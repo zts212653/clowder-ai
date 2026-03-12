@@ -125,6 +125,93 @@ pnpm install
 pnpm dev
 ```
 
+## Usage Guide
+
+### Chat — Your AI Team in One Place
+
+<!-- screenshot: main chat view — thread sidebar + conversation + right status panel -->
+![Chat View](docs/screenshots/chat-main.png)
+
+The main interface is a multi-threaded chat where your AI team lives. Each thread is an isolated workspace — one per feature, bug, or topic.
+
+- **@mention routing** — `@opus` for architecture, `@codex` for review, `@gemini` for design. Messages go to the right agent automatically.
+- **Thread isolation** — context stays clean. Your auth refactor doesn't leak into the landing page thread.
+- **Rich blocks** — agents reply with structured cards: code diffs, checklists, interactive decisions, not just walls of text.
+
+### Hub — Command Center
+
+<!-- screenshot: Hub modal — showing Capability / Skills / Quota Board tabs -->
+![Hub Modal](docs/screenshots/hub-modal.png)
+
+Hit the Hub button to open the floating command center. Tabs include:
+
+| Tab | What It Shows |
+|-----|---------------|
+| **Capability** | What each agent can do — strengths, tools, context budget |
+| **Skills** | On-demand skills loaded by agents (TDD, debugging, review, etc.) |
+| **Quota Board** | Real-time token usage and cost tracking per agent |
+| **Routing Policy** | How tasks get routed — which agent handles what |
+| **Provider Profiles** | Model configurations, API keys, output format per provider |
+
+### Mission Hub — Feature Governance
+
+<!-- screenshot: Mission Hub — feature list with status badges + detail panel -->
+![Mission Hub](docs/screenshots/mission-hub.png)
+
+The ops dashboard for tracking everything your team is building.
+
+- **Feature lifecycle** — every feature moves through: idea → spec → in-progress → review → done
+- **Need Audit** — paste a PRD, and the system auto-extracts intent cards, detects risks (empty verbs, missing actors, AI-fabricated specificity), and builds a prioritized slice plan
+- **Bulletin Board** — live SOP workflow status per feature: who holds the baton, what stage, what's blocking
+
+### Multi-Platform — Chat From Anywhere
+
+<!-- screenshot: Feishu/Telegram conversation showing multi-cat replies as distinct cards -->
+![Multi-Platform Chat](docs/screenshots/multi-platform.png)
+
+Don't want to open the web UI? Chat with your team from the apps you already use.
+
+- **Feishu (Lark)** and **Telegram** — send messages, get replies from specific cats
+- Each cat replies as a **distinct card** — no more merged indistinguishable bubbles
+- Slash commands: `/new` (new thread), `/threads` (list), `/use <id>` (switch), `/where` (current)
+- Voice messages and file transfer supported both ways
+
+### Voice Companion — Hands-Free Mode
+
+<!-- screenshot: voice mode — audio rich blocks auto-playing in chat -->
+![Voice Companion](docs/screenshots/voice-companion.png)
+
+Working out? Commuting? Turn on Voice Companion and talk to your team through AirPods.
+
+- One-tap activation from the header
+- **Per-agent voice** — each cat has its own distinct voice
+- Auto-play: replies queue and play in sequence, no tapping
+- Push-to-talk input via ASR (speech-to-text)
+
+### Signals — AI Research Feed
+
+<!-- screenshot: Signal inbox page with article cards and tier badges -->
+![Signals](docs/screenshots/signals-inbox.png)
+
+A curated feed of AI and tech articles, built into your workspace.
+
+- Auto-aggregated from configured sources
+- Read, star, annotate, take study notes
+- Generate podcast summaries from articles (your cats discuss the paper)
+
+### Game Modes — Play With Your Team
+
+<!-- screenshot: Werewolf game — full-screen PlayerGrid + PhaseTimeline + ActionDock -->
+![Game Modes](docs/screenshots/game-werewolf.png)
+
+Yes, your AI team plays games. Currently shipping:
+
+- **Werewolf (狼人杀)** — standard rules, 7-player lobby, cats as AI players with distinct strategies. Full day/night cycle, voting, role abilities. The judge is deterministic code, not LLM.
+- **Pixel Cat Brawl** — real-time pixel fighting demo
+- More game modes in development
+
+> Games aren't a gimmick — they stress-test the same A2A messaging, identity persistence, and turn-based coordination that powers the work features.
+
 ## Roadmap
 
 We build in the open. Here's where we are.
@@ -336,6 +423,93 @@ cd clowder-ai
 pnpm install
 pnpm dev
 ```
+
+## 使用指南
+
+### 聊天 — 你的 AI 团队就在这里
+
+<!-- screenshot: 主聊天界面 — 左侧线程列表 + 中间对话 + 右侧状态面板 -->
+![聊天界面](docs/screenshots/chat-main.png)
+
+主界面是一个多线程聊天空间，你的 AI 团队在这里工作。每个线程是独立的工作区 — 一个功能一个线程。
+
+- **@mention 路由** — `@opus` 做架构、`@codex` 做 review、`@gemini` 做设计，消息自动路由到对的猫
+- **线程隔离** — 上下文不会串。登录重构的线程不会污染落地页的讨论
+- **Rich Blocks** — 猫猫用结构化卡片回复：代码 diff、checklist、交互式决策，不是一堵文字墙
+
+### Hub — 指挥中心
+
+<!-- screenshot: Hub 弹窗 — 显示 Capability / Skills / Quota Board 等 tab -->
+![Hub 弹窗](docs/screenshots/hub-modal.png)
+
+点击 Hub 按钮打开浮动指挥面板：
+
+| 标签页 | 内容 |
+|--------|------|
+| **Capability** | 每只猫的能力 — 擅长什么、有什么工具、上下文预算 |
+| **Skills** | 按需加载的技能（TDD、调试、审查等） |
+| **Quota Board** | 实时 token 用量和费用追踪 |
+| **Routing Policy** | 任务路由策略 — 哪只猫处理什么类型的任务 |
+| **Provider Profiles** | 模型配置、API 密钥、每个 provider 的输出格式 |
+
+### 作战中枢（Mission Hub） — Feature 治理
+
+<!-- screenshot: Mission Hub — Feature 列表 + 状态 badge + 详情面板 -->
+![作战中枢](docs/screenshots/mission-hub.png)
+
+追踪团队正在做的所有事情的运营面板。
+
+- **Feature 生命周期** — 每个功能经历：idea → spec → in-progress → review → done
+- **需求审计（Need Audit）** — 粘贴一份 PRD，系统自动拆解意图卡、检测风险（空洞动词、缺失执行者、AI 编造的具体性），生成优先级切片计划
+- **告示面板（Bulletin Board）** — 每个 Feature 的 SOP 工作流实时状态：谁在执行、什么阶段、什么在阻塞
+
+### 多平台 — 在哪都能聊
+
+<!-- screenshot: 飞书/Telegram 对话 — 多猫独立卡片回复 -->
+![多平台聊天](docs/screenshots/multi-platform.png)
+
+不想开 web？用你已经在用的 app 跟团队聊。
+
+- **飞书** 和 **Telegram** — 发消息，收到指定猫猫的回复
+- 每只猫的回复是**独立的卡片** — 不再是混在一起分不清谁是谁的气泡
+- 指令：`/new`（新线程）、`/threads`（列表）、`/use <id>`（切换）、`/where`（当前位置）
+- 语音消息和文件互传双向支持
+
+### 语音陪伴 — 解放双手
+
+<!-- screenshot: 语音模式 — 音频 rich block 自动播放 -->
+![语音陪伴](docs/screenshots/voice-companion.png)
+
+在运动？在通勤？打开语音陪伴，戴上 AirPods 跟团队对话。
+
+- 标题栏一键开启
+- **每只猫独立声线** — 听声音就知道是谁在说话
+- 自动播放：回复自动排队依次播放，不用点
+- 按住说话输入（ASR 语音转文字）
+
+### Signals — AI 研究信息流
+
+<!-- screenshot: Signal inbox 页面 — 文章卡片 + tier 标签 -->
+![Signals](docs/screenshots/signals-inbox.png)
+
+内嵌在工作空间里的 AI/技术文章聚合。
+
+- 从配置的源自动抓取
+- 阅读、收藏、标注、写学习笔记
+- 生成播客摘要（你的猫猫们讨论这篇论文）
+
+### 游戏模式 — 和团队一起玩
+
+<!-- screenshot: 狼人杀 — 全屏 PlayerGrid + PhaseTimeline + ActionDock -->
+![游戏模式](docs/screenshots/game-werewolf.png)
+
+没错，你的 AI 团队会玩游戏。当前已有：
+
+- **狼人杀** — 标准规则、7 人局、猫猫作为 AI 玩家各有策略。完整昼夜循环、投票、角色技能。法官是确定性代码，不是 LLM。
+- **像素猫大作战** — 实时像素格斗 demo
+- 更多游戏模式开发中
+
+> 游戏不是噱头 — 它压力测试的是同一套 A2A 消息、身份持久化和回合制协调机制，这些也是工作功能的基础设施。
 
 ## 路线图
 
