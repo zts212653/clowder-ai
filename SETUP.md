@@ -95,6 +95,20 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 
 Supported engines: Qwen3-ASR (primary), Whisper (fallback) for input; Kokoro, edge-tts, Qwen3-TTS for output.
 
+### API Gateway Proxy
+
+Optional reverse proxy for routing API requests through third-party gateways. Useful when you need to route Claude API calls through a custom endpoint.
+
+```bash
+ANTHROPIC_PROXY_ENABLED=1          # default: 0 (disabled)
+ANTHROPIC_PROXY_PORT=9877          # proxy listen port
+```
+
+Configure upstreams in `.cat-cafe/proxy-upstreams.json`:
+```json
+{ "my-gateway": "https://your-gateway.example.com/api" }
+```
+
 ### Feishu (飞书 / Lark) Integration
 
 Chat with your team from Feishu. Requires a Feishu app.
@@ -290,6 +304,20 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ```
 
 支持引擎：输入用 Qwen3-ASR（主）/ Whisper（备）；输出用 Kokoro / edge-tts / Qwen3-TTS。
+
+### API 网关代理
+
+可选的反向代理，用于将 API 请求路由到第三方网关。适用于需要通过自定义端点调用 Claude API 的场景。
+
+```bash
+ANTHROPIC_PROXY_ENABLED=1          # 默认: 0（关闭）
+ANTHROPIC_PROXY_PORT=9877          # 代理监听端口
+```
+
+在 `.cat-cafe/proxy-upstreams.json` 中配置上游：
+```json
+{ "my-gateway": "https://your-gateway.example.com/api" }
+```
 
 ### 飞书接入
 

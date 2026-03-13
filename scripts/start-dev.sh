@@ -410,17 +410,22 @@ main() {
     echo -e "${CYAN}启动服务...${NC}"
 
     # Anthropic API Gateway Proxy (api_key profiles auto-routed here)
+    # 默认关闭 (ANTHROPIC_PROXY_ENABLED=0)，需要反代时在 .env 设为 1
     PROXY_PORT=${ANTHROPIC_PROXY_PORT:-9877}
-    if [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ]; then
-        echo "  启动 Anthropic Proxy (端口 $PROXY_PORT)..."
-        PROXY_UPSTREAMS="${ANTHROPIC_PROXY_UPSTREAMS_PATH:-$PROJECT_DIR/.cat-cafe/proxy-upstreams.json}"
-        ANTHROPIC_PROXY_PORT=$PROXY_PORT node scripts/anthropic-proxy.mjs --port $PROXY_PORT --upstreams "$PROXY_UPSTREAMS" &
-        PROXY_PID=$!
-        sleep 1
-        if kill -0 $PROXY_PID 2>/dev/null; then
-            echo -e "${GREEN}  ✓ Anthropic Proxy 已启动${NC}"
+    if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
+        if [ -f "scripts/anthropic-proxy.mjs" ]; then
+            echo "  启动 Anthropic Proxy (端口 $PROXY_PORT)..."
+            PROXY_UPSTREAMS="${ANTHROPIC_PROXY_UPSTREAMS_PATH:-$PROJECT_DIR/.cat-cafe/proxy-upstreams.json}"
+            ANTHROPIC_PROXY_PORT=$PROXY_PORT node scripts/anthropic-proxy.mjs --port $PROXY_PORT --upstreams "$PROXY_UPSTREAMS" &
+            PROXY_PID=$!
+            sleep 1
+            if kill -0 $PROXY_PID 2>/dev/null; then
+                echo -e "${GREEN}  ✓ Anthropic Proxy 已启动${NC}"
+            else
+                echo -e "${RED}  ✗ Anthropic Proxy 启动失败（端口 $PROXY_PORT 被占用？）${NC}"
+            fi
         else
-            echo -e "${RED}  ✗ Anthropic Proxy 启动失败（端口 $PROXY_PORT 被占用？）${NC}"
+            echo -e "${YELLOW}  ⚠ anthropic-proxy.mjs 未找到，跳过 Proxy${NC}"
         fi
     else
         echo -e "${YELLOW}  ⚠ Anthropic Proxy 已禁用 (ANTHROPIC_PROXY_ENABLED=0)${NC}"

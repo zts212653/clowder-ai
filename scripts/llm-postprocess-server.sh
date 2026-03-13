@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# scripts/llm-postprocess-server.sh
+# Start local LLM post-processing server for Cat Cafe voice input (MLX backend).
+#
+# Pipeline position:  Whisper ASR → **LLM post-edit** → term dictionary → filler removal
+#
+# Usage:
+#   ./scripts/llm-postprocess-server.sh                                            # default: Qwen2.5-3B
+#   ./scripts/llm-postprocess-server.sh mlx-community/Qwen2.5-7B-Instruct-4bit    # bigger model
+#
+# Requires: pip install mlx-lm fastapi uvicorn pydantic
+# First run will download the model from HuggingFace (~2GB for Qwen2.5-3B-4bit).
+
+set -euo pipefail
+
+VENV_DIR="${HOME}/.cat-cafe/llm-venv"
+MODEL="${1:-mlx-community/Qwen3-4B-Instruct-2507-4bit}"
+PORT="${LLM_POSTPROCESS_PORT:-9878}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Activate venv if it exists
+if [ -d "$VENV_DIR" ]; then
+  source "$VENV_DIR/bin/activate"
+fi
+
+# Check mlx-lm is installed
+if ! python3 -c "import mlx_lm" 2>/dev/null; then
+  echo "ERROR: mlx-lm not installed. Run:"
+  echo "  python3 -m venv ${VENV_DIR}"
+  echo "  source ${VENV_DIR}/bin/activate"
+  echo "  pip install mlx-lm fastapi uvicorn pydantic"
+  exit 1
+fi
+
+python3 "$SCRIPT_DIR/llm-postprocess-api.py" --model "$MODEL" --port "$PORT"
