@@ -25,6 +25,8 @@ export interface RightStatusPanelProps {
     evidence: number;
     followup: number;
   };
+  /** #28: Panel width in px (default 288) */
+  width?: number;
 }
 
 /* ── Cat invocation card (shared between active/history) ──── */
@@ -214,6 +216,7 @@ export function RightStatusPanel({
   catInvocations,
   threadId,
   messageSummary,
+  width,
 }: RightStatusPanelProps) {
   // F26: Split into active (working now) vs history (appeared before)
   const { activeCats, historyCats } = useMemo(() => {
@@ -247,7 +250,10 @@ export function RightStatusPanel({
   }, []);
 
   return (
-    <aside className="hidden lg:flex w-72 border-l border-owner-light bg-white/90 px-4 py-4 flex-col gap-4 overflow-y-auto">
+    <aside
+      className="hidden lg:flex border-l border-owner-light bg-white/90 px-4 py-4 flex-col gap-4 overflow-y-auto flex-shrink-0"
+      style={{ width: width ?? 288 }}
+    >
       <div>
         <h2 className="text-sm font-bold text-cafe-black">状态栏</h2>
         <p className="text-xs text-gray-500 mt-1">
