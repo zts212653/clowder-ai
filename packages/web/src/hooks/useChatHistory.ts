@@ -156,6 +156,11 @@ export function useChatHistory(threadId: string) {
   const prevFirstIdRef = useRef<string | null>(null);
   const prevCountRef = useRef(0);
   const scrollSnapshotRef = useRef<number | null>(null);
+  // Explicit flag: when true, the next scroll effect should scroll to bottom
+  // regardless of prevCount. Set on thread switch, consumed on first non-empty render.
+  const scrollToBottomRef = useRef(false);
+  // Track which threadId the scroll flag targets, so stale renders don't consume it
+  const scrollTargetThreadRef = useRef(threadId);
 
   // Track loading guard per-thread to prevent double-fetch
   const loadingRef = useRef(false);
@@ -418,9 +423,13 @@ export function useChatHistory(threadId: string) {
 
     // Reset scroll tracking refs so the scroll effect treats the new thread
     // as an "initial load" (prevCount === 0) and scrolls to bottom.
+    // scrollToBottomRef is the primary mechanism: it survives across render cycles
+    // until the scroll effect sees new-thread messages and consumes it.
     prevCountRef.current = 0;
     prevFirstIdRef.current = null;
     scrollSnapshotRef.current = null;
+    scrollToBottomRef.current = true;
+    scrollTargetThreadRef.current = threadId;
 
     const controller = abortRef.current;
 
@@ -503,8 +512,14 @@ export function useChatHistory(threadId: string) {
 
     if (messages.length === 0) return;
 
-    // Initial load - scroll to bottom
-    if (prevCount === 0) {
+    // Thread switch or initial load — scroll to bottom.
+    // scrollToBottomRef is set by the threadId change effect and survives
+    // across render cycles until consumed here with actual new-thread messages.
+    // Only consume when the store is synced to the target thread (avoids consuming
+    // the flag on a stale render before setCurrentThread restores cached messages).
+    const storeReady = useChatStore.getState().currentThreadId === scrollTargetThreadRef.current;
+    if ((scrollToBottomRef.current && storeReady) || prevCount === 0) {
+      scrollToBottomRef.current = false;
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
       return;
     }

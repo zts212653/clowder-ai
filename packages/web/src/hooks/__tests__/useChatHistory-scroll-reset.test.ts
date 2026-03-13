@@ -9,12 +9,28 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
 }));
 
-let capturedMessagesEndRef: React.RefObject<HTMLDivElement | null> | null = null;
-
-function HookHost({ threadId }: { threadId: string }) {
+/**
+ * Host component that mirrors the real ChatContainer pattern:
+ * 1. useChatHistory(threadId) — registers scroll effects first
+ * 2. useEffect with setCurrentThread — restores cached messages second
+ *
+ * This ordering is critical: in the real app, useChatHistory's effects
+ * fire before ChatContainer's setCurrentThread effect.
+ */
+function RealisticHost({ threadId }: { threadId: string }) {
   const { messagesEndRef } = useChatHistory(threadId);
-  capturedMessagesEndRef = messagesEndRef;
-  return null;
+
+  // Simulate ChatContainer's setCurrentThread effect (fires AFTER useChatHistory effects)
+  const prevThreadRef = React.useRef(threadId);
+  React.useEffect(() => {
+    if (prevThreadRef.current !== threadId) {
+      useChatStore.getState().setCurrentThread(threadId);
+      prevThreadRef.current = threadId;
+    }
+    useChatStore.getState().setCurrentThread(threadId);
+  }, [threadId]);
+
+  return React.createElement('div', { ref: messagesEndRef });
 }
 
 describe('useChatHistory scroll reset on thread switch (#35)', () => {
@@ -36,21 +52,19 @@ describe('useChatHistory scroll reset on thread switch (#35)', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    capturedMessagesEndRef = null;
-
     apiFetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+    // jsdom does not implement scrollIntoView — stub it globally
+    Element.prototype.scrollIntoView = vi.fn();
   });
 
   afterEach(() => {
-    act(() => {
-      root.unmount();
-    });
+    act(() => root.unmount());
     container.remove();
     apiFetchMock.mockReset();
   });
 
-  it('treats cached thread restore as initial load for scroll-to-bottom', () => {
-    // Thread A has messages loaded
+  it('scrolls to bottom after setCurrentThread restores cached messages', () => {
+    // Setup: thread-a is active with 2 messages, thread-b has cached 3 messages
     useChatStore.setState({
       messages: [
         { id: 'a1', type: 'user', content: 'msg in thread-a', timestamp: 1000 },
@@ -98,29 +112,36 @@ describe('useChatHistory scroll reset on thread switch (#35)', () => {
       isLoadingThreads: false,
     });
 
-    // Mount with thread-a to initialize prevCountRef to 2
+    // Mount with thread-a — this initializes prevCountRef to 2
     act(() => {
-      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      root.render(React.createElement(RealisticHost, { threadId: 'thread-a' }));
     });
 
-    // Now switch to thread-b (which has cached messages).
-    // First, simulate setCurrentThread restoring cached messages.
+    // Spy on scrollIntoView on the end sentinel div (messagesEndRef target)
+    const endDiv = container.querySelector('div');
+    const scrollSpy = vi.fn();
+    if (endDiv) endDiv.scrollIntoView = scrollSpy;
+
+    // Switch to thread-b — this triggers the real sequence:
+    // Render 1: effects fire in hook declaration order:
+    //   1. useChatHistory threadId effect → sets scrollToBottomRef = true
+    //   2. useChatHistory scroll effect → messages still from thread-a → scrollToBottomRef consumed
+    //      BUT wrong messages; or if messages.length=0 (clearMessages ran), skip
+    //   3. RealisticHost setCurrentThread effect → restores cached thread-b messages
+    // Render 2 (triggered by state change from setCurrentThread):
+    //   4. useChatHistory scroll effect → scrollToBottomRef was consumed in step 2...
+    //
+    // With the scrollToBottomRef fix, even if step 2 fires prematurely,
+    // the flag persists across renders and triggers scroll on the correct render.
     act(() => {
-      useChatStore.getState().setCurrentThread('thread-b');
+      root.render(React.createElement(RealisticHost, { threadId: 'thread-b' }));
     });
 
-    // Re-render hook with new threadId — this triggers the threadId change
-    // effect which should reset prevCountRef to 0.
-    act(() => {
-      root.render(React.createElement(HookHost, { threadId: 'thread-b' }));
-    });
-
-    // After the scroll effect runs with prevCount === 0, it should have
-    // called scrollIntoView on the messagesEndRef. Since we don't have
-    // a real DOM scroll container, we verify indirectly: the messages
-    // should be the cached thread-b messages (proving restore worked),
-    // and no error should have occurred.
+    // Verify messages are now thread-b's cached messages
     const state = useChatStore.getState();
     expect(state.messages.map((m) => m.id)).toEqual(['b1', 'b2', 'b3']);
+
+    // Verify scrollIntoView was called (proving scroll-to-bottom fired)
+    expect(scrollSpy).toHaveBeenCalled();
   });
 });
