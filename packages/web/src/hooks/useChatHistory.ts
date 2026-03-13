@@ -160,6 +160,11 @@ export function useChatHistory(threadId: string) {
   const prevCountRef = useRef(0);
   const scrollSnapshotRef = useRef<number | null>(null);
 
+  // #27: Save/restore scroll position per thread
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map());
+  const prevThreadIdRef = useRef(threadId);
+  const restoreScrollRef = useRef(false);
+
   // Track loading guard per-thread to prevent double-fetch
   const loadingRef = useRef(false);
 
@@ -412,6 +417,20 @@ export function useChatHistory(threadId: string) {
     }
   }, [threadId, setQueue, setQueuePaused]);
 
+  // #27: Save scroll position of outgoing thread, prepare restore for incoming
+  useEffect(() => {
+    const prevThread = prevThreadIdRef.current;
+    if (prevThread !== threadId) {
+      const el = scrollContainerRef.current;
+      if (el) scrollPositionsRef.current.set(prevThread, el.scrollTop);
+      prevCountRef.current = 0;
+      prevFirstIdRef.current = null;
+      scrollSnapshotRef.current = null;
+      restoreScrollRef.current = scrollPositionsRef.current.has(threadId);
+      prevThreadIdRef.current = threadId;
+    }
+  }, [threadId]);
+
   // Load history + tasks when threadId changes (handles initial mount and navigation)
   useEffect(() => {
     // Abort any in-flight requests from previous thread
@@ -499,7 +518,19 @@ export function useChatHistory(threadId: string) {
 
     if (messages.length === 0) return;
 
-    // Initial load - scroll to bottom
+    // #27: Restore saved scroll position after thread switch
+    if (restoreScrollRef.current && el) {
+      restoreScrollRef.current = false;
+      const savedTop = scrollPositionsRef.current.get(threadId);
+      if (savedTop !== undefined) {
+        requestAnimationFrame(() => {
+          el.scrollTop = savedTop;
+        });
+        return;
+      }
+    }
+
+    // Initial load (first visit to thread) — scroll to bottom
     if (prevCount === 0) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
       return;
@@ -517,7 +548,7 @@ export function useChatHistory(threadId: string) {
     if (messages.length > prevCount) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, threadId]);
 
   // Load more when scrolled to top
   const handleScroll = useCallback(() => {
