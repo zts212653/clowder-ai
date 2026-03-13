@@ -81,6 +81,10 @@ Clowder works out of the box with just model API keys and Redis. Everything belo
 Talk to your cats hands-free. Requires local ASR/TTS services.
 
 ```bash
+ASR_ENABLED=1
+TTS_ENABLED=1
+LLM_POSTPROCESS_ENABLED=1
+
 # Speech-to-Text (ASR)
 WHISPER_URL=http://localhost:9876
 NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
@@ -94,6 +98,7 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ```
 
 Supported engines: Qwen3-ASR (primary), Whisper (fallback) for input; Kokoro, edge-tts, Qwen3-TTS for output.
+These services are disabled by default. Set the corresponding `*_ENABLED=1` flags only after you have installed the local dependencies.
 
 ### API Gateway Proxy
 
@@ -291,6 +296,10 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 解放双手跟猫猫对话。需要本地 ASR/TTS 服务。
 
 ```bash
+ASR_ENABLED=1
+TTS_ENABLED=1
+LLM_POSTPROCESS_ENABLED=1
+
 # 语音转文字（ASR）
 WHISPER_URL=http://localhost:9876
 NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
@@ -304,6 +313,7 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ```
 
 支持引擎：输入用 Qwen3-ASR（主）/ Whisper（备）；输出用 Kokoro / edge-tts / Qwen3-TTS。
+这些服务默认关闭。只有在本地依赖安装完成后，再把对应的 `*_ENABLED=1` 打开。
 
 ### API 网关代理
 

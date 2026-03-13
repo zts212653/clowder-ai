@@ -394,7 +394,7 @@ export function ChatInput({
     const isMobile = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 767px)').matches : false;
     const maxH = isMobile ? 120 : 200; // ~5 lines mobile, ~8 lines desktop
     ta.style.height = `${Math.min(ta.scrollHeight, maxH)}px`;
-  }, []);
+  }, [input]);
 
   useEffect(() => {
     if (!activeMenu) return;

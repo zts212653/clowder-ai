@@ -18,18 +18,17 @@ MODEL="${1:-mlx-community/Qwen3-4B-Instruct-2507-4bit}"
 PORT="${LLM_POSTPROCESS_PORT:-9878}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Activate venv if it exists
-if [ -d "$VENV_DIR" ]; then
-  source "$VENV_DIR/bin/activate"
+# Create venv if missing, then activate
+if [ ! -d "$VENV_DIR" ]; then
+  echo "  创建 venv: $VENV_DIR ..."
+  python3 -m venv "$VENV_DIR"
 fi
+source "$VENV_DIR/bin/activate"
 
-# Check mlx-lm is installed
+# Auto-install dependencies if missing
 if ! python3 -c "import mlx_lm" 2>/dev/null; then
-  echo "ERROR: mlx-lm not installed. Run:"
-  echo "  python3 -m venv ${VENV_DIR}"
-  echo "  source ${VENV_DIR}/bin/activate"
-  echo "  pip install mlx-lm fastapi uvicorn pydantic"
-  exit 1
+  echo "  安装依赖: mlx-lm fastapi uvicorn pydantic ..."
+  pip install --quiet mlx-lm fastapi uvicorn pydantic
 fi
 
 python3 "$SCRIPT_DIR/llm-postprocess-api.py" --model "$MODEL" --port "$PORT"
