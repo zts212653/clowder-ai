@@ -22,12 +22,12 @@ import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
 
 // --- Imports (from dist) ---
 
-const { ClaudeAgentService } = await import('../../dist/domains/cats/services/ClaudeAgentService.js');
-const { CodexAgentService } = await import('../../dist/domains/cats/services/CodexAgentService.js');
-const { GeminiAgentService } = await import('../../dist/domains/cats/services/GeminiAgentService.js');
-const { AgentRouter } = await import('../../dist/domains/cats/services/AgentRouter.js');
-const { InvocationRegistry } = await import('../../dist/domains/cats/services/InvocationRegistry.js');
-const { MessageStore } = await import('../../dist/domains/cats/services/MessageStore.js');
+const { ClaudeAgentService } = await import('../../dist/domains/cats/services/agents/providers/ClaudeAgentService.js');
+const { CodexAgentService } = await import('../../dist/domains/cats/services/agents/providers/CodexAgentService.js');
+const { GeminiAgentService } = await import('../../dist/domains/cats/services/agents/providers/GeminiAgentService.js');
+const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
+const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
 
 // --- Helpers ---

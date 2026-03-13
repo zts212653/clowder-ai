@@ -518,6 +518,13 @@ export function useAgentMessages() {
             const warningText = typeof parsed.message === 'string' ? parsed.message : '';
             sysContent = warningText ? `⚠️ ${warningText}` : '⚠️ Warning';
             sysVariant = 'info';
+          } else if (parsed?.type === 'silent_completion') {
+            // Bugfix: silent-exit — cat ran tools but produced no text response
+            const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
+            sysContent = detail || `${msg.catId} completed without a text response.`;
+          } else if (parsed?.type === 'invocation_preempted') {
+            // Bugfix: silent-exit — invocation was superseded by a newer request
+            sysContent = 'This response was superseded by a newer request.';
           } else if (parsed?.type === 'rich_block') {
             // F22: Append rich block — prefer messageId correlation (#83 P2), fallback to activeRefs
             let targetId: string | undefined;

@@ -40,8 +40,8 @@ export class InvocationTracker {
       controller.abort();
       return controller;
     }
-    // Abort any existing invocation for this thread
-    this.active.get(threadId)?.controller.abort();
+    // Abort any existing invocation for this thread (preempted by new invocation)
+    this.active.get(threadId)?.controller.abort('preempted');
     const controller = new AbortController();
     this.active.set(threadId, { controller, userId, catIds });
     return controller;
@@ -66,13 +66,14 @@ export class InvocationTracker {
   /**
    * Cancel an active invocation. Returns cancel result with catIds for broadcast.
    * If requestUserId is provided, only cancels if it matches the invocation owner.
+   * Optional abortReason is forwarded to AbortController.abort(reason).
    */
-  cancel(threadId: string, requestUserId?: string): CancelResult {
+  cancel(threadId: string, requestUserId?: string, abortReason?: string): CancelResult {
     const inv = this.active.get(threadId);
     if (!inv) return { cancelled: false, catIds: [] };
     if (requestUserId && inv.userId !== requestUserId) return { cancelled: false, catIds: [] };
     const { catIds } = inv;
-    inv.controller.abort();
+    inv.controller.abort(abortReason);
     this.active.delete(threadId);
     return { cancelled: true, catIds };
   }

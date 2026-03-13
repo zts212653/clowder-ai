@@ -452,6 +452,25 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
             });
+            // Bugfix: silent-exit P2 — only broadcast diagnostic when preempted by
+            // a newer invocation (reason='preempted'). User-initiated cancel already
+            // broadcasts its own messages via buildCancelMessages; adding another here
+            // would cause a duplicate with misleading text.
+            if (controller.signal.reason === 'preempted') {
+              opts.socketManager.broadcastAgentMessage(
+                {
+                  type: 'system_info',
+                  catId: targetCats[0] ?? getDefaultCatId(),
+                  content: JSON.stringify({
+                    type: 'invocation_preempted',
+                    detail: 'This response was superseded by a newer request.',
+                    invocationId: createResult.invocationId,
+                  }),
+                  timestamp: Date.now(),
+                },
+                resolvedThreadId,
+              );
+            }
             // Skip ack/succeeded/push-notify — let finally handle cleanup
           } else if (persistenceContext.failed) {
             const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');

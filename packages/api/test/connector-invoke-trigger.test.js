@@ -436,10 +436,18 @@ describe('ConnectorInvokeTrigger', () => {
     it('preempts active invocation for urgent connector triggers', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Urgent review msg', 'msg-urgent-1', {
-        priority: 'urgent',
-        reason: 'github_review',
-      });
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'Urgent review msg',
+        'msg-urgent-1',
+        undefined,
+        {
+          priority: 'urgent',
+          reason: 'github_review',
+        },
+      );
       await waitForTrigger();
 
       // Should execute directly instead of queueing
@@ -468,6 +476,7 @@ describe('ConnectorInvokeTrigger', () => {
         'user-1',
         'Urgent review msg',
         'msg-urgent-clear-pause',
+        undefined,
         { priority: 'urgent', reason: 'github_review' },
       );
       await waitForTrigger();
@@ -479,10 +488,18 @@ describe('ConnectorInvokeTrigger', () => {
     it('does not preempt when urgent cancel is denied (owner mismatch)', async () => {
       trackerMock.setActive('thread-1', 'owner-user');
       const trigger = createTrigger();
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-2', 'Urgent review msg', 'msg-urgent-2', {
-        priority: 'urgent',
-        reason: 'github_review',
-      });
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-2',
+        'Urgent review msg',
+        'msg-urgent-2',
+        undefined,
+        {
+          priority: 'urgent',
+          reason: 'github_review',
+        },
+      );
       await waitForTrigger();
 
       // owner mismatch should enqueue without attempting cancel
@@ -498,10 +515,18 @@ describe('ConnectorInvokeTrigger', () => {
       trackerMock.setActive('thread-1', 'user-1');
       recordMock.setDuplicate();
       const trigger = createTrigger();
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Urgent duplicate review msg', 'msg-dup-1', {
-        priority: 'urgent',
-        reason: 'github_review',
-      });
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'Urgent duplicate review msg',
+        'msg-dup-1',
+        undefined,
+        {
+          priority: 'urgent',
+          reason: 'github_review',
+        },
+      );
       await waitForTrigger();
 
       // Existing invocation should remain untouched.
@@ -531,17 +556,33 @@ describe('ConnectorInvokeTrigger', () => {
       };
 
       const trigger = createTrigger();
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Urgent duplicate race', 'msg-dup-race', {
-        priority: 'urgent',
-        reason: 'github_review',
-      });
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'Urgent duplicate race',
+        'msg-dup-race',
+        undefined,
+        {
+          priority: 'urgent',
+          reason: 'github_review',
+        },
+      );
 
       // Let first trigger enter create() await, then send duplicate.
       await Promise.resolve();
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Urgent duplicate race', 'msg-dup-race', {
-        priority: 'urgent',
-        reason: 'github_review',
-      });
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'Urgent duplicate race',
+        'msg-dup-race',
+        undefined,
+        {
+          priority: 'urgent',
+          reason: 'github_review',
+        },
+      );
 
       await waitForTrigger();
       assert.strictEqual(trackerMock.cancelCalls.length, 0, 'Duplicate trigger must not cancel before winner resolves');
@@ -568,6 +609,7 @@ describe('ConnectorInvokeTrigger', () => {
         'user-1',
         'Urgent review after race',
         'msg-urgent-race',
+        undefined,
         { priority: 'urgent', reason: 'github_review' },
       );
       await waitForTrigger();
@@ -591,6 +633,7 @@ describe('ConnectorInvokeTrigger', () => {
         'user-1',
         'Urgent review fallback race',
         'msg-urgent-fallback-race',
+        undefined,
         { priority: 'urgent', reason: 'github_review' },
       );
       await waitForTrigger();
@@ -622,10 +665,18 @@ describe('ConnectorInvokeTrigger', () => {
         await waitForTrigger();
       }
 
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Urgent when queue full', 'msg-urgent-full', {
-        priority: 'urgent',
-        reason: 'github_review',
-      });
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'Urgent when queue full',
+        'msg-urgent-full',
+        undefined,
+        {
+          priority: 'urgent',
+          reason: 'github_review',
+        },
+      );
       await waitForTrigger();
 
       assert.strictEqual(trackerMock.cancelCalls.length, 1, 'Should attempt cancel once');
@@ -667,6 +718,7 @@ describe('ConnectorInvokeTrigger', () => {
         'user-1',
         'Urgent owner mismatch + queue full',
         'msg-urgent-owner-race',
+        undefined,
         { priority: 'urgent', reason: 'github_review' },
       );
       await waitForTrigger();

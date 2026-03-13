@@ -21,7 +21,7 @@ import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js'
 interface InvocationTrackerLike {
   has(threadId: string): boolean;
   getUserId(threadId: string): string | null;
-  cancel(threadId: string, requestUserId?: string): { cancelled: boolean; catIds: string[] };
+  cancel(threadId: string, requestUserId?: string, abortReason?: string): { cancelled: boolean; catIds: string[] };
 }
 
 export interface QueueRoutesOptions {
@@ -174,7 +174,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           reply.status(409);
           return { error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
         }
-        const cancelResult = invocationTracker.cancel(threadId, guard.userId);
+        const cancelResult = invocationTracker.cancel(threadId, guard.userId, 'preempted');
         // Also abort any active multi-mention dispatches for this thread
         getMultiMentionOrchestrator().abortByThread(threadId);
         if (!cancelResult.cancelled && invocationTracker.has(threadId)) {

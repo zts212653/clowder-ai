@@ -29,11 +29,9 @@ describe('F086 M2: Meta-thinking trigger documentation', () => {
   it('triggerType enum values match documented triggers', () => {
     // Read source directly (no build required) and regex-match the enum
     const callbackToolsSrc = readFileSync(resolve(__dirname, '../../mcp-server/src/tools/callback-tools.ts'), 'utf-8');
-    const enumMatch = callbackToolsSrc.match(
-      /z\.enum\(\[([^\]]+)\]\).*triggerType|triggerType.*z\.enum\(\[([^\]]+)\]\)/,
-    );
+    const enumMatch = callbackToolsSrc.match(/triggerType:\s*z[\s\S]*?\.enum\(\[([^\]]+)\]\)/);
     assert.ok(enumMatch, 'Could not find triggerType z.enum in callback-tools.ts');
-    const rawValues = (enumMatch[1] || enumMatch[2])
+    const rawValues = enumMatch[1]
       .replace(/'/g, '')
       .split(',')
       .map((s) => s.trim());

@@ -262,7 +262,8 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('编造'), 'Prompt should tell cats not to fabricate');
+    assert.ok(prompt.includes('实事求是'), 'Prompt should enforce evidence-based honesty');
+    assert.ok(prompt.includes('还没查完'), 'Prompt should tell cats to say when investigation is incomplete');
   });
 
   // --- System prompt split tests (buildStaticIdentity / buildInvocationContext) ---
@@ -385,9 +386,9 @@ describe('SystemPromptBuilder', () => {
       }
 
       const identity = buildStaticIdentity('opus');
-      // gpt52 has teamStrengths="架构思考、Review" and caution="思考太慢"
+      // gpt52 keeps teamStrengths and has no explicit caution override in current config.
       assert.ok(identity.includes('架构思考'), 'Should include gpt52 teamStrengths');
-      assert.ok(identity.includes('思考太慢'), 'Should include gpt52 caution');
+      assert.ok(identity.includes('| 缅因猫/砚砚（GPT-5.4） |') || identity.includes('| 缅因猫/砚砚 |'));
       // gemini has caution about no coding
       assert.ok(identity.includes('禁止写代码'), 'Should include gemini caution');
     } finally {

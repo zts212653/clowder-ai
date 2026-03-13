@@ -7,6 +7,7 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { migrateRouterOpts } from './helpers/agent-registry-helpers.js';
 
@@ -1282,6 +1283,7 @@ describe('AgentRouter', () => {
 
   test('passes workingDirectory when thread has non-default projectPath', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const projectPath = resolve(process.cwd(), '..', '..');
 
     let receivedOptions = null;
     const mockClaudeService = {
@@ -1295,7 +1297,7 @@ describe('AgentRouter', () => {
     const threadStore = createMockThreadStore(
       {},
       {
-        'thread-proj': '/home/user/projects/cat-cafe',
+        'thread-proj': projectPath,
       },
     );
 
@@ -1315,7 +1317,7 @@ describe('AgentRouter', () => {
     }
 
     assert.ok(receivedOptions);
-    assert.equal(receivedOptions.workingDirectory, '/home/user/projects/cat-cafe');
+    assert.equal(receivedOptions.workingDirectory, projectPath);
   });
 
   test('does NOT pass workingDirectory when thread has default projectPath', async () => {

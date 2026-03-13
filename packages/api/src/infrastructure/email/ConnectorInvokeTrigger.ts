@@ -195,7 +195,7 @@ export class ConnectorInvokeTrigger {
       return;
     }
 
-    const cancelResult = invocationTracker.cancel(threadId, userId);
+    const cancelResult = invocationTracker.cancel(threadId, userId, 'preempted');
     // Also abort any active multi-mention dispatches for this thread
     getMultiMentionOrchestrator().abortByThread(threadId);
     log.info(

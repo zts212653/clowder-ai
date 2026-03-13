@@ -17,10 +17,10 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
 
-const { AgentRouter } = await import('../../dist/domains/cats/services/AgentRouter.js');
-const { InvocationRegistry } = await import('../../dist/domains/cats/services/InvocationRegistry.js');
-const { MessageStore } = await import('../../dist/domains/cats/services/MessageStore.js');
-const { ThreadStore } = await import('../../dist/domains/cats/services/ThreadStore.js');
+const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
+const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { threadsRoutes } = await import('../../dist/routes/threads.js');
 const { messagesRoutes } = await import('../../dist/routes/messages.js');
 
@@ -160,7 +160,9 @@ describe('Thread isolation: messages stay in their thread', () => {
 
 describe('Participant tracking: @mentions add cats to thread', () => {
   it('@opus → no @ → opus still responds (via participants)', async () => {
-    const { ClaudeAgentService } = await import('../../dist/domains/cats/services/ClaudeAgentService.js');
+    const { ClaudeAgentService } = await import(
+      '../../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
+    );
 
     const spawnFn = createMockSpawnFn([
       { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } },

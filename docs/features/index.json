@@ -668,16 +668,28 @@
     },
     {
       "id": "F109",
-      "name": "Streaming TTS Chunker — 流式分句合成管线",
-      "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P1",
-      "file": "F109-streaming-tts-chunker.md"
+      "name": "Message Actions 修复与增强 — 软删除/Branch/编辑/通知",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F109-message-actions-overhaul.md"
     },
     {
       "id": "F110",
+      "name": "训练营愿景引导增强 — CVO 需求挖掘 + SOP 显式加载",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F110-bootcamp-vision-elicitation.md"
+    },
+    {
+      "id": "F111",
+      "name": "Streaming TTS Chunker — 流式分句合成管线",
+      "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P1",
+      "file": "F111-streaming-tts-chunker.md"
+    },
+    {
+      "id": "F112",
       "name": "Voice Playback Queue — 语音播放队列 + Intent 调度",
       "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P2",
-      "file": "F110-voice-playback-queue.md"
+      "file": "F112-voice-playback-queue.md"
     }
   ],
-  "generated_at": "2026-03-13T04:03:39.358Z"
+  "generated_at": "2026-03-13T04:19:32.640Z"
 }

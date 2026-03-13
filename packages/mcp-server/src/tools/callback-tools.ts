@@ -210,6 +210,24 @@ export async function handlePostMessage(input: {
     { enableOutbox: true },
   );
 
+  // Detect stale_ignored: server returned 200 but message was NOT delivered
+  // because a newer invocation for the same thread+cat has superseded this one.
+  // The CLI must know this so it doesn't assume the message reached the user.
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Message was NOT delivered: this invocation has been superseded by a newer one for the same thread. ' +
+            'Your message was silently discarded by the server (stale_ignored). ' +
+            'Include the message content in your stdout response instead.',
+        );
+      }
+    } catch {
+      // parse failure is fine — means result is not a stale_ignored response
+    }
+  }
+
   // If post-message failed and content contains @mentions,
   // hint that text-based @mention is always available.
   // Only mention credential issues when the error actually looks like auth failure.
