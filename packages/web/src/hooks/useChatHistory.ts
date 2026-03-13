@@ -515,10 +515,12 @@ export function useChatHistory(threadId: string) {
     // Thread switch or initial load — scroll to bottom.
     // scrollToBottomRef is set by the threadId change effect and survives
     // across render cycles until consumed here with actual new-thread messages.
-    // Only consume when the store is synced to the target thread (avoids consuming
-    // the flag on a stale render before setCurrentThread restores cached messages).
+    // Gate ALL scroll-to-bottom paths on storeReady: the store's currentThreadId
+    // must match the target thread. This prevents consuming the flag (or the
+    // prevCount===0 sentinel) on a stale render before setCurrentThread restores
+    // cached messages for the new thread.
     const storeReady = useChatStore.getState().currentThreadId === scrollTargetThreadRef.current;
-    if ((scrollToBottomRef.current && storeReady) || prevCount === 0) {
+    if (storeReady && (scrollToBottomRef.current || prevCount === 0)) {
       scrollToBottomRef.current = false;
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
       return;

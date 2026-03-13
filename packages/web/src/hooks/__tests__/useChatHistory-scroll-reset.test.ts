@@ -117,9 +117,13 @@ describe('useChatHistory scroll reset on thread switch (#35)', () => {
       root.render(React.createElement(RealisticHost, { threadId: 'thread-a' }));
     });
 
-    // Spy on scrollIntoView on the end sentinel div (messagesEndRef target)
+    // Spy on scrollIntoView on the end sentinel div (messagesEndRef target).
+    // Record the currentThreadId at each call to prove scroll fires on the right thread.
     const endDiv = container.querySelector('div');
-    const scrollSpy = vi.fn();
+    const callThreadIds: string[] = [];
+    const scrollSpy = vi.fn(() => {
+      callThreadIds.push(useChatStore.getState().currentThreadId);
+    });
     if (endDiv) endDiv.scrollIntoView = scrollSpy;
 
     // Switch to thread-b — this triggers the real sequence:
@@ -143,5 +147,14 @@ describe('useChatHistory scroll reset on thread switch (#35)', () => {
 
     // Verify scrollIntoView was called (proving scroll-to-bottom fired)
     expect(scrollSpy).toHaveBeenCalled();
+
+    // Critical: verify that EVERY scrollIntoView call happened while the
+    // store was synced to thread-b (the target thread), not on stale thread-a data.
+    // This is the core invariant: scroll must not fire before setCurrentThread restores
+    // the correct messages.
+    expect(callThreadIds.length).toBeGreaterThan(0);
+    for (const tid of callThreadIds) {
+      expect(tid).toBe('thread-b');
+    }
   });
 });
