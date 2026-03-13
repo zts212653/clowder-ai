@@ -561,7 +561,7 @@
     {
       "id": "F091",
       "name": "Signal Study Mode — 信号学习伴侣",
-      "status": "in-progress (Phase 8 podcast context injection done) | **Owner**: Ragdoll",
+      "status": "in-progress (Phase 9 signal nav + notes viewable done) | **Owner**: Ragdoll",
       "file": "F091-signal-study-mode.md"
     },
     {
@@ -691,5 +691,5 @@
       "file": "F112-voice-playback-queue.md"
     }
   ],
-  "generated_at": "2026-03-13T08:03:34.232Z"
+  "generated_at": "2026-03-13T11:16:57.103Z"
 }

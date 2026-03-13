@@ -80,13 +80,46 @@ triggers:
 
 ### Phase 3.5: 进阶功能引导 (phase-3.5-advanced)
 
-环境检测结果已包含 TTS/ASR/Pencil 状态，根据结果引导：
-1. **TTS**：ok=true → "你已经有 TTS 了！" / ok=false → 推荐 Kokoro-82M（`mlx-community/Kokoro-82M-bf16`）
-2. **ASR**：ok=true → "语音识别已就绪" / ok=false → 推荐 Whisper（需 GPU/Apple Silicon）
-3. **Pencil**：ok=false → "需要 Antigravity IDE + Pencil 扩展"
+环境检测结果已包含 TTS/ASR/Pencil 状态。**不要默认跳过！主动问用户想不想装。**
 
-跑不起来就跳过，**不阻塞训练营流程！**
-记录状态：`cat_cafe_update_bootcamp_state(threadId, phase='phase-4-task-select', advancedFeatures={tts:'available'|'unavailable'|'skipped', asr:..., pencil:...})`
+#### Step 1: 展示状态 + 介绍价值
+
+用友好的方式展示每个可选功能的状态和实际用途：
+- **TTS（语音合成）**：ok=true → "你已经有语音了！猫猫可以给你发语音消息 🎤" / ok=false → 介绍："装上后猫猫能用语音跟你说话，讨论问题更自然"
+- **ASR（语音识别）**：ok=true → "语音输入已就绪" / ok=false → 介绍："装上后你可以直接说话，不用打字"
+- **Pencil（设计工具）**：ok=false → 介绍："装上后猫猫能帮你画界面设计稿"
+
+#### Step 2: 主动询问
+
+> "这些都是可选的进阶功能，能让我们的协作更有趣。**你想装哪些？**全都要/选几个/全跳过都可以，不影响训练营流程。"
+
+#### Step 3: 帮装（用户说想装的才装）
+
+**硬件探测**：先跑 `uname -m` + 检查是否有 NVIDIA GPU（`nvidia-smi`），判断用户硬件：
+
+| 硬件 | TTS 推荐 | ASR 推荐 |
+|------|---------|---------|
+| **Apple Silicon** (arm64 + macOS) | Kokoro-82M via MLX：`mlx-community/Kokoro-82M-bf16` | Whisper via MLX：`mlx-community/whisper-large-v3-mlx` |
+| **NVIDIA GPU** (nvidia-smi OK) | Qwen3-TTS 1.7B via vLLM/transformers | Whisper large-v3 via faster-whisper (CUDA) |
+| **CPU-only** | Kokoro-82M (CPU 模式，较慢但可用) | Whisper tiny/base（CPU 可跑但体验一般，建议跳过） |
+
+**帮装流程**（每个功能）：
+1. 告诉用户推荐方案和理由
+2. 帮下载模型 / 安装依赖
+3. 帮配 `.env` 里对应的端口和路径
+4. 帮拉起服务
+5. **重跑 `cat_cafe_bootcamp_env_check(threadId)` 验证端口通了**
+6. 验证通过 → 庆祝！验证失败 → 排查或建议跳过
+
+**Pencil 特殊处理**：需要 Antigravity IDE + Pencil 扩展，无法自动安装。给用户安装指引，装不了就 mark skipped。
+
+#### Step 4: 记录状态
+
+只有用户**明确说不要**或**硬件确实跑不了**才标 `skipped`，帮装成功标 `available`。
+
+`cat_cafe_update_bootcamp_state(threadId, phase='phase-4-task-select', advancedFeatures={tts:'available'|'unavailable'|'skipped', asr:..., pencil:...})`
+
+**不阻塞原则仍然有效**：如果用户说"全跳过"或某个功能实在装不上，不要死磕，标记后继续。
 
 ### Phase 4: 任务选择 (phase-4-task-select)
 

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import type { ArtifactJobState, ArtifactKind } from '@cat-cafe/shared';
 import { SignalArticleStatusSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -59,6 +60,42 @@ export const signalStudyRoutes: FastifyPluginAsync = async (app) => {
 
     const meta = await studyMeta.readMeta(params.id, article.filePath);
     return { meta };
+  });
+
+  // Phase 9: read note artifact content
+  app.get('/api/signals/articles/:id/notes/:noteId', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const params = request.params as { id?: string; noteId?: string };
+    if (!params.id || !params.noteId) {
+      reply.status(400);
+      return { error: 'Article id and note id are required' };
+    }
+
+    const article = await articleQuery.getArticleById(params.id);
+    if (!article) {
+      reply.status(404);
+      return { error: `Article not found: ${params.id}` };
+    }
+
+    const meta = await studyMeta.readMeta(params.id, article.filePath);
+    const note = meta.artifacts.find((a) => a.id === params.noteId && a.kind === 'note');
+    if (!note?.filePath) {
+      reply.status(404);
+      return { error: `Note not found: ${params.noteId}` };
+    }
+
+    try {
+      const content = await readFile(note.filePath, 'utf-8');
+      return { content };
+    } catch {
+      reply.status(404);
+      return { error: 'Note file not found on disk' };
+    }
   });
 
   app.post('/api/signals/articles/:id/threads', async (request, reply) => {

@@ -219,6 +219,29 @@ skills:
     sop_step: [4, 5, 6]
     merged_from: ["merge-approval-gate", "requesting-cloud-review", "finishing-a-development-branch"]
 
+  # ── 社区贡献 PR ──
+  community-pr:
+    description: >
+      开源仓贡献 PR 准备：F 编号校验、Feature Doc 对齐、PR 格式化。
+      Use when: 准备向 clowder-ai 提 PR、fork 用户提交贡献、社区 PR。
+      Not for: 内部 cat-cafe PR（用 merge-gate）、review（用 request-review）。
+      Output: 编号对齐 + Feature Doc 校验 + 格式化 PR。
+    triggers:
+      - "提 PR 到 clowder"
+      - "社区 PR"
+      - "community PR"
+      - "贡献 PR"
+      - "提交贡献"
+      - "open source PR"
+      - "fork PR"
+    not_for:
+      - "内部 cat-cafe PR（用 merge-gate）"
+      - "review（用 request-review）"
+    output: "F-number aligned + Feature Doc validated + formatted PR"
+    next: ["receive-review"]
+    sop_step: null
+    merged_from: null
+
   # ── 自我进化 ──
   self-evolution:
     description: >

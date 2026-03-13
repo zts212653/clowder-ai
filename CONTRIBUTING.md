@@ -43,6 +43,19 @@ gh pr create --repo zts212653/clowder-ai
 - Open an [Issue](https://github.com/zts212653/clowder-ai/issues) — please include reproduction steps for bugs
 - Check [pinned issues](https://github.com/zts212653/clowder-ai/issues) for current focus areas
 
+### Feature numbering
+
+Feature IDs (`F001`, `F002`, ...) are assigned by **maintainers**, not by contributors. Here's how it works:
+
+1. **You** open a GitHub Issue describing the feature you want
+2. **Maintainers** discuss and approve the idea
+3. **Maintainers** assign the next available F-number and create the Feature Doc
+4. **You** (or anyone) can then implement against the Feature Doc's Acceptance Criteria
+
+**Bug fixes** don't get F-numbers — they're tracked by their GitHub Issue number directly.
+
+> Don't worry about picking a number. Just open an issue with a clear description of what you want and why.
+
 ### Runtime ports
 
 The default ports are `3003` (API) and `3004` (Frontend). See [SETUP.md](SETUP.md) for full configuration.
@@ -63,11 +76,11 @@ In the age of AI-assisted development, **code is cheap. Alignment is expensive.*
 ```
 1. Intent          You have an idea or found a problem
       ↓
-2. Feature Doc     Write a Fxxx-slug.md following the template
+2. Open an Issue   Describe what you want and why
       ↓
-3. Discussion      Open a PR with just the doc — get alignment on intent
+3. Discussion      Maintainers discuss → assign F-number → create Feature Doc
       ↓
-4. Execution       Implement against the doc's Acceptance Criteria
+4. Execution       Implement against the Feature Doc's Acceptance Criteria
       ↓
 5. Verification    Does the result match the doc? Evidence, not confidence.
 ```
@@ -215,16 +228,29 @@ Every contribution should respect these:
 > Clowder 不是一个纯代码仓库。
 > 对于非 trivial 的改动，贡献的主体是**意图**：解释应该改什么、为什么改的功能文档、协议更新或设计决策。代码、测试和参考文档是让意图变成现实的手段。
 
+### Feature 编号规则
+
+Feature 编号（`F001`、`F002`、……）由 **maintainer 分配**，不需要贡献者自己选号：
+
+1. **你** 开一个 GitHub Issue，描述你想要的功能
+2. **Maintainer** 讨论并批准
+3. **Maintainer** 分配下一个可用的 F 编号，创建 Feature Doc
+4. **你**（或任何人）按照 Feature Doc 的验收标准实现
+
+**Bug 修复**不分配 F 编号——直接用 GitHub Issue 号追踪。
+
+> 不用纠结编号。开个 Issue 把你想要的东西和原因说清楚就行。
+
 ### 贡献流程
 
 ```
 1. 意图          你有一个想法，或发现了一个问题
       ↓
-2. Feature Doc   按模板写一个 Fxxx-slug.md
+2. 开 Issue      描述你想要什么、为什么
       ↓
-3. 讨论          开一个只包含文档的 PR — 在意图层面对齐
+3. 讨论          Maintainer 讨论 → 分配 F 号 → 创建 Feature Doc
       ↓
-4. 执行          按文档的验收标准实现
+4. 执行          按 Feature Doc 的验收标准实现
       ↓
 5. 验证          结果和文档一致吗？靠证据，不靠自信
 ```

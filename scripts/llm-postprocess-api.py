@@ -7,11 +7,11 @@ Pipeline position:  Whisper ASR → **LLM post-edit** → term dictionary → fi
 
 Usage:
   source ~/.cat-cafe/llm-venv/bin/activate
-  python scripts/llm-postprocess-api.py                                          # default: Qwen2.5-3B
-  python scripts/llm-postprocess-api.py --model mlx-community/Qwen2.5-7B-Instruct-4bit
+  python scripts/llm-postprocess-api.py                                          # default: Qwen3.5-35B-A3B MoE
+  python scripts/llm-postprocess-api.py --model mlx-community/Qwen3.5-35B-A3B-4bit
   python scripts/llm-postprocess-api.py --port 9878                              # custom port
 
-Requires: pip install mlx-lm fastapi uvicorn pydantic
+Requires: pip install mlx-vlm fastapi uvicorn pydantic
 """
 
 import argparse
@@ -21,7 +21,7 @@ import signal
 import sys
 import time
 
-from mlx_lm import generate, load
+from mlx_vlm import load, generate
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,7 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model_ref = {"model": None, "tokenizer": None, "path": "", "loaded": False}
+model_ref = {"model": None, "processor": None, "path": "", "loaded": False}
 
 # Serialize GPU access — MLX doesn't handle concurrent generation well
 _generate_lock = asyncio.Lock()
@@ -97,7 +97,7 @@ async def refine(req: RefineRequest):
         {"role": "user", "content": user_msg},
     ]
 
-    prompt = model_ref["tokenizer"].apply_chat_template(
+    prompt = model_ref["processor"].apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True,
     )
 
@@ -107,10 +107,10 @@ async def refine(req: RefineRequest):
             result = await asyncio.to_thread(
                 generate,
                 model_ref["model"],
-                model_ref["tokenizer"],
-                prompt=prompt,
+                model_ref["processor"],
+                prompt,
                 max_tokens=len(text) * 2 + 50,  # Allow some expansion but cap it
-                temp=0.1,  # Low temperature for deterministic correction
+                temperature=0.1,  # Low temperature for deterministic correction
             )
         latency_ms = int((time.monotonic() - t0) * 1000)
         refined = result.strip()
@@ -132,7 +132,7 @@ async def health():
     return {
         "status": "ok" if model_ref["loaded"] else "loading",
         "model": model_ref["path"] or "none",
-        "backend": "mlx-lm",
+        "backend": "mlx-vlm",
     }
 
 
@@ -140,8 +140,8 @@ def main():
     parser = argparse.ArgumentParser(description="Cat Cafe LLM Post-Process Server (MLX)")
     parser.add_argument(
         "--model",
-        default="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-        help="HuggingFace MLX model repo (default: mlx-community/Qwen3-4B-Instruct-2507-4bit)",
+        default="mlx-community/Qwen3.5-35B-A3B-4bit",
+        help="HuggingFace MLX model repo (default: mlx-community/Qwen3.5-35B-A3B-4bit)",
     )
     parser.add_argument("--port", type=int, default=9878, help="Server port (default: 9878)")
     args = parser.parse_args()
@@ -159,9 +159,9 @@ def main():
     log.info("Loading model (first run downloads from HuggingFace)...")
 
     try:
-        model, tokenizer = load(args.model)
+        model, processor = load(args.model)
         model_ref["model"] = model
-        model_ref["tokenizer"] = tokenizer
+        model_ref["processor"] = processor
         model_ref["loaded"] = True
     except Exception:
         log.exception("Failed to load model '%s'", args.model)

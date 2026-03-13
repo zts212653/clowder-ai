@@ -3,7 +3,7 @@
 <EXTREMELY_IMPORTANT>
 你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（22 个）
+## Skills 列表（23 个）
 
 ### 开发流程链
 ```
@@ -24,6 +24,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `request-review` | 发 review 请求给 reviewer | ③ |
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
 | `merge-gate` | 门禁→PR→云端 review→merge→清理 | ④⑤⑥ |
+| `community-pr` | 开源贡献 PR（F 编号校验+对齐+格式化） | — |
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `parallel-execution` | 多任务并行/子代理 | — |
 | `deep-research` | 多源深度调研 | — |
