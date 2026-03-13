@@ -25,7 +25,7 @@ function parseBacklogFeatureIds(markdown) {
   const lines = markdown.split(/\r?\n/);
 
   for (const line of lines) {
-    const match = line.match(/^\|\s*(F\d{3,4})\s*\|/);
+    const match = line.match(/^\|\s*([FP]\d{3,4})\s*\|/);
     if (match) {
       ids.add(match[1]);
     }
@@ -58,7 +58,7 @@ function buildFeatureStatusMap(features) {
 
   for (const feature of features) {
     const id = feature?.id;
-    if (typeof id !== 'string' || !/^F\d{3,4}$/.test(id)) {
+    if (typeof id !== 'string' || !/^[FP]\d{3,4}$/.test(id)) {
       continue;
     }
 
