@@ -35,7 +35,7 @@ argument-hint: "[阶段: kickoff|discussion|completion] [F0xx 或主题]"
 
 **5 步流程**：
 
-1. **分配 ID**：`grep -E "^\| [FP][0-9]+" docs/ROADMAP.md | tail -1`，新 ID = 最大 + 1，三位数。开源仓新功能使用 P 系列编号（P001, P002...），内部功能使用 F 系列。
+1. **分配 ID**：`grep -E "^\| [FP][0-9]+" docs/ROADMAP.md | tail -1`，新 ID = 最大 + 1，三位数。编号由 maintainer 统一分配（F 系列），贡献者只需开 Issue 描述需求。
 
 2. **创建聚合文件** `docs/features/Fxxx-name.md`（kebab-case 文件名）
 
@@ -45,7 +45,7 @@ argument-hint: "[阶段: kickoff|discussion|completion] [F0xx 或主题]"
 
    并在 spec 中补一节：`## 需求点 Checklist`（模板见 `cat-cafe-skills/refs/requirements-checklist-template.md`）
 
-3. **更新 ROADMAP.md**：末尾加 `| P001 | 名称 | spec | Owner | [P001](features/...) |`
+3. **更新 ROADMAP.md**：末尾加 `| Fxxx | 名称 | spec | Owner | [Fxxx](features/...) |`
 
 4. **关联文档**：Links 章节列出相关 research/discussion；更新这些文档的 `feature_ids: [F042]`
 
