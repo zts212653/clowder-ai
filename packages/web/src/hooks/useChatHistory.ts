@@ -415,6 +415,13 @@ export function useChatHistory(threadId: string) {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     loadingRef.current = false;
+
+    // Reset scroll tracking refs so the scroll effect treats the new thread
+    // as an "initial load" (prevCount === 0) and scrolls to bottom.
+    prevCountRef.current = 0;
+    prevFirstIdRef.current = null;
+    scrollSnapshotRef.current = null;
+
     const controller = abortRef.current;
 
     // Check if this thread has cached messages in the threadStates map.
