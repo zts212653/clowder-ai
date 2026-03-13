@@ -689,7 +689,13 @@
       "name": "Voice Playback Queue — 语音播放队列 + Intent 调度",
       "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P2",
       "file": "F112-voice-playback-queue.md"
+    },
+    {
+      "id": "F113",
+      "name": "Linux One-Click Deploy",
+      "status": "spec | **Owner**: opus | **Priority**: P1",
+      "file": "F113-linux-one-click-deploy.md"
     }
   ],
-  "generated_at": "2026-03-13T08:03:34.232Z"
+  "generated_at": "2026-03-13T09:36:33.164Z"
 }

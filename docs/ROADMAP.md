@@ -50,3 +50,4 @@ created: 2026-02-26
 | F110 | 训练营愿景引导增强 — CVO 需求挖掘 + SOP 显式加载 | spec | Ragdoll | [F110](features/F110-bootcamp-vision-elicitation.md) |
 | F111 | Streaming TTS Chunker — 流式分句合成管线 | spec | Ragdoll | [F111](features/F111-streaming-tts-chunker.md) |
 | F112 | Voice Playback Queue — 语音播放队列 + Intent 调度 | spec | Ragdoll | [F112](features/F112-voice-playback-queue.md) |
+| F113 | Linux One-Click Deploy — Linux 裸机一键部署 | spec | opus | [F113](features/F113-linux-one-click-deploy.md) |

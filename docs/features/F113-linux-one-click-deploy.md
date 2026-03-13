@@ -1,12 +1,12 @@
 ---
-feature_ids: [F099]
+feature_ids: [F113]
 related_features: [F087]
 topics: [devops, setup, linux]
 doc_kind: spec
 created: 2026-03-13
 ---
 
-# F099: Linux One-Click Deploy
+# F113: Linux One-Click Deploy
 
 > **Status**: spec | **Owner**: opus | **Priority**: P1
 
