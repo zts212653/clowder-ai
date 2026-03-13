@@ -10,6 +10,7 @@
 # Per ADR-009: each skill gets its own symlink (no directory-level link).
 #
 # Usage: ./scripts/sync-skills.sh [--dry-run]
+# Exit code: 0 = all ok, 1 = conflicts found
 # ============================================================
 
 set -e
@@ -50,6 +51,7 @@ SKIP_DIRS="refs"
 TOTAL_CREATED=0
 TOTAL_SKIPPED=0
 TOTAL_UPDATED=0
+TOTAL_CONFLICTS=0
 
 for PROVIDER_DIR in "${PROVIDERS[@]}"; do
     PROVIDER_NAME=$(basename "$(dirname "$PROVIDER_DIR")")
@@ -91,6 +93,8 @@ for PROVIDER_DIR in "${PROVIDERS[@]}"; do
         elif [ -e "$TARGET" ]; then
             # Non-symlink file/dir exists — don't overwrite
             echo -e "  ${RED}✗${NC} $SKILL_NAME (conflict: non-symlink exists at $TARGET)"
+            echo -e "    ${YELLOW}→ Remove manually: rm -rf $TARGET${NC}"
+            TOTAL_CONFLICTS=$((TOTAL_CONFLICTS + 1))
         else
             # Create new symlink
             if [ "$DRY_RUN" = false ]; then
@@ -105,8 +109,13 @@ for PROVIDER_DIR in "${PROVIDERS[@]}"; do
 done
 
 echo "──────────────────────────────"
-echo -e "Created: ${GREEN}$TOTAL_CREATED${NC}  Updated: ${YELLOW}$TOTAL_UPDATED${NC}  Unchanged: $TOTAL_SKIPPED"
+echo -e "Created: ${GREEN}$TOTAL_CREATED${NC}  Updated: ${YELLOW}$TOTAL_UPDATED${NC}  Unchanged: $TOTAL_SKIPPED  Conflicts: ${RED}$TOTAL_CONFLICTS${NC}"
 
 if [ "$DRY_RUN" = true ]; then
     echo -e "${YELLOW}[dry-run] Re-run without --dry-run to apply.${NC}"
+fi
+
+if [ "$TOTAL_CONFLICTS" -gt 0 ]; then
+    echo -e "${RED}$TOTAL_CONFLICTS conflict(s) found. Remove conflicting paths and re-run.${NC}"
+    exit 1
 fi

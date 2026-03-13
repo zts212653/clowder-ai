@@ -110,9 +110,14 @@ echo "  猫猫咖啡技能提供开发流程治理（feat-lifecycle、tdd 等）
 echo ""
 
 if [ -d "$PROJECT_DIR/cat-cafe-skills" ]; then
-    bash "$SCRIPT_DIR/sync-skills.sh"
-    echo ""
-    echo -e "  ${GREEN}✓${NC} Skills mounted to ~/.{claude,codex,gemini}/skills/"
+    if bash "$SCRIPT_DIR/sync-skills.sh"; then
+        echo ""
+        echo -e "  ${GREEN}✓${NC} Skills mounted to ~/.{claude,codex,gemini}/skills/"
+    else
+        echo ""
+        echo -e "  ${YELLOW}⚠${NC} Some skills had conflicts. See output above."
+        echo -e "  ${YELLOW}  Remove conflicting paths and run: pnpm sync:skills${NC}"
+    fi
 else
     echo -e "  ${YELLOW}⚠${NC} cat-cafe-skills/ not found. Skipping skill mount."
 fi

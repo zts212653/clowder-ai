@@ -61,6 +61,7 @@ for ENTRY in "${PROVIDERS[@]}"; do
     MOUNTED=0
     MISSING=0
     BROKEN=0
+    CONFLICTS=0
 
     echo -e "${CYAN}[$PROVIDER_NAME]${NC} $PROVIDER_DIR"
 
@@ -86,16 +87,23 @@ for ENTRY in "${PROVIDERS[@]}"; do
                 HAS_ISSUES=true
             fi
         else
-            echo -e "  ${RED}✗${NC} $SKILL_NAME — not linked"
-            MISSING=$((MISSING + 1))
+            if [ -e "$TARGET" ]; then
+                # Non-symlink file/dir exists — conflict
+                echo -e "  ${RED}✗${NC} $SKILL_NAME — conflict (non-symlink exists)"
+                echo -e "    ${YELLOW}→ Remove manually: rm -rf $TARGET${NC}"
+                CONFLICTS=$((CONFLICTS + 1))
+            else
+                echo -e "  ${RED}✗${NC} $SKILL_NAME — not linked"
+                MISSING=$((MISSING + 1))
+            fi
             HAS_ISSUES=true
         fi
     done
 
-    if [ $MISSING -eq 0 ] && [ $BROKEN -eq 0 ]; then
+    if [ $MISSING -eq 0 ] && [ $BROKEN -eq 0 ] && [ $CONFLICTS -eq 0 ]; then
         echo -e "  ${GREEN}✓${NC} All $MOUNTED/$TOTAL_SKILLS skills mounted"
     else
-        echo -e "  Mounted: ${GREEN}$MOUNTED${NC}  Missing: ${RED}$MISSING${NC}  Broken: ${YELLOW}$BROKEN${NC}"
+        echo -e "  Mounted: ${GREEN}$MOUNTED${NC}  Missing: ${RED}$MISSING${NC}  Broken: ${YELLOW}$BROKEN${NC}  Conflicts: ${RED}$CONFLICTS${NC}"
     fi
     echo ""
 done
@@ -103,7 +111,9 @@ done
 # Summary
 echo "──────────────────────────────"
 if [ "$HAS_ISSUES" = true ]; then
-    echo -e "${RED}Issues found.${NC} Run ${BOLD}pnpm sync:skills${NC} to fix."
+    echo -e "${RED}Issues found.${NC}"
+    echo -e "  Run ${BOLD}pnpm sync:skills${NC} to create missing symlinks."
+    echo -e "  For conflicts, remove the blocking path first (see above)."
     exit 1
 else
     echo -e "${GREEN}All skills properly mounted across all providers.${NC}"
