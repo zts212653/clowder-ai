@@ -46,5 +46,7 @@ created: 2026-02-26
 | F104 | 本地全感知升级 — Qwen Omni + VL MoE 替换管道 | spec | Ragdoll | [F104](features/F104-local-omni-perception.md) |
 | F107 | 猫猫杀（脑门贴词）— 坏猫战术推理游戏 | spec | Ragdoll | [F107](features/F107-headband-guess-game.md) |
 | F108 | Side-Dispatch — 同一 Thread 多猫并发执行 | spec | TBD | [F108](features/F108-side-dispatch-concurrent-invocation.md) |
-| F109 | Streaming TTS Chunker — 流式分句合成管线 | spec | Ragdoll | [F109](features/F109-streaming-tts-chunker.md) |
-| F110 | Voice Playback Queue — 语音播放队列 + Intent 调度 | spec | Ragdoll | [F110](features/F110-voice-playback-queue.md) |
+| F109 | Message Actions 修复与增强 — 软删除/Branch/编辑/通知 | spec | Ragdoll | [F109](features/F109-message-actions-overhaul.md) |
+| F110 | 训练营愿景引导增强 — CVO 需求挖掘 + SOP 显式加载 | spec | Ragdoll | [F110](features/F110-bootcamp-vision-elicitation.md) |
+| F111 | Streaming TTS Chunker — 流式分句合成管线 | spec | Ragdoll | [F111](features/F111-streaming-tts-chunker.md) |
+| F112 | Voice Playback Queue — 语音播放队列 + Intent 调度 | spec | Ragdoll | [F112](features/F112-voice-playback-queue.md) |

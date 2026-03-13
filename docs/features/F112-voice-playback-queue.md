@@ -1,12 +1,12 @@
 ---
-feature_ids: [F110]
-related_features: [F066, F034, F021, F109]
+feature_ids: [F112]
+related_features: [F066, F034, F021, F111]
 topics: [voice, tts, playback, queue, intent, podcast]
 doc_kind: spec
 created: 2026-03-12
 ---
 
-# F110: Voice Playback Queue — 语音播放队列 + Intent 调度
+# F112: Voice Playback Queue — 语音播放队列 + Intent 调度
 
 > **Status**: spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P2
 
@@ -20,7 +20,7 @@ created: 2026-03-12
 AIRI 项目的 speech-pipeline 架构（PlaybackManager + Intent 系统）验证了这种调度在实时对话中的可行性。
 
 > Evolved from F066 Phase 3（从 F066 拆分为独立 Feature）
-> Blocked by F109（流式分句是播放队列的前置——需要有 chunk 才有"队列"可排）
+> Blocked by F111（流式分句是播放队列的前置——需要有 chunk 才有"队列"可排）
 
 ## What
 
@@ -70,7 +70,7 @@ AIRI 项目的 speech-pipeline 架构（PlaybackManager + Intent 系统）验证
 ## Dependencies
 
 - **Evolved from**: F066（Voice Pipeline Upgrade — Phase 3 拆出）
-- **Blocked by**: F109（Streaming TTS Chunker — 需要有 chunk 流才有队列可排）
+- **Blocked by**: F111（Streaming TTS Chunker — 需要有 chunk 流才有队列可排）
 - **Related**: F034（TTS 架构基础 — ITtsProvider / TtsRegistry）
 - **Related**: F021（Signal Study Mode — R5 播客功能是核心使用场景）
 - **Related**: F104（本地全感知升级 — Phase B VAD 可能依赖其感知管线）

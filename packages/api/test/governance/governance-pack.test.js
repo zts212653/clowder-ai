@@ -63,7 +63,7 @@ describe('governance-pack', () => {
     assert.ok(block.includes('cat-cafe-skills'));
   });
 
-  it('pack version is 1.1.0', () => {
-    assert.equal(GOVERNANCE_PACK_VERSION, '1.1.0');
+  it('pack version is 1.2.0', () => {
+    assert.equal(GOVERNANCE_PACK_VERSION, '1.2.0');
   });
 });

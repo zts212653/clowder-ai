@@ -555,6 +555,23 @@ export async function* routeParallel(
         const meta = catMeta.get(msg.catId);
         const catTools = catToolEvents.get(msg.catId);
         const thinking = catThinking.get(msg.catId);
+
+        // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
+        // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
+        const hasRichBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])].length > 0;
+        if (catTools && catTools.length > 0 && !hasRichBlocks) {
+          yield {
+            type: 'system_info' as AgentMessageType,
+            catId: msg.catId,
+            content: JSON.stringify({
+              type: 'silent_completion',
+              detail: `${msg.catId} completed with tool calls but no text response.`,
+              toolCount: catTools.length,
+            }),
+            timestamp: Date.now(),
+          } as AgentMessage;
+        }
+
         try {
           await deps.messageStore.append({
             userId,

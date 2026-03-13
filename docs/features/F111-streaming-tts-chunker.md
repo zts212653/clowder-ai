@@ -1,12 +1,12 @@
 ---
-feature_ids: [F109]
+feature_ids: [F111]
 related_features: [F066, F034, F021]
 topics: [voice, tts, streaming, chunker, latency]
 doc_kind: spec
 created: 2026-03-12
 ---
 
-# F109: Streaming TTS Chunker — 流式分句合成管线
+# F111: Streaming TTS Chunker — 流式分句合成管线
 
 > **Status**: spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P1
 
