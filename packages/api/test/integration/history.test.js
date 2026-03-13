@@ -12,8 +12,10 @@ describe('POST → GET /api/messages roundtrip', () => {
   let messageStore;
 
   beforeEach(async () => {
-    const { MessageStore } = await import('../../dist/domains/cats/services/MessageStore.js');
-    const { InvocationRegistry } = await import('../../dist/domains/cats/services/InvocationRegistry.js');
+    const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { InvocationRegistry } = await import(
+      '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
     const { messagesRoutes } = await import('../../dist/routes/messages.js');
     const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
 

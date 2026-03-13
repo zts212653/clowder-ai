@@ -2356,7 +2356,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const deps = makeDeps();
     const previousCwd = process.cwd();
+    const previousProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
     try {
+      process.env.ANTHROPIC_PROXY_ENABLED = '0';
       process.chdir(apiDir);
       await collect(
         invokeSingleCat(deps, {
@@ -2370,6 +2372,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
     } finally {
       process.chdir(previousCwd);
+      if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
+      else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       await rm(root, { recursive: true, force: true });
     }
 

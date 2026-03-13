@@ -175,6 +175,13 @@ export function consumeBackgroundSystemInfo(
     } else if (parsed?.type === 'mode_switch_proposal') {
       const by = parsed.proposedBy ?? '猫猫';
       sysContent = `${by} 提议切换到 ${parsed.proposedMode} 模式。`;
+    } else if (parsed?.type === 'silent_completion') {
+      // Bugfix: silent-exit — cat ran tools but produced no text response
+      const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
+      sysContent = detail || `${msg.catId} completed without a text response.`;
+    } else if (parsed?.type === 'invocation_preempted') {
+      // Bugfix: silent-exit — invocation was superseded by a newer request
+      sysContent = 'This response was superseded by a newer request.';
     } else if (parsed?.type === 'thinking') {
       // F045: Embed thinking into the assistant bubble (matches foreground path)
       const thinkingText = parsed.text ?? '';

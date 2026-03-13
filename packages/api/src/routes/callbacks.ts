@@ -1061,6 +1061,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(invocationTracker ? { invocationTracker } : {}),
     });
     // Wire orchestrator into SocketManager for cancel propagation (P1-1 fix)
-    socketManager.setMultiMentionOrchestrator(getMultiMentionOrchestrator());
+    if (typeof socketManager.setMultiMentionOrchestrator === 'function') {
+      socketManager.setMultiMentionOrchestrator(getMultiMentionOrchestrator());
+    }
   }
 };

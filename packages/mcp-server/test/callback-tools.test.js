@@ -107,6 +107,34 @@ describe('MCP Callback Tools', () => {
     assert.ok(result.content[0].text.includes('not configured'));
   });
 
+  test('handlePostMessage detects stale_ignored and returns error', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({ status: 'stale_ignored' }),
+    });
+
+    const result = await handlePostMessage({ content: 'Hello from stale invocation' });
+
+    assert.equal(result.isError, true);
+    assert.ok(result.content[0].text.includes('stale_ignored'));
+    assert.ok(result.content[0].text.includes('NOT delivered'));
+  });
+
+  test('handlePostMessage treats normal success as success (not stale)', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({ status: 'ok', messageId: 'msg-123' }),
+    });
+
+    const result = await handlePostMessage({ content: 'Hello' });
+
+    assert.equal(result.isError, undefined);
+  });
+
   test('handleGetPendingMentions calls API with auth in query', async () => {
     const { handleGetPendingMentions } = await import('../dist/tools/callback-tools.js');
 

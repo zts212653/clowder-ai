@@ -9,9 +9,9 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
-const { InvocationRegistry } = await import('../../dist/domains/cats/services/InvocationRegistry.js');
-const { TaskStore } = await import('../../dist/domains/cats/services/TaskStore.js');
-const { MessageStore } = await import('../../dist/domains/cats/services/MessageStore.js');
+const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+const { TaskStore } = await import('../../dist/domains/cats/services/stores/ports/TaskStore.js');
+const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
 
 function createMockSocketManager() {

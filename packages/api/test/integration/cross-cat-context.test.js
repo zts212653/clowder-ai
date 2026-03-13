@@ -12,9 +12,9 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, mock, test } from 'node:test';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
 
-const { AgentRouter } = await import('../../dist/domains/cats/services/AgentRouter.js');
-const { MessageStore } = await import('../../dist/domains/cats/services/MessageStore.js');
-const { InvocationRegistry } = await import('../../dist/domains/cats/services/InvocationRegistry.js');
+const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
+const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 
 /** Collect all items from async iterable */
 async function collect(iterable) {
