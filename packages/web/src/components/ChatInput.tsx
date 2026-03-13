@@ -10,7 +10,14 @@ import { useInputHistoryStore } from '@/stores/inputHistoryStore';
 import { compressImage } from '@/utils/compressImage';
 import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputMenus } from './ChatInputMenus';
-import { buildCatOptions, buildWhisperOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
+import {
+  buildCatOptions,
+  buildWhisperOptions,
+  type CatOption,
+  detectMenuTrigger,
+  GAME_LIST,
+  WEREWOLF_MODES,
+} from './chat-input-options';
 import { deriveImageLifecycleStatus, isImageLifecycleBlockingSend } from './chat-input-upload-state';
 import { HistorySearchModal } from './HistorySearchModal';
 import { ImagePreview } from './ImagePreview';
@@ -49,6 +56,8 @@ export function ChatInput({
 
   const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
   const [showMentions, setShowMentions] = useState(false);
+  const [showGameMenu, setShowGameMenu] = useState(false);
+  const [gameStep, setGameStep] = useState<'list' | 'modes'>('list');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
@@ -62,6 +71,7 @@ export function ChatInput({
   const [showHistorySearch, setShowHistorySearch] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const gameBtnRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageLifecycleStatus = deriveImageLifecycleStatus(isPreparingImages, uploadStatus);
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
@@ -98,8 +108,9 @@ export function ChatInput({
     );
   }, [catOptions, mentionFilter]);
 
-  const activeMenu = showMentions ? 'mention' : null;
-  const activeOptions = activeMenu === 'mention' ? filteredCatOptions : [];
+  const activeMenu = showMentions ? 'mention' : showGameMenu ? 'game' : null;
+  const gameMenuItems = gameStep === 'list' ? GAME_LIST : WEREWOLF_MODES;
+  const activeOptions = activeMenu === 'mention' ? filteredCatOptions : (gameMenuItems as unknown as CatOption[]);
 
   const addHistoryEntry = useInputHistoryStore((s) => s.addEntry);
   const findHistoryMatch = useInputHistoryStore((s) => s.findMatch);
@@ -124,6 +135,7 @@ export function ChatInput({
         setGhostSuggestion(null);
         setImages([]);
         setShowMentions(false);
+        setShowGameMenu(false);
       }
     },
     [input, disabled, onSend, images, sendTemporarilyDisabled, whisperMode, whisperTargets, addHistoryEntry],
@@ -135,7 +147,18 @@ export function ChatInput({
 
   const closeMenus = useCallback(() => {
     setShowMentions(false);
+    setShowGameMenu(false);
   }, []);
+
+  const sendGameCommand = useCallback(
+    (command: string) => {
+      closeMenus();
+      if (!disabled && !sendTemporarilyDisabled) {
+        onSend(command, undefined, undefined, hasActiveInvocation ? 'queue' : undefined);
+      }
+    },
+    [closeMenus, disabled, sendTemporarilyDisabled, onSend, hasActiveInvocation],
+  );
 
   const insertMention = useCallback(
     (option: CatOption) => {
@@ -154,8 +177,14 @@ export function ChatInput({
       const val = e.target.value;
       setInput(val);
       const trigger = detectMenuTrigger(val, e.target.selectionStart);
-      if (trigger?.type === 'mention') {
+      if (trigger?.type === 'game') {
+        setShowGameMenu(true);
+        setGameStep('list');
+        setShowMentions(false);
+        setSelectedIdx(0);
+      } else if (trigger?.type === 'mention') {
         setShowMentions(true);
+        setShowGameMenu(false);
         setMentionStart(trigger.start);
         setMentionFilter(trigger.filter);
         setSelectedIdx(0);
@@ -213,12 +242,21 @@ export function ChatInput({
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        const opt = filteredCatOptions[selectedIdx];
-        if (!opt) {
-          closeMenus();
-          return;
+        if (activeMenu === 'mention') {
+          const opt = filteredCatOptions[selectedIdx];
+          if (!opt) {
+            closeMenus();
+            return;
+          }
+          insertMention(opt);
+        } else if (gameStep === 'list') {
+          // Layer 1: drill into mode selection
+          setGameStep('modes');
+          setSelectedIdx(0);
+        } else {
+          // Layer 2: send selected mode command directly
+          sendGameCommand(WEREWOLF_MODES[selectedIdx].command);
         }
-        insertMention(opt);
         return;
       }
       if (e.key === 'Escape') {
@@ -346,7 +384,9 @@ export function ChatInput({
     });
   }, []);
 
-  // Clamp selectedIdx when catOptions shrink.
+  // Clamp selectedIdx when catOptions shrink — only when mention menu is active.
+  // selectedIdx is shared by mention/game menus; clamping to catOptions.length
+  // when game menu is open would corrupt game selection.
   useEffect(() => {
     if (!showMentions) return;
     setSelectedIdx((i) => Math.min(i, Math.max(0, filteredCatOptions.length - 1)));
@@ -361,6 +401,14 @@ export function ChatInput({
       return filtered.size === prev.size ? prev : filtered;
     });
   }, [whisperOptions, whisperMode]);
+
+  const handleGameClick = useCallback(() => {
+    setShowMentions(false);
+    setMentionStart(-1);
+    setShowGameMenu((prev) => !prev);
+    setGameStep('list');
+    setSelectedIdx(0);
+  }, []);
 
   const handleWhisperToggle = useCallback(() => {
     setWhisperMode((prev) => {
@@ -399,7 +447,14 @@ export function ChatInput({
   useEffect(() => {
     if (!activeMenu) return;
     const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenus();
+      const target = e.target as Node;
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(target) &&
+        !gameBtnRef.current?.contains(target)
+      ) {
+        closeMenus();
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -432,9 +487,13 @@ export function ChatInput({
       <ChatInputMenus
         catOptions={filteredCatOptions}
         showMentions={showMentions}
+        showGameMenu={showGameMenu}
+        gameStep={gameStep}
+        onGameStepChange={setGameStep}
         selectedIdx={selectedIdx}
         onSelectIdx={setSelectedIdx}
         onInsertMention={insertMention}
+        onSendCommand={sendGameCommand}
         menuRef={menuRef}
       />
 
@@ -491,6 +550,7 @@ export function ChatInput({
         <MobileInputToolbar
           onAttach={() => fileInputRef.current?.click()}
           onWhisperToggle={handleWhisperToggle}
+          onGameClick={handleGameClick}
           onClose={() => setMobileToolbar(false)}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
@@ -546,6 +606,19 @@ export function ChatInput({
               d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
               clipRule="evenodd"
             />
+          </svg>
+        </button>
+
+        <button
+          ref={gameBtnRef}
+          onClick={handleGameClick}
+          disabled={disabled || sendTemporarilyDisabled}
+          className="hidden md:block p-3 rounded-xl text-gray-400 hover:text-indigo-500 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          aria-label="Game mode"
+          title="游戏模式"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
           </svg>
         </button>
 

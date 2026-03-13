@@ -40,6 +40,9 @@ function getLocalPlaceholderInvocationId(
   currentCatInvocations: Record<string, CatInvocationInfo>,
 ): string | undefined {
   if (msg.extra?.stream?.invocationId) return msg.extra.stream.invocationId;
+  // Fallback: draft messages have id = 'draft-{invocationId}' — extract even after
+  // isStreaming is cleared by the done handler (prevents duplicate bubbles).
+  if (msg.id.startsWith('draft-')) return msg.id.slice('draft-'.length);
   if (msg.type !== 'assistant' || msg.origin !== 'stream' || !msg.isStreaming || !msg.catId) return undefined;
   return currentCatInvocations[msg.catId]?.invocationId;
 }

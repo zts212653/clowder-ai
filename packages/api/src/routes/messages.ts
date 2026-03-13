@@ -789,7 +789,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             content: d.content,
             timestamp: d.updatedAt,
             isDraft: true,
+            origin: 'stream',
+            extra: { stream: { invocationId: d.invocationId } },
             ...(d.toolEvents ? { toolEvents: d.toolEvents } : {}),
+            ...(d.thinking ? { thinking: d.thinking } : {}),
           });
         }
       }

@@ -83,7 +83,7 @@ describe('maskUrlCredentials', () => {
   });
 
   it('preserves URL without credentials', () => {
-    const result = maskUrlCredentials('redis://localhost:6399');
+    const result = maskUrlCredentials('redis://localhost:6379');
     assert.ok(result.includes('localhost:6399'), `Lost host: ${result}`);
     assert.ok(!result.includes('***'), `Unnecessary masking: ${result}`);
   });

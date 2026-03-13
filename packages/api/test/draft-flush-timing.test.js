@@ -49,7 +49,7 @@ function createMockDeps(services) {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore: null,
-      apiUrl: 'http://127.0.0.1:3002',
+      apiUrl: 'your local Clowder API URL',
     },
     messageStore: {
       append: async () => ({ id: `msg-${counter}`, userId: '', catId: null, content: '', mentions: [], timestamp: 0 }),
@@ -81,6 +81,29 @@ function createSpyDraftStore() {
       calls.push({ method: 'deleteByThread', args });
     },
     getByThread: () => [],
+  };
+}
+
+// Thinking → tool_use stream: verifies thinking is included in draft upsert
+function createThinkingThenToolService(catId) {
+  return {
+    async *invoke() {
+      yield {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({ type: 'invocation_created', invocationId: `inv-${catId}` }),
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({ type: 'thinking', text: 'Let me reason about this...' }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'tool_use', catId, toolName: 'read_file', toolInput: '{}', timestamp: Date.now() };
+      yield { type: 'tool_result', catId, content: 'file content', timestamp: Date.now() };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
   };
 }
 
@@ -172,6 +195,30 @@ describe('#80 draft flush timing — first event bypass (cloud R7 P1)', () => {
       // First upsert should carry tool events
       const firstUpsert = spy.calls[0].args[0];
       assert.ok(firstUpsert.toolEvents && firstUpsert.toolEvents.length > 0, 'First upsert should include tool events');
+    });
+
+    it('thinking before tool_use is included in first draft upsert (Bug A parallel regression)', async () => {
+      const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+      const deps = createMockDeps({ opus: createThinkingThenToolService('opus') });
+      const spy = createSpyDraftStore();
+      deps.draftStore = spy;
+
+      const msgs = [];
+      for await (const msg of routeParallel(deps, ['opus'], 'do something', 'user-1', 'thread-1')) {
+        msgs.push(msg);
+      }
+
+      // Must have at least one upsert
+      const upserts = spy.calls.filter((c) => c.method === 'upsert');
+      assert.ok(upserts.length >= 1, `Expected at least 1 upsert, got ${upserts.length}`);
+
+      // First upsert must include thinking (Bug A parallel regression guard)
+      const firstUpsert = upserts[0].args[0];
+      assert.ok(firstUpsert.thinking, 'First upsert must include thinking field');
+      assert.ok(
+        firstUpsert.thinking.includes('Let me reason about this'),
+        `thinking should contain the reasoning text, got: "${firstUpsert.thinking}"`,
+      );
     });
   });
 });

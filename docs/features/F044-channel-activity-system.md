@@ -366,7 +366,7 @@ grep/search 要过滤无权限消息，否则私密内容可能被搜索命中
 ## 追溯链
 
 ```
-BACKLOG.md F044（入口）
+ROADMAP.md F044（入口）
   └→ docs/features/F044-channel-activity-system.md（本文档：spec + 讨论纪要）
       ├→ thread_mm4uyww7va6y8k15（原始讨论 Thread，2026-02-27）
       └→ thread_mm4uyww7va6y8k15（依赖更新讨论，2026-03-07）

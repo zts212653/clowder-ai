@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { computeWorkStats, parseGitLog } from '../../dist/domains/leaderboard/work-stats.js';
 
-const CAT_NAMES = { opus: '布偶猫', codex: '缅因猫', gemini: '暹罗猫', owner: 'owner' };
+const CAT_NAMES = { opus: '布偶猫', codex: '缅因猫', gemini: '暹罗猫', owner: 'team lead' };
 
 describe('parseGitLog', () => {
   it('parses pipe-delimited git log lines', () => {
@@ -48,13 +48,13 @@ describe('computeWorkStats', () => {
       message: 'review: F070 code review feedback',
       coAuthors: '',
     },
-    { hash: '4', author: 'lysander@local', date: '2026-03-08', message: 'docs: update readme', coAuthors: '' },
+    { hash: '4', author: 'owner@local', date: '2026-03-08', message: 'docs: update readme', coAuthors: '' },
   ];
 
   const authorMap = {
     'noreply@anthropic.com': 'opus',
     'codex@openai.com': 'codex',
-    'lysander@local': 'owner',
+    'owner@local': 'owner',
   };
 
   it('counts total commits per cat', () => {

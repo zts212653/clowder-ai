@@ -369,6 +369,53 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draft.toolEvents[0].label, 'Read file');
   });
 
+  it('draft response includes origin, extra.stream.invocationId, and thinking (Bug A+B contract)', async () => {
+    const ts = Date.now();
+
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'Hello',
+      mentions: [],
+      timestamp: ts,
+      threadId: 'thread-1',
+    });
+
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-contract',
+      catId: 'opus',
+      content: 'Partial text...',
+      thinking: 'Let me think about this...',
+      toolEvents: [{ id: 'te-1', type: 'tool_use', label: 'Read', timestamp: ts }],
+      updatedAt: ts + 100,
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const draft = body.messages.find((m) => m.id === 'draft-inv-contract');
+    assert(draft, 'Draft should be present');
+
+    // Bug A: thinking must be included
+    assert.equal(draft.thinking, 'Let me think about this...', 'Draft should include thinking');
+
+    // Bug B: stream identity must be included for frontend reconciliation
+    assert.equal(draft.origin, 'stream', 'Draft should have origin: stream');
+    assert.deepEqual(
+      draft.extra?.stream,
+      { invocationId: 'inv-contract' },
+      'Draft should have extra.stream.invocationId',
+    );
+  });
+
   it('multiple concurrent drafts sorted by updatedAt', async () => {
     const now = Date.now();
     draftStore.upsert({

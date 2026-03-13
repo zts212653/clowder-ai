@@ -6,7 +6,7 @@ const seerSeat: SeatView = {
   seatId: 'P2',
   actorType: 'human',
   actorId: 'user1',
-  displayName: 'owner',
+  displayName: 'team lead',
   role: 'seer',
   alive: true,
 };
@@ -304,7 +304,7 @@ describe('gameStore', () => {
       seatId: 'P5',
       actorType: 'human',
       actorId: 'user1',
-      displayName: 'owner',
+      displayName: 'team lead',
       role: 'hunter',
       alive: true,
     };
@@ -325,7 +325,7 @@ describe('gameStore', () => {
       seatId: 'P6',
       actorType: 'human',
       actorId: 'user1',
-      displayName: 'owner',
+      displayName: 'team lead',
       role: 'villager',
       alive: true,
     };

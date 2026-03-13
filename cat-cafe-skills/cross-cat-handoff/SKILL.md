@@ -190,4 +190,4 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 ## 参考
 
 - 五件套详见：`refs/shared-rules.md` §1
-- Review 信存放：`review-notes/`
+- Review 信存放：*(internal reference removed)*

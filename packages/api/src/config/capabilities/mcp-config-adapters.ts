@@ -145,6 +145,12 @@ export async function writeCodexMcpConfig(filePath: string, servers: McpServerDe
 
   // Update/add only managed entries; preserve user's own servers
   for (const s of servers) {
+    // Skip entries without a usable stdio command — writing them produces
+    // invalid TOML that newer Codex versions reject during config validation.
+    if (!s.command || s.command.trim().length === 0) {
+      delete existingMcp[s.name];
+      continue;
+    }
     const entry: Record<string, unknown> = { command: s.command, args: s.args };
     if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
     entry.enabled = s.enabled;

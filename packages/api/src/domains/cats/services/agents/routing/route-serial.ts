@@ -379,6 +379,7 @@ export async function* routeSerial(
                 catId,
                 content: textContent,
                 ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+                ...(thinkingContent ? { thinking: thinkingContent } : {}),
                 updatedAt: now,
               })
               ?.catch?.(noop);
@@ -403,6 +404,7 @@ export async function* routeSerial(
                   catId,
                   content: textContent,
                   ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+                  ...(thinkingContent ? { thinking: thinkingContent } : {}),
                   updatedAt: now,
                 })
                 ?.catch?.(noop);

@@ -273,6 +273,53 @@ describe('useChatHistory replace hydration', () => {
     expect(useChatStore.getState().messages.find((m) => m.id === 'live-1')).toBeUndefined();
   });
 
+  it('reconciles a completed draft bubble with its formal message (Bug B: no duplicate)', async () => {
+    const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 1000;
+    // No catInvocations — simulates post-done state where invocationId is cleared
+    mountReplaceHydrationThread(makeThreadBState(cachedAssistantTs));
+
+    // Simulate: draft bubble loaded on previous F5, now completed (isStreaming=false)
+    act(() => {
+      useChatStore.getState().addMessage({
+        id: 'draft-inv-1',
+        type: 'assistant',
+        catId: 'codex',
+        content: '',
+        toolEvents: [{ id: 'te-1', type: 'tool_use' as const, label: 'Read file', timestamp: Date.now() }],
+        timestamp: Date.now() - 500,
+        isStreaming: false,
+        // Note: NO origin, NO extra.stream — matches real draft behavior
+      });
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    // Server returns the formal message for the same invocation
+    await history.resolve({
+      messages: [
+        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
+        {
+          id: 'server-msg-1',
+          catId: 'codex',
+          content: 'Full completed response',
+          thinking: 'My reasoning...',
+          origin: 'stream',
+          timestamp: Date.now(),
+          extra: { stream: { invocationId: 'inv-1' } },
+          toolEvents: [{ id: 'te-1', type: 'tool_use', label: 'Read file', timestamp: Date.now() }],
+        },
+      ],
+      hasMore: false,
+    });
+
+    // Bug B fix: only the formal message should survive, draft should be reconciled away
+    const msgIds = useChatStore.getState().messages.map((m) => m.id);
+    expect(msgIds).not.toContain('draft-inv-1');
+    expect(msgIds).toContain('server-msg-1');
+  });
+
   it('preserves local blob URLs when a kept stream bubble survives replace hydration', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;

@@ -229,7 +229,7 @@ describe('projectDisplayName', () => {
   });
 
   it('returns last segment of path', () => {
-    expect(projectDisplayName('/Users/dev/my-project')).toBe('my-project');
+    expect(projectDisplayName('/home/user')).toBe('my-project');
   });
 
   it('handles trailing slash', () => {

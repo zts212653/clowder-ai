@@ -23,17 +23,23 @@ function dispatchInteractiveSend(text: string) {
 
 // ── Pure function (exported for testing) ────────────────────
 
-export function buildGroupMessage(blocks: RichInteractiveBlock[], selections: Map<string, string[]>): string {
+export function buildGroupMessage(
+  blocks: RichInteractiveBlock[],
+  selections: Map<string, string[]>,
+  customTexts?: Map<string, string>,
+): string {
   const parts: string[] = [];
   for (const block of blocks) {
     const selected = selections.get(block.id);
     if (!selected || selected.length === 0) continue;
+    const ct = customTexts?.get(block.id);
     const msg = buildSelectionMessage(
       block.interactiveType,
       block.options,
       selected,
       block.messageTemplate,
       block.title,
+      ct || undefined,
     );
     parts.push(msg);
   }
@@ -41,6 +47,12 @@ export function buildGroupMessage(blocks: RichInteractiveBlock[], selections: Ma
 }
 
 // ── Component ───────────────────────────────────────────────
+
+/** Check if a block has a customInput option currently selected */
+function needsCustomText(block: RichInteractiveBlock, selectedIds?: string[]): boolean {
+  if (!selectedIds || selectedIds.length === 0) return false;
+  return block.options.some((o) => o.customInput && selectedIds.includes(o.id));
+}
 
 export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInteractiveBlock[]; messageId?: string }) {
   const allDisabled = blocks.every((b) => b.disabled);
@@ -52,18 +64,38 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
     }
     return init;
   });
+  const [customTexts, setCustomTexts] = useState<Map<string, string>>(() => new Map());
 
   const handlePendingChange = useCallback((blockId: string, selectedIds: string[]) => {
     setSelections((prev) => {
       const next = new Map(prev);
-      next.set(blockId, selectedIds);
+      if (selectedIds.length === 0) {
+        next.delete(blockId); // P2-1 fix: empty selection removes entry
+      } else {
+        next.set(blockId, selectedIds);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCustomTextChange = useCallback((blockId: string, text: string) => {
+    setCustomTexts((prev) => {
+      const next = new Map(prev);
+      if (text) {
+        next.set(blockId, text);
+      } else {
+        next.delete(blockId);
+      }
       return next;
     });
   }, []);
 
   const allSelected = blocks.every((b) => {
     const sel = selections.get(b.id);
-    return sel && sel.length > 0;
+    if (!sel || sel.length === 0) return false;
+    // If a customInput option is selected, require non-empty text
+    if (needsCustomText(b, sel) && !customTexts.get(b.id)?.trim()) return false;
+    return true;
   });
 
   const handleGroupSubmit = useCallback(() => {
@@ -71,7 +103,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
     setSubmitted(true);
 
     // Build and send combined message
-    const text = buildGroupMessage(blocks, selections);
+    const text = buildGroupMessage(blocks, selections, customTexts);
     dispatchInteractiveSend(text);
 
     // Persist each block
@@ -82,7 +114,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
         patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds }).catch(() => {});
       }
     }
-  }, [allSelected, submitted, blocks, selections, messageId]);
+  }, [allSelected, submitted, blocks, selections, customTexts, messageId]);
 
   return (
     <div className="space-y-3 rounded-2xl border-2 border-dashed border-amber-200 dark:border-amber-800/50 p-3">
@@ -93,6 +125,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
           messageId={messageId}
           pendingMode={!submitted}
           onPendingChange={(ids) => handlePendingChange(block.id, ids)}
+          onCustomTextChange={(text) => handleCustomTextChange(block.id, text)}
           groupDisabled={submitted}
           groupSelectedIds={submitted ? selections.get(block.id) : undefined}
         />

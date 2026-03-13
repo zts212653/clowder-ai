@@ -74,9 +74,7 @@ function stripThinkingFromRequest(bodyBuffer) {
   let modified = false;
   for (const msg of parsed.messages) {
     if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
-    const filtered = msg.content.filter(
-      (block) => block?.type !== 'thinking' && block?.type !== 'redacted_thinking',
-    );
+    const filtered = msg.content.filter((block) => block?.type !== 'thinking' && block?.type !== 'redacted_thinking');
     if (filtered.length !== msg.content.length) {
       msg.content = filtered;
       modified = true;
@@ -301,7 +299,9 @@ const server = createServer(async (req, res) => {
   // gateway responses stored in Claude Code sessions.
   const sanitizedBody = stripThinkingFromRequest(body);
   if (DEBUG && sanitizedBody.length !== body.length) {
-    console.log(`[proxy #${reqId}] stripped thinking blocks from request (${body.length} → ${sanitizedBody.length} bytes)`);
+    console.log(
+      `[proxy #${reqId}] stripped thinking blocks from request (${body.length} → ${sanitizedBody.length} bytes)`,
+    );
   }
 
   // Forward headers (strip hop-by-hop)
@@ -330,7 +330,7 @@ const server = createServer(async (req, res) => {
       if ((upstream.status === 429 || upstream.status === 529) && attempt < MAX_RETRIES) {
         // Respect Retry-After header, fallback to exponential backoff
         const retryAfter = upstream.headers.get('retry-after');
-        const delaySec = retryAfter ? Math.min(Number(retryAfter) || 1, 30) : Math.pow(2, attempt);
+        const delaySec = retryAfter ? Math.min(Number(retryAfter) || 1, 30) : 2 ** attempt;
         const delayMs = delaySec * 1000;
         console.log(
           `[proxy #${reqId}] upstream ${upstream.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${delaySec}s`,

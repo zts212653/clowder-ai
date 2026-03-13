@@ -19,6 +19,10 @@ function createBaseServer(name: string): McpServer {
   });
 }
 
+/**
+ * Create a Collab MCP server instance with messaging, context,
+ * task management, and permission tools registered.
+ */
 export function createCollabServer(): McpServer {
   const server = createBaseServer('cat-cafe-collab-mcp');
   registerCollabToolset(server);

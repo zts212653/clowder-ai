@@ -4,6 +4,7 @@ import type { BacklogItem, CatId, ExternalProject, MissionHubSelfClaimScope, Thr
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThreadSidebar } from '@/components/ThreadSidebar';
+import { useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
 import { apiFetch } from '@/utils/api-client';
@@ -435,11 +436,16 @@ export function MissionControlPage() {
   }, [activeProject, setActiveProjectId]);
 
   // AC-H2: Referrer-based back button — remember where we came from
+  // Priority: URL ?from= param > store's currentThreadId (last active thread)
+  const storeThreadId = useChatStore((s) => s.currentThreadId);
   const referrerThread = useMemo(() => {
-    if (typeof window === 'undefined') return null;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('from') ?? null;
-  }, []);
+    if (typeof window !== 'undefined') {
+      const fromParam = new URLSearchParams(window.location.search).get('from');
+      if (fromParam) return fromParam;
+    }
+    // Fallback: use last active thread from store (survives navigation without ?from=)
+    return storeThreadId && storeThreadId !== 'default' ? storeThreadId : null;
+  }, [storeThreadId]);
 
   return (
     <div className="flex h-screen bg-[#F4EFE7]">
@@ -451,7 +457,7 @@ export function MissionControlPage() {
         <header className="flex items-center justify-between border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-3">
           <div className="flex items-center gap-3">
             <Link
-              href={referrerThread ? `/thread/${referrerThread}` : '/'}
+              href={referrerThread && referrerThread !== 'default' ? `/thread/${referrerThread}` : '/'}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#8B6F47] transition-colors hover:bg-[#F7EEDB]"
               data-testid="mc-back-to-chat"
             >

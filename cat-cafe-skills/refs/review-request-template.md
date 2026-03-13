@@ -15,7 +15,7 @@
 
 ## Original Requirements（必填）
 > {直接粘贴team experience，≤5 行}
-- 来源：`feature-discussions/{date}-{topic}/...`
+- 来源：*(internal reference removed)*
 - **请对照上面的摘录判断交付物是否解决了team lead的问题**
 
 ## Tradeoff
@@ -38,14 +38,14 @@ pnpm --filter @cat-cafe/web test       # X passed, 0 failed
 pnpm -r --if-present run build         # 成功
 
 ### 相关文档
-- Plan: `feature-specs/...`
+- Plan: *(internal reference removed)*
 - ADR: `docs/decisions/...`（如有）
 - Feature: F__ / BACKLOG #__
 ```
 
 ## 存档位置
 
-`review request note`
+*(internal reference removed)*
 
 ## 注意事项
 

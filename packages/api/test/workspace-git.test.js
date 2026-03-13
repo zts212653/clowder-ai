@@ -128,11 +128,11 @@ describe('parseStaleBranches', () => {
 describe('parseWorktreeHealth', () => {
   test('marks worktrees with merged branches as orphan', () => {
     const worktreeListOutput = [
-      'worktree /Users/x/cat-cafe',
+      'worktree /path/to/project',
       'HEAD abc1234567890123456789012345678901234567',
       'branch refs/heads/main',
       '',
-      'worktree /Users/x/cat-cafe-f079',
+      'worktree /path/to/project-f079',
       'HEAD def1234567890123456789012345678901234567',
       'branch refs/heads/feat/f079-voting',
       '',
@@ -146,7 +146,7 @@ describe('parseWorktreeHealth', () => {
   });
 
   test('handles detached HEAD worktrees', () => {
-    const output = ['worktree /Users/x/detached', 'HEAD abc1234567890123456789012345678901234567', 'detached', ''].join(
+    const output = ['worktree /home/user', 'HEAD abc1234567890123456789012345678901234567', 'detached', ''].join(
       '\n',
     );
     const result = parseWorktreeHealth(output, new Set());

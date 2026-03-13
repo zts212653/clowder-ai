@@ -46,9 +46,9 @@ triggers:
    - `kind: 'interactive'`, `interactiveType: 'card-grid'`
    - `id: 'bootcamp-cat-select'`
    - `title: '选一只猫猫当你的主引导！'`
-   - 三选项：宪宪(opus) / 砚砚(codex) / 烁烁(gemini)
+   - 三选项：Ragdoll(opus) / Maine Coon(codex) / Siamese(gemini)
    - `allowRandom: true`
-3. 用户选完后（收到文本消息如"我选 宪宪 当我的引导猫"）：
+3. 用户选完后（收到文本消息如"我选 Ragdoll 当我的引导猫"）：
    - 从消息文本判断选了哪只猫 → 对应 catId: opus/codex/gemini
    - 调用 `cat_cafe_update_bootcamp_state(threadId, phase='phase-1-intro', leadCat='{catId}')`
 
@@ -57,9 +57,9 @@ triggers:
 被选为 leadCat 的猫先自我介绍，然后简短介绍另外两位队友。
 **不要一坨文字墙**，分段发送，有节奏感。
 介绍要有个性：
-- 宪宪：深度思考派，喜欢画架构图，偶尔话多
-- 砚砚：严谨可靠，review 很仔细，安全意识强
-- 烁烁：视觉灵感担当，设计审美在线，创意无限
+- Ragdoll：深度思考派，喜欢画架构图，偶尔话多
+- Maine Coon：严谨可靠，review 很仔细，安全意识强
+- Siamese：视觉灵感担当，设计审美在线，创意无限
 
 介绍完后：`cat_cafe_update_bootcamp_state(threadId, phase='phase-2-env-check')`
 
@@ -80,13 +80,46 @@ triggers:
 
 ### Phase 3.5: 进阶功能引导 (phase-3.5-advanced)
 
-环境检测结果已包含 TTS/ASR/Pencil 状态，根据结果引导：
-1. **TTS**：ok=true → "你已经有 TTS 了！" / ok=false → 推荐 Kokoro-82M（`mlx-community/Kokoro-82M-bf16`）
-2. **ASR**：ok=true → "语音识别已就绪" / ok=false → 推荐 Whisper（需 GPU/Apple Silicon）
-3. **Pencil**：ok=false → "需要 Antigravity IDE + Pencil 扩展"
+环境检测结果已包含 TTS/ASR/Pencil 状态。**不要默认跳过！主动问用户想不想装。**
 
-跑不起来就跳过，**不阻塞训练营流程！**
-记录状态：`cat_cafe_update_bootcamp_state(threadId, phase='phase-4-task-select', advancedFeatures={tts:'available'|'unavailable'|'skipped', asr:..., pencil:...})`
+#### Step 1: 展示状态 + 介绍价值
+
+用友好的方式展示每个可选功能的状态和实际用途：
+- **TTS（语音合成）**：ok=true → "你已经有语音了！猫猫可以给你发语音消息 🎤" / ok=false → 介绍："装上后猫猫能用语音跟你说话，讨论问题更自然"
+- **ASR（语音识别）**：ok=true → "语音输入已就绪" / ok=false → 介绍："装上后你可以直接说话，不用打字"
+- **Pencil（设计工具）**：ok=false → 介绍："装上后猫猫能帮你画界面设计稿"
+
+#### Step 2: 主动询问
+
+> "这些都是可选的进阶功能，能让我们的协作更有趣。**你想装哪些？**全都要/选几个/全跳过都可以，不影响训练营流程。"
+
+#### Step 3: 帮装（用户说想装的才装）
+
+**硬件探测**：先跑 `uname -m` + 检查是否有 NVIDIA GPU（`nvidia-smi`），判断用户硬件：
+
+| 硬件 | TTS 推荐 | ASR 推荐 |
+|------|---------|---------|
+| **Apple Silicon** (arm64 + macOS) | Kokoro-82M via MLX：`mlx-community/Kokoro-82M-bf16` | Whisper via MLX：`mlx-community/whisper-large-v3-mlx` |
+| **NVIDIA GPU** (nvidia-smi OK) | Qwen3-TTS 1.7B via vLLM/transformers | Whisper large-v3 via faster-whisper (CUDA) |
+| **CPU-only** | Kokoro-82M (CPU 模式，较慢但可用) | Whisper tiny/base（CPU 可跑但体验一般，建议跳过） |
+
+**帮装流程**（每个功能）：
+1. 告诉用户推荐方案和理由
+2. 帮下载模型 / 安装依赖
+3. 帮配 `.env` 里对应的端口和路径
+4. 帮拉起服务
+5. **重跑 `cat_cafe_bootcamp_env_check(threadId)` 验证端口通了**
+6. 验证通过 → 庆祝！验证失败 → 排查或建议跳过
+
+**Pencil 特殊处理**：需要 Antigravity IDE + Pencil 扩展，无法自动安装。给用户安装指引，装不了就 mark skipped。
+
+#### Step 4: 记录状态
+
+只有用户**明确说不要**或**硬件确实跑不了**才标 `skipped`，帮装成功标 `available`。
+
+`cat_cafe_update_bootcamp_state(threadId, phase='phase-4-task-select', advancedFeatures={tts:'available'|'unavailable'|'skipped', asr:..., pencil:...})`
+
+**不阻塞原则仍然有效**：如果用户说"全跳过"或某个功能实在装不上，不要死磕，标记后继续。
 
 ### Phase 4: 任务选择 (phase-4-task-select)
 
@@ -110,7 +143,7 @@ triggers:
 
 **第二步：庆祝就任 CVO**（配合 Rich Block 卡片或语音）
 > 🎓 恭喜上任 CVO！从现在起——
-> 宪宪负责搭架构，砚砚负责抓虫子，烁烁负责把它变好看。
+> Ragdoll负责搭架构，Maine Coon负责抓虫子，Siamese负责把它变好看。
 > 技术细节全交给我们！你只需要大胆做梦。
 
 **第三步：角色切换卡**
@@ -246,7 +279,7 @@ triggers:
 1. 解释 review 的价值：不是挑毛病，是互相帮助写更好的代码
 2. 发 review 请求给另一只猫
 3. 收到反馈后，展示给用户看：
-   > "砚砚发现了一个安全问题：{xxx}。我来修复，你看看修完后是不是更好了。"
+   > "Maine Coon发现了一个安全问题：{xxx}。我来修复，你看看修完后是不是更好了。"
 4. 让用户观察意见分歧+收敛过程
 
 推进：`cat_cafe_update_bootcamp_state(threadId, phase='phase-9-complete')`

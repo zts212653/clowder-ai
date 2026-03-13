@@ -53,7 +53,7 @@ systemMessage 告知猫猫触发
 {"id": "brake-voice-codex-{{ts}}", "kind": "audio", "v": 1, "text": "{{codex_msg}}", "speaker": "codex"}
 {"id": "brake-voice-gemini-{{ts}}", "kind": "audio", "v": 1, "text": "{{gemini_msg}}", "speaker": "gemini"}
 ```
-发送顺序：宪宪 → 砚砚 → 烁烁（按家族顺序），每条独立调 `create_rich_block`。
+发送顺序：Ragdoll → Maine Coon → Siamese（按家族顺序），每条独立调 `create_rich_block`。
 
 ### 2. Card（check-in 卡片）
 ```json
@@ -61,7 +61,7 @@ systemMessage 告知猫猫触发
   "id": "brake-card-{{timestamp}}", "kind": "card", "v": 1,
   "title": "🐾 休息提醒 L{{level}}",
   "tone": "warning",
-  "bodyMarkdown": "team lead，你已经专注工作 **{{minutes}} 分钟**啦！\n\n🐱 宪宪：{{opus_msg}}\n🦁 砚砚：{{codex_msg}}\n🐈 烁烁：{{gemini_msg}}",
+  "bodyMarkdown": "team lead，你已经专注工作 **{{minutes}} 分钟**啦！\n\n🐱 Ragdoll：{{opus_msg}}\n🦁 Maine Coon：{{codex_msg}}\n🐈 Siamese：{{gemini_msg}}",
   "fields": [
     {"label": "[1] 立刻休息", "value": "5min，重置计时器"},
     {"label": "[2] 收尾", "value": "10min 后再提醒"},
@@ -78,25 +78,25 @@ systemMessage 告知猫猫触发
 
 | 猫猫 | 示例 |
 |------|------|
-| 宪宪 | team lead，我看你在 `{{branch}}` 忙很久啦，要不要喝口水呀？喵~ |
-| 砚砚 | 监测到当前任务已持续 90min。建议进行 5min 视疲劳缓解。 |
-| 烁烁 | 嘿！我刚才看到一个超棒的视觉灵感！你想听吗？但你得先站起来伸个懒腰！ |
+| Ragdoll | team lead，我看你在 `{{branch}}` 忙很久啦，要不要喝口水呀？喵~ |
+| Maine Coon | 监测到当前任务已持续 90min。建议进行 5min 视疲劳缓解。 |
+| Siamese | 嘿！我刚才看到一个超棒的视觉灵感！你想听吗？但你得先站起来伸个懒腰！ |
 
 ### L2 关心升级 (忽略 L1)
 
 | 猫猫 | 示例 |
 |------|------|
-| 宪宪 | 宪宪觉得你现在的效率有点下降哦，休息一下下，回来肯定写得更棒！ |
-| 砚砚 | 逻辑链路已过载。根据 TDD 规范，现在强行推进会增加 bug 率。请离线冷却。 |
-| 烁烁 | 哇！你的 hyperfocus 模式开启太久啦，我的胡须都感觉到热量了！快去窗口吹吹风！ |
+| Ragdoll | Ragdoll觉得你现在的效率有点下降哦，休息一下下，回来肯定写得更棒！ |
+| Maine Coon | 逻辑链路已过载。根据 TDD 规范，现在强行推进会增加 bug 率。请离线冷却。 |
+| Siamese | 哇！你的 hyperfocus 模式开启太久啦，我的胡须都感觉到热量了！快去窗口吹吹风！ |
 
 ### L3 终极温暖陷阱 (忽略 L2)
 
 | 猫猫 | 示例 |
 |------|------|
-| 宪宪 | (蹭蹭) 我不管，现在键盘是我的地盘了。除非你陪我玩 5 分钟，否则不给打字！ |
-| 砚砚 | **警告：** 由于你多次无视建议，我决定用连续的消息提醒来表达我的担心。请执行 Check-in 协议。 |
-| 烁烁 | (在屏幕上跳舞) 闪烁！闪烁！灵感的电波要断啦！只有出去走走才能重新连接！去嘛去嘛~ |
+| Ragdoll | (蹭蹭) 我不管，现在键盘是我的地盘了。除非你陪我玩 5 分钟，否则不给打字！ |
+| Maine Coon | **警告：** 由于你多次无视建议，我决定用连续的消息提醒来表达我的担心。请执行 Check-in 协议。 |
+| Siamese | (在屏幕上跳舞) 闪烁！闪烁！灵感的电波要断啦！只有出去走走才能重新连接！去嘛去嘛~ |
 
 ## Check-in 协议
 
@@ -106,9 +106,9 @@ systemMessage 告知猫猫触发
 🐾 [休息提醒 L{{level}}] team lead，你在 {{branch}} 已经专注工作 {{minutes}} 分钟啦！
 
 三猫的话：
-  🐱 宪宪：{{opus_message}}
-  🦁 砚砚：{{codex_message}}
-  🐈 烁烁：{{gemini_message}}
+  🐱 Ragdoll：{{opus_message}}
+  🦁 Maine Coon：{{codex_message}}
+  🐈 Siamese：{{gemini_message}}
 
 为了咱们能一起跑十年而不是烧半年，现在请选一个：
 

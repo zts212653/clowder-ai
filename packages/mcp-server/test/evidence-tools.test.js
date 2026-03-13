@@ -12,7 +12,7 @@ describe('MCP Evidence Tools', () => {
 
   beforeEach(() => {
     originalEnv = { ...process.env };
-    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3002';
+    process.env.CAT_CAFE_API_URL = 'your local Clowder API URL';
     originalFetch = globalThis.fetch;
   });
 
