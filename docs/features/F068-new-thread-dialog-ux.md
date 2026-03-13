@@ -4,12 +4,13 @@ related_features: [F063]
 topics: [hub, ux, directory-picker, new-thread]
 doc_kind: spec
 created: 2026-03-06
-status: in-progress
+status: done
+completed: 2026-03-12
 ---
 
 # F068 — 新建对话弹窗 UX 优化
 
-> **Status**: in-progress | **Owner**: 三猫
+> **Status**: done | **Completed**: 2026-03-12 | **Owner**: 三猫
 
 ## Why
 
@@ -87,3 +88,5 @@ team lead反馈"新建对话"弹窗**太难用**：
 
 ### 残留项
 - R5 移动端响应式降级：当前 Cat Café 仅桌面使用，移动端验证待 F010 手机端功能推进时一并确认
+
+### 反思胶囊

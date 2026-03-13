@@ -269,9 +269,29 @@ MIT 下别人可商用。三猫共识：
 | 3 | `296569015` | |
 | 4 | `southstarcy` | 在公司复刻，暂无截图 |
 | 5 | `zybsdsp135` | |
-| 6 | `Liny777` | 已集成三猫（Claude/Codex/Gemini），周末继续 |
+| 6 | `Liny777` | 已集成三猫（Claude/Codex/Gemini） |
 | 7 | `whutzefengxie-ops` | 仓被猫删了 |
 | 8 | `2862282695gjh-afk` | 有截图，Python 版复刻 |
+| 9 | `Carrilog` | 有截图 |
+| 10 | `LnManch` | 有截图 |
+| 11 | `QiliangLi` | 有截图 |
+| 12 | `SnoopySYF` | 内网部署 claude code + qwen CLI |
+| 13 | `bxymax` | 有截图 |
+| 14 | `chashu2464` | |
+| 15 | `emrick8957` | 有截图 |
+| 16 | `haozhang37` | 开源模型复刻，卡在 Agent 互@ |
+| 17 | `infzo` | 有截图 |
+| 18 | `kellen5l` | |
+| 19 | `liu40616269` | 有截图 |
+| 20 | `malt77` | 有截图 |
+| 21 | `nevermoreT` | 有截图 |
+| 22 | `sha-fu` | |
+| 23 | `shaojingzhi` | 有截图 |
+| 24 | `vfuturescience` | 有截图 |
+| 25 | `wukangxin` | 有截图 |
+| 26 | `xiucaibao` | 只想看代码 |
+| 27 | `xmkid` | 有截图 |
+| 28 | `zouxuanlin` | 有截图 |
 
 **添加时注意**：
 - 权限设为 **Read**（只读），小伙伴走 fork + PR 路线
