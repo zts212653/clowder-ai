@@ -73,8 +73,10 @@ created: 2026-03-13
 
 | # | 问题 | 状态 |
 |---|------|------|
-| OQ-1 | 是否需要支持 WSL2？ | 待定 |
+| OQ-1 | 是否需要支持 WSL2？ | 待定（Windows 后续支持）|
 | OQ-2 | Hindsight 是否纳入安装流程？ | 待定 |
+| OQ-3 | macOS 支持 | 后续 Phase，复用 Linux 逻辑 + Homebrew |
+| OQ-4 | Windows 支持 | 后续 Phase，需单独实现 PowerShell 版本 |
 
 ## Key Decisions
 
@@ -95,3 +97,4 @@ created: 2026-03-13
 |------|------|------|
 | **Feature** | `docs/features/F087-cvo-bootcamp.md` | Bootcamp 环境检查逻辑 |
 | **Script** | `scripts/setup.sh` | 现有交互式向导 |
+| **Issue** | [#14](https://github.com/zts212653/clowder-ai/issues/14) | 多平台裸机支持总 issue |
