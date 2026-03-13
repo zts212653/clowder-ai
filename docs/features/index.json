@@ -691,11 +691,11 @@
       "file": "F112-voice-playback-queue.md"
     },
     {
-      "id": "F113",
+      "id": "P001",
       "name": "Linux One-Click Deploy",
       "status": "spec | **Owner**: opus | **Priority**: P1",
-      "file": "F113-linux-one-click-deploy.md"
+      "file": "P001-linux-one-click-deploy.md"
     }
   ],
-  "generated_at": "2026-03-13T09:36:33.164Z"
+  "generated_at": "2026-03-13T13:16:56.566Z"
 }
