@@ -52,6 +52,41 @@ function loadUpstreams() {
   }
 }
 
+// --- Request body sanitization ---
+// Third-party gateways (e.g. Felix-2) may strip/modify thinking content from
+// responses while preserving the original Anthropic signature. On the next turn,
+// Claude Code sends back these thinking blocks with mismatched content+signature,
+// causing "Invalid signature in thinking block" 400 errors.
+// Fix: strip thinking/redacted_thinking blocks from previous assistant messages
+// in the request body before forwarding. The model loses previous reasoning
+// context but avoids the fatal signature validation failure.
+
+function stripThinkingFromRequest(bodyBuffer) {
+  if (bodyBuffer.length === 0) return bodyBuffer;
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyBuffer.toString('utf-8'));
+  } catch {
+    return bodyBuffer;
+  }
+  if (!parsed.messages || !Array.isArray(parsed.messages)) return bodyBuffer;
+
+  let modified = false;
+  for (const msg of parsed.messages) {
+    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+    const filtered = msg.content.filter(
+      (block) => block?.type !== 'thinking' && block?.type !== 'redacted_thinking',
+    );
+    if (filtered.length !== msg.content.length) {
+      msg.content = filtered;
+      modified = true;
+    }
+  }
+
+  if (!modified) return bodyBuffer;
+  return Buffer.from(JSON.stringify(parsed), 'utf-8');
+}
+
 // --- SSE normalization for non-standard upstream responses ---
 // Known quirks (some third-party gateways):
 // 1. message_start.usage.input_tokens = 0 (should be real count)
@@ -187,7 +222,7 @@ function rewriteSSEChunk(text, state) {
       }
       output += `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
     } else {
-      // Pass through other events unchanged
+      // Pass through other events unchanged (incl. content_block_stop, message_stop, ping)
       output += `${part}\n\n`;
     }
   }
@@ -261,6 +296,14 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // Sanitize request body: strip thinking blocks from conversation history
+  // to prevent "Invalid signature in thinking block" errors from corrupted
+  // gateway responses stored in Claude Code sessions.
+  const sanitizedBody = stripThinkingFromRequest(body);
+  if (DEBUG && sanitizedBody.length !== body.length) {
+    console.log(`[proxy #${reqId}] stripped thinking blocks from request (${body.length} → ${sanitizedBody.length} bytes)`);
+  }
+
   // Forward headers (strip hop-by-hop)
   // P1 fix: Force identity encoding so upstream doesn't gzip the response.
   // Node fetch auto-decompresses but keeps the content-encoding header,
@@ -274,11 +317,31 @@ const server = createServer(async (req, res) => {
   forwardHeaders['accept-encoding'] = 'identity';
 
   try {
-    const upstream = await fetch(targetUrl.href, {
-      method: req.method || 'GET',
-      headers: forwardHeaders,
-      ...(body.length > 0 ? { body } : {}),
-    });
+    // Retry loop for transient upstream errors (429 rate-limited, 529 overloaded)
+    const MAX_RETRIES = 3;
+    let upstream;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      upstream = await fetch(targetUrl.href, {
+        method: req.method || 'GET',
+        headers: forwardHeaders,
+        ...(sanitizedBody.length > 0 ? { body: sanitizedBody } : {}),
+      });
+
+      if ((upstream.status === 429 || upstream.status === 529) && attempt < MAX_RETRIES) {
+        // Respect Retry-After header, fallback to exponential backoff
+        const retryAfter = upstream.headers.get('retry-after');
+        const delaySec = retryAfter ? Math.min(Number(retryAfter) || 1, 30) : Math.pow(2, attempt);
+        const delayMs = delaySec * 1000;
+        console.log(
+          `[proxy #${reqId}] upstream ${upstream.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${delaySec}s`,
+        );
+        // Drain the body to free the connection
+        await upstream.text().catch(() => {});
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      break;
+    }
 
     const responseHeaders = {};
     for (const [key, value] of upstream.headers.entries()) {
@@ -338,9 +401,10 @@ const server = createServer(async (req, res) => {
           if (rewritten) res.write(rewritten);
         }
       }
-      // Flush any remaining SSE buffer
+      // Flush any remaining SSE buffer through normalization (not raw!)
       if (isSSE && sseState.buffer?.trim()) {
-        res.write(`${sseState.buffer}\n\n`);
+        const finalRewritten = rewriteSSEChunk(sseState.buffer + '\n\n', sseState);
+        if (finalRewritten) res.write(finalRewritten);
       }
     } catch (streamErr) {
       if (DEBUG) console.error(`[proxy #${reqId}] stream error:`, streamErr.message);

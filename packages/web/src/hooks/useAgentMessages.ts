@@ -362,6 +362,11 @@ export function useAgentMessages() {
           setStreaming(messageId, false);
           activeRefs.current.delete(msg.catId);
         }
+        // Bugfix: clear stale invocationId so findRecoverableAssistantMessage
+        // can't match this finalized message when the next invocation starts.
+        // Without this, a race (new text before invocation_created) appends to
+        // the old bubble, causing messages to visually merge until page refresh.
+        setCatInvocation(msg.catId, { invocationId: undefined });
         if (msg.isFinal) {
           clearDoneTimeout();
           setLoading(false);
@@ -535,8 +540,29 @@ export function useAgentMessages() {
               if (found) targetId = found.id;
             }
 
+            // Bugfix: standalone create_rich_block (no messageId) — prefer most recent
+            // callback message from this cat over the active streaming message.
+            // Without this, blocks land on the CLI streaming bubble instead of the
+            // preceding post_message bubble, showing raw JSON until page refresh.
+            // Guard: if the most recent assistant message from this cat is a streaming
+            // message, skip callback lookup — the block likely came from the CLI stream
+            // (e.g. codex-event-transform image extraction), not a MCP callback.
             if (!targetId) {
-              // Fallback: recover the active stream bubble before creating a placeholder.
+              const currentMessages = useChatStore.getState().messages;
+              for (let i = currentMessages.length - 1; i >= 0; i--) {
+                const m = currentMessages[i];
+                if (m.type !== 'assistant' || m.catId !== msg.catId) continue;
+                // If we hit an active streaming message first, callback is stale — stop
+                if (m.origin === 'stream' && m.isStreaming) break;
+                if (m.origin === 'callback') {
+                  targetId = m.id;
+                  break;
+                }
+              }
+            }
+
+            if (!targetId) {
+              // Final fallback: recover the active stream bubble before creating a placeholder.
               targetId = ensureActiveAssistantMessage(msg.catId, msg.metadata);
             }
 

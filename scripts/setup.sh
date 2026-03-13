@@ -229,9 +229,9 @@ REDIS_PORT=6379
 REDIS_URL=redis://localhost:6379
 
 # ── Model API Keys 模型密钥 ──────────────────────────────────
-# Fill in at least one key to start chatting.
-# 至少填入一个 API Key 才能开始对话。
-ANTHROPIC_API_KEY=
+# Optional if your CLI subscription already handles auth.
+# 如果 CLI 订阅已管理认证，这里可以留空。
+# ANTHROPIC_API_KEY=
 # OPENAI_API_KEY=
 # GOOGLE_API_KEY=
 
@@ -244,8 +244,15 @@ if [ "$ENABLE_ASR" = true ]; then
     cat >> "$ENV_FILE" <<ENVEOF
 
 # ── Voice Input (ASR) 语音输入 ───────────────────────────────
+ASR_ENABLED=1
 WHISPER_URL=http://localhost:9876
 NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
+ENVEOF
+else
+    cat >> "$ENV_FILE" <<ENVEOF
+
+# ── Voice Input (ASR) 语音输入 ───────────────────────────────
+ASR_ENABLED=0
 ENVEOF
 fi
 
@@ -253,8 +260,15 @@ if [ "$ENABLE_TTS" = true ]; then
     cat >> "$ENV_FILE" <<ENVEOF
 
 # ── Voice Output (TTS) 语音输出 ──────────────────────────────
+TTS_ENABLED=1
 TTS_URL=http://localhost:9879
 TTS_CACHE_DIR=./data/tts-cache
+ENVEOF
+else
+    cat >> "$ENV_FILE" <<ENVEOF
+
+# ── Voice Output (TTS) 语音输出 ──────────────────────────────
+TTS_ENABLED=0
 ENVEOF
 fi
 
@@ -262,7 +276,14 @@ if [ "$ENABLE_LLM_PP" = true ]; then
     cat >> "$ENV_FILE" <<ENVEOF
 
 # ── Speech Correction 语音纠正 ───────────────────────────────
+LLM_POSTPROCESS_ENABLED=1
 NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
+ENVEOF
+else
+    cat >> "$ENV_FILE" <<ENVEOF
+
+# ── Speech Correction 语音纠正 ───────────────────────────────
+LLM_POSTPROCESS_ENABLED=0
 ENVEOF
 fi
 

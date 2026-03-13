@@ -24,30 +24,27 @@ PORT="${TTS_PORT:-9879}"
 PROVIDER="${TTS_PROVIDER:-qwen3-clone}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Activate venv if it exists
-if [ -d "$VENV_DIR" ]; then
-  source "$VENV_DIR/bin/activate"
+# Create venv if missing, then activate
+if [ ! -d "$VENV_DIR" ]; then
+  echo "  创建 venv: $VENV_DIR ..."
+  python3 -m venv "$VENV_DIR"
 fi
+source "$VENV_DIR/bin/activate"
 
-# Provider-specific dependency checks
+# Provider-specific auto-install
 if [ "$PROVIDER" = "mlx-audio" ] || [ "$PROVIDER" = "qwen3-clone" ]; then
   if ! python3 -c "import mlx_audio" 2>/dev/null; then
-    echo "ERROR: mlx-audio not installed. Run:"
-    echo "  python3 -m venv $VENV_DIR"
-    echo "  source $VENV_DIR/bin/activate"
-    echo "  pip install mlx-audio 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer"
-    exit 1
+    echo "  安装依赖: mlx-audio + misaki[zh] ..."
+    pip install --quiet mlx-audio 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
   fi
-
   if ! python3 -c "import misaki" 2>/dev/null; then
-    echo "WARNING: misaki not installed. Chinese TTS may not work."
-    echo "  pip install 'misaki[zh]'"
+    echo "  安装依赖: misaki[zh] ..."
+    pip install --quiet 'misaki[zh]'
   fi
 elif [ "$PROVIDER" = "edge-tts" ]; then
   if ! python3 -c "import edge_tts" 2>/dev/null; then
-    echo "ERROR: edge-tts not installed. Run:"
-    echo "  pip install edge-tts"
-    exit 1
+    echo "  安装依赖: edge-tts ..."
+    pip install --quiet edge-tts fastapi uvicorn
   fi
 fi
 
