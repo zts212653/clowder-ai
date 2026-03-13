@@ -570,6 +570,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick }: ThreadSid
                             threadState={getThreadState(t.id)}
                             indented
                             preferredCats={t.preferredCats}
+                            summary={t.threadMemory?.summary}
                           />
                         ))}
                       </SectionGroup>
@@ -615,6 +616,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick }: ThreadSid
                     threadState={getThreadState(t.id)}
                     indented={group.type === 'project'}
                     preferredCats={t.preferredCats}
+                    summary={t.threadMemory?.summary}
                   />
                 ))}
               </SectionGroup>

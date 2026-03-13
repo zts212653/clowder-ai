@@ -25,6 +25,8 @@ export interface ThreadItemProps {
   threadState?: ThreadState;
   indented?: boolean;
   preferredCats?: string[];
+  /** Thread memory summary shown on hover */
+  summary?: string;
 }
 
 export function ThreadItem({
@@ -44,6 +46,7 @@ export function ThreadItem({
   threadState,
   indented,
   preferredCats,
+  summary,
 }: ThreadItemProps) {
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
@@ -94,6 +97,7 @@ export function ThreadItem({
         isActive ? 'bg-owner-bg' : 'hover:bg-gray-50'
       }`}
       onClick={() => onSelect(id)}
+      title={summary || undefined}
     >
       {/* Title row */}
       <div className="flex items-start justify-between gap-1 mb-1">

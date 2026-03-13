@@ -249,6 +249,8 @@ export interface Thread {
   deletedAt?: number | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
+  /** F065: Rolling thread memory with summary */
+  threadMemory?: { v: 1; summary: string };
 }
 
 /** F087: Bootcamp state for CVO onboarding threads */
