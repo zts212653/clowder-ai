@@ -29,7 +29,6 @@ created: 2026-02-26
 | F059 | Cat Café 开源计划 — 3/30 目标 | in-progress | Ragdoll | [F059](features/F059-open-source-plan.md) |
 | F061 | Antigravity 接入 — 孟加拉猫（混血家族） | phase-1-done | Ragdoll | [F061](features/F061-antigravity-bengal-cat.md) |
 | F067 | Cold-start Verifier — 无历史污染的交付物验证 | spec | Ragdoll | [F067](features/F067-cold-start-verifier.md) |
-| F068 | 新建对话弹窗 UX 优化 | in-progress | 三猫 | [F068](features/F068-new-thread-dialog-ux.md) |
 | F069 | Thread Read State — 未读 Badge 后端真相源 | spec | Ragdoll | [F069](features/F069-thread-read-state.md) |
 | F076 | Mission Hub 跨项目作战面板 — 派遣进展 + 回流摘要 + 决策中枢 | phase-2-done | Ragdoll | [F076](features/F076-mission-hub-cross-project.md) |
 | F077 | Multi-User Secure Collaboration — GitHub OAuth + Thread ACL + Session | spec | Ragdoll | [F077](features/F077-multi-user-secure-collab.md) |
@@ -47,3 +46,5 @@ created: 2026-02-26
 | F104 | 本地全感知升级 — Qwen Omni + VL MoE 替换管道 | spec | Ragdoll | [F104](features/F104-local-omni-perception.md) |
 | F107 | 猫猫杀（脑门贴词）— 坏猫战术推理游戏 | spec | Ragdoll | [F107](features/F107-headband-guess-game.md) |
 | F108 | Side-Dispatch — 同一 Thread 多猫并发执行 | spec | TBD | [F108](features/F108-side-dispatch-concurrent-invocation.md) |
+| F109 | Streaming TTS Chunker — 流式分句合成管线 | spec | Ragdoll | [F109](features/F109-streaming-tts-chunker.md) |
+| F110 | Voice Playback Queue — 语音播放队列 + Intent 调度 | spec | Ragdoll | [F110](features/F110-voice-playback-queue.md) |

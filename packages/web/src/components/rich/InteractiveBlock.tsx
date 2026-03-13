@@ -495,9 +495,13 @@ export function InteractiveBlock({
 }: InteractiveBlockProps) {
   const [localDisabled, setLocalDisabled] = useState(block.disabled ?? false);
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(block.selectedIds ?? []);
-  const [customText, setCustomText] = useState('');
+  const customTextRef = useRef('');
   const isDisabled = groupDisabled ?? localDisabled;
   const displaySelectedIds = groupSelectedIds ?? localSelectedIds;
+
+  const handleCustomText = useCallback((text: string) => {
+    customTextRef.current = text;
+  }, []);
 
   const handleSelect = useCallback(
     async (optionIds: string[]) => {
@@ -512,14 +516,16 @@ export function InteractiveBlock({
       setLocalDisabled(true);
       setLocalSelectedIds(optionIds);
 
-      // Build and send message (include custom text if present)
+      // Read from ref to avoid stale closure — child calls setCustomText then onSelect
+      // in the same event loop, so state hasn't re-rendered yet
+      const ct = customTextRef.current;
       const text = buildSelectionMessage(
         block.interactiveType,
         block.options,
         optionIds,
         block.messageTemplate,
         block.title,
-        customText || undefined,
+        ct || undefined,
       );
       dispatchInteractiveSend(text);
 
@@ -532,7 +538,7 @@ export function InteractiveBlock({
         });
       }
     },
-    [isDisabled, block, messageId, pendingMode, onPendingChange, customText],
+    [isDisabled, block, messageId, pendingMode, onPendingChange],
   );
 
   return (
@@ -546,7 +552,7 @@ export function InteractiveBlock({
           selectedIds={displaySelectedIds}
           onSelect={handleSelect}
           hideSubmit={pendingMode}
-          onCustomText={setCustomText}
+          onCustomText={handleCustomText}
         />
       )}
       {block.interactiveType === 'multi-select' && (

@@ -217,11 +217,21 @@ commit body 补一行 `Why:` 说明决策理由。
 
 ## 14. 共享状态文件只在 main 改
 
-BACKLOG.md、feature docs 的 status 等**共享状态文件**禁止在 worktree 里改。
+**机器强制的文件**（三层防御）：
+- `docs/BACKLOG.md`
+- `cat-config.json`
 
-- **在 main 上改，改完立刻 commit push**
-- 在 worktree 里改 → 冲突 + 污染 feature PR + 其他猫看不到更新
-- 涉及文件：`BACKLOG.md`、`docs/features/F*.md` 的 status 字段、`cat-config.json` 的可用性状态
+| 层 | 机制 | 行为 |
+|----|------|------|
+| L1 | `.githooks/pre-commit` | 非 main 分支 commit → **硬拦** |
+| L2 | `invoke-single-cat.ts` runtime preflight | unpushed → **硬拦**（停止调用）；uncommitted → warn |
+| L2.5 | `.claude/hooks/shared-doc-push-guard.sh` | Claude 专属提醒（不拦截） |
+| L3 | `.github/workflows/shared-state-guard.yml` | PR 含共享状态变更 → **硬拦** |
+
+**Review 守护的字段**（不做机器拦截）：
+- `docs/features/F*.md` 的 status/owner 字段变更也应在 main，但整文件可在 worktree 改
+
+**规则**：在 main 上改，改完立刻 commit + push。在 worktree 改 → 冲突 + 污染 feature PR + 其他猫看不到更新。
 
 ## 15. 阻塞依赖必须双写到可追溯状态
 

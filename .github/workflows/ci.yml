@@ -3,28 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/ci.yml'
-      - 'packages/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'tsconfig*.json'
-      - 'biome.json'
-      - 'cat-config.json'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'designs/**'
+      - 'assets/**'
   pull_request:
     branches: [main]
-    paths:
-      - '.github/workflows/ci.yml'
-      - 'packages/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'tsconfig*.json'
-      - 'biome.json'
-      - 'cat-config.json'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'designs/**'
+      - 'assets/**'
 
 concurrency:
   group: ci-${{ github.ref }}

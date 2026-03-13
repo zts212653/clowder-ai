@@ -1,9 +1,9 @@
 {
-  "source_commit_sha": "33f3d9fef47d",
+  "source_commit_sha": "e6738cd10b67",
   "manifest_version": 3,
-  "included_file_count": 1519,
+  "included_file_count": 1528,
   "excluded_file_count": 4,
-  "transform_count": 26,
+  "transform_count": 30,
   "secret_scan_result": "clean",
-  "synced_at": "2026-03-13T02:20:22Z"
+  "synced_at": "2026-03-13T04:03:46Z"
 }

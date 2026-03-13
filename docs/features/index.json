@@ -417,7 +417,7 @@
     {
       "id": "F068",
       "name": "— 新建对话弹窗 UX 优化",
-      "status": "in-progress | **Owner**: 三猫",
+      "status": "done | **Completed**: 2026-03-12 | **Owner**: 三猫",
       "file": "F068-new-thread-dialog-ux.md"
     },
     {
@@ -665,7 +665,19 @@
       "name": "Side-Dispatch — 同一 Thread 多猫并发执行",
       "status": "spec | **Owner**: TBD | **Priority**: P1",
       "file": "F108-side-dispatch-concurrent-invocation.md"
+    },
+    {
+      "id": "F109",
+      "name": "Streaming TTS Chunker — 流式分句合成管线",
+      "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P1",
+      "file": "F109-streaming-tts-chunker.md"
+    },
+    {
+      "id": "F110",
+      "name": "Voice Playback Queue — 语音播放队列 + Intent 调度",
+      "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P2",
+      "file": "F110-voice-playback-queue.md"
     }
   ],
-  "generated_at": "2026-03-13T02:20:16.201Z"
+  "generated_at": "2026-03-13T04:03:39.358Z"
 }
