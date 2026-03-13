@@ -562,7 +562,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             // Don't broadcast error for intentional cancel
           } else {
             console.error('[messages] Background processing error:', err);
-            const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+            const errorMsg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error';
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
               error: errorMsg,
@@ -645,7 +645,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             {
               type: 'error',
               catId: getDefaultCatId(),
-              error: err instanceof Error ? err.message : 'Unknown error',
+              error: err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error',
               isFinal: true,
               timestamp: Date.now(),
             },
