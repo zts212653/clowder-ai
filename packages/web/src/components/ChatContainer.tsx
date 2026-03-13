@@ -122,6 +122,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     'cat-cafe:sidebarWidth',
     SIDEBAR_DEFAULT,
   );
+  // F037: Right status panel width in px, persisted
+  const STATUS_PANEL_DEFAULT = 288; // w-72 = 18rem = 288px
+  const [statusPanelWidth, setStatusPanelWidth, resetStatusPanelWidth] = usePersistedState(
+    'cat-cafe:statusPanelWidth',
+    STATUS_PANEL_DEFAULT,
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const handleHorizontalResize = useCallback(
     (delta: number) => {
@@ -138,6 +144,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setSidebarWidth((prev) => Math.min(480, Math.max(180, prev + delta)));
     },
     [setSidebarWidth],
+  );
+  const handleStatusPanelResize = useCallback(
+    (delta: number) => {
+      // Negative delta = dragging left = making panel wider
+      setStatusPanelWidth((prev) => Math.min(560, Math.max(200, prev - delta)));
+    },
+    [setStatusPanelWidth],
   );
 
   // F063: auto-open panel when message file path click triggers workspace mode
@@ -613,14 +626,24 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       </div>
 
       {statusPanelOpen && rightPanelMode === 'status' && (
-        <RightStatusPanel
-          intentMode={intentMode}
-          targetCats={targetCats}
-          catStatuses={catStatuses}
-          catInvocations={catInvocations}
-          threadId={threadId}
-          messageSummary={messageSummary}
-        />
+        <>
+          <div className="hidden lg:flex items-center">
+            <ResizeHandle
+              direction="horizontal"
+              onResize={handleStatusPanelResize}
+              onDoubleClick={resetStatusPanelWidth}
+            />
+          </div>
+          <RightStatusPanel
+            intentMode={intentMode}
+            targetCats={targetCats}
+            catStatuses={catStatuses}
+            catInvocations={catInvocations}
+            threadId={threadId}
+            messageSummary={messageSummary}
+            width={statusPanelWidth}
+          />
+        </>
       )}
       {statusPanelOpen && rightPanelMode === 'workspace' && (
         <>
