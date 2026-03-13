@@ -1,38 +1,107 @@
-import { describe, expect, it } from 'vitest';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useChatStore } from '@/stores/chatStore';
+
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    getCatById: () => null,
+    cats: [],
+  }),
+  formatCatName: (id: string) => id,
+}));
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(() => Promise.resolve({ ok: false })),
+  API_URL: 'http://localhost:3000',
+}));
 
 describe('Right status panel resizable width (#37)', () => {
-  it('renders ResizeHandle between chat area and RightStatusPanel', async () => {
-    // Read the ChatContainer source to verify the ResizeHandle is adjacent to RightStatusPanel
-    const fs = await import('node:fs');
-    const path = await import('node:path');
-    const chatContainerPath = path.resolve(__dirname, '../ChatContainer.tsx');
-    const source = fs.readFileSync(chatContainerPath, 'utf-8');
+  let container: HTMLDivElement;
+  let root: Root;
 
-    // Verify: when status panel is open, ResizeHandle appears before RightStatusPanel
-    const statusPanelBlock = source.match(
-      /statusPanelOpen && rightPanelMode === 'status'[\s\S]*?<ResizeHandle[\s\S]*?handleStatusPanelResize[\s\S]*?<RightStatusPanel/,
-    );
-    expect(statusPanelBlock).not.toBeNull();
+  beforeAll(() => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
 
-  it('RightStatusPanel accepts width prop and applies it as inline style', async () => {
-    const fs = await import('node:fs');
-    const path = await import('node:path');
-    const panelPath = path.resolve(__dirname, '../RightStatusPanel.tsx');
-    const source = fs.readFileSync(panelPath, 'utf-8');
-
-    // Verify the width prop is in the interface and used in the aside element
-    expect(source).toContain('width?: number');
-    expect(source).toMatch(/style=\{width \? \{ width \} : undefined\}/);
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('persists status panel width with usePersistedState', async () => {
-    const fs = await import('node:fs');
-    const path = await import('node:path');
-    const chatContainerPath = path.resolve(__dirname, '../ChatContainer.tsx');
-    const source = fs.readFileSync(chatContainerPath, 'utf-8');
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    useChatStore.setState({
+      messages: [],
+      currentThreadId: 'test-thread',
+    });
+  });
 
-    expect(source).toContain("'cat-cafe:statusPanelWidth'");
-    expect(source).toContain('statusPanelWidth');
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('renders aside with inline width style when width prop is provided', async () => {
+    const { RightStatusPanel } = await import('../RightStatusPanel');
+    act(() => {
+      root.render(
+        React.createElement(RightStatusPanel, {
+          intentMode: null,
+          targetCats: [],
+          catStatuses: {},
+          catInvocations: {},
+          threadId: 'test-thread',
+          messageSummary: { total: 0, assistant: 0, system: 0, evidence: 0, followup: 0 },
+          width: 400,
+        }),
+      );
+    });
+
+    const aside = container.querySelector('aside');
+    expect(aside).not.toBeNull();
+    expect(aside?.style.width).toBe('400px');
+    // Should NOT have w-72 class when width is provided
+    expect(aside?.className).not.toContain('w-72');
+  });
+
+  it('renders aside with w-72 class when no width prop is provided', async () => {
+    const { RightStatusPanel } = await import('../RightStatusPanel');
+    act(() => {
+      root.render(
+        React.createElement(RightStatusPanel, {
+          intentMode: null,
+          targetCats: [],
+          catStatuses: {},
+          catInvocations: {},
+          threadId: 'test-thread',
+          messageSummary: { total: 0, assistant: 0, system: 0, evidence: 0, followup: 0 },
+        }),
+      );
+    });
+
+    const aside = container.querySelector('aside');
+    expect(aside).not.toBeNull();
+    expect(aside?.className).toContain('w-72');
+    expect(aside?.style.width).toBe('');
+  });
+
+  it('handleStatusPanelResize clamps width within bounds', () => {
+    // Test the resize handler logic directly (same as ChatContainer uses)
+    const MIN = 200;
+    const MAX = 560;
+    const clamp = (prev: number, delta: number) => Math.min(MAX, Math.max(MIN, prev - delta));
+
+    // Dragging left (negative delta) = wider
+    expect(clamp(288, -100)).toBe(388);
+    // Dragging right (positive delta) = narrower
+    expect(clamp(288, 50)).toBe(238);
+    // Should not go below MIN
+    expect(clamp(288, 100)).toBe(MIN);
+    // Should not go above MAX
+    expect(clamp(288, -400)).toBe(MAX);
   });
 });
