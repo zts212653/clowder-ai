@@ -54,8 +54,9 @@ export function checkSharedStatePreflight(projectRoot: string): SharedStatePrefl
       timeout: 5000,
     }).trim();
 
-    const uncommittedShared = [...uncommittedRaw.split('\n'), ...stagedRaw.split('\n')]
-      .filter((f: string) => f && SHARED_STATE_PATTERN.test(f));
+    const uncommittedShared = [...uncommittedRaw.split('\n'), ...stagedRaw.split('\n')].filter(
+      (f: string) => f && SHARED_STATE_PATTERN.test(f),
+    );
 
     // Check unpushed commits touching shared state
     let unpushedShared: string[] = [];

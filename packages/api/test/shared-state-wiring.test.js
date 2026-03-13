@@ -28,10 +28,7 @@ describe('shared-state defense wiring', () => {
       entry.hooks?.some((h) => h.command?.includes('preflight-shared-state.sh')),
     );
     assert.ok(preflightEntry, 'SessionStart should include preflight-shared-state.sh');
-    assert.ok(
-      preflightEntry.matcher.includes('new'),
-      'preflight should run on new sessions',
-    );
+    assert.ok(preflightEntry.matcher.includes('new'), 'preflight should run on new sessions');
   });
 
   it('.claude/settings.json PostToolUse hooks include shared-doc-push-guard.sh', () => {
@@ -41,19 +38,16 @@ describe('shared-state defense wiring', () => {
     const postToolUseHooks = settings.hooks?.PostToolUse;
     assert.ok(Array.isArray(postToolUseHooks), 'PostToolUse hooks should be an array');
 
-    const editWriteEntry = postToolUseHooks.find((entry) =>
-      entry.matcher === 'Edit|Write' &&
-      entry.hooks?.some((h) => h.command?.includes('shared-doc-push-guard.sh')),
+    const editWriteEntry = postToolUseHooks.find(
+      (entry) =>
+        entry.matcher === 'Edit|Write' && entry.hooks?.some((h) => h.command?.includes('shared-doc-push-guard.sh')),
     );
     assert.ok(editWriteEntry, 'PostToolUse Edit|Write should include shared-doc-push-guard.sh');
   });
 
   it('.githooks/pre-commit is executable', () => {
     const hookPath = resolve(projectRoot, '.githooks/pre-commit');
-    assert.doesNotThrow(
-      () => accessSync(hookPath, constants.X_OK),
-      `.githooks/pre-commit should be executable`,
-    );
+    assert.doesNotThrow(() => accessSync(hookPath, constants.X_OK), `.githooks/pre-commit should be executable`);
   });
 
   it('scripts/preflight-shared-state.sh is executable', () => {

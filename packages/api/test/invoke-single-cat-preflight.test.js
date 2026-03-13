@@ -13,10 +13,10 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { before, describe, it, after } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 
 let invokeSingleCat;
 const tempDirs = [];
@@ -81,7 +81,11 @@ describe('invokeSingleCat shared-state preflight', () => {
   after(() => {
     process.chdir(originalCwd);
     for (const dir of tempDirs) {
-      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
     }
   });
 
@@ -129,14 +133,16 @@ describe('invokeSingleCat shared-state preflight', () => {
     // Find the invocation_created message
     const invCreated = msgs.find((m) => {
       if (m.type !== 'system_info' || !m.content) return false;
-      try { return JSON.parse(m.content).type === 'invocation_created'; } catch { return false; }
+      try {
+        return JSON.parse(m.content).type === 'invocation_created';
+      } catch {
+        return false;
+      }
     });
     assert.ok(invCreated, 'should have invocation_created');
 
     // Find the 🚫 preflight message
-    const blocked = msgs.find((m) =>
-      m.type === 'system_info' && m.content?.includes('🚫'),
-    );
+    const blocked = msgs.find((m) => m.type === 'system_info' && m.content?.includes('🚫'));
     assert.ok(blocked, 'should have 🚫 blocked message');
     assert.ok(blocked.content.includes('docs/BACKLOG.md'), 'blocked message should name the file');
     assert.ok(blocked.content.includes('git push'), 'blocked message should tell user to push');
@@ -188,13 +194,15 @@ describe('invokeSingleCat shared-state preflight', () => {
     // 砚砚 钉子 2: invocation_created comes first, then ⚠️, then provider output
     const invCreated = msgs.find((m) => {
       if (m.type !== 'system_info' || !m.content) return false;
-      try { return JSON.parse(m.content).type === 'invocation_created'; } catch { return false; }
+      try {
+        return JSON.parse(m.content).type === 'invocation_created';
+      } catch {
+        return false;
+      }
     });
     assert.ok(invCreated, 'should have invocation_created');
 
-    const warned = msgs.find((m) =>
-      m.type === 'system_info' && m.content?.includes('⚠️'),
-    );
+    const warned = msgs.find((m) => m.type === 'system_info' && m.content?.includes('⚠️'));
     assert.ok(warned, 'should have ⚠️ warning message');
     assert.ok(warned.content.includes('cat-config.json'), 'warning should name the file');
 
@@ -237,8 +245,8 @@ describe('invokeSingleCat shared-state preflight', () => {
     process.chdir(originalCwd);
 
     // No 🚫 or ⚠️ messages
-    const preflight = msgs.filter((m) =>
-      m.type === 'system_info' && (m.content?.includes('🚫') || m.content?.includes('⚠️')),
+    const preflight = msgs.filter(
+      (m) => m.type === 'system_info' && (m.content?.includes('🚫') || m.content?.includes('⚠️')),
     );
     assert.equal(preflight.length, 0, 'should have no preflight messages when clean');
 
