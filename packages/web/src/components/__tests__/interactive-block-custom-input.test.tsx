@@ -79,8 +79,8 @@ describe('InteractiveBlock customInput integration', () => {
     });
 
     // 1. Click the customInput option
-    const optionBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('我有其他反馈'),
+    const optionBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('我有其他反馈'),
     );
     expect(optionBtn).toBeTruthy();
     act(() => optionBtn!.click());
@@ -89,18 +89,13 @@ describe('InteractiveBlock customInput integration', () => {
     const input = container.querySelector('input[placeholder="输入反馈..."]') as HTMLInputElement;
     expect(input).toBeTruthy();
     act(() => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value',
-      )!.set!;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
       nativeInputValueSetter.call(input, '这里有个 bug 需要修');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
     // 3. Click submit
-    const submitBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('确认选择'),
-    );
+    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('确认选择'));
     expect(submitBtn).toBeTruthy();
     act(() => submitBtn!.click());
 
@@ -122,25 +117,18 @@ describe('InteractiveBlock customInput integration', () => {
     });
 
     // 1. Click the customInput option
-    const optionBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('其他'),
-    );
+    const optionBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('其他'));
     act(() => optionBtn!.click());
 
     // 2. Type and submit via Enter
     const input = container.querySelector('input') as HTMLInputElement;
     act(() => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value',
-      )!.set!;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
       nativeInputValueSetter.call(input, '用 ref 修闭包');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     act(() => {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
     // 3. Verify
@@ -164,14 +152,10 @@ describe('InteractiveBlock customInput integration', () => {
       root.render(React.createElement(InteractiveBlock, { block, messageId: 'msg-3' }));
     });
 
-    const optionBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('方案 A'),
-    );
+    const optionBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('方案 A'));
     act(() => optionBtn!.click());
 
-    const submitBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('确认选择'),
-    );
+    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('确认选择'));
     act(() => submitBtn!.click());
 
     expect(dispatched).toBe('我选了：方案 A（选择）');

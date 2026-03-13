@@ -15,10 +15,10 @@
  */
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { before, describe, it, after } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 
 let checkSharedStatePreflight;
 
@@ -53,7 +53,11 @@ describe('checkSharedStatePreflight (integration)', () => {
 
   after(() => {
     for (const dir of tempDirs) {
-      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
     }
   });
 

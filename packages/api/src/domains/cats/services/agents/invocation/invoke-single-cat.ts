@@ -206,8 +206,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (!ssCheck.ok) {
       // Fail-closed: unpushed shared-state commits must be pushed before any cat runs
       if (ssCheck.unpushedFiles?.length) {
-        const msg = `Shared-state files committed but not pushed: ${ssCheck.unpushedFiles.join(', ')}. `
-          + 'Run `git push` before invoking any cat (shared-rules §14).';
+        const msg =
+          `Shared-state files committed but not pushed: ${ssCheck.unpushedFiles.join(', ')}. ` +
+          'Run `git push` before invoking any cat (shared-rules §14).';
         console.warn(`[shared-state-preflight] ${catId}: BLOCKED — ${msg}`);
         yield {
           type: 'system_info' as const,
