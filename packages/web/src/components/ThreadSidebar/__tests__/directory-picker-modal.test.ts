@@ -20,7 +20,7 @@ function jsonFail(status = 500, error = 'fail') {
   return Promise.resolve({ ok: false, status, json: () => Promise.resolve({ error }) });
 }
 
-const CWD_PATH = '/Users/test/projects/cat-cafe';
+const CWD_PATH = '/path/to/project';
 
 describe('DirectoryPickerModal', () => {
   let container: HTMLDivElement;
@@ -124,7 +124,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('calls onSelect with existing project path when selected and confirmed', async () => {
-    const existingPath = '/Users/test/projects/other';
+    const existingPath = '/home/user';
     setupCwdSuccess();
     const fns = render({ existingProjects: [existingPath] });
     await flush();
@@ -176,7 +176,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('selects path via pick-directory and confirms to create', async () => {
-    const pickedPath = '/Users/test/projects/new-project';
+    const pickedPath = '/home/user';
     mockApiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
       if (path === '/api/projects/cwd') return jsonOk({ path: CWD_PATH });
       if (path === '/api/backlog/items') return jsonOk({ items: [] });
@@ -231,7 +231,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('validates path via browse API and selects it for confirmation', async () => {
-    const canonicalPath = '/Users/test/new-path';
+    const canonicalPath = '/home/user';
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/projects/cwd') return jsonOk({ path: CWD_PATH });
       if (path === '/api/backlog/items') return jsonOk({ items: [] });
@@ -246,7 +246,7 @@ describe('DirectoryPickerModal', () => {
     ) as HTMLInputElement;
     act(() => {
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-      nativeInputValueSetter.call(input, '/Users/test/new-path');
+      nativeInputValueSetter.call(input, '/home/user');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await flush();

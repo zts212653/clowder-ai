@@ -49,7 +49,7 @@ describe('F075 leaderboard avatar pipeline', () => {
             catId: 'gpt52',
             displayName: '缅因猫',
             label: '社死王',
-            description: '被owner吐槽',
+            description: '被team lead吐槽',
             count: 2,
           },
         ],

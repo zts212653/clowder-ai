@@ -1,6 +1,6 @@
 # Gemini Browser Automation — Chrome MCP 操作参考
 
-> 实测日期：2026-03-10 | 实测猫：布偶猫 Opus 4.6
+> 实测日期：2026-03-10 | 实测猫：Ragdoll Opus 4.6
 > 平台：gemini.google.com（Gemini 3 Pro）
 
 ## 核心发现

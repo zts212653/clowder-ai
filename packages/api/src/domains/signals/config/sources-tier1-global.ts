@@ -5,7 +5,7 @@ import type { SignalSource } from '@cat-cafe/shared';
  * Microsoft/Apple/AWS, xAI, Mistral, Cohere, Together AI, Groq.
  */
 export const TIER1_GLOBAL_SOURCES: readonly SignalSource[] = [
-  // ── Anthropic (P0 — owner特别指出) ──────────────────────────
+  // ── Anthropic (P0 — team lead特别指出) ──────────────────────────
   {
     id: 'anthropic-news',
     name: 'Anthropic Newsroom',

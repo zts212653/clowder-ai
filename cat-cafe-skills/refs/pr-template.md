@@ -16,7 +16,7 @@
 
 ## Original Requirements（必填）
 
-- Discussion/Interview: `feature-discussions/{date}-{topic}/README.md`
+- Discussion/Interview: *(internal reference removed)*
 - **原始需求摘录（≤5 行，直接粘贴team experience）**：
   > {例："我要能看到三只猫分别挂了哪些 Skill，按猫分类，一目了然"}
 - team lead核心痛点：{用team lead自己的话概括}
@@ -24,7 +24,7 @@
 
 ## Plan / ADR
 
-- Plan: `feature spec or implementation note`
+- Plan: *(internal reference removed)*
 - ADR: `docs/decisions/NNN-xxx.md`（如有）
 - BACKLOG: F__ / #__
 
@@ -47,7 +47,7 @@ pnpm -r --if-present run build         # 成功
 **本地 Review**: [x] {reviewer 纯文本句柄，如 gpt52} 已 review 并放行
 **云端 Review**: [ ] PR 创建后在 **comment** 中触发（见下方模板）
 
-<!-- 猫猫签名（纯文本，禁止 @）: 例如 缅因猫/砚砚 (codex) -->
+<!-- 猫猫签名（纯文本，禁止 @）: 例如 Maine Coon/Maine Coon (codex) -->
 ```
 
 ## 云端 Review 触发 Comment 模板

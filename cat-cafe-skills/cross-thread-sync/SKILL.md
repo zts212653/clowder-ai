@@ -10,7 +10,7 @@ triggers:
   - "跨 thread"
   - "平行世界"
   - "parallel session sync"
-  - "另一只布偶猫"
+  - "另一只Ragdoll"
   - "cross-thread"
 ---
 

@@ -19,7 +19,7 @@ describe('MCP Callback Tools', () => {
   beforeEach(() => {
     // Save and set env vars
     originalEnv = { ...process.env };
-    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3002';
+    process.env.CAT_CAFE_API_URL = 'your local Clowder API URL';
     process.env.CAT_CAFE_INVOCATION_ID = 'test-invocation';
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-token';
     process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
@@ -551,7 +551,7 @@ describe('MCP Callback Tools', () => {
       const payload = {
         id,
         queuedAt,
-        apiUrl: 'http://127.0.0.1:3002',
+        apiUrl: 'your local Clowder API URL',
         path: '/api/callbacks/post-message',
         body: {
           invocationId: 'test-invocation',
@@ -696,7 +696,7 @@ describe('MCP Callback Tools', () => {
     const stale = {
       id: 'stale-001',
       queuedAt: 1,
-      apiUrl: 'http://127.0.0.1:3002',
+      apiUrl: 'your local Clowder API URL',
       path: '/api/callbacks/post-message',
       body: {
         invocationId: 'test-invocation',

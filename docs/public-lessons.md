@@ -143,7 +143,7 @@ created: 2026-02-26
 - 原理（可选）：风险管理要“就地收敛”，延后会把局部风险变系统风险。
 
 - 关联：
-  - `docs/BACKLOG.md`
+  - `docs/ROADMAP.md`
   - `cat-cafe-skills/merge-approval-gate/SKILL.md`
 
 ### LL-005: 修完 review 后必须回给 reviewer 二次确认再合 main
@@ -154,7 +154,7 @@ created: 2026-02-26
 - 根因：把“实现完成”与“审查闭环完成”混为一件事。
 - 触发条件：连续修复多项 P1/P2、分支已准备合入、作者主观把握高时。
 - 修复：修复完成后提交确认请求，等待 reviewer 明确放行语句再合入。
-- 防护：合入门禁检查 review-notes 放行证据；条件放行需二次确认。
+- 防护：合入门禁检查 docs/mailbox 放行证据；条件放行需二次确认。
 - 来源锚点：
   - `cat-cafe-skills/merge-approval-gate/SKILL.md#L8`
   - `cat-cafe-skills/cat-cafe-receiving-review/SKILL.md#L151`
@@ -216,7 +216,7 @@ created: 2026-02-26
 
 - 关联：
   - `AGENTS.md`
-  - `docs/BACKLOG.md`
+  - `docs/ROADMAP.md`
   - `LL-011`
   - `LL-012`
 
@@ -328,7 +328,7 @@ created: 2026-02-26
 
 - 坑：在 worktree 工作时未设置 REDIS_URL，服务回落到默认 6399（team lead数据），数据从 307 keys 降至 15 keys（95% 丢失）。虽最终从 RDB 备份完全恢复，但过程惊险。
 - 根因：开发环境和生产数据共享同一个 Redis 实例，靠配置（环境变量）隔离。一旦忘设配置，默认值指向生产。
-- 触发条件：worktree 中启动服务但忘记创建 `.env` 设置 `REDIS_URL=redis://localhost:6398`。
+- 触发条件：worktree 中启动服务但忘记创建 `.env` 设置 `REDIS_URL=redis://localhost:6380`。
 - 修复：(1) 强制 worktree 使用 6398 端口 (2) 启动前验证 `echo $REDIS_URL` (3) 启动后验证数据量。
 - 防护：CLAUDE.md §10 三猫铁律 + `.env` 模板 + 启动验证步骤。
 - 来源锚点：
@@ -467,7 +467,7 @@ created: 2026-02-26
   - *(internal reference removed)*
 - 原理：治理有效性不是“策略存在”，而是“策略被持续验证”。没有自动化检查的治理，等同于没有治理。
 
-- 关联：`docs/decisions/005-hindsight-integration-decisions.md` | `docs/BACKLOG.md` | Task 4 可观测检查
+- 关联：`docs/decisions/005-hindsight-integration-decisions.md` | `docs/ROADMAP.md` | Task 4 可观测检查
 
 ### LL-024: 状态字段多点写入会复发蜘蛛网
 - 状态：validated

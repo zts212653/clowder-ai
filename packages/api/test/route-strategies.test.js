@@ -70,7 +70,7 @@ function createMockDeps(services, appendCalls, threadStore = null) {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore,
-      apiUrl: 'http://127.0.0.1:3002',
+      apiUrl: 'your local Clowder API URL',
     },
     messageStore: {
       append: async (msg) => {
@@ -548,7 +548,7 @@ describe('routeSerial resilience', () => {
           resolveWorkingDirectory: () => '/tmp/test',
         },
         threadStore: null,
-        apiUrl: 'http://127.0.0.1:3002',
+        apiUrl: 'your local Clowder API URL',
       },
       messageStore: {
         append: async () => {

@@ -3,16 +3,16 @@ import { describe, it } from 'node:test';
 import { detectUserMention } from '../dist/routes/user-mention.js';
 
 describe('detectUserMention', () => {
-  it('detects @owner at line start', () => {
-    assert.equal(detectUserMention('请看这个\n@owner\n帮忙确认'), true);
+  it('detects @team lead at line start', () => {
+    assert.equal(detectUserMention('请看这个\n@team lead\n帮忙确认'), true);
   });
 
   it('detects @user at line start', () => {
     assert.equal(detectUserMention('@user 请帮忙看看'), true);
   });
 
-  it('ignores @owner in middle of line', () => {
-    assert.equal(detectUserMention('告诉@owner这件事'), false);
+  it('ignores @team lead in middle of line', () => {
+    assert.equal(detectUserMention('告诉@team lead这件事'), false);
   });
 
   it('ignores @user inside code block', () => {
@@ -24,7 +24,7 @@ describe('detectUserMention', () => {
   });
 
   it('handles leading whitespace before @user', () => {
-    assert.equal(detectUserMention('  @owner 看看'), true);
+    assert.equal(detectUserMention('  @team lead 看看'), true);
   });
 
   it('returns false for empty string', () => {
@@ -37,11 +37,11 @@ describe('detectUserMention', () => {
   });
 
   it('handles multiple code blocks correctly', () => {
-    assert.equal(detectUserMention('```js\n@user\n```\n普通文本\n```\n@owner\n```'), false);
+    assert.equal(detectUserMention('```js\n@user\n```\n普通文本\n```\n@team lead\n```'), false);
   });
 
-  it('detects @owner after code block', () => {
-    assert.equal(detectUserMention('```\ncode\n```\n@owner 看看'), true);
+  it('detects @team lead after code block', () => {
+    assert.equal(detectUserMention('```\ncode\n```\n@team lead 看看'), true);
   });
 
   it('OQ-1: rejects @user123 (token boundary)', () => {
@@ -60,16 +60,16 @@ describe('detectUserMention', () => {
     assert.equal(detectUserMention('@user'), true);
   });
 
-  it('OQ-1: accepts @owner followed by space', () => {
-    assert.equal(detectUserMention('@owner 检查一下'), true);
+  it('OQ-1: accepts @team lead followed by space', () => {
+    assert.equal(detectUserMention('@team lead 检查一下'), true);
   });
 
   it('R2-P2: accepts @user followed by CJK text (no space)', () => {
     assert.equal(detectUserMention('@user请看'), true);
   });
 
-  it('R2-P2: accepts @owner followed by CJK text (no space)', () => {
-    assert.equal(detectUserMention('@owner请看'), true);
+  it('R2-P2: accepts @team lead followed by CJK text (no space)', () => {
+    assert.equal(detectUserMention('@team lead请看'), true);
   });
 
   it('R2-P2: still rejects @user followed by ASCII letter', () => {

@@ -101,9 +101,9 @@ Intent Card 槽位（v2）：actor / context-trigger / goal / object-state / suc
 
 | 层级 | 能力 | 来源 | Tab 呈现 |
 |------|------|------|----------|
-| **基础层：Mission Hub 原有** | Feature 列表 + 状态徽章 | 读取外部项目 BACKLOG.md | Sub-tab「功能列表」 |
+| **基础层：Mission Hub 原有** | Feature 列表 + 状态徽章 | 读取外部项目 ROADMAP.md | Sub-tab「功能列表」 |
 | **基础层：Mission Hub 原有** | 告示面板 / Suggestions | 复用 SOP 告示牌能力 | Sub-tab「告示面板」 |
-| **基础层：Mission Hub 原有** | 导入 Backlog | 从外部项目 BACKLOG.md 导入 feat 状态 | Header「导入 Backlog」按钮 |
+| **基础层：Mission Hub 原有** | 导入 Backlog | 从外部项目 ROADMAP.md 导入 feat 状态 | Header「导入 Backlog」按钮 |
 | **基础层：Mission Hub 原有** | 状态筛选（待审议/执行中/已完成） | 复用筛选组件 | Status bar |
 | **治理层：Need Audit 新增** | 需求追踪（Intent Card 列表 + Source tag） | Need Audit Pipeline | Sub-tab「需求追踪」 |
 | **治理层：Need Audit 新增** | 治理健康度 | Triage 统计 | Sub-tab「治理健康度」 |
@@ -126,7 +126,7 @@ Intent Card 槽位（v2）：actor / context-trigger / goal / object-state / suc
 
 ### 案例参考：studio-flow
 
-`/Users/owner/projects/freelance/studio-flow` — 典型甲方项目：
+`/home/user — 典型甲方项目：
 - 27+ features（SF-001 ~ SF-027），企业管理系统全模块
 - 甲方9点验收基线 → BACKLOG feature 映射
 - SF-025 Gap Fix Batch：6 个模块塞一个 feat（登录、工作台、客户、审核、团队、数据）

@@ -20,12 +20,12 @@ team lead指出参考 Codex App 的组织方式：
 ```
 Codex App 侧栏:
 ├── cat-cafe (Project = 目录)
-│   ├── /Users/owner/projects/relay-st...   (Thread)
+│   ├── /home/user   (Thread)
 │   ├── Study identity injection discussion    (Thread)
 │   ├── 调研 Claude Code Agent Teams ...       (Thread)
 │   └── 你看看这是一个怎么样的工程！...        (Thread)
 └── relay-station (Project = 目录)
-    └── /Users/owner/.gemini/antigravit...   (Thread)
+    └── /home/user   (Thread)
 ```
 
 ## 决策
@@ -94,7 +94,7 @@ interface Thread {
     Study identity inject...  4h
     调研 Agent Teams ...      8h
 ▼ relay-station              2w
-    /Users/.gemini/anti...   2w
+    /home/user   2w
 ─────────────────────────────────
 ```
 
@@ -134,7 +134,7 @@ Demo 发现: 三只猫全不知道自己是谁。
 ```
 System Prompt 分层组装:
 1. 身份层: "你是Ragdoll(Opus), Cat Cafe 的主架构师..."
-2. 项目层: "当前项目: cat-cafe, 路径: /Users/.../cat-cafe"
+2. 项目层: "当前项目: cat-cafe, 路径: /path/to/project"
 3. 会话层: "当前对话参与者: opus, codex"
 4. 即时层: "用户刚说: ..."
 ```

@@ -48,7 +48,7 @@ docs/prompts/YYYY-MM-DD-{topic}-research-prompt.md
   Gemini Deep Research
   ChatGPT Deep Research  ← 可能先问澄清问题，答完后把 Q&A 追加到另外两路的 prompt
 ```
-结果存：`docs/research/YYYY-MM-DD-{topic}/`（chatgpt / claude-ai / gemini）
+结果存：*(internal reference removed)*（chatgpt / claude-ai / gemini）
 
 **Step 3 — GPT-5.2 Pro 审阅**
 输入三份报告 → 找逻辑漏洞、弱证据、三方分歧
@@ -258,7 +258,7 @@ docs/research/YYYY-MM-DD-{topic}-{model}-consult.md
 | **结构化** | 用表格/列表呈现已有结论，便于云端模型快速理解 |
 | **明确请求** | 说清楚要什么（案例/审阅/建议），不要让模型猜 |
 | **留回填区** | Part 2 和 Part 3 结构清晰，方便后续操作 |
-| **追溯链** | 文档放在 `docs/research/`，关联到原始 thread |
+| **追溯链** | 文档放在 *(internal reference removed)*，关联到原始 thread |
 
 ## 常见错误
 

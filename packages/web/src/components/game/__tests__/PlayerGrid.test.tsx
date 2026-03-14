@@ -7,7 +7,7 @@ import { PlayerGrid } from '../PlayerGrid';
 Object.assign(globalThis as Record<string, unknown>, { React });
 
 const mockSeats: SeatView[] = [
-  { seatId: 'P1', actorType: 'human', actorId: 'owner', displayName: 'owner', alive: true },
+  { seatId: 'P1', actorType: 'human', actorId: 'owner', displayName: 'team lead', alive: true },
   { seatId: 'P2', actorType: 'cat', actorId: 'opus', displayName: '宪宪', alive: true },
   { seatId: 'P3', actorType: 'cat', actorId: 'codex', displayName: '砚砚', alive: true },
   { seatId: 'P6', actorType: 'cat', actorId: 'dare', displayName: 'Dare', alive: false },
@@ -20,7 +20,7 @@ function render(props: Partial<Parameters<typeof PlayerGrid>[0]> = {}): string {
 describe('PlayerGrid', () => {
   it('renders all seat display names', () => {
     const html = render();
-    expect(html).toContain('owner');
+    expect(html).toContain('team lead');
     expect(html).toContain('宪宪');
     expect(html).toContain('砚砚');
     expect(html).toContain('Dare');

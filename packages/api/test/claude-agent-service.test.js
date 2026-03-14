@@ -214,7 +214,7 @@ test('F062: subscription profile clears inherited ANTHROPIC env vars', async () 
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3002',
+          CAT_CAFE_API_URL: 'http://localhost:3003',
           CAT_CAFE_INVOCATION_ID: 'inv-1',
           CAT_CAFE_CALLBACK_TOKEN: 'token-1',
           CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription',
@@ -249,7 +249,7 @@ test('F062: api_key profile injects ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL', a
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3002',
+          CAT_CAFE_API_URL: 'http://localhost:3003',
           CAT_CAFE_INVOCATION_ID: 'inv-2',
           CAT_CAFE_CALLBACK_TOKEN: 'token-2',
           CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
@@ -653,7 +653,7 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3002',
+          CAT_CAFE_API_URL: 'http://localhost:3003',
           CAT_CAFE_INVOCATION_ID: 'inv-1',
           CAT_CAFE_CALLBACK_TOKEN: 'token-1',
         },

@@ -84,8 +84,8 @@ describe('F061: detectUserMention in route-serial integration', () => {
     assert.equal(detectUserMention(agentResponse), true);
   });
 
-  it('detects @owner in agent response', () => {
-    const agentResponse = '分析完成。\n@owner 请查看结果。';
+  it('detects @team lead in agent response', () => {
+    const agentResponse = '分析完成。\n@team lead 请查看结果。';
     assert.equal(detectUserMention(agentResponse), true);
   });
 

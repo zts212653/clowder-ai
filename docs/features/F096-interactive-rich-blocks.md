@@ -8,7 +8,8 @@ created: 2026-03-11
 
 # F096: Interactive Rich Blocks — 可交互富文本组件
 
-> **Status**: Phase C in progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Completed**: 2026-03-13
+> **Priority**: P1 | **Evolved from**: F022（Rich Block 基础架构） | **Related**: F087（猫猫训练营）
 
 ## Why
 
@@ -36,9 +37,9 @@ Cat Café 有完整的 Web 前端，交互能力远超 CLI。可交互 Rich Bloc
 
 | interactiveType | 说明 | 用户操作 | 自动发送的消息示例 |
 |-----------------|------|---------|-------------------|
-| `select` | 单选列表 | 点一个选项 | "我选了：方案 A" |
+| `select` | 单选列表 | 点选项 → 确认（`customInput` 时先输入） | "我选了：方案 A" / "其他：我的想法" |
 | `multi-select` | 多选列表 | 勾选多个 → 确认 | "我选了：Node.js, pnpm" |
-| `card-grid` | 卡片网格 | 点一张卡片 | "我选了：🎲 猫猫盲盒" |
+| `card-grid` | 卡片网格 | 点卡片或随机抽 → 确认 | "我选了：猫猫盲盒" |
 | `confirm` | 确认/取消 | 点按钮 | "确认" / "取消" |
 
 ### 数据结构
@@ -64,9 +65,12 @@ interface InteractiveOption {
   id: string;
   label: string;
   emoji?: string;
+  icon?: string;               // café SVG 图标名，优先于 emoji
   description?: string;
   level?: number;              // card-grid 分组用（难度等级）
   group?: string;              // 分组标题
+  customInput?: boolean;       // 选中后展开自由输入框
+  customInputPlaceholder?: string;
 }
 ```
 
@@ -110,14 +114,14 @@ interface InteractiveOption {
 - [x] AC-B1: 非交互客户端降级为纯文本展示（option 列表 + "请输入编号选择"）
 - [x] AC-B2: Rich Block Rules 文档更新，猫猫知道怎么用 interactive block
 
-### Phase C（表单组：多 block 统一提交）
+### Phase C（表单组：多 block 统一提交） ✅
 
-- [ ] AC-C1: `RichInteractiveBlock` 新增可选 `groupId` 字段，同 groupId 的 block 归为一组
-- [ ] AC-C2: 同组 block 选择后不立刻发消息，只更新本地选中状态
-- [ ] AC-C3: 同组最后一个 block 下方显示"全部提交"按钮（所有 block 都有选择后才可点）
-- [ ] AC-C4: 提交时汇总所有 block 的选择，发一条合并消息
-- [ ] AC-C5: 提交后同组所有 block 同时变 disabled + 持久化
-- [ ] AC-C6: 无 `groupId` 的 block 保持现有行为（独立提交）
+- [x] AC-C1: `RichInteractiveBlock` 新增可选 `groupId` 字段，同 groupId 的 block 归为一组
+- [x] AC-C2: 同组 block 选择后不立刻发消息，只更新本地选中状态
+- [x] AC-C3: 同组最后一个 block 下方显示"全部提交"按钮（所有 block 都有选择后才可点）
+- [x] AC-C4: 提交时汇总所有 block 的选择，发一条合并消息
+- [x] AC-C5: 提交后同组所有 block 同时变 disabled + 持久化
+- [x] AC-C6: 无 `groupId` 的 block 保持现有行为（独立提交）
 
 ## Dependencies
 
@@ -156,7 +160,7 @@ interface InteractiveOption {
 | R2 | "别的地方还能用" — 通用组件 | AC-A1~A6 | 多场景 test | [x] |
 | R3 | F087 训练营选任务需要 card-grid | AC-A2, AC-A7 | F087 集成测试 | [x] |
 | R4 | 随机抽功能 | AC-A7 | manual + screenshot | [x] |
-| R5 | "都选完一起提交" — 多 block 统一提交 | AC-C1~C6 | test + manual | [ ] |
+| R5 | "都选完一起提交" — 多 block 统一提交 | AC-C1~C6 | test + manual | [x] |
 
 ## Post-ship Bugs / Lessons
 
@@ -164,6 +168,9 @@ interface InteractiveOption {
 |---|------|------|------|------|
 | B1 | select 点击立刻发送，误点无法撤回 | SelectInteraction 的 `onSelect` 直接触发 `handleSelect`（发消息+disable） | 加 `pendingId` 状态 + "确认选择"按钮，点选项只高亮不发送 | 单选也需要确认步骤——用户点错了没有回头路，UX 基本功 |
 | B2 | confirm 发出的消息只有"取消"，多 block 时无法区分回答的是哪个问题 | `buildSelectionMessage` 的 confirm 分支硬编码返回 `'确认'`/`'取消'`，不带 block title | 加 `title` 参数，无 messageTemplate 时自动拼上：`"取消 — 确认部署到生产环境？"` | 消息必须自带上下文——异步对话中 "是/否" 没有意义，必须说清楚"对什么说是/否" |
+| B3 | customInput 在中文输入法下回车误提交，且文本可能丢失 | 缺少 IME `isComposing` 守卫 + 父子组件同 tick 闭包读取旧值 | 补 `isComposing` 守卫；提交链改为 ref/实时同步，保证拿到最新文本 | 文本输入场景必须单独检查 IME 和 React 闭包，不能只测英文键盘路径 |
+| B4 | `create_rich_block` 实时富块挂错气泡，callback 消息会粘连到旧 bubble | rich_block 无 `messageId` 时前端错误回退到 stream bubble；done 后 stale `invocationId` 未清理 | `useAgentMessages` 优先关联最近 callback 消息；done 时清空 stale `invocationId` | 富块渲染和消息气泡边界是同一条实时链路，必须一起测 |
+| B5 | 分组提交早期版本对 `customInput`、badge 计数、card-grid 确认链路处理不完整 | group 模式下 customText 通道、badge state 和 card-grid 两步确认最初没一起设计完 | 补全 `InteractiveBlockGroup` customTexts 通道、实时同步/清空逻辑、badge 归零、card-grid 确认步骤 | 多 block 表单不是“单块逻辑乘 N”，必须以整组交互链路做 review 和测试 |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC

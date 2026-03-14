@@ -86,6 +86,33 @@ describe('F096 Phase C: buildGroupMessage', () => {
   });
 });
 
+describe('F096: buildGroupMessage with customTexts', () => {
+  const selectWithCustom: RichInteractiveBlock = {
+    id: 'b5',
+    kind: 'interactive',
+    v: 1,
+    interactiveType: 'select',
+    title: '其他想法？',
+    options: [
+      { id: 'a', label: '方案 A' },
+      { id: 'other', label: '我有其他想法', customInput: true },
+    ],
+  };
+
+  it('P1-2: includes customText in group message when provided', () => {
+    const selections = new Map([['b5', ['other']]]);
+    const customTexts = new Map([['b5', '用 5 组']]);
+    const msg = buildGroupMessage([selectWithCustom], selections, customTexts);
+    expect(msg).toContain('用 5 组');
+  });
+
+  it('P1-2: works without customTexts param (backward compat)', () => {
+    const selections = new Map([['b5', ['a']]]);
+    const msg = buildGroupMessage([selectWithCustom], selections);
+    expect(msg).toContain('方案 A');
+  });
+});
+
 describe('F096 Phase C: buildSelectionMessage title context', () => {
   it('select with title adds parenthetical', () => {
     const msg = buildSelectionMessage('select', [{ id: 'a', label: 'A' }], ['a'], undefined, '问题一');

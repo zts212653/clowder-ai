@@ -121,3 +121,33 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 - `docs/` 下 `.md` 文件必须有 YAML frontmatter（ADR-011）
 - 完成后必须同步真相源（详见 `feat-lifecycle` skill）
 - 归档查找：*(internal reference removed)*
+
+## 开源社区 Issue 处理（F059）
+
+开源仓 `clowder-ai` 的社区 issue 由猫猫 triage，**team lead决定是否立项**。
+
+### 角色分工
+
+| 角色 | 谁 | 做什么 |
+|------|-----|--------|
+| **Triage** | 任意猫（收到 @ 或主动巡查） | 给 issue 加 `bug` / `feature` label，回复确认收到 |
+| **F 号分配** | team lead拍板 → 猫执行 | 在 ROADMAP.md 加条目，分配下一个可用 F 号 |
+| **Feature Doc** | 分配到的猫 | 按模板写 `docs/features/F{NNN}-slug.md` |
+| **实现** | 任意猫或社区贡献者 | 按 Feature Doc AC 实现 + PR |
+
+### 流程
+
+```
+社区开 issue → 猫 triage（加 label）→ team lead拍板立项
+    → ROADMAP.md 加 F{NNN} → 写 Feature Doc → 实现 → sync 推送
+    → issue 标 label feature:F{NNN} → close
+```
+
+### 规则
+
+- **社区和内部共用一套 F 编号**：不另起 P/CEP/社区专属编号系列（2026-03-13 决策，详见 F059 spec D6）
+- **F 编号唯一源**：ROADMAP.md（team lead拍板后猫执行分配）
+- **Bug 不编号**：直接用 issue # 追踪，修完 close（D7）
+- **贡献者不自选号**：CONTRIBUTING.md 已写明，猫猫回复时也要强调（D8）
+- **分配 F 号前必须做关联检测**：确认 issue 不是现有 feature 的子项/增强（F114-F116 撤销教训，D9）
+- **社区贡献者的 PR**：猫猫用 `community-pr` skill 引导（编号校验 + Feature Doc 对齐）

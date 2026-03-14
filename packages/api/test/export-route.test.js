@@ -43,7 +43,7 @@ describe('formatThreadAsMarkdown', () => {
       makeMessage({ content: '你好布偶猫', timestamp: new Date('2026-02-07T10:30:00').getTime() }),
       makeMessage({
         catId: 'opus',
-        content: '你好owner！',
+        content: '你好team lead！',
         timestamp: new Date('2026-02-07T10:31:00').getTime(),
         id: 'msg-2',
       }),
@@ -55,8 +55,8 @@ describe('formatThreadAsMarkdown', () => {
     assert.ok(md.includes('thread-1'));
     assert.ok(md.includes('布偶猫'));
     assert.ok(md.includes('你好布偶猫'));
-    assert.ok(md.includes('你好owner！'));
-    assert.ok(md.includes('owner'));
+    assert.ok(md.includes('你好team lead！'));
+    assert.ok(md.includes('team lead'));
   });
 
   test('handles empty messages with only header', () => {
@@ -85,7 +85,7 @@ describe('formatThreadAsMarkdown', () => {
 
     const md = formatThreadAsMarkdown(thread, messages);
 
-    assert.ok(md.includes('owner'));
+    assert.ok(md.includes('team lead'));
     assert.ok(md.includes('布偶猫'));
     assert.ok(md.includes('缅因猫'));
     assert.ok(md.includes('请问一下'));
@@ -126,7 +126,7 @@ describe('formatThreadAsText', () => {
       makeMessage({ content: '你好布偶猫', timestamp: new Date('2026-02-07T10:30:00').getTime() }),
       makeMessage({
         catId: 'opus',
-        content: '你好owner！',
+        content: '你好team lead！',
         timestamp: new Date('2026-02-07T10:31:00').getTime(),
         id: 'msg-2',
       }),
@@ -144,7 +144,7 @@ describe('formatThreadAsText', () => {
 
     // Should include message content
     assert.ok(txt.includes('你好布偶猫'));
-    assert.ok(txt.includes('你好owner！'));
+    assert.ok(txt.includes('你好team lead！'));
   });
 
   test('handles empty messages', () => {

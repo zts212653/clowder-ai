@@ -219,7 +219,7 @@ export interface ChatMessage {
   whisperTo?: string[];
   /** F35: Timestamp when whisper was revealed (made public) */
   revealedAt?: number;
-  /** F057-C2: Whether this message mentions the user (@user / @owner) */
+  /** F057-C2: Whether this message mentions the user (@user / @team lead) */
   mentionsUser?: boolean;
 }
 

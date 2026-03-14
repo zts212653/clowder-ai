@@ -43,7 +43,7 @@ function makeDeps() {
       resolveWorkingDirectory: () => '/tmp/test',
     },
     threadStore: null,
-    apiUrl: 'http://127.0.0.1:3002',
+    apiUrl: 'your local Clowder API URL',
   };
 }
 

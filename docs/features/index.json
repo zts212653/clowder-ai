@@ -561,7 +561,7 @@
     {
       "id": "F091",
       "name": "Signal Study Mode — 信号学习伴侣",
-      "status": "in-progress (Phase 8 podcast context injection done) | **Owner**: Ragdoll",
+      "status": "in-progress (Phase 9 signal nav + notes viewable done) | **Owner**: Ragdoll",
       "file": "F091-signal-study-mode.md"
     },
     {
@@ -591,7 +591,7 @@
     {
       "id": "F096",
       "name": "Interactive Rich Blocks — 可交互富文本组件",
-      "status": "Phase C in progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Completed**: 2026-03-13",
       "file": "F096-interactive-rich-blocks.md"
     },
     {
@@ -689,7 +689,19 @@
       "name": "Voice Playback Queue — 语音播放队列 + Intent 调度",
       "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P2",
       "file": "F112-voice-playback-queue.md"
+    },
+    {
+      "id": "F113",
+      "name": "Multi-Platform One-Click Deploy",
+      "status": "backlog | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2",
+      "file": "F113-multi-platform-one-click-deploy.md"
+    },
+    {
+      "id": "F114",
+      "name": "喵约治理升级 — 四层架构 + Magic Words + Evidence Gate",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F114-governance-magic-words.md"
     }
   ],
-  "generated_at": "2026-03-13T08:03:34.232Z"
+  "generated_at": "2026-03-13T23:30:46.103Z"
 }

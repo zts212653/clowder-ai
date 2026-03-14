@@ -32,6 +32,7 @@ describe('MobileInputToolbar', () => {
     const defaults = {
       onAttach: vi.fn(),
       onWhisperToggle: vi.fn(),
+      onGameClick: vi.fn(),
       onClose: vi.fn(),
       ...props,
     };
@@ -41,12 +42,13 @@ describe('MobileInputToolbar', () => {
     return defaults;
   }
 
-  it('renders two action buttons', () => {
+  it('renders three action buttons', () => {
     render();
     const buttons = container.querySelectorAll('button');
-    expect(buttons.length).toBe(2);
+    expect(buttons.length).toBe(3);
     expect(container.textContent).toContain('附件');
     expect(container.textContent).toContain('悄悄话');
+    expect(container.textContent).toContain('游戏');
   });
 
   it('calls onAttach + onClose when attach button is clicked', () => {

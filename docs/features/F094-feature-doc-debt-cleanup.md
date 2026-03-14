@@ -24,7 +24,7 @@ F094 立项时，家里共有 97 个 Feature 文档，质量参差不齐。F086/
 - **最高频缺失项（当前）**：无（13 项检查全部清零）
 - **重复 Feature ID**：F055、F061、F081 各有 2 份文档（待team lead拍板去留）
 - **TEMPLATE.md 过时**：不反映实际最佳实践（已有 `feature-doc-template.md` 取代）
-- **BACKLOG.md 脱节**：已清零（`PASS check-feature-truth`）
+- **ROADMAP.md 脱节**：已清零（`PASS check-feature-truth`）
 
 **Mission Hub Dashboard parser（F058）依赖统一格式**：Phase 标题、AC 编号、Status 行、Dependencies 段——格式不统一就无法自动提取进度。
 
@@ -87,7 +87,7 @@ team experience（2026-03-10）：
 
 ### Phase C: BACKLOG 对齐 + 验证
 
-1. **BACKLOG.md 清理**：done 的移除、status 对齐实际
+1. **ROADMAP.md 清理**：done 的移除、status 对齐实际
 2. **自动化验证脚本**：lint 检查所有 feat 文档的模板合规度
 3. **CI 集成**（可选）：新 feat 文档不符合模板 → 告警
 
@@ -105,7 +105,7 @@ team experience（2026-03-10）：
 - [x] AC-B4: Phase 标题和 AC 编号符合 parser 格式
 
 ### Phase C（BACKLOG 对齐 + 验证）
-- [x] AC-C1: BACKLOG.md 与 feat 文档状态一致
+- [x] AC-C1: ROADMAP.md 与 feat 文档状态一致
 - [x] AC-C2: lint 脚本可检查 feat 文档模板合规度
 - [x] AC-C3: 全量通过 lint（0 error）
 

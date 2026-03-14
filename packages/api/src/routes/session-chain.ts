@@ -166,7 +166,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
   });
 
   // PATCH /api/threads/:threadId/sessions/:catId/bind — Manual bind (#72)
-  // Allows owner to bind a known-good CLI session ID to a cat's thread session.
+  // Allows team lead to bind a known-good CLI session ID to a cat's thread session.
   // If active session exists → update cliSessionId; otherwise → create new session.
   app.patch<{
     Params: { threadId: string; catId: string };

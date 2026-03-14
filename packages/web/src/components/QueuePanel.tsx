@@ -261,7 +261,7 @@ function QueueEntryRow({
         <p className="text-sm text-gray-700 truncate">{entry.content}</p>
         <div className="flex items-center gap-1 mt-0.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
-          <span className="text-xs text-gray-400">{entry.source === 'connector' ? 'Connector' : 'owner'}</span>
+          <span className="text-xs text-gray-400">{entry.source === 'connector' ? 'Connector' : 'team lead'}</span>
           {imageCount > 0 && (
             <span className="flex items-center gap-0.5 text-xs text-gray-400 ml-1">
               <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">

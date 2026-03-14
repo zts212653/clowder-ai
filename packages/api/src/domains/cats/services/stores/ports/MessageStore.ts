@@ -50,7 +50,7 @@ export interface StoredMessage {
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];
-  /** F057-C2: Whether this message mentions the user (@user / @owner) */
+  /** F057-C2: Whether this message mentions the user (@user / @team lead) */
   mentionsUser?: boolean;
   timestamp: number;
   /** F045: Extended thinking content (accumulated from CLI thinking blocks). Persisted for F5 recovery. */

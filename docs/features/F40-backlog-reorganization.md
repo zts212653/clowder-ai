@@ -62,7 +62,7 @@ team lead的记忆系统设计 proposal（三层记忆）：
 
 ```
 docs/
-├── BACKLOG.md              # 简化为活跃 Feature 索引（热层）
+├── ROADMAP.md              # 简化为活跃 Feature 索引（热层）
 ├── TECH-DEBT.md            # 技术债务单独文件
 ├── features/               # Feature 聚合目录（温层）
 │   ├── F40-backlog-reorganization.md   # 本文件，第一个示范
@@ -82,7 +82,7 @@ docs/
 
 **新结构**：
 
-#### `docs/BACKLOG.md`（热层 - 活跃 Feature 索引）
+#### `docs/ROADMAP.md`（热层 - 活跃 Feature 索引）
 
 ```markdown
 # Cat Cafe Feature Roadmap
@@ -399,7 +399,7 @@ F014 → F015 → F036
    - 如果有 → 记录待开的下一个 Feature
 
 4. **更新 BACKLOG**
-   - 从 `docs/BACKLOG.md` 移除该行
+   - 从 `docs/ROADMAP.md` 移除该行
    - （聚合文件保留，不删除）
 
 5. **真相源同步检查**

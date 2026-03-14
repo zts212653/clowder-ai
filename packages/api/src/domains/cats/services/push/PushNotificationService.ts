@@ -1,6 +1,6 @@
 /**
  * Push Notification Service
- * 通过 Web Push 向owner的所有设备推送通知
+ * 通过 Web Push 向team lead的所有设备推送通知
  *
  * Best-effort: 推送失败不影响主流程，410 Gone 自动清理过期订阅
  */

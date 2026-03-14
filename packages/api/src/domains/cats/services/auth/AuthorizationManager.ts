@@ -55,7 +55,7 @@ export class AuthorizationManager {
    * 猫猫请求权限 — 完整流程:
    * 1. 查规则 → 命中则直接返回
    * 2. 创建 pending record → WebSocket 推送
-   * 3. 等待owner审批 (120s) → 返回结果或 pending
+   * 3. 等待team lead审批 (120s) → 返回结果或 pending
    */
   async requestPermission(
     catId: CatId,
@@ -117,11 +117,11 @@ export class AuthorizationManager {
         });
     }
 
-    // Step 3: 等待owner审批
+    // Step 3: 等待team lead审批
     return new Promise<PermissionResponse>((resolve) => {
       const timer = setTimeout(() => {
         this.inFlightWaiters.delete(record.requestId);
-        // 超时 → 返回 pending + requestId（owner稍后审批）
+        // 超时 → 返回 pending + requestId（team lead稍后审批）
         void this.auditStore.append({
           requestId: record.requestId,
           invocationId: req.invocationId,
@@ -139,7 +139,7 @@ export class AuthorizationManager {
   }
 
   /**
-   * owner审批 — 更新 record + 可选创建规则 + resolve waiter
+   * team lead审批 — 更新 record + 可选创建规则 + resolve waiter
    */
   async respond(
     requestId: string,

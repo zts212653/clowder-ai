@@ -235,7 +235,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               </span>
             )}
             <span className="text-xs text-gray-400">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
-            <span className="text-xs font-semibold text-owner-dark">owner</span>
+            <span className="text-xs font-semibold text-owner-dark">team lead</span>
           </div>
           <div
             className={`rounded-2xl rounded-br-sm px-4 py-3 transition-transform hover:-translate-y-0.5 ${
@@ -254,7 +254,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
         <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 ring-owner-light bg-owner-primary flex items-center justify-center">
           <img
             src="/avatars/owner.jpg"
-            alt="owner"
+            alt="team lead"
             width={32}
             height={32}
             className="object-cover w-full h-full"

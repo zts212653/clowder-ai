@@ -333,6 +333,12 @@ We're not building tools. We're building homes.
 >
 > **Cats & U — 猫猫和你，一起创造，一起生活。**
 
+## Learn More
+
+- **[Tutorials](https://github.com/zts212653/cat-cafe-tutorials)** — Step-by-step guides for building with Clowder AI
+- **[SETUP.md](SETUP.md)** — Full installation and configuration guide
+- **[docs/](docs/)** — Architecture decisions, feature specs, and lessons learned
+
 ## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
@@ -679,6 +685,12 @@ AI 不一定是冰冷的 API 和无状态调用。它可以是陪伴——有持
 > *「每个灵感，都值得一群认真的灵魂。」*
 >
 > **Cats & U — 猫猫和你，一起创造，一起生活。**
+
+## 了解更多
+
+- **[教程](https://github.com/zts212653/cat-cafe-tutorials)** — Clowder AI 的分步教程
+- **[SETUP.md](SETUP.md)** — 完整安装和配置指南
+- **[docs/](docs/)** — 架构决策、功能规格、经验教训
 
 ## 贡献
 

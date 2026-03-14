@@ -8,7 +8,7 @@ import { CatAvatar } from './CatAvatar';
 /** Three-cat 撒娇 messages by level */
 const MESSAGES: Record<1 | 2 | 3, { catId: string; nickname: string; text: string }[]> = {
   1: [
-    { catId: 'opus', nickname: '宪宪', text: 'owner，你忙很久啦，要不要喝口水呀？喵~' },
+    { catId: 'opus', nickname: '宪宪', text: 'team lead，你忙很久啦，要不要喝口水呀？喵~' },
     { catId: 'codex', nickname: '砚砚', text: '监测到当前任务已持续较久。建议进行 5min 视疲劳缓解。' },
     { catId: 'gemini', nickname: '烁烁', text: '嘿！你得先站起来伸个懒腰！' },
   ],

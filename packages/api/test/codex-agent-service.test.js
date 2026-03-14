@@ -136,7 +136,7 @@ test('injects cat-cafe MCP config even when cwd is outside repo', async () => {
     const promise = collect(
       service.invoke('hello from outside cwd', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://127.0.0.1:3002',
+          CAT_CAFE_API_URL: 'your local Clowder API URL',
           CAT_CAFE_INVOCATION_ID: 'inv-test-1',
           CAT_CAFE_CALLBACK_TOKEN: 'tok-test-1',
           CAT_CAFE_USER_ID: 'user-test-1\nline2',
@@ -153,7 +153,7 @@ test('injects cat-cafe MCP config even when cwd is outside repo', async () => {
     assert.ok(mcpArgsConfig, 'must inject cat-cafe mcp args config');
     assert.match(mcpArgsConfig, /packages\/mcp-server\/dist\/index\.js/);
     assert.ok(args.includes('mcp_servers.cat-cafe.enabled=true'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_API_URL="http://127.0.0.1:3002"'));
+    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_API_URL="your local Clowder API URL"'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_USER_ID="user-test-1\\nline2"'));

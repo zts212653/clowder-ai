@@ -33,7 +33,7 @@ triggers:
 1. **理解上下文**：先读项目现状（文件、文档、近期 commits）。每次只问一个问题，优先多选题。
 2. **探索方案**：提出 2-3 个备选 + tradeoffs，先说推荐和理由。**YAGNI 无情剪枝**——"以后可能需要"的功能先砍。
 3. **呈现设计**：每次 200-300 字，每段后问"这个方向对吗？"。覆盖：架构 / 组件 / 数据流 / 错误处理 / 测试。
-4. **产出**：设计文档写到 `feature-specs/YYYY-MM-DD-{topic}-design.md`，commit 后问"要开始实现了吗？"
+4. **产出**：设计文档写到 *(internal reference removed)*，commit 后问"要开始实现了吗？"
 
 ## Mode B: 多猫独立思考
 
@@ -86,7 +86,7 @@ Phase 6: team lead反馈 + 最终确认 → 进入 Mode C
 
 **追溯链**（每次收敛必须建立）：BACKLOG 条目 link 会议纪要入口；每篇文档头部 link 回上级文档。
 
-**会议纪要模板**（存放：`feature-discussions/YYYY-MM-DD-{topic}-meeting-notes.md`）：
+**会议纪要模板**（存放：*(internal reference removed)*）：
 ```markdown
 # {主题} 讨论纪要
 **Thread ID**: `thread_xxx` | **日期**: YYYY-MM-DD | **参与者**: [列出]

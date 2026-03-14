@@ -102,7 +102,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 ### 数据来源
 - **消息表**：@ 提及解析、消息统计、情绪关键词分析
 - **Git 历史**：commit 数、review 记录
-- **Feature 文档**：BACKLOG.md 已完成 feature 的参与者
+- **Feature 文档**：ROADMAP.md 已完成 feature 的参与者
 - **游戏记录**：需要新的存储结构（或复用 thread metadata）
 
 ## Acceptance Criteria — Phase A（已完成）

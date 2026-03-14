@@ -133,7 +133,7 @@ interface FeatEntry {
 }
 ```
 
-**数据源**：`docs/features/*.md` frontmatter 为主，`docs/BACKLOG.md` 为补充；冲突时以 feature 文档为准。
+**数据源**：`docs/features/*.md` frontmatter 为主，`docs/ROADMAP.md` 为补充；冲突时以 feature 文档为准。
 
 #### P2: cross_post_message
 

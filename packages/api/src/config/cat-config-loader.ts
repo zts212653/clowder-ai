@@ -559,7 +559,7 @@ export function getReviewPolicy(config?: CatCafeConfig): ReviewPolicy {
 
 /**
  * Check if a cat is available (has quota).
- * F032: owner 40 美刀教训 — 没猫粮的猫不要找！
+ * F032: team lead 40 美刀教训 — 没猫粮的猫不要找！
  */
 export function isCatAvailable(catId: string, config?: CatCafeConfig): boolean {
   const roster = getRoster(config);
@@ -599,13 +599,13 @@ export function isCatLead(catId: string, config?: CatCafeConfig): boolean {
 // ── F067: Owner config accessor ─────────────────────────────────────
 
 /** Default owner mention patterns (backward compat when owner not configured) */
-const DEFAULT_OWNER_MENTION_PATTERNS = ['@user', '@owner'];
+const DEFAULT_OWNER_MENTION_PATTERNS = ['@user', '@team lead'];
 
 let _cachedOwner: OwnerConfig | null = null;
 
 /**
  * Get owner config from cat-config.json.
- * Returns a default config with @user/@owner patterns when not configured.
+ * Returns a default config with @user/@team lead patterns when not configured.
  */
 export function getOwnerConfig(config?: CatCafeConfig): OwnerConfig {
   if (_cachedOwner && !config) return _cachedOwner;
@@ -614,7 +614,7 @@ export function getOwnerConfig(config?: CatCafeConfig): OwnerConfig {
 
   // v1 config or no owner → return defaults
   if (!cfg || cfg.version === 1 || !cfg.owner) {
-    return { name: 'owner', aliases: [], mentionPatterns: DEFAULT_OWNER_MENTION_PATTERNS };
+    return { name: 'team lead', aliases: [], mentionPatterns: DEFAULT_OWNER_MENTION_PATTERNS };
   }
 
   _cachedOwner = cfg.owner;
@@ -623,7 +623,7 @@ export function getOwnerConfig(config?: CatCafeConfig): OwnerConfig {
 
 /**
  * Get all owner mention patterns (lowercased, with @ prefix).
- * Always includes @user and @owner as fallback patterns in addition to configured ones.
+ * Always includes @user and @team lead as fallback patterns in addition to configured ones.
  */
 export function getOwnerMentionPatterns(config?: CatCafeConfig): readonly string[] {
   const owner = getOwnerConfig(config);

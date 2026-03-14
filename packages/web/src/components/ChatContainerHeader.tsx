@@ -58,7 +58,7 @@ export function ChatContainerHeader({
         <ExportButton threadId={threadId} />
         <VoiceCompanionButton threadId={threadId} defaultCatId={defaultCatId} />
         <Link
-          href="/signals"
+          href={`/signals?from=${encodeURIComponent(threadId)}`}
           className="p-1 rounded-lg hover:bg-owner-light transition-colors"
           title="Signal Inbox"
           aria-label="Signal Inbox"

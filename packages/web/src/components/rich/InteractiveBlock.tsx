@@ -88,6 +88,8 @@ function SelectInteraction({
     if (disabled) return;
     setPendingId(id);
     setCustomText('');
+    // Clear stale customText in parent when switching options
+    if (onCustomText) onCustomText('');
     // In group mode, immediately notify parent of pending selection
     if (hideSubmit) onSelect([id]);
   };
@@ -145,7 +147,10 @@ function SelectInteraction({
           <input
             type="text"
             value={customText}
-            onChange={(e) => setCustomText(e.target.value)}
+            onChange={(e) => {
+              setCustomText(e.target.value);
+              if (onCustomText) onCustomText(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.nativeEvent.isComposing && customText.trim()) handleSubmit();
             }}
@@ -287,12 +292,15 @@ function CardGridInteraction({
 
   const handleCardClick = (id: string) => {
     if (disabled || shuffling.current) return;
-    if (pendingMode) {
-      setPendingId(id);
-      onSelect([id]);
-    } else {
-      onSelect([id]);
-    }
+    setPendingId(id);
+    setHighlightId(null);
+    // In group mode, notify parent of pending selection immediately
+    if (pendingMode) onSelect([id]);
+  };
+
+  const handleSubmit = () => {
+    if (!pendingId) return;
+    onSelect([pendingId]);
   };
 
   const handleRandom = useCallback(() => {
@@ -313,11 +321,10 @@ function CardGridInteraction({
         const finalIdx = Math.floor(Math.random() * options.length);
         const finalId = options[finalIdx]?.id;
         setHighlightId(finalId);
+        setPendingId(finalId);
         shuffling.current = false;
+        // In group mode, notify parent after animation
         if (pendingMode) {
-          setPendingId(finalId);
-          setTimeout(() => onSelect([finalId]), 400);
-        } else {
           setTimeout(() => onSelect([finalId]), 400);
         }
       }
@@ -379,14 +386,30 @@ function CardGridInteraction({
           </div>
         </div>
       ))}
-      {allowRandom && !disabled && (
-        <button
-          type="button"
-          onClick={handleRandom}
-          className="mt-2 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm hover:from-amber-600 hover:to-orange-600 transition-all"
-        >
-          <CafeIcon name="shuffle" className="w-4 h-4 inline-block" /> 随机抽
-        </button>
+      {!disabled && (allowRandom || pendingId) && (
+        <div className="flex gap-2 mt-2">
+          {allowRandom && !disabled && (
+            <button
+              type="button"
+              onClick={handleRandom}
+              className="px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm hover:from-amber-600 hover:to-orange-600 transition-all"
+            >
+              <CafeIcon name="shuffle" className="w-4 h-4 inline-block" /> 随机抽
+            </button>
+          )}
+          {!disabled && !pendingMode && pendingId && (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="flex-1 py-2.5 bg-amber-600 text-white rounded-full text-sm font-semibold hover:bg-amber-700 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              确认选择
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -479,6 +502,8 @@ export interface InteractiveBlockProps {
   pendingMode?: boolean;
   /** Phase C: called when pending selection changes in group mode */
   onPendingChange?: (selectedIds: string[]) => void;
+  /** Phase C: called when customInput text changes in group mode */
+  onCustomTextChange?: (text: string) => void;
   /** Phase C: externally controlled disabled (group submitted) */
   groupDisabled?: boolean;
   /** Phase C: externally controlled selectedIds (group submitted) */
@@ -490,6 +515,7 @@ export function InteractiveBlock({
   messageId,
   pendingMode,
   onPendingChange,
+  onCustomTextChange,
   groupDisabled,
   groupSelectedIds,
 }: InteractiveBlockProps) {
@@ -499,9 +525,13 @@ export function InteractiveBlock({
   const isDisabled = groupDisabled ?? localDisabled;
   const displaySelectedIds = groupSelectedIds ?? localSelectedIds;
 
-  const handleCustomText = useCallback((text: string) => {
-    customTextRef.current = text;
-  }, []);
+  const handleCustomText = useCallback(
+    (text: string) => {
+      customTextRef.current = text;
+      if (onCustomTextChange) onCustomTextChange(text);
+    },
+    [onCustomTextChange],
+  );
 
   const handleSelect = useCallback(
     async (optionIds: string[]) => {

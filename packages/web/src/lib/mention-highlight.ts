@@ -29,7 +29,7 @@ function buildMentionColor(cats: Array<{ id: string; color: { primary: string } 
   return Object.fromEntries(cats.map((cat) => [cat.id, cat.color.primary]));
 }
 
-// ── Owner (owner) ─────────────────────────────────────────
+// ── Owner (team lead) ─────────────────────────────────────────
 const OWNER_ID = '__owner__';
 const OWNER_COLOR = '#F5A623'; // warm gold
 const OWNER_MENTIONS = ['owner', 'admin'];
@@ -42,7 +42,7 @@ const staticCats = Object.entries(CAT_CONFIGS).map(([id, c]) => ({
   color: { primary: c.color.primary },
 }));
 
-// Include owner as a pseudo-cat so @owner / @owner highlights gold
+// Include owner as a pseudo-cat so @owner / @team lead highlights gold
 const withOwner = [
   ...staticCats,
   {

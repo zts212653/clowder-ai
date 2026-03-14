@@ -172,7 +172,7 @@ describe('ConnectorGateway Bootstrap', () => {
       feishuAppId: 'test-app-id',
       feishuAppSecret: 'test-app-secret',
       feishuVerificationToken: 'test-token',
-      ownerUserId: 'lysander-real-id',
+      ownerUserId: 'owner-real-id',
     };
     const handle = await startConnectorGateway(config, deps);
     assert.ok(handle);
@@ -198,7 +198,7 @@ describe('ConnectorGateway Bootstrap', () => {
     assert.equal(createdThreads.length, 1);
     assert.equal(
       createdThreads[0].createdBy,
-      'lysander-real-id',
+      'owner-real-id',
       'thread should be created with ownerUserId, not fallback',
     );
     await handle.stop();

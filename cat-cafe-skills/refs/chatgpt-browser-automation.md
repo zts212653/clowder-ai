@@ -1,6 +1,6 @@
 # ChatGPT 浏览器自动化参考
 
-> 验证日期：2026-03-10 | 验证猫：布偶猫 Opus 4.6
+> 验证日期：2026-03-10 | 验证猫：Ragdoll Opus 4.6
 > 工具：`mcp__claude-in-chrome__*`
 
 本文档记录通过 Chrome MCP 操作 ChatGPT Web UI 的实测 DOM 知识。
