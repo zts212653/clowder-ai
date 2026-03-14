@@ -3,7 +3,9 @@
  * 通用 CLI 子进程管理器，处理生命周期、超时和清理
  */
 
-import { spawn as nodeSpawn } from 'node:child_process';
+import { execSync, spawn as nodeSpawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
@@ -265,7 +267,72 @@ export function isCliTimeout(
 }
 
 /**
- * Default spawn function wrapping child_process.spawn
+ * Resolve a command's underlying Node.js script path on Windows.
+ *
+ * npm global installs create .cmd shims that delegate to the actual JS entry
+ * point. We resolve the script path so we can spawn `node` directly, bypassing
+ * cmd.exe shell entirely (and all its argument escaping issues).
+ *
+ * Resolution strategy:
+ * 1. Check npm global prefix (standard location for npm/pnpm global installs)
+ * 2. Parse .cmd shim content as fallback
+ */
+function resolveCmdShimScript(command: string): string | undefined {
+  try {
+    const npmPrefix = process.env.APPDATA ? join(process.env.APPDATA, 'npm') : undefined;
+    if (npmPrefix) {
+      const knownScripts: Record<string, string> = {
+        claude: join(npmPrefix, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+        codex: join(npmPrefix, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
+      };
+      const knownPath = knownScripts[command];
+      if (knownPath && existsSync(knownPath)) return knownPath;
+    }
+
+    const output = execSync(`where ${command}.cmd`, { encoding: 'utf8', timeout: 5000 });
+    const cmdPath = output.trim().split(/\r?\n/)[0];
+    if (!cmdPath?.endsWith('.cmd')) return undefined;
+
+    const content = readFileSync(cmdPath, 'utf8');
+    const cmdDir = cmdPath.replace(/\\[^\\]+$/, '');
+
+    const dp0Matches = content.match(/"%dp0%\\([^"]+\.js)"/g);
+    if (dp0Matches) {
+      for (const m of dp0Matches) {
+        const relPath = m.replace(/^"%dp0%\\/, '').replace(/"$/, '');
+        const absPath = join(cmdDir, relPath);
+        if (existsSync(absPath)) return absPath;
+      }
+    }
+
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Cache resolved shim paths to avoid repeated filesystem lookups */
+const resolvedShimCache = new Map<string, string | null>();
+
+/**
+ * Escape a single argument for cmd.exe when using shell: true on Windows.
+ * Used only as fallback when .cmd shim resolution fails.
+ */
+function escapeCmdArg(arg: string): string {
+  if (arg === '') return '""';
+  if (!/[\s"&|<>^%!()\\]/.test(arg)) return arg;
+  const escaped = arg
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\+)$/g, '$1$1');
+  return `"${escaped}"`;
+}
+
+/**
+ * Default spawn function wrapping child_process.spawn.
+ *
+ * On Windows, resolves .cmd shim to underlying Node.js script and spawns
+ * `node` directly — bypassing cmd.exe shell entirely. Falls back to
+ * shell: true with escapeCmdArg if script resolution fails.
  */
 function defaultSpawn(
   command: string,
@@ -276,6 +343,28 @@ function defaultSpawn(
     stdio: ['ignore', 'pipe', 'pipe'];
   },
 ): ChildProcessLike {
+  if (process.platform === 'win32') {
+    if (!resolvedShimCache.has(command)) {
+      resolvedShimCache.set(command, resolveCmdShimScript(command) ?? null);
+    }
+    const scriptPath = resolvedShimCache.get(command);
+
+    if (scriptPath) {
+      return nodeSpawn('node', [scriptPath, ...args], {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: options.stdio,
+      });
+    }
+
+    const escapedArgs = args.map(escapeCmdArg);
+    return nodeSpawn(command, [...escapedArgs], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: options.stdio,
+      shell: true,
+    });
+  }
   return nodeSpawn(command, [...args], {
     cwd: options.cwd,
     env: options.env,

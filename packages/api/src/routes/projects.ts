@@ -6,9 +6,10 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readdir, realpath, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { readdir, realpath, stat, unlink, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
 import { getAllowedRoots, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
@@ -22,10 +23,19 @@ export type PickDirectoryResult =
   | { status: 'error'; message: string };
 
 /**
- * Shell out to macOS osascript to open native folder picker (NSOpenPanel).
+ * Open native folder picker dialog.
+ * - macOS: osascript → NSOpenPanel
+ * - Windows: PowerShell → System.Windows.Forms.FolderBrowserDialog
  * Returns a discriminated result: picked / cancelled / error.
  */
 export async function execPickDirectory(): Promise<PickDirectoryResult> {
+  if (process.platform === 'win32') {
+    return execPickDirectoryWindows();
+  }
+  return execPickDirectoryMac();
+}
+
+async function execPickDirectoryMac(): Promise<PickDirectoryResult> {
   try {
     const { stdout } = await execFileAsync('osascript', ['-e', 'POSIX path of (choose folder)'], { timeout: 120_000 });
     const picked = stdout.trim().replace(/\/$/, '');
@@ -34,11 +44,69 @@ export async function execPickDirectory(): Promise<PickDirectoryResult> {
     if (!s.isDirectory()) return { status: 'error', message: 'Selected path is not a directory' };
     return { status: 'picked', path: picked };
   } catch (err: unknown) {
-    // osascript reports "User canceled. (-128)" in stderr when user presses Cancel.
-    // Exit code 1 is generic — also used for permission denial, script errors, etc.
-    // Only treat explicit "User canceled" as cancellation.
     const stderr = String((err as { stderr?: unknown }).stderr ?? '');
     if (stderr.includes('User canceled')) return { status: 'cancelled' };
+    return { status: 'error', message: stderr || (err instanceof Error ? err.message : 'Unknown error') };
+  }
+}
+
+/** C# source for the native folder picker — compiled once, cached as .exe */
+const PICKER_CS = `
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+class Program {
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+    [STAThread]
+    static void Main() {
+        var f = new Form { TopMost = true, Size = new System.Drawing.Size(1,1),
+                           StartPosition = FormStartPosition.CenterScreen };
+        f.Show();
+        SetForegroundWindow(f.Handle);
+        f.BringToFront();
+        var d = new FolderBrowserDialog { Description = "Select project directory",
+                                          ShowNewFolderButton = true };
+        var r = d.ShowDialog(f);
+        f.Close();
+        Console.Write(r == DialogResult.OK ? d.SelectedPath : "::CANCELLED::");
+    }
+}`.trimStart();
+
+let pickerExePath: string | undefined;
+
+/**
+ * Ensure the native folder-picker .exe exists (compile on first call).
+ * Uses .NET Framework csc.exe which ships with every Windows install.
+ */
+async function ensurePickerExe(): Promise<string> {
+  if (pickerExePath && existsSync(pickerExePath)) return pickerExePath;
+  const exePath = join(tmpdir(), 'cat-cafe-pick-folder.exe');
+  if (existsSync(exePath)) { pickerExePath = exePath; return exePath; }
+  const csPath = join(tmpdir(), 'cat-cafe-pick-folder.cs');
+  await writeFile(csPath, PICKER_CS, 'utf8');
+  const cscDir = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319';
+  const { stderr } = await execFileAsync(
+    'powershell', ['-NoProfile', '-Command',
+      `& '${cscDir}\\csc.exe' /nologo /target:winexe '/out:${exePath}' /reference:System.Windows.Forms.dll /reference:System.Drawing.dll '${csPath}'`],
+    { timeout: 15_000 },
+  );
+  if (!existsSync(exePath)) throw new Error(`Failed to compile picker: ${stderr}`);
+  unlink(csPath).catch(() => {});
+  pickerExePath = exePath;
+  return exePath;
+}
+
+async function execPickDirectoryWindows(): Promise<PickDirectoryResult> {
+  try {
+    const exe = await ensurePickerExe();
+    const { stdout } = await execFileAsync(exe, [], { timeout: 120_000 });
+    const result = stdout.trim();
+    if (!result || result === '::CANCELLED::') return { status: 'cancelled' };
+    const s = await stat(result);
+    if (!s.isDirectory()) return { status: 'error', message: 'Selected path is not a directory' };
+    return { status: 'picked', path: result };
+  } catch (err: unknown) {
+    const stderr = String((err as { stderr?: unknown }).stderr ?? '');
     return { status: 'error', message: stderr || (err instanceof Error ? err.message : 'Unknown error') };
   }
 }
@@ -62,7 +130,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     return { path: cwd, name: basename(cwd) };
   });
 
-  // POST /api/projects/pick-directory - open native macOS folder picker
+  // POST /api/projects/pick-directory - open native folder picker (macOS/Windows)
   app.post('/api/projects/pick-directory', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {

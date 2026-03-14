@@ -15,6 +15,7 @@
  *   result/success → 跳过 (done 在循环后 yield)
  */
 
+import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
@@ -49,19 +50,70 @@ function formatThinkingSignatureRescueError(sessionId: string | undefined): stri
   ].join(' ');
 }
 
-function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> | undefined {
-  if (!callbackEnv) return undefined;
-  const env: Record<string, string | null> = { ...callbackEnv };
-  const mode = callbackEnv[ANTHROPIC_PROFILE_MODE_KEY];
-  if (mode === 'api_key') {
-    const apiKey = callbackEnv[ANTHROPIC_PROFILE_API_KEY]?.trim();
-    const baseUrl = callbackEnv[ANTHROPIC_PROFILE_BASE_URL]?.trim();
-    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
-    if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
-  } else {
-    // Subscription mode: explicitly clear inherited key-based env vars.
-    env.ANTHROPIC_API_KEY = null;
-    env.ANTHROPIC_BASE_URL = null;
+/**
+ * Locate git-bash on Windows via `where bash` + known paths.
+ * Claude CLI requires git-bash's bash.exe (not WSL bash).
+ * Result is cached after first resolution.
+ */
+let cachedGitBashPath: string | null | undefined;
+function findGitBashPath(): string | undefined {
+  if (cachedGitBashPath !== undefined) return cachedGitBashPath ?? undefined;
+  // Known standard install locations
+  const candidates = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) {
+      cachedGitBashPath = c;
+      return c;
+    }
+  }
+  // Dynamic: use `where bash` to find all bash.exe on PATH, pick the Git one
+  try {
+    const output = execSync('where bash', { encoding: 'utf8', timeout: 5000 });
+    for (const line of output.trim().split(/\r?\n/)) {
+      const p = line.trim();
+      // Skip WSL bash (System32), only accept Git-installed bash
+      if (p && /\\Git\\.*\\bash\.exe$/i.test(p) && existsSync(p)) {
+        cachedGitBashPath = p;
+        return p;
+      }
+    }
+  } catch {
+    // `where` not available or no results
+  }
+  cachedGitBashPath = null;
+  return undefined;
+}
+
+function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
+  const env: Record<string, string | null> = { ...(callbackEnv ?? {}) };
+
+  // CRITICAL: Always strip nested-session detection env vars.
+  // API server runs inside Claude Code, which sets CLAUDECODE=1. If inherited,
+  // the child `claude` CLI will refuse to start ("nested session detected").
+  env.CLAUDECODE = null;
+  env.CLAUDE_CODE_ENTRYPOINT = null;
+
+  // Windows: Ensure child Claude CLI can find git-bash.
+  if (process.platform === 'win32' && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
+    const found = findGitBashPath();
+    if (found) env.CLAUDE_CODE_GIT_BASH_PATH = found;
+  }
+
+  if (callbackEnv) {
+    const mode = callbackEnv[ANTHROPIC_PROFILE_MODE_KEY];
+    if (mode === 'api_key') {
+      const apiKey = callbackEnv[ANTHROPIC_PROFILE_API_KEY]?.trim();
+      const baseUrl = callbackEnv[ANTHROPIC_PROFILE_BASE_URL]?.trim();
+      if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
+      if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
+    } else {
+      // Subscription mode: explicitly clear inherited key-based env vars.
+      env.ANTHROPIC_API_KEY = null;
+      env.ANTHROPIC_BASE_URL = null;
+    }
   }
   return env;
 }
@@ -193,7 +245,7 @@ export class ClaudeAgentService implements AgentService {
         command: 'claude' as const,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
-        ...(envOverrides ? { env: envOverrides } : {}),
+        env: envOverrides,
         ...(options?.signal ? { signal: options.signal } : {}),
       };
       const events = options?.spawnCliOverride

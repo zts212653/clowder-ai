@@ -20,7 +20,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
+import { getCodexApprovalPolicy, getCodexSandboxMode, shouldSkipCodexModel } from '../../../../../config/codex-cli.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { isCliError, isCliTimeout, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
@@ -209,7 +209,7 @@ export class CodexAgentService implements AgentService {
 
     const sandboxMode = getCodexSandboxMode();
     const approvalPolicy = getCodexApprovalPolicy();
-    const modelArgs = ['--model', this.model];
+    const modelArgs = shouldSkipCodexModel() ? [] : ['--model', this.model];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
 

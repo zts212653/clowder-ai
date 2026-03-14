@@ -7,7 +7,8 @@
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
+import { resolveGitCommonDir } from '../../utils/monorepo-root.js';
 import type { GovernanceHealthSummary, GovernancePackMeta } from '@cat-cafe/shared';
 import { GOVERNANCE_PACK_VERSION } from './governance-pack.js';
 
@@ -33,8 +34,30 @@ function safePath(root: string, ...segments: string[]): string {
   return normalized;
 }
 
+/**
+ * Resolve catCafeRoot to the main worktree root so all worktrees
+ * share a single governance registry file.
+ *
+ * For worktrees: .git is a file pointing to the real .git dir.
+ * resolveGitCommonDir() returns the shared .git directory,
+ * whose parent is the main worktree root.
+ *
+ * For regular repos or non-git dirs: returns catCafeRoot unchanged.
+ *
+ * @param catCafeRoot Must be the git working tree root (where `.git` lives).
+ *   Callers must pass `getProjectRoot()` or equivalent, not a subdirectory.
+ */
+function resolveSharedRegistryRoot(catCafeRoot: string): string {
+  const commonDir = resolveGitCommonDir(catCafeRoot);
+  if (!commonDir) return catCafeRoot;
+  return dirname(commonDir);
+}
+
 export class GovernanceRegistry {
-  constructor(private readonly catCafeRoot: string) {}
+  private readonly catCafeRoot: string;
+  constructor(catCafeRoot: string) {
+    this.catCafeRoot = resolveSharedRegistryRoot(catCafeRoot);
+  }
 
   private get filePath(): string {
     return safePath(this.catCafeRoot, REGISTRY_DIR, REGISTRY_FILENAME);

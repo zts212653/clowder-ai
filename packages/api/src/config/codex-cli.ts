@@ -26,3 +26,12 @@ export function getCodexSandboxMode(env: NodeJS.ProcessEnv = process.env): Codex
 export function getCodexApprovalPolicy(env: NodeJS.ProcessEnv = process.env): CodexApprovalPolicy {
   return parseEnum(env.CAT_CODEX_APPROVAL_POLICY, CODEX_APPROVAL_POLICIES, DEFAULT_CODEX_APPROVAL_POLICY);
 }
+
+/**
+ * Whether to skip --model flag when invoking Codex CLI.
+ * Codex CLI 0.111.0+ with ChatGPT account mode rejects any --model argument.
+ * Set CAT_CODEX_SKIP_MODEL=1 to omit --model and use the CLI's default model.
+ */
+export function shouldSkipCodexModel(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CAT_CODEX_SKIP_MODEL === '1' || env.CAT_CODEX_SKIP_MODEL === 'true';
+}

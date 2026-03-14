@@ -677,7 +677,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setTargetCats: (cats) =>
     set({ targetCats: cats, catStatuses: Object.fromEntries(cats.map((c) => [c, 'pending' as const])) }),
 
-  setCatStatus: (catId, status) => set((state) => ({ catStatuses: { ...state.catStatuses, [catId]: status } })),
+  setCatStatus: (catId, status) => {
+    if (get().catStatuses[catId] === status) return;
+    set((state) => ({ catStatuses: { ...state.catStatuses, [catId]: status } }));
+  },
 
   clearCatStatuses: () => set({ targetCats: [], catStatuses: {} }),
 
