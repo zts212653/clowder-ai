@@ -2438,12 +2438,7 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
   test('explicit #ideate with multi preferredCats dispatches all preferred cats', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
-    const threadStore = createMockThreadStore(
-      { t1: ['opus', 'codex'] },
-      {},
-      {},
-      { t1: ['opus', 'codex'] },
-    );
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] }, {}, {}, { t1: ['opus', 'codex'] });
     threadStore.updateParticipantActivity('t1', 'opus');
     threadStore.updateParticipantActivity('t1', 'codex');
 
@@ -2467,12 +2462,7 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
   test('no #ideate with multi preferredCats still routes to single cat', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
-    const threadStore = createMockThreadStore(
-      { t1: ['opus', 'codex'] },
-      {},
-      {},
-      { t1: ['opus', 'codex'] },
-    );
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] }, {}, {}, { t1: ['opus', 'codex'] });
     threadStore.updateParticipantActivity('t1', 'opus');
     threadStore.updateParticipantActivity('t1', 'codex');
 
