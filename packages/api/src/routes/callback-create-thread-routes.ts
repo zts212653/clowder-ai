@@ -37,7 +37,17 @@ export function registerCallbackCreateThreadRoutes(
       return EXPIRED_CREDENTIALS_ERROR;
     }
 
-    const thread = await threadStore.create(record.userId, title);
+    // P2: Stale invocation guard — reject if superseded by newer invocation
+    if (!registry.isLatest(invocationId)) {
+      return { status: 'stale_ignored' };
+    }
+
+    // P2: Inherit projectPath from the invoking thread so the new thread
+    // lands in the correct project context (avoids "default" fallback).
+    const sourceThread = await threadStore.get(record.threadId);
+    const projectPath = sourceThread?.projectPath;
+
+    const thread = await threadStore.create(record.userId, title, projectPath);
 
     if (preferredCats && preferredCats.length > 0) {
       await threadStore.updatePreferredCats(thread.id, preferredCats as CatId[]);

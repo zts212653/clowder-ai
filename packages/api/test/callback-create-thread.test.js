@@ -131,4 +131,52 @@ describe('POST /api/callbacks/create-thread (F115)', () => {
 
     assert.equal(response.statusCode, 400);
   });
+
+  // P2 fix: inherits projectPath from invoking thread
+  test('inherits projectPath from source thread', async () => {
+    const app = await createApp();
+    // Create a source thread with a specific projectPath
+    const sourceThread = await threadStore.create('user-1', 'Source thread', '/Users/dev/my-project');
+    // Create invocation bound to that thread
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus', sourceThread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-thread',
+      payload: {
+        invocationId,
+        callbackToken,
+        title: 'Child thread',
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    const body = JSON.parse(response.body);
+    const newThread = await threadStore.get(body.threadId);
+    assert.ok(newThread);
+    assert.equal(newThread.projectPath, '/Users/dev/my-project', 'new thread should inherit projectPath');
+  });
+
+  // P2 fix: stale invocation guard
+  test('returns stale_ignored for superseded invocation', async () => {
+    const app = await createApp();
+    // Create first invocation
+    const first = registry.create('user-1', 'opus', 'thread-1');
+    // Create second invocation for same thread+cat — supersedes first
+    registry.create('user-1', 'opus', 'thread-1');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-thread',
+      payload: {
+        invocationId: first.invocationId,
+        callbackToken: first.callbackToken,
+        title: 'Ghost thread',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'stale_ignored', 'stale invocation should be rejected');
+  });
 });
