@@ -105,6 +105,7 @@ export function ChatInputActionButton({
         <button
           onClick={() => onStop()}
           className="p-2 rounded-lg bg-red-500/80 text-white hover:bg-red-600 transition-colors"
+          title="停止生成"
           aria-label="Stop generation"
         >
           <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -119,6 +120,7 @@ export function ChatInputActionButton({
         <button
           onClick={() => onStop()}
           className="p-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors"
+          title="停止生成"
           aria-label="Stop generation"
         >
           <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
@@ -129,12 +131,13 @@ export function ChatInputActionButton({
         <button
           onClick={voice.stopRecording}
           className="p-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors animate-pulse"
+          title="停止录音"
           aria-label="Stop recording"
         >
           <StopRecordingIcon className="w-5 h-5" />
         </button>
       ) : voice.state === 'transcribing' ? (
-        <button disabled className="p-3 rounded-xl bg-gray-300 text-white cursor-wait" aria-label="Transcribing">
+        <button disabled className="p-3 rounded-xl bg-gray-300 text-white cursor-wait" title="转写中" aria-label="Transcribing">
           <LoadingIcon className="w-5 h-5" />
         </button>
       ) : isQueueMode && onQueueSend ? (
@@ -172,6 +175,7 @@ export function ChatInputActionButton({
           onClick={onSend}
           disabled={isSendDisabled}
           className="p-3 rounded-xl bg-owner-primary text-white hover:bg-owner-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="发送消息"
           aria-label="Send message"
         >
           <SendIcon className="w-5 h-5" />

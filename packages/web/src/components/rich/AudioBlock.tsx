@@ -111,6 +111,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
           onClick={toggle}
           className={`flex items-center gap-2 rounded-2xl px-3 py-1.5 transition-colors cursor-pointer ${colors.bg} hover:opacity-80`}
           style={{ width: `${barWidth}px` }}
+          title={playing ? '暂停语音' : '播放语音'}
           aria-label={playing ? '暂停语音' : '播放语音'}
         >
           {/* Speaker / sound wave icon */}
@@ -182,6 +183,7 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
       <button
         onClick={toggle}
         className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center transition-colors"
+        title={playing ? '暂停' : '播放'}
         aria-label={playing ? 'Pause' : 'Play'}
       >
         {playing ? (

@@ -77,7 +77,7 @@ export function VoteConfigModal({
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="text-base font-semibold text-cafe-black">发起投票</h2>
-          <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+          <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition-colors p-1" title="关闭" aria-label="关闭">
             <svg aria-hidden="true" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
               <path
                 fillRule="evenodd"
@@ -131,6 +131,7 @@ export function VoteConfigModal({
                       type="button"
                       onClick={() => removeOption(i)}
                       className="text-gray-400 hover:text-red-500 transition-colors px-1"
+                      title={`删除选项 ${i + 1}`}
                       aria-label={`删除选项 ${i + 1}`}
                     >
                       <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
