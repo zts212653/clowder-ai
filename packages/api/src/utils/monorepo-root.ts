@@ -15,7 +15,7 @@ export function findMonorepoRoot(start = process.cwd()): string {
  * Handles both regular repos (.git is a directory) and
  * worktrees (.git is a file pointing to the main repo).
  */
-function resolveGitCommonDir(projectPath: string): string | null {
+export function resolveGitCommonDir(projectPath: string): string | null {
   const gitPath = join(projectPath, '.git');
   try {
     const stat = statSync(gitPath);
