@@ -5,7 +5,7 @@
 #
 # Usage (run as normal user, not root — script uses sudo internally):
 #   curl -fsSL https://raw.githubusercontent.com/zts212653/clowder-ai/main/scripts/install.sh | bash
-#   ./scripts/install.sh [--start] [--memory] [--dir=/path/to/install]
+#   ./scripts/install.sh [--start] [--memory] [--dir=/path/to/install] [--auth=oauth|apikey]
 #
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
 # Not yet supported: Alpine, Arch, openSUSE
@@ -13,35 +13,26 @@
 
 set -euo pipefail
 
-# ── Colors ──────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+# ── Colors & helpers ──────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-# ── Parse arguments ─────────────────────────────────────────
-AUTO_START=false
-MEMORY_MODE=false
-INSTALL_DIR=""
+AUTO_START=false; MEMORY_MODE=false; INSTALL_DIR=""; AUTH_MODE=""
 for arg in "$@"; do
     case $arg in
-        --start) AUTO_START=true ;;
-        --memory) MEMORY_MODE=true ;;
-        --dir=*) INSTALL_DIR="${arg#*=}" ;;
+        --start) AUTO_START=true ;; --memory) MEMORY_MODE=true ;;
+        --dir=*) INSTALL_DIR="${arg#*=}" ;; --auth=*) AUTH_MODE="${arg#*=}" ;;
     esac
 done
 
-# ── Logging helpers ─────────────────────────────────────────
 info()    { echo -e "${CYAN}$*${NC}"; }
 ok()      { echo -e "  ${GREEN}✓${NC} $*"; }
 warn()    { echo -e "  ${YELLOW}⚠${NC} $*"; }
 fail()    { echo -e "  ${RED}✗${NC} $*"; }
 step()    { echo ""; echo -e "${BOLD}$*${NC}"; }
 
-# ── [1/7] Environment detection ────────────────────────────
-step "[1/7] Detecting environment / 环境检测..."
+# ── [1/9] Environment detection ────────────────────────────
+step "[1/9] Detecting environment / 环境检测..."
 
 if [[ "$(uname -s)" != "Linux" ]]; then
     fail "This script is for Linux only. Detected: $(uname -s)"
@@ -49,18 +40,10 @@ if [[ "$(uname -s)" != "Linux" ]]; then
     exit 1
 fi
 
-DISTRO_FAMILY=""
-DISTRO_NAME=""
-DISTRO_VERSION=""
-PKG_INSTALL=""
-PKG_UPDATE=""
-
+DISTRO_FAMILY=""; DISTRO_NAME=""; PKG_INSTALL=""; PKG_UPDATE=""
 if [[ -f /etc/os-release ]]; then
-    # shellcheck source=/dev/null
-    . /etc/os-release
+    . /etc/os-release  # shellcheck source=/dev/null
     DISTRO_NAME="${ID:-unknown}"
-    DISTRO_VERSION="${VERSION_ID:-}"
-
     case "$DISTRO_NAME" in
         ubuntu|debian|linuxmint|pop)
             DISTRO_FAMILY="debian"
@@ -81,65 +64,38 @@ if [[ -f /etc/os-release ]]; then
 fi
 
 if [[ -z "$DISTRO_FAMILY" ]]; then
-    fail "Unsupported distribution: ${DISTRO_NAME:-unknown}"
-    fail "不支持的发行版: ${DISTRO_NAME:-unknown}"
-    echo ""
-    echo "  Supported / 支持的发行版:"
-    echo "    - Ubuntu 22.04 / 24.04"
-    echo "    - Debian 12+"
-    echo "    - CentOS Stream 9 / RHEL 9"
-    echo "    - Fedora 39+"
-    echo ""
-    echo "  Alpine, Arch, etc. — not yet supported"
+    fail "Unsupported: ${DISTRO_NAME:-unknown}. Supported: Ubuntu/Debian, CentOS/RHEL/Fedora"
+    fail "不支持的发行版: ${DISTRO_NAME:-unknown}。支持: Ubuntu/Debian, CentOS/RHEL/Fedora"
     exit 1
 fi
+ok "OS: ${PRETTY_NAME:-$DISTRO_NAME} ($DISTRO_FAMILY)"
 
-ok "OS: ${PRETTY_NAME:-$DISTRO_NAME $DISTRO_VERSION} ($DISTRO_FAMILY)"
-
-# ── Sudo detection ──────────────────────────────────────────
 SUDO=""
 if [[ $EUID -ne 0 ]]; then
-    if command -v sudo &>/dev/null; then
-        SUDO="sudo"
-    else
-        fail "Not running as root and sudo not found."
-        fail "请以 root 运行或安装 sudo"
-        exit 1
-    fi
+    command -v sudo &>/dev/null || { fail "Not root and sudo not found / 请以 root 运行或安装 sudo"; exit 1; }
+    SUDO="sudo"
 fi
 
-# ── [2/7] Install system dependencies ──────────────────────
-step "[2/7] Installing system dependencies / 安装系统依赖..."
+# ── [2/9] Install system dependencies ──────────────────────
+step "[2/9] Installing system dependencies / 安装系统依赖..."
 
 $SUDO $PKG_UPDATE 2>/dev/null || true
-
 case "$DISTRO_FAMILY" in
-    debian)
-        $SUDO $PKG_INSTALL git curl ca-certificates gnupg build-essential
-        ;;
-    rhel)
-        $SUDO $PKG_INSTALL git curl ca-certificates gnupg2 gcc gcc-c++ make
-        ;;
+    debian) $SUDO $PKG_INSTALL git curl ca-certificates gnupg build-essential ;;
+    rhel)   $SUDO $PKG_INSTALL git curl ca-certificates gnupg2 gcc gcc-c++ make ;;
 esac
 ok "System dependencies installed / 系统依赖已安装"
 
-# ── [3/7] Install Node.js 20+ ──────────────────────────────
-step "[3/7] Installing Node.js / 安装 Node.js..."
+# ── [3/9] Install Node.js 20+ ──────────────────────────────
+step "[3/9] Installing Node.js / 安装 Node.js..."
 
-install_node_needed() {
-    if ! command -v node &>/dev/null; then
-        return 0
-    fi
-    local major
-    major=$(node -v | sed 's/v//' | cut -d. -f1)
-    if [[ "$major" -lt 20 ]]; then
-        warn "Node.js $(node -v) found but v20+ required / 发现 $(node -v) 但需要 v20+"
-        return 0
-    fi
+node_needs_install() {
+    command -v node &>/dev/null || return 0
+    local v; v=$(node -v | sed 's/v//' | cut -d. -f1)
+    [[ "$v" -lt 20 ]] && { warn "Node.js $(node -v) < v20 required"; return 0; }
     return 1
 }
-
-if install_node_needed; then
+if node_needs_install; then
     info "  Installing Node.js 20 via NodeSource..."
     case "$DISTRO_FAMILY" in
         debian)
@@ -161,115 +117,100 @@ else
     ok "Node.js $(node -v) already installed (>= 20)"
 fi
 
-# ── [4/7] Install pnpm + Redis ─────────────────────────────
-step "[4/7] Installing pnpm & Redis / 安装 pnpm 和 Redis..."
+# ── [4/9] Install pnpm + Redis ─────────────────────────────
+step "[4/9] Installing pnpm & Redis / 安装 pnpm 和 Redis..."
 
-# pnpm: corepack first, npm fallback
+# pnpm: corepack → npm fallback
 if ! command -v pnpm &>/dev/null; then
-    info "  Installing pnpm via corepack..."
     if command -v corepack &>/dev/null; then
         $SUDO corepack enable 2>/dev/null || true
         corepack prepare pnpm@latest --activate 2>/dev/null || true
     fi
-    # Fallback if corepack didn't work
     if ! command -v pnpm &>/dev/null; then
-        warn "corepack unavailable, falling back to npm / corepack 不可用，回退到 npm"
         $SUDO npm install -g pnpm
     fi
     ok "pnpm $(pnpm -v) installed"
-else
-    ok "pnpm $(pnpm -v) already installed"
+else ok "pnpm $(pnpm -v) already installed"
 fi
 
 # Redis (skip if --memory)
 if [[ "$MEMORY_MODE" == true ]]; then
     warn "Memory mode — skipping Redis / 内存模式，跳过 Redis"
 elif ! command -v redis-server &>/dev/null; then
-    info "  Installing Redis..."
     case "$DISTRO_FAMILY" in
-        debian) $SUDO $PKG_INSTALL redis-server ;;
-        rhel)   $SUDO $PKG_INSTALL redis ;;
+        debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;;
     esac
-    $SUDO systemctl enable redis-server 2>/dev/null \
-        || $SUDO systemctl enable redis 2>/dev/null \
-        || true
-    $SUDO systemctl start redis-server 2>/dev/null \
-        || $SUDO systemctl start redis 2>/dev/null \
-        || true
-    ok "Redis $(redis-server --version | grep -oE 'v=[0-9.]+' | cut -d= -f2) installed and started"
+    $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
+    $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
+    ok "Redis installed and started"
 else
-    ok "Redis already installed ($(redis-server --version | grep -oE 'v=[0-9.]+' | cut -d= -f2))"
-    if ! redis-cli ping &>/dev/null 2>&1; then
-        warn "Redis installed but not running, starting..."
-        $SUDO systemctl start redis-server 2>/dev/null \
-            || $SUDO systemctl start redis 2>/dev/null \
-            || true
-    fi
+    ok "Redis already installed"
+    redis-cli ping &>/dev/null 2>&1 || {
+        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
+    }
 fi
 
-# ── [5/7] Clone & build project ────────────────────────────
-step "[5/7] Setting up project / 设置项目..."
+# ── [5/9] Clone & build project ────────────────────────────
+step "[5/9] Setting up project / 设置项目..."
 
 REPO_URL="https://github.com/zts212653/clowder-ai.git"
-
-# Detect if we're already inside the repo
 IN_REPO=false
 if [[ -f "package.json" ]] && grep -q '"name": "cat-cafe"' package.json 2>/dev/null; then
-    IN_REPO=true
-    PROJECT_DIR="$(pwd)"
-elif [[ -n "$INSTALL_DIR" ]]; then
-    PROJECT_DIR="$INSTALL_DIR"
-else
-    PROJECT_DIR="$HOME/clowder-ai"
+    IN_REPO=true; PROJECT_DIR="$(pwd)"
+elif [[ -n "$INSTALL_DIR" ]]; then PROJECT_DIR="$INSTALL_DIR"
+else PROJECT_DIR="$HOME/clowder-ai"
 fi
-
 if [[ "$IN_REPO" == false ]]; then
     if [[ -d "$PROJECT_DIR/.git" ]]; then
-        ok "Repository already cloned at $PROJECT_DIR"
         cd "$PROJECT_DIR"
-        info "  Pulling latest changes..."
-        git pull --ff-only 2>/dev/null || warn "Could not pull (not on tracking branch?)"
+        git pull --ff-only 2>/dev/null || warn "Could not pull"
     else
-        info "  Cloning repository to $PROJECT_DIR..."
-        git clone "$REPO_URL" "$PROJECT_DIR"
-        cd "$PROJECT_DIR"
-        ok "Repository cloned"
+        git clone "$REPO_URL" "$PROJECT_DIR" && cd "$PROJECT_DIR"
     fi
-else
-    ok "Already in project directory: $PROJECT_DIR"
+else ok "Already in project: $PROJECT_DIR"
 fi
 
-info "  Installing npm packages..."
 pnpm install --frozen-lockfile 2>&1 | tail -3
 ok "Packages installed"
-
-info "  Building project..."
 pnpm build 2>&1 | tail -5
 ok "Build complete"
 
-# Skills: symlink each skill to user-level directories (ADR-009)
+# Skills: per-skill user-level symlinks (ADR-009)
 SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
 if [[ -d "$SKILLS_SOURCE" ]]; then
-    info "  Setting up skills symlinks (ADR-009)..."
-    SKILLS_TARGETS=("$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills")
-    for target_dir in "${SKILLS_TARGETS[@]}"; do
-        mkdir -p "$target_dir"
-        for skill_dir in "$SKILLS_SOURCE"/*/; do
-            [[ -d "$skill_dir" ]] || continue
-            skill_name=$(basename "$skill_dir")
-            [[ "$skill_name" == "refs" ]] && continue
-            ln -sfn "$skill_dir" "$target_dir/$skill_name"
+    for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills"; do
+        mkdir -p "$tdir"
+        for sd in "$SKILLS_SOURCE"/*/; do
+            [[ -d "$sd" ]] || continue
+            sn=$(basename "$sd"); [[ "$sn" == "refs" ]] && continue
+            ln -sfn "$sd" "$tdir/$sn"
         done
     done
-    ok "Skills linked to ~/.claude/skills, ~/.codex/skills, ~/.gemini/skills"
+    ok "Skills linked to user-level directories"
 else
-    fail "cat-cafe-skills/ directory not found in $PROJECT_DIR"
-    fail "Skills setup failed — cats will not load workflow rules"
+    fail "cat-cafe-skills/ not found — cats cannot load workflow rules"
     exit 1
 fi
 
-# ── [6/7] Generate .env ────────────────────────────────────
-step "[6/7] Configuring environment / 配置环境..."
+# ── [6/9] Install AI agent CLI tools ─────────────────────
+step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
+info "  Clowder spawns CLI subprocesses — these are required"
+
+install_cli() {
+    local name="$1" cmd="$2" pkg="$3"
+    if command -v "$cmd" &>/dev/null; then
+        ok "$name already installed"
+    else
+        npm install -g "$pkg" 2>&1 | tail -2
+        command -v "$cmd" &>/dev/null && ok "$name installed" || warn "$name: try 'hash -r' to refresh PATH"
+    fi
+}
+install_cli "Claude Code" "claude" "@anthropic-ai/claude-code"
+install_cli "Codex CLI"   "codex"  "@openai/codex"
+install_cli "Gemini CLI"  "gemini" "@google/gemini-cli"
+
+# ── [7/9] Generate .env ────────────────────────────────────
+step "[7/9] Configuring environment / 配置环境..."
 
 if [[ -f .env ]]; then
     warn ".env already exists — not overwriting / .env 已存在，不覆盖"
@@ -286,51 +227,68 @@ else
     fi
 fi
 
-# ── [7/7] Done ──────────────────────────────────────────────
-step "[7/7] Installation complete! / 安装完成！"
+# ── [8/9] Authentication setup / 认证配置 ─────────────────
+step "[8/9] Authentication setup / 认证配置..."
 
-echo ""
-echo "=========================="
-echo -e "${GREEN}  Clowder AI is ready!${NC}"
-echo -e "${GREEN}  猫猫咖啡已就绪！${NC}"
-echo "=========================="
-echo ""
-echo "  Project directory / 项目目录:"
-echo "    $PROJECT_DIR"
-echo ""
-echo "  Next steps / 下一步:"
-echo ""
-echo "    1. Edit .env and add at least one model API key:"
-echo "       编辑 .env，至少填入一个模型 API key："
-echo ""
-echo "       cd $PROJECT_DIR"
-echo "       nano .env   # or vim / code"
-echo ""
-echo "    2. Start the service / 启动服务:"
-if [[ "$MEMORY_MODE" == true ]]; then
-    echo "       pnpm start --memory"
-else
-    echo "       pnpm start"
-fi
-echo ""
-echo "    3. Open in browser / 打开浏览器:"
-echo "       http://localhost:3003"
-echo ""
-
-# Warn if no API key is configured
-if [[ -f .env ]]; then
-    HAS_KEY=false
-    grep -qE '^ANTHROPIC_API_KEY=.+' .env 2>/dev/null && HAS_KEY=true
-    grep -qE '^OPENAI_API_KEY=.+' .env 2>/dev/null && HAS_KEY=true
-    grep -qE '^GOOGLE_API_KEY=.+' .env 2>/dev/null && HAS_KEY=true
-    if [[ "$HAS_KEY" == false ]]; then
-        echo -e "  ${YELLOW}Note: No API key found in .env${NC}"
-        echo -e "  ${YELLOW}注意：.env 中未发现 API key${NC}"
-        echo "  Add at least one key to start chatting with your cats."
-        echo "  至少添加一个 key 才能和猫猫聊天。"
-        echo ""
+if [[ -z "$AUTH_MODE" ]]; then
+    if [[ -t 0 ]]; then
+        echo "  1) OAuth / Subscription login (recommended / 推荐)"
+        echo "  2) API Key mode / API Key 模式"
+        read -rp "  Choose [1/2] (default: 1): " auth_choice
+        [[ "${auth_choice:-1}" == "2" ]] && AUTH_MODE="apikey" || AUTH_MODE="oauth"
+    else
+        AUTH_MODE="oauth"
+        info "  Non-interactive — defaulting to OAuth"
     fi
 fi
+
+if [[ "$AUTH_MODE" == "apikey" ]]; then
+    info "  API Key mode — edit .env to add keys:"
+    echo "    ANTHROPIC_API_KEY=sk-...   (Claude / 布偶猫)"
+    echo "    OPENAI_API_KEY=sk-...      (Codex / 缅因猫)"
+    echo "    GOOGLE_API_KEY=AI...       (Gemini / 暹罗猫)"
+    if [[ -f .env ]] && ! grep -q 'CAT_CAFE_ANTHROPIC_PROFILE_MODE' .env; then
+        { echo ""; echo "# Auth: api_key (set by installer)"; echo "CAT_CAFE_ANTHROPIC_PROFILE_MODE=api_key"; echo "CODEX_AUTH_MODE=api_key"; } >> .env
+    fi
+    ok "API key mode configured"
+else
+    info "  OAuth mode — logging in to CLI tools..."
+    for cli_info in "claude:Claude Code" "codex:Codex CLI" "gemini:Gemini CLI"; do
+        cmd="${cli_info%%:*}"; name="${cli_info#*:}"
+        if command -v "$cmd" &>/dev/null; then
+            echo -e "  ${CYAN}→ $name login:${NC}"
+            "$cmd" auth login 2>&1 || warn "$name login skipped"
+        fi
+    done
+    ok "CLI auth setup complete (retry later: claude/codex/gemini auth login)"
+fi
+
+# ── [9/9] Done ──────────────────────────────────────────────
+step "[9/9] Installation complete! / 安装完成！"
+
+echo ""
+echo "=========================="
+echo -e "${GREEN}  Clowder AI is ready!  猫猫咖啡已就绪！${NC}"
+echo "=========================="
+echo ""
+echo "  Project: $PROJECT_DIR"
+echo ""
+if [[ "$AUTH_MODE" == "apikey" ]]; then
+    echo "  Next: edit .env with your API keys, then start"
+    echo "  下一步：编辑 .env 填入 API key，然后启动"
+    echo "    cd $PROJECT_DIR && nano .env"
+else
+    echo "  Next: start the service / 下一步：启动服务"
+fi
+echo ""
+if [[ "$MEMORY_MODE" == true ]]; then
+    echo "    pnpm start --memory"
+else
+    echo "    pnpm start"
+fi
+echo ""
+echo "  Open: http://localhost:3003"
+echo ""
 
 # Auto-start if requested
 if [[ "$AUTO_START" == true ]]; then
