@@ -50,15 +50,21 @@ async function execPickDirectoryMac(): Promise<PickDirectoryResult> {
 }
 
 async function execPickDirectoryWindows(): Promise<PickDirectoryResult> {
+  // FolderBrowserDialog requires STA thread. Use a helper WinForm to own the
+  // dialog and call TopMost + BringToFront so the picker appears in foreground
+  // even when spawned from a headless Node.js process.
   const psScript = [
     'Add-Type -AssemblyName System.Windows.Forms',
+    '$f = New-Object System.Windows.Forms.Form',
+    '$f.TopMost = $true',
     '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
     '$d.Description = "Select project directory"',
     '$d.ShowNewFolderButton = $true',
-    'if ($d.ShowDialog() -eq "OK") { Write-Output $d.SelectedPath } else { Write-Output "::CANCELLED::" }',
+    'if ($d.ShowDialog($f) -eq "OK") { Write-Output $d.SelectedPath } else { Write-Output "::CANCELLED::" }',
+    '$f.Dispose()',
   ].join('; ');
   try {
-    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', psScript], { timeout: 120_000 });
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-STA', '-Command', psScript], { timeout: 120_000 });
     const result = stdout.trim();
     if (!result || result === '::CANCELLED::') return { status: 'cancelled' };
     const s = await stat(result);
