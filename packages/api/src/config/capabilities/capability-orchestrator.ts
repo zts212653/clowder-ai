@@ -9,7 +9,7 @@
  * 连同 Cat Cafe 自有 MCP 一起写入 capabilities.json。
  */
 
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
@@ -50,9 +50,7 @@ function hasUsableStdioCommand(command: string | undefined): boolean {
 export async function resolvePencilBinary(): Promise<string | null> {
   try {
     const entries = await readdir(PENCIL_EXTENSIONS_DIR);
-    const pencilDirs = entries
-      .filter((e) => e.startsWith(PENCIL_DIR_PREFIX))
-      .sort(); // lexicographic sort works for semver with same prefix
+    const pencilDirs = entries.filter((e) => e.startsWith(PENCIL_DIR_PREFIX)).sort(); // lexicographic sort works for semver with same prefix
     if (pencilDirs.length === 0) return null;
     const latest = pencilDirs[pencilDirs.length - 1];
     return resolve(PENCIL_EXTENSIONS_DIR, latest, PENCIL_BINARY_SUFFIX);

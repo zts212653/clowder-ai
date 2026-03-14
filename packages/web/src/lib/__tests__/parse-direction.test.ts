@@ -144,7 +144,7 @@ describe('parseDirection', () => {
     const ownerToCat: Record<string, string> = {
       ...mockToCat,
       landy: '__owner__',
-      team lead: '__owner__',
+      'team lead': '__owner__',
     };
     const ownerAliases = Object.keys(ownerToCat).sort((a, b) => b.length - a.length);
     const ownerRe = new RegExp(`@(${ownerAliases.join('|')})(?=$|\\s|[,.:;!?])`, 'gi');

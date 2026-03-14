@@ -448,11 +448,7 @@ export function ChatInput({
     if (!activeMenu) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(target) &&
-        !gameBtnRef.current?.contains(target)
-      ) {
+      if (menuRef.current && !menuRef.current.contains(target) && !gameBtnRef.current?.contains(target)) {
         closeMenus();
       }
     };
