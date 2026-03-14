@@ -244,31 +244,8 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
     done
 fi
 
-# ── [7/9] Generate .env ────────────────────────────────────
-step "[7/9] Configuring environment / 配置环境..."
-
-if [[ -f .env ]]; then
-    warn ".env already exists — not overwriting / .env 已存在，不覆盖"
-    warn "To regenerate: cp .env.example .env"
-else
-    if [[ -f .env.example ]]; then
-        cp .env.example .env
-        ok ".env generated from .env.example"
-    else
-        fail ".env.example not found — cannot generate config. Try: git clone $REPO_URL"
-        exit 1
-    fi
-fi
-
-# Write deferred external Redis URL into .env
-if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
-    sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_EXT_URL|" .env 2>/dev/null \
-        || echo "REDIS_URL=$REDIS_EXT_URL" >> .env
-    ok "External Redis URL written to .env"
-fi
-
-# ── [8/9] Authentication setup / 认证配置 ─────────────────
-step "[8/9] Authentication setup / 认证配置..."
+# ── [7/9] Authentication setup / 认证配置 ─────────────────
+step "[7/9] Authentication setup / 认证配置..."
 write_claude_profile() {
     local key="$1" base_url="$2" model="$3" pid="profile-installer-$$"
     local pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"
@@ -282,6 +259,8 @@ EOSEC
     chmod 600 "$pdir/provider-profiles.secrets.local.json"
 }
 
+# Collect auth info into variables (written to .env in step 8)
+ENV_APPENDS=""
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
@@ -308,17 +287,17 @@ configure_agent_auth() {
         codex)
             tty_read "    Base URL (Enter = default): " base_url
             tty_read "    Model (Enter = default): " model
-            echo "CODEX_AUTH_MODE=api_key" >> .env
-            [[ -n "$key" ]] && echo "OPENAI_API_KEY=$key" >> .env
-            [[ -n "$base_url" ]] && echo "OPENAI_BASE_URL=$base_url" >> .env
-            [[ -n "$model" ]] && echo "CAT_CODEX_MODEL=$model" >> .env
-            ok "$name: API key configured in .env"
+            ENV_APPENDS+="CODEX_AUTH_MODE=api_key\n"
+            [[ -n "$key" ]] && ENV_APPENDS+="OPENAI_API_KEY=$key\n"
+            [[ -n "$base_url" ]] && ENV_APPENDS+="OPENAI_BASE_URL=$base_url\n"
+            [[ -n "$model" ]] && ENV_APPENDS+="CAT_CODEX_MODEL=$model\n"
+            ok "$name: API key collected (will write to .env)"
             ;;
         gemini)
             tty_read "    Model (Enter = default): " model
-            [[ -n "$key" ]] && echo "GEMINI_API_KEY=$key" >> .env
-            [[ -n "$model" ]] && echo "CAT_GEMINI_MODEL=$model" >> .env
-            ok "$name: API key configured in .env"
+            [[ -n "$key" ]] && ENV_APPENDS+="GEMINI_API_KEY=$key\n"
+            [[ -n "$model" ]] && ENV_APPENDS+="CAT_GEMINI_MODEL=$model\n"
+            ok "$name: API key collected (will write to .env)"
             ;;
     esac
 }
@@ -333,6 +312,22 @@ else
     info "  Log in by running each CLI: claude / codex / gemini"
     info "  Or re-run this script interactively for API key setup"
 fi
+
+# ── [8/9] Generate .env with all collected config ─────────
+step "[8/9] Generating config / 生成配置..."
+if [[ -f .env ]]; then
+    warn ".env already exists — not overwriting. To regenerate: cp .env.example .env"
+elif [[ -f .env.example ]]; then
+    cp .env.example .env; ok ".env generated from .env.example"
+else fail ".env.example not found. Try: git clone $REPO_URL"; exit 1
+fi
+# Write deferred Redis URL + collected auth config
+if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
+    sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_EXT_URL|" .env 2>/dev/null \
+        || echo "REDIS_URL=$REDIS_EXT_URL" >> .env
+    ok "External Redis URL written to .env"
+fi
+[[ -n "$ENV_APPENDS" ]] && { echo -e "$ENV_APPENDS" >> .env; ok "Auth config written to .env"; }
 
 # ── [9/9] Done ──────────────────────────────────────────────
 step "[9/9] Installation complete! / 安装完成！"
