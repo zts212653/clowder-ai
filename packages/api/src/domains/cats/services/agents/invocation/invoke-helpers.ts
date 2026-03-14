@@ -4,6 +4,8 @@
  * F23: 拆分以减少 invoke-single-cat.ts 行数
  */
 
+import type { SessionRecord } from '@cat-cafe/shared';
+
 /* ── F26: Task tool detection for real-time progress ─────── */
 export const TASK_TOOL_NAMES = new Set(['TodoWrite', 'write_todos']);
 
@@ -57,4 +59,26 @@ export function isMissingClaudeSessionError(message: string | undefined): boolea
 export function isTransientCliExitCode1(message: string | undefined): boolean {
   if (!message) return false;
   return /CLI 异常退出 \(code:\s*1(?:,\s*signal:\s*none)?\)/i.test(message);
+}
+
+/**
+ * Detect toxic sessions that should be auto-sealed before resume.
+ *
+ * Toxic indicators (any ONE triggers seal):
+ * 1. compressionCount >= 5 AND messageCount === 0
+ *    → Session has been compressed 5+ times but produced zero effective messages (BUG-001 pattern)
+ * 2. compressionCount >= 10
+ *    → Unconditional seal — no session should survive 10+ compressions
+ */
+export function isSessionToxic(record: Pick<SessionRecord, 'compressionCount' | 'messageCount'>): boolean {
+  const cc = record.compressionCount ?? 0;
+  const mc = record.messageCount ?? 0;
+
+  // Pattern 1: many compressions, zero output = Sisyphus loop
+  if (cc >= 5 && mc === 0) return true;
+
+  // Pattern 2: unconditional compression cap
+  if (cc >= 10) return true;
+
+  return false;
 }

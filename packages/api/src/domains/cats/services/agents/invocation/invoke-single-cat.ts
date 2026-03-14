@@ -34,6 +34,7 @@ import {
   classifyResumeFailure,
   extractTaskProgress,
   isMissingClaudeSessionError,
+  isSessionToxic,
   isTransientCliExitCode1,
 } from './invoke-helpers.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
@@ -383,8 +384,36 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             // Chain exists but no active session → previous was sealed; don't resume
             sessionId = undefined;
           } else if (activeRec.cliSessionId) {
-            // Active record's cliSessionId is authoritative (includes F33 manual bind)
-            sessionId = activeRec.cliSessionId;
+            // Pre-resume health check: detect toxic sessions before resume
+            if (isSessionToxic(activeRec)) {
+              // Auto-seal toxic session, start fresh
+              if (deps.sessionSealer) {
+                try {
+                  const sealResult = await deps.sessionSealer.requestSeal({
+                    sessionId: activeRec.id,
+                    reason: 'toxic_pre_check',
+                  });
+                  if (sealResult.accepted) {
+                    sessionManager.delete(userId, catId, threadId).catch(() => {});
+                    deps.sessionSealer.finalize({ sessionId: activeRec.id }).catch(() => {});
+                    console.info('[session-health] auto-sealed toxic session', {
+                      catId,
+                      threadId,
+                      sessionId: activeRec.id,
+                      compressionCount: activeRec.compressionCount,
+                      messageCount: activeRec.messageCount,
+                      fillRatio: activeRec.contextHealth?.fillRatio,
+                    });
+                  }
+                } catch {
+                  /* best-effort */
+                }
+              }
+              sessionId = undefined;
+            } else {
+              // Active record's cliSessionId is authoritative (includes F33 manual bind)
+              sessionId = activeRec.cliSessionId;
+            }
           }
         }
       } catch {
@@ -904,6 +933,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const maxAttempts = 2;
     let allowSessionRetry = Boolean(sessionId);
     let allowTransientRetry = true;
+    let outerHasContentOutput = false;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptStartedAt = Date.now();
       const options: AgentServiceOptions = {
@@ -1021,6 +1051,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         }
         if (msg.type !== 'error' && msg.type !== 'done' && msg.type !== 'session_init') {
           attemptHasContentOutput = true;
+          outerHasContentOutput = true;
         }
       }
 
@@ -1118,6 +1149,38 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         }
       }
       break;
+    }
+
+    // Post-invocation auto-seal: if we resumed a session but got no useful output,
+    // seal it so the next invocation starts fresh instead of hitting the same dead session.
+    if (
+      initialResumeSessionId &&
+      !outerHasContentOutput &&
+      hadError &&
+      deps.sessionSealer &&
+      deps.sessionChainStore
+    ) {
+      try {
+        const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
+        if (activeRecord && activeRecord.cliSessionId === initialResumeSessionId) {
+          const sealResult = await deps.sessionSealer.requestSeal({
+            sessionId: activeRecord.id,
+            reason: 'resume_failure',
+          });
+          if (sealResult.accepted) {
+            sessionManager.delete(userId, catId, threadId).catch(() => {});
+            deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
+            console.info('[session-health] auto-sealed failed-resume session', {
+              catId,
+              threadId,
+              sessionId: activeRecord.id,
+              initialResumeSessionId,
+            });
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
     }
 
     if (shouldTrackGeminiResumeFailures && Object.keys(resumeFailureCounts).length > 0) {
