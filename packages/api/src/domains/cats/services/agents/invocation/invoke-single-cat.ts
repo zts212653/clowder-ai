@@ -255,6 +255,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   let hadStreamError = false;
   let hadError = false;
+  let auditWritten = false;
+  let lastErrorMessage: string | undefined;
   let lastTasks: TaskProgressItem[] | null = null;
   let terminalTaskProgressStatus: TaskProgressStatus | null = null;
   let terminalInterruptReason: 'error' | 'aborted' | null = null;
@@ -544,8 +546,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
     };
 
-    let lastErrorMessage: string | undefined;
-
     const processMessage = async (msg: AgentMessage): Promise<AgentMessage[]> => {
       const outputs: AgentMessage[] = [];
 
@@ -652,6 +652,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           .catch((err) => {
             console.warn(`[audit] ${auditType} write failed`, { threadId, invocationId, err });
           });
+        auditWritten = true;
 
         // Push completion metrics for frontend status panel
         outputs.push({
@@ -1156,6 +1157,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       .catch((auditErr) => {
         console.warn('[audit] CAT_ERROR write failed', { threadId, invocationId, err: auditErr });
       });
+    auditWritten = true;
 
     hadError = true;
     yield {
@@ -1167,6 +1169,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     await finalizeTaskProgress();
     yield { type: 'done' as const, catId, isFinal: isLastCat, timestamp: Date.now() };
   } finally {
+    // Fallback audit: covers generator .return() (abort/break) where neither
+    // processMessage(done) nor catch block wrote the audit event.
+    if (!auditWritten) {
+      const durationMs = Date.now() - startTime;
+      const isAborted = Boolean(signal?.aborted);
+      auditLog
+        .append({
+          type: AuditEventTypes.CAT_ERROR,
+          threadId,
+          data: {
+            catId,
+            userId,
+            invocationId,
+            durationMs,
+            error: isAborted
+              ? 'invocation aborted (generator terminated)'
+              : (lastErrorMessage ?? 'invocation ended without completion audit'),
+          },
+        })
+        .catch((err) => {
+          console.warn('[audit] CAT_ERROR fallback write failed', { threadId, invocationId, err });
+        });
+    }
+
     await finalizeTaskProgress();
 
     // F089: Mark agent pane status when invocation completes
