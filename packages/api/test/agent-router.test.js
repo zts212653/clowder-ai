@@ -72,7 +72,12 @@ function createMockMessageStore() {
   };
 }
 
-function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}, threadRoutingPolicies = {}, threadPreferredCats = {}) {
+function createMockThreadStore(
+  initialParticipants = {},
+  threadProjectPaths = {},
+  threadRoutingPolicies = {},
+  threadPreferredCats = {},
+) {
   const participants = { ...initialParticipants };
   // F032 P1-2: Track activity timestamps for each participant
   const activity = {};
@@ -134,7 +139,7 @@ function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}
       }
       const key = `${threadId}:${catId}`;
       const existing = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
-      activity[key] = { lastMessageAt: Date.now() + (++activitySeq), messageCount: existing.messageCount + 1 };
+      activity[key] = { lastMessageAt: Date.now() + ++activitySeq, messageCount: existing.messageCount + 1 };
     },
     updateLastActive: () => {},
     delete: () => true,
@@ -2320,7 +2325,11 @@ describe('#58: preferredCats should not override last-replier', () => {
     );
 
     const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
-    assert.deepStrictEqual(targetCats, ['opus'], 'should route to first preferred cat when last replier is outside preferred set');
+    assert.deepStrictEqual(
+      targetCats,
+      ['opus'],
+      'should route to first preferred cat when last replier is outside preferred set',
+    );
   });
 
   test('@mention still overrides preferredCats', async () => {
