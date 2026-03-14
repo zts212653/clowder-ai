@@ -72,10 +72,12 @@ function createMockMessageStore() {
   };
 }
 
-function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}, threadRoutingPolicies = {}) {
+function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}, threadRoutingPolicies = {}, threadPreferredCats = {}) {
   const participants = { ...initialParticipants };
   // F032 P1-2: Track activity timestamps for each participant
   const activity = {};
+  // Monotonic counter to ensure stable ordering even when Date.now() has same-ms resolution
+  let activitySeq = 0;
   return {
     create: (userId, title, projectPath) => ({
       id: `thread_mock`,
@@ -95,6 +97,7 @@ function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}
       lastActiveAt: Date.now(),
       createdAt: Date.now(),
       routingPolicy: threadRoutingPolicies[threadId],
+      preferredCats: threadPreferredCats[threadId],
     }),
     list: () => [],
     listByProject: () => [],
@@ -131,7 +134,7 @@ function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}
       }
       const key = `${threadId}:${catId}`;
       const existing = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
-      activity[key] = { lastMessageAt: Date.now(), messageCount: existing.messageCount + 1 };
+      activity[key] = { lastMessageAt: Date.now() + (++activitySeq), messageCount: existing.messageCount + 1 };
     },
     updateLastActive: () => {},
     delete: () => true,
@@ -2261,5 +2264,111 @@ describe('F078: Group mentions', () => {
     const { targetCats } = await router.resolveTargetsAndIntent('@全体布偶猫咪 hi');
     // 咪 is not a boundary char — should NOT match @全体布偶猫
     assert.equal(targetCats.length, 1, '@全体布偶猫咪 should not trigger breed group');
+  });
+});
+
+describe('#58: preferredCats should not override last-replier', () => {
+  test('preferredCats + last replier in preferred set → routes to last replier only', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { t1: ['opus', 'codex', 'gemini'] },
+      {},
+      {},
+      { t1: ['opus', 'codex', 'gemini'] },
+    );
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'gemini');
+    threadStore.updateParticipantActivity('t1', 'codex'); // most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+    assert.deepStrictEqual(targetCats, ['codex'], 'should route to last replier, not all preferred cats');
+  });
+
+  test('last replier NOT in preferred set → routes to first preferred cat only', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { t1: ['opus', 'codex', 'gemini'] },
+      {},
+      {},
+      { t1: ['opus', 'gemini'] }, // codex not in preferred
+    );
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'codex'); // most recent, but not preferred
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+    assert.deepStrictEqual(targetCats, ['opus'], 'should route to first preferred cat when last replier is outside preferred set');
+  });
+
+  test('@mention still overrides preferredCats', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { t1: ['opus', 'codex'] },
+      {},
+      {},
+      { t1: ['opus'] }, // only opus preferred
+    );
+    threadStore.updateParticipantActivity('t1', 'opus'); // most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@codex review this', 't1');
+    assert.deepStrictEqual(targetCats, ['codex'], '@mention should override preferredCats');
+  });
+
+  test('no preferredCats preserves existing last-replier behavior', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex', 'gemini'] });
+    threadStore.updateParticipantActivity('t1', 'codex');
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'gemini'); // most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+    assert.deepStrictEqual(targetCats, ['gemini'], 'without preferredCats, last replier should still work');
   });
 });
