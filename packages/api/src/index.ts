@@ -774,6 +774,8 @@ async function main(): Promise<void> {
       taskProgressStore,
       log: app.log,
       processStartAt: PROCESS_START_AT,
+      messageStore,
+      socketManager: socketManager ?? undefined,
     });
     try {
       await reconciler.reconcileOrphans();
