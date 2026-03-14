@@ -6,9 +6,10 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readdir, realpath, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { readdir, realpath, stat, unlink, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
 import { getAllowedRoots, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
@@ -49,22 +50,56 @@ async function execPickDirectoryMac(): Promise<PickDirectoryResult> {
   }
 }
 
+/** C# source for the native folder picker — compiled once, cached as .exe */
+const PICKER_CS = `
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+class Program {
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+    [STAThread]
+    static void Main() {
+        var f = new Form { TopMost = true, Size = new System.Drawing.Size(1,1),
+                           StartPosition = FormStartPosition.CenterScreen };
+        f.Show();
+        SetForegroundWindow(f.Handle);
+        f.BringToFront();
+        var d = new FolderBrowserDialog { Description = "Select project directory",
+                                          ShowNewFolderButton = true };
+        var r = d.ShowDialog(f);
+        f.Close();
+        Console.Write(r == DialogResult.OK ? d.SelectedPath : "::CANCELLED::");
+    }
+}`.trimStart();
+
+let pickerExePath: string | undefined;
+
+/**
+ * Ensure the native folder-picker .exe exists (compile on first call).
+ * Uses .NET Framework csc.exe which ships with every Windows install.
+ */
+async function ensurePickerExe(): Promise<string> {
+  if (pickerExePath && existsSync(pickerExePath)) return pickerExePath;
+  const exePath = join(tmpdir(), 'cat-cafe-pick-folder.exe');
+  if (existsSync(exePath)) { pickerExePath = exePath; return exePath; }
+  const csPath = join(tmpdir(), 'cat-cafe-pick-folder.cs');
+  await writeFile(csPath, PICKER_CS, 'utf8');
+  const cscDir = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319';
+  const { stderr } = await execFileAsync(
+    'powershell', ['-NoProfile', '-Command',
+      `& '${cscDir}\\csc.exe' /nologo /target:winexe '/out:${exePath}' /reference:System.Windows.Forms.dll /reference:System.Drawing.dll '${csPath}'`],
+    { timeout: 15_000 },
+  );
+  if (!existsSync(exePath)) throw new Error(`Failed to compile picker: ${stderr}`);
+  unlink(csPath).catch(() => {});
+  pickerExePath = exePath;
+  return exePath;
+}
+
 async function execPickDirectoryWindows(): Promise<PickDirectoryResult> {
-  // FolderBrowserDialog requires STA thread. Use a helper WinForm to own the
-  // dialog and call TopMost + BringToFront so the picker appears in foreground
-  // even when spawned from a headless Node.js process.
-  const psScript = [
-    'Add-Type -AssemblyName System.Windows.Forms',
-    '$f = New-Object System.Windows.Forms.Form',
-    '$f.TopMost = $true',
-    '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
-    '$d.Description = "Select project directory"',
-    '$d.ShowNewFolderButton = $true',
-    'if ($d.ShowDialog($f) -eq "OK") { Write-Output $d.SelectedPath } else { Write-Output "::CANCELLED::" }',
-    '$f.Dispose()',
-  ].join('; ');
   try {
-    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-STA', '-Command', psScript], { timeout: 120_000 });
+    const exe = await ensurePickerExe();
+    const { stdout } = await execFileAsync(exe, [], { timeout: 120_000 });
     const result = stdout.trim();
     if (!result || result === '::CANCELLED::') return { status: 'cancelled' };
     const s = await stat(result);
