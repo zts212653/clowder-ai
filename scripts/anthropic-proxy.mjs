@@ -41,6 +41,130 @@ const UPSTREAMS_PATH =
   getArg('upstreams') ||
   process.env.ANTHROPIC_PROXY_UPSTREAMS_PATH ||
   resolve(PROJECT_ROOT, '.cat-cafe', 'proxy-upstreams.json');
+const MAX_RETRIES = parseCount(getArg('max-retries') || process.env.ANTHROPIC_PROXY_MAX_RETRIES, 3);
+const UPSTREAM_TIMEOUT_MS = parseCount(
+  getArg('upstream-timeout-ms') || process.env.ANTHROPIC_PROXY_UPSTREAM_TIMEOUT_MS,
+  30_000,
+);
+
+const RETRYABLE_HTTP_STATUSES = new Set([429, 529]);
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EAI_AGAIN',
+  'ENETDOWN',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'UPSTREAM_TIMEOUT',
+]);
+
+function parseCount(rawValue, fallback) {
+  if (rawValue == null) return fallback;
+  const parsed = Number.parseInt(String(rawValue), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function buildRetryDelayMs(attempt, kind, retryAfterHeader) {
+  if (kind === 'http_status') {
+    const retryAfter = retryAfterHeader ? Math.min(Number(retryAfterHeader) || 1, 30) : Math.pow(2, attempt);
+    return retryAfter * 1000;
+  }
+  return 250 * Math.pow(2, attempt);
+}
+
+function isTimeoutError(err) {
+  return (
+    (typeof err?.causeCode === 'string' && err.causeCode === 'UPSTREAM_TIMEOUT') ||
+    err?.name === 'TimeoutError' ||
+    err?.name === 'AbortError' ||
+    err?.message === 'The operation was aborted due to timeout'
+  );
+}
+
+function extractCauseCode(err) {
+  if (typeof err?.causeCode === 'string') return err.causeCode;
+  if (typeof err?.code === 'string') return err.code;
+  if (typeof err?.cause?.code === 'string') return err.cause.code;
+  if (isTimeoutError(err)) return 'UPSTREAM_TIMEOUT';
+  return undefined;
+}
+
+function isRetryableNetworkError(err) {
+  const causeCode = extractCauseCode(err);
+  if (causeCode && RETRYABLE_NETWORK_CODES.has(causeCode)) return true;
+  return err instanceof TypeError && err.message === 'fetch failed';
+}
+
+function formatUpstreamErrorMessage(causeCode) {
+  switch (causeCode) {
+    case 'UPSTREAM_TIMEOUT':
+    case 'ETIMEDOUT':
+    case 'UND_ERR_CONNECT_TIMEOUT':
+    case 'UND_ERR_HEADERS_TIMEOUT':
+      return 'upstream request timed out';
+    case 'ECONNREFUSED':
+      return 'upstream connection refused';
+    case 'ECONNRESET':
+      return 'upstream connection reset';
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return 'upstream host lookup failed';
+    default:
+      return 'upstream request failed';
+  }
+}
+
+function createUpstreamError(message, { causeCode, cause, retryable = false, statusCode = 502 } = {}) {
+  const err = new Error(message, cause ? { cause } : undefined);
+  err.causeCode = causeCode;
+  err.retryable = retryable;
+  err.statusCode = statusCode;
+  return err;
+}
+
+async function fetchWithTimeout(url, init) {
+  const signal = UPSTREAM_TIMEOUT_MS > 0 ? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) : undefined;
+  try {
+    return await fetch(url, {
+      ...init,
+      ...(signal ? { signal } : {}),
+    });
+  } catch (err) {
+    if (isTimeoutError(err)) {
+      throw createUpstreamError('upstream request timed out', {
+        causeCode: 'UPSTREAM_TIMEOUT',
+        cause: err,
+        retryable: true,
+        statusCode: 504,
+      });
+    }
+
+    const causeCode = extractCauseCode(err);
+    throw createUpstreamError(formatUpstreamErrorMessage(causeCode), {
+      ...(causeCode ? { causeCode } : {}),
+      cause: err,
+      retryable: isRetryableNetworkError(err),
+      statusCode: 502,
+    });
+  }
+}
+
+function serializeProxyError(err) {
+  const causeCode = extractCauseCode(err);
+  const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : isTimeoutError(err) ? 504 : 502;
+  const error = {
+    type: 'proxy_error',
+    message: err instanceof Error ? err.message : String(err),
+    ...(causeCode ? { causeCode } : {}),
+    ...(err?.retryable === true ? { retryable: true } : {}),
+  };
+  return { statusCode, body: { type: 'error', error } };
+}
 
 /** Load upstream mapping from config file. Re-read on each request for hot-reload. */
 function loadUpstreams() {
@@ -317,27 +441,35 @@ const server = createServer(async (req, res) => {
   forwardHeaders['accept-encoding'] = 'identity';
 
   try {
-    // Retry loop for transient upstream errors (429 rate-limited, 529 overloaded)
-    const MAX_RETRIES = 3;
     let upstream;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      upstream = await fetch(targetUrl.href, {
-        method: req.method || 'GET',
-        headers: forwardHeaders,
-        ...(sanitizedBody.length > 0 ? { body: sanitizedBody } : {}),
-      });
+      try {
+        upstream = await fetchWithTimeout(targetUrl.href, {
+          method: req.method || 'GET',
+          headers: forwardHeaders,
+          ...(sanitizedBody.length > 0 ? { body: sanitizedBody } : {}),
+        });
+      } catch (err) {
+        const retryable = isRetryableNetworkError(err) || err?.retryable === true;
+        if (retryable && attempt < MAX_RETRIES) {
+          const delayMs = buildRetryDelayMs(attempt, 'network_error');
+          console.warn(
+            `[proxy #${reqId}] upstream ${extractCauseCode(err) ?? 'NETWORK_ERROR'}, retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        throw err;
+      }
 
-      if ((upstream.status === 429 || upstream.status === 529) && attempt < MAX_RETRIES) {
-        // Respect Retry-After header, fallback to exponential backoff
-        const retryAfter = upstream.headers.get('retry-after');
-        const delaySec = retryAfter ? Math.min(Number(retryAfter) || 1, 30) : 2 ** attempt;
-        const delayMs = delaySec * 1000;
+      if (RETRYABLE_HTTP_STATUSES.has(upstream.status) && attempt < MAX_RETRIES) {
+        const delayMs = buildRetryDelayMs(attempt, 'http_status', upstream.headers.get('retry-after'));
         console.log(
-          `[proxy #${reqId}] upstream ${upstream.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${delaySec}s`,
+          `[proxy #${reqId}] upstream ${upstream.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${Math.round(delayMs / 1000)}s`,
         );
         // Drain the body to free the connection
         await upstream.text().catch(() => {});
-        await new Promise((r) => setTimeout(r, delayMs));
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
       break;
@@ -414,15 +546,17 @@ const server = createServer(async (req, res) => {
         console.log(`[proxy #${reqId}] done, ${totalBytes} bytes${isSSE ? ' (SSE)' : ''}, status=${upstream.status}`);
     }
   } catch (err) {
+    const { statusCode, body: errorBody } = serializeProxyError(err);
     console.error(
       `[proxy #${reqId}] upstream error:`,
-      err.message,
-      err.cause ? `(cause: ${err.cause.message || err.cause})` : '',
+      err instanceof Error ? err.message : String(err),
+      err?.cause ? `(cause: ${err.cause.message || err.cause})` : '',
+      err?.causeCode ? `(code: ${err.causeCode})` : '',
     );
     if (!res.headersSent) {
-      res.writeHead(502, { 'content-type': 'application/json' });
+      res.writeHead(statusCode, { 'content-type': 'application/json' });
     }
-    res.end(JSON.stringify({ type: 'error', error: { type: 'proxy_error', message: err.message } }));
+    res.end(JSON.stringify(errorBody));
   }
 });
 
