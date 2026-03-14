@@ -357,6 +357,7 @@ export async function* routeParallel(
         charDelta > 0 &&
         (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
       ) {
+        const curThinking = catThinking.get(msg.catId);
         deps.draftStore
           .upsert({
             userId,
@@ -365,6 +366,7 @@ export async function* routeParallel(
             catId: msg.catId as CatId,
             content: curText,
             ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
+            ...(curThinking ? { thinking: curThinking } : {}),
             updatedAt: now,
           })
           ?.catch?.(noop);
@@ -380,6 +382,7 @@ export async function* routeParallel(
         // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
         // tool-first invocations (no text yet) must still create a draft record.
         if (curText.length > lastLen || curToolLen > lastToolLen) {
+          const curThinkingTool = catThinking.get(msg.catId);
           deps.draftStore
             .upsert({
               userId,
@@ -388,6 +391,7 @@ export async function* routeParallel(
               catId: msg.catId as CatId,
               content: curText,
               ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
+              ...(curThinkingTool ? { thinking: curThinkingTool } : {}),
               updatedAt: now,
             })
             ?.catch?.(noop);

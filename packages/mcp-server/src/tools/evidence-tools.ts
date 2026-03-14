@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3002';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3003';
 
 export const searchEvidenceInputSchema = {
   query: z.string().min(1).describe('Search query for project knowledge'),

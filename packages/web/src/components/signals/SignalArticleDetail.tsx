@@ -138,16 +138,20 @@ export function SignalArticleDetail({
     [onCreateCollection, refreshStudyMeta, onCollectionChanged],
   );
 
+  // Resolve the best thread for discussion: use linked study thread if available
   const discussedLink = useMemo(() => {
     if (!article) {
       return '/thread/default';
     }
+    const threads = studyMeta?.threads ?? [];
+    const activeThread = threads.find((t) => !t.stale);
+    const threadId = activeThread ? activeThread.threadId : 'default';
     const query = new URLSearchParams({
       signal: article.id,
       source: article.source,
     });
-    return `/thread/default?${query.toString()}`;
-  }, [article]);
+    return `/thread/${encodeURIComponent(threadId)}?${query.toString()}`;
+  }, [article, studyMeta]);
 
   const addPendingTag = useCallback(async () => {
     if (!article) {

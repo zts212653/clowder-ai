@@ -19,6 +19,10 @@ function createBaseServer(name: string): McpServer {
   });
 }
 
+/**
+ * Create a Signals MCP server instance with Signal Hunter tools
+ * (inbox, search, study, article management) registered.
+ */
 export function createSignalsServer(): McpServer {
   const server = createBaseServer('cat-cafe-signals-mcp');
   registerSignalToolset(server);

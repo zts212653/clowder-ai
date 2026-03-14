@@ -19,6 +19,7 @@ export interface DraftRecord {
   catId: CatId;
   content: string;
   toolEvents?: unknown[];
+  thinking?: string;
   updatedAt: number;
 }
 

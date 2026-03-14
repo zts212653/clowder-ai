@@ -19,6 +19,10 @@ function createBaseServer(name: string): McpServer {
   });
 }
 
+/**
+ * Create a Memory MCP server instance with evidence search,
+ * reflection, session chain, and memory retention tools registered.
+ */
 export function createMemoryServer(): McpServer {
   const server = createBaseServer('cat-cafe-memory-mcp');
   registerMemoryToolset(server);

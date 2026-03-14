@@ -5,7 +5,7 @@ import { getAntigravitySmokeSkipReason, runAntigravityRoundTripSmoke } from './h
 // Skip entire suite if Antigravity is not running on port 9000
 async function isAntigravityRunning() {
   try {
-    const resp = await fetch('http://localhost:9000/json/version', {
+    const resp = await fetch('http://<local-browser-automation-endpoint>/json/version', {
       signal: AbortSignal.timeout(2000),
     });
     return resp.ok;

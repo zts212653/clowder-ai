@@ -4,7 +4,7 @@
  *
  * 安全:
  * - logPath 绝对路径仅在 EXPOSE_LOG_PATH=true 或 NODE_ENV!=production 时返回
- *   (owner需要 VSCode 跳转; 生产部署应关闭以避免路径泄露)
+ *   (team lead需要 VSCode 跳转; 生产部署应关闭以避免路径泄露)
  * - 通过 resolveUserId 解析身份 (header > query fallback)
  * - 校验 userId 与 thread.createdBy 一致 (ownership guard)
  */

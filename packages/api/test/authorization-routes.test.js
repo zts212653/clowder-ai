@@ -1,6 +1,6 @@
 /**
  * Authorization Routes Tests
- * 猫猫授权 HTTP 端点 — callback-auth (猫端) + authorization (owner端)
+ * 猫猫授权 HTTP 端点 — callback-auth (猫端) + authorization (team lead端)
  *
  * Uses Fastify injection (no real HTTP server).
  */
@@ -252,7 +252,7 @@ describe('GET /api/callbacks/permission-status', () => {
   });
 });
 
-// ---- Authorization Routes (owner-facing) ----
+// ---- Authorization Routes (team lead-facing) ----
 
 describe('POST /api/authorization/respond', () => {
   let authManager;

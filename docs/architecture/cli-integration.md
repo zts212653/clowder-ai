@@ -8,14 +8,14 @@ created: 2026-02-26
 # CLI 集成架构：Claude Code / Codex / Gemini CLI
 
 > Cat Cafe 项目如何对接三个不同厂商的 AI CLI 工具
-> 作者：布偶猫 | 最后更新：2026-02-07
+> 作者：Ragdoll | 最后更新：2026-02-07
 
 ## 概述
 
 Cat Cafe 需要调用三个不同厂商的 AI Agent：
-- **布偶猫** → Claude Code CLI (`claude`)
-- **缅因猫** → OpenAI Codex CLI (`codex`)
-- **暹罗猫** → Google Gemini CLI (`gemini`)
+- **Ragdoll** → Claude Code CLI (`claude`)
+- **Maine Coon** → OpenAI Codex CLI (`codex`)
+- **Siamese** → Google Gemini CLI (`gemini`)
 
 这三个 CLI 有不同的调用方式、输出格式和 Session 管理机制。本文档记录我们的集成方案和踩过的坑。
 
@@ -32,7 +32,7 @@ Cat Cafe 需要调用三个不同厂商的 AI Agent：
                 ▼                 ▼                 ▼
 ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
 │ ClaudeAgentService│ │ CodexAgentService │ │ GeminiAgentService│
-│  (布偶猫 Opus)     │ │  (缅因猫 Codex)    │ │  (暹罗猫 Gemini)   │
+│  (Ragdoll Opus)     │ │  (Maine Coon Codex)    │ │  (Siamese Gemini)   │
 └─────────┬─────────┘ └─────────┬─────────┘ └─────────┬─────────┘
           │                     │                     │
           └─────────────────────┼─────────────────────┘
@@ -477,7 +477,7 @@ packages/api/src/
 │   ├── cat-models.ts         # 模型配置读取
 │   └── cat-config-loader.ts  # JSON 配置加载
 └── domains/cats/services/
-    ├── ClaudeAgentService.ts # 布偶猫
-    ├── CodexAgentService.ts  # 缅因猫
-    └── GeminiAgentService.ts # 暹罗猫
+    ├── ClaudeAgentService.ts # Ragdoll
+    ├── CodexAgentService.ts  # Maine Coon
+    └── GeminiAgentService.ts # Siamese
 ```

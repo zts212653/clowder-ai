@@ -104,7 +104,7 @@ export function computeMentionStats(
   const dateSets = new Map<string, Set<string>>(); // catId → set of date keys
 
   for (const msg of messages) {
-    // Mention-based rankings should reflect owner/owner mentions only.
+    // Mention-based rankings should reflect team lead/owner mentions only.
     // Exclude cat-authored messages AND connector-sourced messages (catId is also null).
     if (!msg.catId && !msg.source?.connector) {
       for (const catId of msg.mentions) {

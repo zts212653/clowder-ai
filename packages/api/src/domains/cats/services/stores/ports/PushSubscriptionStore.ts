@@ -1,6 +1,6 @@
 /**
  * Push Subscription Store
- * 管理 Web Push 订阅记录 — owner的设备订阅信息
+ * 管理 Web Push 订阅记录 — team lead的设备订阅信息
  */
 
 export interface PushSubscriptionRecord {

@@ -141,4 +141,30 @@ describe('DraftStore (in-memory)', () => {
       assert.equal(drafts[0].toolEvents[0].label, 'Read');
     });
   });
+
+  describe('thinking persistence (Bug A)', () => {
+    it('stores and retrieves thinking content', () => {
+      store.upsert(
+        makeDraft({
+          thinking: 'Let me analyze this step by step...',
+        }),
+      );
+      const drafts = store.getByThread('user-1', 'thread-1');
+      assert.equal(drafts[0].thinking, 'Let me analyze this step by step...');
+    });
+
+    it('upsert overwrites thinking', () => {
+      store.upsert(makeDraft({ thinking: 'v1 thinking' }));
+      store.upsert(makeDraft({ thinking: 'v2 thinking' }));
+      const drafts = store.getByThread('user-1', 'thread-1');
+      assert.equal(drafts.length, 1);
+      assert.equal(drafts[0].thinking, 'v2 thinking');
+    });
+
+    it('omitting thinking returns undefined', () => {
+      store.upsert(makeDraft());
+      const drafts = store.getByThread('user-1', 'thread-1');
+      assert.equal(drafts[0].thinking, undefined);
+    });
+  });
 });

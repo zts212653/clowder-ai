@@ -146,7 +146,7 @@ export async function startConnectorGateway(
     bindingStore,
     threadStore: deps.threadStore,
     ...(deps.backlogStore ? { backlogStore: deps.backlogStore } : {}),
-    frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3001',
+    frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3004',
   });
 
   // Phase 5+6: Media service + STT provider (optional)

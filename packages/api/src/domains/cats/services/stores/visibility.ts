@@ -13,7 +13,7 @@ export type Viewer = { readonly type: 'user' } | { readonly type: 'cat'; readonl
  * Check if a message is visible to the given viewer.
  *
  * Rules:
- * - User (owner) always sees everything
+ * - User (team lead) always sees everything
  * - Public messages (visibility undefined or 'public') are visible to all
  * - Revealed whispers (revealedAt set) are visible to all
  * - Unrevealed whispers are only visible to recipients listed in whisperTo
