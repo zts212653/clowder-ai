@@ -235,6 +235,50 @@ test('result error_during_execution → error with errorSubtype in content', () 
   assert.equal(parsed.errorSubtype, 'error_during_execution');
 });
 
+// ─── Issue #24 — error.error should never be "Unknown error" when subtype is known ──
+
+test('error_max_turns with empty errors → error.error should be "Max turns exceeded"', () => {
+  const state = makeStreamState();
+  const event = { type: 'result', subtype: 'error_max_turns', errors: [] };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'error');
+  assert.equal(result.error, 'Max turns exceeded', 'should use subtype label as fallback');
+});
+
+test('error_max_budget_usd with empty errors → error.error should be "Budget limit reached"', () => {
+  const state = makeStreamState();
+  const event = { type: 'result', subtype: 'error_max_budget_usd', errors: [] };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'error');
+  assert.equal(result.error, 'Budget limit reached', 'should use subtype label as fallback');
+});
+
+test('error_during_execution with errors → error.error uses errors array (not subtype)', () => {
+  const state = makeStreamState();
+  const event = { type: 'result', subtype: 'error_during_execution', errors: ['execution failed'] };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.error, 'execution failed', 'errors array should take precedence over subtype label');
+});
+
+test('unknown subtype with empty errors → error.error includes subtype string', () => {
+  const state = makeStreamState();
+  const event = { type: 'result', subtype: 'error_new_future_type', errors: [] };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.notEqual(result.error, 'Unknown error', 'even unknown subtypes should not produce "Unknown error"');
+  assert.ok(
+    result.error.includes('error_new_future_type'),
+    'error should contain the raw subtype string for unknown subtypes',
+  );
+});
+
 // ─── Task 6 — system events ───────────────────────────────────────────────────
 
 test('system compact_boundary → system_info(compact_boundary) with preTokens', () => {

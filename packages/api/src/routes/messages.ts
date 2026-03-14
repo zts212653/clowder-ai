@@ -36,6 +36,7 @@ import type { ISummaryStore } from '../domains/cats/services/stores/ports/Summar
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
@@ -562,7 +563,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             // Don't broadcast error for intentional cancel
           } else {
             console.error('[messages] Background processing error:', err);
-            const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+            const errorMsg = normalizeErrorMessage(err);
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
               error: errorMsg,
@@ -645,7 +646,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             {
               type: 'error',
               catId: getDefaultCatId(),
-              error: err instanceof Error ? err.message : 'Unknown error',
+              error: normalizeErrorMessage(err),
               isFinal: true,
               timestamp: Date.now(),
             },
