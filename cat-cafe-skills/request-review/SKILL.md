@@ -73,7 +73,7 @@ BEFORE 发 review 请求:
 - **Open Questions**: 标注 review 重点，帮 reviewer 快速定位
 - **自检证据**: 附 quality-gate report 摘要 + 测试命令输出
 
-存档：`review request note`
+存档：*(internal reference removed)*
 
 ## Block 场景
 

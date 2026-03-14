@@ -9,7 +9,8 @@
  * 连同 Cat Cafe 自有 MCP 一起写入 capabilities.json。
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
@@ -27,6 +28,10 @@ import {
 const CAPABILITIES_FILENAME = 'capabilities.json';
 const CAT_CAFE_DIR = '.cat-cafe';
 
+const PENCIL_EXTENSIONS_DIR = resolve(homedir(), '.antigravity/extensions');
+const PENCIL_DIR_PREFIX = 'highagency.pencildev-';
+const PENCIL_BINARY_SUFFIX = '/out/mcp-server-darwin-arm64';
+
 /** Provider → CLI config writer mapping */
 const PROVIDER_WRITERS = {
   anthropic: writeClaudeMcpConfig,
@@ -36,6 +41,22 @@ const PROVIDER_WRITERS = {
 
 function hasUsableStdioCommand(command: string | undefined): boolean {
   return typeof command === 'string' && command.trim().length > 0;
+}
+
+/**
+ * Resolve the latest Pencil MCP binary path by scanning ~/.antigravity/extensions/.
+ * Returns null if no installation is found.
+ */
+export async function resolvePencilBinary(): Promise<string | null> {
+  try {
+    const entries = await readdir(PENCIL_EXTENSIONS_DIR);
+    const pencilDirs = entries.filter((e) => e.startsWith(PENCIL_DIR_PREFIX)).sort(); // lexicographic sort works for semver with same prefix
+    if (pencilDirs.length === 0) return null;
+    const latest = pencilDirs[pencilDirs.length - 1];
+    return resolve(PENCIL_EXTENSIONS_DIR, latest, PENCIL_BINARY_SUFFIX);
+  } catch {
+    return null;
+  }
 }
 
 // ────────── Core: Read / Write capabilities.json ──────────
@@ -350,6 +371,18 @@ function collectServersPerProvider(config: CapabilitiesConfig): Record<string, M
  */
 export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliConfigPaths): Promise<void> {
   const perProvider = collectServersPerProvider(config);
+
+  // Resolve dynamic paths (e.g. pencil binary) once, apply to all providers
+  const pencilBinary = await resolvePencilBinary();
+  if (pencilBinary) {
+    for (const servers of Object.values(perProvider)) {
+      for (const s of servers) {
+        if (s.name === 'pencil') {
+          s.command = pencilBinary;
+        }
+      }
+    }
+  }
 
   const writes: Promise<void>[] = [];
   for (const [provider, servers] of Object.entries(perProvider)) {

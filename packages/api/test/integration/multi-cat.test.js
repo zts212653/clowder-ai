@@ -48,12 +48,18 @@ if (!shouldRunIntegrationTests) {
 
 /** Create a fully wired router with real services (no mock) */
 async function createRealRouter() {
-  const { ClaudeAgentService } = await import('../../dist/domains/cats/services/ClaudeAgentService.js');
-  const { CodexAgentService } = await import('../../dist/domains/cats/services/CodexAgentService.js');
-  const { GeminiAgentService } = await import('../../dist/domains/cats/services/GeminiAgentService.js');
-  const { AgentRouter } = await import('../../dist/domains/cats/services/AgentRouter.js');
-  const { InvocationRegistry } = await import('../../dist/domains/cats/services/InvocationRegistry.js');
-  const { MessageStore } = await import('../../dist/domains/cats/services/MessageStore.js');
+  const { ClaudeAgentService } = await import(
+    '../../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
+  );
+  const { CodexAgentService } = await import('../../dist/domains/cats/services/agents/providers/CodexAgentService.js');
+  const { GeminiAgentService } = await import(
+    '../../dist/domains/cats/services/agents/providers/GeminiAgentService.js'
+  );
+  const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
+  const { InvocationRegistry } = await import(
+    '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+  );
+  const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
 
   return new AgentRouter(
     await migrateRouterOpts({
@@ -252,7 +258,9 @@ describe('Individual Service Integration Tests', { skip: !shouldRunIntegrationTe
    * Test: ClaudeAgentService direct invocation
    */
   itOrSkip('ClaudeAgentService responds to prompt', { skip: !hasClaude, timeout: 60_000 }, async () => {
-    const { ClaudeAgentService } = await import('../../dist/domains/cats/services/ClaudeAgentService.js');
+    const { ClaudeAgentService } = await import(
+      '../../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
+    );
 
     const service = new ClaudeAgentService();
     const messages = [];
@@ -280,7 +288,9 @@ describe('Individual Service Integration Tests', { skip: !shouldRunIntegrationTe
    * Test: CodexAgentService direct invocation
    */
   itOrSkip('CodexAgentService responds to prompt', { skip: !hasCodex, timeout: 60_000 }, async () => {
-    const { CodexAgentService } = await import('../../dist/domains/cats/services/CodexAgentService.js');
+    const { CodexAgentService } = await import(
+      '../../dist/domains/cats/services/agents/providers/CodexAgentService.js'
+    );
 
     const service = new CodexAgentService();
     const messages = [];
@@ -300,7 +310,9 @@ describe('Individual Service Integration Tests', { skip: !shouldRunIntegrationTe
    * Test: GeminiAgentService direct invocation
    */
   itOrSkip('GeminiAgentService responds to prompt', { skip: !hasGemini, timeout: 60_000 }, async () => {
-    const { GeminiAgentService } = await import('../../dist/domains/cats/services/GeminiAgentService.js');
+    const { GeminiAgentService } = await import(
+      '../../dist/domains/cats/services/agents/providers/GeminiAgentService.js'
+    );
 
     const service = new GeminiAgentService();
     const messages = [];

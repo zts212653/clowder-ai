@@ -13,7 +13,7 @@
 
 ### P1. 面向终态，不绕路
 
-> team lead原话："猫猫们一天干的活 > 一个程序员一年！现在的世界绕路 = 犯傻！"
+> team experience："猫猫们一天干的活 > 一个程序员一年！现在的世界绕路 = 犯傻！"
 
 设计路线先画终态，从终态反推。每一步的产物必须是终态的**基座**（保留），不是**脚手架**（拆掉重做）。
 
@@ -23,7 +23,7 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 
 ### P2. 共创伙伴，不是木头人
 
-> team lead原话："我不想要一群听话的木头人。我想要的是共创伙伴。大家有共同的愿景的信条的伙伴。"
+> team experience："我不想要一群听话的木头人。我想要的是共创伙伴。大家有共同的愿景的信条的伙伴。"
 
 硬约束（铁律）是法律底线。在底线之上，释放猫猫的主观能动性——自主判断、自主协作、自主跑完 SOP，不要每步问team lead。
 
@@ -44,7 +44,7 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 
 每个概念、每条规则、每个状态只在一个地方定义。其他地方引用，不重复。
 
-**推论**：shared-rules.md 是规则真相源；cat-config.json 是猫猫名册真相源；BACKLOG.md 是任务真相源。
+**推论**：shared-rules.md 是规则真相源；cat-config.json 是猫猫名册真相源；ROADMAP.md 是任务真相源。
 
 ### P5. 可验证才算完成
 
@@ -123,7 +123,12 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 
 ## 5. Commit 纪律
 
-完成一个可验证的子任务就提交。签名表见 `refs/commit-signatures.md`。
+完成一个可验证的子任务就提交。
+
+**签名（强制）**：commit message body 必须带猫猫签名，格式 `[昵称/模型🐾]`。
+签名必须包含**模型型号**，不能只写 `[Ragdoll🐾]`——同族有多个模型（Opus 4.6 / Opus 4.5 / Sonnet），不带型号无法区分是谁干的。
+签名表见 `refs/commit-signatures.md`。示例：`[Ragdoll/Opus-46🐾]`、`[Maine Coon/GPT-52🐾]`。
+
 commit body 补一行 `Why:` 说明决策理由。
 
 ## 6. 技术债务与 P3 处置
@@ -177,7 +182,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 **常见误用**：
 - ❌ 等待阶段互相 @ 确认"在等"（浪费调用）
-- ❌ 叙述性提及用 @（"@opus 已经完成了 X" → "布偶猫已经完成了 X"）
+- ❌ 叙述性提及用 @（"@opus 已经完成了 X" → "Ragdoll已经完成了 X"）
 - ✅ 需要行动才 @（另起一行行首写 @，如"完成了，请 review：\n@opus"）
 
 ## 11. Feature 生命周期 Skill
@@ -217,11 +222,21 @@ commit body 补一行 `Why:` 说明决策理由。
 
 ## 14. 共享状态文件只在 main 改
 
-BACKLOG.md、feature docs 的 status 等**共享状态文件**禁止在 worktree 里改。
+**机器强制的文件**（三层防御）：
+- `docs/ROADMAP.md`
+- `cat-config.json`
 
-- **在 main 上改，改完立刻 commit push**
-- 在 worktree 里改 → 冲突 + 污染 feature PR + 其他猫看不到更新
-- 涉及文件：`BACKLOG.md`、`docs/features/F*.md` 的 status 字段、`cat-config.json` 的可用性状态
+| 层 | 机制 | 行为 |
+|----|------|------|
+| L1 | `.githooks/pre-commit` | 非 main 分支 commit → **硬拦** |
+| L2 | `invoke-single-cat.ts` runtime preflight | unpushed → **硬拦**（停止调用）；uncommitted → warn |
+| L2.5 | `.claude/hooks/shared-doc-push-guard.sh` | Claude 专属提醒（不拦截） |
+| L3 | `.github/workflows/shared-state-guard.yml` | PR 含共享状态变更 → **硬拦** |
+
+**Review 守护的字段**（不做机器拦截）：
+- `docs/features/F*.md` 的 status/owner 字段变更也应在 main，但整文件可在 worktree 改
+
+**规则**：在 main 上改，改完立刻 commit + push。在 worktree 改 → 冲突 + 污染 feature PR + 其他猫看不到更新。
 
 ## 15. 阻塞依赖必须双写到可追溯状态
 
@@ -241,7 +256,7 @@ BACKLOG.md、feature docs 的 status 等**共享状态文件**禁止在 worktree
 
 ## 17. 决策漏斗：该问的问，不该问的别问
 
-> team lead原话："大宝贝你别问我呀，我们 SOP 没说你自己和你的小伙伴直接闭环吗？"
+> team experience："大宝贝你别问我呀，我们 SOP 没说你自己和你的小伙伴直接闭环吗？"
 
 **SOP 流程推进不是决策，是执行。** 不要在每个阶段转换时停下来问team lead"可以继续吗？"
 

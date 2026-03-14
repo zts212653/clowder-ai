@@ -39,7 +39,7 @@ team lead的愿景：**猫咖不只是一个项目，是共创工作站。猫是
 |----|------|------|
 | 硬约束 | 端口保留表（3001=猫咖前端）、Redis production Redis (sacred)、禁止 self-review、身份不可冒充 | managed block in CLAUDE.md/AGENTS.md/GEMINI.md |
 | 文档架构 | 三层信息架构（CLAUDE.md/Skills/refs）、frontmatter 契约、归档规则 | 模板 + 规范文档 |
-| Backlog 治理 | Feature lifecycle 方法论（立项→讨论→开发→review→完成）、热/温/冷层 | BACKLOG.md 模板 + Feature 聚合文件模板 |
+| Backlog 治理 | Feature lifecycle 方法论（立项→讨论→开发→review→完成）、热/温/冷层 | ROADMAP.md 模板 + Feature 聚合文件模板 |
 | SOP 工作流 | 6 步流程导航 + Skills 路由表 | SOP 模板 + manifest |
 | Skills + 路由 | cat-cafe-skills symlink + manifest.yaml | project-level `.claude/skills/` symlink bootstrap |
 | 协作规范 | A2A 交接五件套、愿景守护协议、review 流程 | shared-rules.md |
@@ -48,12 +48,12 @@ team lead的愿景：**猫咖不只是一个项目，是共创工作站。猫是
 ### 不携带（各项目独立 or 猫咖私有）
 
 - MEMORY.md 项目细节（猫咖私有上下文）
-- 猫咖自己的 BACKLOG.md 条目（猫咖自己的功能规划）
+- 猫咖自己的 ROADMAP.md 条目（猫咖自己的功能规划）
 - 猫咖自己的 Feature 聚合文件（猫咖自己的 spec）
 - 猫咖自己的 ADR/lessons-learned 条目（但方法论模板会输出）
 - SystemPromptBuilder 实现细节
 
-注：外部项目会有**自己独立的** BACKLOG.md / Feature 文件 / ADR，由外部项目的猫独立管理。猫咖输出的是方法论模板（"怎么写"），不是具体条目（"写什么"）。
+注：外部项目会有**自己独立的** ROADMAP.md / Feature 文件 / ADR，由外部项目的猫独立管理。猫咖输出的是方法论模板（"怎么写"），不是具体条目（"写什么"）。
 
 ## Non-goals
 
@@ -192,7 +192,7 @@ managed block 扩充协作方法论段落：
 
 ### 核心 AC
 - [x] AC-1: 空白外部项目首次派遣，自动 bootstrap 完整治理骨架（managed block + skills + hooks + 方法论模板）— **Phase 1 + Phase 2 ✅**
-- [x] AC-2: 已有自己 CLAUDE.md/docs/BACKLOG.md 的外部项目，managed block 共存不冲突，已有文件不被覆盖 — **Phase 1 ✅**
+- [x] AC-2: 已有自己 CLAUDE.md/docs/ROADMAP.md 的外部项目，managed block 共存不冲突，已有文件不被覆盖 — **Phase 1 ✅**
 - [x] AC-3: 重复派遣幂等（版本戳 + checksum）— **Phase 1 ✅**
 - [x] AC-4: 缺失治理文件时 Preflight Gate 阻断生效（fail-closed，per-provider）— **Phase 1 ✅**
 - [x] AC-5: 回滚后可再同步（版本漂移检测 + 修复）— **Phase 1 ✅**
@@ -200,7 +200,7 @@ managed block 扩充协作方法论段落：
 
 ### 方法论输出 AC
 - [x] AC-7: 外部项目获得文档架构模板（docs/ 目录结构 + frontmatter 契约）— **Phase 1 ✅**
-- [x] AC-8: 外部项目获得 Backlog 治理模板（BACKLOG.md + Feature 聚合文件模板）— **Phase 1 ✅**
+- [x] AC-8: 外部项目获得 Backlog 治理模板（ROADMAP.md + Feature 聚合文件模板）— **Phase 1 ✅**
 - [x] AC-9: 外部项目获得 SOP 工作流模板 + Skills 路由 — **Phase 1 ✅**
 - [x] AC-10: 外部项目获得协作规范（shared-rules + A2A + 愿景守护）— **Phase 1 (skills symlink) + Phase 2c ✅ (managed block 显式引用)**
 - [x] AC-11: 派遣猫能在外部项目按猫咖 feat/backlog/SOP 跑完整闭环 — **Phase 2a ✅ (任务包注入), Phase 3b 待验证**

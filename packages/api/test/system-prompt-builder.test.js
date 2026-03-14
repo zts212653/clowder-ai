@@ -74,11 +74,11 @@ describe('SystemPromptBuilder', () => {
     // Dynamic teammate listing absent, but static collaboration guide still present
     assert.ok(!prompt.includes('你的队友'));
     assert.ok(prompt.includes('@队友'));
-    // Still mentions owner
-    assert.ok(prompt.includes('owner'));
+    // Still mentions team lead
+    assert.ok(prompt.includes('team lead'));
   });
 
-  test('contains owner reference', async () => {
+  test('contains team lead reference', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -86,7 +86,7 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('owner'));
+    assert.ok(prompt.includes('team lead'));
   });
 
   test('contains serial chain context when mode is serial', async () => {
@@ -262,7 +262,8 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('编造'), 'Prompt should tell cats not to fabricate');
+    assert.ok(prompt.includes('实事求是'), 'Prompt should enforce evidence-based honesty');
+    assert.ok(prompt.includes('还没查完'), 'Prompt should tell cats to say when investigation is incomplete');
   });
 
   // --- System prompt split tests (buildStaticIdentity / buildInvocationContext) ---
@@ -385,9 +386,9 @@ describe('SystemPromptBuilder', () => {
       }
 
       const identity = buildStaticIdentity('opus');
-      // gpt52 has teamStrengths="架构思考、Review" and caution="思考太慢"
+      // gpt52 keeps teamStrengths and has no explicit caution override in current config.
       assert.ok(identity.includes('架构思考'), 'Should include gpt52 teamStrengths');
-      assert.ok(identity.includes('思考太慢'), 'Should include gpt52 caution');
+      assert.ok(identity.includes('| 缅因猫/砚砚（GPT-5.4） |') || identity.includes('| 缅因猫/砚砚 |'));
       // gemini has caution about no coding
       assert.ok(identity.includes('禁止写代码'), 'Should include gemini caution');
     } finally {
@@ -448,7 +449,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 3350, `Full runtime prompt is ${prompt.length} chars, expected < 3350`);
+      assert.ok(prompt.length < 3500, `Full runtime prompt is ${prompt.length} chars, expected < 3500`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -539,8 +540,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('## 协作'), 'Should not contain collaboration guide');
     // MCP tools moved to static identity (session-level, not per-message)
     assert.ok(!ctx.includes('cat_cafe_post_message'), 'MCP tools should be in static identity, not invocation context');
-    // owner reference also moved to static identity
-    assert.ok(!ctx.includes('owner是真人用户'), 'owner reference should be in static identity');
+    // team lead reference also moved to static identity
+    assert.ok(!ctx.includes('team lead是真人用户'), 'team lead reference should be in static identity');
   });
 
   test('buildStaticIdentity includes MCP tools when mcpAvailable', async () => {
@@ -566,19 +567,18 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!identity.includes('HTTP 回调'), 'Codex should not have callback instructions in static identity');
   });
 
-  test('buildStaticIdentity includes owner reference', async () => {
+  test('buildStaticIdentity includes team lead reference', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    assert.ok(identity.includes('owner'), 'Should contain owner reference in static identity');
+    assert.ok(identity.includes('team lead'), 'Should contain team lead reference in static identity');
   });
 
   test('buildStaticIdentity includes configured owner name and mention handles', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    // Owner config has name: "Owner", mentionPatterns: ["@owner", "@owner", "@owner"]
-    assert.ok(identity.includes('Owner'), 'Should include owner name from config');
-    assert.ok(identity.includes('@owner'), 'Should include @owner mention handle');
-    assert.ok(identity.includes('@owner'), 'Should include @owner mention handle');
+    // Owner config has name: "Co-worker", mentionPatterns: ["@co-worker", "@owner"]
+    assert.ok(identity.includes('Co-worker'), 'Should include owner name from config');
+    assert.ok(identity.includes('@co-worker') || identity.includes('@owner'), 'Should include owner mention handle');
     assert.ok(identity.includes('行首'), 'Should teach line-start rule for owner mentions');
   });
 

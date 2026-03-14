@@ -147,9 +147,9 @@ test_message_render_complete() {
   output=$("$SCRIPT_DIR/messages.sh" render 1 "main" 90)
 
   # 检查关键元素
-  [[ "$output" == *"宪宪"* ]] &&
-  [[ "$output" == *"砚砚"* ]] &&
-  [[ "$output" == *"烁烁"* ]] &&
+  [[ "$output" == *"Ragdoll"* ]] &&
+  [[ "$output" == *"Maine Coon"* ]] &&
+  [[ "$output" == *"Siamese"* ]] &&
   [[ "$output" == *"[1]"* ]] &&
   [[ "$output" == *"[2]"* ]] &&
   [[ "$output" == *"[3]"* ]]

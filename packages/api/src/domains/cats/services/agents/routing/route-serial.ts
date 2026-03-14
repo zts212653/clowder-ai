@@ -379,6 +379,7 @@ export async function* routeSerial(
                 catId,
                 content: textContent,
                 ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+                ...(thinkingContent ? { thinking: thinkingContent } : {}),
                 updatedAt: now,
               })
               ?.catch?.(noop);
@@ -403,6 +404,7 @@ export async function* routeSerial(
                   catId,
                   content: textContent,
                   ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+                  ...(thinkingContent ? { thinking: thinkingContent } : {}),
                   updatedAt: now,
                 })
                 ?.catch?.(noop);
@@ -674,6 +676,23 @@ export async function* routeSerial(
       } else if (!hadError) {
         // No text content and no error — store empty message (cat responded with no text)
         // F22: still attach any MCP-buffered rich blocks (cloud Codex P1: block-only responses)
+
+        // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
+        // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
+        const hasRichBlocks = [...bufferedBlocks, ...streamRichBlocks].length > 0;
+        if (collectedToolEvents.length > 0 && !hasRichBlocks) {
+          yield {
+            type: 'system_info' as AgentMessageType,
+            catId,
+            content: JSON.stringify({
+              type: 'silent_completion',
+              detail: `${catConfig?.displayName ?? (catId as string)} completed with tool calls but no text response.`,
+              toolCount: collectedToolEvents.length,
+            }),
+            timestamp: Date.now(),
+          } as AgentMessage;
+        }
+
         try {
           await deps.messageStore.append({
             userId,

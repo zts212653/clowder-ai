@@ -125,6 +125,25 @@ kill_port() {
     fi
 }
 
+# 轮询等待端口监听（ML 模型加载需要时间）
+# 用法: wait_for_port <port> <name> [max_seconds=15]
+wait_for_port() {
+    local port=$1
+    local name=$2
+    local max_wait=${3:-15}
+    local elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        if lsof -nP -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo -e "${GREEN}  ✓ $name 已启动 (端口 $port, ${elapsed}s)${NC}"
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo -e "${RED}  ✗ $name 启动超时（端口 $port, ${max_wait}s 内未监听）${NC}"
+    return 1
+}
+
 # 清理缓存
 # --prod-web + --quick: 保留 .next production 产物以便秒启动
 clean_cache() {
@@ -380,10 +399,18 @@ main() {
     echo -e "${CYAN}检查端口...${NC}"
     kill_port $API_PORT "API"
     kill_port $WEB_PORT "Frontend"
-    [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
-    kill_port ${WHISPER_PORT:-9876} "ASR"
-    kill_port ${TTS_PORT:-9879} "TTS"
-    kill_port ${LLM_POSTPROCESS_PORT:-9878} "LLM后修"
+    if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
+        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
+    fi
+    if [ "${ASR_ENABLED:-0}" = "1" ]; then
+        kill_port ${WHISPER_PORT:-9876} "ASR"
+    fi
+    if [ "${TTS_ENABLED:-0}" = "1" ]; then
+        kill_port ${TTS_PORT:-9879} "TTS"
+    fi
+    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
+        kill_port ${LLM_POSTPROCESS_PORT:-9878} "LLM后修"
+    fi
 
     # 2. 清理缓存
     clean_cache
@@ -410,17 +437,22 @@ main() {
     echo -e "${CYAN}启动服务...${NC}"
 
     # Anthropic API Gateway Proxy (api_key profiles auto-routed here)
+    # 默认关闭 (ANTHROPIC_PROXY_ENABLED=0)，需要反代时在 .env 设为 1
     PROXY_PORT=${ANTHROPIC_PROXY_PORT:-9877}
-    if [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ]; then
-        echo "  启动 Anthropic Proxy (端口 $PROXY_PORT)..."
-        PROXY_UPSTREAMS="${ANTHROPIC_PROXY_UPSTREAMS_PATH:-$PROJECT_DIR/.cat-cafe/proxy-upstreams.json}"
-        ANTHROPIC_PROXY_PORT=$PROXY_PORT node scripts/anthropic-proxy.mjs --port $PROXY_PORT --upstreams "$PROXY_UPSTREAMS" &
-        PROXY_PID=$!
-        sleep 1
-        if kill -0 $PROXY_PID 2>/dev/null; then
-            echo -e "${GREEN}  ✓ Anthropic Proxy 已启动${NC}"
+    if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
+        if [ -f "scripts/anthropic-proxy.mjs" ]; then
+            echo "  启动 Anthropic Proxy (端口 $PROXY_PORT)..."
+            PROXY_UPSTREAMS="${ANTHROPIC_PROXY_UPSTREAMS_PATH:-$PROJECT_DIR/.cat-cafe/proxy-upstreams.json}"
+            ANTHROPIC_PROXY_PORT=$PROXY_PORT node scripts/anthropic-proxy.mjs --port $PROXY_PORT --upstreams "$PROXY_UPSTREAMS" &
+            PROXY_PID=$!
+            sleep 1
+            if kill -0 $PROXY_PID 2>/dev/null; then
+                echo -e "${GREEN}  ✓ Anthropic Proxy 已启动${NC}"
+            else
+                echo -e "${RED}  ✗ Anthropic Proxy 启动失败（端口 $PROXY_PORT 被占用？）${NC}"
+            fi
         else
-            echo -e "${RED}  ✗ Anthropic Proxy 启动失败（端口 $PROXY_PORT 被占用？）${NC}"
+            echo -e "${YELLOW}  ⚠ anthropic-proxy.mjs 未找到，跳过 Proxy${NC}"
         fi
     else
         echo -e "${YELLOW}  ⚠ Anthropic Proxy 已禁用 (ANTHROPIC_PROXY_ENABLED=0)${NC}"
@@ -428,40 +460,59 @@ main() {
 
     # Qwen3-ASR Server (语音输入 — 替代 Whisper，同端口 drop-in)
     ASR_PORT=${WHISPER_PORT:-9876}
-    if [ -f "scripts/qwen3-asr-server.sh" ]; then
-        echo "  启动 Qwen3-ASR (端口 $ASR_PORT)..."
-        WHISPER_PORT=$ASR_PORT bash scripts/qwen3-asr-server.sh &
-        sleep 2
-        echo -e "${GREEN}  ✓ Qwen3-ASR 已启动${NC}"
-    elif [ -f "scripts/whisper-server.sh" ]; then
-        echo "  启动 Whisper ASR fallback (端口 $ASR_PORT)..."
-        WHISPER_PORT=$ASR_PORT bash scripts/whisper-server.sh &
-        sleep 2
-        echo -e "${GREEN}  ✓ Whisper ASR 已启动${NC}"
+    STARTED_ASR=false
+    if [ "${ASR_ENABLED:-0}" = "1" ]; then
+        if [ -f "scripts/qwen3-asr-server.sh" ]; then
+            echo "  启动 Qwen3-ASR (端口 $ASR_PORT)..."
+            WHISPER_PORT=$ASR_PORT bash scripts/qwen3-asr-server.sh &
+            if wait_for_port $ASR_PORT "Qwen3-ASR" 30; then
+                STARTED_ASR=true
+            fi
+        elif [ -f "scripts/whisper-server.sh" ]; then
+            echo "  启动 Whisper ASR fallback (端口 $ASR_PORT)..."
+            WHISPER_PORT=$ASR_PORT bash scripts/whisper-server.sh &
+            if wait_for_port $ASR_PORT "Whisper ASR" 30; then
+                STARTED_ASR=true
+            fi
+        else
+            echo -e "${YELLOW}  ⚠ ASR 已启用，但脚本未找到，跳过语音输入服务${NC}"
+        fi
     else
-        echo -e "${YELLOW}  ⚠ ASR 脚本未找到，跳过语音输入服务${NC}"
+        echo -e "${YELLOW}  ⚠ ASR 已禁用 (ASR_ENABLED=0)${NC}"
     fi
 
     # TTS Server (语音合成 — Qwen3-TTS / Kokoro / edge-tts)
     TTS_PORT_VAL=${TTS_PORT:-9879}
-    if [ -f "scripts/tts-server.sh" ]; then
-        echo "  启动 TTS (端口 $TTS_PORT_VAL)..."
-        TTS_PORT=$TTS_PORT_VAL bash scripts/tts-server.sh &
-        sleep 2
-        echo -e "${GREEN}  ✓ TTS 已启动${NC}"
+    STARTED_TTS=false
+    if [ "${TTS_ENABLED:-0}" = "1" ]; then
+        if [ -f "scripts/tts-server.sh" ]; then
+            echo "  启动 TTS (端口 $TTS_PORT_VAL)..."
+            TTS_PORT=$TTS_PORT_VAL bash scripts/tts-server.sh &
+            if wait_for_port $TTS_PORT_VAL "TTS" 30; then
+                STARTED_TTS=true
+            fi
+        else
+            echo -e "${YELLOW}  ⚠ TTS 已启用，但 tts-server.sh 未找到，跳过语音合成服务${NC}"
+        fi
     else
-        echo -e "${YELLOW}  ⚠ tts-server.sh 未找到，跳过语音合成服务${NC}"
+        echo -e "${YELLOW}  ⚠ TTS 已禁用 (TTS_ENABLED=0)${NC}"
     fi
 
     # LLM 后修 Server (语音转写纠正 — Qwen3-4B)
     LLM_PP_PORT=${LLM_POSTPROCESS_PORT:-9878}
-    if [ -f "scripts/llm-postprocess-server.sh" ]; then
-        echo "  启动 LLM 后修 (端口 $LLM_PP_PORT)..."
-        LLM_POSTPROCESS_PORT=$LLM_PP_PORT bash scripts/llm-postprocess-server.sh &
-        sleep 2
-        echo -e "${GREEN}  ✓ LLM 后修已启动${NC}"
+    STARTED_LLM_PP=false
+    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
+        if [ -f "scripts/llm-postprocess-server.sh" ]; then
+            echo "  启动 LLM 后修 (端口 $LLM_PP_PORT)..."
+            LLM_POSTPROCESS_PORT=$LLM_PP_PORT bash scripts/llm-postprocess-server.sh &
+            if wait_for_port $LLM_PP_PORT "LLM 后修" 20; then
+                STARTED_LLM_PP=true
+            fi
+        else
+            echo -e "${YELLOW}  ⚠ LLM 后修已启用，但脚本未找到，跳过语音纠正${NC}"
+        fi
     else
-        echo -e "${YELLOW}  ⚠ llm-postprocess-server.sh 未找到，跳过语音纠正${NC}"
+        echo -e "${YELLOW}  ⚠ LLM 后修已禁用 (LLM_POSTPROCESS_ENABLED=0)${NC}"
     fi
 
     # API Server
@@ -508,10 +559,10 @@ main() {
     echo "服务地址："
     echo "  - Frontend: http://localhost:$WEB_PORT"
     echo "  - API:      http://localhost:$API_PORT"
-    echo "  - Proxy:    http://localhost:$PROXY_PORT"
-    echo "  - ASR:      http://localhost:$ASR_PORT"
-    echo "  - TTS:      http://localhost:$TTS_PORT_VAL"
-    echo "  - LLM后修:  http://localhost:$LLM_PP_PORT"
+    [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ] && echo "  - Proxy:    http://localhost:$PROXY_PORT"
+    [ "$STARTED_ASR" = true ] && echo "  - ASR:      http://localhost:$ASR_PORT"
+    [ "$STARTED_TTS" = true ] && echo "  - TTS:      http://localhost:$TTS_PORT_VAL"
+    [ "$STARTED_LLM_PP" = true ] && echo "  - LLM后修:  http://localhost:$LLM_PP_PORT"
     echo -e "  - 前端模式: $PWA_INFO"
     echo -e "  - 存储:     $STORAGE_INFO"
     echo ""

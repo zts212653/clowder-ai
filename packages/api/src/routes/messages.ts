@@ -36,6 +36,7 @@ import type { ISummaryStore } from '../domains/cats/services/stores/ports/Summar
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
@@ -452,6 +453,25 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
             });
+            // Bugfix: silent-exit P2 — only broadcast diagnostic when preempted by
+            // a newer invocation (reason='preempted'). User-initiated cancel already
+            // broadcasts its own messages via buildCancelMessages; adding another here
+            // would cause a duplicate with misleading text.
+            if (controller.signal.reason === 'preempted') {
+              opts.socketManager.broadcastAgentMessage(
+                {
+                  type: 'system_info',
+                  catId: targetCats[0] ?? getDefaultCatId(),
+                  content: JSON.stringify({
+                    type: 'invocation_preempted',
+                    detail: 'This response was superseded by a newer request.',
+                    invocationId: createResult.invocationId,
+                  }),
+                  timestamp: Date.now(),
+                },
+                resolvedThreadId,
+              );
+            }
             // Skip ack/succeeded/push-notify — let finally handle cleanup
           } else if (persistenceContext.failed) {
             const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
@@ -543,7 +563,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             // Don't broadcast error for intentional cancel
           } else {
             console.error('[messages] Background processing error:', err);
-            const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+            const errorMsg = normalizeErrorMessage(err);
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
               error: errorMsg,
@@ -626,7 +646,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             {
               type: 'error',
               catId: getDefaultCatId(),
-              error: err instanceof Error ? err.message : 'Unknown error',
+              error: normalizeErrorMessage(err),
               isFinal: true,
               timestamp: Date.now(),
             },
@@ -770,7 +790,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             content: d.content,
             timestamp: d.updatedAt,
             isDraft: true,
+            origin: 'stream',
+            extra: { stream: { invocationId: d.invocationId } },
             ...(d.toolEvents ? { toolEvents: d.toolEvents } : {}),
+            ...(d.thinking ? { thinking: d.thinking } : {}),
           });
         }
       }

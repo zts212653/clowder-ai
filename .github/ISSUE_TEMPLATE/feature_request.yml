@@ -1,0 +1,40 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+title: "Feature: "
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature IDs (F001, F002, ...) are assigned by **maintainers**, not by contributors.
+        Just describe what you want — we'll handle the numbering.
+        See [CONTRIBUTING.md](https://github.com/zts212653/clowder-ai/blob/main/CONTRIBUTING.md) for details.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the pain point or opportunity.
+      placeholder: "I want to deploy on Windows but the setup script only supports macOS/Linux."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like this to work? Include examples if possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you think about? Why not those?
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, links to related issues, competitive examples, etc.

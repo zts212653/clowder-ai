@@ -581,7 +581,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     let filtered: Awaited<ReturnType<typeof messageStore.getByThread>>;
 
     // F35: Viewer for whisper filtering.
-    // Debug mode: cats see everything (like owner) — full transparency for debugging.
+    // Debug mode: cats see everything (like team lead) — full transparency for debugging.
     // Play mode: cats only see whispers addressed to them — game privacy.
     const viewer = needsPlayFilter
       ? { type: 'cat' as const, catId: createCatId(record.catId) }
@@ -1061,6 +1061,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(invocationTracker ? { invocationTracker } : {}),
     });
     // Wire orchestrator into SocketManager for cancel propagation (P1-1 fix)
-    socketManager.setMultiMentionOrchestrator(getMultiMentionOrchestrator());
+    if (typeof socketManager.setMultiMentionOrchestrator === 'function') {
+      socketManager.setMultiMentionOrchestrator(getMultiMentionOrchestrator());
+    }
   }
 };

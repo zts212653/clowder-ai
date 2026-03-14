@@ -140,7 +140,7 @@ git branch -d {branch-name} && git worktree prune
 |------|---------|
 | Reviewer 放行？ | 搜索明确信号词 |
 | P1/P2 清零？ | 检查 review 记录 |
-| BACKLOG 更新？ | `grep '\[x\]' docs/BACKLOG.md` |
+| BACKLOG 更新？ | `grep '\[x\]' docs/ROADMAP.md` |
 | 云端通过？ | `gh pr checks {PR}` |
 | Phase 文档同步？ | feature doc Phase ✅ + AC 打勾 + Timeline 有记录 |
 
@@ -210,10 +210,10 @@ git branch -d {branch-name} && git worktree prune
 
 | 原 reviewer | 降级到 | 说明 |
 |-------------|--------|------|
-| 缅因猫 Codex | 缅因猫 GPT-5.4 | 同族不同个体 |
-| 缅因猫 GPT-5.4 | 缅因猫 Codex | 反向降级 |
-| 布偶猫某个体 | 布偶猫其他个体 / 缅因猫 | 同族或跨族 |
-| **禁止** | 暹罗猫 | 不做代码 review（孟加拉猫 Opus 除外，底层是 Opus） |
+| Maine Coon Codex | Maine Coon GPT-5.4 | 同族不同个体 |
+| Maine Coon GPT-5.4 | Maine Coon Codex | 反向降级 |
+| Ragdoll某个体 | Ragdoll其他个体 / Maine Coon | 同族或跨族 |
+| **禁止** | Siamese | 不做代码 review（孟加拉猫 Opus 除外，底层是 Opus） |
 
 **铁律：降级后仍须校验"reviewer ≠ 作者"**——降级表是建议顺序，不能覆盖 self-review 禁令。
 

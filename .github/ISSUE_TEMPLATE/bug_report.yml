@@ -1,0 +1,54 @@
+name: Bug Report
+description: Report a bug — include reproduction steps so we can fix it fast
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in as much detail as you can.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly.
+      placeholder: "When I click X, Y happens instead of Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Step-by-step instructions so we can reproduce the issue.
+      placeholder: |
+        1. Run `pnpm dev`
+        2. Open http://localhost:3003
+        3. Click "New Chat"
+        4. See error in console
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version, browser, etc.
+      placeholder: |
+        - OS: macOS 15.2 / Ubuntu 24.04 / Windows 11
+        - Node: v22.x
+        - Browser: Chrome 130
+        - pnpm: 9.x
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: Paste error logs or attach screenshots if relevant.

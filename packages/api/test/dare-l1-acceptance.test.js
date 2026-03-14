@@ -84,7 +84,7 @@ describe('DARE L1 acceptance contract', () => {
       const pending = collect(
         service.invoke('auth test', {
           callbackEnv: {
-            CAT_CAFE_API_URL: 'http://127.0.0.1:3002',
+            CAT_CAFE_API_URL: 'your local Clowder API URL',
             CAT_CAFE_INVOCATION_ID: 'inv-l1',
           },
         }),
@@ -102,7 +102,7 @@ describe('DARE L1 acceptance contract', () => {
 
       const spawnOpts = spawnFn.mock.calls[0].arguments[2];
       assert.equal(spawnOpts.env.OPENROUTER_API_KEY, 'sk-openrouter-test');
-      assert.equal(spawnOpts.env.CAT_CAFE_API_URL, 'http://127.0.0.1:3002');
+      assert.equal(spawnOpts.env.CAT_CAFE_API_URL, 'your local Clowder API URL');
       assert.equal(spawnOpts.env.CAT_CAFE_INVOCATION_ID, 'inv-l1');
     } finally {
       if (oldOpenrouter === undefined) delete process.env.OPENROUTER_API_KEY;

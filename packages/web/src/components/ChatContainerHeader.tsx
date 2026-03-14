@@ -40,6 +40,7 @@ export function ChatContainerHeader({
         <button
           onClick={onToggleSidebar}
           className="p-1 rounded-lg hover:bg-owner-light transition-colors mr-1"
+          title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
           aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
           <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
@@ -58,7 +59,7 @@ export function ChatContainerHeader({
         <ExportButton threadId={threadId} />
         <VoiceCompanionButton threadId={threadId} defaultCatId={defaultCatId} />
         <Link
-          href="/signals"
+          href={`/signals?from=${encodeURIComponent(threadId)}`}
           className="p-1 rounded-lg hover:bg-owner-light transition-colors"
           title="Signal Inbox"
           aria-label="Signal Inbox"
@@ -85,6 +86,7 @@ export function ChatContainerHeader({
         <button
           onClick={onOpenMobileStatus}
           className="p-1 rounded-lg hover:bg-owner-light transition-colors ml-1 lg:hidden"
+          title="打开状态面板"
           aria-label="打开状态面板"
         >
           <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">

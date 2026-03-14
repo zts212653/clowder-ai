@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MissionControlPage } from '@/components/mission-control/MissionControlPage';
+import { useChatStore } from '@/stores/chatStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
 import {
   createMissionControlMockBackend,
@@ -1593,6 +1594,64 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     expect(backLink.getAttribute('href')).toBe('/thread/thread-abc');
 
     // Restore
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, search: originalSearch },
+    });
+  });
+
+  it('back button falls back to store currentThreadId when no ?from= param', async () => {
+    // No ?from= in URL — simulate navigating to /mission-hub directly
+    const originalSearch = window.location.search;
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, search: '' },
+    });
+
+    // Set the store's currentThreadId before render (inside act to avoid warning)
+    await act(async () => {
+      useChatStore.setState({ currentThreadId: 'thread-xyz' });
+    });
+
+    await act(async () => {
+      root.render(React.createElement(MissionControlPage));
+    });
+    await flush(act);
+
+    const backLink = container.querySelector('[data-testid="mc-back-to-chat"]') as HTMLAnchorElement;
+    expect(backLink).not.toBeNull();
+    expect(backLink.getAttribute('href')).toBe('/thread/thread-xyz');
+
+    // Restore
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, search: originalSearch },
+    });
+    await act(async () => {
+      useChatStore.setState({ currentThreadId: 'default' });
+    });
+  });
+
+  it('back button goes to / when store has default thread and no ?from= param', async () => {
+    const originalSearch = window.location.search;
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, search: '' },
+    });
+
+    await act(async () => {
+      useChatStore.setState({ currentThreadId: 'default' });
+    });
+
+    await act(async () => {
+      root.render(React.createElement(MissionControlPage));
+    });
+    await flush(act);
+
+    const backLink = container.querySelector('[data-testid="mc-back-to-chat"]') as HTMLAnchorElement;
+    expect(backLink).not.toBeNull();
+    expect(backLink.getAttribute('href')).toBe('/');
+
     Object.defineProperty(window, 'location', {
       writable: true,
       value: { ...window.location, search: originalSearch },

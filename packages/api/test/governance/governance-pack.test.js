@@ -18,7 +18,7 @@ describe('governance-pack', () => {
 
   it('managed block includes hard constraints', () => {
     const block = getGovernanceManagedBlock('claude');
-    assert.ok(block.includes('3001'));
+    assert.ok(block.includes('3003'));
     assert.ok(block.includes('6399'));
     assert.ok(block.includes('self-review'));
     assert.ok(block.includes('Identity is constant'));
@@ -63,7 +63,7 @@ describe('governance-pack', () => {
     assert.ok(block.includes('cat-cafe-skills'));
   });
 
-  it('pack version is 1.1.0', () => {
-    assert.equal(GOVERNANCE_PACK_VERSION, '1.1.0');
+  it('pack version is 1.2.0', () => {
+    assert.equal(GOVERNANCE_PACK_VERSION, '1.2.0');
   });
 });

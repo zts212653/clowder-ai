@@ -17,7 +17,7 @@ created: 2026-02-26
 
 ## What
 - **F015（机制层）**：确保功能想法不散落在手机备忘录，能在 `docs/` 真相源中被持续管理与追溯。
-- 本需求的机制落地由 **F040** 完成（`docs/BACKLOG.md` + `docs/features/` 聚合文件 + skills）。
+- 本需求的机制落地由 **F040** 完成（`docs/ROADMAP.md` + `docs/features/` 聚合文件 + skills）。
 
 ## Acceptance Criteria
 - [x] AC-A1: 本文档已补齐模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。

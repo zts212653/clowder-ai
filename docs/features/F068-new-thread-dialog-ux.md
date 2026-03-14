@@ -4,12 +4,13 @@ related_features: [F063]
 topics: [hub, ux, directory-picker, new-thread]
 doc_kind: spec
 created: 2026-03-06
-status: in-progress
+status: done
+completed: 2026-03-12
 ---
 
 # F068 — 新建对话弹窗 UX 优化
 
-> **Status**: in-progress | **Owner**: 三猫
+> **Status**: done | **Completed**: 2026-03-12 | **Owner**: 三猫
 
 ## Why
 
@@ -24,7 +25,7 @@ team lead反馈"新建对话"弹窗**太难用**：
 重新设计"新建对话"弹窗，用**三种入口**覆盖所有场景：
 
 1. **系统原生文件选择器** — 后端通过 `osascript` 调用 macOS 原生 NSOpenPanel（Finder 风格），用户体验与上传文件完全一致
-2. **路径输入框** — 常驻输入框，直接粘贴/输入完整路径（如 `/Users/owner/projects/freelance/studio-flow`）
+2. **路径输入框** — 常驻输入框，直接粘贴/输入完整路径（如 `/home/user
 3. **最近项目快捷入口** — 底部显示历史项目 + 大厅，一键直达
 
 **删除**自建目录浏览器 — 有原生选择器后不再需要。
@@ -87,3 +88,5 @@ team lead反馈"新建对话"弹窗**太难用**：
 
 ### 残留项
 - R5 移动端响应式降级：当前 Cat Café 仅桌面使用，移动端验证待 F010 手机端功能推进时一并确认
+
+### 反思胶囊

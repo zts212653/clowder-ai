@@ -1,5 +1,6 @@
 import type { StudyMeta } from '@cat-cafe/shared';
-import { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { apiFetch } from '@/utils/api-client';
 import { PodcastPlayer } from './PodcastPlayer';
 
 interface StudyFoldAreaProps {
@@ -23,6 +24,22 @@ function formatDate(iso: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/** Returns the best thread to navigate to: first active linked thread > default */
+function resolveDiscussThread(studyMeta: StudyMeta | null): string {
+  const threads = studyMeta?.threads ?? [];
+  const active = threads.find((t) => !t.stale);
+  return active ? active.threadId : 'default';
+}
+
+async function fetchNoteContent(articleId: string, noteId: string): Promise<string> {
+  const res = await apiFetch(
+    `/api/signals/articles/${encodeURIComponent(articleId)}/notes/${encodeURIComponent(noteId)}`,
+  );
+  if (!res.ok) return '（无法加载笔记内容）';
+  const data = (await res.json()) as { content?: string };
+  return data.content ?? '（空）';
 }
 
 export function StudyFoldArea({
@@ -57,6 +74,42 @@ export function StudyFoldArea({
   const hasContent = threads.length > 0 || artifacts.length > 0;
   const studyCount = threads.length + artifacts.length;
 
+  // Use linked thread instead of hardcoded /thread/default
+  const discussThread = resolveDiscussThread(studyMeta);
+  const discussLink = `/thread/${encodeURIComponent(discussThread)}?signal=${encodeURIComponent(articleId)}`;
+
+  // Note expansion state
+  const [expandedNote, setExpandedNote] = useState<string | null>(null);
+  const [noteContents, setNoteContents] = useState<Record<string, string>>({});
+  const [loadingNote, setLoadingNote] = useState<string | null>(null);
+
+  // Reset expanded note when article changes
+  const prevArticleRef = useRef(articleId);
+  useEffect(() => {
+    if (articleId !== prevArticleRef.current) {
+      prevArticleRef.current = articleId;
+      setExpandedNote(null);
+      setNoteContents({});
+    }
+  }, [articleId]);
+
+  const toggleNote = useCallback(
+    async (noteId: string) => {
+      if (expandedNote === noteId) {
+        setExpandedNote(null);
+        return;
+      }
+      setExpandedNote(noteId);
+      if (!noteContents[noteId]) {
+        setLoadingNote(noteId);
+        const content = await fetchNoteContent(articleId, noteId);
+        setNoteContents((prev) => ({ ...prev, [noteId]: content }));
+        setLoadingNote(null);
+      }
+    },
+    [expandedNote, noteContents, articleId],
+  );
+
   return (
     <section className="mt-4">
       <button
@@ -83,14 +136,14 @@ export function StudyFoldArea({
               开始学习
             </button>
             <a
-              href={`/thread/default?signal=${encodeURIComponent(articleId)}`}
+              href={discussLink}
               className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100"
             >
               在对话中讨论
             </a>
             {/* AC-6: 多猫研究派发 — signal param binds article context via activeSignals */}
             <a
-              href={`/thread/default?signal=${encodeURIComponent(articleId)}&research=multi`}
+              href={`${discussLink}&research=multi`}
               className="rounded-md border border-emerald-300 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50"
             >
               多猫研究
@@ -157,14 +210,30 @@ export function StudyFoldArea({
               <h4 className="text-xs font-semibold text-gray-500">学习笔记</h4>
               <ul className="mt-1 space-y-1">
                 {notes.map((n) => (
-                  <li
-                    key={n.id}
-                    className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700"
-                  >
-                    <span className="font-medium">{n.id}</span>
-                    <span className="ml-2 text-gray-400">
-                      {n.state} · {formatDate(n.createdAt)}
-                    </span>
+                  <li key={n.id}>
+                    <button
+                      type="button"
+                      onClick={() => void toggleNote(n.id)}
+                      className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                      data-testid={`note-toggle-${n.id}`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-gray-400">{expandedNote === n.id ? '▾' : '▸'}</span>
+                        <span className="font-medium">{n.id}</span>
+                      </span>
+                      <span className="text-gray-400">
+                        {n.state} · {formatDate(n.createdAt)}
+                      </span>
+                    </button>
+                    {expandedNote === n.id && (
+                      <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                        {loadingNote === n.id ? (
+                          <span className="text-gray-400">加载中...</span>
+                        ) : (
+                          <pre className="whitespace-pre-wrap">{noteContents[n.id] ?? ''}</pre>
+                        )}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

@@ -3,7 +3,7 @@
  * Used by GET /api/config/env-summary to report current values to the frontend.
  *
  * ⚠️  ALL CATS: 新增 process.env.XXX → 必须在下方 ENV_VARS 数组注册！
- *    不注册 = 前端「环境 & 文件」页面看不到 = owner不知道 = 不存在。
+ *    不注册 = 前端「环境 & 文件」页面看不到 = team lead不知道 = 不存在。
  *    SOP.md「环境变量注册」章节有说明。
  *
  * To add a new env var:

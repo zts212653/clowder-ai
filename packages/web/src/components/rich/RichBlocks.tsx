@@ -35,11 +35,6 @@ function RichBlockRenderer({ block, catId, messageId }: { block: RichBlock; catI
 type GroupedItem = { grouped: true; groupId: string; blocks: RichInteractiveBlock[] };
 type ResultItem = RichBlock | GroupedItem;
 
-/** Check if any option in a block has customInput (incompatible with group submission) */
-function hasCustomInput(block: RichInteractiveBlock): boolean {
-  return block.options.some((o) => o.customInput);
-}
-
 /** Find runs of consecutive ungrouped interactive blocks (no non-interactive gaps) */
 function findConsecutiveRuns(blocks: RichBlock[]): RichInteractiveBlock[][] {
   const runs: RichInteractiveBlock[][] = [];
@@ -59,7 +54,7 @@ function findConsecutiveRuns(blocks: RichBlock[]): RichInteractiveBlock[][] {
 }
 
 /** Phase C: collect interactive blocks into groups by groupId.
- *  Auto-groups: consecutive ungrouped blocks (2+, none with customInput)
+ *  Auto-groups: consecutive ungrouped blocks (2+)
  *  are batched at the first block's position. Non-consecutive blocks stay solo. */
 function groupBlocks(blocks: RichBlock[]): ResultItem[] {
   const result: ResultItem[] = [];
@@ -72,7 +67,7 @@ function groupBlocks(blocks: RichBlock[]): ResultItem[] {
   const syntheticGroups = new Map<string, RichInteractiveBlock[]>();
 
   for (const run of findConsecutiveRuns(blocks)) {
-    if (run.length >= 2 && !run.some(hasCustomInput)) {
+    if (run.length >= 2) {
       const gid = `__auto_${run[0]?.id}`;
       syntheticGroups.set(gid, run);
       for (const b of run) {

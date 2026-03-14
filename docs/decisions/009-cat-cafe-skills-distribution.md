@@ -66,7 +66,7 @@ cat-cafe/
 
 ```bash
 # 源目录绝对路径
-SOURCE=/Users/owner/projects/relay-station/cat-cafe/cat-cafe-skills
+SOURCE=/path/to/project-skills
 
 # Claude 用户级（每个 skill 单独 symlink）
 mkdir -p ~/.claude/skills
@@ -139,5 +139,3 @@ ln -s $(pwd)/cat-cafe-skills ~/.gemini/skills/cat-cafe-skills
 
 ## 相关文档
 
-- Cat Café Skills 总体计划 (internal)
-- Superpowers 整合策略 (internal)

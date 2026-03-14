@@ -21,7 +21,7 @@ triggers:
 
 **Context:** This should be run in a dedicated worktree (created by `worktree` skill).
 
-**Save plans to:** `feature spec or implementation note`
+**Save plans to:** *(internal reference removed)*
 
 ## Straight-Line Check (A→B, No Detour)
 

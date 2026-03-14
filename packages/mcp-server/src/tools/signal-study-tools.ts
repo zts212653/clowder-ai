@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3002';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3003';
 const SIGNAL_USER = process.env['CAT_CAFE_SIGNAL_USER']?.trim() || 'codex';
 
 async function apiJson(
@@ -167,7 +167,7 @@ export const signalUpdateArticleInputSchema = {
   id: z.string().min(1).describe('Article ID'),
   status: z.enum(['inbox', 'read', 'archived', 'starred']).optional().describe('New status'),
   tags: z.array(z.string()).optional().describe('Replace tags'),
-  note: z.string().optional().describe('owner个人备注'),
+  note: z.string().optional().describe('team lead个人备注'),
 };
 
 export const signalDeleteArticleInputSchema = {
@@ -212,7 +212,7 @@ export const signalStudyTools = [
   },
   {
     name: 'signal_delete_article',
-    description: 'Soft-delete one or more articles. Use when owner wants to clean up garbage signals.',
+    description: 'Soft-delete one or more articles. Use when team lead wants to clean up garbage signals.',
     inputSchema: signalDeleteArticleInputSchema,
     handler: handleDeleteArticle,
   },

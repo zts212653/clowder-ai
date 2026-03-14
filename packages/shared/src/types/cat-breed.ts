@@ -114,7 +114,7 @@ export interface CatBreed {
   readonly catId: CatId;
   readonly name: string; // '布偶猫'
   readonly displayName: string;
-  /** Nickname given by owner. See docs/stories/cat-names/ */
+  /** Nickname given by team lead. See docs/stories/cat-names/ */
   readonly nickname?: string;
   readonly avatar: string;
   readonly color: CatColor;
@@ -143,9 +143,9 @@ export interface RosterEntry {
   readonly roles: readonly string[];
   /** Whether this cat is the lead of its family */
   readonly lead: boolean;
-  /** Whether this cat is available (has quota). owner 40 美刀教训！ */
+  /** Whether this cat is available (has quota). team lead 40 美刀教训！ */
   readonly available: boolean;
-  /** owner's evaluation of this cat */
+  /** team lead's evaluation of this cat */
   readonly evaluation: string;
 }
 
@@ -176,7 +176,7 @@ export interface CatCafeConfigV1 {
 }
 
 /**
- * F067: Owner (owner) configuration — configurable identity for @ mention routing.
+ * F067: Owner (team lead) configuration — configurable identity for @ mention routing.
  */
 export interface OwnerConfig {
   /** Primary display name (e.g. "Owner") */

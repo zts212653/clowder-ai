@@ -48,6 +48,9 @@ export class RedisDraftStore implements IDraftStore {
     if (draft.toolEvents && draft.toolEvents.length > 0) {
       fields.toolEvents = JSON.stringify(draft.toolEvents);
     }
+    if (draft.thinking) {
+      fields.thinking = draft.thinking;
+    }
 
     const pipeline = this.redis.multi();
     pipeline.hset(detailKey, fields);
@@ -154,6 +157,7 @@ export class RedisDraftStore implements IDraftStore {
       content: d.content ?? '',
       updatedAt: parseInt(d.updatedAt ?? '0', 10),
       ...(toolEvents ? { toolEvents } : {}),
+      ...(d.thinking ? { thinking: d.thinking } : {}),
     };
   }
 }

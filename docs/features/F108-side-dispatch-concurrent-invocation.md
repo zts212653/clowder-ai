@@ -38,11 +38,43 @@ team experience（2026-03-12）：
    - 同一 catId 在同一 thread 不能有多个并发 invocation（保留原有单锁语义，只是粒度从 thread 细化到 thread+cat）
    - 文件锁/worktree 冲突检测（两只猫不能同时改同一个文件）
 
-### Phase B: Steer 集成 + UX
+### Phase B: 双模发送 UX（team lead 2026-03-12 定义）
 
-1. **Steer 旁路派遣**：UI 上「悄悄话」模式或指定猫模式，不中断主执行流
-2. **Whisper Mode**：team lead给特定猫发消息，其他猫看不到（类似当前 steer，但不 abort 其他猫）
-3. **Thread 执行状态面板**：显示当前 thread 有哪些猫在活跃执行
+team lead发消息有两种模式：
+
+#### 模式 A：悄悄话（Whisper） — 锁头按钮
+
+```
+交互流：
+1. team lead点击输入框旁的 🔒 锁头按钮 → 进入悄悄话模式
+2. 出现猫选择器（⚠️ 不能选当前正在执行的猫）
+3. 选择目标猫 → 输入消息 → 发送
+4. 目标猫开始旁路执行（不打断当前执行猫）
+5. 当前执行猫看不到这条消息（whisper 可见性）
+```
+
+- 与 steer 的区别：**steer 会 abort 当前执行猫，锁头不会**
+- 猫选择器**灰掉当前正在执行的猫**（强制不能选）
+- 复用现有 `visibility='whisper' + whisperTo` 消息可见性模型
+
+#### 模式 B：广播（默认） — 不点锁头直接发
+
+```
+交互流：
+1. team lead直接在输入框打字 → 发送
+2. 消息对所有猫可见（广播）
+3. 当前正在执行的猫**不被打断**，下一次拉起 CLI 时收到这条广播
+4. 如果消息里 @ 了特定猫，那只猫开始旁路执行
+```
+
+- 与现在的区别：现在发消息会 abort 当前执行猫；F108 后**广播不打断，只排队**
+- 当前执行猫完成后自动拉起下一次执行时，才处理排队的广播
+
+#### 共通 UX
+
+- **Thread 执行状态指示**：显示当前 thread 有哪些猫在活跃执行（头像 + 状态）
+- **Stop 按钮**：并发时每只猫独立 Stop（不再整 thread 清零）
+- **输入框状态**：只有目标猫正在执行时才显示 Queue/Force；给空闲猫发消息直接发送
 
 ## Acceptance Criteria
 
@@ -53,10 +85,14 @@ team experience（2026-03-12）：
 - [ ] AC-A4: InvocationRecord 存储结构支持 per-thread 多条并发记录
 - [ ] AC-A5: 现有 multi_mention 等编排工具继续正常工作（向后兼容）
 
-### Phase B（Steer 集成 + UX）
-- [ ] AC-B1: team lead可以在 UI 上选择目标猫发送消息，不中断其他猫的执行
-- [ ] AC-B2: Thread 状态面板显示当前活跃执行的猫和状态
-- [ ] AC-B3: Whisper Mode — 发给特定猫的消息不影响其他猫的执行流
+### Phase B（双模发送 UX）
+- [ ] AC-B1: 锁头按钮 → 猫选择器 → 悄悄话发送，不打断当前执行猫
+- [ ] AC-B2: 猫选择器灰掉当前正在执行的猫（强制不能选）
+- [ ] AC-B3: 广播消息（不点锁头）不打断当前执行猫，排队到下次拉起
+- [ ] AC-B4: 广播消息中 @ 特定猫，该猫开始旁路执行
+- [ ] AC-B5: Thread 执行状态指示（头像 + 活跃状态）
+- [ ] AC-B6: Stop 按钮精确到每只猫（不再整 thread 清零）
+- [ ] AC-B7: 输入框状态：给空闲猫发消息直接发送，不显示 Queue/Force
 
 ## Dependencies
 
@@ -89,9 +125,10 @@ team experience（2026-03-12）：
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "让你修复问题，并发让Maine Coon反思" — 同一 thread 同时派两只猫干不同的事 | AC-A1 | integration test: 两猫并发 invocation 互不 abort | [ ] |
-| R2 | "给Maine Coon一直发悄悄话避免影响你的修复" — 旁路消息不中断主执行 | AC-A2, AC-B1 | test: 主执行猫不被 abort | [ ] |
+| R2 | "给Maine Coon一直发悄悄话避免影响你的修复" — 锁头 → 选猫 → 悄悄话 | AC-B1, AC-B2 | test: 锁头模式发消息不打断当前猫 + 不能选执行中的猫 | [ ] |
 | R3 | 相关但不同的任务在同一 feat/thread 里，结果都可见 | AC-A2 | test: 旁路消息在 thread 中可见 | [ ] |
 | R4 | 涉及 A2A 并发调整，安全性需要强评估 | AC-A5 | 向后兼容测试 + Maine Coon安全 review | [ ] |
+| R5 | 不点锁头直接发 = 广播，不打断执行猫，下次拉起时收到 | AC-B3, AC-B4 | test: 广播排队 + @ 路由旁路执行 | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -101,17 +138,22 @@ team experience（2026-03-12）：
 ## team lead用例示例
 
 ```
-场景：Ragdoll修 bug 中，team lead同时想让Maine Coon反思架构
+场景 1：悄悄话模式（锁头）
+  Ragdoll正在修 bug...
+  team lead → 点 🔒 锁头 → 猫选择器出现（Ragdoll灰掉不能选）
+  team lead → 选Maine Coon → "你反思一下为什么 review 放过了"
+  ✅ Maine Coon开始旁路执行（反思）
+  ✅ Ragdoll不被打断，也看不到这条消息
+  ✅ team lead可以继续用锁头和Maine Coon对话
 
-当前（F108 之前）：
-  team lead → @opus 修这个 bug
-  team lead → @gpt52 你反思一下为什么过了
-  ❌ @gpt52 的消息 abort 了 @opus 正在进行的修复
-  ❌ 或者team lead被迫开新 thread，结果分散在两个地方
+场景 2：广播模式（不点锁头）
+  Ragdoll正在修 bug...
+  team lead → 直接输入 "大家注意，这个 API 的 breaking change 影响范围可能更大"
+  ✅ Ragdoll不被打断，下次拉起 CLI 时收到这条广播
+  ✅ 如果消息里写了 @gpt52，Maine Coon立即开始旁路执行
 
-期望（F108 之后）：
-  team lead → @opus 修这个 bug       → Ragdoll在主执行流修 bug
-  team lead → @gpt52 你反思一下       → Maine Coon在旁路执行流反思（不打断Ragdoll）
-  ✅ 两只猫并发执行，消息都在同一 thread
-  ✅ team lead可以随时和任一只猫交流
+场景 3：给空闲猫发消息
+  没有猫在执行...
+  team lead → 直接发消息（不需要锁头）→ 按正常流程路由
+  ✅ 和现在行为一样，向后兼容
 ```

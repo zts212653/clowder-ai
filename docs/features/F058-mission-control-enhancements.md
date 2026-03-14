@@ -65,8 +65,8 @@ UI 上加一个"已完成"折叠区（默认收起），展示已完成的 backl
 #### A2: 导入同步"消失 = 完成"
 
 `POST /api/backlog/import-active-features` 增加逻辑：
-- 导入后，对比 Redis 中已有 item 和 BACKLOG.md 活跃表
-- 在 BACKLOG.md 中消失、但 Redis 中仍为 `dispatched` 的 item → 自动标 `done`
+- 导入后，对比 Redis 中已有 item 和 ROADMAP.md 活跃表
+- 在 ROADMAP.md 中消失、但 Redis 中仍为 `dispatched` 的 item → 自动标 `done`
 - 同时读 `docs/features/*.md` 中 `Status: done` 的 feature，对应 item 也标 `done`
 
 #### A3: 依赖关系展示
@@ -108,9 +108,9 @@ approve→dispatch 的多步操作（改状态→开 thread→写消息→标记
 
 #### D1: 导入状态映射
 
-**问题**：`buildBacklogInputFromFeature` 把 BACKLOG.md 的 `in-progress`/`in-review` 只存到 tags（`status:in-progress`），但 BacklogItem 的 `status` 永远是 `'open'`。导致 27 个 item 全堆在 Open 栏，Suggested/Dispatched 全空。
+**问题**：`buildBacklogInputFromFeature` 把 ROADMAP.md 的 `in-progress`/`in-review` 只存到 tags（`status:in-progress`），但 BacklogItem 的 `status` 永远是 `'open'`。导致 27 个 item 全堆在 Open 栏，Suggested/Dispatched 全空。
 
-**修复方案**：导入时根据 BACKLOG.md 的 feature status 映射到合理的 BacklogStatus：
+**修复方案**：导入时根据 ROADMAP.md 的 feature status 映射到合理的 BacklogStatus：
 - `in-progress` → `dispatched`（正在做）
 - `in-review` → `dispatched`（在 review 也是在做）
 - `done` → `done`
@@ -198,7 +198,7 @@ approve→dispatch 的多步操作（改状态→开 thread→写消息→标记
 
 ### Phase A（Bug 修复）
 - [x] AC-A1: `BacklogStatus` 包含 `done`，`dispatched → done` 转换可用
-- [x] AC-A2: 导入同步时，BACKLOG.md 中消失的 feature 对应 item 自动标 `done`
+- [x] AC-A2: 导入同步时，ROADMAP.md 中消失的 feature 对应 item 自动标 `done`
 - [x] AC-A3: UI 有"已完成"折叠区，展示 done 状态的 item
 - [x] AC-A4: `BacklogItem` 支持 `dependencies` 字段
 - [x] AC-A5: UI 卡片显示依赖标签（可点击跳转）

@@ -357,6 +357,7 @@ export async function* routeParallel(
         charDelta > 0 &&
         (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
       ) {
+        const curThinking = catThinking.get(msg.catId);
         deps.draftStore
           .upsert({
             userId,
@@ -365,6 +366,7 @@ export async function* routeParallel(
             catId: msg.catId as CatId,
             content: curText,
             ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
+            ...(curThinking ? { thinking: curThinking } : {}),
             updatedAt: now,
           })
           ?.catch?.(noop);
@@ -380,6 +382,7 @@ export async function* routeParallel(
         // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
         // tool-first invocations (no text yet) must still create a draft record.
         if (curText.length > lastLen || curToolLen > lastToolLen) {
+          const curThinkingTool = catThinking.get(msg.catId);
           deps.draftStore
             .upsert({
               userId,
@@ -388,6 +391,7 @@ export async function* routeParallel(
               catId: msg.catId as CatId,
               content: curText,
               ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
+              ...(curThinkingTool ? { thinking: curThinkingTool } : {}),
               updatedAt: now,
             })
             ?.catch?.(noop);
@@ -555,6 +559,23 @@ export async function* routeParallel(
         const meta = catMeta.get(msg.catId);
         const catTools = catToolEvents.get(msg.catId);
         const thinking = catThinking.get(msg.catId);
+
+        // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
+        // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
+        const hasRichBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])].length > 0;
+        if (catTools && catTools.length > 0 && !hasRichBlocks) {
+          yield {
+            type: 'system_info' as AgentMessageType,
+            catId: msg.catId,
+            content: JSON.stringify({
+              type: 'silent_completion',
+              detail: `${msg.catId} completed with tool calls but no text response.`,
+              toolCount: catTools.length,
+            }),
+            timestamp: Date.now(),
+          } as AgentMessage;
+        }
+
         try {
           await deps.messageStore.append({
             userId,

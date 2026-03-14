@@ -261,7 +261,7 @@ function QueueEntryRow({
         <p className="text-sm text-gray-700 truncate">{entry.content}</p>
         <div className="flex items-center gap-1 mt-0.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
-          <span className="text-xs text-gray-400">{entry.source === 'connector' ? 'Connector' : 'owner'}</span>
+          <span className="text-xs text-gray-400">{entry.source === 'connector' ? 'Connector' : 'team lead'}</span>
           {imageCount > 0 && (
             <span className="flex items-center gap-0.5 text-xs text-gray-400 ml-1">
               <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
@@ -283,6 +283,7 @@ function QueueEntryRow({
           <button
             onClick={() => onMove(entry.id, 'up')}
             className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+            title="上移"
             aria-label="Move up"
           >
             <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
@@ -298,6 +299,7 @@ function QueueEntryRow({
           <button
             onClick={() => onMove(entry.id, 'down')}
             className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+            title="下移"
             aria-label="Move down"
           >
             <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
@@ -326,6 +328,7 @@ function QueueEntryRow({
       <button
         onClick={() => onRemove(entry.id)}
         className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+        title="撤回"
         aria-label="撤回"
       >
         <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
