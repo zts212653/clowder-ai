@@ -283,6 +283,7 @@ function QueueEntryRow({
           <button
             onClick={() => onMove(entry.id, 'up')}
             className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+            title="Move up"
             aria-label="Move up"
           >
             <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
@@ -298,6 +299,7 @@ function QueueEntryRow({
           <button
             onClick={() => onMove(entry.id, 'down')}
             className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+            title="Move down"
             aria-label="Move down"
           >
             <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
@@ -326,6 +328,7 @@ function QueueEntryRow({
       <button
         onClick={() => onRemove(entry.id)}
         className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+        title="Remove"
         aria-label="撤回"
       >
         <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
