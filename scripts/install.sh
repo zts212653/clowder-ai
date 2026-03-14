@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
-# ============================================================
 # Clowder AI — Linux One-Click Install (F113 Phase A)
-# 猫猫咖啡 — Linux 一键部署脚本
-#
-# Usage (run as normal user, not root — script uses sudo internally):
-#   curl -fsSL https://raw.githubusercontent.com/zts212653/clowder-ai/main/scripts/install.sh | bash
-#   ./scripts/install.sh [--start] [--memory] [--dir=/path/to/install]
-#
+# Usage: curl -fsSL https://.../scripts/install.sh | bash
+#   or:  ./scripts/install.sh [--start] [--memory] [--dir=/path]
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
-# Not yet supported: Alpine, Arch, openSUSE
-# ============================================================
 
 set -euo pipefail
-
-# ── Colors & helpers ──────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -31,13 +22,15 @@ warn()    { echo -e "  ${YELLOW}⚠${NC} $*"; }
 fail()    { echo -e "  ${RED}✗${NC} $*"; }
 step()    { echo ""; echo -e "${BOLD}$*${NC}"; }
 
+# TTY-safe read: works even when stdin is a pipe (curl | bash)
+HAS_TTY=false; [[ -r /dev/tty ]] && HAS_TTY=true
+tty_read() { local prompt="$1" var="$2"; read -rp "$prompt" "$var" </dev/tty; }
+
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
 
 if [[ "$(uname -s)" != "Linux" ]]; then
-    fail "This script is for Linux only. Detected: $(uname -s)"
-    fail "此脚本仅支持 Linux。检测到: $(uname -s)"
-    exit 1
+    fail "This script is for Linux only. Detected: $(uname -s)"; exit 1
 fi
 
 DISTRO_FAMILY=""; DISTRO_NAME=""; PKG_INSTALL=""; PKG_UPDATE=""
@@ -51,22 +44,15 @@ if [[ -f /etc/os-release ]]; then
             PKG_INSTALL="apt-get install -y -qq"
             ;;
         centos|rhel|rocky|almalinux|fedora)
-            DISTRO_FAMILY="rhel"
-            if command -v dnf &>/dev/null; then
-                PKG_UPDATE="true"
-                PKG_INSTALL="dnf install -y -q"
-            else
-                PKG_UPDATE="true"
-                PKG_INSTALL="yum install -y -q"
-            fi
+            DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
+            if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y -q"
+            else PKG_INSTALL="yum install -y -q"; fi
             ;;
     esac
 fi
 
 if [[ -z "$DISTRO_FAMILY" ]]; then
-    fail "Unsupported: ${DISTRO_NAME:-unknown}. Supported: Ubuntu/Debian, CentOS/RHEL/Fedora"
-    fail "不支持的发行版: ${DISTRO_NAME:-unknown}。支持: Ubuntu/Debian, CentOS/RHEL/Fedora"
-    exit 1
+    fail "Unsupported: ${DISTRO_NAME:-unknown}. Supported: Ubuntu/Debian, CentOS/RHEL/Fedora"; exit 1
 fi
 ok "OS: ${PRETTY_NAME:-$DISTRO_NAME} ($DISTRO_FAMILY)"
 
@@ -133,21 +119,36 @@ if ! command -v pnpm &>/dev/null; then
 else ok "pnpm $(pnpm -v) already installed"
 fi
 
-# Redis (skip if --memory)
-if [[ "$MEMORY_MODE" == true ]]; then
-    warn "Memory mode — skipping Redis / 内存模式，跳过 Redis"
-elif ! command -v redis-server &>/dev/null; then
+# Redis: --memory → skip; existing → use; else ask user
+install_redis_local() {
     case "$DISTRO_FAMILY" in
         debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;;
     esac
     $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
     $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
     ok "Redis installed and started"
-else
+}
+REDIS_EXTERNAL=false
+if [[ "$MEMORY_MODE" == true ]]; then
+    warn "Memory mode — skipping Redis / 内存模式，跳过 Redis"
+elif command -v redis-server &>/dev/null; then
     ok "Redis already installed"
     redis-cli ping &>/dev/null 2>&1 || {
         $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
     }
+elif [[ "$HAS_TTY" == true ]]; then
+    echo "    1) Install Redis locally (recommended / 推荐)"
+    echo "    2) Use external Redis URL / 使用外部 Redis"
+    tty_read "    Choose [1/2] (default: 1): " REDIS_CHOICE
+    if [[ "${REDIS_CHOICE:-1}" == "2" ]]; then
+        tty_read "    Redis URL (e.g. redis://user:pass@host:6379): " REDIS_EXT_URL
+        if [[ -n "$REDIS_EXT_URL" ]]; then
+            ok "External Redis URL saved — will write to .env after config step"
+            REDIS_EXTERNAL=true
+        else warn "No URL provided — falling back to local install"; fi
+    fi
+    [[ "$REDIS_EXTERNAL" == false ]] && install_redis_local
+else install_redis_local
 fi
 
 # ── [5/9] Clone & build project ────────────────────────────
@@ -181,15 +182,11 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
     for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills"; do
         mkdir -p "$tdir"
         for sd in "$SKILLS_SOURCE"/*/; do
-            [[ -d "$sd" ]] || continue
-            sn=$(basename "$sd"); [[ "$sn" == "refs" ]] && continue
+            [[ -d "$sd" ]] || continue; sn=$(basename "$sd"); [[ "$sn" == "refs" ]] && continue
             ln -sfn "$sd" "$tdir/$sn"
         done
-    done
-    ok "Skills linked to user-level directories"
-else
-    fail "cat-cafe-skills/ not found — cats cannot load workflow rules"
-    exit 1
+    done; ok "Skills linked to user-level directories"
+else fail "cat-cafe-skills/ not found"; exit 1
 fi
 
 # ── [6/9] Install AI agent CLI tools ─────────────────────
@@ -198,37 +195,54 @@ info "  Clowder spawns CLI subprocesses — these are required"
 
 install_npm_cli() {
     local name="$1" cmd="$2" pkg="$3"
-    if command -v "$cmd" &>/dev/null; then
-        ok "$name already installed"
-    else
-        npm install -g "$pkg" 2>&1 | tail -2
-        hash -r 2>/dev/null || true
-        if ! command -v "$cmd" &>/dev/null; then
-            fail "$name ($pkg) install failed — $cmd not found in PATH"
-            fail "Try manually: npm install -g $pkg"
-            exit 1
-        fi
-        ok "$name installed"
+    npm install -g "$pkg" 2>&1 | tail -2
+    hash -r 2>/dev/null || true
+    if ! command -v "$cmd" &>/dev/null; then
+        fail "$name ($pkg) install failed — $cmd not found in PATH"
+        fail "Try manually: npm install -g $pkg"; exit 1
     fi
+    ok "$name installed"
 }
-
-# Claude Code: official installer (not npm)
-if command -v claude &>/dev/null; then
-    ok "Claude Code already installed"
-else
-    info "  Installing Claude Code via official installer..."
+install_claude_cli() {
     curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5
     hash -r 2>/dev/null || true
     if ! command -v claude &>/dev/null; then
         fail "Claude Code install failed — claude not found in PATH"
-        fail "Try manually: curl -fsSL https://claude.ai/install.sh | bash"
-        exit 1
+        fail "Try manually: curl -fsSL https://claude.ai/install.sh | bash"; exit 1
     fi
     ok "Claude Code installed"
-fi
+}
 
-install_npm_cli "Codex CLI"  "codex"  "@openai/codex"
-install_npm_cli "Gemini CLI" "gemini" "@google/gemini-cli"
+# Detect missing CLIs
+MISSING_AGENTS=()
+command -v claude &>/dev/null && ok "Claude Code already installed" || MISSING_AGENTS+=("claude")
+command -v codex &>/dev/null && ok "Codex CLI already installed"  || MISSING_AGENTS+=("codex")
+command -v gemini &>/dev/null && ok "Gemini CLI already installed" || MISSING_AGENTS+=("gemini")
+
+if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
+    INSTALL_AGENTS=("${MISSING_AGENTS[@]}")  # default: install all missing
+    if [[ "$HAS_TTY" == true ]]; then
+        info "  Missing agents / 缺少的 Agent CLI:"
+        for i in "${!MISSING_AGENTS[@]}"; do echo "    $((i+1))) ${MISSING_AGENTS[$i]}"; done
+        tty_read "    Install which? (e.g. 1,2,3 / Enter=all / 0=none): " AGENT_SEL
+        if [[ "$AGENT_SEL" == "0" ]]; then INSTALL_AGENTS=()
+        elif [[ -n "$AGENT_SEL" ]]; then
+            INSTALL_AGENTS=()
+            IFS=',' read -ra SEL_IDX <<< "$AGENT_SEL"
+            for idx in "${SEL_IDX[@]}"; do
+                idx=$((idx - 1))
+                [[ $idx -ge 0 && $idx -lt ${#MISSING_AGENTS[@]} ]] && INSTALL_AGENTS+=("${MISSING_AGENTS[$idx]}")
+            done
+        fi
+    fi
+    for agent in "${INSTALL_AGENTS[@]}"; do
+        case "$agent" in
+            claude) install_claude_cli ;;
+            codex)  install_npm_cli "Codex CLI" "codex" "@openai/codex" ;;
+            gemini) install_npm_cli "Gemini CLI" "gemini" "@google/gemini-cli" ;;
+        esac
+    done
+fi
 
 # ── [7/9] Generate .env ────────────────────────────────────
 step "[7/9] Configuring environment / 配置环境..."
@@ -241,17 +255,20 @@ else
         cp .env.example .env
         ok ".env generated from .env.example"
     else
-        fail ".env.example not found — cannot generate config"
-        fail ".env.example 未找到，无法生成配置"
-        fail "This may indicate an incomplete clone. Try: git clone $REPO_URL"
+        fail ".env.example not found — cannot generate config. Try: git clone $REPO_URL"
         exit 1
     fi
 fi
 
+# Write deferred external Redis URL into .env
+if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
+    sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_EXT_URL|" .env 2>/dev/null \
+        || echo "REDIS_URL=$REDIS_EXT_URL" >> .env
+    ok "External Redis URL written to .env"
+fi
+
 # ── [8/9] Authentication setup / 认证配置 ─────────────────
 step "[8/9] Authentication setup / 认证配置..."
-# Claude API key → .cat-cafe/ profile files (runtime reads those, not .env).
-# Codex/Gemini API keys → .env (process.env → subprocess inheritance).
 write_claude_profile() {
     local key="$1" base_url="$2" model="$3" pid="profile-installer-$$"
     local pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"
@@ -272,25 +289,25 @@ configure_agent_auth() {
     echo -e "  ${BOLD}$name ($cmd):${NC}"
     echo "    1) OAuth / Subscription (recommended / 推荐)"
     echo "    2) API Key"
-    local choice; read -rp "    Choose [1/2] (default: 1): " choice
+    local choice; tty_read "    Choose [1/2] (default: 1): " choice
     if [[ "${choice:-1}" != "2" ]]; then
         ok "$name: OAuth mode (login on first use: run '$cmd')"
         return 0
     fi
     local key="" base_url="" model=""
-    read -rp "    API Key: " key
+    tty_read "    API Key: " key
     case "$cmd" in
         claude)
-            read -rp "    Base URL (Enter = https://api.anthropic.com): " base_url
-            read -rp "    Model (Enter = default): " model
+            tty_read "    Base URL (Enter = https://api.anthropic.com): " base_url
+            tty_read "    Model (Enter = default): " model
             if [[ -n "$key" ]]; then
                 write_claude_profile "$key" "$base_url" "$model"
                 ok "$name: API key profile created in .cat-cafe/"
             else warn "$name: no key provided, skipping"; fi
             ;;
         codex)
-            read -rp "    Base URL (Enter = default): " base_url
-            read -rp "    Model (Enter = default): " model
+            tty_read "    Base URL (Enter = default): " base_url
+            tty_read "    Model (Enter = default): " model
             echo "CODEX_AUTH_MODE=api_key" >> .env
             [[ -n "$key" ]] && echo "OPENAI_API_KEY=$key" >> .env
             [[ -n "$base_url" ]] && echo "OPENAI_BASE_URL=$base_url" >> .env
@@ -298,7 +315,7 @@ configure_agent_auth() {
             ok "$name: API key configured in .env"
             ;;
         gemini)
-            read -rp "    Model (Enter = default): " model
+            tty_read "    Model (Enter = default): " model
             [[ -n "$key" ]] && echo "GEMINI_API_KEY=$key" >> .env
             [[ -n "$model" ]] && echo "CAT_GEMINI_MODEL=$model" >> .env
             ok "$name: API key configured in .env"
@@ -306,17 +323,14 @@ configure_agent_auth() {
     esac
 }
 
-if [[ -t 0 ]]; then
+if [[ "$HAS_TTY" == true ]]; then
     info "  Configure each agent / 逐个配置每只猫的认证方式："
     configure_agent_auth "Claude (布偶猫)" "claude"
     configure_agent_auth "Codex (缅因猫)"  "codex"
     configure_agent_auth "Gemini (暹罗猫)" "gemini"
 else
     info "  Non-interactive — skipping auth config"
-    info "  After install, log in by running each CLI interactively:"
-    echo "    claude   → sign in with Claude subscription"
-    echo "    codex    → sign in with ChatGPT account"
-    echo "    gemini   → sign in with Google account"
+    info "  Log in by running each CLI: claude / codex / gemini"
     info "  Or re-run this script interactively for API key setup"
 fi
 
@@ -325,18 +339,12 @@ step "[9/9] Installation complete! / 安装完成！"
 echo ""
 echo -e "  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}"
 echo "  Project: $PROJECT_DIR"
-echo -n "  Start: cd $PROJECT_DIR && pnpm start"
-[[ "$MEMORY_MODE" == true ]] && echo " --memory" || echo ""
+START_CMD="cd $PROJECT_DIR && pnpm start"
+[[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
+echo "  Start: $START_CMD"
 echo "  Open:  http://localhost:3003"
 echo ""
-
-# Auto-start if requested
 if [[ "$AUTO_START" == true ]]; then
-    echo -e "${CYAN}Starting service (--start)...${NC}"
-    echo ""
-    if [[ "$MEMORY_MODE" == true ]]; then
-        exec pnpm start --memory
-    else
-        exec pnpm start
-    fi
+    echo -e "${CYAN}Starting service (--start)...${NC}"; echo ""
+    if [[ "$MEMORY_MODE" == true ]]; then exec pnpm start --memory; else exec pnpm start; fi
 fi
