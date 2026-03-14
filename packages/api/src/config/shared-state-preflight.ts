@@ -5,12 +5,12 @@
  * Called from invoke-single-cat.ts before dispatching ANY cat (Claude/Codex/Gemini).
  *
  * Shared state files (must match .githooks/pre-commit + shared-rules.md §14):
- *   - docs/BACKLOG.md
+ *   - docs/ROADMAP.md
  *   - cat-config.json
  */
 import { execFileSync } from 'node:child_process';
 
-const SHARED_STATE_PATTERN = /^(docs\/BACKLOG\.md|cat-config\.json)$/;
+const SHARED_STATE_PATTERN = /^(docs\/ROADMAP\.md|cat-config\.json)$/;
 
 /** Safe git exec — returns trimmed stdout or empty string on failure. */
 function safeExec(cmd: string, args: string[], cwd: string): string {
