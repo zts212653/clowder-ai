@@ -22,10 +22,19 @@ export type PickDirectoryResult =
   | { status: 'error'; message: string };
 
 /**
- * Shell out to macOS osascript to open native folder picker (NSOpenPanel).
+ * Open native folder picker dialog.
+ * - macOS: osascript → NSOpenPanel
+ * - Windows: PowerShell → System.Windows.Forms.FolderBrowserDialog
  * Returns a discriminated result: picked / cancelled / error.
  */
 export async function execPickDirectory(): Promise<PickDirectoryResult> {
+  if (process.platform === 'win32') {
+    return execPickDirectoryWindows();
+  }
+  return execPickDirectoryMac();
+}
+
+async function execPickDirectoryMac(): Promise<PickDirectoryResult> {
   try {
     const { stdout } = await execFileAsync('osascript', ['-e', 'POSIX path of (choose folder)'], { timeout: 120_000 });
     const picked = stdout.trim().replace(/\/$/, '');
@@ -34,11 +43,29 @@ export async function execPickDirectory(): Promise<PickDirectoryResult> {
     if (!s.isDirectory()) return { status: 'error', message: 'Selected path is not a directory' };
     return { status: 'picked', path: picked };
   } catch (err: unknown) {
-    // osascript reports "User canceled. (-128)" in stderr when user presses Cancel.
-    // Exit code 1 is generic — also used for permission denial, script errors, etc.
-    // Only treat explicit "User canceled" as cancellation.
     const stderr = String((err as { stderr?: unknown }).stderr ?? '');
     if (stderr.includes('User canceled')) return { status: 'cancelled' };
+    return { status: 'error', message: stderr || (err instanceof Error ? err.message : 'Unknown error') };
+  }
+}
+
+async function execPickDirectoryWindows(): Promise<PickDirectoryResult> {
+  const psScript = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+    '$d.Description = "Select project directory"',
+    '$d.ShowNewFolderButton = $true',
+    'if ($d.ShowDialog() -eq "OK") { Write-Output $d.SelectedPath } else { Write-Output "::CANCELLED::" }',
+  ].join('; ');
+  try {
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', psScript], { timeout: 120_000 });
+    const result = stdout.trim();
+    if (!result || result === '::CANCELLED::') return { status: 'cancelled' };
+    const s = await stat(result);
+    if (!s.isDirectory()) return { status: 'error', message: 'Selected path is not a directory' };
+    return { status: 'picked', path: result };
+  } catch (err: unknown) {
+    const stderr = String((err as { stderr?: unknown }).stderr ?? '');
     return { status: 'error', message: stderr || (err instanceof Error ? err.message : 'Unknown error') };
   }
 }
@@ -62,7 +89,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     return { path: cwd, name: basename(cwd) };
   });
 
-  // POST /api/projects/pick-directory - open native macOS folder picker
+  // POST /api/projects/pick-directory - open native folder picker (macOS/Windows)
   app.post('/api/projects/pick-directory', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
