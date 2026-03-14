@@ -250,49 +250,60 @@ fi
 
 # ── [8/9] Authentication setup / 认证配置 ─────────────────
 step "[8/9] Authentication setup / 认证配置..."
+# Claude API key → .cat-cafe/ profile files (runtime reads those, not .env).
+# Codex/Gemini API keys → .env (process.env → subprocess inheritance).
+write_claude_profile() {
+    local key="$1" base_url="$2" model="$3" pid="profile-installer-$$"
+    local pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"
+    local now; now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    cat > "$pdir/provider-profiles.json" <<EOPROF
+{"version":1,"providers":{"anthropic":{"activeProfileId":"$pid","profiles":[{"id":"$pid","provider":"anthropic","name":"Installer API Key","mode":"api_key","baseUrl":"${base_url:-https://api.anthropic.com}","createdAt":"$now","updatedAt":"$now"${model:+,"modelOverride":"$model"}}]}}}
+EOPROF
+    cat > "$pdir/provider-profiles.secrets.local.json" <<EOSEC
+{"version":1,"providers":{"anthropic":{"$pid":{"apiKey":"$key"}}}}
+EOSEC
+    chmod 600 "$pdir/provider-profiles.secrets.local.json"
+}
 
-# Per-agent auth config: for each installed agent, ask oauth vs api_key
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
-
-    local choice=""
-    if [[ -t 0 ]]; then
-        echo ""
-        echo -e "  ${BOLD}$name ($cmd):${NC}"
-        echo "    1) OAuth / Subscription (recommended / 推荐)"
-        echo "    2) API Key"
-        read -rp "    Choose [1/2] (default: 1): " choice
+    echo ""
+    echo -e "  ${BOLD}$name ($cmd):${NC}"
+    echo "    1) OAuth / Subscription (recommended / 推荐)"
+    echo "    2) API Key"
+    local choice; read -rp "    Choose [1/2] (default: 1): " choice
+    if [[ "${choice:-1}" != "2" ]]; then
+        ok "$name: OAuth mode (login on first use: run '$cmd')"
+        return 0
     fi
-
-    if [[ "${choice:-1}" == "2" ]]; then
-        # API key path — ask for key + base URL + model
-        local key="" base_url="" model=""
-        read -rp "    API Key: " key
-        read -rp "    Base URL (press Enter to skip): " base_url
-        read -rp "    Model name (press Enter for default): " model
-
-        case "$cmd" in
-            claude)
-                [[ -n "$key" ]] && echo "CAT_CAFE_ANTHROPIC_API_KEY=$key" >> .env
-                [[ -n "$base_url" ]] && echo "CAT_CAFE_ANTHROPIC_BASE_URL=$base_url" >> .env
-                [[ -n "$model" ]] && echo "CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE=$model" >> .env
-                echo "CAT_CAFE_ANTHROPIC_PROFILE_MODE=api_key" >> .env
-                ;;
-            codex)
-                [[ -n "$key" ]] && echo "OPENAI_API_KEY=$key" >> .env
-                [[ -n "$base_url" ]] && echo "OPENAI_BASE_URL=$base_url" >> .env
-                echo "CODEX_AUTH_MODE=api_key" >> .env
-                ;;
-            gemini)
-                [[ -n "$key" ]] && echo "GEMINI_API_KEY=$key" >> .env
-                ;;
-        esac
-        ok "$name: API key configured"
-    else
-        # OAuth path — tell user to run CLI interactively after install
-        ok "$name: OAuth mode (login on first use: run '$cmd' in terminal)"
-    fi
+    local key="" base_url="" model=""
+    read -rp "    API Key: " key
+    case "$cmd" in
+        claude)
+            read -rp "    Base URL (Enter = https://api.anthropic.com): " base_url
+            read -rp "    Model (Enter = default): " model
+            if [[ -n "$key" ]]; then
+                write_claude_profile "$key" "$base_url" "$model"
+                ok "$name: API key profile created in .cat-cafe/"
+            else warn "$name: no key provided, skipping"; fi
+            ;;
+        codex)
+            read -rp "    Base URL (Enter = default): " base_url
+            read -rp "    Model (Enter = default): " model
+            echo "CODEX_AUTH_MODE=api_key" >> .env
+            [[ -n "$key" ]] && echo "OPENAI_API_KEY=$key" >> .env
+            [[ -n "$base_url" ]] && echo "OPENAI_BASE_URL=$base_url" >> .env
+            [[ -n "$model" ]] && echo "CAT_CODEX_MODEL=$model" >> .env
+            ok "$name: API key configured in .env"
+            ;;
+        gemini)
+            read -rp "    Model (Enter = default): " model
+            [[ -n "$key" ]] && echo "GEMINI_API_KEY=$key" >> .env
+            [[ -n "$model" ]] && echo "CAT_GEMINI_MODEL=$model" >> .env
+            ok "$name: API key configured in .env"
+            ;;
+    esac
 }
 
 if [[ -t 0 ]]; then
@@ -302,31 +313,21 @@ if [[ -t 0 ]]; then
     configure_agent_auth "Gemini (暹罗猫)" "gemini"
 else
     info "  Non-interactive — skipping auth config"
-    info "  CLI tools installed; log in by running each tool interactively:"
+    info "  After install, log in by running each CLI interactively:"
     echo "    claude   → sign in with Claude subscription"
     echo "    codex    → sign in with ChatGPT account"
     echo "    gemini   → sign in with Google account"
-    info "  Or edit .env for API key mode (see .env.example)"
+    info "  Or re-run this script interactively for API key setup"
 fi
 
 # ── [9/9] Done ──────────────────────────────────────────────
 step "[9/9] Installation complete! / 安装完成！"
-
 echo ""
-echo "=========================="
-echo -e "${GREEN}  Clowder AI is ready!  猫猫咖啡已就绪！${NC}"
-echo "=========================="
-echo ""
+echo -e "  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}"
 echo "  Project: $PROJECT_DIR"
-echo ""
-echo "  Start the service / 启动服务:"
-if [[ "$MEMORY_MODE" == true ]]; then
-    echo "    cd $PROJECT_DIR && pnpm start --memory"
-else
-    echo "    cd $PROJECT_DIR && pnpm start"
-fi
-echo ""
-echo "  Open: http://localhost:3003"
+echo -n "  Start: cd $PROJECT_DIR && pnpm start"
+[[ "$MEMORY_MODE" == true ]] && echo " --memory" || echo ""
+echo "  Open:  http://localhost:3003"
 echo ""
 
 # Auto-start if requested
