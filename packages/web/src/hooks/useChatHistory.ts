@@ -523,8 +523,12 @@ export function useChatHistory(threadId: string) {
       restoreScrollRef.current = false;
       const savedTop = scrollPositionsRef.current.get(threadId);
       if (savedTop !== undefined) {
+        const restoreThread = threadId;
         requestAnimationFrame(() => {
-          el.scrollTop = savedTop;
+          // Guard: skip if thread changed during the frame (fast A→B→C switch)
+          if (threadIdRef.current === restoreThread) {
+            el.scrollTop = savedTop;
+          }
         });
         return;
       }
