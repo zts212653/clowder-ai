@@ -127,11 +127,26 @@ echo ""
 read -p "  Choose (1/2) [1]: " AUTH_MODE_CHOICE
 AUTH_MODE_CHOICE=${AUTH_MODE_CHOICE:-1}
 
-# Resolve the true repo root (handles worktree scenarios where
-# $PROJECT_DIR may be a worktree checkout, not the main repo).
-REPO_ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
-if [ -z "$REPO_ROOT" ]; then
-    REPO_ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$PROJECT_DIR")
+# Resolve the true repo root for provider profile storage.
+# In a git worktree, .git is a file (not a dir) containing "gitdir: ..."
+# pointing into the main repo's .git/worktrees/<name>. We follow that
+# pointer to find the main repo root, matching the runtime logic in
+# provider-profiles-root.ts.
+REPO_ROOT="$PROJECT_DIR"
+_GIT_PATH="$PROJECT_DIR/.git"
+if [ -f "$_GIT_PATH" ]; then
+    # .git is a file → likely a worktree; extract gitdir pointer
+    _GITDIR=$(sed -n 's/^gitdir: *//p' "$_GIT_PATH" 2>/dev/null)
+    if [ -n "$_GITDIR" ]; then
+        # Resolve relative path
+        _GITDIR=$(cd "$PROJECT_DIR" && cd "$_GITDIR" 2>/dev/null && pwd)
+        # worktree gitdir is typically <main-repo>/.git/worktrees/<name>
+        _WORKTREES_DIR=$(dirname "$_GITDIR" 2>/dev/null)
+        _DOT_GIT_DIR=$(dirname "$_WORKTREES_DIR" 2>/dev/null)
+        if [ "$(basename "$_WORKTREES_DIR")" = "worktrees" ] && [ "$(basename "$_DOT_GIT_DIR")" = ".git" ]; then
+            REPO_ROOT=$(dirname "$_DOT_GIT_DIR")
+        fi
+    fi
 fi
 CAT_CAFE_DIR="$REPO_ROOT/.cat-cafe"
 PROFILE_META="$CAT_CAFE_DIR/provider-profiles.json"
@@ -154,13 +169,16 @@ if [ "$AUTH_MODE_CHOICE" = "2" ]; then
 
         # Use Node for safe JSON serialization and merge with existing profiles.
         # This avoids shell quoting issues and preserves existing profiles.
+        # API key is passed via stdin (not argv) to avoid /proc exposure.
         mkdir -p "$CAT_CAFE_DIR"
-        node -e "
+        echo "$SETUP_API_KEY" | node -e "
 const fs = require('fs');
-const apiKey = process.argv[1];
-const baseUrl = process.argv[2].replace(/\/+\$/, '');
-const metaPath = process.argv[3];
-const secretsPath = process.argv[4];
+const baseUrl = process.argv[1].replace(/\/+\$/, '');
+const metaPath = process.argv[2];
+const secretsPath = process.argv[3];
+
+// Read API key from stdin (avoids argv exposure in process list)
+const apiKey = fs.readFileSync('/dev/stdin', 'utf-8').trim();
 
 const profileId = 'profile-setup-' + Date.now();
 const now = new Date().toISOString();
@@ -208,7 +226,7 @@ secrets.providers.anthropic[profileId] = { apiKey: apiKey };
 
 fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
 fs.writeFileSync(secretsPath, JSON.stringify(secrets, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
-" "$SETUP_API_KEY" "$SETUP_BASE_URL" "$PROFILE_META" "$PROFILE_SECRETS"
+" "$SETUP_BASE_URL" "$PROFILE_META" "$PROFILE_SECRETS"
 
         if [ $? -eq 0 ]; then
             chmod 600 "$PROFILE_SECRETS"
