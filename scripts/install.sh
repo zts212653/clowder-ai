@@ -5,7 +5,7 @@
 #
 # Usage (run as normal user, not root — script uses sudo internally):
 #   curl -fsSL https://raw.githubusercontent.com/zts212653/clowder-ai/main/scripts/install.sh | bash
-#   ./scripts/install.sh [--start] [--memory] [--dir=/path/to/install] [--auth=oauth|apikey]
+#   ./scripts/install.sh [--start] [--memory] [--dir=/path/to/install]
 #
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
 # Not yet supported: Alpine, Arch, openSUSE
@@ -17,11 +17,11 @@ set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-AUTO_START=false; MEMORY_MODE=false; INSTALL_DIR=""; AUTH_MODE=""
+AUTO_START=false; MEMORY_MODE=false; INSTALL_DIR=""
 for arg in "$@"; do
     case $arg in
         --start) AUTO_START=true ;; --memory) MEMORY_MODE=true ;;
-        --dir=*) INSTALL_DIR="${arg#*=}" ;; --auth=*) AUTH_MODE="${arg#*=}" ;;
+        --dir=*) INSTALL_DIR="${arg#*=}" ;;
     esac
 done
 
@@ -196,18 +196,39 @@ fi
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
 
-install_cli() {
+install_npm_cli() {
     local name="$1" cmd="$2" pkg="$3"
     if command -v "$cmd" &>/dev/null; then
         ok "$name already installed"
     else
         npm install -g "$pkg" 2>&1 | tail -2
-        command -v "$cmd" &>/dev/null && ok "$name installed" || warn "$name: try 'hash -r' to refresh PATH"
+        hash -r 2>/dev/null || true
+        if ! command -v "$cmd" &>/dev/null; then
+            fail "$name ($pkg) install failed — $cmd not found in PATH"
+            fail "Try manually: npm install -g $pkg"
+            exit 1
+        fi
+        ok "$name installed"
     fi
 }
-install_cli "Claude Code" "claude" "@anthropic-ai/claude-code"
-install_cli "Codex CLI"   "codex"  "@openai/codex"
-install_cli "Gemini CLI"  "gemini" "@google/gemini-cli"
+
+# Claude Code: official installer (not npm)
+if command -v claude &>/dev/null; then
+    ok "Claude Code already installed"
+else
+    info "  Installing Claude Code via official installer..."
+    curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5
+    hash -r 2>/dev/null || true
+    if ! command -v claude &>/dev/null; then
+        fail "Claude Code install failed — claude not found in PATH"
+        fail "Try manually: curl -fsSL https://claude.ai/install.sh | bash"
+        exit 1
+    fi
+    ok "Claude Code installed"
+fi
+
+install_npm_cli "Codex CLI"  "codex"  "@openai/codex"
+install_npm_cli "Gemini CLI" "gemini" "@google/gemini-cli"
 
 # ── [7/9] Generate .env ────────────────────────────────────
 step "[7/9] Configuring environment / 配置环境..."
@@ -230,37 +251,62 @@ fi
 # ── [8/9] Authentication setup / 认证配置 ─────────────────
 step "[8/9] Authentication setup / 认证配置..."
 
-if [[ -z "$AUTH_MODE" ]]; then
-    if [[ -t 0 ]]; then
-        echo "  1) OAuth / Subscription login (recommended / 推荐)"
-        echo "  2) API Key mode / API Key 模式"
-        read -rp "  Choose [1/2] (default: 1): " auth_choice
-        [[ "${auth_choice:-1}" == "2" ]] && AUTH_MODE="apikey" || AUTH_MODE="oauth"
-    else
-        AUTH_MODE="oauth"
-        info "  Non-interactive — defaulting to OAuth"
-    fi
-fi
+# Per-agent auth config: for each installed agent, ask oauth vs api_key
+configure_agent_auth() {
+    local name="$1" cmd="$2"
+    command -v "$cmd" &>/dev/null || return 0
 
-if [[ "$AUTH_MODE" == "apikey" ]]; then
-    info "  API Key mode — edit .env to add keys:"
-    echo "    ANTHROPIC_API_KEY=sk-...   (Claude / 布偶猫)"
-    echo "    OPENAI_API_KEY=sk-...      (Codex / 缅因猫)"
-    echo "    GOOGLE_API_KEY=AI...       (Gemini / 暹罗猫)"
-    if [[ -f .env ]] && ! grep -q 'CAT_CAFE_ANTHROPIC_PROFILE_MODE' .env; then
-        { echo ""; echo "# Auth: api_key (set by installer)"; echo "CAT_CAFE_ANTHROPIC_PROFILE_MODE=api_key"; echo "CODEX_AUTH_MODE=api_key"; } >> .env
+    local choice=""
+    if [[ -t 0 ]]; then
+        echo ""
+        echo -e "  ${BOLD}$name ($cmd):${NC}"
+        echo "    1) OAuth / Subscription (recommended / 推荐)"
+        echo "    2) API Key"
+        read -rp "    Choose [1/2] (default: 1): " choice
     fi
-    ok "API key mode configured"
+
+    if [[ "${choice:-1}" == "2" ]]; then
+        # API key path — ask for key + base URL + model
+        local key="" base_url="" model=""
+        read -rp "    API Key: " key
+        read -rp "    Base URL (press Enter to skip): " base_url
+        read -rp "    Model name (press Enter for default): " model
+
+        case "$cmd" in
+            claude)
+                [[ -n "$key" ]] && echo "CAT_CAFE_ANTHROPIC_API_KEY=$key" >> .env
+                [[ -n "$base_url" ]] && echo "CAT_CAFE_ANTHROPIC_BASE_URL=$base_url" >> .env
+                [[ -n "$model" ]] && echo "CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE=$model" >> .env
+                echo "CAT_CAFE_ANTHROPIC_PROFILE_MODE=api_key" >> .env
+                ;;
+            codex)
+                [[ -n "$key" ]] && echo "OPENAI_API_KEY=$key" >> .env
+                [[ -n "$base_url" ]] && echo "OPENAI_BASE_URL=$base_url" >> .env
+                echo "CODEX_AUTH_MODE=api_key" >> .env
+                ;;
+            gemini)
+                [[ -n "$key" ]] && echo "GEMINI_API_KEY=$key" >> .env
+                ;;
+        esac
+        ok "$name: API key configured"
+    else
+        # OAuth path — tell user to run CLI interactively after install
+        ok "$name: OAuth mode (login on first use: run '$cmd' in terminal)"
+    fi
+}
+
+if [[ -t 0 ]]; then
+    info "  Configure each agent / 逐个配置每只猫的认证方式："
+    configure_agent_auth "Claude (布偶猫)" "claude"
+    configure_agent_auth "Codex (缅因猫)"  "codex"
+    configure_agent_auth "Gemini (暹罗猫)" "gemini"
 else
-    info "  OAuth mode — logging in to CLI tools..."
-    for cli_info in "claude:Claude Code" "codex:Codex CLI" "gemini:Gemini CLI"; do
-        cmd="${cli_info%%:*}"; name="${cli_info#*:}"
-        if command -v "$cmd" &>/dev/null; then
-            echo -e "  ${CYAN}→ $name login:${NC}"
-            "$cmd" auth login 2>&1 || warn "$name login skipped"
-        fi
-    done
-    ok "CLI auth setup complete (retry later: claude/codex/gemini auth login)"
+    info "  Non-interactive — skipping auth config"
+    info "  CLI tools installed; log in by running each tool interactively:"
+    echo "    claude   → sign in with Claude subscription"
+    echo "    codex    → sign in with ChatGPT account"
+    echo "    gemini   → sign in with Google account"
+    info "  Or edit .env for API key mode (see .env.example)"
 fi
 
 # ── [9/9] Done ──────────────────────────────────────────────
@@ -273,18 +319,11 @@ echo "=========================="
 echo ""
 echo "  Project: $PROJECT_DIR"
 echo ""
-if [[ "$AUTH_MODE" == "apikey" ]]; then
-    echo "  Next: edit .env with your API keys, then start"
-    echo "  下一步：编辑 .env 填入 API key，然后启动"
-    echo "    cd $PROJECT_DIR && nano .env"
-else
-    echo "  Next: start the service / 下一步：启动服务"
-fi
-echo ""
+echo "  Start the service / 启动服务:"
 if [[ "$MEMORY_MODE" == true ]]; then
-    echo "    pnpm start --memory"
+    echo "    cd $PROJECT_DIR && pnpm start --memory"
 else
-    echo "    pnpm start"
+    echo "    cd $PROJECT_DIR && pnpm start"
 fi
 echo ""
 echo "  Open: http://localhost:3003"
