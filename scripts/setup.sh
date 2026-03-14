@@ -127,9 +127,17 @@ echo ""
 read -p "  Choose (1/2) [1]: " AUTH_MODE_CHOICE
 AUTH_MODE_CHOICE=${AUTH_MODE_CHOICE:-1}
 
-CAT_CAFE_DIR="$PROJECT_DIR/.cat-cafe"
+# Resolve the true repo root (handles worktree scenarios where
+# $PROJECT_DIR may be a worktree checkout, not the main repo).
+REPO_ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-superproject-working-tree 2>/dev/null)
+if [ -z "$REPO_ROOT" ]; then
+    REPO_ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$PROJECT_DIR")
+fi
+CAT_CAFE_DIR="$REPO_ROOT/.cat-cafe"
 PROFILE_META="$CAT_CAFE_DIR/provider-profiles.json"
 PROFILE_SECRETS="$CAT_CAFE_DIR/provider-profiles.secrets.local.json"
+
+AUTH_MODE_EFFECTIVE="subscription"
 
 if [ "$AUTH_MODE_CHOICE" = "2" ]; then
     echo ""
@@ -139,64 +147,78 @@ if [ "$AUTH_MODE_CHOICE" = "2" ]; then
         echo -e "  ${RED}✗${NC} API Key is required for api_key mode."
         echo "     You can add it later via Web UI → Settings → Provider Profiles."
         echo "     也可稍后通过 Web UI → Settings → Provider Profiles 添加。"
+        echo -e "  ${YELLOW}○${NC} Falling back to subscription mode."
     else
         read -p "  API Base URL [https://api.anthropic.com]: " SETUP_BASE_URL
         SETUP_BASE_URL=${SETUP_BASE_URL:-https://api.anthropic.com}
-        # Remove trailing slashes
-        SETUP_BASE_URL=$(echo "$SETUP_BASE_URL" | sed 's|/\+$||')
 
-        # Write provider profile files
+        # Use Node for safe JSON serialization and merge with existing profiles.
+        # This avoids shell quoting issues and preserves existing profiles.
         mkdir -p "$CAT_CAFE_DIR"
-        PROFILE_ID="profile-setup-$(date +%s)"
-        NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        node -e "
+const fs = require('fs');
+const apiKey = process.argv[1];
+const baseUrl = process.argv[2].replace(/\/+\$/, '');
+const metaPath = process.argv[3];
+const secretsPath = process.argv[4];
 
-        cat > "$PROFILE_META" <<METAEOF
-{
-  "version": 1,
-  "providers": {
-    "anthropic": {
-      "activeProfileId": "$PROFILE_ID",
-      "profiles": [
-        {
-          "id": "anthropic-subscription-default",
-          "provider": "anthropic",
-          "name": "自有订阅",
-          "mode": "subscription",
-          "createdAt": "$NOW",
-          "updatedAt": "$NOW"
-        },
-        {
-          "id": "$PROFILE_ID",
-          "provider": "anthropic",
-          "name": "API Key (setup.sh)",
-          "mode": "api_key",
-          "baseUrl": "$SETUP_BASE_URL",
-          "createdAt": "$NOW",
-          "updatedAt": "$NOW"
-        }
-      ]
-    }
-  }
+const profileId = 'profile-setup-' + Date.now();
+const now = new Date().toISOString();
+
+// Read existing or create default
+let meta;
+try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch { meta = null; }
+if (!meta || meta.version !== 1 || !meta.providers?.anthropic?.profiles) {
+  meta = {
+    version: 1,
+    providers: {
+      anthropic: {
+        activeProfileId: 'anthropic-subscription-default',
+        profiles: [{
+          id: 'anthropic-subscription-default',
+          provider: 'anthropic',
+          name: '自有订阅',
+          mode: 'subscription',
+          createdAt: now,
+          updatedAt: now,
+        }],
+      },
+    },
+  };
 }
-METAEOF
 
-        cat > "$PROFILE_SECRETS" <<SECRETSEOF
-{
-  "version": 1,
-  "providers": {
-    "anthropic": {
-      "$PROFILE_ID": {
-        "apiKey": "$SETUP_API_KEY"
-      }
-    }
-  }
+let secrets;
+try { secrets = JSON.parse(fs.readFileSync(secretsPath, 'utf-8')); } catch { secrets = null; }
+if (!secrets || secrets.version !== 1 || !secrets.providers?.anthropic) {
+  secrets = { version: 1, providers: { anthropic: {} } };
 }
-SECRETSEOF
 
-        chmod 600 "$PROFILE_SECRETS"
+// Add new profile (merge, don't overwrite)
+meta.providers.anthropic.profiles.push({
+  id: profileId,
+  provider: 'anthropic',
+  name: 'API Key (setup.sh)',
+  mode: 'api_key',
+  baseUrl: baseUrl,
+  createdAt: now,
+  updatedAt: now,
+});
+meta.providers.anthropic.activeProfileId = profileId;
+secrets.providers.anthropic[profileId] = { apiKey: apiKey };
 
-        echo -e "  ${GREEN}✓${NC} API key profile created and activated"
-        echo -e "  ${GREEN}✓${NC} Provider profile is the auth truth source for Cat Cafe"
+fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
+fs.writeFileSync(secretsPath, JSON.stringify(secrets, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+" "$SETUP_API_KEY" "$SETUP_BASE_URL" "$PROFILE_META" "$PROFILE_SECRETS"
+
+        if [ $? -eq 0 ]; then
+            chmod 600 "$PROFILE_SECRETS"
+            AUTH_MODE_EFFECTIVE="api_key"
+            echo -e "  ${GREEN}✓${NC} API key profile created and activated"
+            echo -e "  ${GREEN}✓${NC} Provider profile is the auth truth source for Cat Cafe"
+        else
+            echo -e "  ${RED}✗${NC} Failed to write provider profile."
+            echo -e "  ${YELLOW}○${NC} Falling back to subscription mode."
+        fi
     fi
 else
     echo -e "  ${GREEN}✓${NC} Using Claude Max subscription (default)"
@@ -469,7 +491,7 @@ echo "=================================="
 echo -e "${GREEN}🎉 Cat Cafe is ready!${NC}"
 echo ""
 echo "  Enabled features / 已启用功能:"
-[ "$AUTH_MODE_CHOICE" = "2" ] && echo "    ✓ Auth: API Key" || echo "    ✓ Auth: Claude Max subscription"
+[ "$AUTH_MODE_EFFECTIVE" = "api_key" ] && echo "    ✓ Auth: API Key" || echo "    ✓ Auth: Claude Max subscription"
 echo "    ✓ Core (API + Frontend + Redis)"
 [ "$ENABLE_ASR" = true ] && echo "    ✓ Voice Input (ASR)"
 [ "$ENABLE_TTS" = true ] && echo "    ✓ Voice Output (TTS)"
