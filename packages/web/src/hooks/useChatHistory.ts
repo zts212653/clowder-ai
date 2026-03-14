@@ -219,6 +219,7 @@ export function useChatHistory(threadId: string) {
             source?: { connector: string; label: string; icon: string; url?: string };
             mentionsUser?: boolean;
             deliveredAt?: number;
+            replyTo?: string;
           }) =>
             ({
               id: m.id,
@@ -250,6 +251,7 @@ export function useChatHistory(threadId: string) {
               ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
               ...(m.source ? { source: m.source } : {}),
               ...(m.mentionsUser ? { mentionsUser: true } : {}),
+              ...(m.replyTo ? { replyTo: m.replyTo } : {}),
               // #80: Restore streaming indicator for draft messages recovered from Redis
               ...(m.isDraft ? { isStreaming: true } : {}),
               timestamp: m.timestamp,
