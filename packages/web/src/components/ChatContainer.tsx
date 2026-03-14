@@ -124,6 +124,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   );
   // #28: Right status panel width in px, persisted
   const STATUS_PANEL_DEFAULT = 288;
+  const STATUS_PANEL_MIN = 200;
+  const STATUS_PANEL_MAX = 480;
   const [statusPanelWidth, setStatusPanelWidth, resetStatusPanelWidth] = usePersistedState(
     'cat-cafe:statusPanelWidth',
     STATUS_PANEL_DEFAULT,
@@ -147,7 +149,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   );
   const handleStatusPanelResize = useCallback(
     (delta: number) => {
-      setStatusPanelWidth((prev) => Math.min(480, Math.max(200, prev - delta)));
+      setStatusPanelWidth((prev) => Math.min(STATUS_PANEL_MAX, Math.max(STATUS_PANEL_MIN, prev - delta)));
     },
     [setStatusPanelWidth],
   );
