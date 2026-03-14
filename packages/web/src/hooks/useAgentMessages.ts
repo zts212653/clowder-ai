@@ -29,6 +29,8 @@ interface AgentMsg {
   mentionsUser?: boolean;
   /** F52: Cross-thread origin metadata */
   extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };
+  /** F066: ID of the message this is replying to (threading) */
+  replyTo?: string;
 }
 
 function truncate(text: string, maxLength: number): string {
@@ -269,6 +271,7 @@ export function useAgentMessages() {
             ...(msg.metadata ? { metadata: msg.metadata } : {}),
             ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
             ...(msg.mentionsUser ? { mentionsUser: true } : {}),
+            ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
             ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
             timestamp: Date.now(),
           });

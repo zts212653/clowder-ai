@@ -109,6 +109,7 @@ export class RedisMessageStore {
       ...(msg.whisperTo ? { whisperTo: JSON.stringify(msg.whisperTo) } : {}),
       ...(msg.source ? { source: JSON.stringify(msg.source) } : {}),
       ...(msg.mentionsUser ? { mentionsUser: '1' } : {}),
+      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
     });
     if (this.ttlSeconds !== null) {
       pipeline.expire(hashKey, this.ttlSeconds);
@@ -198,6 +199,7 @@ export class RedisMessageStore {
       ...(data.deliveredAt ? { deliveredAt: parseInt(data.deliveredAt, 10) } : {}),
       ...(parsedSource ? { source: parsedSource } : {}),
       ...(data.mentionsUser === '1' ? { mentionsUser: true } : {}),
+      ...(data.replyTo ? { replyTo: data.replyTo } : {}),
     };
   }
 
@@ -625,6 +627,7 @@ export class RedisMessageStore {
         ...(d.deliveredAt ? { deliveredAt: parseInt(d.deliveredAt, 10) } : {}),
         ...(parsedSource ? { source: parsedSource } : {}),
         ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
+        ...(d.replyTo ? { replyTo: d.replyTo } : {}),
       });
     }
     return messages;

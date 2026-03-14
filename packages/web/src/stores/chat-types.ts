@@ -221,6 +221,8 @@ export interface ChatMessage {
   revealedAt?: number;
   /** F057-C2: Whether this message mentions the user (@user / @team lead) */
   mentionsUser?: boolean;
+  /** F066: ID of the message this is replying to (threading) */
+  replyTo?: string;
 }
 
 export interface Thread {

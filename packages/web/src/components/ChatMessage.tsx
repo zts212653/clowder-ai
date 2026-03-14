@@ -18,6 +18,7 @@ import { EvidencePanel } from './EvidencePanel';
 import { Lightbox } from './Lightbox';
 import { MarkdownContent } from './MarkdownContent';
 import { MetadataBadge } from './MetadataBadge';
+import { ReplyQuote } from './ReplyQuote';
 import { RichBlocks } from './rich/RichBlocks';
 import { SummaryCard } from './SummaryCard';
 import { ThinkingContent } from './ThinkingContent';
@@ -244,6 +245,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 : 'bg-owner-light text-owner-dark'
             }`}
           >
+            {message.replyTo && <ReplyQuote replyTo={message.replyTo} getCatById={getCatById} />}
             {hasBlocks ? (
               <ContentBlocks blocks={message.contentBlocks!} />
             ) : (
@@ -350,6 +352,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               : undefined
           }
         >
+          {message.replyTo && <ReplyQuote replyTo={message.replyTo} getCatById={getCatById} />}
           {/* F097: Content first, then Thinking (reasoning before execution), then CLI output */}
           {/* 1. Content — callback messages or non-stream text shown as normal content.
               If CLI block exists, text is already inside it — never render outside. */}

@@ -732,6 +732,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       ...(m.visibility ? { visibility: m.visibility } : {}),
       ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
       ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
+      ...(m.replyTo ? { replyTo: m.replyTo } : {}),
       ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
       ...(m.source
         ? {

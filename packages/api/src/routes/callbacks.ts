@@ -355,6 +355,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       timestamp: Date.now(),
       threadId: effectiveThreadId,
       ...(extra ? { extra } : {}),
+      ...(replyTo ? { replyTo } : {}),
     });
 
     socketManager.broadcastAgentMessage(
@@ -376,6 +377,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             }
           : {}),
         ...(mentionsUser ? { mentionsUser } : {}),
+        ...(replyTo ? { replyTo } : {}),
         timestamp: Date.now(),
       },
       effectiveThreadId,
@@ -700,6 +702,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         catId: item.catId,
         content: item.content,
         ...(item.contentBlocks ? { contentBlocks: item.contentBlocks } : {}),
+        ...(item.replyTo ? { replyTo: item.replyTo } : {}),
         timestamp: item.timestamp,
       })),
       ...(workflowSop ? { workflowSop } : {}),

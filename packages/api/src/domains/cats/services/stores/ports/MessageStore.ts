@@ -65,6 +65,8 @@ export interface StoredMessage {
   revealedAt?: number;
   /** F97: External connector source. Present = connector message (not user/cat) */
   source?: ConnectorSource;
+  /** F066: ID of the message this is replying to (threading) */
+  replyTo?: string;
   /** F098-D: Timestamp when a queued message was actually dequeued and processed by a cat */
   deliveredAt?: number;
   /** ADR-008 D3: Soft delete timestamp (present = deleted) */
