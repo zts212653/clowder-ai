@@ -63,26 +63,37 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ── [2/9] Install system dependencies ──────────────────────
-step "[2/9] Installing system dependencies / 安装系统依赖..."
-
-$SUDO $PKG_UPDATE 2>/dev/null || true
-case "$DISTRO_FAMILY" in
-    debian) $SUDO $PKG_INSTALL git curl ca-certificates gnupg build-essential ;;
-    rhel)   $SUDO $PKG_INSTALL git curl ca-certificates gnupg2 gcc gcc-c++ make ;;
+step "[2/9] Checking system dependencies / 检测系统依赖..."
+NEED_PKGS=()
+for cmd in git curl gcc; do
+    if command -v "$cmd" &>/dev/null; then ok "$cmd found"
+    else warn "$cmd not found — will install"
+        case "$cmd" in
+            gcc) case "$DISTRO_FAMILY" in
+                     debian) NEED_PKGS+=(build-essential) ;; rhel) NEED_PKGS+=(gcc gcc-c++ make) ;;
+                 esac ;;
+            *) NEED_PKGS+=("$cmd") ;;
+        esac
+    fi
+done
+case "$DISTRO_FAMILY" in  # always ensure HTTPS deps
+    debian) NEED_PKGS+=(ca-certificates gnupg) ;; rhel) NEED_PKGS+=(ca-certificates gnupg2) ;;
 esac
-ok "System dependencies installed / 系统依赖已安装"
+if [[ ${#NEED_PKGS[@]} -gt 0 ]]; then
+    $SUDO $PKG_UPDATE 2>/dev/null || true
+    $SUDO $PKG_INSTALL "${NEED_PKGS[@]}"; ok "System dependencies installed"
+else ok "All system dependencies present"
+fi
 
 # ── [3/9] Install Node.js 20+ ──────────────────────────────
-step "[3/9] Installing Node.js / 安装 Node.js..."
-
+step "[3/9] Checking Node.js / 检测 Node.js..."
 node_needs_install() {
     command -v node &>/dev/null || return 0
     local v; v=$(node -v | sed 's/v//' | cut -d. -f1)
-    [[ "$v" -lt 20 ]] && { warn "Node.js $(node -v) < v20 required"; return 0; }
+    [[ "$v" -lt 20 ]] && { warn "Node.js $(node -v) < v20 — upgrading"; return 0; }
     return 1
 }
 if node_needs_install; then
-    info "  Installing Node.js 20 via NodeSource..."
     case "$DISTRO_FAMILY" in
         debian)
             $SUDO mkdir -p /etc/apt/keyrings
@@ -104,10 +115,9 @@ else
 fi
 
 # ── [4/9] Install pnpm + Redis ─────────────────────────────
-step "[4/9] Installing pnpm & Redis / 安装 pnpm 和 Redis..."
-
-# pnpm: corepack → npm fallback
+step "[4/9] Checking pnpm & Redis / 检测 pnpm 和 Redis..."
 if ! command -v pnpm &>/dev/null; then
+    warn "pnpm not found — installing"
     if command -v corepack &>/dev/null; then
         $SUDO corepack enable 2>/dev/null || true
         corepack prepare pnpm@latest --activate 2>/dev/null || true
@@ -119,36 +129,36 @@ if ! command -v pnpm &>/dev/null; then
 else ok "pnpm $(pnpm -v) already installed"
 fi
 
-# Redis: --memory → skip; existing → use; else ask user
+# Redis: detect → already running / --memory skip / ask user
 install_redis_local() {
-    case "$DISTRO_FAMILY" in
-        debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;;
-    esac
+    case "$DISTRO_FAMILY" in debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;; esac
     $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
     $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
     ok "Redis installed and started"
 }
 REDIS_EXTERNAL=false
-if [[ "$MEMORY_MODE" == true ]]; then
-    warn "Memory mode — skipping Redis / 内存模式，跳过 Redis"
+if [[ "$MEMORY_MODE" == true ]]; then warn "Memory mode (--memory) — skipping Redis"
 elif command -v redis-server &>/dev/null; then
     ok "Redis already installed"
     redis-cli ping &>/dev/null 2>&1 || {
+        warn "Redis not running — starting..."
         $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
     }
-elif [[ "$HAS_TTY" == true ]]; then
-    echo "    1) Install Redis locally (recommended / 推荐)"
-    echo "    2) Use external Redis URL / 使用外部 Redis"
-    tty_read "    Choose [1/2] (default: 1): " REDIS_CHOICE
-    if [[ "${REDIS_CHOICE:-1}" == "2" ]]; then
-        tty_read "    Redis URL (e.g. redis://user:pass@host:6379): " REDIS_EXT_URL
-        if [[ -n "$REDIS_EXT_URL" ]]; then
-            ok "External Redis URL saved — will write to .env after config step"
-            REDIS_EXTERNAL=true
-        else warn "No URL provided — falling back to local install"; fi
+else
+    warn "Redis not found"
+    if [[ "$HAS_TTY" == true ]]; then
+        echo "    1) Install Redis locally (recommended / 推荐)"
+        echo "    2) Use external Redis URL / 使用外部 Redis"
+        tty_read "    Choose [1/2] (default: 1): " REDIS_CHOICE
+        if [[ "${REDIS_CHOICE:-1}" == "2" ]]; then
+            tty_read "    Redis URL (e.g. redis://user:pass@host:6379): " REDIS_EXT_URL
+            if [[ -n "$REDIS_EXT_URL" ]]; then
+                ok "External Redis URL saved — will write to .env in step 8"; REDIS_EXTERNAL=true
+            else warn "No URL — falling back to local install"; fi
+        fi
+        [[ "$REDIS_EXTERNAL" == false ]] && install_redis_local
+    else install_redis_local
     fi
-    [[ "$REDIS_EXTERNAL" == false ]] && install_redis_local
-else install_redis_local
 fi
 
 # ── [5/9] Clone & build project ────────────────────────────
@@ -171,10 +181,8 @@ if [[ "$IN_REPO" == false ]]; then
 else ok "Already in project: $PROJECT_DIR"
 fi
 
-pnpm install --frozen-lockfile 2>&1 | tail -3
-ok "Packages installed"
-pnpm build 2>&1 | tail -5
-ok "Build complete"
+pnpm install --frozen-lockfile 2>&1 | tail -3; ok "Packages installed"
+pnpm build 2>&1 | tail -5; ok "Build complete"
 
 # Skills: per-skill user-level symlinks (ADR-009)
 SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
@@ -331,14 +339,10 @@ fi
 
 # ── [9/9] Done ──────────────────────────────────────────────
 step "[9/9] Installation complete! / 安装完成！"
-echo ""
-echo -e "  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}"
+echo ""; echo -e "  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}"
 echo "  Project: $PROJECT_DIR"
-START_CMD="cd $PROJECT_DIR && pnpm start"
-[[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
-echo "  Start: $START_CMD"
-echo "  Open:  http://localhost:3003"
-echo ""
+START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
+echo "  Start: $START_CMD"; echo "  Open:  http://localhost:3003"; echo ""
 if [[ "$AUTO_START" == true ]]; then
     echo -e "${CYAN}Starting service (--start)...${NC}"; echo ""
     if [[ "$MEMORY_MODE" == true ]]; then exec pnpm start --memory; else exec pnpm start; fi
