@@ -43,6 +43,9 @@ function safePath(root: string, ...segments: string[]): string {
  * whose parent is the main worktree root.
  *
  * For regular repos or non-git dirs: returns catCafeRoot unchanged.
+ *
+ * @param catCafeRoot Must be the git working tree root (where `.git` lives).
+ *   Callers must pass `getProjectRoot()` or equivalent, not a subdirectory.
  */
 function resolveSharedRegistryRoot(catCafeRoot: string): string {
   const commonDir = resolveGitCommonDir(catCafeRoot);
