@@ -309,7 +309,12 @@ export function CatCafeHub() {
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-4 pb-3" style={{ flexShrink: 0 }}>
           <h2 className="text-base font-bold text-gray-900">Cat Caf&eacute; Hub</h2>
-          <button onClick={closeHub} className="text-gray-400 hover:text-gray-600 text-lg" title="关闭" aria-label="关闭">
+          <button
+            onClick={closeHub}
+            className="text-gray-400 hover:text-gray-600 text-lg"
+            title="关闭"
+            aria-label="关闭"
+          >
             &times;
           </button>
         </div>

@@ -19,7 +19,7 @@ When users send messages without @mention, the system currently routes to ALL th
 
 Four routing improvements:
 
-1. **Default to last replier** -- When no @mention is present and the thread has participants, route only to the most recent replier (not all participants). No participants -> default to opus.
+1. **Default to last replier** -- When no @mention is present and the thread has participants, route only to the most recent replier (not all participants). When `preferredCats` is set, last-replier is scoped to that set; if last replier is outside preferred, falls back to first preferred cat (#58). No participants and no preferredCats -> default to opus.
 
 2. **@all / @全体** -- Route to all available cats.
 

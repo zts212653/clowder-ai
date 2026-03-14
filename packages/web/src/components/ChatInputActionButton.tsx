@@ -137,7 +137,12 @@ export function ChatInputActionButton({
           <StopRecordingIcon className="w-5 h-5" />
         </button>
       ) : voice.state === 'transcribing' ? (
-        <button disabled className="p-3 rounded-xl bg-gray-300 text-white cursor-wait" title="转写中" aria-label="Transcribing">
+        <button
+          disabled
+          className="p-3 rounded-xl bg-gray-300 text-white cursor-wait"
+          title="转写中"
+          aria-label="Transcribing"
+        >
           <LoadingIcon className="w-5 h-5" />
         </button>
       ) : isQueueMode && onQueueSend ? (

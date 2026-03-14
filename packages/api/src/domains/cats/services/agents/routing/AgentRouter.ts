@@ -472,8 +472,8 @@ export class AgentRouter {
   }
 
   /**
-   * Read-only target resolution: mentions → preferredCats → participants → default cat.
-   * F32-b Phase 2: Thread-level preferredCats inserted between mentions and participants.
+   * Read-only target resolution: mentions → last-replier (scoped to preferredCats) → default cat.
+   * F32-b Phase 2 + #58: preferredCats is a candidate scope, not a dispatch list.
    * Does NOT mutate thread participants.
    */
   private async peekTargets(message: string, threadId: string): Promise<CatId[]> {
@@ -483,22 +483,32 @@ export class AgentRouter {
     if (this.threadStore) {
       const thread = await this.threadStore.get(threadId);
 
-      // F32-b Phase 2: Thread preferred cats
+      // F32-b Phase 2 + #58: preferredCats = candidate scope, not dispatch list
       // R5: Object.hasOwn + dedupe; Cloud P1: Array.isArray guard for corrupted data
       const rawPref = Array.isArray(thread?.preferredCats) ? thread.preferredCats : [];
       const validPreferred = [...new Set(rawPref.filter((id) => Object.hasOwn(this.services, id as string)))];
-      if (validPreferred.length > 0) {
+      const preferredSet = new Set(validPreferred.map(String));
+
+      // #58: explicit #ideate with multiple preferred cats → dispatch all (user requested parallel)
+      const hasExplicitIdeate = /#ideate\b/i.test(message);
+      if (hasExplicitIdeate && validPreferred.length > 1) {
         return this.applyThreadRoutingPolicy(thread, message, validPreferred);
       }
 
-      // F078: Route to last replier only (not all participants)
+      // F078 + #58: last-replier takes priority, scoped to preferred cats when set
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       if (participantsWithActivity.length > 0) {
-        // Already sorted by lastMessageAt desc in ThreadStore — take only the most recent
-        return this.applyThreadRoutingPolicy(thread, message, [participantsWithActivity[0]?.catId]);
+        const lastReplier = participantsWithActivity[0]?.catId;
+        if (preferredSet.size === 0 || preferredSet.has(lastReplier as string)) {
+          return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
+        }
       }
 
-      // No preferredCats and no participants: default cat, then apply policy (e.g. review avoid opus)
+      // No last-replier (or last-replier not in preferred set): use first preferred cat
+      if (validPreferred.length > 0) {
+        return this.applyThreadRoutingPolicy(thread, message, [validPreferred[0]]);
+      }
+
       return this.applyThreadRoutingPolicy(thread, message, [getDefaultCatId()]);
     }
 
@@ -519,19 +529,30 @@ export class AgentRouter {
     if (this.threadStore) {
       const thread = await this.threadStore.get(threadId);
 
-      // F32-b Phase 2: Thread preferred cats
+      // F32-b Phase 2 + #58: preferredCats = candidate scope, not dispatch list
       // R5: Object.hasOwn + dedupe; Cloud P1: Array.isArray guard for corrupted data
       const rawPref = Array.isArray(thread?.preferredCats) ? thread.preferredCats : [];
       const validPreferred = [...new Set(rawPref.filter((id) => Object.hasOwn(this.services, id as string)))];
-      if (validPreferred.length > 0) {
+      const preferredSet = new Set(validPreferred.map(String));
+
+      // #58: explicit #ideate with multiple preferred cats → dispatch all (user requested parallel)
+      const hasExplicitIdeate = /#ideate\b/i.test(message);
+      if (hasExplicitIdeate && validPreferred.length > 1) {
         return this.applyThreadRoutingPolicy(thread, message, validPreferred);
       }
 
-      // F078: Route to last replier only (not all participants)
+      // F078 + #58: last-replier takes priority, scoped to preferred cats when set
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       if (participantsWithActivity.length > 0) {
-        // Already sorted by lastMessageAt desc in ThreadStore — take only the most recent
-        return this.applyThreadRoutingPolicy(thread, message, [participantsWithActivity[0]?.catId]);
+        const lastReplier = participantsWithActivity[0]?.catId;
+        if (preferredSet.size === 0 || preferredSet.has(lastReplier as string)) {
+          return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
+        }
+      }
+
+      // No last-replier (or last-replier not in preferred set): use first preferred cat
+      if (validPreferred.length > 0) {
+        return this.applyThreadRoutingPolicy(thread, message, [validPreferred[0]]);
       }
 
       return this.applyThreadRoutingPolicy(thread, message, [getDefaultCatId()]);
