@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Clowder AI — Linux One-Click Install (F113 Phase A)
 # Usage: curl -fsSL https://.../scripts/install.sh | bash
-#   or:  ./scripts/install.sh [--start] [--memory] [--dir=/path] [--registry=URL]
+#   or:  ./scripts/install.sh [--start] [--memory] [--registry=URL]
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
 
 set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-AUTO_START=false; MEMORY_MODE=false; INSTALL_DIR=""; NPM_REGISTRY=""
+AUTO_START=false; MEMORY_MODE=false; NPM_REGISTRY=""
 for arg in "$@"; do
     case $arg in
         --start) AUTO_START=true ;; --memory) MEMORY_MODE=true ;;
-        --dir=*) INSTALL_DIR="${arg#*=}" ;; --registry=*) NPM_REGISTRY="${arg#*=}" ;;
+        --registry=*) NPM_REGISTRY="${arg#*=}" ;;
     esac
 done
 # Apply npm registry if specified (helps in China / behind proxy)
@@ -21,6 +21,14 @@ done
 info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
 step() { echo ""; echo -e "${BOLD}$*${NC}"; }
+USED_FNM=false
+persist_user_bin() {
+    local bin="$1" path=""
+    path="$(command -v "$bin" 2>/dev/null || true)"
+    [[ -n "$path" ]] || return 0
+    $SUDO mkdir -p /usr/local/bin
+    $SUDO ln -sfn "$(readlink -f "$path" 2>/dev/null || echo "$path")" "/usr/local/bin/$bin"
+}
 
 # TTY-safe read: works even when stdin is a pipe (curl | bash)
 HAS_TTY=false; [[ -r /dev/tty ]] && HAS_TTY=true
@@ -93,12 +101,14 @@ node_needs_install() {
     return 1
 }
 install_node_fnm() {
+    USED_FNM=true
     warn "NodeSource unreachable — trying fnm (fast node manager)..."
     curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell 2>/dev/null \
         || curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/Schniz/fnm/master/.ci/install.sh | bash -s -- --skip-shell 2>/dev/null
     export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
     eval "$(fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
     fnm install 20 && fnm use 20 && fnm default 20
+    for bin in node npm npx corepack; do persist_user_bin "$bin"; done
 }
 if node_needs_install; then
     NODE_OK=false
@@ -138,6 +148,7 @@ if ! command -v pnpm &>/dev/null; then
         $SUDO npm install -g pnpm \
             || { warn "npm failed — trying npmmirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
     fi
+    [[ "$USED_FNM" == true ]] && persist_user_bin pnpm
     ok "pnpm $(pnpm -v) installed"
 else ok "pnpm $(pnpm -v) already installed"
 fi
@@ -177,25 +188,14 @@ fi
 # ── [5/9] Clone & build project ────────────────────────────
 step "[5/9] Setting up project / 设置项目..."
 
-REPO_URL="https://github.com/zts212653/clowder-ai.git"
-IN_REPO=false
-if [[ -f "package.json" ]] && grep -q '"name": "cat-cafe"' package.json 2>/dev/null; then
-    IN_REPO=true; PROJECT_DIR="$(pwd)"
-elif [[ -n "$INSTALL_DIR" ]]; then PROJECT_DIR="$INSTALL_DIR"
-else PROJECT_DIR="$HOME/clowder-ai"
-fi
-if [[ "$IN_REPO" == false ]]; then
-    if [[ -d "$PROJECT_DIR/.git" ]]; then
-        cd "$PROJECT_DIR"
-        git pull --ff-only 2>/dev/null || warn "Could not pull"
-    else
-        git clone "$REPO_URL" "$PROJECT_DIR" && cd "$PROJECT_DIR"
-    fi
-else ok "Already in project: $PROJECT_DIR"
-fi
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_DIR"
+ok "Using project: $PROJECT_DIR"
 
-pnpm install --frozen-lockfile 2>&1 | tail -3; ok "Packages installed"
-pnpm build 2>&1 | tail -5; ok "Build complete"
+pnpm install --frozen-lockfile || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
+ok "Packages installed"
+pnpm build || { fail "pnpm build failed in $PROJECT_DIR"; exit 1; }
+ok "Build complete"
 
 # Skills: per-skill user-level symlinks (ADR-009)
 SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
@@ -325,7 +325,7 @@ if [[ -f .env ]]; then
     warn ".env already exists — not overwriting. To regenerate: cp .env.example .env"
 elif [[ -f .env.example ]]; then
     cp .env.example .env; ok ".env generated from .env.example"
-else fail ".env.example not found. Try: git clone $REPO_URL"; exit 1
+else fail ".env.example not found in $PROJECT_DIR"; exit 1
 fi
 # Write deferred Redis URL + collected auth config
 if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
