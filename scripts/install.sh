@@ -15,8 +15,11 @@ for arg in "$@"; do
         --registry=*) NPM_REGISTRY="${arg#*=}" ;;
     esac
 done
-# Apply npm registry if specified (helps in China / behind proxy)
-[[ -n "$NPM_REGISTRY" ]] && npm config set registry "$NPM_REGISTRY" 2>/dev/null || true
+# Apply registry if specified (helps in China / behind proxy)
+if [[ -n "$NPM_REGISTRY" ]]; then
+    export npm_config_registry="$NPM_REGISTRY" NPM_CONFIG_REGISTRY="$NPM_REGISTRY" PNPM_CONFIG_REGISTRY="$NPM_REGISTRY"
+    npm config set registry "$NPM_REGISTRY" 2>/dev/null || true
+fi
 
 info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
@@ -149,6 +152,7 @@ if ! command -v pnpm &>/dev/null; then
             || { warn "npm failed — trying npmmirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
     fi
     [[ "$USED_FNM" == true ]] && persist_user_bin pnpm
+    [[ -n "$NPM_REGISTRY" ]] && pnpm config set registry "$NPM_REGISTRY" 2>/dev/null || true
     ok "pnpm $(pnpm -v) installed"
 else ok "pnpm $(pnpm -v) already installed"
 fi
