@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Clowder AI — Linux One-Click Install (F113 Phase A)
 # Usage: curl -fsSL https://.../scripts/install.sh | bash
-#   or:  ./scripts/install.sh [--start] [--memory] [--dir=/path]
+#   or:  ./scripts/install.sh [--start] [--memory] [--dir=/path] [--registry=URL]
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
 
 set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-AUTO_START=false; MEMORY_MODE=false; INSTALL_DIR=""
+AUTO_START=false; MEMORY_MODE=false; INSTALL_DIR=""; NPM_REGISTRY=""
 for arg in "$@"; do
     case $arg in
         --start) AUTO_START=true ;; --memory) MEMORY_MODE=true ;;
-        --dir=*) INSTALL_DIR="${arg#*=}" ;;
+        --dir=*) INSTALL_DIR="${arg#*=}" ;; --registry=*) NPM_REGISTRY="${arg#*=}" ;;
     esac
 done
+# Apply npm registry if specified (helps in China / behind proxy)
+[[ -n "$NPM_REGISTRY" ]] && npm config set registry "$NPM_REGISTRY" 2>/dev/null || true
 
 info()    { echo -e "${CYAN}$*${NC}"; }
 ok()      { echo -e "  ${GREEN}✓${NC} $*"; }
@@ -39,9 +41,8 @@ if [[ -f /etc/os-release ]]; then
     DISTRO_NAME="${ID:-unknown}"
     case "$DISTRO_NAME" in
         ubuntu|debian|linuxmint|pop)
-            DISTRO_FAMILY="debian"
-            PKG_UPDATE="apt-get update -qq"
-            PKG_INSTALL="apt-get install -y -qq"
+            DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
+            PKG_INSTALL="apt-get install -y -qq"; export DEBIAN_FRONTEND=noninteractive
             ;;
         centos|rhel|rocky|almalinux|fedora)
             DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
@@ -124,7 +125,7 @@ if ! command -v pnpm &>/dev/null; then
     fi
     if ! command -v pnpm &>/dev/null; then
         $SUDO npm install -g pnpm \
-            || { warn "npm registry slow — trying mirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
+            || { warn "npm failed — trying npmmirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
     fi
     ok "pnpm $(pnpm -v) installed"
 else ok "pnpm $(pnpm -v) already installed"
@@ -340,8 +341,7 @@ fi
 
 # ── [9/9] Done ──────────────────────────────────────────────
 step "[9/9] Installation complete! / 安装完成！"
-echo ""; echo -e "  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}"
-echo "  Project: $PROJECT_DIR"
+echo ""; echo -e "  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}"; echo "  Project: $PROJECT_DIR"
 START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
 echo "  Start: $START_CMD"; echo "  Open:  http://localhost:3003"; echo ""
 if [[ "$AUTO_START" == true ]]; then
