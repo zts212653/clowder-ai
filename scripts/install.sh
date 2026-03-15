@@ -120,10 +120,11 @@ if ! command -v pnpm &>/dev/null; then
     warn "pnpm not found — installing"
     if command -v corepack &>/dev/null; then
         $SUDO corepack enable 2>/dev/null || true
-        corepack prepare pnpm@latest --activate 2>/dev/null || true
+        timeout 30 corepack prepare pnpm@latest --activate 2>/dev/null || true
     fi
     if ! command -v pnpm &>/dev/null; then
-        $SUDO npm install -g pnpm
+        $SUDO npm install -g pnpm \
+            || { warn "npm registry slow — trying mirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
     fi
     ok "pnpm $(pnpm -v) installed"
 else ok "pnpm $(pnpm -v) already installed"
