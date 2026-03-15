@@ -18,11 +18,9 @@ done
 # Apply npm registry if specified (helps in China / behind proxy)
 [[ -n "$NPM_REGISTRY" ]] && npm config set registry "$NPM_REGISTRY" 2>/dev/null || true
 
-info()    { echo -e "${CYAN}$*${NC}"; }
-ok()      { echo -e "  ${GREEN}✓${NC} $*"; }
-warn()    { echo -e "  ${YELLOW}⚠${NC} $*"; }
-fail()    { echo -e "  ${RED}✗${NC} $*"; }
-step()    { echo ""; echo -e "${BOLD}$*${NC}"; }
+info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
+warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
+step() { echo ""; echo -e "${BOLD}$*${NC}"; }
 
 # TTY-safe read: works even when stdin is a pipe (curl | bash)
 HAS_TTY=false; [[ -r /dev/tty ]] && HAS_TTY=true
@@ -94,22 +92,35 @@ node_needs_install() {
     [[ "$v" -lt 20 ]] && { warn "Node.js $(node -v) < v20 — upgrading"; return 0; }
     return 1
 }
+install_node_fnm() {
+    warn "NodeSource unreachable — trying fnm (fast node manager)..."
+    curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell 2>/dev/null \
+        || curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/Schniz/fnm/master/.ci/install.sh | bash -s -- --skip-shell 2>/dev/null
+    export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
+    eval "$(fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
+    fnm install 20 && fnm use 20 && fnm default 20
+}
 if node_needs_install; then
+    NODE_OK=false
     case "$DISTRO_FAMILY" in
         debian)
             $SUDO mkdir -p /etc/apt/keyrings
-            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-                | $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
-            echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
-                | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
-            $SUDO apt-get update -qq
-            $SUDO apt-get install -y -qq nodejs
+            if timeout 15 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+                | $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null; then
+                echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+                    | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+                $SUDO apt-get update -qq && $SUDO apt-get install -y -qq nodejs && NODE_OK=true
+            fi
+            [[ "$NODE_OK" == false ]] && install_node_fnm && NODE_OK=true
             ;;
         rhel)
-            curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash - 2>/dev/null
-            $SUDO $PKG_INSTALL nodejs
+            if timeout 15 curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash - 2>/dev/null; then
+                $SUDO $PKG_INSTALL nodejs && NODE_OK=true
+            fi
+            [[ "$NODE_OK" == false ]] && install_node_fnm && NODE_OK=true
             ;;
     esac
+    [[ "$NODE_OK" == false ]] && { fail "Could not install Node.js 20. Install manually: https://nodejs.org"; exit 1; }
     ok "Node.js $(node -v) installed"
 else
     ok "Node.js $(node -v) already installed (>= 20)"
@@ -192,35 +203,22 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
     for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills"; do
         mkdir -p "$tdir"
         for sd in "$SKILLS_SOURCE"/*/; do
-            [[ -d "$sd" ]] || continue; sn=$(basename "$sd"); [[ "$sn" == "refs" ]] && continue
-            ln -sfn "$sd" "$tdir/$sn"
+            [[ -d "$sd" ]] || continue; sn=$(basename "$sd"); [[ "$sn" == "refs" ]] && continue; ln -sfn "$sd" "$tdir/$sn"
         done
-    done; ok "Skills linked to user-level directories"
-else fail "cat-cafe-skills/ not found"; exit 1
-fi
+    done; ok "Skills linked"
+else fail "cat-cafe-skills/ not found"; exit 1; fi
 
 # ── [6/9] Install AI agent CLI tools ─────────────────────
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
 
 install_npm_cli() {
-    local name="$1" cmd="$2" pkg="$3"
-    npm install -g "$pkg" 2>&1 | tail -2
-    hash -r 2>/dev/null || true
-    if ! command -v "$cmd" &>/dev/null; then
-        fail "$name ($pkg) install failed — $cmd not found in PATH"
-        fail "Try manually: npm install -g $pkg"; exit 1
-    fi
-    ok "$name installed"
+    local name="$1" cmd="$2" pkg="$3"; npm install -g "$pkg" 2>&1 | tail -2; hash -r 2>/dev/null || true
+    command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }; ok "$name installed"
 }
 install_claude_cli() {
-    curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5
-    hash -r 2>/dev/null || true
-    if ! command -v claude &>/dev/null; then
-        fail "Claude Code install failed — claude not found in PATH"
-        fail "Try manually: curl -fsSL https://claude.ai/install.sh | bash"; exit 1
-    fi
-    ok "Claude Code installed"
+    curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5; hash -r 2>/dev/null || true
+    command -v claude &>/dev/null || { fail "Claude install failed. Try: curl -fsSL https://claude.ai/install.sh | bash"; exit 1; }; ok "Claude Code installed"
 }
 
 # Detect missing CLIs
@@ -318,9 +316,7 @@ if [[ "$HAS_TTY" == true ]]; then
     configure_agent_auth "Codex (缅因猫)"  "codex"
     configure_agent_auth "Gemini (暹罗猫)" "gemini"
 else
-    info "  Non-interactive — skipping auth config"
-    info "  Log in by running each CLI: claude / codex / gemini"
-    info "  Or re-run this script interactively for API key setup"
+    info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini"
 fi
 
 # ── [8/9] Generate .env with all collected config ─────────
@@ -333,8 +329,7 @@ else fail ".env.example not found. Try: git clone $REPO_URL"; exit 1
 fi
 # Write deferred Redis URL + collected auth config
 if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
-    sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_EXT_URL|" .env 2>/dev/null \
-        || echo "REDIS_URL=$REDIS_EXT_URL" >> .env
+    sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_EXT_URL|" .env 2>/dev/null || echo "REDIS_URL=$REDIS_EXT_URL" >> .env
     ok "External Redis URL written to .env"
 fi
 [[ -n "$ENV_APPENDS" ]] && { echo -e "$ENV_APPENDS" >> .env; ok "Auth config written to .env"; }
