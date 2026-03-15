@@ -16,9 +16,14 @@ for arg in "$@"; do
     esac
 done
 # Apply registry if specified (helps in China / behind proxy)
+use_registry() {
+    local reg="$1"
+    export npm_config_registry="$reg" NPM_CONFIG_REGISTRY="$reg" PNPM_CONFIG_REGISTRY="$reg"
+    npm config set registry "$reg" 2>/dev/null || true
+    command -v pnpm &>/dev/null && pnpm config set registry "$reg" 2>/dev/null || true
+}
 if [[ -n "$NPM_REGISTRY" ]]; then
-    export npm_config_registry="$NPM_REGISTRY" NPM_CONFIG_REGISTRY="$NPM_REGISTRY" PNPM_CONFIG_REGISTRY="$NPM_REGISTRY"
-    npm config set registry "$NPM_REGISTRY" 2>/dev/null || true
+    use_registry "$NPM_REGISTRY"
 fi
 
 info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
@@ -36,6 +41,13 @@ persist_user_bin() {
 # TTY-safe read: works even when stdin is a pipe (curl | bash)
 HAS_TTY=false; [[ -r /dev/tty ]] && HAS_TTY=true
 tty_read() { local prompt="$1" var="$2"; read -rp "$prompt" "$var" </dev/tty; }
+pnpm_install_with_fallback() {
+    pnpm install --frozen-lockfile && return 0
+    [[ -n "$NPM_REGISTRY" ]] && return 1
+    warn "pnpm install failed — retrying with npmmirror"
+    use_registry "https://registry.npmmirror.com"
+    pnpm install --frozen-lockfile
+}
 
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
@@ -196,7 +208,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 ok "Using project: $PROJECT_DIR"
 
-pnpm install --frozen-lockfile || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
+pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
 ok "Packages installed"
 pnpm build || { fail "pnpm build failed in $PROJECT_DIR"; exit 1; }
 ok "Build complete"
