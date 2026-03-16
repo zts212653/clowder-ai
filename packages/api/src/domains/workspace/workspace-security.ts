@@ -99,6 +99,16 @@ export interface WorktreeEntry {
   head: string;
 }
 
+/** Check if a directory is a git repo with at least one commit (HEAD exists). */
+export async function isGitReady(cwd: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd, timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function listWorktrees(repoRoot?: string): Promise<WorktreeEntry[]> {
   const cwd = repoRoot ?? process.cwd();
   const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd });
