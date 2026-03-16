@@ -21,6 +21,10 @@ use_registry() {
     command -v pnpm &>/dev/null && pnpm config set registry "$reg" 2>/dev/null || true
 }
 [[ -n "$NPM_REGISTRY" ]] && use_registry "$NPM_REGISTRY"
+npm_global_install() {
+    [[ -n "$NPM_REGISTRY" ]] && $SUDO env npm_config_registry="$NPM_REGISTRY" NPM_CONFIG_REGISTRY="$NPM_REGISTRY" npm install -g "$@"
+    [[ -z "$NPM_REGISTRY" ]] && $SUDO npm install -g "$@"
+}
 
 info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
@@ -33,8 +37,16 @@ persist_user_bin() {
 }
 
 # TTY-safe read + pnpm install with registry fallback
-HAS_TTY=false; [[ -r /dev/tty ]] && HAS_TTY=true
-tty_read() { local prompt="$1" var="$2"; read -rp "$prompt" "$var" </dev/tty; }
+HAS_TTY=false; [[ -r /dev/tty ]] && tty -s </dev/tty 2>/dev/null && HAS_TTY=true
+tty_read() { local prompt="$1" var="$2"; read -rp "$prompt" "$var" </dev/tty 2>/dev/null || printf -v "$var" ''; }
+tty_read_secret() { local prompt="$1" var="$2"; read -rsp "$prompt" "$var" </dev/tty 2>/dev/null || printf -v "$var" ''; echo </dev/tty; }
+env_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+write_env_key() {
+    local key="$1" val="$2" tmp; tmp="$(mktemp)"
+    grep -v "^${key}=" .env > "$tmp" 2>/dev/null || true
+    printf "%s=%s\n" "$key" "$(env_quote "$val")" >> "$tmp"
+    mv "$tmp" .env
+}
 pnpm_install_with_fallback() {
     pnpm install --frozen-lockfile && return 0; [[ -n "$NPM_REGISTRY" ]] && return 1
     warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
@@ -73,17 +85,16 @@ fi
 # ── [2/9] Install system dependencies ──────────────────────
 step "[2/9] Checking system dependencies / 检测系统依赖..."
 NEED_PKGS=()
-for cmd in git curl gcc; do
+for cmd in git curl; do
     if command -v "$cmd" &>/dev/null; then ok "$cmd found"
     else warn "$cmd not found — will install"
-        case "$cmd" in
-            gcc) case "$DISTRO_FAMILY" in
-                     debian) NEED_PKGS+=(build-essential) ;; rhel) NEED_PKGS+=(gcc gcc-c++ make) ;;
-                 esac ;;
-            *) NEED_PKGS+=("$cmd") ;;
-        esac
+        NEED_PKGS+=("$cmd")
     fi
 done
+if ! command -v gcc &>/dev/null || ! command -v g++ &>/dev/null || ! command -v make &>/dev/null; then
+    warn "C/C++ build toolchain incomplete — will install"
+    case "$DISTRO_FAMILY" in debian) NEED_PKGS+=(build-essential) ;; rhel) NEED_PKGS+=(gcc gcc-c++ make) ;; esac
+fi
 # Ensure HTTPS/GPG deps exist (needed for NodeSource)
 case "$DISTRO_FAMILY" in
     debian) for p in ca-certificates gnupg; do dpkg -s "$p" &>/dev/null || NEED_PKGS+=("$p"); done ;;
@@ -107,10 +118,13 @@ node_needs_install() {
 install_node_fnm() {
     USED_FNM=true; warn "NodeSource unreachable — trying fnm..."
     curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell 2>/dev/null \
-        || curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/Schniz/fnm/master/.ci/install.sh | bash -s -- --skip-shell 2>/dev/null
+        || curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/Schniz/fnm/master/.ci/install.sh | bash -s -- --skip-shell 2>/dev/null || return 1
     export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
     eval "$(fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
-    fnm install 20 && fnm use 20 && fnm default 20; for bin in node npm npx corepack; do persist_user_bin "$bin"; done
+    fnm install 20 && fnm use 20 && fnm default 20 || return 1
+    for bin in node npm npx corepack; do persist_user_bin "$bin"; done
+    command -v node &>/dev/null || return 1
+    [[ "$(node -v | sed 's/v//' | cut -d. -f1)" -ge 20 ]] || return 1
 }
 if node_needs_install; then
     NODE_OK=false
@@ -132,6 +146,7 @@ if node_needs_install; then
             [[ "$NODE_OK" == false ]] && install_node_fnm && NODE_OK=true
             ;;
     esac
+    node_needs_install && NODE_OK=false
     [[ "$NODE_OK" == false ]] && { fail "Could not install Node.js 20. Install manually: https://nodejs.org"; exit 1; }
     ok "Node.js $(node -v) installed"
 else
@@ -147,8 +162,7 @@ if ! command -v pnpm &>/dev/null; then
         COREPACK_ENABLE_DOWNLOAD_PROMPT=0 timeout 30 corepack prepare pnpm@latest --activate 2>/dev/null || true
     fi
     if ! command -v pnpm &>/dev/null; then
-        $SUDO npm install -g pnpm \
-            || { warn "npm failed — trying npmmirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
+        npm_global_install pnpm || { warn "npm failed — trying npmmirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
     fi
     [[ "$USED_FNM" == true ]] && persist_user_bin pnpm
     [[ -n "$NPM_REGISTRY" ]] && pnpm config set registry "$NPM_REGISTRY" 2>/dev/null || true
@@ -209,7 +223,7 @@ else fail "cat-cafe-skills/ not found"; exit 1; fi
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
 install_npm_cli() {
-    local name="$1" cmd="$2" pkg="$3"; info "  Installing $name ($pkg)..."; npm install -g "$pkg" 2>&1; hash -r 2>/dev/null || true
+    local name="$1" cmd="$2" pkg="$3"; info "  Installing $name ($pkg)..."; npm_global_install "$pkg" 2>&1; hash -r 2>/dev/null || true
     command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }; ok "$name installed"
 }
 install_claude_cli() {
@@ -257,18 +271,37 @@ fi
 # ── [7/9] Authentication setup / 认证配置 ─────────────────
 step "[7/9] Authentication setup / 认证配置..."
 write_claude_profile() {
-    local key="$1" base_url="$2" model="$3" pid="profile-installer-$$"
-    local pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"; local now; now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-    cat > "$pdir/provider-profiles.json" <<EOPROF
-{"version":1,"providers":{"anthropic":{"activeProfileId":"$pid","profiles":[{"id":"$pid","provider":"anthropic","name":"Installer API Key","mode":"api_key","baseUrl":"${base_url:-https://api.anthropic.com}","createdAt":"$now","updatedAt":"$now"${model:+,"modelOverride":"$model"}}]}}}
-EOPROF
-    cat > "$pdir/provider-profiles.secrets.local.json" <<EOSEC
-{"version":1,"providers":{"anthropic":{"$pid":{"apiKey":"$key"}}}}
-EOSEC
-    chmod 600 "$pdir/provider-profiles.secrets.local.json"
+    local key="$1" base_url="$2" model="$3" pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"
+    node - "$pdir" "$key" "${base_url:-https://api.anthropic.com}" "$model" <<'EONODE'
+const fs = require('fs'), path = require('path');
+const [dir, key, baseUrl, model] = process.argv.slice(2), id = 'installer-managed', now = new Date().toISOString();
+const pf = path.join(dir, 'provider-profiles.json'), sf = path.join(dir, 'provider-profiles.secrets.local.json');
+const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return { version: 1, providers: {} }; } };
+const profiles = read(pf), secrets = read(sf), anth = profiles.providers.anthropic ?? { profiles: [] };
+const keep = (anth.profiles ?? []).filter((p) => p.id !== id);
+keep.push({ id, provider: 'anthropic', name: 'Installer API Key', mode: 'api_key', baseUrl, createdAt: now, updatedAt: now, ...(model ? { modelOverride: model } : {}) });
+profiles.providers.anthropic = { ...anth, activeProfileId: id, profiles: keep };
+secrets.providers.anthropic = { ...(secrets.providers.anthropic ?? {}), [id]: { apiKey: key } };
+fs.writeFileSync(pf, JSON.stringify(profiles)); fs.writeFileSync(sf, JSON.stringify(secrets)); fs.chmodSync(sf, 0o600);
+EONODE
+}
+remove_claude_installer_profile() {
+    local pdir="$PROJECT_DIR/.cat-cafe"; [[ -d "$pdir" ]] || return 0
+    node - "$pdir" <<'EONODE'
+const fs = require('fs'), path = require('path');
+const [dir] = process.argv.slice(2), id = 'installer-managed';
+const pf = path.join(dir, 'provider-profiles.json'), sf = path.join(dir, 'provider-profiles.secrets.local.json');
+const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const profiles = read(pf), secrets = read(sf); if (!profiles?.providers?.anthropic) process.exit(0);
+const anth = profiles.providers.anthropic, nextProfiles = (anth.profiles ?? []).filter((p) => p.id !== id);
+profiles.providers.anthropic = { ...anth, profiles: nextProfiles, ...(anth.activeProfileId === id ? { activeProfileId: nextProfiles[0]?.id ?? '' } : {}) };
+if (secrets?.providers?.anthropic?.[id]) delete secrets.providers.anthropic[id];
+fs.writeFileSync(pf, JSON.stringify(profiles)); if (secrets) fs.writeFileSync(sf, JSON.stringify(secrets));
+EONODE
 }
 # Collect auth info into variables (written to .env in step 8)
-ENV_APPENDS=""
+ENV_KEYS=(); ENV_VALUES=()
+collect_env() { ENV_KEYS+=("$1"); ENV_VALUES+=("$2"); }
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
@@ -276,11 +309,13 @@ configure_agent_auth() {
     echo "    1) OAuth / Subscription (recommended / 推荐)"; echo "    2) API Key"
     local choice; tty_read "    Choose [1/2] (default: 1): " choice
     if [[ "${choice:-1}" != "2" ]]; then
+        [[ "$cmd" == "claude" ]] && remove_claude_installer_profile
+        [[ "$cmd" == "codex" ]] && collect_env "CODEX_AUTH_MODE" "oauth"
         ok "$name: OAuth mode (login on first use: run '$cmd')"
         return 0
     fi
     local key="" base_url="" model=""
-    tty_read "    API Key: " key
+    tty_read_secret "    API Key: " key
     case "$cmd" in
         claude)
             tty_read "    Base URL (Enter = https://api.anthropic.com): " base_url
@@ -293,17 +328,20 @@ configure_agent_auth() {
         codex)
             tty_read "    Base URL (Enter = default): " base_url
             tty_read "    Model (Enter = default): " model
-            ENV_APPENDS+="CODEX_AUTH_MODE=api_key\n"
-            [[ -n "$key" ]] && ENV_APPENDS+="OPENAI_API_KEY=$key\n"
-            [[ -n "$base_url" ]] && ENV_APPENDS+="OPENAI_BASE_URL=$base_url\n"
-            [[ -n "$model" ]] && ENV_APPENDS+="CAT_CODEX_MODEL=$model\n"
-            ok "$name: API key collected (will write to .env)"
+            if [[ -n "$key" ]]; then
+                collect_env "CODEX_AUTH_MODE" "api_key"; collect_env "OPENAI_API_KEY" "$key"
+                [[ -n "$base_url" ]] && collect_env "OPENAI_BASE_URL" "$base_url"
+                [[ -n "$model" ]] && collect_env "CAT_CODEX_MODEL" "$model"
+                ok "$name: API key collected (will write to .env)"
+            else warn "$name: no key provided, keeping OAuth"; collect_env "CODEX_AUTH_MODE" "oauth"; fi
             ;;
         gemini)
             tty_read "    Model (Enter = default): " model
-            [[ -n "$key" ]] && ENV_APPENDS+="GEMINI_API_KEY=$key\n"
-            [[ -n "$model" ]] && ENV_APPENDS+="CAT_GEMINI_MODEL=$model\n"
-            ok "$name: API key collected (will write to .env)"
+            if [[ -n "$key" ]]; then
+                collect_env "GEMINI_API_KEY" "$key"
+                [[ -n "$model" ]] && collect_env "CAT_GEMINI_MODEL" "$model"
+                ok "$name: API key collected (will write to .env)"
+            else warn "$name: no key provided, skipping"; fi
             ;;
     esac
 }
@@ -326,16 +364,17 @@ else fail ".env.example not found in $PROJECT_DIR"; exit 1
 fi
 # Write deferred Redis URL + collected auth config + Docker detection
 if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
-    sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_EXT_URL|" .env 2>/dev/null || echo "REDIS_URL=$REDIS_EXT_URL" >> .env
+    write_env_key "REDIS_URL" "$REDIS_EXT_URL"
     ok "External Redis URL written to .env"
 fi
-[[ -n "$ENV_APPENDS" ]] && { echo -e "$ENV_APPENDS" >> .env; ok "Auth config written to .env"; }
+for i in "${!ENV_KEYS[@]}"; do write_env_key "${ENV_KEYS[$i]}" "${ENV_VALUES[$i]}"; done
+[[ ${#ENV_KEYS[@]} -gt 0 ]] && ok "Auth config written to .env"
 # Auto-detect Docker: bind API to 0.0.0.0 so port mapping works from host
 if [[ -f /.dockerenv ]] || grep -qsw docker /proc/1/cgroup 2>/dev/null; then
-    grep -q '^API_SERVER_HOST=' .env 2>/dev/null && sed -i 's|^API_SERVER_HOST=.*|API_SERVER_HOST=0.0.0.0|' .env \
-        || echo "API_SERVER_HOST=0.0.0.0" >> .env
+    write_env_key "API_SERVER_HOST" "0.0.0.0"
     ok "Docker detected — API_SERVER_HOST=0.0.0.0"
 fi
+chmod 600 .env 2>/dev/null || true
 
 # ── [9/9] Done ──────────────────────────────────────────────
 step "[9/9] Installation complete! / 安装完成！"
