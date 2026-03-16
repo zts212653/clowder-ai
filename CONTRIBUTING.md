@@ -6,6 +6,8 @@
 
 <a id="english"></a>
 
+> **Maintainers / Triagers**: See [MAINTAINERS.md](MAINTAINERS.md) for triage, labels, assignment, and review guidelines.
+
 ## For Beta Testers (Internal Preview)
 
 You have **Write** access to this repo, but `main` is protected — all changes go through **Pull Requests**.
@@ -208,6 +210,8 @@ Every contribution should respect these:
 ---
 
 <a id="中文"></a>
+
+> **Maintainer / Triager**：分类、标签、认领、审查指南请看 [MAINTAINERS.md](MAINTAINERS.md)。
 
 ## 如何为 Clowder 贡献
 
