@@ -143,11 +143,29 @@ You don't need to be a developer. You need to know what you want — and who you
 
 > CVO Bootcamp coming soon — a guided onboarding where your AI team walks you through a complete feature lifecycle.
 
+### One-Click Install (Linux / Docker)
+
+The install script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools, and authentication setup.
+
+```bash
+git clone https://github.com/zts212653/clowder-ai.git
+cd clowder-ai
+bash scripts/install.sh
+```
+
+Options:
+- `--start` — auto-start services after install
+- `--memory` — skip Redis (use in-memory store)
+- `--registry=URL` — custom npm registry (e.g. for China mirrors)
+
+### Manual Setup
+
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
 cp .env.example .env   # add at least one model API key
 pnpm install
+pnpm build
 pnpm start
 ```
 
@@ -259,6 +277,7 @@ We build in the open. Here's where we are.
 | MCP Callback Bridge | Shipped |
 | SOP Auto-Guardian | Shipped |
 | Self-Evolution | Shipped |
+| Linux One-Click Deploy | Shipped |
 
 ### Integrations
 
@@ -496,11 +515,29 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 
 > CVO 训练营即将推出 — AI 团队亲自带你走完一个完整的 feature 生命周期。
 
+### 一键安装（Linux / Docker）
+
+安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具和认证配置。
+
+```bash
+git clone https://github.com/zts212653/clowder-ai.git
+cd clowder-ai
+bash scripts/install.sh
+```
+
+可选参数：
+- `--start` — 安装完成后自动启动服务
+- `--memory` — 跳过 Redis（使用内存模式）
+- `--registry=URL` — 自定义 npm 镜像源（适用于国内网络）
+
+### 手动安装
+
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
 cp .env.example .env   # 至少填一个模型 API key
 pnpm install
+pnpm build
 pnpm start
 ```
 
@@ -612,6 +649,7 @@ pnpm start
 | MCP 回调桥接 | 已发布 |
 | SOP 自动守护 | 已发布 |
 | 自我进化 | 已发布 |
+| Linux 一键部署 | 已发布 |
 
 ### 集成
 
