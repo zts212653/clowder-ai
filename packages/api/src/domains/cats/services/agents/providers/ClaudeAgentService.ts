@@ -17,6 +17,7 @@
 
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
@@ -50,13 +51,61 @@ function formatThinkingSignatureRescueError(sessionId: string | undefined): stri
   ].join(' ');
 }
 
-function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> | undefined {
-  if (!callbackEnv) return undefined;
-  const env: Record<string, string | null> = { ...callbackEnv };
-  const mode = callbackEnv[ANTHROPIC_PROFILE_MODE_KEY];
+const IS_WINDOWS = process.platform === 'win32';
+
+/**
+ * Find git-bash executable on Windows (#64).
+ * Claude CLI requires git-bash for shell operations.
+ * Caches result after first lookup.
+ */
+let cachedGitBashPath: string | undefined | null;
+function findGitBashPath(): string | undefined {
+  if (!IS_WINDOWS) return undefined;
+  if (cachedGitBashPath !== undefined) return cachedGitBashPath ?? undefined;
+
+  // Check standard install path
+  const standardPath = 'C:\\Program Files\\Git\\bin\\bash.exe';
+  if (existsSync(standardPath)) {
+    cachedGitBashPath = standardPath;
+    return standardPath;
+  }
+
+  // Dynamic discovery via `where bash`
+  try {
+    const whereOutput = execSync('where bash', { encoding: 'utf-8', timeout: 5000 }).trim();
+    for (const line of whereOutput.split(/\r?\n/)) {
+      if (/\\Git\\.*\\bash\.exe$/i.test(line) && existsSync(line)) {
+        cachedGitBashPath = line;
+        return line;
+      }
+    }
+  } catch {
+    // `where` failed
+  }
+
+  cachedGitBashPath = null;
+  return undefined;
+}
+
+function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
+  const env: Record<string, string | null> = { ...(callbackEnv ?? {}) };
+
+  // Always clear nested-session detection env vars (#64)
+  env.CLAUDECODE = null;
+  env.CLAUDE_CODE_ENTRYPOINT = null;
+
+  // Windows: set git-bash path for Claude CLI (#64)
+  if (IS_WINDOWS) {
+    const gitBash = findGitBashPath();
+    if (gitBash) {
+      env.CLAUDE_CODE_GIT_BASH_PATH = gitBash;
+    }
+  }
+
+  const mode = callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY];
   if (mode === 'api_key') {
-    const apiKey = callbackEnv[ANTHROPIC_PROFILE_API_KEY]?.trim();
-    const baseUrl = callbackEnv[ANTHROPIC_PROFILE_BASE_URL]?.trim();
+    const apiKey = callbackEnv?.[ANTHROPIC_PROFILE_API_KEY]?.trim();
+    const baseUrl = callbackEnv?.[ANTHROPIC_PROFILE_BASE_URL]?.trim();
     if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
     if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
   } else {
@@ -196,7 +245,7 @@ export class ClaudeAgentService implements AgentService {
         command: 'claude' as const,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
-        ...(envOverrides ? { env: envOverrides } : {}),
+        env: envOverrides,
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
