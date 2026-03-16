@@ -151,6 +151,7 @@ bash scripts/install.sh
 
 The script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools (Claude / Codex / Gemini), and authentication — with interactive prompts to guide you through each step.
 It is a repo-local setup helper: clone `clowder-ai` first, then run it from that checkout. It is not a bare-metal `curl | bash` bootstrapper.
+Archive downloads or copied source trees without `.git` are not supported, because runtime startup relies on git metadata.
 
 Options:
 - `--start` — auto-start services after install
@@ -511,6 +512,7 @@ bash scripts/install.sh
 
 安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具（Claude / Codex / Gemini）和认证配置 — 全程交互式引导。
 这是一个 repo 内安装助手：先 `git clone clowder-ai`，再在仓库目录里运行。它不是 bare-metal 的 `curl | bash` 引导脚本。
+没有 `.git` 的源码压缩包或纯目录拷贝不受支持，因为运行时启动依赖 git 元数据。
 
 可选参数：
 - `--start` — 安装完成后自动启动服务
