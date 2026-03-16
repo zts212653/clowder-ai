@@ -37,12 +37,11 @@ function parseArgs(argv) {
 const FRONTMATTER_RE = /^\uFEFF?---\n([\s\S]*?)\n---\n/;
 
 function normalizeFeatureId(raw) {
-  const match = raw.match(/([fp]?)(\d{1,4})/i);
+  const match = raw.match(/f?(\d{1,4})/i);
   if (!match) return null;
-  const num = Number.parseInt(match[2], 10);
+  const num = Number.parseInt(match[1], 10);
   if (!Number.isFinite(num) || num <= 0) return null;
-  const prefix = match[1].toUpperCase() === 'P' ? 'P' : 'F';
-  return `${prefix}${String(num).padStart(3, '0')}`;
+  return `F${String(num).padStart(3, '0')}`;
 }
 
 function parseFrontmatter(content) {
@@ -91,7 +90,7 @@ function parseTitle(content) {
 }
 
 function stripFeaturePrefix(id, title) {
-  const match = title.match(/^([FP]0*\d{1,4})(?::?\s+|\s+-\s+)(.+)$/i);
+  const match = title.match(/^F0*(\d{1,4})(?::?\s+|\s+-\s+)(.+)$/i);
   if (!match) return title;
   const normalizedInTitle = normalizeFeatureId(match[1]);
   const normalizedId = normalizeFeatureId(id);
@@ -110,7 +109,7 @@ function listFeatureFiles(featuresDir) {
     .readdirSync(featuresDir, { withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
-    .filter((name) => /^[FP]\d+/i.test(path.basename(name, '.md')) && name.endsWith('.md'))
+    .filter((name) => /^F\d+/i.test(path.basename(name, '.md')) && name.endsWith('.md'))
     .filter((name) => name !== 'index.json')
     .map((name) => path.join(featuresDir, name))
     .sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
@@ -147,9 +146,6 @@ function inferFeatureRecord(filePath) {
 }
 
 function sortByFeatureId(a, b) {
-  const aPre = a.id[0];
-  const bPre = b.id[0];
-  if (aPre !== bPre) return aPre < bPre ? -1 : 1;
   const aNum = Number.parseInt(a.id.slice(1), 10);
   const bNum = Number.parseInt(b.id.slice(1), 10);
   return aNum - bNum;

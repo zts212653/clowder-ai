@@ -213,17 +213,6 @@ status_runtime_worktree() {
 }
 
 start_runtime_worktree() {
-  # Non-git deployments run in-place. Real git repos must still have the
-  # configured remote, otherwise runtime/main-sync safety cannot be enforced.
-  if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    info "no git remote '$REMOTE_NAME' — running in-place (deployment mode)"
-    ensure_restart_authorized
-    cd "$PROJECT_DIR"
-    exec ./scripts/start-dev.sh --prod-web ${START_ARGS[@]+"${START_ARGS[@]}"}
-  fi
-
-  ensure_remote_exists
-
   if ! worktree_exists; then
     info "runtime worktree missing; initializing first"
     init_runtime_worktree
