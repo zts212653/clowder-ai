@@ -172,8 +172,7 @@ elif command -v redis-server &>/dev/null; then ok "Redis already installed"
 else
     warn "Redis not found"
     if [[ "$HAS_TTY" == true ]]; then
-        echo "    1) Install Redis locally (recommended / 推荐)"
-        echo "    2) Use external Redis URL / 使用外部 Redis"
+        echo "    1) Install Redis locally (recommended / 推荐)"; echo "    2) Use external Redis URL / 使用外部 Redis"
         tty_read "    Choose [1/2] (default: 1): " REDIS_CHOICE
         if [[ "${REDIS_CHOICE:-1}" == "2" ]]; then
             tty_read "    Redis URL (e.g. redis://user:pass@host:6379): " REDIS_EXT_URL
@@ -238,14 +237,20 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
         info "  Missing agents / 缺少的 Agent CLI:"
         for i in "${!MISSING_AGENTS[@]}"; do echo "    $((i+1))) ${MISSING_AGENTS[$i]}"; done
         tty_read "    Install which? (e.g. 1,2,3 / Enter=all / 0=none): " AGENT_SEL
+        AGENT_SEL="${AGENT_SEL:-}"  # protect against nounset
         if [[ "$AGENT_SEL" == "0" ]]; then INSTALL_AGENTS=()
         elif [[ -n "$AGENT_SEL" ]]; then
             INSTALL_AGENTS=()
             IFS=',' read -ra SEL_IDX <<< "$AGENT_SEL"
             for idx in "${SEL_IDX[@]}"; do
+                [[ "$idx" =~ ^[0-9]+$ ]] || { warn "Ignored non-numeric input: $idx"; continue; }
                 idx=$((idx - 1))
                 [[ $idx -ge 0 && $idx -lt ${#MISSING_AGENTS[@]} ]] && INSTALL_AGENTS+=("${MISSING_AGENTS[$idx]}")
             done
+            if [[ ${#INSTALL_AGENTS[@]} -eq 0 ]]; then
+                warn "No valid selection — installing all missing agents"
+                INSTALL_AGENTS=("${MISSING_AGENTS[@]}")
+            fi
         fi
     fi
     for agent in "${INSTALL_AGENTS[@]}"; do
@@ -261,8 +266,7 @@ fi
 step "[7/9] Authentication setup / 认证配置..."
 write_claude_profile() {
     local key="$1" base_url="$2" model="$3" pid="profile-installer-$$"
-    local pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"
-    local now; now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    local pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"; local now; now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
     cat > "$pdir/provider-profiles.json" <<EOPROF
 {"version":1,"providers":{"anthropic":{"activeProfileId":"$pid","profiles":[{"id":"$pid","provider":"anthropic","name":"Installer API Key","mode":"api_key","baseUrl":"${base_url:-https://api.anthropic.com}","createdAt":"$now","updatedAt":"$now"${model:+,"modelOverride":"$model"}}]}}}
 EOPROF
@@ -271,16 +275,13 @@ EOPROF
 EOSEC
     chmod 600 "$pdir/provider-profiles.secrets.local.json"
 }
-
 # Collect auth info into variables (written to .env in step 8)
 ENV_APPENDS=""
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
-    echo ""
-    echo -e "  ${BOLD}$name ($cmd):${NC}"
-    echo "    1) OAuth / Subscription (recommended / 推荐)"
-    echo "    2) API Key"
+    echo ""; echo -e "  ${BOLD}$name ($cmd):${NC}"
+    echo "    1) OAuth / Subscription (recommended / 推荐)"; echo "    2) API Key"
     local choice; tty_read "    Choose [1/2] (default: 1): " choice
     if [[ "${choice:-1}" != "2" ]]; then
         ok "$name: OAuth mode (login on first use: run '$cmd')"
@@ -317,8 +318,7 @@ configure_agent_auth() {
 
 if [[ "$HAS_TTY" == true ]]; then
     info "  Configure each agent / 逐个配置每只猫的认证方式："
-    configure_agent_auth "Claude (布偶猫)" "claude"
-    configure_agent_auth "Codex (缅因猫)"  "codex"
+    configure_agent_auth "Claude (布偶猫)" "claude"; configure_agent_auth "Codex (缅因猫)" "codex"
     configure_agent_auth "Gemini (暹罗猫)" "gemini"
 else
     info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini"
