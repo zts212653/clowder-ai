@@ -3,11 +3,12 @@ import { execSync } from 'node:child_process';
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 describe('workspace-security', () => {
   let mod;
   let testRoot;
+  const originalPath = process.env.PATH ?? '';
 
   beforeEach(async () => {
     mod = await import('../dist/domains/workspace/workspace-security.js');
@@ -19,6 +20,10 @@ describe('workspace-security', () => {
     await writeFile(join(testRoot, '.env'), 'SECRET=123');
     await writeFile(join(testRoot, '.env.local'), 'SECRET=456');
     await writeFile(join(testRoot, 'certs', 'server.pem'), 'CERT');
+  });
+
+  afterEach(() => {
+    process.env.PATH = originalPath;
   });
 
   // -- Traversal --
@@ -160,6 +165,35 @@ describe('workspace-security', () => {
   it('listWorktrees fail-opens to [] outside a git repository', async () => {
     const entries = await mod.listWorktrees(testRoot);
     assert.deepEqual(entries, []);
+  });
+
+  it('listWorktrees preserves real git failures instead of masking them as []', async () => {
+    const binDir = join(testRoot, 'bin');
+    const fakeGit = join(binDir, 'git');
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      fakeGit,
+      `#!/bin/sh
+if [ "$1" = "rev-parse" ] && [ "$2" = "--is-inside-work-tree" ]; then
+  printf 'true\\n'
+  exit 0
+fi
+if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then
+  printf 'fatal: synthetic git failure\\n' >&2
+  exit 128
+fi
+printf 'unexpected git args: %s\\n' "$*" >&2
+exit 99
+`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${binDir}:${originalPath}`;
+
+    const failingMod = await import(`../dist/domains/workspace/workspace-security.js?gitfail=${Date.now()}`);
+    await assert.rejects(
+      () => failingMod.listWorktrees(testRoot),
+      (err) => String(err?.stderr ?? err?.message ?? '').includes('synthetic git failure'),
+    );
   });
 
   it('treats unborn repositories as git-ready but without HEAD', async () => {
