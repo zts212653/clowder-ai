@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeScriptSource = join(__dirname, '..', '..', '..', 'scripts', 'runtime-worktree.sh');
@@ -18,11 +18,9 @@ function createTempProject(name) {
   writeFileSync(join(projectDir, 'scripts', 'runtime-worktree.sh'), readFileSync(runtimeScriptSource, 'utf8'), {
     mode: 0o755,
   });
-  writeFileSync(
-    join(projectDir, 'scripts', 'start-dev.sh'),
-    '#!/bin/sh\nprintf "STARTED:%s\\n" "$PWD"\n',
-    { mode: 0o755 },
-  );
+  writeFileSync(join(projectDir, 'scripts', 'start-dev.sh'), '#!/bin/sh\nprintf "STARTED:%s\\n" "$PWD"\n', {
+    mode: 0o755,
+  });
   return projectDir;
 }
 
