@@ -6,7 +6,6 @@
 set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-
 AUTO_START=false; MEMORY_MODE=false; NPM_REGISTRY=""
 for arg in "$@"; do
     case $arg in
@@ -97,7 +96,7 @@ if [[ ${#NEED_PKGS[@]} -gt 0 ]]; then
 else ok "All system dependencies present"
 fi
 
-# ── [3/9] Install Node.js 20+ ──────────────────────────────
+# ── [3/9] Install Node.js 20+ ────────────────────────────
 step "[3/9] Checking Node.js / 检测 Node.js..."
 node_needs_install() {
     command -v node &>/dev/null || return 0
@@ -156,7 +155,6 @@ if ! command -v pnpm &>/dev/null; then
     ok "pnpm $(pnpm -v) installed"
 else ok "pnpm $(pnpm -v) already installed"
 fi
-
 # Redis: detect → already running / --memory skip / ask user
 install_redis_local() {
     case "$DISTRO_FAMILY" in debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;; esac
@@ -187,11 +185,8 @@ fi
 
 # ── [5/9] Clone & build project ────────────────────────────
 step "[5/9] Setting up project / 设置项目..."
-
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$PROJECT_DIR"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$PROJECT_DIR"
 ok "Using project: $PROJECT_DIR"
-
 pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
 ok "Packages installed"
 build_step "shared" pnpm --dir packages/shared run build
@@ -199,7 +194,6 @@ build_step "mcp-server" pnpm --dir packages/mcp-server run build
 build_step "api" pnpm --dir packages/api run build
 build_step "web" env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}" pnpm --dir packages/web run build
 ok "Build complete"
-
 # Skills: per-skill user-level symlinks (ADR-009)
 SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
 if [[ -d "$SKILLS_SOURCE" ]]; then
@@ -214,7 +208,6 @@ else fail "cat-cafe-skills/ not found"; exit 1; fi
 # ── [6/9] Install AI agent CLI tools ─────────────────────
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
-
 install_npm_cli() {
     local name="$1" cmd="$2" pkg="$3"; info "  Installing $name ($pkg)..."; npm install -g "$pkg" 2>&1; hash -r 2>/dev/null || true
     command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }; ok "$name installed"
@@ -224,7 +217,6 @@ install_claude_cli() {
     export PATH="$HOME/.local/bin:$HOME/.claude/bin:$PATH"; hash -r 2>/dev/null || true
     command -v claude &>/dev/null || { fail "Claude install failed. Try: curl -fsSL https://claude.ai/install.sh | bash"; exit 1; }; ok "Claude Code installed"
 }
-
 # Detect missing CLIs
 MISSING_AGENTS=()
 command -v claude &>/dev/null && ok "Claude Code already installed" || MISSING_AGENTS+=("claude")
@@ -332,18 +324,24 @@ elif [[ -f .env.example ]]; then
     cp .env.example .env; ok ".env generated from .env.example"
 else fail ".env.example not found in $PROJECT_DIR"; exit 1
 fi
-# Write deferred Redis URL + collected auth config
+# Write deferred Redis URL + collected auth config + Docker detection
 if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
     sed -i "s|^REDIS_URL=.*|REDIS_URL=$REDIS_EXT_URL|" .env 2>/dev/null || echo "REDIS_URL=$REDIS_EXT_URL" >> .env
     ok "External Redis URL written to .env"
 fi
 [[ -n "$ENV_APPENDS" ]] && { echo -e "$ENV_APPENDS" >> .env; ok "Auth config written to .env"; }
+# Auto-detect Docker: bind API to 0.0.0.0 so port mapping works from host
+if [[ -f /.dockerenv ]] || grep -qsw docker /proc/1/cgroup 2>/dev/null; then
+    grep -q '^API_SERVER_HOST=' .env 2>/dev/null && sed -i 's|^API_SERVER_HOST=.*|API_SERVER_HOST=0.0.0.0|' .env \
+        || echo "API_SERVER_HOST=0.0.0.0" >> .env
+    ok "Docker detected — API_SERVER_HOST=0.0.0.0"
+fi
 
 # ── [9/9] Done ──────────────────────────────────────────────
 step "[9/9] Installation complete! / 安装完成！"
-echo ""; echo -e "  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}"; echo "  Project: $PROJECT_DIR"
+echo -e "\n  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
 START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
-echo "  Start: $START_CMD"; echo "  Open:  http://localhost:3003"; echo ""
+echo -e "  Start: $START_CMD\n  Open:  http://localhost:3003\n"
 if [[ "$AUTO_START" == true ]]; then
     echo -e "${CYAN}Starting service (--start)...${NC}"; echo ""
     if [[ "$MEMORY_MODE" == true ]]; then exec pnpm start --memory; else exec pnpm start; fi
