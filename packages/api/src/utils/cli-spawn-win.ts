@@ -22,6 +22,7 @@ const resolvedShimCache = new Map<string, string | null>();
 const KNOWN_SHIM_SCRIPTS: Record<string, string[]> = {
   claude: ['@anthropic-ai/claude-code/cli.js'],
   codex: ['@openai/codex/bin/codex.js'],
+  gemini: ['@google/gemini-cli/bin/gemini.js'],
 };
 
 /**

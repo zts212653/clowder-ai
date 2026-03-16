@@ -60,12 +60,15 @@ Write-Step "Step 2/9 - Node.js and pnpm"
 $nodeOk = $false
 try {
     $nodeRaw = & node --version 2>$null
-    if ($nodeRaw -match 'v(\d+)\.') {
-        if ([int]$Matches[1] -ge 20) {
+    if ($nodeRaw -match 'v(\d+)\.(\d+)') {
+        $nodeMajor = [int]$Matches[1]
+        $nodeMinor = [int]$Matches[2]
+        # --env-file requires Node >= 20.6
+        if ($nodeMajor -gt 20 -or ($nodeMajor -eq 20 -and $nodeMinor -ge 6)) {
             Write-Ok "Node.js $nodeRaw"
             $nodeOk = $true
         } else {
-            Write-Warn "Node.js $nodeRaw too old (need >= 20), upgrading..."
+            Write-Warn "Node.js $nodeRaw too old (need >= 20.6 for --env-file), upgrading..."
         }
     }
 } catch {}
@@ -82,7 +85,7 @@ if (-not $nodeOk) {
         }
     }
     if (-not $nodeOk) {
-        Write-Err "Node.js >= 20 required. Install from https://nodejs.org/"
+        Write-Err "Node.js >= 20.6 required (for --env-file support). Install from https://nodejs.org/"
         exit 1
     }
 }
@@ -237,7 +240,8 @@ Write-Step "Step 6/9 - AI CLI tools"
 if (-not $SkipCli) {
     $cliTools = @(
         @{ Name = "Claude"; Cmd = "claude"; Pkg = "@anthropic-ai/claude-code" },
-        @{ Name = "Codex";  Cmd = "codex";  Pkg = "@openai/codex" }
+        @{ Name = "Codex";  Cmd = "codex";  Pkg = "@openai/codex" },
+        @{ Name = "Gemini"; Cmd = "gemini"; Pkg = "@google/gemini-cli" }
     )
     foreach ($tool in $cliTools) {
         $installed = $null -ne (Get-Command $tool.Cmd -ErrorAction SilentlyContinue)
@@ -267,6 +271,7 @@ Write-Step "Step 7/9 - Auth config"
 Write-Warn "Authenticate CLI tools after installation:"
 Write-Warn "  Claude: run 'claude' and follow OAuth flow"
 Write-Warn "  Codex:  set OPENAI_API_KEY in .env"
+Write-Warn "  Gemini: run 'gemini' and follow OAuth flow"
 
 # ── Step 8: Generate .env ─────────────────────────────────
 Write-Step "Step 8/9 - Generate .env"
@@ -311,6 +316,7 @@ if (-not $allGood -and -not $SkipBuild) {
 
 $hasClaude = $null -ne (Get-Command claude -ErrorAction SilentlyContinue)
 $hasCodex = $null -ne (Get-Command codex -ErrorAction SilentlyContinue)
+$hasGemini = $null -ne (Get-Command gemini -ErrorAction SilentlyContinue)
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor Green
@@ -322,6 +328,7 @@ Write-Host "  Node:    $(node --version)"
 Write-Host "  Redis:   $(if ($hasRedis) { 'available' } else { 'not found (use -Memory)' })"
 Write-Host "  Claude:  $(if ($hasClaude) { 'ready' } else { 'not installed' })"
 Write-Host "  Codex:   $(if ($hasCodex) { 'ready' } else { 'not installed' })"
+Write-Host "  Gemini:  $(if ($hasGemini) { 'ready' } else { 'not installed' })"
 Write-Host ""
 Write-Host "  Start the app:" -ForegroundColor Cyan
 $startCmd = ".\scripts\start-windows.ps1"

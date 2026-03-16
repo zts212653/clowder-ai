@@ -176,16 +176,29 @@ Write-Step "Start services"
 # Track background jobs for cleanup
 $jobs = @()
 
-# API Server (use --env-file for .env loading on Windows)
+# API Server
+# Env vars are loaded into this process (line 42-53) and inherited by Start-Job.
+# No --env-file needed — avoids Node < 20.6 breakage.
 Write-Host "  Starting API Server (port $ApiPort)..."
 $apiJob = Start-Job -ScriptBlock {
     param($root, $envFile)
     Set-Location (Join-Path $root "packages/api")
+    # Load .env into job process (Start-Job inherits parent env,
+    # but re-load to be safe if process env was not fully propagated)
     if (Test-Path $envFile) {
-        & node --env-file=$envFile dist/index.js 2>&1
-    } else {
-        & node dist/index.js 2>&1
+        Get-Content $envFile | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -and -not $line.StartsWith("#")) {
+                $parts = $line -split "=", 2
+                if ($parts.Count -eq 2) {
+                    $k = $parts[0].Trim()
+                    $v = $parts[1].Trim().Trim('"').Trim("'")
+                    [System.Environment]::SetEnvironmentVariable($k, $v, "Process")
+                }
+            }
+        }
     }
+    & node dist/index.js 2>&1
 } -ArgumentList $ProjectRoot, $envFile
 $jobs += $apiJob
 
