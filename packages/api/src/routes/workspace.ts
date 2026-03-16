@@ -34,8 +34,8 @@ import {
 } from '../domains/workspace/workspace-security.js';
 
 const execFileAsync = promisify(execFile);
-const MAX_FILE_SIZE = 1024 * 1024;
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_SIZE = 1024 * 1024; // 1 MB text preview
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB image preview
 const MAX_SEARCH_RESULTS = 100;
 const MAX_TREE_DEPTH = 5;
 
@@ -60,11 +60,13 @@ const MIME_MAP: Record<string, string> = {
   '.toml': 'text/toml',
   '.sh': 'text/x-shellscript',
   '.py': 'text/x-python',
+  // Audio
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
   '.ogg': 'audio/ogg',
   '.flac': 'audio/flac',
+  // Video
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
@@ -107,6 +109,8 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
 
     if (entry.isDirectory()) {
       if (depth + 1 >= maxDepth) {
+        // At max depth: mark directory as "not loaded" (children: undefined)
+        // so frontend knows to lazy-load on expand
         nodes.push({ name: entry.name, path: relPath, type: 'directory' });
       } else {
         const children = await buildTree(root, fullPath, depth + 1, maxDepth);
@@ -120,6 +124,7 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
 }
 
 export const workspaceRoutes: FastifyPluginAsync = async (app) => {
+  // GET /api/workspace/worktrees (includes linked roots)
   app.get<{ Querystring: { repoRoot?: string } }>('/api/workspace/worktrees', async (request, reply) => {
     const { repoRoot } = request.query;
     if (repoRoot) {
@@ -136,6 +141,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     const entries = await listWorktrees(repoRoot || undefined);
+    // Prefix foreign repo worktree IDs with a short hash to prevent cross-repo collision
     if (repoRoot) {
       const prefix = createHash('sha256').update(repoRoot).digest('hex').slice(0, 6);
       for (const e of entries) e.id = `${prefix}_${e.id}`;
@@ -146,6 +152,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     return { worktrees: all };
   });
 
+  // GET /api/workspace/tree?worktreeId=&path=&depth=
   app.get<{
     Querystring: { worktreeId?: string; path?: string; depth?: string };
   }>('/api/workspace/tree', async (request, reply) => {
@@ -172,6 +179,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /api/workspace/file?worktreeId=&path=
   app.get<{
     Querystring: { worktreeId?: string; path?: string };
   }>('/api/workspace/file', async (request, reply) => {
@@ -232,6 +240,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /api/workspace/file/raw?worktreeId=&path= — stream raw image content
   app.get<{
     Querystring: { worktreeId?: string; path?: string };
   }>('/api/workspace/file/raw', async (request, reply) => {
@@ -279,6 +288,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // POST /api/workspace/search { worktreeId, query, type?, limit? }
   app.post<{
     Body: { worktreeId: string; query: string; type?: 'content' | 'filename'; limit?: number };
   }>('/api/workspace/search', async (request, reply) => {
@@ -298,6 +308,10 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
       const root = await getWorktreeRoot(worktreeId);
 
       if (type === 'filename') {
+        // List all non-excluded files, then post-filter on the *relative* path.
+        // We avoid using find's -path for the query because it matches against
+        // the absolute path — if the worktree root itself contains the query
+        // string, nearly every file would match (P2 from cloud review).
         const { stdout } = await execFileAsync(
           'find',
           [
@@ -354,6 +368,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
         return { query, results, totalMatches: results.length, truncated: false };
       }
 
+      // Content search using grep -rn with context
       let grepOutput = '';
       try {
         const { stdout } = await execFileAsync(
@@ -378,7 +393,9 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
           { timeout: 10000, maxBuffer: 5 * 1024 * 1024 },
         );
         grepOutput = stdout;
-      } catch {}
+      } catch {
+        // grep exits 1 when no matches — that's fine
+      }
 
       const results: Array<{
         path: string;
@@ -393,6 +410,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
         if (results.length >= limit) break;
         const lines = group.trim().split('\n').filter(Boolean);
 
+        // Find the actual match line (not context lines which use -)
         const matchLine = lines.find((l) => {
           const m = l.match(/^(.+?):(\d+):/);
           return m != null;
@@ -436,6 +454,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /api/workspace/diff?worktreeId=&path= — git diff (all changed files or single file)
   app.get<{
     Querystring: { worktreeId?: string; path?: string };
   }>('/api/workspace/diff', async (request, reply) => {
@@ -447,6 +466,8 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const root = await getWorktreeRoot(worktreeId);
+
+      // Get list of changed files (staged + unstaged)
       const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '-uall'], {
         cwd: root,
         timeout: 5000,
@@ -459,6 +480,9 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
         .map((line) => {
           const status = line.slice(0, 2).trim();
           let path = line.slice(3);
+          // Normalize rename paths: "old.ts -> new.ts" → "new.ts"
+          // Only apply for rename (R) or copy (C) statuses to avoid
+          // misparsing filenames that literally contain " -> "
           if ((status.startsWith('R') || status.startsWith('C')) && path.includes(' -> ')) {
             path = path.slice(path.indexOf(' -> ') + 4);
           }
@@ -466,9 +490,11 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
         })
         .filter((f) => !isDenylisted(f.path));
 
+      // Build pathspec: only diff allowed (non-denylisted) files
+      // P0 security: git diff without pathspec would leak .env/.pem/.key content
       const allowedPaths = changedFiles.map((f) => f.path);
       if (filePath) {
-        await resolveWorkspacePath(root, filePath);
+        await resolveWorkspacePath(root, filePath); // security check
         if (!allowedPaths.includes(filePath)) {
           return { worktreeId, changedFiles, diff: '' };
         }
@@ -486,6 +512,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
           });
           diffOutput = stdout;
         } catch {
+          // git diff may fail on initial commits — try without HEAD
           try {
             const fallbackArgs = ['diff', '--cached', '--unified=3', '--no-color', '--', ...pathspec];
             const { stdout } = await execFileAsync('git', fallbackArgs, {
@@ -494,16 +521,20 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
               maxBuffer: 2 * 1024 * 1024,
             });
             diffOutput = stdout;
-          } catch {}
+          } catch {
+            // No diff available
+          }
         }
       }
 
+      // Supplement diff for untracked (??) files — git diff HEAD doesn't cover them
       const untrackedFiles = changedFiles.filter((f) => f.status === '??');
       const targetUntracked = filePath ? untrackedFiles.filter((f) => f.path === filePath) : untrackedFiles;
 
       for (const uf of targetUntracked) {
         try {
-          await resolveWorkspacePath(root, uf.path);
+          await resolveWorkspacePath(root, uf.path); // security check
+          // Use relative path so diff headers match changedFiles.path entries
           const { stdout } = await execFileAsync(
             'git',
             ['diff', '--no-index', '--unified=3', '--no-color', '--', '/dev/null', uf.path],
@@ -511,6 +542,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
           );
           diffOutput += stdout;
         } catch (err: unknown) {
+          // git diff --no-index exits 1 when files differ (expected)
           const e2 = err as { stdout?: string };
           if (e2.stdout) diffOutput += e2.stdout;
         }
@@ -527,6 +559,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // POST /api/workspace/linked-roots — add a linked root
   app.post<{
     Body: { name?: string; path?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
@@ -552,6 +585,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // DELETE /api/workspace/linked-roots?id=
   app.delete<{
     Querystring: { id?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
@@ -568,6 +602,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true };
   });
 
+  // POST /api/workspace/reveal — open file/directory in system file manager
   app.post<{
     Body: { worktreeId: string; path: string };
   }>('/api/workspace/reveal', async (request, reply) => {
@@ -580,10 +615,12 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
       const root = await getWorktreeRoot(worktreeId);
       const resolved = await resolveWorkspacePath(root, filePath);
       if (process.platform === 'darwin') {
+        // macOS: open -R reveals the file in Finder
         await execFileAsync('open', ['-R', resolved], { timeout: 5000 });
       } else if (process.platform === 'win32') {
         await execFileAsync('explorer', ['/select,', resolved], { timeout: 5000 });
       } else {
+        // Linux: xdg-open can only open directories, not select files
         const fileStat = await stat(resolved);
         const dir = fileStat.isDirectory() ? resolved : dirname(resolved);
         await execFileAsync('xdg-open', [dir], { timeout: 5000 });

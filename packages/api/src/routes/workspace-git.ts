@@ -14,6 +14,8 @@ import { getWorktreeRoot, WorkspaceSecurityError } from '../domains/workspace/wo
 
 const execFileAsync = promisify(execFile);
 
+// ── Parsers (exported for unit testing) ─────────────────────────────
+
 export interface GitCommit {
   hash: string;
   short: string;
@@ -74,6 +76,8 @@ export function parseGitShow(statOutput: string): Array<{ path: string; summary:
       return { path: (pathPart ?? '').trim(), summary: rest.join('|').trim() };
     });
 }
+
+// ── Phase 2: Health Dashboard Parsers ────────────────────────────────
 
 export interface StaleBranch {
   name: string;
@@ -176,6 +180,7 @@ async function detectRuntimeDrift(repoRoot: string): Promise<RuntimeDrift | null
   const runtimePath = process.env.RUNTIME_REPO_PATH;
   if (!runtimePath) return null;
   try {
+    // Always compare against main, not HEAD — HEAD varies per worktree (VG-1 P1 fix)
     const mainBranch = 'refs/heads/main';
     const { stdout: mainRef } = await execFileAsync('git', ['rev-parse', '--short', mainBranch], {
       cwd: repoRoot,
@@ -190,6 +195,7 @@ async function detectRuntimeDrift(repoRoot: string): Promise<RuntimeDrift | null
       ['rev-list', '--left-right', '--count', `${mainBranch}...${rtRef.trim()}`],
       { cwd: repoRoot, timeout: 5000 },
     );
+    // Fetch commits that main has but runtime doesn't (behind commits)
     const { stdout: logOut } = await execFileAsync(
       'git',
       ['log', '--oneline', '-n', '20', `${rtRef.trim()}..${mainBranch}`],
@@ -202,7 +208,10 @@ async function detectRuntimeDrift(repoRoot: string): Promise<RuntimeDrift | null
   }
 }
 
+// ── Routes ──────────────────────────────────────────────────────────
+
 export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
+  // GET /api/workspace/git-log
   app.get<{
     Querystring: { worktreeId?: string; limit?: string };
   }>('/api/workspace/git-log', async (request, reply) => {
@@ -232,6 +241,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /api/workspace/git-status
   app.get<{
     Querystring: { worktreeId?: string };
   }>('/api/workspace/git-status', async (request, reply) => {
@@ -261,6 +271,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /api/workspace/git-show
   app.get<{
     Querystring: { worktreeId?: string; hash?: string };
   }>('/api/workspace/git-show', async (request, reply) => {
@@ -291,6 +302,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /api/workspace/git-health (Phase 2)
   app.get<{
     Querystring: { worktreeId?: string };
   }>('/api/workspace/git-health', async (request, reply) => {
@@ -301,6 +313,8 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
+
+      // 1. Stale branches: merged into main but not deleted
       const { stdout: mergedOut } = await execFileAsync(
         'git',
         ['branch', '--merged', 'main', '--format=%(refname:short)%x00%(committerdate:iso-strict)%x00%(authorname)'],
@@ -308,6 +322,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       );
       const staleBranches = parseStaleBranches(mergedOut);
 
+      // 2. Worktree health
       const mergedNames = new Set(staleBranches.map((b) => b.name));
       const { stdout: wtOut } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
         cwd: root,
@@ -315,6 +330,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       });
       const worktrees = parseWorktreeHealth(wtOut, mergedNames);
 
+      // 3. Runtime drift (optional — needs RUNTIME_REPO_PATH env)
       const runtimeDrift = await detectRuntimeDrift(root);
 
       return { staleBranches, worktrees, runtimeDrift };
