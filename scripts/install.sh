@@ -42,6 +42,12 @@ pnpm_install_with_fallback() {
     warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
     pnpm install --frozen-lockfile
 }
+build_step() {
+    local label="$1"; shift
+    info "  Building $label..."
+    "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }
+    ok "$label build complete"
+}
 
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
@@ -198,7 +204,10 @@ ok "Using project: $PROJECT_DIR"
 
 pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
 ok "Packages installed"
-pnpm build || { fail "pnpm build failed in $PROJECT_DIR"; exit 1; }
+build_step "shared" pnpm --dir packages/shared run build
+build_step "mcp-server" pnpm --dir packages/mcp-server run build
+build_step "api" pnpm --dir packages/api run build
+build_step "web" env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}" pnpm --dir packages/web run build
 ok "Build complete"
 
 # Skills: per-skill user-level symlinks (ADR-009)
