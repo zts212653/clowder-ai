@@ -148,14 +148,21 @@ You don't need to be a developer. You need to know what you want — and who you
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
-cp .env.example .env   # add at least one model API key
-pnpm install
-pnpm start
+bash scripts/install.sh
 ```
 
-Open `http://localhost:3003` and start talking to your team.
+The script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools (Claude / Codex / Gemini), and authentication — with interactive prompts to guide you through each step.
+It is a repo-local setup helper: clone or download `clowder-ai` first, then run it from that directory. It is not a bare-metal `curl | bash` bootstrapper.
+Downloaded archives (without `.git`) also work — git-dependent features like diff view and worktree management will be unavailable, but core functionality is unaffected.
 
-**Full setup guide** — required vs optional config, voice, IM platforms: **[SETUP.md](SETUP.md)**
+Options:
+- `--start` — auto-start services after install
+- `--memory` — skip Redis (use in-memory store)
+- `--registry=URL` — custom npm registry (e.g. for China mirrors)
+
+Then open `http://localhost:3003` and start talking to your team.
+
+**Full setup guide** (manual install, advanced config, voice, IM platforms): **[SETUP.md](SETUP.md)**
 
 ## Usage Guide
 
@@ -261,6 +268,7 @@ We build in the open. Here's where we are.
 | MCP Callback Bridge | Shipped |
 | SOP Auto-Guardian | Shipped |
 | Self-Evolution | Shipped |
+| Linux Repo-Local Install Helper | Shipped |
 
 ### Integrations
 
@@ -503,14 +511,21 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
-cp .env.example .env   # 至少填一个模型 API key
-pnpm install
-pnpm start
+bash scripts/install.sh
 ```
 
-打开 `http://localhost:3003`，开始和你的团队对话。
+安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具（Claude / Codex / Gemini）和认证配置 — 全程交互式引导。
+这是一个 repo 内安装助手：先 clone 或下载 `clowder-ai`，再在目录里运行。它不是 bare-metal 的 `curl | bash` 引导脚本。
+下载的压缩包（没有 `.git`）同样可用 — diff 视图和 worktree 管理等 git 相关功能不可用，但核心功能不受影响。
 
-**完整安装指南** — 必选 vs 可选配置、语音、IM 平台：**[SETUP.md](SETUP.md)**
+可选参数：
+- `--start` — 安装完成后自动启动服务
+- `--memory` — 跳过 Redis（使用内存模式）
+- `--registry=URL` — 自定义 npm 镜像源（适用于国内网络）
+
+然后打开 `http://localhost:3003`，开始和你的团队对话。
+
+**完整安装指南**（手动安装、高级配置、语音、IM 平台）：**[SETUP.md](SETUP.md)**
 
 ## 使用指南
 
@@ -616,6 +631,7 @@ pnpm start
 | MCP 回调桥接 | 已发布 |
 | SOP 自动守护 | 已发布 |
 | 自我进化 | 已发布 |
+| Linux 仓库内安装助手 | 已发布 |
 
 ### 集成
 

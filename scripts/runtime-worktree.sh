@@ -71,6 +71,10 @@ require_git_repo() {
     || die "project dir is not a git repository: $PROJECT_DIR"
 }
 
+is_git_repo() {
+  git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 worktree_exists() {
   git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fxq "$RUNTIME_DIR"
 }
@@ -213,6 +217,13 @@ status_runtime_worktree() {
 }
 
 start_runtime_worktree() {
+  if ! is_git_repo; then
+    ensure_restart_authorized
+    info "running in-place (deployment mode): $PROJECT_DIR"
+    cd "$PROJECT_DIR"
+    exec ./scripts/start-dev.sh --prod-web ${START_ARGS[@]+"${START_ARGS[@]}"}
+  fi
+
   if ! worktree_exists; then
     info "runtime worktree missing; initializing first"
     init_runtime_worktree
