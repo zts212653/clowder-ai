@@ -6,11 +6,13 @@
 set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-AUTO_START=false; MEMORY_MODE=false; NPM_REGISTRY=""
+AUTO_START=false; MEMORY_MODE=false; NPM_REGISTRY=""; SOURCE_ONLY=false
+PROJECT_DIR=""; PROJECT_HAS_GIT_METADATA=false
 for arg in "$@"; do
     case $arg in
         --start) AUTO_START=true ;; --memory) MEMORY_MODE=true ;;
         --registry=*) NPM_REGISTRY="${arg#*=}" ;;
+        --source-only) SOURCE_ONLY=true ;;
     esac
 done
 # Apply registry if specified (helps in China / behind proxy)
@@ -47,6 +49,11 @@ write_env_key() {
     printf "%s=%s\n" "$key" "$(env_quote "$val")" >> "$tmp"
     mv "$tmp" .env
 }
+delete_env_key() {
+    local key="$1" tmp; tmp="$(mktemp)"
+    grep -v "^${key}=" .env > "$tmp" 2>/dev/null || true
+    mv "$tmp" .env
+}
 pnpm_install_with_fallback() {
     pnpm install --frozen-lockfile && return 0; [[ -n "$NPM_REGISTRY" ]] && return 1
     warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
@@ -54,22 +61,57 @@ pnpm_install_with_fallback() {
 }
 build_step() { local label="$1"; shift; info "  Building $label..."
     "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }
+resolve_project_dir_from() {
+    local script_source="$1" script_dir="" project_dir=""
+    [[ -n "$script_source" ]] || return 1
+    script_dir="$(cd "$(dirname "$script_source")" && pwd)"
+    project_dir="$(cd "$script_dir/.." && pwd)"
+    [[ -f "$project_dir/package.json" && -d "$project_dir/packages/api" ]] || return 1
+    printf '%s\n' "$project_dir"
+}
 resolve_project_dir() {
-    local script_source="${BASH_SOURCE[0]:-}" script_dir=""
+    local script_source="${BASH_SOURCE[0]:-}"
     [[ -n "$script_source" ]] || {
         fail "This helper must run from a clowder-ai source tree. Clone or download first, then run: bash scripts/install.sh"
         exit 1
     }
-    script_dir="$(cd "$(dirname "$script_source")" && pwd)"
-    PROJECT_DIR="$(cd "$script_dir/.." && pwd)"
-    [[ -f "$PROJECT_DIR/package.json" && -d "$PROJECT_DIR/packages/api" ]] || {
+    PROJECT_DIR="$(resolve_project_dir_from "$script_source")" || {
         fail "Could not locate the clowder-ai source tree from $script_source. Clone or download first, then run: bash scripts/install.sh"
         exit 1
     }
-    if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    PROJECT_HAS_GIT_METADATA=false
+    [[ -e "$PROJECT_DIR/.git" ]] && PROJECT_HAS_GIT_METADATA=true
+    if [[ "$PROJECT_HAS_GIT_METADATA" != true ]]; then
         warn "No .git directory — git-dependent features (diff view, worktree management) will be unavailable"
     fi
 }
+
+ENV_KEYS=(); ENV_VALUES=(); ENV_DELETE_KEYS=()
+reset_env_changes() { ENV_KEYS=(); ENV_VALUES=(); ENV_DELETE_KEYS=(); }
+collect_env() { ENV_KEYS+=("$1"); ENV_VALUES+=("$2"); }
+clear_env() { ENV_DELETE_KEYS+=("$1"); }
+set_codex_oauth_mode() {
+    collect_env "CODEX_AUTH_MODE" "oauth"
+    clear_env "OPENAI_API_KEY"; clear_env "OPENAI_BASE_URL"; clear_env "CAT_CODEX_MODEL"
+}
+set_codex_api_key_mode() {
+    local key="$1" base_url="$2" model="$3"
+    collect_env "CODEX_AUTH_MODE" "api_key"; collect_env "OPENAI_API_KEY" "$key"
+    [[ -n "$base_url" ]] && collect_env "OPENAI_BASE_URL" "$base_url" || clear_env "OPENAI_BASE_URL"
+    [[ -n "$model" ]] && collect_env "CAT_CODEX_MODEL" "$model" || clear_env "CAT_CODEX_MODEL"
+}
+set_gemini_oauth_mode() {
+    clear_env "GEMINI_API_KEY"; clear_env "CAT_GEMINI_MODEL"
+}
+set_gemini_api_key_mode() {
+    local key="$1" model="$2"
+    collect_env "GEMINI_API_KEY" "$key"
+    [[ -n "$model" ]] && collect_env "CAT_GEMINI_MODEL" "$model" || clear_env "CAT_GEMINI_MODEL"
+}
+
+if [[ "$SOURCE_ONLY" == true ]]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
@@ -97,6 +139,9 @@ if [[ $EUID -ne 0 ]]; then
     command -v sudo &>/dev/null || { fail "Not root and sudo not found / 请以 root 运行或安装 sudo"; exit 1; }
     SUDO="sudo"
 fi
+
+resolve_project_dir
+ok "Source tree: $PROJECT_DIR"
 
 # ── [2/9] Install system dependencies ──────────────────────
 step "[2/9] Checking system dependencies / 检测系统依赖..."
@@ -215,7 +260,7 @@ fi
 
 # ── [5/9] Build checked-out project ────────────────────────
 step "[5/9] Preparing current repo / 准备当前仓库..."
-resolve_project_dir; cd "$PROJECT_DIR"
+cd "$PROJECT_DIR"
 ok "Using project: $PROJECT_DIR"
 pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
 ok "Packages installed"
@@ -315,9 +360,6 @@ if (secrets?.providers?.anthropic?.[id]) delete secrets.providers.anthropic[id];
 fs.writeFileSync(pf, JSON.stringify(profiles)); if (secrets) fs.writeFileSync(sf, JSON.stringify(secrets));
 EONODE
 }
-# Collect auth info into variables (written to .env in step 8)
-ENV_KEYS=(); ENV_VALUES=()
-collect_env() { ENV_KEYS+=("$1"); ENV_VALUES+=("$2"); }
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
@@ -326,7 +368,8 @@ configure_agent_auth() {
     local choice; tty_read "    Choose [1/2] (default: 1): " choice
     if [[ "${choice:-1}" != "2" ]]; then
         [[ "$cmd" == "claude" ]] && remove_claude_installer_profile
-        [[ "$cmd" == "codex" ]] && collect_env "CODEX_AUTH_MODE" "oauth"
+        [[ "$cmd" == "codex" ]] && set_codex_oauth_mode
+        [[ "$cmd" == "gemini" ]] && set_gemini_oauth_mode
         ok "$name: OAuth mode (login on first use: run '$cmd')"
         return 0
     fi
@@ -345,19 +388,16 @@ configure_agent_auth() {
             tty_read "    Base URL (Enter = default): " base_url
             tty_read "    Model (Enter = default): " model
             if [[ -n "$key" ]]; then
-                collect_env "CODEX_AUTH_MODE" "api_key"; collect_env "OPENAI_API_KEY" "$key"
-                [[ -n "$base_url" ]] && collect_env "OPENAI_BASE_URL" "$base_url"
-                [[ -n "$model" ]] && collect_env "CAT_CODEX_MODEL" "$model"
+                set_codex_api_key_mode "$key" "$base_url" "$model"
                 ok "$name: API key collected (will write to .env)"
-            else warn "$name: no key provided, keeping OAuth"; collect_env "CODEX_AUTH_MODE" "oauth"; fi
+            else warn "$name: no key provided, keeping OAuth"; set_codex_oauth_mode; fi
             ;;
         gemini)
             tty_read "    Model (Enter = default): " model
             if [[ -n "$key" ]]; then
-                collect_env "GEMINI_API_KEY" "$key"
-                [[ -n "$model" ]] && collect_env "CAT_GEMINI_MODEL" "$model"
+                set_gemini_api_key_mode "$key" "$model"
                 ok "$name: API key collected (will write to .env)"
-            else warn "$name: no key provided, skipping"; fi
+            else warn "$name: no key provided, keeping OAuth"; set_gemini_oauth_mode; fi
             ;;
     esac
 }
@@ -383,6 +423,7 @@ if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
     write_env_key "REDIS_URL" "$REDIS_EXT_URL"
     ok "External Redis URL written to .env"
 fi
+for key in "${ENV_DELETE_KEYS[@]}"; do delete_env_key "$key"; done
 for i in "${!ENV_KEYS[@]}"; do write_env_key "${ENV_KEYS[$i]}" "${ENV_VALUES[$i]}"; done
 [[ ${#ENV_KEYS[@]} -gt 0 ]] && ok "Auth config written to .env"
 # Auto-detect Docker: bind API to 0.0.0.0 so port mapping works from host

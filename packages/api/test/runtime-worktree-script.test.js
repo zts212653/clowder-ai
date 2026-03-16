@@ -31,6 +31,20 @@ afterEach(async () => {
 });
 
 describe('runtime-worktree.sh', () => {
+  it('starts in-place when project is not a git repository', () => {
+    const projectDir = createTempProject('runtime-non-git');
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: { ...process.env, CAT_CAFE_RUNTIME_RESTART_OK: '1' },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /running in-place \(deployment mode\)/);
+    assert.match(result.stdout, new RegExp(`STARTED:${projectDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  });
+
   it('fails fast when project is a git repo but the configured remote is missing', () => {
     const projectDir = createTempProject('runtime-missing-remote');
     execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
