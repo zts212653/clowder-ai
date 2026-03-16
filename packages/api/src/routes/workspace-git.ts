@@ -10,7 +10,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
-import { getWorktreeRoot, isGitReady, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
+import { getWorktreeRoot, hasGitHead, isGitReady, WorkspaceSecurityError } from '../domains/workspace/workspace-security.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -222,7 +222,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      if (!(await isGitReady(root))) return { worktreeId, commits: [] };
+      if (!(await isGitReady(root)) || !(await hasGitHead(root))) return { worktreeId, commits: [] };
       const n = Math.min(Math.max(1, Number(limit) || 50), 200);
       const { stdout } = await execFileAsync(
         'git',
@@ -288,7 +288,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      if (!(await isGitReady(root))) return { worktreeId, hash, files: [] };
+      if (!(await isGitReady(root)) || !(await hasGitHead(root))) return { worktreeId, hash, files: [] };
       const { stdout } = await execFileAsync('git', ['show', '--stat', '--no-color', hash], {
         cwd: root,
         timeout: 5000,
@@ -316,7 +316,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      if (!(await isGitReady(root))) {
+      if (!(await isGitReady(root)) || !(await hasGitHead(root))) {
         return {
           staleBranches: [],
           worktrees: [],

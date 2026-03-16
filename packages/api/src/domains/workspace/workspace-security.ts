@@ -99,8 +99,18 @@ export interface WorktreeEntry {
   head: string;
 }
 
-/** Check if a directory is a git repo with at least one commit (HEAD exists). */
+/** Check if a directory is inside a git work tree (HEAD may still be unborn). */
 export async function isGitReady(cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, timeout: 3000 });
+    return stdout.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/** Check if a git work tree already has a valid HEAD commit. */
+export async function hasGitHead(cwd: string): Promise<boolean> {
   try {
     await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd, timeout: 3000 });
     return true;
@@ -111,7 +121,7 @@ export async function isGitReady(cwd: string): Promise<boolean> {
 
 export async function listWorktrees(repoRoot?: string): Promise<WorktreeEntry[]> {
   const cwd = repoRoot ?? process.cwd();
-  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd });
+  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd }).catch(() => ({ stdout: '' }));
   const entries: WorktreeEntry[] = [];
   let current: Partial<WorktreeEntry> = {};
 
