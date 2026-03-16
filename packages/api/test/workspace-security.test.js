@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -154,6 +155,20 @@ describe('workspace-security', () => {
     assert.ok(entries[0].id);
     assert.ok(entries[0].root);
     assert.ok(entries[0].branch);
+  });
+
+  it('listWorktrees fail-opens to [] outside a git repository', async () => {
+    const entries = await mod.listWorktrees(testRoot);
+    assert.deepEqual(entries, []);
+  });
+
+  it('treats unborn repositories as git-ready but without HEAD', async () => {
+    const repo = join(tmpdir(), `ws-git-unborn-${Date.now()}`);
+    await mkdir(repo, { recursive: true });
+    execSync('git init -b main', { cwd: repo, stdio: 'ignore' });
+    assert.equal(await mod.isGitReady(repo), true);
+    assert.equal(await mod.hasGitHead(repo), false);
+    await rm(repo, { recursive: true, force: true });
   });
 
   it('getWorktreeRoot throws for unknown ID', async () => {

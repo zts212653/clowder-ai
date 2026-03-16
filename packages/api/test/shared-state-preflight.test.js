@@ -158,6 +158,18 @@ describe('checkSharedStatePreflight (integration)', () => {
     assert.deepEqual(result, { ok: true }, 'should fail-open when git is unavailable');
   });
 
+  it('returns ok:true for freshly initialized repos with no commits yet', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'ss-test-unborn-'));
+    tempDirs.push(repo);
+
+    execSync('git init -b main', { cwd: repo, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: repo, stdio: 'ignore' });
+    execSync('git config user.name "test"', { cwd: repo, stdio: 'ignore' });
+
+    const result = checkSharedStatePreflight(repo);
+    assert.deepEqual(result, { ok: true }, 'should fail-open when HEAD is unborn');
+  });
+
   it('falls back to origin/<branch> when no upstream tracking (new branch)', () => {
     const repo = createTempRepo('noupstream');
     const bare = addBareRemote(repo);
