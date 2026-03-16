@@ -240,7 +240,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  // GET /api/workspace/file/raw?worktreeId=&path= — stream raw image content
+  // GET /api/workspace/file/raw?worktreeId=&path= — stream raw binary content
   app.get<{
     Querystring: { worktreeId?: string; path?: string };
   }>('/api/workspace/file/raw', async (request, reply) => {

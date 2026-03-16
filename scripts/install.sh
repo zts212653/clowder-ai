@@ -54,25 +54,21 @@ pnpm_install_with_fallback() {
 }
 build_step() { local label="$1"; shift; info "  Building $label..."
     "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }
-ensure_git_checkout() {
-    git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
-        fail "This helper only supports a git checkout of clowder-ai. Use git clone first; archive downloads or copied source trees without .git are not supported."
-        exit 1
-    }
-}
 resolve_project_dir() {
     local script_source="${BASH_SOURCE[0]:-}" script_dir=""
     [[ -n "$script_source" ]] || {
-        fail "This helper must run from a checked-out clowder-ai repo. Clone first, then run: bash scripts/install.sh"
+        fail "This helper must run from a clowder-ai source tree. Clone or download first, then run: bash scripts/install.sh"
         exit 1
     }
     script_dir="$(cd "$(dirname "$script_source")" && pwd)"
     PROJECT_DIR="$(cd "$script_dir/.." && pwd)"
     [[ -f "$PROJECT_DIR/package.json" && -d "$PROJECT_DIR/packages/api" ]] || {
-        fail "Could not locate the clowder-ai repo from $script_source. Clone the repo first, then run: bash scripts/install.sh"
+        fail "Could not locate the clowder-ai source tree from $script_source. Clone or download first, then run: bash scripts/install.sh"
         exit 1
     }
-    ensure_git_checkout
+    if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        warn "No .git directory — git-dependent features (diff view, worktree management) will be unavailable"
+    fi
 }
 
 # ── [1/9] Environment detection ────────────────────────────
