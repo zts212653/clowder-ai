@@ -216,11 +216,11 @@ step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
 
 install_npm_cli() {
-    local name="$1" cmd="$2" pkg="$3"; npm install -g "$pkg" 2>&1 | tail -2; hash -r 2>/dev/null || true
+    local name="$1" cmd="$2" pkg="$3"; info "  Installing $name ($pkg)..."; npm install -g "$pkg" 2>&1; hash -r 2>/dev/null || true
     command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }; ok "$name installed"
 }
 install_claude_cli() {
-    curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5
+    info "  Installing Claude Code..."; curl -fsSL https://claude.ai/install.sh | bash 2>&1
     export PATH="$HOME/.local/bin:$HOME/.claude/bin:$PATH"; hash -r 2>/dev/null || true
     command -v claude &>/dev/null || { fail "Claude install failed. Try: curl -fsSL https://claude.ai/install.sh | bash"; exit 1; }; ok "Claude Code installed"
 }
