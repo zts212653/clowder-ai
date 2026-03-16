@@ -150,6 +150,7 @@ bash scripts/install.sh
 ```
 
 The script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools (Claude / Codex / Gemini), and authentication — with interactive prompts to guide you through each step.
+It is a repo-local setup helper: clone `clowder-ai` first, then run it from that checkout. It is not a bare-metal `curl | bash` bootstrapper.
 
 Options:
 - `--start` — auto-start services after install
@@ -264,7 +265,7 @@ We build in the open. Here's where we are.
 | MCP Callback Bridge | Shipped |
 | SOP Auto-Guardian | Shipped |
 | Self-Evolution | Shipped |
-| Linux One-Click Deploy | Shipped |
+| Linux Repo-Local Install Helper | Shipped |
 
 ### Integrations
 
@@ -509,6 +510,7 @@ bash scripts/install.sh
 ```
 
 安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具（Claude / Codex / Gemini）和认证配置 — 全程交互式引导。
+这是一个 repo 内安装助手：先 `git clone clowder-ai`，再在仓库目录里运行。它不是 bare-metal 的 `curl | bash` 引导脚本。
 
 可选参数：
 - `--start` — 安装完成后自动启动服务
@@ -623,7 +625,7 @@ bash scripts/install.sh
 | MCP 回调桥接 | 已发布 |
 | SOP 自动守护 | 已发布 |
 | 自我进化 | 已发布 |
-| Linux 一键部署 | 已发布 |
+| Linux 仓库内安装助手 | 已发布 |
 
 ### 集成
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Clowder AI — Linux One-Click Install (F113)
-# Usage: ./scripts/install.sh [--start] [--memory] [--registry=URL]
+# Clowder AI — Linux Repo-Local Install Helper (F113)
+# Usage: bash scripts/install.sh [--start] [--memory] [--registry=URL]
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
 
 set -euo pipefail
@@ -40,7 +40,7 @@ persist_user_bin() {
 HAS_TTY=false; [[ -r /dev/tty ]] && tty -s </dev/tty 2>/dev/null && HAS_TTY=true
 tty_read() { local prompt="$1" var="$2"; read -rp "$prompt" "$var" </dev/tty 2>/dev/null || printf -v "$var" ''; }
 tty_read_secret() { local prompt="$1" var="$2"; read -rsp "$prompt" "$var" </dev/tty 2>/dev/null || printf -v "$var" ''; echo </dev/tty; }
-env_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+env_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"; }
 write_env_key() {
     local key="$1" val="$2" tmp; tmp="$(mktemp)"
     grep -v "^${key}=" .env > "$tmp" 2>/dev/null || true
@@ -54,6 +54,19 @@ pnpm_install_with_fallback() {
 }
 build_step() { local label="$1"; shift; info "  Building $label..."
     "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }
+resolve_project_dir() {
+    local script_source="${BASH_SOURCE[0]:-}" script_dir=""
+    [[ -n "$script_source" ]] || {
+        fail "This helper must run from a checked-out clowder-ai repo. Clone first, then run: bash scripts/install.sh"
+        exit 1
+    }
+    script_dir="$(cd "$(dirname "$script_source")" && pwd)"
+    PROJECT_DIR="$(cd "$script_dir/.." && pwd)"
+    [[ -f "$PROJECT_DIR/package.json" && -d "$PROJECT_DIR/packages/api" ]] || {
+        fail "Could not locate the clowder-ai repo from $script_source. Clone the repo first, then run: bash scripts/install.sh"
+        exit 1
+    }
+}
 
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
@@ -197,9 +210,9 @@ else
     fi
 fi
 
-# ── [5/9] Clone & build project ────────────────────────────
-step "[5/9] Setting up project / 设置项目..."
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$PROJECT_DIR"
+# ── [5/9] Build checked-out project ────────────────────────
+step "[5/9] Preparing current repo / 准备当前仓库..."
+resolve_project_dir; cd "$PROJECT_DIR"
 ok "Using project: $PROJECT_DIR"
 pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
 ok "Packages installed"
