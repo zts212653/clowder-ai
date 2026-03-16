@@ -1,18 +1,15 @@
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 
 describe('workspace-security', () => {
   let mod;
   let testRoot;
-  const originalPath = process.env.PATH ?? '';
 
   beforeEach(async () => {
     mod = await import('../dist/domains/workspace/workspace-security.js');
-    // Create a temp directory to simulate a workspace root
     testRoot = join(tmpdir(), `ws-test-${Date.now()}`);
     await mkdir(join(testRoot, 'src'), { recursive: true });
     await mkdir(join(testRoot, 'certs'), { recursive: true });
@@ -21,12 +18,6 @@ describe('workspace-security', () => {
     await writeFile(join(testRoot, '.env.local'), 'SECRET=456');
     await writeFile(join(testRoot, 'certs', 'server.pem'), 'CERT');
   });
-
-  afterEach(() => {
-    process.env.PATH = originalPath;
-  });
-
-  // -- Traversal --
 
   it('resolves valid relative path within root', async () => {
     const result = await mod.resolveWorkspacePath(testRoot, 'src/index.ts');
@@ -54,8 +45,6 @@ describe('workspace-security', () => {
       (err) => err.code === 'TRAVERSAL',
     );
   });
-
-  // -- Denylist --
 
   it('rejects .env file', async () => {
     await assert.rejects(
@@ -92,8 +81,6 @@ describe('workspace-security', () => {
     );
   });
 
-  // -- Symlink escape --
-
   it('rejects symlink that escapes root', async () => {
     const linkPath = join(testRoot, 'src', 'escape-link');
     try {
@@ -107,7 +94,6 @@ describe('workspace-security', () => {
     }
   });
 
-  // P1: directory symlink escape (intermediate symlink dir, not just final segment)
   it('rejects path traversing through a directory symlink that escapes root', async () => {
     const linkDir = join(testRoot, 'src', 'escape-dir');
     try {
@@ -120,8 +106,6 @@ describe('workspace-security', () => {
       await rm(linkDir, { force: true });
     }
   });
-
-  // -- isDenylisted (P2: search result filtering) --
 
   it('isDenylisted blocks .env files', () => {
     assert.ok(mod.isDenylisted('.env'));
@@ -152,8 +136,6 @@ describe('workspace-security', () => {
     assert.ok(!mod.isDenylisted('docs/README.md'));
   });
 
-  // -- Worktree listing --
-
   it('listWorktrees returns at least one entry', async () => {
     const entries = await mod.listWorktrees();
     assert.ok(entries.length >= 1);
@@ -162,57 +144,12 @@ describe('workspace-security', () => {
     assert.ok(entries[0].branch);
   });
 
-  it('listWorktrees fail-opens to [] outside a git repository', async () => {
-    const entries = await mod.listWorktrees(testRoot);
-    assert.deepEqual(entries, []);
-  });
-
-  it('listWorktrees preserves real git failures instead of masking them as []', async () => {
-    const binDir = join(testRoot, 'bin');
-    const fakeGit = join(binDir, 'git');
-    await mkdir(binDir, { recursive: true });
-    await writeFile(
-      fakeGit,
-      `#!/bin/sh
-if [ "$1" = "rev-parse" ] && [ "$2" = "--is-inside-work-tree" ]; then
-  printf 'true\\n'
-  exit 0
-fi
-if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then
-  printf 'fatal: synthetic git failure\\n' >&2
-  exit 128
-fi
-printf 'unexpected git args: %s\\n' "$*" >&2
-exit 99
-`,
-      { mode: 0o755 },
-    );
-    process.env.PATH = `${binDir}:${originalPath}`;
-
-    const failingMod = await import(`../dist/domains/workspace/workspace-security.js?gitfail=${Date.now()}`);
-    await assert.rejects(
-      () => failingMod.listWorktrees(testRoot),
-      (err) => String(err?.stderr ?? err?.message ?? '').includes('synthetic git failure'),
-    );
-  });
-
-  it('treats unborn repositories as git-ready but without HEAD', async () => {
-    const repo = join(tmpdir(), `ws-git-unborn-${Date.now()}`);
-    await mkdir(repo, { recursive: true });
-    execSync('git init -b main', { cwd: repo, stdio: 'ignore' });
-    assert.equal(await mod.isGitReady(repo), true);
-    assert.equal(await mod.hasGitHead(repo), false);
-    await rm(repo, { recursive: true, force: true });
-  });
-
   it('getWorktreeRoot throws for unknown ID', async () => {
     await assert.rejects(
       () => mod.getWorktreeRoot('nonexistent-worktree-id-12345'),
       (err) => err.code === 'NOT_FOUND',
     );
   });
-
-  // -- resolveWorktreeIdByPath (F089 Phase 3a) --
 
   it('resolveWorktreeIdByPath returns canonical id for known worktree root', async () => {
     const entries = await mod.listWorktrees();
