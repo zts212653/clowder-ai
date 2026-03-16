@@ -42,12 +42,8 @@ pnpm_install_with_fallback() {
     warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
     pnpm install --frozen-lockfile
 }
-build_step() {
-    local label="$1"; shift
-    info "  Building $label..."
-    "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }
-    ok "$label build complete"
-}
+build_step() { local label="$1"; shift; info "  Building $label..."
+    "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }
 
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
@@ -110,14 +106,12 @@ node_needs_install() {
     return 1
 }
 install_node_fnm() {
-    USED_FNM=true
-    warn "NodeSource unreachable — trying fnm (fast node manager)..."
+    USED_FNM=true; warn "NodeSource unreachable — trying fnm..."
     curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell 2>/dev/null \
         || curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/Schniz/fnm/master/.ci/install.sh | bash -s -- --skip-shell 2>/dev/null
     export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
     eval "$(fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
-    fnm install 20 && fnm use 20 && fnm default 20
-    for bin in node npm npx corepack; do persist_user_bin "$bin"; done
+    fnm install 20 && fnm use 20 && fnm default 20; for bin in node npm npx corepack; do persist_user_bin "$bin"; done
 }
 if node_needs_install; then
     NODE_OK=false
@@ -167,17 +161,14 @@ fi
 install_redis_local() {
     case "$DISTRO_FAMILY" in debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;; esac
     $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
-    $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
-    ok "Redis installed and started"
+    $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; ok "Redis installed and started"
 }
 REDIS_EXTERNAL=false
 if [[ "$MEMORY_MODE" == true ]]; then warn "Memory mode (--memory) — skipping Redis"
-elif command -v redis-server &>/dev/null; then
-    ok "Redis already installed"
+elif command -v redis-server &>/dev/null; then ok "Redis already installed"
     redis-cli ping &>/dev/null 2>&1 || {
         warn "Redis not running — starting..."
-        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
-    }
+        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; }
 else
     warn "Redis not found"
     if [[ "$HAS_TTY" == true ]]; then
@@ -230,7 +221,8 @@ install_npm_cli() {
     command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }; ok "$name installed"
 }
 install_claude_cli() {
-    curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5; hash -r 2>/dev/null || true
+    curl -fsSL https://claude.ai/install.sh | bash 2>&1 | tail -5
+    export PATH="$HOME/.local/bin:$HOME/.claude/bin:$PATH"; hash -r 2>/dev/null || true
     command -v claude &>/dev/null || { fail "Claude install failed. Try: curl -fsSL https://claude.ai/install.sh | bash"; exit 1; }; ok "Claude Code installed"
 }
 
