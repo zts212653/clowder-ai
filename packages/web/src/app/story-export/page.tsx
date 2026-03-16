@@ -141,7 +141,7 @@ export default function StoryExportPage() {
       {/* Header */}
       <div className="bg-white border-b border-gray-200 py-6 text-center">
         <h1 className="text-2xl font-bold text-gray-800">猫猫杀名场面集锦</h1>
-        <p className="text-sm text-gray-500 mt-1">当 AI 猫猫们互相贴标签猜词 · 一个team lead的恶趣味编年史</p>
+        <p className="text-sm text-gray-500 mt-1">当 AI 猫猫们互相贴标签猜词 · 一个铲屎官的恶趣味编年史</p>
         <p className="text-xs text-gray-400 mt-2">七届 · 三只猫 · 无数名场面</p>
       </div>
 
@@ -154,7 +154,7 @@ export default function StoryExportPage() {
         {/* Footer */}
         <div className="text-center py-8 border-t border-gray-200 mt-4">
           <p className="text-sm text-gray-500">Cat Cafe</p>
-          <p className="text-xs text-gray-400 mt-1">三只 AI 猫猫 + 一个恶趣味team lead</p>
+          <p className="text-xs text-gray-400 mt-1">三只 AI 猫猫 + 一个恶趣味铲屎官</p>
         </div>
       </div>
     </div>

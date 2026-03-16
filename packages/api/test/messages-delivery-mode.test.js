@@ -40,6 +40,7 @@ function buildDeps(overrides = {}) {
     },
     invocationTracker: {
       start: mock.fn(() => new AbortController()),
+      tryStartThread: mock.fn(() => new AbortController()),
       complete: mock.fn(),
       has: mock.fn(() => false),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
@@ -359,12 +360,13 @@ describe('POST /api/messages deliveryMode', () => {
 
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.invocationTracker.start.mock.mockImplementation(() => controller);
+    deps.invocationTracker.tryStartThread.mock.mockImplementation(() => controller);
 
     // Router that yields one message, then aborts (simulating external force-cancel),
     // then ends normally (no throw) — this is the exact scenario砚砚 identified.
     deps.router.routeExecution.mock.mockImplementation(async function* () {
       yield { type: 'text', catId: 'opus', content: 'partial output', timestamp: Date.now() };
-      // External cancel happens here (e.g., force-send fromteam lead)
+      // External cancel happens here (e.g., force-send from铲屎官)
       controller.abort();
       // Generator ends normally — no throw. The for-await break exits the loop,
       // but post-loop code must NOT run ack+succeeded.

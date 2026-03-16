@@ -688,6 +688,8 @@ export class AgentRouter {
       cursorBoundaries?: Map<string, string>;
       /** P1-2: pass to track persistence failures across generator boundary */
       persistenceContext?: PersistenceContext;
+      /** F108: parentInvocationId for WorklistRegistry concurrent isolation */
+      parentInvocationId?: string;
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
@@ -714,6 +716,7 @@ export class AgentRouter {
       thinkingMode,
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+      ...(options?.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
     };
 
     if (intent.intent === 'ideate' && targetCats.length > 1) {

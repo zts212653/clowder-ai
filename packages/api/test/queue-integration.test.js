@@ -127,8 +127,8 @@ function mockInvocationTracker() {
     },
     /** @type {any} */
     tracker: {
-      start(threadId, userId, catIds) {
-        starts.push({ threadId, userId, catIds });
+      start(threadId, catId, userId, catIds) {
+        starts.push({ threadId, catId, userId, catIds });
         activeThreads.add(threadId);
         return new AbortController();
       },
@@ -199,7 +199,7 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     // 3. Previous invocation completes (succeeded → auto-dequeue)
     trackerMock.clearActive('thread-1');
-    await processor.onInvocationComplete('thread-1', 'succeeded');
+    await processor.onInvocationComplete('thread-1', 'opus', 'succeeded');
     await settle();
 
     // 4. Verify queued message was auto-processed
@@ -225,7 +225,7 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     // 2. Cancel invocation → queue pauses
     trackerMock.clearActive('thread-1');
-    await processor.onInvocationComplete('thread-1', 'canceled');
+    await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
 
     // 3. Verify queue_paused emitted
     const pauseEmit = socketMock.userEmits.find((e) => e.event === 'queue_paused');
@@ -236,7 +236,7 @@ describe('Queue Integration (E2E scenarios)', () => {
     // 4. No auto-dequeue should have happened
     assert.strictEqual(routerMock.calls.length, 0, 'Should NOT auto-dequeue on cancel');
 
-    // 5. team lead manually triggers processNext
+    // 5. 铲屎官 manually triggers processNext
     const processResult = await processor.processNext('thread-1', 'user-1');
     assert.strictEqual(processResult.started, true);
     await settle();
@@ -280,7 +280,7 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     // 5. Active invocation completes → auto-dequeue
     trackerMock.clearActive('thread-1');
-    await processor.onInvocationComplete('thread-1', 'succeeded');
+    await processor.onInvocationComplete('thread-1', 'opus', 'succeeded');
     await settle();
 
     assert.strictEqual(routerMock.calls.length, 1, 'Should auto-dequeue after completion');
@@ -306,7 +306,7 @@ describe('Queue Integration (E2E scenarios)', () => {
     // After force completes → onInvocationComplete('canceled') pauses queue.
 
     trackerMock.clearActive('thread-1');
-    await processor.onInvocationComplete('thread-1', 'canceled');
+    await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
 
     // Queue should be paused (canceled status)
     assert.ok(processor.isPaused('thread-1'), 'Queue should pause after force-cancel');
@@ -341,7 +341,7 @@ describe('Queue Integration (E2E scenarios)', () => {
     processor.clearPause('thread-1');
 
     // 3. Old invocation's async cleanup calls onInvocationComplete('canceled')
-    await processor.onInvocationComplete('thread-1', 'canceled');
+    await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
 
     // Queue SHOULD be paused (the old cleanup still fires)
     // But the force-send's new invocation will start() and run independently.
@@ -415,10 +415,10 @@ describe('Queue Integration (E2E scenarios)', () => {
     processor.clearPause('thread-1');
 
     // 3. Old cleanup pauses (race)
-    await processor.onInvocationComplete('thread-1', 'canceled');
+    await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
 
     // 4. New force-send invocation succeeds → should auto-dequeue
-    await processor.onInvocationComplete('thread-1', 'succeeded');
+    await processor.onInvocationComplete('thread-1', 'opus', 'succeeded');
     await settle();
 
     // The queued message should have been auto-dequeued and executed

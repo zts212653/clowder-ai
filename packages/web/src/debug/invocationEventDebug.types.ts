@@ -7,6 +7,7 @@ export type DebugEventName =
   | 'queue_updated'
   | 'queue_paused'
   | 'agent_message'
+  | 'bubble_lifecycle'
   | 'done'
   | 'rejoin_rooms';
 
@@ -24,6 +25,10 @@ export const EVENT_KEYS = [
   'queuePaused',
   'hasActiveInvocation',
   'reason',
+  'catId',
+  'messageId',
+  'invocationId',
+  'origin',
 ] as const;
 
 export type AllowedEventKey = (typeof EVENT_KEYS)[number];
@@ -42,6 +47,10 @@ export type StoredDebugEvent = {
   queuePaused?: boolean;
   hasActiveInvocation?: boolean;
   reason?: string;
+  catId?: string;
+  messageId?: string;
+  invocationId?: string;
+  origin?: 'stream' | 'callback';
 };
 
 export type DebugEventInput = Partial<StoredDebugEvent> & {
@@ -83,6 +92,7 @@ export type DebugStatus = {
 export type DebugWindowApi = {
   configure: (input: DebugConfigureInput) => DebugStatus;
   dump: (options?: DebugDumpOptions) => string;
+  dumpBubbleTimeline: (options?: DebugDumpOptions) => string;
   clear: () => void;
   status: () => DebugStatus;
 };

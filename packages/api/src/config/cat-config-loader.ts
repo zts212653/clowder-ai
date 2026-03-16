@@ -64,6 +64,17 @@ const catVariantSchema = z.object({
   avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
   color: colorSchema.optional(), // F32-b P4c: override breed color
   contextBudget: contextBudgetSchema.optional(),
+  voiceConfig: z // F103: per-cat TTS voice configuration
+    .object({
+      voice: z.string().min(1),
+      langCode: z.string().min(1),
+      speed: z.number().positive().optional(),
+      refAudio: z.string().min(1).optional(),
+      refText: z.string().min(1).optional(),
+      instruct: z.string().min(1).optional(),
+      temperature: z.number().min(0).max(2).optional(),
+    })
+    .optional(),
   teamStrengths: z.string().optional(), // F-Ground-3: human-readable strengths
   caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
 });
@@ -559,7 +570,7 @@ export function getReviewPolicy(config?: CatCafeConfig): ReviewPolicy {
 
 /**
  * Check if a cat is available (has quota).
- * F032: team lead 40 美刀教训 — 没猫粮的猫不要找！
+ * F032: 铲屎官 40 美刀教训 — 没猫粮的猫不要找！
  */
 export function isCatAvailable(catId: string, config?: CatCafeConfig): boolean {
   const roster = getRoster(config);
@@ -599,13 +610,13 @@ export function isCatLead(catId: string, config?: CatCafeConfig): boolean {
 // ── F067: Owner config accessor ─────────────────────────────────────
 
 /** Default owner mention patterns (backward compat when owner not configured) */
-const DEFAULT_OWNER_MENTION_PATTERNS = ['@user', '@team lead'];
+const DEFAULT_OWNER_MENTION_PATTERNS = ['@user', '@铲屎官'];
 
 let _cachedOwner: OwnerConfig | null = null;
 
 /**
  * Get owner config from cat-config.json.
- * Returns a default config with @user/@team lead patterns when not configured.
+ * Returns a default config with @user/@铲屎官 patterns when not configured.
  */
 export function getOwnerConfig(config?: CatCafeConfig): OwnerConfig {
   if (_cachedOwner && !config) return _cachedOwner;
@@ -614,7 +625,7 @@ export function getOwnerConfig(config?: CatCafeConfig): OwnerConfig {
 
   // v1 config or no owner → return defaults
   if (!cfg || cfg.version === 1 || !cfg.owner) {
-    return { name: 'team lead', aliases: [], mentionPatterns: DEFAULT_OWNER_MENTION_PATTERNS };
+    return { name: '铲屎官', aliases: [], mentionPatterns: DEFAULT_OWNER_MENTION_PATTERNS };
   }
 
   _cachedOwner = cfg.owner;
@@ -623,7 +634,7 @@ export function getOwnerConfig(config?: CatCafeConfig): OwnerConfig {
 
 /**
  * Get all owner mention patterns (lowercased, with @ prefix).
- * Always includes @user and @team lead as fallback patterns in addition to configured ones.
+ * Always includes @user and @铲屎官 as fallback patterns in addition to configured ones.
  */
 export function getOwnerMentionPatterns(config?: CatCafeConfig): readonly string[] {
   const owner = getOwnerConfig(config);

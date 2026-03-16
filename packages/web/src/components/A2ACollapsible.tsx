@@ -34,7 +34,7 @@ export function A2ACollapsible({ group, renderMessage, getCatColor }: A2ACollaps
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('catcafe:chat-layout-changed'));
     }
-  }, []);
+  }, [expanded]);
 
   const catIds = [...new Set(group.messages.filter((m) => m.catId).map((m) => m.catId!))];
   const catLabel = catIds.length > 0 ? catIds.join(' ↔ ') : 'agents';

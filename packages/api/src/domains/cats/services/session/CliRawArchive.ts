@@ -18,6 +18,12 @@ export class CliRawArchive {
     this.archiveDir = options?.archiveDir ?? process.env.CLI_RAW_ARCHIVE_DIR ?? DEFAULT_CLI_RAW_ARCHIVE_DIR;
   }
 
+  /** F118: Get the archive file path for a given invocationId (today's date) */
+  getPath(invocationId: string): string {
+    const day = this.formatDate(new Date());
+    return join(this.archiveDir, day, `${invocationId}.ndjson`);
+  }
+
   async append(invocationId: string, payload: unknown): Promise<void> {
     if (!INVOCATION_ID_PATTERN.test(invocationId)) {
       throw new Error(`Invalid invocationId for archive: ${invocationId}`);

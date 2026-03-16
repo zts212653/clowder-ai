@@ -257,6 +257,27 @@ export class InvocationQueue {
     return { ...first };
   }
 
+  /** Peek at the next queued entry without mutating state. */
+  peekNextQueued(threadId: string, userId: string): QueueEntry | null {
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (!q) return null;
+    const first = q.find((e) => e.status === 'queued');
+    return first ? { ...first } : null;
+  }
+
+  /** Rollback a processing entry back to queued (undo markProcessing/markProcessingAcrossUsers). */
+  rollbackProcessing(threadId: string, entryId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      const entry = q.find((e) => e.id === entryId && e.status === 'processing');
+      if (entry) {
+        entry.status = 'queued';
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Remove a processing entry for this user by entryId. */
   removeProcessed(threadId: string, userId: string, entryId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));

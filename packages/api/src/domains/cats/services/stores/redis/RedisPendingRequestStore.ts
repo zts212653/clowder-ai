@@ -1,6 +1,6 @@
 /**
  * Redis Pending Request Store
- * Redis-backed pending queue — team lead离线时请求不丢失
+ * Redis-backed pending queue — 铲屎官离线时请求不丢失
  *
  * Data structures:
  * - Hash pending-req:{requestId} — request details

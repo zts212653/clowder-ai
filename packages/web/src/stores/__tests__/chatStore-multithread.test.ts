@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearDebugEvents, configureDebug, dumpBubbleTimeline } from '@/debug/invocationEventDebug';
 import type { ChatMessage } from '../chat-types';
 import { useChatStore } from '../chatStore';
 
@@ -8,6 +9,8 @@ function makeMsg(id: string, content = 'hello'): ChatMessage {
 
 describe('chatStore multi-thread state', () => {
   beforeEach(() => {
+    clearDebugEvents();
+    configureDebug({ enabled: false });
     // Reset store to initial state
     useChatStore.setState({
       messages: [],
@@ -30,6 +33,11 @@ describe('chatStore multi-thread state', () => {
       threads: [],
       isLoadingThreads: false,
     });
+  });
+
+  afterEach(() => {
+    clearDebugEvents();
+    configureDebug({ enabled: false });
   });
 
   it('preserves messages when switching threads', () => {
@@ -162,6 +170,43 @@ describe('chatStore multi-thread state', () => {
       expect(messages[0].id).toBe('msg-server-1');
     });
 
+    it('records a bubble lifecycle drop event when canonical id already exists in the active thread', () => {
+      configureDebug({ enabled: true });
+      useChatStore.getState().addMessage({
+        id: 'temp-stream-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'hello',
+        origin: 'stream',
+        extra: { stream: { invocationId: 'inv-1' } },
+        timestamp: Date.now(),
+      });
+      useChatStore.getState().addMessage({
+        id: 'msg-server-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'hello',
+        origin: 'callback',
+        extra: { stream: { invocationId: 'inv-1' } },
+        timestamp: Date.now() + 1,
+      });
+
+      useChatStore.getState().replaceMessageId('temp-stream-1', 'msg-server-1');
+
+      expect(dumpBubbleTimeline({ rawThreadId: true }).events).toEqual([
+        expect.objectContaining({
+          event: 'bubble_lifecycle',
+          threadId: 'thread-a',
+          action: 'drop',
+          reason: 'replace_message_id_dedup',
+          catId: 'opus',
+          messageId: 'msg-server-1',
+          invocationId: 'inv-1',
+          origin: 'stream',
+        }),
+      ]);
+    });
+
     it('replaces an optimistic background-thread message id in place', () => {
       useChatStore.getState().addMessageToThread('thread-b', makeMsg('temp-user-2', 'background'));
 
@@ -182,6 +227,39 @@ describe('chatStore multi-thread state', () => {
       const messages = useChatStore.getState().threadStates['thread-b']?.messages;
       expect(messages).toHaveLength(1);
       expect(messages[0].id).toBe('msg-server-2');
+    });
+
+    it('patchMessage merges callback fields without dropping stream invocation identity', () => {
+      useChatStore.getState().addMessage({
+        id: 'msg-stream-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'thinking...',
+        origin: 'stream',
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-1' } },
+        timestamp: Date.now(),
+      });
+
+      useChatStore.getState().patchMessage('msg-stream-1', {
+        content: 'final answer',
+        origin: 'callback',
+        isStreaming: false,
+        extra: { crossPost: { sourceThreadId: 'thread-x', sourceInvocationId: 'inv-x' } },
+      });
+
+      expect(useChatStore.getState().messages).toEqual([
+        expect.objectContaining({
+          id: 'msg-stream-1',
+          content: 'final answer',
+          origin: 'callback',
+          isStreaming: false,
+          extra: {
+            stream: { invocationId: 'inv-1' },
+            crossPost: { sourceThreadId: 'thread-x', sourceInvocationId: 'inv-x' },
+          },
+        }),
+      ]);
     });
   });
 

@@ -156,7 +156,7 @@ describe('triggerA2AInvocation (fallback path)', () => {
       has() {
         return true;
       },
-      getCatIds() {
+      getActiveSlots() {
         return ['opus', 'codex', 'gemini'];
       },
       start() {
@@ -305,8 +305,8 @@ describe('triggerA2AInvocation (fallback path)', () => {
 
     const completions = [];
     const mockQueueProcessor = {
-      async onInvocationComplete(threadId, status) {
-        completions.push({ threadId, status });
+      async onInvocationComplete(threadId, catId, status) {
+        completions.push({ threadId, catId, status });
       },
     };
 
@@ -378,8 +378,8 @@ describe('triggerA2AInvocation (fallback path)', () => {
 
     const completions = [];
     const mockQueueProcessor = {
-      async onInvocationComplete(threadId, status) {
-        completions.push({ threadId, status });
+      async onInvocationComplete(threadId, catId, status) {
+        completions.push({ threadId, catId, status });
       },
     };
 
@@ -451,8 +451,8 @@ describe('triggerA2AInvocation (fallback path)', () => {
 
     const completions = [];
     const mockQueueProcessor = {
-      async onInvocationComplete(threadId, status) {
-        completions.push({ threadId, status });
+      async onInvocationComplete(threadId, catId, status) {
+        completions.push({ threadId, catId, status });
       },
     };
 
@@ -674,7 +674,7 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
     }
   });
 
-  test('R1 P1-2: fallback does not abort active parent invocation', async () => {
+  test('R1 P1-2: slot-aware fallback allows non-conflicting cross-slot invocation', async () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
 
     let startCalled = 0;
@@ -683,9 +683,9 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
       has() {
         return true;
       }, // Parent is active
-      getCatIds() {
+      getActiveSlots() {
         return ['opus'];
-      }, // Different from targets
+      }, // Only opus is active — codex is non-conflicting
       start() {
         startCalled++;
         return new AbortController();
@@ -703,7 +703,7 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
 
     const mockRouter = {
       async *routeExecution() {
-        throw new Error('must not be called');
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
       },
     };
 
@@ -739,12 +739,178 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
       },
     );
 
-    // Fallback was entered (no worklist), but since parent is active,
-    // it must NOT call tracker.start() which would abort the parent.
-    assert.equal(startCalled, 0, 'tracker.start() must NOT be called when parent is active');
-    assert.equal(createCalled, 0, 'invocationRecord must NOT be created when parent is active');
+    // Wait for fire-and-forget background execution
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // F108 slot-aware: codex is non-conflicting with opus, safe to start
+    assert.equal(startCalled, 1, 'tracker.start() should be called for non-conflicting slot');
+    assert.equal(createCalled, 1, 'invocationRecord should be created for non-conflicting target');
+    assert.equal(result.fallback, true, 'should indicate fallback path was used');
+    assert.deepEqual(result.enqueued, ['codex'], 'non-conflicting target should be enqueued');
+  });
+
+  test('R1 P1-2: slot-aware fallback skips when all targets already active', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    let startCalled = 0;
+    const mockInvocationTracker = {
+      has() {
+        return true;
+      },
+      getActiveSlots() {
+        return ['opus', 'codex'];
+      }, // codex already active
+      start() {
+        startCalled++;
+        return new AbortController();
+      },
+      complete() {},
+    };
+
+    const mockInvocationRecordStore = {
+      create() {
+        return { outcome: 'created', invocationId: 'inv-skip' };
+      },
+      update() {},
+    };
+
+    const mockRouter = {
+      async *routeExecution() {
+        throw new Error('must not be called');
+      },
+    };
+
+    const mockSocketManager = {
+      broadcastAgentMessage() {},
+      broadcastToRoom() {},
+    };
+
+    const mockLog = { error() {}, warn() {}, info() {} };
+
+    const result = await enqueueA2ATargets(
+      {
+        router: mockRouter,
+        invocationRecordStore: mockInvocationRecordStore,
+        socketManager: mockSocketManager,
+        invocationTracker: mockInvocationTracker,
+        log: mockLog,
+      },
+      {
+        targetCats: ['codex'],
+        content: '@缅因猫\nreview',
+        userId: 'user-1',
+        threadId: 'all-active-thread',
+        triggerMessage: {
+          id: 'msg-allactive',
+          threadId: 'all-active-thread',
+          userId: 'user-1',
+          catId: 'opus',
+          content: 'test',
+          mentions: [],
+          timestamp: Date.now(),
+        },
+      },
+    );
+
+    assert.equal(startCalled, 0, 'tracker.start() must NOT be called when target already active');
     assert.equal(result.fallback, true, 'should indicate fallback path was attempted');
-    assert.deepEqual(result.enqueued, [], 'nothing actually enqueued when parent blocks fallback');
+    assert.deepEqual(result.enqueued, [], 'nothing enqueued when all targets already active');
+  });
+
+  test('F122 AC-A3: not_found reason falls back to standalone invocation', async () => {
+    // Race condition: hasWorklist returns true, but worklist is unregistered
+    // between has() and push(). pushToWorklist returns { added: [], reason: 'not_found' }.
+    // enqueueA2ATargets must fall through to standalone invocation.
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const {
+      registerWorklist,
+      unregisterWorklist,
+      hasWorklist: hasWL,
+    } = await import('../dist/domains/cats/services/agents/routing/WorklistRegistry.js');
+
+    // Register then immediately unregister to set up the race
+    // We need hasWorklist to return true but pushToWorklist to return not_found.
+    // Since the module-level functions share state, we can't do this with the real registry.
+    // Instead, test that when no worklist exists at all (hasWorklist=false),
+    // fallback path triggers — and separately test the new not_found branch via
+    // a targeted code path where we register + unregister between calls.
+    // Actually the simplest way: the not_found branch now falls through to the same
+    // fallback code. So if we register a worklist with parentInvocationId 'inv-X',
+    // then call enqueueA2ATargets with parentInvocationId 'inv-Y' (wrong key),
+    // hasWorklist(threadId) returns true (thread index), but pushToWorklist
+    // with 'inv-Y' returns not_found (specific key doesn't exist).
+    const threadId = 't-notfound-race';
+    const worklist = ['opus'];
+    const entry = registerWorklist(threadId, worklist, 10, 'inv-existing');
+    assert.equal(hasWL(threadId), true, 'setup: thread has worklist via inv-existing');
+
+    let routeCalled = 0;
+    const mockInvocationRecordStore = {
+      create() {
+        return { outcome: 'created', invocationId: 'inv-fb-nf' };
+      },
+      update() {},
+    };
+
+    const mockInvocationTracker = {
+      has() {
+        return false;
+      },
+      start() {
+        return new AbortController();
+      },
+      complete() {},
+    };
+
+    const mockRouter = {
+      async *routeExecution() {
+        routeCalled++;
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    const mockSocketManager = {
+      broadcastAgentMessage() {},
+      broadcastToRoom() {},
+    };
+
+    const mockLog = { error() {}, warn() {}, info() {} };
+
+    try {
+      const result = await enqueueA2ATargets(
+        {
+          router: mockRouter,
+          invocationRecordStore: mockInvocationRecordStore,
+          socketManager: mockSocketManager,
+          invocationTracker: mockInvocationTracker,
+          log: mockLog,
+        },
+        {
+          targetCats: ['codex'],
+          content: '@缅因猫\nreview',
+          userId: 'user-1',
+          threadId,
+          triggerMessage: {
+            id: 'msg-nf',
+            threadId,
+            userId: 'user-1',
+            catId: 'opus',
+            content: 'test',
+            mentions: [],
+            timestamp: Date.now(),
+          },
+          // Wrong parentInvocationId — will cause not_found from pushToWorklist
+          parentInvocationId: 'inv-nonexistent',
+        },
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      assert.equal(result.fallback, true, 'not_found must trigger fallback path');
+      assert.equal(routeCalled, 1, 'standalone invocation must be triggered on not_found');
+    } finally {
+      unregisterWorklist(threadId, entry, 'inv-existing');
+    }
   });
 
   test('falls back to standalone invocation when no worklist exists', async () => {

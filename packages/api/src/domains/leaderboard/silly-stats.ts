@@ -45,7 +45,7 @@ export function computeSillyStats(messages: MessageLike[], catNames: Record<stri
       catId,
       displayName: catNames[catId] ?? catId,
       label: '被骂最多 💀',
-      description: 'team lead发飙次数',
+      description: '铲屎官发飙次数',
       count,
     }));
 

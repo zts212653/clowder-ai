@@ -98,19 +98,32 @@ async function dispatchToTarget(
   log: FastifyBaseLogger,
 ): Promise<void> {
   const orch = getMultiMentionOrchestrator();
-  const { router, invocationRecordStore, socketManager } = deps;
+  const { router, invocationRecordStore, socketManager, invocationTracker } = deps;
 
+  // Build the message for this target
+  // Include multi-mention context as structured prefix so the target cat
+  // understands the request is from another cat, not the user directly.
+  const messageContent = [`[Multi-Mention from ${initiator}]`, question, ...(context ? ['---', context] : [])].join(
+    '\n\n',
+  );
+
+  const intent = parseIntent(messageContent, 1);
+
+  // Collect response text from the routing execution
+  let responseText = '';
+  const toolsUsed: string[] = [];
+
+  // F122 AC-A9: Occupy tracker slot BEFORE create to close TOCTOU window.
+  // Entire create/execute lifecycle wrapped in outer try/finally for guaranteed release.
+  // F108 slot-aware: multi-mention dispatches register per (threadId, catId) slot.
+  const controller = invocationTracker?.start(threadId, targetCatId, userId, [targetCatId]) ?? new AbortController();
   try {
-    // Build the message for this target
-    // Include multi-mention context as structured prefix so the target cat
-    // understands the request is from another cat, not the user directly.
-    const messageContent = [`[Multi-Mention from ${initiator}]`, question, ...(context ? ['---', context] : [])].join(
-      '\n\n',
-    );
+    if (controller.signal.aborted) {
+      log.info({ requestId, targetCatId }, '[F086] Multi-mention dispatch canceled before start (deleting)');
+      return;
+    }
 
-    const intent = parseIntent(messageContent, 1);
-
-    // Create invocation record
+    // Create invocation record (now protected by tracker slot)
     const createResult = await invocationRecordStore.create({
       threadId,
       userId,
@@ -121,25 +134,23 @@ async function dispatchToTarget(
 
     if (createResult.outcome === 'duplicate') {
       log.info({ requestId, targetCatId }, '[F086] Dispatch skipped: duplicate invocation');
-      return;
+      return; // finally will release slot (AC-A12)
     }
 
     await invocationRecordStore.update(createResult.invocationId, {
       status: 'running',
     });
 
-    // Collect response text from the routing execution
-    let responseText = '';
-    const toolsUsed: string[] = [];
-
-    // Each dispatch gets its OWN AbortController, registered with the orchestrator.
-    // This avoids InvocationTracker's per-thread singleton constraint (which aborts
-    // concurrent dispatches), while still allowing thread-level cancel (stop button)
-    // and delete guard to propagate via orchestrator.abortByThread().
-    const controller = new AbortController();
     orch.registerDispatch(requestId, targetCatId, controller);
 
     try {
+      socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
+        threadId,
+        mode: intent.intent,
+        targetCats: [targetCatId],
+        invocationId: createResult.invocationId,
+      });
+
       for await (const msg of router.routeExecution(
         userId,
         messageContent,
@@ -147,7 +158,7 @@ async function dispatchToTarget(
         createResult.invocationId,
         [targetCatId],
         intent,
-        { signal: controller.signal },
+        { signal: controller.signal, parentInvocationId: createResult.invocationId },
       )) {
         if (controller.signal.aborted) break;
 
@@ -160,7 +171,7 @@ async function dispatchToTarget(
           }
         }
 
-        socketManager.broadcastAgentMessage(msg, threadId);
+        socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
       }
 
       await invocationRecordStore.update(createResult.invocationId, {
@@ -205,6 +216,11 @@ async function dispatchToTarget(
       targetCatId,
       `[dispatch error: ${err instanceof Error ? err.message : String(err)}]`,
     );
+  } finally {
+    // F122 AC-A7: unconditional slot release — covers early return, registerDispatch
+    // throw, routeExecution crash, and normal completion. InvocationTracker.complete()
+    // is idempotent (no-op if slot already removed or controller doesn't match).
+    invocationTracker?.complete(threadId, targetCatId, controller);
   }
 }
 

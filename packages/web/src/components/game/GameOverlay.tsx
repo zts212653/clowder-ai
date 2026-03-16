@@ -1,8 +1,11 @@
 'use client';
 
 import type { GameView, SeatId } from '@cat-cafe/shared';
+import { useCountdown } from '@/hooks/useCountdown';
+import { PHASE_NAMES_ZH } from '@/stores/gameStore';
 import { ActionDock } from './ActionDock';
 import { EventFlow } from './EventFlow';
+import { GameResultScreen } from './GameResultScreen';
 import { GameShell } from './GameShell';
 import { GodInspector } from './GodInspector';
 import { NightActionCard } from './NightActionCard';
@@ -17,8 +20,10 @@ interface GameOverlayProps {
   selectedTarget: SeatId | null;
   godScopeFilter: string;
 
-  // God-view mode
+  // God-view / detective mode
   isGodView?: boolean;
+  isDetective?: boolean;
+  detectiveBoundName?: string;
   godSeats?: Array<{ seatId: string; role: string; faction?: string; alive: boolean; status: string }>;
   godNightSteps?: Array<{ roleName: string; detail: string; status: 'done' | 'in_progress' | 'pending' }>;
 
@@ -35,6 +40,7 @@ interface GameOverlayProps {
   onClose: () => void;
   onSelectTarget: (seatId: SeatId) => void;
   onGodScopeChange: (scope: string) => void;
+  onGodAction?: (action: string) => void;
   onVote: () => void;
   onSpeak: (content: string) => void;
   onConfirmAction: () => void;
@@ -43,7 +49,8 @@ interface GameOverlayProps {
 }
 
 function buildPhaseEntries(view: GameView): PhaseEntry[] {
-  return [{ name: view.currentPhase, label: view.currentPhase, round: view.round }];
+  const label = PHASE_NAMES_ZH[view.currentPhase] ?? view.currentPhase;
+  return [{ name: view.currentPhase, label, round: view.round }];
 }
 
 export function GameOverlay({
@@ -52,6 +59,8 @@ export function GameOverlay({
   selectedTarget,
   godScopeFilter,
   isGodView = false,
+  isDetective = false,
+  detectiveBoundName,
   godSeats = [],
   godNightSteps = [],
   hasTargetedAction = false,
@@ -63,24 +72,35 @@ export function GameOverlay({
   onClose,
   onSelectTarget,
   onGodScopeChange,
+  onGodAction,
   onVote,
   onSpeak,
   onConfirmAction,
   onConfirmAltAction,
 }: GameOverlayProps) {
   const phases = buildPhaseEntries(view);
-  const timeLeftMs = view.config.timeoutMs;
+  const timeLeftMs = useCountdown(view.config.timeoutMs, view.phaseStartedAt);
+
+  // Show result screen when game is finished with stats
+  if (view.status === 'finished' && view.gameStats) {
+    return (
+      <GameShell onClose={onClose} isNight={false}>
+        <GameResultScreen stats={view.gameStats} onClose={onClose} />
+      </GameShell>
+    );
+  }
 
   return (
     <GameShell onClose={onClose} isNight={isNight}>
       <TopBar
-        phaseName={view.currentPhase}
+        phaseName={PHASE_NAMES_ZH[view.currentPhase] ?? view.currentPhase}
         roundInfo={`第 ${view.round} 轮`}
         timeLeftMs={timeLeftMs}
         isNight={isNight}
+        onClose={onClose}
       />
       <PhaseTimeline phases={phases} currentIndex={0} />
-      <PlayerGrid seats={view.seats} />
+      <PlayerGrid seats={view.seats} gameStatus={view.status} />
 
       <div className="flex flex-1 min-h-0">
         {/* Main content area */}
@@ -110,13 +130,17 @@ export function GameOverlay({
           )}
         </div>
 
-        {/* God Inspector (right panel) */}
-        {isGodView && (
+        {/* God Inspector (right panel) — shown for god-view and detective */}
+        {(isGodView || isDetective) && (
           <GodInspector
             seats={godSeats}
             nightSteps={godNightSteps}
             scopeFilter={godScopeFilter}
+            gameStatus={view.status}
+            isDetective={isDetective}
+            detectiveBoundName={detectiveBoundName}
             onScopeChange={onGodScopeChange}
+            onGodAction={onGodAction}
           />
         )}
       </div>

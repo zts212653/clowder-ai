@@ -1,12 +1,12 @@
 ---
 feature_ids: [F107]
-related_features: [F101, F075]
+related_features: [F101, F075, F119]
 topics: [game, headband, guess-who, party-game, ai-deception]
 doc_kind: spec
 created: 2026-03-12
 ---
 
-# F107: 猫猫杀（脑门贴词）— 坏猫战术推理游戏
+# F107: 脑门贴词 — 坏猫战术推理游戏 #1
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
 
@@ -95,9 +95,33 @@ F101 已搭好通用游戏引擎基座（`GameDefinition` / `GameRuntime` / `Gam
 - 误导成功率（让对手多猜 N 轮）
 - MVP 评选（最快猜中 + 最强误导）
 
-### Phase B: 前端游戏 UI
+**A6. GameMaster 自动驱动（系统角色）**
 
-复用 F101 GameShell 框架，定制猫猫杀交互：
+GameMaster 是一个独立的系统角色，走现有消息管线，有专属头像（KD-8/KD-9）。
+
+**身份**：
+- 独立角色（不是任何一只猫），像飞书 bot / GitHub bot
+- 有专属头像和显示名称
+- 通过 `post_message` / `multi_mention` / 富文本（`create_rich_block`）在消息流中发言
+
+**自动流程**：
+- **开局**：team lead说"开一局脑门贴词" → GameMaster 自动发词、分配身份、注入坏猫战术 prompt
+- **教学**：首局自动给猫猫发送游戏规则 + 战术手册
+- **回合推进**：自动 @ 该轮到的猫，提示动作（提问/回答/猜词）
+- **可见性切换**：自动管理 scoped event log（公开发言 vs 内心戏）
+- **裁判**：自动计分、判定猜词结果、宣布全员猜中时排名
+- **结算**：自动写战绩到 leaderboard + 宣布 MVP
+
+**team lead零操作**：
+- 当上帝 = 开局后躺着看，god-view 自动展示内心戏
+- 当玩家 = 和猫猫一样被 @ 到时才操作
+- 当 host = 只管选词，其余 GameMaster 全包
+
+### Phase B: 前端游戏 UI（KD-7: 不做，纯聊天模式）
+
+~~复用 F101 GameShell 框架，定制猫猫杀交互：~~
+
+> **KD-7 决策**：不做前端，纯聊天模式。脑门贴词的灵魂是对话博弈，聊天本身就是游戏场。以下 B1-B3 保留作为未来可选增强参考，当前不实施。
 
 **B1. 游戏布局**
 
@@ -127,11 +151,14 @@ F101 已搭好通用游戏引擎基座（`GameDefinition` / `GameRuntime` / `Gam
 - [ ] AC-A6: team lead可选 player / god-view / host 三种模式参与
 - [ ] AC-A7: 选词系统支持手动选词 + 自动选词（词库）
 - [ ] AC-A8: 战绩数据正确写入 F075 game-store
+- [ ] AC-A9: GameMaster 系统角色有独立身份 + 头像，走消息管线发言
+- [ ] AC-A10: GameMaster 全自动驱动：开局→教学→回合推进→裁判→结算，team lead零操作
+- [ ] AC-A11: GameMaster 自动管理可见性切换（公开发言 vs 内心戏 scope）
 
-### Phase B（前端游戏 UI）
-- [ ] AC-B1: GameShell 适配猫猫杀布局（PlayerGrid + 脑门词展示 + ActionDock）
-- [ ] AC-B2: god-view 内心戏面板实时展示 AI 推理过程
-- [ ] AC-B3: 揭词仪式动画 + 排行榜展示
+### Phase B（前端游戏 UI — KD-7: 暂不实施）
+- [ ] AC-B1: ~~GameShell 适配~~ （KD-7 暂不实施，保留参考）
+- [ ] AC-B2: ~~god-view 内心戏面板~~ （聊天模式下通过 scoped 消息实现）
+- [ ] AC-B3: ~~揭词仪式动画~~ （聊天模式下通过富文本/emoji 实现）
 - [ ] AC-B4: 语音模式可选（复用 F066 TTS）
 
 ## 需求点 Checklist
@@ -158,6 +185,7 @@ F101 已搭好通用游戏引擎基座（`GameDefinition` / `GameRuntime` / `Gam
 - **Related**: F075（Cat Leaderboard — 战绩对接 game-store）
 - **Related**: F066（Voice Pipeline — 语音模式 TTS）
 - **Related**: F103（Per-Cat Voice Identity — 多猫独立声线）
+- **Related**: F119（谁是卧底 — 坏猫战术推理游戏 #2，共享战术体系）
 
 ## Risk
 
@@ -178,6 +206,9 @@ F101 已搭好通用游戏引擎基座（`GameDefinition` / `GameRuntime` / `Gam
 | KD-4 | 猜错不淘汰，语音模式下卖萌 | 猫猫杀传统规则 + team lead要求语音卖萌 | 2026-03-12 |
 | KD-5 | 允许猫猫之间讨论/质疑回答 | team lead确认，保留七届传统玩法 | 2026-03-12 |
 | KD-6 | 坏猫内心戏是核心乐趣，god-view 必须保留 | team lead确认，毛玻璃面板 + 战术标注 | 2026-03-12 |
+| KD-7 | 不做前端，纯聊天模式 | 脑门贴词/谁是卧底灵魂是对话博弈，聊天就是游戏场 | 2026-03-14 |
+| KD-8 | GameMaster 系统全自动驱动，走现有消息管线 | team lead当上帝不需要手动组织流程，复用 post_message/multi_mention/富文本 | 2026-03-14 |
+| KD-9 | GameMaster 是独立角色，有专属头像 | 像飞书 bot / GitHub bot，在消息流中有清晰视觉区分 | 2026-03-14 |
 
 ## Review Gate
 

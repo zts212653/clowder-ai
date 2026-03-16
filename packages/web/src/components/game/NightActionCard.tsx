@@ -34,12 +34,12 @@ export function NightActionCard({
   return (
     <div
       data-testid="night-action-card"
-      className="bg-[#0F172A] border border-[#1E293B] rounded-xl p-5 flex flex-col gap-4 w-[400px]"
+      className="bg-ww-topbar border border-ww-subtle rounded-xl p-5 flex flex-col gap-4 w-[400px]"
     >
       {/* Role header */}
       <div className="flex items-center gap-2">
         <span className="text-lg">{roleIcon}</span>
-        <span className="text-white text-sm font-semibold">
+        <span className="text-ww-main text-sm font-semibold">
           {roleName} — {actionLabel}
         </span>
       </div>
@@ -57,7 +57,7 @@ export function NightActionCard({
               onClick={() => !isDead && onSelectTarget(seat.seatId)}
               disabled={isDead || disabled}
               className={`flex flex-col items-center justify-center gap-0.5 rounded-lg w-14 h-16 ${
-                isSelected ? 'bg-[#1E293B] border-2 border-[#22D3EE]' : 'bg-[#1E293B] border-2 border-transparent'
+                isSelected ? 'bg-ww-card border-2 border-ww-cute' : 'bg-ww-card border-2 border-transparent'
               }${isDead ? ' opacity-40' : ''}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -66,7 +66,7 @@ export function NightActionCard({
                 alt={seat.displayName}
                 className="w-7 h-7 rounded-full object-cover"
               />
-              <span className="text-[9px] text-[#94A3B8] font-semibold truncate max-w-[52px]">
+              <span className="text-[9px] text-ww-muted font-semibold truncate max-w-[52px]">
                 {seat.seatId} {seat.displayName}
               </span>
             </button>
@@ -80,7 +80,7 @@ export function NightActionCard({
         data-testid="confirm-btn"
         onClick={onConfirm}
         disabled={!selectedTarget || disabled}
-        className="bg-[#22D3EE] text-[#0A0F1C] font-bold text-sm rounded-lg h-10 w-full disabled:opacity-50"
+        className="bg-ww-cute text-ww-base font-bold text-sm rounded-lg h-10 w-full disabled:opacity-50"
       >
         {selectedTarget ? `确认${actionLabel} ${selectedTarget}` : `请选择目标`}
       </button>
@@ -92,14 +92,14 @@ export function NightActionCard({
           data-testid="confirm-alt-btn"
           onClick={onConfirmAlt}
           disabled={!selectedTarget || disabled}
-          className="bg-[#7C3AED] text-white font-bold text-sm rounded-lg h-10 w-full disabled:opacity-50"
+          className="bg-ww-witch text-ww-main font-bold text-sm rounded-lg h-10 w-full disabled:opacity-50"
         >
           {selectedTarget ? `确认${altActionLabel} ${selectedTarget}` : `请选择目标`}
         </button>
       )}
 
       {/* Hint */}
-      <span className="text-[#475569] text-xs text-center">{hint}</span>
+      <span className="text-ww-dim text-xs text-center">{hint}</span>
     </div>
   );
 }

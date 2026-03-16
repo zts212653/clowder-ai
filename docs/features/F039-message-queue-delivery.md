@@ -1,6 +1,6 @@
 ---
 feature_ids: [F039]
-related_features: []
+related_features: [F117]
 topics: [message, queue, delivery]
 doc_kind: note
 created: 2026-02-26

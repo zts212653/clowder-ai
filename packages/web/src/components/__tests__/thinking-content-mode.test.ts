@@ -82,13 +82,13 @@ describe('ThinkingContent default collapse', () => {
 
     const buttons = container.querySelectorAll('button');
     const thinkingButton = Array.from(buttons).find((b) => b.textContent?.includes('Thinking'));
-    const cliButton = Array.from(buttons).find((b) => b.textContent?.includes('CLI 输出'));
+    const cliButton = Array.from(buttons).find((b) => b.textContent?.includes('CLI Output'));
 
     expect(thinkingButton).toBeTruthy();
     expect(cliButton).toBeTruthy();
 
     // Thinking expanded content should NOT be visible (collapsed)
-    const markdownDivs = container.querySelectorAll('.border-l-2.border-gray-300');
+    const markdownDivs = container.querySelectorAll('.cli-output-md');
     expect(markdownDivs.length).toBe(0);
   });
 
@@ -102,7 +102,7 @@ describe('ThinkingContent default collapse', () => {
       );
     });
 
-    expect(container.querySelectorAll('.border-l-2.border-gray-300').length).toBe(0);
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
 
     // Flip global preference → should expand thinking (ThinkingContent uses border-l-2)
     act(() => {
@@ -110,7 +110,7 @@ describe('ThinkingContent default collapse', () => {
     });
 
     // Only 🧠 Thinking uses the border-l-2 style (CliOutputBlock uses terminal substrate)
-    const markdownDivs = container.querySelectorAll('.border-l-2.border-gray-300');
+    const markdownDivs = container.querySelectorAll('.cli-output-md');
     expect(markdownDivs.length).toBe(1); // only 🧠 Thinking
   });
 });

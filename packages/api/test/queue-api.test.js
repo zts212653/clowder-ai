@@ -26,12 +26,14 @@ function buildDeps(overrides = {}) {
       isPaused: mock.fn(() => false),
       getPauseReason: mock.fn(() => undefined),
       clearPause: mock.fn(() => {}),
+      releaseSlot: mock.fn(() => {}),
       releaseThread: mock.fn(() => {}),
     },
     invocationTracker: {
       has: mock.fn(() => false),
       getUserId: mock.fn(() => null),
       cancel: mock.fn(() => ({ cancelled: false, catIds: [] })),
+      getActiveSlots: mock.fn(() => []),
     },
     socketManager: {
       broadcastAgentMessage: mock.fn(),
@@ -445,6 +447,12 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 200);
     assert.equal(deps.invocationTracker.cancel.mock.calls.length, 1);
     assert.equal(deps.queueProcessor.processNext.mock.calls.length, 1);
+    // Bugfix: steer must broadcast cancel+done so frontend clears old invocation's "正在回复中"
+    const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
+    assert.ok(broadcastCalls.length >= 2, 'should broadcast system_info + done for canceled invocation');
+    const doneCall = broadcastCalls.find((c) => c.arguments[0].type === 'done');
+    assert.ok(doneCall, 'should broadcast done event to clear frontend loading state');
+    assert.equal(doneCall.arguments[0].isFinal, true);
   });
 
   it('POST /queue/:entryId/steer immediate releases QueueProcessor mutex after cancel (P2 race)', async () => {
@@ -456,7 +464,7 @@ describe('Queue Management API', () => {
     deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['codex'] }));
 
     let locked = true;
-    deps.queueProcessor.releaseThread = mock.fn(() => {
+    deps.queueProcessor.releaseSlot = mock.fn(() => {
       locked = false;
     });
     deps.queueProcessor.processNext = mock.fn(async () => {
@@ -471,7 +479,35 @@ describe('Queue Management API', () => {
       payload: { mode: 'immediate' },
     });
     assert.equal(res.statusCode, 200);
-    assert.equal(deps.queueProcessor.releaseThread.mock.calls.length, 1);
+    assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 1);
+  });
+
+  it('POST /queue/:entryId/steer immediate scopes cancel broadcast to steered cat only (P1 cloud review)', async () => {
+    const r1 = enqueueEntry(deps.invocationQueue, { content: 'first', targetCats: ['opus'] });
+    enqueueEntry(deps.invocationQueue, { content: 'second' });
+
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    // cancel returns multi-cat catIds (co-dispatched), but steer targets only opus
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus', 'codex'] }));
+    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: { id: r1.entry.id } }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${r1.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    // done should only be broadcast for opus (the steered cat), NOT codex
+    const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
+    const doneCalls = broadcastCalls.filter((c) => c.arguments[0].type === 'done');
+    assert.equal(doneCalls.length, 1, 'should broadcast exactly 1 done event (steered cat only)');
+    assert.equal(doneCalls[0].arguments[0].catId, 'opus');
+    // codex should NOT receive a done event
+    const codexDone = broadcastCalls.find((c) => c.arguments[0].type === 'done' && c.arguments[0].catId === 'codex');
+    assert.equal(codexDone, undefined, 'codex should NOT receive cancel done when not steered');
   });
 
   it('POST /queue/:entryId/steer returns 404 for another user entry', async () => {

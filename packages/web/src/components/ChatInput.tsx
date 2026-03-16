@@ -1,12 +1,15 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { reconnectGame } from '@/hooks/useGameReconnect';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
+import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
 import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputMenus } from './ChatInputMenus';
@@ -19,6 +22,7 @@ import {
   WEREWOLF_MODES,
 } from './chat-input-options';
 import { deriveImageLifecycleStatus, isImageLifecycleBlockingSend } from './chat-input-upload-state';
+import { GameLobby, type GameStartPayload } from './game/GameLobby';
 import { HistorySearchModal } from './HistorySearchModal';
 import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
@@ -69,6 +73,7 @@ export function ChatInput({
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
+  const [lobbyMode, setLobbyMode] = useState<'player' | 'god-view' | 'detective' | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const gameBtnRef = useRef<HTMLButtonElement>(null);
@@ -150,14 +155,53 @@ export function ChatInput({
     setShowGameMenu(false);
   }, []);
 
-  const sendGameCommand = useCallback(
-    (command: string) => {
+  const router = useRouter();
+  const [gameStarting, setGameStarting] = useState(false);
+
+  const startGame = useCallback(
+    async (payload: GameStartPayload) => {
       closeMenus();
-      if (!disabled && !sendTemporarilyDisabled) {
-        onSend(command, undefined, undefined, hasActiveInvocation ? 'queue' : undefined);
+      if (disabled || sendTemporarilyDisabled || gameStarting) return;
+      setGameStarting(true);
+      try {
+        const res = await apiFetch('/api/game/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          useChatStore.getState().addMessage({
+            id: `game-err-${Date.now()}`,
+            type: 'system',
+            variant: 'error',
+            content: `开局失败: ${data.error ?? `HTTP ${res.status}`}`,
+            timestamp: Date.now(),
+          });
+          // Restore lobby so user can retry without re-selecting
+          setLobbyMode(payload.humanRole);
+          return;
+        }
+        // Success — dismiss lobby and navigate
+        setLobbyMode(null);
+        router.push(`/thread/${data.gameThreadId}`);
+        // Hydrate game state immediately (socket reconnect won't fire for same connection)
+        reconnectGame(data.gameThreadId).catch(() => {});
+      } catch (err) {
+        useChatStore.getState().addMessage({
+          id: `game-err-${Date.now()}`,
+          type: 'system',
+          variant: 'error',
+          content: `开局失败: ${err instanceof Error ? err.message : '网络异常'}`,
+          timestamp: Date.now(),
+        });
+        // Restore lobby so user can retry
+        setLobbyMode(payload.humanRole);
+      } finally {
+        setGameStarting(false);
       }
     },
-    [closeMenus, disabled, sendTemporarilyDisabled, onSend, hasActiveInvocation],
+    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting, router],
   );
 
   const insertMention = useCallback(
@@ -254,8 +298,11 @@ export function ChatInput({
           setGameStep('modes');
           setSelectedIdx(0);
         } else {
-          // Layer 2: send selected mode command directly
-          sendGameCommand(WEREWOLF_MODES[selectedIdx].command);
+          // Layer 2: open lobby for mode configuration
+          const mode = WEREWOLF_MODES[selectedIdx];
+          const role = mode.id === 'detective' ? 'detective' : mode.id.startsWith('god') ? 'god-view' : 'player';
+          closeMenus();
+          setLobbyMode(role as 'player' | 'god-view' | 'detective');
         }
         return;
       }
@@ -448,6 +495,10 @@ export function ChatInput({
     if (!activeMenu) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
+      // React 18 may flush state synchronously during event bubbling,
+      // detaching the original target (e.g. layer 1 unmounts when drilling
+      // into layer 2). A detached target is not a genuine outside click.
+      if (!target.isConnected) return;
       if (menuRef.current && !menuRef.current.contains(target) && !gameBtnRef.current?.contains(target)) {
         closeMenus();
       }
@@ -489,7 +540,16 @@ export function ChatInput({
         selectedIdx={selectedIdx}
         onSelectIdx={setSelectedIdx}
         onInsertMention={insertMention}
-        onSendCommand={sendGameCommand}
+        onSendCommand={(command) => {
+          // Open lobby instead of sending directly
+          const role = command.includes('detective')
+            ? 'detective'
+            : command.includes('god-view')
+              ? 'god-view'
+              : 'player';
+          closeMenus();
+          setLobbyMode(role as 'player' | 'god-view' | 'detective');
+        }}
         menuRef={menuRef}
       />
 
@@ -663,6 +723,17 @@ export function ChatInput({
 
       {showHistorySearch && (
         <HistorySearchModal onSelect={handleHistorySelect} onClose={() => setShowHistorySearch(false)} />
+      )}
+
+      {lobbyMode && (
+        <GameLobby
+          mode={lobbyMode}
+          cats={cats}
+          onConfirm={(payload) => {
+            startGame(payload);
+          }}
+          onCancel={() => setLobbyMode(null)}
+        />
       )}
     </div>
   );

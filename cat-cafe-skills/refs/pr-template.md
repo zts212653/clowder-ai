@@ -17,10 +17,10 @@
 ## Original Requirements（必填）
 
 - Discussion/Interview: *(internal reference removed)*
-- **原始需求摘录（≤5 行，直接粘贴team experience）**：
+- **原始需求摘录（≤5 行，直接粘贴铲屎官原话）**：
   > {例："我要能看到三只猫分别挂了哪些 Skill，按猫分类，一目了然"}
-- team lead核心痛点：{用team lead自己的话概括}
-- **请 Reviewer 对照上面的摘录判断：交付物是否解决了team lead的问题？**
+- 铲屎官核心痛点：{用铲屎官自己的话概括}
+- **请 Reviewer 对照上面的摘录判断：交付物是否解决了铲屎官的问题？**
 
 ## Plan / ADR
 
@@ -109,7 +109,7 @@ Please review latest commit {SHORT_SHA} for P1/P2 only.
 - 同一 commit 不要重复触发；有新 commit（新 SHA）再触发下一轮
 - 触发后等待通知；未收到通知前禁止二次触发同一 SHA
 - **PR body（含 HTML 注释）禁止出现任何 `@句柄`（例如 `(@codex)`）**
-- team lead教训：2026-02-28 某 PR 在 body 里写 `@codex review`，导致 Codex 回复"需要权限"而非执行 review
+- 铲屎官教训：2026-02-28 某 PR 在 body 里写 `@codex review`，导致 Codex 回复"需要权限"而非执行 review
 - 新增反面案例：2026-03-02 PR #160 在 body 签名写 `(@codex)`，触发环境提示评论，污染 review 流程
 
 ## 常见 QA（必须读）

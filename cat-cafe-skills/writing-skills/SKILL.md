@@ -82,7 +82,7 @@ description: Use when creating new skills, editing existing skills, or verifying
 新 skill 或修改 skill 后，必须完成以下步骤（否则部分猫看不到）：
 
 1. **源文件**：`cat-cafe-skills/{skill-name}/SKILL.md`（+ 支持文件）
-2. **Symlink 三猫**：
+2. **Symlink 三猫**（OpenCode 读 `~/.claude/`，无需单独挂）：
    ```bash
    SKILLS_SRC=/path/to/cat-cafe/cat-cafe-skills
    ln -s $SKILLS_SRC/{skill-name} ~/.claude/skills/{skill-name}
@@ -101,7 +101,7 @@ description: Use when creating new skills, editing existing skills, or verifying
 | 错误 | 后果 | 修复 |
 |------|------|------|
 | Description 含流程摘要 | 猫猫走捷径不读 SKILL.md | 只写触发条件 |
-| 忘记 symlink | 某只猫找不到 skill | 补 symlink + check:skills |
+| 忘记 symlink | 某只猫找不到 skill | 补 symlink（claude/codex/gemini）+ check:skills |
 | 功能实现时产出了 skill 但没加载 writing-skills | 漏 symlink、漏 manifest、漏 BOOTSTRAP | **动了 cat-cafe-skills/ 就必须加载本 skill** |
 | 忘记 manifest 注册 | check:skills 报警告 | 添加 manifest 条目 |
 | 文件 >150 行 | 超出 token 预算 | 重材料移到 refs/ |

@@ -34,6 +34,12 @@ interface AgentMessage {
   metadata?: { provider: string; model: string; sessionId?: string; usage?: import('../stores/chat-types').TokenUsage };
   /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
   origin?: 'stream' | 'callback';
+  /** F121: ID of the message this message is replying to */
+  replyTo?: string;
+  /** F121: Hydrated preview of the replied-to message */
+  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+  /** F108: Invocation ID — distinguishes messages from concurrent invocations */
+  invocationId?: string;
   timestamp: number;
 }
 
@@ -84,6 +90,13 @@ export interface SocketCallbacks {
   onAuthorizationResponse?: (data: { requestId: string; status: string; scope?: string; reason?: string }) => void;
   /** F101: Game state update */
   onGameStateUpdate?: (data: { gameId: string; view: unknown; timestamp: number }) => void;
+  /** F101 Phase D: Independent game thread created */
+  onGameThreadCreated?: (data: {
+    gameThreadId: string;
+    gameTitle: string;
+    initiatorUserId: string;
+    timestamp: number;
+  }) => void;
   /** #80 fix-C: Clear the done-timeout guard (called when background thread completes) */
   clearDoneTimeout?: (threadId?: string) => void;
   /** F39: Queue updated */
@@ -104,6 +117,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const socketRef = useRef<Socket | null>(null);
   const joinedRoomsRef = useRef<Set<string>>(new Set());
   const bgStreamRefsRef = useRef<Map<string, { id: string; threadId: string; catId: string }>>(new Map());
+  const bgReplacedInvocationsRef = useRef<Map<string, string>>(new Map());
   const bgSeqRef = useRef(0);
   const userIdRef = useRef(getUserId());
   const threadIdRef = useRef(threadId);
@@ -255,6 +269,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       handleBackgroundAgentMessage(msg as BackgroundAgentMessage, {
         store: useChatStore.getState(),
         bgStreamRefs: bgStreamRefsRef.current,
+        replacedInvocations: bgReplacedInvocationsRef.current,
         nextBgSeq: () => bgSeqRef.current++,
         addToast: (toast) => useToastStore.getState().addToast(toast),
         clearDoneTimeout: callbacksRef.current.clearDoneTimeout,
@@ -265,36 +280,50 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       callbacksRef.current.onThreadUpdated?.(data);
     });
 
-    socket.on('intent_mode', (data: { threadId: string; mode: string; targetCats: string[] }) => {
-      const routeThread = threadIdRef.current;
-      const storeThread = useChatStore.getState().currentThreadId;
-      recordInvocationEvent({
-        event: 'intent_mode',
-        threadId: data.threadId,
-        mode: data.mode,
-      });
+    socket.on(
+      'intent_mode',
+      (data: { threadId: string; mode: string; targetCats: string[]; invocationId?: string }) => {
+        const routeThread = threadIdRef.current;
+        const storeThread = useChatStore.getState().currentThreadId;
+        recordInvocationEvent({
+          event: 'intent_mode',
+          threadId: data.threadId,
+          mode: data.mode,
+        });
 
-      // Dual-pointer guard: both route and store must agree for active-thread processing.
-      // Mirrors agent_message pattern — blocks switch-window race where route already
-      // points to thread-B but flat store still belongs to thread-A.
-      const isActiveThread = Boolean(
-        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
-      );
+        // Dual-pointer guard: both route and store must agree for active-thread processing.
+        // Mirrors agent_message pattern — blocks switch-window race where route already
+        // points to thread-B but flat store still belongs to thread-A.
+        const isActiveThread = Boolean(
+          data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
+        );
 
-      if (isActiveThread) {
-        callbacksRef.current.onIntentMode?.(data);
-        return;
-      }
+        if (isActiveThread) {
+          callbacksRef.current.onIntentMode?.(data);
+          // F108: Register invocation slot in active thread store
+          if (data.invocationId) {
+            const primaryCat = data.targetCats?.[0] ?? 'unknown';
+            useChatStore.getState().addActiveInvocation(data.invocationId, primaryCat, data.mode);
+          }
+          return;
+        }
 
-      // Background thread (split-pane) or switch-window: write directly to thread-scoped state
-      if (data.threadId) {
-        const store = useChatStore.getState();
-        store.setThreadLoading(data.threadId, true);
-        store.setThreadHasActiveInvocation(data.threadId, true);
-        store.setThreadIntentMode(data.threadId, data.mode as 'execute' | 'ideate');
-        store.setThreadTargetCats(data.threadId, data.targetCats ?? []);
-      }
-    });
+        // Background thread (split-pane) or switch-window: write directly to thread-scoped state
+        if (data.threadId) {
+          const store = useChatStore.getState();
+          store.setThreadLoading(data.threadId, true);
+          // F108: slot-aware — register specific invocation if ID available
+          if (data.invocationId) {
+            const primaryCat = data.targetCats?.[0] ?? 'unknown';
+            store.addThreadActiveInvocation(data.threadId, data.invocationId, primaryCat, data.mode);
+          } else {
+            store.setThreadHasActiveInvocation(data.threadId, true);
+          }
+          store.setThreadIntentMode(data.threadId, data.mode as 'execute' | 'ideate');
+          store.setThreadTargetCats(data.threadId, data.targetCats ?? []);
+        }
+      },
+    );
 
     socket.on('task_created', (task: Record<string, unknown>) => {
       callbacksRef.current.onTaskCreated?.(task);
@@ -386,10 +415,26 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         });
       }
     });
-    // F098-D: Messages delivered — update deliveredAt on queued messages
-    socket.on('messages_delivered', (data: { threadId: string; messageIds: string[]; deliveredAt: number }) => {
-      useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt);
-    });
+    // F098-D + F117: Messages delivered — update deliveredAt + insert user bubbles for queue sends
+    socket.on(
+      'messages_delivered',
+      (data: {
+        threadId: string;
+        messageIds: string[];
+        deliveredAt: number;
+        messages?: Array<{
+          id: string;
+          content: string;
+          catId: string | null;
+          timestamp: number;
+          mentions: readonly string[];
+          userId: string;
+          contentBlocks?: readonly unknown[];
+        }>;
+      }) => {
+        useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
+      },
+    );
 
     socket.on('queue_paused', (data: { threadId: string; reason: 'canceled' | 'failed'; queue: unknown[] }) => {
       const store = useChatStore.getState();
@@ -443,6 +488,14 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('game:state_update', (data: { gameId: string; view: unknown; timestamp: number }) => {
       callbacksRef.current.onGameStateUpdate?.(data);
     });
+
+    // F101 Phase D: Independent game thread created
+    socket.on(
+      'game:thread_created',
+      (data: { gameThreadId: string; gameTitle: string; initiatorUserId: string; timestamp: number }) => {
+        callbacksRef.current.onGameThreadCreated?.(data);
+      },
+    );
 
     socket.on('connect_error', (error: Error & { description?: unknown; context?: unknown }) => {
       console.error('[ws] connect_error', {

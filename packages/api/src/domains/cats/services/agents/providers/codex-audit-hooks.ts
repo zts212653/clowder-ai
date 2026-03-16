@@ -6,6 +6,8 @@ export interface AuditLogSink {
 
 export interface RawArchiveSink {
   append(invocationId: string, payload: unknown): Promise<void>;
+  /** F118: Get archive file path for diagnostic enrichment (optional) */
+  getPath?(invocationId: string): string;
 }
 
 export interface CommandExecutionLifecycle {

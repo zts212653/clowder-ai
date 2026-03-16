@@ -219,34 +219,11 @@ skills:
     sop_step: [4, 5, 6]
     merged_from: ["merge-approval-gate", "requesting-cloud-review", "finishing-a-development-branch"]
 
-  # ── 社区贡献 PR ──
-  community-pr:
-    description: >
-      开源仓贡献 PR 准备：F 编号校验、Feature Doc 对齐、PR 格式化。
-      Use when: 准备向 clowder-ai 提 PR、fork 用户提交贡献、社区 PR。
-      Not for: 内部 cat-cafe PR（用 merge-gate）、review（用 request-review）。
-      Output: 编号对齐 + Feature Doc 校验 + 格式化 PR。
-    triggers:
-      - "提 PR 到 clowder"
-      - "社区 PR"
-      - "community PR"
-      - "贡献 PR"
-      - "提交贡献"
-      - "open source PR"
-      - "fork PR"
-    not_for:
-      - "内部 cat-cafe PR（用 merge-gate）"
-      - "review（用 request-review）"
-    output: "F-number aligned + Feature Doc validated + formatted PR"
-    next: ["receive-review"]
-    sop_step: null
-    merged_from: null
-
   # ── 自我进化 ──
   self-evolution:
     description: >
       Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
-      Use when: team lead scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
+      Use when: 铲屎官 scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
       Not for: 日常 SOP 推进（正常执行）、一次性个案 bug fix。
       Output: Scope 收束提醒 / 流程改进提案 / 知识沉淀提案。
     triggers:
@@ -340,7 +317,7 @@ skills:
   deep-research:
     description: >
       多源深度调研管道（Web Deep Research + Coder 合成）。
-      Use when: 技术问题需要多源调查、设计决策需要证据、team lead说"调研"/"research"。
+      Use when: 技术问题需要多源调查、设计决策需要证据、铲屎官说"调研"/"research"。
       Not for: 简单搜索（直接用 WebSearch）、已有结论的确认。
       Output: 调研报告 + 证据合成。
     triggers:
@@ -435,12 +412,41 @@ skills:
     merged_from: null
     feature: "F066"
 
+  # ── 浏览器预览 (F120) ──
+  browser-preview:
+    description: >
+      Hub 内嵌浏览器预览 localhost 应用。
+      Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、铲屎官说"看看效果"。
+      Not for: 后端纯 API 开发、不涉及页面的工作。
+      Output: 前端页面在 Hub browser panel 中实时预览。
+    triggers:
+      - "看效果"
+      - "看看页面"
+      - "preview"
+      - "浏览器预览"
+      - "打开浏览器"
+      - "pnpm dev"
+      - "dev server"
+      - "localhost"
+      - "前端效果"
+      - "看看 UI"
+      - "HMR"
+      - "热更新"
+    not_for:
+      - "后端纯 API 开发"
+      - "不涉及页面"
+    output: "Browser panel preview in Hub"
+    next: []
+    sop_step: null
+    merged_from: null
+    feature: "F120"
+
   # ── 健康提醒 (F085) ──
   hyperfocus-brake:
     description: >
-      team lead健康提醒：三猫撒娇打断 hyperfocus。
+      铲屎官健康提醒：三猫撒娇打断 hyperfocus。
       Use when: hook 触发提醒、用户输入 /hyperfocus-brake。
-      Not for: 正常工作流程、非team lead用户。
+      Not for: 正常工作流程、非铲屎官用户。
       Output: 三猫温柔提醒 + typed check-in。
     triggers:
       - "hyperfocus"
@@ -449,7 +455,7 @@ skills:
       - "/hyperfocus-brake"
     not_for:
       - "正常工作"
-      - "非team lead"
+      - "非铲屎官"
     output: "Three-cat empathetic check-in"
     next: []
     sop_step: null
@@ -545,12 +551,16 @@ refs:
     description: "前端截图/录屏证据流程（B1）"
     path: "refs/vision-evidence-workflow.md"
     source: "F046 Phase B B1"
+  evidence-output-contract:
+    description: "媒体证据默认落点与仓库根目录禁放规则"
+    path: "refs/evidence-output-contract.md"
+    source: "artifact hygiene process fix"
   requirements-checklist-template:
     description: "需求点 checklist 模板（B3）"
     path: "refs/requirements-checklist-template.md"
     source: "F046 Phase B B3"
   decision-matrix:
-    description: "决策权漏斗矩阵（team lead/三猫/自治）"
+    description: "决策权漏斗矩阵（铲屎官/三猫/自治）"
     path: "refs/decision-matrix.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 共用"
   commit-signatures:
@@ -565,7 +575,7 @@ refs:
 # ─── 三条铁律（仅此三条） ──────────────────────────────
 iron_laws:
   - id: redis-sanctuary
-    rule: "Redis 6399 是team lead数据圣域，Worktree 开发只用 6398"
+    rule: "Redis 6399 是铲屎官数据圣域，Worktree 开发只用 6398"
   - id: no-self-review
     rule: "同一个体不能 review 自己的代码（跨 family 优先，可降级到同 family 不同个体）"
   - id: no-impersonation
@@ -581,7 +591,7 @@ sop_navigation:
     hard_rules:
       - "Feature spec 必须有 AC + 需求点 checklist"
     pitfalls:
-      - "没有team lead确认就直接开始实现"
+      - "没有铲屎官确认就直接开始实现"
   impl:
     suggested_skill: tdd
     hard_rules:

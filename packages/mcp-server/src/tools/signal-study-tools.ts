@@ -167,7 +167,7 @@ export const signalUpdateArticleInputSchema = {
   id: z.string().min(1).describe('Article ID'),
   status: z.enum(['inbox', 'read', 'archived', 'starred']).optional().describe('New status'),
   tags: z.array(z.string()).optional().describe('Replace tags'),
-  note: z.string().optional().describe('team lead个人备注'),
+  note: z.string().optional().describe('铲屎官个人备注'),
 };
 
 export const signalDeleteArticleInputSchema = {
@@ -212,7 +212,7 @@ export const signalStudyTools = [
   },
   {
     name: 'signal_delete_article',
-    description: 'Soft-delete one or more articles. Use when team lead wants to clean up garbage signals.',
+    description: 'Soft-delete one or more articles. Use when 铲屎官 wants to clean up garbage signals.',
     inputSchema: signalDeleteArticleInputSchema,
     handler: handleDeleteArticle,
   },

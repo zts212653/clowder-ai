@@ -131,8 +131,14 @@ export interface AgentMessage {
   messageId?: string;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
   extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string }; targetCats?: string[] };
-  /** F061: Whether this message mentions the owner (@user/@team lead/configured patterns) */
+  /** F121: ID of the message this message is replying to */
+  replyTo?: string;
+  /** F121: Hydrated preview of the replied-to message */
+  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+  /** F061: Whether this message mentions the owner (@user/@铲屎官/configured patterns) */
   mentionsUser?: boolean;
+  /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations */
+  invocationId?: string;
   /** When this message was created */
   timestamp: number;
 }
@@ -165,6 +171,17 @@ export interface AgentServiceOptions {
   systemPrompt?: string;
   /** F089: Override spawnCli with tmux-based spawner (set per-invocation) */
   spawnCliOverride?: SpawnCliOverride;
+  /** F118: Invocation ID for diagnostic enrichment of __cliTimeout */
+  invocationId?: string;
+  /** F118: CLI session ID for diagnostic enrichment of __cliTimeout */
+  cliSessionId?: string;
+  /** F118 Phase B: Liveness probe config (undefined = disabled) */
+  livenessProbe?: {
+    sampleIntervalMs?: number;
+    softWarningMs?: number;
+    stallWarningMs?: number;
+    boundedExtensionFactor?: number;
+  };
 }
 
 /**

@@ -45,6 +45,18 @@ export async function submitAction(
   }
 }
 
+export async function godAction(threadId: string, action: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await apiFetch(`/api/threads/${threadId}/game/god-action`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
 export async function abortGame(threadId: string): Promise<void> {
   await apiFetch(`/api/threads/${threadId}/game`, { method: 'DELETE' });
 }

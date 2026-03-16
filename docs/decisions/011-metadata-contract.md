@@ -8,12 +8,12 @@ created: 2026-02-27
 # ADR-011: 文档元数据契约（Frontmatter Contract）
 
 > 日期：2026-02-27
-> 状态：**已批准** — 三猫收敛 (4.5 + 4.6 + GPT-5.2) + team lead确认
-> 参与者：Ragdoll（方案设计）、Opus 4.6（审查）、Maine Coon/GPT-5.2（审查）、team lead（确认）
+> 状态：**已批准** — 三猫收敛 (4.5 + 4.6 + GPT-5.2) + 铲屎官确认
+> 参与者：Ragdoll（方案设计）、Opus 4.6（审查）、Maine Coon/GPT-5.2（审查）、铲屎官（确认）
 
 ## 背景
 
-2026-02-26 team lead发现 BACKLOG 蜘蛛网问题：
+2026-02-26 铲屎官发现 BACKLOG 蜘蛛网问题：
 - Feature (F1-F39) 和 Tech Debt (#1-#103) 混编
 - 一个 Feature 的文档散落在 feature-specs/feature-discussions/review-notes/bug-reports
 - 问"F21 什么情况"要搜 85 个文件
@@ -123,7 +123,7 @@ created: 2026-02-26           # 创建日期
 
 本决策来自 F040 讨论，详见：
 - `docs/features/F40-backlog-reorganization.md`
-- 2026-02-26 三猫 + team lead讨论 thread
+- 2026-02-26 三猫 + 铲屎官讨论 thread
 
 ---
 

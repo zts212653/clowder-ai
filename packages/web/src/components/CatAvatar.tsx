@@ -5,7 +5,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { hexToRgba } from '@/lib/color-utils';
 import { PawIcon } from './icons/PawIcon';
 
-type CatStatus = 'pending' | 'streaming' | 'done' | 'error';
+type CatStatus = 'pending' | 'streaming' | 'done' | 'error' | 'alive_but_silent' | 'suspected_stall';
 
 interface CatAvatarProps {
   catId: string;

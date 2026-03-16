@@ -84,6 +84,6 @@ describe('ChatMessage author precedence', () => {
 
     expect(container.textContent).toContain('cross-posted review');
     expect(container.textContent).toContain('缅因猫（GPT-5.2）');
-    expect(container.textContent).not.toContain('team lead');
+    expect(container.textContent).not.toContain('铲屎官');
   });
 });

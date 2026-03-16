@@ -18,6 +18,10 @@ vi.mock('@/utils/signals-api', () => ({
   fetchSignalsInbox: (...args: unknown[]) => mocks.fetchSignalsInbox(...args),
   searchSignals: (...args: unknown[]) => mocks.searchSignals(...args),
   updateSignalArticle: (...args: unknown[]) => mocks.updateSignalArticle(...args),
+  fetchCollections: () => Promise.resolve([]),
+  createCollection: vi.fn(),
+  updateCollection: vi.fn(),
+  deleteSignalArticle: vi.fn(),
 }));
 
 vi.mock('@/components/signals/SignalArticleDetail', () => ({
@@ -113,24 +117,32 @@ describe('SignalInboxView', () => {
     });
 
     const queryInput = container.querySelector('input[placeholder="搜索标题、来源、标签..."]');
+    // Component uses tab buttons for status, so only 2 <select> elements: tier + source
     const selects = container.querySelectorAll('select');
-    let statusSelect = selects.item(0) as HTMLSelectElement | null;
-    let tierSelect = selects.item(1) as HTMLSelectElement | null;
-    let sourceSelect = selects.item(2) as HTMLSelectElement | null;
+    let tierSelect = selects.item(0) as HTMLSelectElement | null;
+    let sourceSelect = selects.item(1) as HTMLSelectElement | null;
     let form = container.querySelector('form');
 
     expect(queryInput).not.toBeNull();
     expect(form).not.toBeNull();
-    expect(statusSelect).not.toBeNull();
     expect(tierSelect).not.toBeNull();
     expect(sourceSelect).not.toBeNull();
 
-    if (!queryInput || !form || !statusSelect || !tierSelect || !sourceSelect) {
+    if (!queryInput || !form || !tierSelect || !sourceSelect) {
       return;
     }
 
     const sourceOption = sourceSelect.querySelector('option[value="anthropic-news"]');
     expect(sourceOption).not.toBeNull();
+
+    // Switch status to "已读" via tab button
+    const readTabButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '已读');
+    expect(readTabButton).toBeTruthy();
+    await act(async () => {
+      readTabButton!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     await act(async () => {
       setNativeValue(queryInput as HTMLInputElement, 'claude');
@@ -139,21 +151,17 @@ describe('SignalInboxView', () => {
     });
 
     const refreshedSelects = container.querySelectorAll('select');
-    statusSelect = refreshedSelects.item(0) as HTMLSelectElement | null;
-    tierSelect = refreshedSelects.item(1) as HTMLSelectElement | null;
-    sourceSelect = refreshedSelects.item(2) as HTMLSelectElement | null;
+    tierSelect = refreshedSelects.item(0) as HTMLSelectElement | null;
+    sourceSelect = refreshedSelects.item(1) as HTMLSelectElement | null;
     form = container.querySelector('form');
-    expect(statusSelect).not.toBeNull();
     expect(tierSelect).not.toBeNull();
     expect(sourceSelect).not.toBeNull();
     expect(form).not.toBeNull();
-    if (!statusSelect || !tierSelect || !sourceSelect || !form) {
+    if (!tierSelect || !sourceSelect || !form) {
       return;
     }
 
     await act(async () => {
-      statusSelect.value = 'read';
-      statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
       tierSelect.value = '1';
       tierSelect.dispatchEvent(new Event('change', { bubbles: true }));
       sourceSelect.value = 'anthropic-news';
@@ -161,7 +169,6 @@ describe('SignalInboxView', () => {
       await Promise.resolve();
     });
 
-    expect(statusSelect.value).toBe('read');
     expect(tierSelect.value).toBe('1');
     expect(sourceSelect.value).toBe('anthropic-news');
 
@@ -227,10 +234,11 @@ describe('SignalInboxView', () => {
       await Promise.resolve();
     });
 
+    // Default status tab is 'inbox', which passes as-is to searchSignals
     expect(mocks.searchSignals).toHaveBeenCalledWith('content-only-hit', {
       limit: 80,
       source: undefined,
-      status: undefined,
+      status: 'inbox',
       tier: undefined,
     });
     expect(container.textContent).toContain('共 1 篇');

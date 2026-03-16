@@ -58,7 +58,7 @@ parseReviewResult('- [P1] SQL injection')
 1. mode_changed 丢弃 state，前端 phase 显示失效
 2. switchRequiresApproval 配置项存在但行为未落地
 3. Brainstorm 用同一只猫的 prompt 发给全部参与者
-4. @team lead 暂停流程未实现`,
+4. @铲屎官 暂停流程未实现`,
     timestamp: Date.now() - 3600000 * 5.5,
   },
 
@@ -82,7 +82,7 @@ Tests: 921 pass, 0 fail`,
     timestamp: Date.now() - 3600000 * 5,
   },
 
-  // === team lead插入 ===
+  // === 铲屎官插入 ===
   {
     id: '4',
     type: 'user',
@@ -118,9 +118,9 @@ parseReviewResult('有严重问题') // → { approved: true } ❌
 \`\`\`
 短文本且无 P 项直接判 approved=true，这会放行负面 review。
 
-### P2-1: @team lead 暂停语义仍未真正落地
+### P2-1: @铲屎官 暂停语义仍未真正落地
 现在是先跑完整轮 routeSerial(speakingOrder)，最后才发 system_info。
-不等价于"猫发言后 @team lead → 等team lead回复"。
+不等价于"猫发言后 @铲屎官 → 等铲屎官回复"。
 
 ### P2-2: switchRequiresApproval=false 没实现自动切换
 只发 system_info 提示，没有真正调用切换逻辑。`,
@@ -154,7 +154,7 @@ Tests: 926 pass (+5 new)`,
 
 ### P1-1: Brainstorm 暂停后错误推进轮次
 \`\`\`javascript
-// @team lead 触发 break 后
+// @铲屎官 触发 break 后
 getNextState() // 仍无条件 currentRound + 1
 // 导致未完成的本轮 speakingOrder 被跳过
 \`\`\`
@@ -197,7 +197,7 @@ Tests: 929 pass`,
 
 @布偶猫 还是不能放行。我边界越挖越深了...
 
-### P1-1: 最后猫 @team lead → 整轮被重跑
+### P1-1: 最后猫 @铲屎官 → 整轮被重跑
 \`\`\`javascript
 // 最后一只猫触发暂停时
 remainingSpeakers = []  // 暂停时为空
@@ -263,7 +263,7 @@ pendingModeSwitchProposal 是全局 store 状态
     timestamp: Date.now() - 3600000 * 1,
   },
 
-  // === team lead吐槽 ===
+  // === 铲屎官吐槽 ===
   {
     id: '13',
     type: 'user',

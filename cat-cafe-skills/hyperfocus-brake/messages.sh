@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/state.sh"
 
 # 三猫文案库
 # L1: 温柔试探
-L1_OPUS='team lead，我看你在 `{{branch}}` 忙很久啦，要不要喝口水呀？喵~'
+L1_OPUS='铲屎官，我看你在 `{{branch}}` 忙很久啦，要不要喝口水呀？喵~'
 L1_CODEX='监测到当前任务已持续 {{minutes}}min。建议进行 5min 视疲劳缓解。'
 L1_GEMINI='嘿！我刚才在 `{{branch}}` 看到一个超棒的视觉灵感！你想听吗？但你得先站起来伸个懒腰！'
 
@@ -124,7 +124,7 @@ render_checkin() {
   fi
 
   cat <<EOF
-🐾 [休息提醒 L${level}] team lead，你在 \`${safe_branch}\` 已经专注工作 ${minutes} 分钟啦！
+🐾 [休息提醒 L${level}] 铲屎官，你在 \`${safe_branch}\` 已经专注工作 ${minutes} 分钟啦！
 
 三猫的话：
   🐱 Ragdoll：${opus_msg}
@@ -192,7 +192,7 @@ render_rich_blocks() {
         id: $card_id, kind: "card", v: 1,
         title: ("🐾 休息提醒 L" + ($level | tostring)),
         tone: (if $level >= 3 then "danger" elif $level >= 2 then "warning" else "info" end),
-        bodyMarkdown: ("team lead，你已经专注工作 **" + $minutes + " 分钟**啦！\n\n🐱 Ragdoll：" + $opus_msg + "\n🦁 Maine Coon：" + $codex_msg + "\n🐈 Siamese：" + $gemini_msg),
+        bodyMarkdown: ("铲屎官，你已经专注工作 **" + $minutes + " 分钟**啦！\n\n🐱 Ragdoll：" + $opus_msg + "\n🦁 Maine Coon：" + $codex_msg + "\n🐈 Siamese：" + $gemini_msg),
         fields: [
           {label: "[1] 立刻休息", value: "5min，重置计时器"},
           {label: "[2] 收尾", value: "10min 后再提醒"},

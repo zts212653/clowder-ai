@@ -1,3 +1,19 @@
+// ============================================================================
+// 暂时注释掉：subagent model guard 测试
+//
+// 原因（2026-03-14）：
+//   铲屎官在 2026-03-12 明确关闭了 subagent model guard hook
+//   （~/.claude/hooks/check-subagent-model.sh 首行 exit 0）。
+//   理由："方向正确更重要，不缺猫粮（4×Max plan），省猫粮的 hook 变成了降智税。"
+//   参见 feedback_workflow_preferences.md "Subagent 不指定 model" 条目。
+//
+//   项目级也不需要这个 hook——opus 都懒成这样了，haiku/sonnet 指导他干活更惨。
+//
+//   如果未来需要恢复 subagent 成本控制，取消下面的注释即可。
+//   对应 bug report: docs/bug-report/2026-03-01-task-hook-model-guard-missing/
+// ============================================================================
+
+/*
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { accessSync, constants, readFileSync } from 'node:fs';
@@ -10,9 +26,6 @@ const repoRoot = resolve(testDir, '..', '..', '..');
 const settingsPath = resolve(repoRoot, '.claude', 'settings.json');
 const taskHookScript = resolve(repoRoot, '.claude', 'hooks', 'check-subagent-model.sh');
 
-/**
- * Run the hook script with a given tool_name and tool_input.
- */
 function runHook(toolName, toolInput = {}) {
   return spawnSync('bash', [taskHookScript], {
     input: JSON.stringify({
@@ -24,9 +37,6 @@ function runHook(toolName, toolInput = {}) {
   });
 }
 
-/**
- * Parse hook JSON decision from stdout.
- */
 function parseHookDecision(stdout) {
   assert.ok(stdout.trim().length > 0, 'hook should emit JSON decision output');
   const parsed = JSON.parse(stdout);
@@ -73,9 +83,8 @@ describe('subagent_type gating logic', () => {
   it('allows Explore subagent (auto-haiku, cheap)', () => {
     const result = runHook('Agent', { subagent_type: 'Explore', prompt: 'find files' });
     assert.equal(result.status, 0, result.stderr);
-    // Explore should either silently allow or explicitly allow — never deny/ask
     const stdout = result.stdout.trim();
-    if (stdout.length === 0) return; // silent allow is fine
+    if (stdout.length === 0) return;
     const decision = parseHookDecision(result.stdout);
     assert.notEqual(decision.permissionDecision, 'deny');
     assert.notEqual(decision.permissionDecision, 'ask');
@@ -85,7 +94,7 @@ describe('subagent_type gating logic', () => {
     const result = runHook('Agent', { subagent_type: 'Plan', prompt: 'design architecture' });
     assert.equal(result.status, 0, result.stderr);
     const stdout = result.stdout.trim();
-    if (stdout.length === 0) return; // silent allow is fine
+    if (stdout.length === 0) return;
     const decision = parseHookDecision(result.stdout);
     assert.notEqual(decision.permissionDecision, 'deny');
     assert.notEqual(decision.permissionDecision, 'ask');
@@ -114,3 +123,4 @@ describe('subagent_type gating logic', () => {
     assert.equal(decision.permissionDecision, 'ask');
   });
 });
+*/

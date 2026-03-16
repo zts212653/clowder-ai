@@ -15,8 +15,11 @@ function resolveApiUrl(): string {
   }
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
   if (typeof window === 'undefined') return 'http://localhost:3003';
-  // 使用当前页面的 hostname，适配 Tailscale / 局域网等任意网络
-  return `${window.location.protocol}//${window.location.hostname}:3002`;
+  // Derive API port from frontend port: convention is frontend + 1 = API
+  // (runtime: 3001→3002, alpha: 3011→3012). Fallback to +1 of current port.
+  const frontendPort = Number(window.location.port) || 3001;
+  const apiPort = frontendPort + 1;
+  return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
 }
 export const API_URL = resolveApiUrl();
 

@@ -7,8 +7,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock('@/stores/chatStore', () => ({
-  useChatStore: () => ({
+vi.mock('@/stores/chatStore', () => {
+  const state = {
     messages: [
       {
         id: 'a2a-msg-1',
@@ -34,10 +34,18 @@ vi.mock('@/stores/chatStore', () => ({
     updateThreadTitle: vi.fn(),
     setCurrentGame: vi.fn(),
     currentGame: null,
+    threads: [],
     queue: [],
     queuePaused: false,
-  }),
-}));
+    viewMode: 'single',
+    splitPaneThreadIds: [],
+    setSplitPaneThreadIds: vi.fn(),
+    setSplitPaneTarget: vi.fn(),
+    clearUnread: vi.fn(),
+  };
+  const hook = (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state);
+  return { useChatStore: hook };
+});
 
 vi.mock('@/stores/taskStore', () => ({
   useTaskStore: () => ({

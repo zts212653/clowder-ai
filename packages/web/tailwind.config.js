@@ -38,6 +38,46 @@ module.exports = {
           white: 'var(--color-base-white)',
           black: 'var(--color-base-black)',
         },
+        /* F101 AC-D5: Werewolf Cute theme tokens */
+        ww: {
+          base: 'var(--ww-bg-base)',
+          card: 'var(--ww-bg-card)',
+          surface: 'var(--ww-bg-surface)',
+          topbar: 'var(--ww-bg-topbar)',
+          danger: 'var(--ww-accent-danger)',
+          cute: 'var(--ww-accent-cute)',
+          success: 'var(--ww-accent-success)',
+          info: 'var(--ww-accent-info)',
+          wolf: 'var(--ww-role-wolf)',
+          seer: 'var(--ww-role-seer)',
+          witch: 'var(--ww-role-witch)',
+          guard: 'var(--ww-role-guard)',
+          'danger-soft': 'var(--ww-danger-soft)',
+          'info-soft': 'var(--ww-info-soft)',
+          'subtle-soft': 'var(--ww-subtle-soft)',
+          'cute-soft': 'var(--ww-cute-soft)',
+          'base-overlay': 'var(--ww-base-overlay)',
+        },
+      },
+      textColor: {
+        ww: {
+          main: 'var(--ww-text-main)',
+          muted: 'var(--ww-text-muted)',
+          dim: 'var(--ww-text-dim)',
+        },
+      },
+      borderColor: {
+        ww: {
+          subtle: 'var(--ww-border-subtle)',
+          active: 'var(--ww-border-active)',
+          'info-soft': 'var(--ww-info-soft)',
+          'subtle-soft': 'var(--ww-subtle-soft)',
+        },
+      },
+      boxShadowColor: {
+        ww: {
+          glow: 'var(--ww-shadow-glow)',
+        },
       },
       keyframes: {
         'fade-in': {

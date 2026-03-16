@@ -1,9 +1,12 @@
 // F102: Memory service factory — creates the right implementations based on config
 
 import type { IHindsightClient } from '../cats/services/orchestration/HindsightClient.js';
+import { EmbeddingService } from './EmbeddingService.js';
 import { HindsightAdapter } from './HindsightAdapter.js';
 import { IndexBuilder } from './IndexBuilder.js';
 import type {
+  EmbedConfig,
+  IEmbeddingService,
   IEvidenceStore,
   IIndexBuilder,
   IKnowledgeResolver,
@@ -11,11 +14,14 @@ import type {
   IMaterializationService,
   IReflectionService,
 } from './interfaces.js';
+import { resolveEmbedConfig } from './interfaces.js';
 import { KnowledgeResolver } from './KnowledgeResolver.js';
 import { MarkerQueue } from './MarkerQueue.js';
 import { MaterializationService } from './MaterializationService.js';
 import { createHindsightReflectBackend, ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import { ensureVectorTable } from './schema.js';
+import { VectorStore } from './VectorStore.js';
 
 export interface MemoryServices {
   evidenceStore: IEvidenceStore;
@@ -24,6 +30,8 @@ export interface MemoryServices {
   knowledgeResolver: IKnowledgeResolver;
   indexBuilder?: IIndexBuilder;
   materializationService?: IMaterializationService;
+  embeddingService?: IEmbeddingService;
+  vectorStore?: VectorStore;
 }
 
 export interface MemoryConfig {
@@ -38,6 +46,8 @@ export interface MemoryConfig {
   hindsightClient?: IHindsightClient;
   /** For hindsight: bank ID */
   hindsightBank?: string;
+  /** Phase C: embedding configuration */
+  embed?: Partial<EmbedConfig>;
 }
 
 export async function createMemoryServices(config: MemoryConfig): Promise<MemoryServices> {
@@ -51,11 +61,47 @@ async function createSqliteServices(config: MemoryConfig): Promise<MemoryService
   const sqlitePath = config.sqlitePath ?? 'evidence.sqlite';
   const docsRoot = config.docsRoot ?? 'docs';
   const markersDir = config.markersDir ?? 'docs/markers';
+  const embedConfig = resolveEmbedConfig(config.embed);
 
   const store = new SqliteEvidenceStore(sqlitePath);
   await store.initialize();
 
-  const indexBuilder = new IndexBuilder(store, docsRoot);
+  let embeddingService: IEmbeddingService | undefined;
+  let vectorStore: VectorStore | undefined;
+
+  if (embedConfig.embedMode !== 'off') {
+    embeddingService = new EmbeddingService(embedConfig);
+
+    // P1 (codex R2): explicitly call load() — without this, isReady() stays false forever.
+    // Wrapped in try-catch for AC-C4 fail-open.
+    try {
+      await embeddingService.load();
+    } catch {
+      // fail-open: model load failed → isReady()=false → lexical-only degradation
+    }
+
+    // Load sqlite-vec + ensure vec0 table (decoupled from migration, fail-open)
+    try {
+      // @ts-ignore — optional dep, may or may not be installed
+      const sqliteVecMod = await import('sqlite-vec');
+      sqliteVecMod.load(store.getDb());
+      const ok = ensureVectorTable(store.getDb(), embedConfig.embedDim);
+      if (ok) {
+        vectorStore = new VectorStore(store.getDb(), embedConfig.embedDim);
+      }
+    } catch {
+      // fail-open: sqlite-vec not available
+    }
+  }
+
+  const embedDeps = embeddingService && vectorStore ? { embedding: embeddingService, vectorStore } : undefined;
+  const indexBuilder = new IndexBuilder(store, docsRoot, embedDeps);
+
+  // Wire rerank deps into store for search-time
+  if (embedDeps) {
+    store.setEmbedDeps({ ...embedDeps, mode: embedConfig.embedMode as 'shadow' | 'on' });
+  }
+
   const markerQueue = new MarkerQueue(markersDir);
   const materializationService = new MaterializationService(markerQueue, docsRoot);
   const reflectionService = new ReflectionService(async () => '');
@@ -68,6 +114,8 @@ async function createSqliteServices(config: MemoryConfig): Promise<MemoryService
     knowledgeResolver,
     indexBuilder,
     materializationService,
+    embeddingService,
+    vectorStore,
   };
 }
 

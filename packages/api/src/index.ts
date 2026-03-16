@@ -70,6 +70,9 @@ import { startTtsCacheCleaner } from './domains/cats/services/tts/tts-cache-clea
 import { initVoiceBlockSynthesizer } from './domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { AgentService } from './domains/cats/services/types.js';
 import { ActivityTracker } from './domains/health/ActivityTracker.js';
+import { PortDiscoveryService } from './domains/preview/port-discovery.js';
+import { collectRuntimePorts } from './domains/preview/port-validator.js';
+import { PreviewGateway } from './domains/preview/preview-gateway.js';
 import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
@@ -146,6 +149,7 @@ import {
   workspaceRoutes,
 } from './routes/index.js';
 import { prTrackingRoutes } from './routes/pr-tracking.js';
+import { previewRoutes } from './routes/preview.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
@@ -389,6 +393,25 @@ async function main(): Promise<void> {
   }
   const agentPaneRegistry = tmuxGateway ? new AgentPaneRegistry() : undefined;
 
+  // F120: Preview Gateway (独立端口反向代理) + Port Discovery
+  const PREVIEW_GATEWAY_PORT = Number.parseInt(process.env.PREVIEW_GATEWAY_PORT ?? '4100', 10);
+  const runtimePorts = collectRuntimePorts();
+  const previewGateway = new PreviewGateway({ port: PREVIEW_GATEWAY_PORT, runtimePorts });
+  const portDiscovery = new PortDiscoveryService();
+  try {
+    await previewGateway.start();
+    app.log.info(`[preview] Gateway started on port ${previewGateway.actualPort}`);
+  } catch (err) {
+    app.log.warn(`[preview] Gateway failed to start: ${(err as Error).message}`);
+  }
+  // Port discovery → Socket.IO push to worktree-scoped room
+  portDiscovery.onDiscovered((port) => {
+    if (socketManager) {
+      const room = port.worktreeId ? `worktree:${port.worktreeId}` : 'preview:global';
+      socketManager.broadcastToRoom(room, 'preview:port-discovered', port);
+    }
+  });
+
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   const router = new AgentRouter({
     agentRegistry,
@@ -426,6 +449,10 @@ async function main(): Promise<void> {
     log: app.log,
   });
 
+  // F101: Game engine store (created early so messages route can intercept /game commands)
+  const { RedisGameStore } = await import('./domains/cats/services/stores/redis/RedisGameStore.js');
+  const f101GameStore = redis ? new RedisGameStore(redis) : undefined;
+
   // Register routes (socketManager injected, no circular import)
   await app.register(messagesRoutes, {
     registry,
@@ -442,6 +469,7 @@ async function main(): Promise<void> {
     draftStore,
     invocationQueue,
     queueProcessor,
+    ...(f101GameStore ? { gameStore: f101GameStore } : {}),
   });
   await app.register(queueRoutes, {
     threadStore,
@@ -449,6 +477,7 @@ async function main(): Promise<void> {
     queueProcessor,
     invocationTracker,
     socketManager,
+    messageStore, // F117: for marking queued messages as canceled on withdraw/clear
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,
@@ -475,11 +504,9 @@ async function main(): Promise<void> {
   await app.register(bootcampRoutes, { threadStore });
   await app.register(brakeRoutes, { activityTracker });
 
-  // F101: Game engine store + routes
-  const { RedisGameStore } = await import('./domains/cats/services/stores/redis/RedisGameStore.js');
-  const f101GameStore = redis ? new RedisGameStore(redis) : undefined;
+  // F101: Game routes (store created earlier for /game command interception)
   if (f101GameStore) {
-    await app.register(gameRoutes, { gameStore: f101GameStore, socketManager });
+    await app.register(gameRoutes, { gameStore: f101GameStore, socketManager, threadStore, messageStore });
     app.log.info('[api] F101 game routes registered');
   }
 
@@ -586,6 +613,15 @@ async function main(): Promise<void> {
   await app.register(terminalRoutes, {
     ...(tmuxGateway ? { tmuxGateway } : {}),
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
+    portDiscovery,
+  });
+  await app.register(previewRoutes, {
+    portDiscovery,
+    gatewayPort: previewGateway.actualPort || PREVIEW_GATEWAY_PORT,
+    runtimePorts,
+    socketEmit: (event, data, room) => {
+      socketManager?.broadcastToRoom(room, event, data);
+    },
   });
   await app.register(skillsRoutes);
   await app.register(memoryRoutes, { memoryStore, threadStore });
@@ -596,6 +632,7 @@ async function main(): Promise<void> {
     threadStore,
     messageStore,
     transcriptReader,
+    sessionSealer,
   });
   await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
   const hookToken = process.env.CAT_CAFE_HOOK_TOKEN || '';
@@ -879,6 +916,13 @@ async function main(): Promise<void> {
         await connectorGatewayHandle?.stop();
       } catch (err) {
         app.log.error(`[api] ConnectorGateway stop failed: ${String(err)}`);
+      }
+
+      // Stop preview gateway (F120)
+      try {
+        await previewGateway.stop();
+      } catch (err) {
+        app.log.error(`[api] PreviewGateway stop failed: ${String(err)}`);
       }
 
       // Close WebSocket connections

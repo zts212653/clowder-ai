@@ -176,4 +176,4 @@ Cat Café 的治理结构分为三层：
 
 ## Decision Status
 
-Draft → Accepted。由Maine Coon(GPT-5.4)起草，Ragdoll(Opus 4.6) review 两轮，Ragdoll(Opus 4.5) 独立思考补充 W3，team lead定稿。
+Draft → Accepted。由Maine Coon(GPT-5.4)起草，Ragdoll(Opus 4.6) review 两轮，Ragdoll(Opus 4.5) 独立思考补充 W3，铲屎官定稿。

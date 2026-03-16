@@ -36,3 +36,12 @@ test('plain object without message → JSON.stringify', () => {
   const result = normalizeErrorMessage({ code: 500 });
   assert.ok(result.includes('500'), 'should contain the value from the object');
 });
+
+test('throwing message getter → string fallback without throw', () => {
+  const err = {
+    get message() {
+      throw new Error('getter boom');
+    },
+  };
+  assert.equal(normalizeErrorMessage(err), 'Unknown error');
+});

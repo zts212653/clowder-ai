@@ -89,6 +89,27 @@ function createMockInvocationRecordStore() {
   };
 }
 
+function createMockInvocationTracker() {
+  const starts = [];
+  const completes = [];
+  return {
+    start(threadId, catId, userId, catIds) {
+      const controller = new AbortController();
+      starts.push({ threadId, catId, userId, catIds, controller });
+      return controller;
+    },
+    complete(threadId, catId, controller) {
+      completes.push({ threadId, catId, controller });
+    },
+    getStarts() {
+      return starts;
+    },
+    getCompletes() {
+      return completes;
+    },
+  };
+}
+
 function createMockRouter(responses = {}) {
   const executions = [];
   return {
@@ -114,6 +135,7 @@ describe('Multi-Mention Routes', () => {
   let mockSocket;
   let mockMessageStore;
   let mockInvocationRecordStore;
+  let mockInvocationTracker;
   let mockRouter;
   let creds;
 
@@ -124,6 +146,7 @@ describe('Multi-Mention Routes', () => {
     mockSocket = createMockSocketManager();
     mockMessageStore = createMockMessageStore();
     mockInvocationRecordStore = createMockInvocationRecordStore();
+    mockInvocationTracker = createMockInvocationTracker();
     mockRouter = createMockRouter({ codex: 'Codex says hello', gemini: 'Gemini says hi' });
 
     // Register a caller invocation (opus calling)
@@ -139,6 +162,7 @@ describe('Multi-Mention Routes', () => {
       socketManager: mockSocket,
       router: mockRouter,
       invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
     });
 
     await app.ready();
@@ -242,6 +266,45 @@ describe('Multi-Mention Routes', () => {
     assert.equal(executions.length, 2);
     assert.ok(executions.some((e) => e.targetCats[0] === 'codex'));
     assert.ok(executions.some((e) => e.targetCats[0] === 'gemini'));
+  });
+
+  test('broadcasts intent_mode and tracks active slots for dispatched targets', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      payload: {
+        invocationId: creds.invocationId,
+        callbackToken: creds.callbackToken,
+        targets: ['codex', 'gemini'],
+        question: 'Review this design',
+        callbackTo: 'opus',
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const starts = mockInvocationTracker.getStarts();
+    assert.equal(starts.length, 2);
+    assert.deepEqual(starts.map((entry) => entry.catId).sort(), ['codex', 'gemini']);
+
+    const roomEvents = mockSocket.getRoomEvents().filter((event) => event.event === 'intent_mode');
+    assert.equal(roomEvents.length, 2);
+    assert.deepEqual(roomEvents.map((event) => event.data.targetCats[0]).sort(), ['codex', 'gemini']);
+    for (const event of roomEvents) {
+      assert.equal(event.data.threadId, 'thread-1');
+      assert.ok(event.data.invocationId, 'intent_mode should include invocationId');
+    }
+
+    const agentMessages = mockSocket
+      .getMessages()
+      .filter((message) => ['text', 'done'].includes(message.type) && ['codex', 'gemini'].includes(message.catId));
+    assert.ok(agentMessages.length >= 4, 'expected streamed text+done messages for both targets');
+    for (const message of agentMessages) {
+      assert.ok(message.invocationId, 'streamed multi-mention events should carry invocationId');
+    }
+
+    const completes = mockInvocationTracker.getCompletes();
+    assert.equal(completes.length, 2);
   });
 
   test('includes multi-mention prefix in dispatched message', async () => {
@@ -516,5 +579,177 @@ describe('Multi-Mention Routes', () => {
     const body1 = JSON.parse(res1.body);
     const body2 = JSON.parse(res2.body);
     assert.equal(body1.requestId, body2.requestId);
+  });
+
+  // ── F122: target crash releases target slot (AC-A7) ────────────
+
+  test('F122 AC-A7: target execution failure releases target tracker slot', async () => {
+    resetMultiMentionOrchestrator();
+
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const tracker = new InvocationTracker();
+
+    // Router that throws (simulating target crash / context limit exceeded)
+    const crashRouter = {
+      async *routeExecution() {
+        throw new Error('prompt token count of 158302 exceeds the limit of 128000');
+      },
+    };
+
+    const crashApp = Fastify({ logger: false });
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(crashApp, {
+      registry: mockRegistry,
+      messageStore: mockMessageStore,
+      socketManager: mockSocket,
+      router: crashRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: tracker,
+    });
+    await crashApp.ready();
+
+    const crashCreds = mockRegistry.register('opus', 'thread-crash', 'user-1');
+
+    const res = await crashApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      payload: {
+        invocationId: crashCreds.invocationId,
+        callbackToken: crashCreds.callbackToken,
+        targets: ['codex'],
+        question: 'This will crash',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+
+    // Wait for background dispatch to complete (with error)
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The key assertion: target slot must be released after crash
+    assert.equal(
+      tracker.has('thread-crash', 'codex'),
+      false,
+      'Target cat slot must be released after execution failure',
+    );
+    // Thread-level check
+    assert.equal(tracker.has('thread-crash'), false, 'Thread must have no active slots after target crash');
+
+    await crashApp.close();
+  });
+
+  test('F122 AC-A7: pre-aborted controller still releases target tracker slot', async () => {
+    resetMultiMentionOrchestrator();
+
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const tracker = new InvocationTracker();
+
+    // Pre-abort the slot: simulate another invocation aborting this one
+    // by starting a slot for codex, then starting again (which aborts the first)
+    const controller1 = tracker.start('thread-preabort', 'codex', 'user-1', ['codex']);
+    // The slot is now active and not aborted
+    assert.equal(tracker.has('thread-preabort', 'codex'), true);
+    // Abort it to simulate preemption
+    controller1.abort();
+    tracker.complete('thread-preabort', 'codex', controller1);
+
+    // Now the slot should be free for the next dispatch
+    // The router doesn't matter here — what matters is the aborted-before-start path
+    const normalRouter = {
+      async *routeExecution(_u, _m, _t, _i, targetCats) {
+        const catId = targetCats[0];
+        yield { type: 'text', catId, content: 'ok', timestamp: Date.now() };
+        yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    const preAbortApp = Fastify({ logger: false });
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(preAbortApp, {
+      registry: mockRegistry,
+      messageStore: mockMessageStore,
+      socketManager: mockSocket,
+      router: normalRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: tracker,
+    });
+    await preAbortApp.ready();
+
+    const preCreds = mockRegistry.register('opus', 'thread-preabort', 'user-1');
+
+    const res = await preAbortApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      payload: {
+        invocationId: preCreds.invocationId,
+        callbackToken: preCreds.callbackToken,
+        targets: ['codex'],
+        question: 'After preempt',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Slot must be released regardless of whether dispatch ran or was pre-aborted
+    assert.equal(tracker.has('thread-preabort', 'codex'), false, 'Slot must be released after pre-aborted dispatch');
+
+    await preAbortApp.close();
+  });
+
+  // ── F122: parentInvocationId passthrough ───────────────────────
+
+  test('F122 AC-A1: dispatchToTarget passes parentInvocationId to routeExecution', async () => {
+    resetMultiMentionOrchestrator();
+
+    const capturedOpts = [];
+    const capturingRouter = {
+      async *routeExecution(_userId, _message, _threadId, _invId, targetCats, _intent, opts) {
+        capturedOpts.push(opts);
+        const catId = targetCats[0];
+        yield { type: 'text', catId, content: `Response from ${catId}`, timestamp: Date.now() };
+        yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    const capApp = Fastify({ logger: false });
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(capApp, {
+      registry: mockRegistry,
+      messageStore: mockMessageStore,
+      socketManager: mockSocket,
+      router: capturingRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+    });
+    await capApp.ready();
+
+    const capCreds = mockRegistry.register('opus', 'thread-pid', 'user-1');
+
+    const res = await capApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      payload: {
+        invocationId: capCreds.invocationId,
+        callbackToken: capCreds.callbackToken,
+        targets: ['codex'],
+        question: 'F122 parentInvocationId test',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+
+    // Wait for background dispatch
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.equal(capturedOpts.length, 1, 'routeExecution should be called once');
+    assert.ok(capturedOpts[0].parentInvocationId, 'opts must include parentInvocationId');
+    assert.ok(typeof capturedOpts[0].parentInvocationId === 'string', 'parentInvocationId must be a string');
+    assert.ok(capturedOpts[0].signal, 'opts must still include signal');
+
+    await capApp.close();
   });
 });

@@ -20,7 +20,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
-import { isCliError, isCliTimeout, spawnCli } from '../../../../../utils/cli-spawn.js';
+import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
@@ -195,6 +195,9 @@ export class ClaudeAgentService implements AgentService {
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         ...(envOverrides ? { env: envOverrides } : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
+        ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+        ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
+        ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
       };
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
@@ -202,11 +205,38 @@ export class ClaudeAgentService implements AgentService {
 
       for await (const event of events) {
         if (isCliTimeout(event)) {
+          // F118 AC-C3: Forward timeout diagnostics before error
+          yield {
+            type: 'system_info' as const,
+            catId: this.catId,
+            content: JSON.stringify({
+              type: 'timeout_diagnostics',
+              silenceDurationMs: event.silenceDurationMs,
+              processAlive: event.processAlive,
+              lastEventType: event.lastEventType,
+              firstEventAt: event.firstEventAt,
+              lastEventAt: event.lastEventAt,
+              cliSessionId: event.cliSessionId,
+              invocationId: event.invocationId,
+              rawArchivePath: event.rawArchivePath,
+            }),
+            timestamp: Date.now(),
+          };
           yield {
             type: 'error',
             catId: this.catId,
             error: `布偶猫 CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s)`,
             metadata,
+            timestamp: Date.now(),
+          };
+          continue;
+        }
+        // F118 Phase C: Forward liveness warnings to frontend with catId
+        if (isLivenessWarning(event)) {
+          yield {
+            type: 'system_info' as const,
+            catId: this.catId,
+            content: JSON.stringify({ type: 'liveness_warning', ...event }),
             timestamp: Date.now(),
           };
           continue;

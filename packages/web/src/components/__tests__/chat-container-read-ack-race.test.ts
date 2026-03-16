@@ -53,6 +53,7 @@ const baseStore = () => ({
   queuePauseReason: null,
   queueFull: false,
   queueFullSource: null,
+  threads: [],
 });
 
 vi.mock('@/stores/chatStore', () => {

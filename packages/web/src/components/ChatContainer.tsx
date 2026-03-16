@@ -7,8 +7,9 @@ import { useAuthorization } from '@/hooks/useAuthorization';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
-import { abortGame, submitAction } from '@/hooks/useGameApi';
+import { abortGame, godAction, submitAction } from '@/hooks/useGameApi';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useSocket } from '@/hooks/useSocket';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
@@ -18,6 +19,7 @@ import { useGameStore } from '@/stores/gameStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
+import { getUserId } from '@/utils/userId';
 import { A2ACollapsible } from './A2ACollapsible';
 import { AuthorizationCard } from './AuthorizationCard';
 import { BootcampListModal } from './BootcampListModal';
@@ -74,6 +76,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const myActionLabel = useGameStore((s) => s.myActionLabel);
   const myActionHint = useGameStore((s) => s.myActionHint);
   const isGodView = useGameStore((s) => s.isGodView);
+  const isDetective = useGameStore((s) => s.isDetective);
+  const detectiveBoundName = useGameStore((s) => s.detectiveBoundName);
   const godSeats = useGameStore((s) => s.godSeats);
   const godNightSteps = useGameStore((s) => s.godNightSteps);
   const hasTargetedAction = useGameStore((s) => s.hasTargetedAction);
@@ -86,6 +90,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();
   const { getCatById } = useCatData();
+  const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
+  usePreviewAutoOpen(workspaceWorktreeId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(true);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
@@ -116,6 +122,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, []);
   // F063: resizable split pane — chatBasis as percentage (20-80), persisted
   const [chatBasis, setChatBasis, resetChatBasis] = usePersistedState('cat-cafe:chatBasis', 50);
+  // clowder-ai#28: right status panel width in px, persisted
+  const STATUS_PANEL_DEFAULT = 288; // w-72
+  const [statusPanelWidth, setStatusPanelWidth, resetStatusPanelWidth] = usePersistedState(
+    'cat-cafe:statusPanelWidth',
+    STATUS_PANEL_DEFAULT,
+  );
   // F063 Gap 6: sidebar width in px, persisted
   const SIDEBAR_DEFAULT = 240;
   const [sidebarWidth, setSidebarWidth, resetSidebarWidth] = usePersistedState(
@@ -138,6 +150,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setSidebarWidth((prev) => Math.min(480, Math.max(180, prev + delta)));
     },
     [setSidebarWidth],
+  );
+  // clowder-ai#28: drag-to-resize for right status panel (negative delta = panel wider)
+  const handleStatusPanelResize = useCallback(
+    (delta: number) => {
+      setStatusPanelWidth((prev) => Math.min(480, Math.max(200, prev - delta)));
+    },
+    [setStatusPanelWidth],
   );
 
   // F063: auto-open panel when message file path click triggers workspace mode
@@ -269,11 +288,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   const socketCallbacks = useChatSocketCallbacks({
     threadId,
+    userId: getUserId(),
     handleAgentMessage,
     resetTimeout,
     clearDoneTimeout,
     handleAuthRequest,
     handleAuthResponse,
+    onNavigateToThread: (tid) => router.push(`/thread/${tid}`),
   });
 
   type RenderItem =
@@ -354,7 +375,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }).catch((err) => {
       console.debug('[F069] read ack failed:', err);
     });
-  }, [threadId]);
+  }, [threadId, _messageCount]);
 
   const handleStop = useCallback(
     (overrideThreadId?: unknown) => {
@@ -459,7 +480,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         />
 
         {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} />}
-        {intentMode === 'execute' && <ThinkingIndicator />}
+        {intentMode === 'execute' && <ThinkingIndicator onCancel={cancelInvocation} />}
 
         <div className="flex-1 relative overflow-hidden">
           <main
@@ -568,6 +589,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           selectedTarget={selectedTarget}
           godScopeFilter={godScopeFilter}
           isGodView={isGodView}
+          isDetective={isDetective}
+          detectiveBoundName={detectiveBoundName ?? undefined}
           godSeats={godSeats}
           godNightSteps={godNightSteps}
           hasTargetedAction={hasTargetedAction}
@@ -582,6 +605,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           }}
           onSelectTarget={(seatId) => useGameStore.getState().setSelectedTarget(seatId)}
           onGodScopeChange={(scope) => useGameStore.getState().setGodScopeFilter(scope)}
+          onGodAction={(action) => godAction(threadId, action)}
           onVote={() => {
             const state = useGameStore.getState();
             if (state.selectedTarget && state.mySeatId) {
@@ -613,14 +637,24 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       </div>
 
       {statusPanelOpen && rightPanelMode === 'status' && (
-        <RightStatusPanel
-          intentMode={intentMode}
-          targetCats={targetCats}
-          catStatuses={catStatuses}
-          catInvocations={catInvocations}
-          threadId={threadId}
-          messageSummary={messageSummary}
-        />
+        <>
+          <div className="hidden lg:flex">
+            <ResizeHandle
+              direction="horizontal"
+              onResize={handleStatusPanelResize}
+              onDoubleClick={resetStatusPanelWidth}
+            />
+          </div>
+          <RightStatusPanel
+            intentMode={intentMode}
+            targetCats={targetCats}
+            catStatuses={catStatuses}
+            catInvocations={catInvocations}
+            threadId={threadId}
+            messageSummary={messageSummary}
+            width={statusPanelWidth}
+          />
+        </>
       )}
       {statusPanelOpen && rightPanelMode === 'workspace' && (
         <>

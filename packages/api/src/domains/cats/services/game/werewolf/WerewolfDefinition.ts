@@ -13,14 +13,14 @@ export interface WerewolfPreset {
   roles: Record<string, number>;
 }
 
-/** Presets: role distribution per player count */
+/** Presets: role distribution per player count (aligned with NetEase standard) */
 export const WEREWOLF_PRESETS: Record<number, WerewolfPreset> = {
-  6: { roles: { wolf: 1, seer: 1, witch: 1, villager: 3 } },
-  7: { roles: { wolf: 2, seer: 1, witch: 1, villager: 3 } },
-  8: { roles: { wolf: 2, seer: 1, witch: 1, hunter: 1, villager: 3 } },
-  9: { roles: { wolf: 2, seer: 1, witch: 1, hunter: 1, guard: 1, villager: 3 } },
-  10: { roles: { wolf: 3, seer: 1, witch: 1, hunter: 1, guard: 1, villager: 3 } },
-  12: { roles: { wolf: 4, seer: 1, witch: 1, hunter: 1, guard: 1, idiot: 1, villager: 3 } },
+  6: { roles: { wolf: 2, seer: 1, witch: 1, villager: 2 } },
+  7: { roles: { wolf: 2, seer: 1, witch: 1, hunter: 1, villager: 2 } },
+  8: { roles: { wolf: 3, seer: 1, witch: 1, hunter: 1, villager: 2 } },
+  9: { roles: { wolf: 3, seer: 1, witch: 1, hunter: 1, villager: 3 } },
+  10: { roles: { wolf: 3, seer: 1, witch: 1, hunter: 1, villager: 4 } },
+  12: { roles: { wolf: 4, seer: 1, witch: 1, hunter: 1, guard: 1, villager: 4 } },
 };
 
 /** Standard phase sequence — some may be skipped if role not present */

@@ -53,7 +53,7 @@ describe('NightActionCard', () => {
   it('shows selected target border', () => {
     const html = render({ selectedTarget: 'P2' });
     const p2Match = html.match(/data-testid="target-P2"[^>]*class="([^"]+)"/);
-    expect(p2Match?.[1]).toContain('border-[#22D3EE]');
+    expect(p2Match?.[1]).toContain('border-ww-cute');
   });
 
   it('confirm button shows target when selected', () => {

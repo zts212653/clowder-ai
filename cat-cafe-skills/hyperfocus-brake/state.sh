@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-# 用户级状态文件（跨 session 共享，保护team lead而非猫猫 session）
+# 用户级状态文件（跨 session 共享，保护铲屎官而非猫猫 session）
 # 5 分钟间隔检测已确保真正休息时不累加
 _resolve_state_file() {
   STATE_FILE="${TMPDIR:-/tmp}/hyperfocus-brake-state-${USER:-default}.json"

@@ -101,7 +101,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     // Full content should NOT be in the DOM when collapsed
     // The border-l-2 div with MarkdownContent only renders when expanded
-    const expandedBlocks = container.querySelectorAll('.border-l-2');
+    const expandedBlocks = container.querySelectorAll('.cli-output-md');
     expect(expandedBlocks.length).toBe(0);
   });
 
@@ -117,14 +117,14 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
       );
     });
 
-    expect(container.querySelectorAll('.border-l-2').length).toBe(0);
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
 
     // Expand globally
     act(() => {
       useChatStore.getState().setUiThinkingExpandedByDefault(true);
     });
 
-    expect(container.querySelectorAll('.border-l-2').length).toBeGreaterThanOrEqual(1);
+    expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
     expect(container.textContent).toContain(THINKING_TEXT);
 
     // Collapse globally again
@@ -132,7 +132,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
       useChatStore.getState().setUiThinkingExpandedByDefault(false);
     });
 
-    expect(container.querySelectorAll('.border-l-2').length).toBe(0);
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
   });
 
   it('stream-origin messages render via CliOutputBlock (F097)', async () => {
@@ -159,10 +159,12 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     });
 
     // F097: stream content now renders inside CliOutputBlock, not ThinkingContent
-    expect(container.textContent).toContain('CLI 输出');
+    expect(container.textContent).toContain('CLI Output');
 
     // Click to expand → content visible in terminal substrate
-    const cliButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('CLI 输出'));
+    const cliButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('CLI Output'),
+    );
     expect(cliButton).toBeTruthy();
     act(() => {
       cliButton?.click();

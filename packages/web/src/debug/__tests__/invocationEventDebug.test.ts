@@ -45,6 +45,56 @@ describe('invocationEventDebug', () => {
     expect((window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug).toBeTruthy();
   });
 
+  it('exposes dumpBubbleTimeline() and returns only bubble lifecycle events', () => {
+    configureDebug({ enabled: true });
+    ensureWindowDebugApi();
+
+    recordDebugEvent({
+      event: 'queue_updated',
+      threadId: 'thread-a',
+      action: 'processing',
+      timestamp: 1,
+    });
+    recordDebugEvent({
+      event: 'bubble_lifecycle',
+      threadId: 'thread-a',
+      timestamp: 2,
+      action: 'create',
+      reason: 'active-late-bind',
+      catId: 'opus',
+      messageId: 'msg-stream-1',
+      invocationId: 'inv-1',
+      origin: 'stream',
+    } as Parameters<typeof recordDebugEvent>[0]);
+
+    const debugApi = (
+      window as typeof window & {
+        __catCafeDebug?: { dumpBubbleTimeline?: (options?: { rawThreadId?: boolean }) => string };
+      }
+    ).__catCafeDebug;
+
+    expect(debugApi?.dumpBubbleTimeline).toBeTypeOf('function');
+
+    const dump = JSON.parse(debugApi!.dumpBubbleTimeline!({ rawThreadId: true })) as {
+      meta: { count: number };
+      events: Array<Record<string, unknown>>;
+    };
+
+    expect(dump.meta.count).toBe(1);
+    expect(dump.events).toEqual([
+      expect.objectContaining({
+        event: 'bubble_lifecycle',
+        threadId: 'thread-a',
+        action: 'create',
+        reason: 'active-late-bind',
+        catId: 'opus',
+        messageId: 'msg-stream-1',
+        invocationId: 'inv-1',
+        origin: 'stream',
+      }),
+    ]);
+  });
+
   it('records history_replace events with action and reason payload', () => {
     configureDebug({ enabled: true });
 

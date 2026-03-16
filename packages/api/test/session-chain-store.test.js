@@ -300,4 +300,22 @@ describe('SessionChainStore', () => {
       assert.ok(found, `thread-${i} active should still exist`);
     }
   });
+
+  test('update() persists consecutiveRestoreFailures (F118 AC-C6)', async () => {
+    const store = await createStore();
+    const record = store.create(BASE_INPUT);
+    assert.equal(record.consecutiveRestoreFailures, undefined);
+
+    // Increment
+    store.update(record.id, { consecutiveRestoreFailures: 1 });
+    assert.equal(store.get(record.id).consecutiveRestoreFailures, 1);
+
+    // Increment again
+    store.update(record.id, { consecutiveRestoreFailures: 2 });
+    assert.equal(store.get(record.id).consecutiveRestoreFailures, 2);
+
+    // Reset to 0
+    store.update(record.id, { consecutiveRestoreFailures: 0 });
+    assert.equal(store.get(record.id).consecutiveRestoreFailures, 0);
+  });
 });

@@ -8,15 +8,15 @@ created: 2026-02-26
 # ADR-008: 对话可变性与调用生命周期
 
 > 日期: 2026-02-09
-> 状态: **草案 — 待Maine Coon review + team lead拍板**
-> 参与者: Ragdoll (Opus) + Maine Coon (Codex) + team lead
-> 背景: team lead要求类似 Google AI Studio 的删除/编辑能力；重复消息 + ENOENT 问题
+> 状态: **草案 — 待Maine Coon review + 铲屎官拍板**
+> 参与者: Ragdoll (Opus) + Maine Coon (Codex) + 铲屎官
+> 背景: 铲屎官要求类似 Google AI Studio 的删除/编辑能力；重复消息 + ENOENT 问题
 
 ---
 
 ## 问题
 
-team lead提出三个互相关联的诉求：
+铲屎官提出三个互相关联的诉求：
 
 1. **消息可删可编辑** — 否则"会出现可怕的事情"（误发消息、敏感内容无法删除）
 2. **删改不能破坏 resume/cursor** — 删了消息后，增量上下文投递不能乱
@@ -175,7 +175,7 @@ POST /api/invocations/:id/retry
 
 1. **语义干净** — 每个调用有明确的生命周期状态，不存在"消息写了但调用状态不明"的灰区
 2. **统一底座** — 后续的 Edit→Branch、软硬删除、cursor 推进都可以引用 InvocationRecord 状态
-3. **不上线所以一步到位** — team lead明确"这是我们自己的项目"，优先长期正确
+3. **不上线所以一步到位** — 铲屎官明确"这是我们自己的项目"，优先长期正确
 
 ### Tradeoff
 
@@ -577,5 +577,5 @@ ADR-007 定义的 thread 级联删除保持不变。新增的消息级删除（D
 ---
 
 *起草: Ragdoll 🐾 (2026-02-09)*
-*讨论基础: Maine Coon开放邀请 + team lead裁决*
-*待: Maine Coon review → team lead拍板 → 开始实施*
+*讨论基础: Maine Coon开放邀请 + 铲屎官裁决*
+*待: Maine Coon review → 铲屎官拍板 → 开始实施*

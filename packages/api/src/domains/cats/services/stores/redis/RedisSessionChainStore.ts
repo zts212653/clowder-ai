@@ -220,6 +220,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.compressionCount !== undefined) {
       pairs.push('compressionCount', String(patch.compressionCount));
     }
+    if (patch.consecutiveRestoreFailures !== undefined) {
+      pairs.push('consecutiveRestoreFailures', String(patch.consecutiveRestoreFailures));
+    }
 
     await this.redis.hset(detailKey, ...pairs);
     return this.get(id);
@@ -246,6 +249,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const sealReason = data.sealReason as SessionRecord['sealReason'] | undefined;
     const sealedAt = data.sealedAt ? parseInt(data.sealedAt, 10) : undefined;
     const compressionCount = data.compressionCount ? parseInt(data.compressionCount, 10) : undefined;
+    const consecutiveRestoreFailures = data.consecutiveRestoreFailures
+      ? parseInt(data.consecutiveRestoreFailures, 10)
+      : undefined;
 
     return {
       id: data.id!,
@@ -261,6 +267,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(sealReason ? { sealReason } : {}),
       ...(sealedAt ? { sealedAt } : {}),
       ...(compressionCount !== undefined ? { compressionCount } : {}),
+      ...(consecutiveRestoreFailures !== undefined ? { consecutiveRestoreFailures } : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),
     };

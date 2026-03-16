@@ -261,7 +261,7 @@ describe('RedisMessageStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }
     const msg = await store.append({
       userId: 'u',
       catId: 'opus',
-      content: '@team lead 看看这个',
+      content: '@铲屎官 看看这个',
       mentions: ['opus'],
       timestamp: Date.now(),
       threadId: 'thread-mention-user',
@@ -297,5 +297,82 @@ describe('RedisMessageStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }
     assert.equal(msgs.length, 2);
     assert.equal(msgs[0].mentionsUser, true, 'first message should have mentionsUser');
     assert.equal(msgs[1].mentionsUser, undefined, 'second message should not have mentionsUser');
+  });
+
+  it('getByThreadAfter() returns delivered messages whose score shifted forward (Bug A cursor regression)', async () => {
+    const base = Date.now();
+    const threadId = 'thread-cursor-deliver';
+
+    // Simulate: msg1 sent at base, msg2 sent at base+1, msg3 (queued) sent at base+2
+    const msg1 = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'msg1',
+      mentions: [],
+      timestamp: base,
+      threadId,
+    });
+    const msg2 = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'msg2',
+      mentions: [],
+      timestamp: base + 1,
+      threadId,
+    });
+    const msg3 = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'msg3-queued',
+      mentions: [],
+      timestamp: base + 2,
+      threadId,
+    });
+
+    // msg3 was queued and delivered later — its score shifts forward
+    await store.markDelivered(msg3.id, base + 500);
+
+    // Cursor is msg1 — should see msg2 AND msg3 (even though msg3's score shifted)
+    const afterMsg1 = await store.getByThreadAfter(threadId, msg1.id);
+    const ids = afterMsg1.map((m) => m.id);
+    assert.ok(ids.includes(msg2.id), 'msg2 should appear after cursor msg1');
+    assert.ok(ids.includes(msg3.id), 'msg3 (delivered later) should appear after cursor msg1');
+
+    // Cursor is msg2 — should see msg3 (higher score after delivery)
+    const afterMsg2 = await store.getByThreadAfter(threadId, msg2.id);
+    const ids2 = afterMsg2.map((m) => m.id);
+    assert.ok(ids2.includes(msg3.id), 'msg3 should appear after cursor msg2 despite score shift');
+  });
+
+  it('getByThreadAfter() does not skip same-score messages after deliveredAt shift', async () => {
+    const base = Date.now();
+    const threadId = 'thread-cursor-same-score';
+
+    // msg1 sent at base, msg2 sent at base+1
+    const msg1 = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'early',
+      mentions: [],
+      timestamp: base,
+      threadId,
+    });
+    const msg2 = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'late-queued',
+      mentions: [],
+      timestamp: base + 1,
+      threadId,
+    });
+
+    // Both delivered at the same deliveredAt time
+    await store.markDelivered(msg1.id, base + 100);
+    await store.markDelivered(msg2.id, base + 100);
+
+    // Cursor is msg1 — msg2 has the same score but different ID, should still appear
+    const afterMsg1 = await store.getByThreadAfter(threadId, msg1.id);
+    const ids = afterMsg1.map((m) => m.id);
+    assert.ok(ids.includes(msg2.id), 'msg2 with same deliveredAt score should appear via ID tiebreaker');
   });
 });

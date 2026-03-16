@@ -7,6 +7,28 @@ import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatSto
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 
+type SavedScrollState = {
+  top: number;
+  anchor: 'bottom' | 'offset';
+};
+
+// clowder-ai#27: route navigation remounts the page, so scroll memory must live
+// outside React refs to survive /thread/A → /thread/B → /thread/A.
+const scrollPositionsByThread = new Map<string, SavedScrollState>();
+const SCROLL_BOTTOM_THRESHOLD_PX = 24;
+const MAX_RESTORE_FRAMES = 90;
+
+function isNearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX;
+}
+
+function rememberScrollState(threadId: string, el: HTMLElement) {
+  scrollPositionsByThread.set(threadId, {
+    top: el.scrollTop,
+    anchor: isNearBottom(el) ? 'bottom' : 'offset',
+  });
+}
+
 const HISTORY_PAGE_SIZE = 50;
 // In export mode (?export=true), load all messages in one request for screenshot capture.
 // Normal browsing still uses 50-per-page pagination.
@@ -56,7 +78,19 @@ function getMessageRichness(msg: ChatMessageData): [number, number, number, numb
   ];
 }
 
+function getMessagePhasePriority(msg: ChatMessageData): number {
+  if (msg.origin === 'callback') return 2;
+  if (msg.origin === 'stream') return 1;
+  return 0;
+}
+
 function shouldPreferCurrentMessage(current: ChatMessageData, history: ChatMessageData): boolean {
+  const currentPhasePriority = getMessagePhasePriority(current);
+  const historyPhasePriority = getMessagePhasePriority(history);
+  if (currentPhasePriority !== historyPhasePriority) {
+    return currentPhasePriority > historyPhasePriority;
+  }
+
   const currentRichness = getMessageRichness(current);
   const historyRichness = getMessageRichness(history);
   for (let i = 0; i < currentRichness.length; i++) {
@@ -119,7 +153,9 @@ function mergeReplaceHydrationMessages(
 
   return {
     messages: mergedMsgs.sort((a, b) => {
-      if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+      const ta = a.deliveredAt ?? a.timestamp;
+      const tb = b.deliveredAt ?? b.timestamp;
+      if (ta !== tb) return ta - tb;
       return a.id.localeCompare(b.id);
     }),
     stats: {
@@ -159,6 +195,7 @@ export function useChatHistory(threadId: string) {
   const prevFirstIdRef = useRef<string | null>(null);
   const prevCountRef = useRef(0);
   const scrollSnapshotRef = useRef<number | null>(null);
+  const restoreFrameRef = useRef<number | null>(null);
 
   // Track loading guard per-thread to prevent double-fetch
   const loadingRef = useRef(false);
@@ -168,6 +205,56 @@ export function useChatHistory(threadId: string) {
   // Always-current threadId for stale response checks
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
+
+  const cancelPendingRestore = useCallback(() => {
+    if (restoreFrameRef.current !== null) {
+      cancelAnimationFrame(restoreFrameRef.current);
+      restoreFrameRef.current = null;
+    }
+  }, []);
+
+  const scheduleRestore = useCallback(
+    (saved: SavedScrollState) => {
+      cancelPendingRestore();
+      let framesRemaining = MAX_RESTORE_FRAMES;
+      // Capture threadId at schedule time so a stale callback can't mutate
+      // the next thread's scroll state if it fires before effect cleanup.
+      const scheduledForThread = threadIdRef.current;
+
+      const apply = () => {
+        // Stale guard: if thread switched before cleanup cancelled us, no-op.
+        if (threadIdRef.current !== scheduledForThread) {
+          restoreFrameRef.current = null;
+          return;
+        }
+
+        const el = scrollContainerRef.current;
+        if (!el) {
+          restoreFrameRef.current = null;
+          return;
+        }
+
+        const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+        const targetTop = saved.anchor === 'bottom' ? maxTop : Math.min(saved.top, maxTop);
+        el.scrollTop = targetTop;
+
+        const canSettle = saved.anchor === 'bottom' ? maxTop > 0 : maxTop >= saved.top;
+        const reachedTarget = Math.abs(el.scrollTop - targetTop) <= 1;
+
+        if ((canSettle && reachedTarget) || framesRemaining <= 0) {
+          rememberScrollState(scheduledForThread, el);
+          restoreFrameRef.current = null;
+          return;
+        }
+
+        framesRemaining -= 1;
+        restoreFrameRef.current = requestAnimationFrame(apply);
+      };
+
+      restoreFrameRef.current = requestAnimationFrame(apply);
+    },
+    [cancelPendingRestore],
+  );
 
   // Fetch history page from API
   // When replace=true, clears existing messages before setting (used for force-refresh).
@@ -219,6 +306,8 @@ export function useChatHistory(threadId: string) {
             source?: { connector: string; label: string; icon: string; url?: string };
             mentionsUser?: boolean;
             deliveredAt?: number;
+            replyTo?: string;
+            replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
           }) =>
             ({
               id: m.id,
@@ -250,6 +339,8 @@ export function useChatHistory(threadId: string) {
               ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
               ...(m.source ? { source: m.source } : {}),
               ...(m.mentionsUser ? { mentionsUser: true } : {}),
+              ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+              ...(m.replyPreview ? { replyPreview: m.replyPreview } : {}),
               // #80: Restore streaming indicator for draft messages recovered from Redis
               ...(m.isDraft ? { isStreaming: true } : {}),
               timestamp: m.timestamp,
@@ -403,13 +494,37 @@ export function useChatHistory(threadId: string) {
       if (!res.ok) return;
       if (abortRef.current !== controller) return;
       if (threadIdRef.current !== fetchForThread) return;
-      const data = (await res.json()) as { queue: QueueEntry[]; paused: boolean; pauseReason?: 'canceled' | 'failed' };
+      const data = (await res.json()) as {
+        queue: QueueEntry[];
+        paused: boolean;
+        pauseReason?: 'canceled' | 'failed';
+        activeInvocations?: string[];
+      };
       // Always sync server state — clears stale local data when server queue is empty
       setQueue(fetchForThread, data.queue);
       setQueuePaused(fetchForThread, data.paused, data.pauseReason);
+      // Issue #83: Reconcile processing state from server-side InvocationTracker.
+      // Uses thread-scoped APIs so it works correctly for both active and background threads,
+      // and always overwrites stale snapshots restored by setCurrentThread().
+      const store = useChatStore.getState();
+      if (data.activeInvocations && data.activeInvocations.length > 0) {
+        setThreadTargetCats(fetchForThread, data.activeInvocations);
+        for (const catId of data.activeInvocations) {
+          store.setCatStatus(catId, 'streaming');
+        }
+        store.setThreadHasActiveInvocation(fetchForThread, true);
+      } else {
+        // Server says no active invocations — clear any stale processing state
+        // that may have been restored from a threadStates snapshot.
+        // clearThreadActiveInvocation clears BOTH hasActiveInvocation boolean
+        // AND the activeInvocations slot map, preventing re-derivation bugs.
+        store.clearThreadActiveInvocation(fetchForThread);
+        setThreadTargetCats(fetchForThread, []);
+      }
     } catch (err) {
       if (isAbortError(err)) return;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, setQueue, setQueuePaused]);
 
   // Load history + tasks when threadId changes (handles initial mount and navigation)
@@ -474,10 +589,27 @@ export function useChatHistory(threadId: string) {
     void bootstrap();
 
     return () => {
+      // Scroll save is now done during render (before DOM commit), not here.
       clearTimeout(secondaryFallbackTimer);
+      cancelPendingRestore();
       abortRef.current?.abort();
     };
-  }, [threadId, clearMessages, fetchHistory, fetchQueue, fetchTaskProgress, fetchTasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [threadId, cancelPendingRestore, clearMessages, fetchHistory, fetchQueue, fetchTaskProgress, fetchTasks]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bug C safety net: when useAgentMessages detects done(isFinal) with no
+  // streaming bubble, it bumps streamCatchUpVersion with a target threadId.
+  // Only fetch if this hook's threadId matches the request (P1: thread-scoped).
+  const catchUpVersion = useChatStore((s) => s.streamCatchUpVersion);
+  const catchUpThreadId = useChatStore((s) => s.streamCatchUpThreadId);
+  useEffect(() => {
+    if (catchUpVersion === 0) return; // Skip initial render
+    if (catchUpThreadId !== threadId) return; // P1: only act for matching thread
+    // Small delay: backend may still be persisting the final message
+    const timer = setTimeout(() => {
+      void fetchHistory(undefined, { replace: true });
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [catchUpVersion, catchUpThreadId, threadId, fetchHistory]);
 
   // Snapshot scroll height before history load
   useEffect(() => {
@@ -490,18 +622,30 @@ export function useChatHistory(threadId: string) {
   // Scroll adjustment after messages change
   useEffect(() => {
     const el = scrollContainerRef.current;
+
+    if (messages.length === 0) return;
+
+    // clowder-ai#27: wait for store to sync before acting on scroll.
+    // On remount, threadId (prop) updates immediately but store.currentThreadId
+    // is still the OLD thread until ChatContainer's useEffect calls setCurrentThread().
+    // If we act now, we'd restore scroll on the wrong DOM content, then the store
+    // swap re-render would trigger append-case scrollIntoView → position lost.
+    // By returning early (without updating tracking refs), we ensure the NEXT
+    // effect run (after store sync) still sees prevCount=0 and does the restore.
+    const storeThreadId = useChatStore.getState().currentThreadId;
+    if (storeThreadId !== threadId) return;
+
     const prevCount = prevCountRef.current;
     const prevFirstId = prevFirstIdRef.current;
-    const currentFirstId = messages.length > 0 ? messages[0].id : null;
+    const currentFirstId = messages[0].id;
 
     prevCountRef.current = messages.length;
     prevFirstIdRef.current = currentFirstId;
 
-    if (messages.length === 0) return;
-
-    // Initial load - scroll to bottom
+    // Initial load (includes remount after thread switch — prevCountRef resets to 0).
+    // clowder-ai#27: check module-level Map for a saved position before scrolling to bottom.
     if (prevCount === 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      scheduleRestore(scrollPositionsByThread.get(threadId) ?? { top: 0, anchor: 'bottom' });
       return;
     }
 
@@ -510,24 +654,43 @@ export function useChatHistory(threadId: string) {
       const heightDelta = el.scrollHeight - scrollSnapshotRef.current;
       el.scrollTop += heightDelta;
       scrollSnapshotRef.current = null;
+      rememberScrollState(threadId, el);
       return;
     }
 
-    // Append case - smooth scroll to bottom
+    // Append case: only auto-follow when the user intentionally stayed at bottom.
     if (messages.length > prevCount) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const saved = scrollPositionsByThread.get(threadId);
+      if (saved?.anchor === 'bottom') {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (el) {
+          scrollPositionsByThread.set(threadId, {
+            top: el.scrollTop,
+            anchor: 'bottom',
+          });
+        }
+      }
     }
-  }, [messages]);
+  }, [messages, scheduleRestore, threadId]);
 
-  // Load more when scrolled to top
+  // Load more when scrolled to top + clowder-ai#27 continuous scroll save
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
-    if (!el || !hasMore || isLoadingHistory) return;
+    if (!el) return;
+
+    // clowder-ai#27: continuously save scroll position for this thread.
+    // Guard: don't save during store swap (DOM content may not match threadId,
+    // and browser may fire scroll events with scrollTop=0 during content swap).
+    if (useChatStore.getState().currentThreadId === threadIdRef.current) {
+      rememberScrollState(threadIdRef.current, el);
+    }
+
+    if (!hasMore || isLoadingHistory) return;
     if (el.scrollTop < 80 && messages.length > 0) {
       // #80 cloud R8 P2: skip draft rows — their synthetic IDs break cursor semantics
       const oldest = messages.find((m) => !m.id.startsWith('draft-'));
       if (oldest) {
-        void fetchHistory(`${oldest.timestamp}:${oldest.id}`);
+        void fetchHistory(`${oldest.deliveredAt ?? oldest.timestamp}:${oldest.id}`);
       }
     }
   }, [hasMore, isLoadingHistory, messages, fetchHistory]);

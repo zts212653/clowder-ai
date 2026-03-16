@@ -7,11 +7,13 @@ import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 
 interface ExternalDeps {
   threadId: string;
+  userId: string;
   handleAgentMessage: SocketCallbacks['onMessage'];
   resetTimeout: () => void;
   clearDoneTimeout: (threadId?: string) => void;
   handleAuthRequest: NonNullable<SocketCallbacks['onAuthorizationRequest']>;
   handleAuthResponse: NonNullable<SocketCallbacks['onAuthorizationResponse']>;
+  onNavigateToThread?: (threadId: string) => void;
 }
 
 /**
@@ -20,11 +22,13 @@ interface ExternalDeps {
  */
 export function useChatSocketCallbacks({
   threadId,
+  userId,
   handleAgentMessage,
   resetTimeout,
   clearDoneTimeout,
   handleAuthRequest,
   handleAuthResponse,
+  onNavigateToThread,
 }: ExternalDeps): SocketCallbacks {
   const {
     updateThreadTitle,
@@ -97,6 +101,12 @@ export function useChatSocketCallbacks({
         if (view.threadId !== threadId) return;
         useGameStore.getState().setGameView(view, data.gameId, threadId);
       },
+      onGameThreadCreated: (data) => {
+        // Only navigate the initiator — other users in the room should not be auto-redirected
+        if (data.initiatorUserId === userId) {
+          onNavigateToThread?.(data.gameThreadId);
+        }
+      },
     }),
     [
       handleAgentMessage,
@@ -113,7 +123,9 @@ export function useChatSocketCallbacks({
       clearDoneTimeout,
       handleAuthRequest,
       handleAuthResponse,
+      onNavigateToThread,
       threadId,
+      userId,
     ],
   );
 }

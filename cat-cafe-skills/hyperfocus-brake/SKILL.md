@@ -1,9 +1,9 @@
 ---
 name: hyperfocus-brake
 description: >
-  team lead健康提醒：三猫撒娇打断 hyperfocus。
+  铲屎官健康提醒：三猫撒娇打断 hyperfocus。
   Use when: hook 触发提醒、用户输入 /hyperfocus-brake。
-  Not for: 正常工作流程、非team lead用户。
+  Not for: 正常工作流程、非铲屎官用户。
   Output: 三猫温柔提醒 + typed check-in。
 triggers:
   - "hyperfocus"
@@ -14,12 +14,12 @@ triggers:
 
 # Hyperfocus Brake 🐾
 
-team lead有 ADHD+ASD，容易过度专注。这个 skill 用三猫撒娇打断 hyperfocus，提醒休息。
+铲屎官有 ADHD+ASD，容易过度专注。这个 skill 用三猫撒娇打断 hyperfocus，提醒休息。
 
 ## 核心原则
 
-1. **情感纽带优先**：不是机械闹钟，是三只关心team lead的猫猫
-2. **上下文感知**：知道team lead在做什么，不说废话
+1. **情感纽带优先**：不是机械闹钟，是三只关心铲屎官的猫猫
+2. **上下文感知**：知道铲屎官在做什么，不说废话
 3. **渐进升级**：从温柔试探到急了要休息，三档递进
 4. **尊重自主**：typed check-in，不是强制弹窗
 
@@ -61,7 +61,7 @@ systemMessage 告知猫猫触发
   "id": "brake-card-{{timestamp}}", "kind": "card", "v": 1,
   "title": "🐾 休息提醒 L{{level}}",
   "tone": "warning",
-  "bodyMarkdown": "team lead，你已经专注工作 **{{minutes}} 分钟**啦！\n\n🐱 Ragdoll：{{opus_msg}}\n🦁 Maine Coon：{{codex_msg}}\n🐈 Siamese：{{gemini_msg}}",
+  "bodyMarkdown": "铲屎官，你已经专注工作 **{{minutes}} 分钟**啦！\n\n🐱 Ragdoll：{{opus_msg}}\n🦁 Maine Coon：{{codex_msg}}\n🐈 Siamese：{{gemini_msg}}",
   "fields": [
     {"label": "[1] 立刻休息", "value": "5min，重置计时器"},
     {"label": "[2] 收尾", "value": "10min 后再提醒"},
@@ -70,7 +70,7 @@ systemMessage 告知猫猫触发
 }
 ```
 
-发完 rich blocks 后，再输出纯文本 `请输入数字 (1/2/3):` 等待team lead选择。
+发完 rich blocks 后，再输出纯文本 `请输入数字 (1/2/3):` 等待铲屎官选择。
 
 ## 三档撒娇
 
@@ -78,7 +78,7 @@ systemMessage 告知猫猫触发
 
 | 猫猫 | 示例 |
 |------|------|
-| Ragdoll | team lead，我看你在 `{{branch}}` 忙很久啦，要不要喝口水呀？喵~ |
+| Ragdoll | 铲屎官，我看你在 `{{branch}}` 忙很久啦，要不要喝口水呀？喵~ |
 | Maine Coon | 监测到当前任务已持续 90min。建议进行 5min 视疲劳缓解。 |
 | Siamese | 嘿！我刚才看到一个超棒的视觉灵感！你想听吗？但你得先站起来伸个懒腰！ |
 
@@ -103,7 +103,7 @@ systemMessage 告知猫猫触发
 当触发提醒时，输出以下选项：
 
 ```
-🐾 [休息提醒 L{{level}}] team lead，你在 {{branch}} 已经专注工作 {{minutes}} 分钟啦！
+🐾 [休息提醒 L{{level}}] 铲屎官，你在 {{branch}} 已经专注工作 {{minutes}} 分钟啦！
 
 三猫的话：
   🐱 Ragdoll：{{opus_message}}

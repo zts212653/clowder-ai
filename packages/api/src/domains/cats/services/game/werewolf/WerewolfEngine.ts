@@ -240,7 +240,7 @@ export class WerewolfEngine extends GameEngine {
   }
 
   /** Check win condition. Returns 'wolf', 'village', or null. */
-  checkWinCondition(): 'wolf' | 'village' | null {
+  override checkWinCondition(): 'wolf' | 'village' | null {
     const runtime = this.getRuntime();
     const roles = runtime.definition.roles;
 

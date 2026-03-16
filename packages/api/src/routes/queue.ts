@@ -9,19 +9,28 @@
  * DELETE /api/threads/:threadId/queue               → 清空队列
  */
 
+import type { CatId } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
 interface InvocationTrackerLike {
-  has(threadId: string): boolean;
-  getUserId(threadId: string): string | null;
-  cancel(threadId: string, requestUserId?: string, abortReason?: string): { cancelled: boolean; catIds: string[] };
+  has(threadId: string, catId?: string): boolean;
+  getUserId(threadId: string, catId: string): string | null;
+  cancel(
+    threadId: string,
+    catId: string,
+    requestUserId?: string,
+    abortReason?: string,
+  ): { cancelled: boolean; catIds: string[] };
+  /** Issue #83: Get all active catIds for a thread (F5 refresh recovery) */
+  getActiveSlots(threadId: string): string[];
 }
 
 export interface QueueRoutesOptions {
@@ -30,6 +39,8 @@ export interface QueueRoutesOptions {
   queueProcessor: QueueProcessor;
   invocationTracker: InvocationTrackerLike;
   socketManager: SocketManager;
+  /** F117: MessageStore for marking queued messages as canceled on withdraw/clear */
+  messageStore?: IMessageStore;
 }
 
 const moveBodySchema = z.object({
@@ -75,7 +86,7 @@ async function guardThreadOwnership(
 }
 
 export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, opts) => {
-  const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager } = opts;
+  const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager, messageStore } = opts;
 
   // GET /api/threads/:threadId/queue
   app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/queue', async (request, reply) => {
@@ -87,6 +98,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       queue: invocationQueue.list(threadId, guard.userId),
       paused: queueProcessor.isPaused(threadId),
       pauseReason: queueProcessor.getPauseReason(threadId),
+      // Issue #83: Expose active invocation slots for F5 refresh recovery.
+      // Frontend can use this to restore processing state even when drafts expire.
+      activeInvocations: invocationTracker.getActiveSlots(threadId),
     };
   });
 
@@ -110,12 +124,27 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { error: '条目正在处理中，无法撤回', code: 'ENTRY_PROCESSING' };
       }
 
+      // F117: Collect message IDs before removing (entry contains messageId + mergedMessageIds)
+      const messageIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
+
       const removed = invocationQueue.remove(threadId, guard.userId, entryId);
       socketManager.emitToUser(guard.userId, 'queue_updated', {
         threadId,
         queue: invocationQueue.list(threadId, guard.userId),
         action: 'removed',
       });
+
+      // F117: Mark queued messages as canceled + emit message_deleted
+      if (messageStore) {
+        for (const msgId of messageIds) {
+          await messageStore.markCanceled(msgId);
+          socketManager.emitToUser(guard.userId, 'message_deleted', {
+            messageId: msgId,
+            threadId,
+            deletedBy: guard.userId,
+          });
+        }
+      }
 
       return { removed };
     },
@@ -168,21 +197,32 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
 
       // mode === 'immediate'
-      if (invocationTracker.has(threadId)) {
-        const activeUserId = invocationTracker.getUserId(threadId);
+      const steerCatId = entry.targetCats[0] ?? 'unknown';
+      if (invocationTracker.has(threadId, steerCatId)) {
+        const activeUserId = invocationTracker.getUserId(threadId, steerCatId);
         if (activeUserId && activeUserId !== guard.userId) {
           reply.status(409);
           return { error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
         }
-        const cancelResult = invocationTracker.cancel(threadId, guard.userId, 'preempted');
-        // Also abort any active multi-mention dispatches for this thread
-        getMultiMentionOrchestrator().abortByThread(threadId);
-        if (!cancelResult.cancelled && invocationTracker.has(threadId)) {
+        const cancelResult = invocationTracker.cancel(threadId, steerCatId, guard.userId, 'preempted');
+        // Broadcast cancel+done so frontend clears old invocation's "正在回复中" state.
+        // Without this, activeInvocations retains the old invocationId permanently.
+        // Scope to steerCatId only — cancelResult.catIds may include co-dispatched cats
+        // whose separate invocations should not be terminated.
+        if (cancelResult.cancelled) {
+          const scopedResult = { ...cancelResult, catIds: [steerCatId] };
+          for (const m of buildCancelMessages(scopedResult)) {
+            socketManager.broadcastAgentMessage(m, threadId);
+          }
+        }
+        // F108 P1-4 fix: abort only the target cat's dispatches, not the entire thread
+        getMultiMentionOrchestrator().abortBySlot(threadId, steerCatId as CatId);
+        if (!cancelResult.cancelled && invocationTracker.has(threadId, steerCatId)) {
           reply.status(409);
           return { error: '当前调用无法取消，无法立即执行', code: 'INVOCATION_CANCEL_FAILED' };
         }
-        queueProcessor.clearPause(threadId);
-        queueProcessor.releaseThread(threadId);
+        queueProcessor.clearPause(threadId, steerCatId);
+        queueProcessor.releaseSlot(threadId, steerCatId);
       }
 
       invocationQueue.promote(threadId, guard.userId, entryId);
@@ -245,12 +285,34 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
+    // F117: Collect message IDs from non-processing entries for cancelation
+    // Skip 'processing' entries — their invocation is already running and will markDelivered itself
+    const entriesBeforeClear = invocationQueue.list(threadId, guard.userId);
+    const allMessageIds: string[] = [];
+    for (const e of entriesBeforeClear) {
+      if (e.status === 'processing') continue;
+      if (e.messageId) allMessageIds.push(e.messageId);
+      if (e.mergedMessageIds) allMessageIds.push(...e.mergedMessageIds);
+    }
+
     const cleared = invocationQueue.clear(threadId, guard.userId);
     socketManager.emitToUser(guard.userId, 'queue_updated', {
       threadId,
       queue: [],
       action: 'cleared',
     });
+
+    // F117: Mark all queued messages as canceled + emit message_deleted
+    if (messageStore) {
+      for (const msgId of allMessageIds) {
+        await messageStore.markCanceled(msgId);
+        socketManager.emitToUser(guard.userId, 'message_deleted', {
+          messageId: msgId,
+          threadId,
+          deletedBy: guard.userId,
+        });
+      }
+    }
 
     return { cleared };
   });

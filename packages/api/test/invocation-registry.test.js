@@ -331,6 +331,34 @@ describe('InvocationRegistry', () => {
     assert.ok(remainingMs > 2 * 60 * 60 * 1000 - 5000, `TTL should be ~2h, got ${Math.round(remainingMs / 1000)}s`);
   });
 
+  // --- F108 fix: parentInvocationId propagation ---
+
+  test('create() stores parentInvocationId in record when provided', async () => {
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+
+    const registry = new InvocationRegistry();
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-1', 'parent-inv-123');
+
+    const record = registry.verify(invocationId, callbackToken);
+    assert.ok(record !== null);
+    assert.equal(record.parentInvocationId, 'parent-inv-123');
+  });
+
+  test('create() omits parentInvocationId from record when not provided', async () => {
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+
+    const registry = new InvocationRegistry();
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-1');
+
+    const record = registry.verify(invocationId, callbackToken);
+    assert.ok(record !== null);
+    assert.equal(record.parentInvocationId, undefined);
+  });
+
   test('stale invocation still rejected despite sliding window', async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'

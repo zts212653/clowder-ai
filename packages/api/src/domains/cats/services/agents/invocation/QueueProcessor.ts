@@ -4,7 +4,7 @@
  *
  * 两个入口：
  * - onInvocationComplete（系统级）：invocation 完成后调用，succeeded 时自动出队
- * - processNext（用户级）：team lead手动触发处理自己的下一条
+ * - processNext（用户级）：铲屎官手动触发处理自己的下一条
  */
 
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
@@ -13,9 +13,9 @@ import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
 interface TrackerLike {
-  start(threadId: string, userId: string, catIds: string[]): AbortController;
-  complete(threadId: string, controller?: AbortController): void;
-  has(threadId: string): boolean;
+  start(threadId: string, catId: string, userId: string, catIds?: string[]): AbortController;
+  complete(threadId: string, catId: string, controller?: AbortController): void;
+  has(threadId: string, catId?: string): boolean;
 }
 
 export interface InvocationRecordStoreLike {
@@ -60,18 +60,33 @@ export interface QueueProcessorDeps {
 
 export class QueueProcessor {
   private deps: QueueProcessorDeps;
-  /** Per-thread mutex — prevents concurrent double-start */
-  private processingThreads = new Set<string>();
-  /** Tracks paused threads (set on canceled/failed, cleared on next execution) */
-  private pausedThreads = new Map<string, 'canceled' | 'failed'>();
+  /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair */
+  private processingSlots = new Set<string>();
+  /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
+  private pausedSlots = new Map<string, 'canceled' | 'failed'>();
 
   constructor(deps: QueueProcessorDeps) {
     this.deps = deps;
   }
 
-  /** Check if a thread's queue is paused (canceled/failed AND has queued entries). */
-  isPaused(threadId: string): boolean {
-    return this.pausedThreads.has(threadId) && this.deps.queue.hasQueuedForThread(threadId);
+  private static slotKey(threadId: string, catId: string): string {
+    return `${threadId}:${catId}`;
+  }
+
+  /** Check if a slot's queue is paused (canceled/failed AND has queued entries). */
+  isPaused(threadId: string, catId?: string): boolean {
+    if (catId) {
+      return (
+        this.pausedSlots.has(QueueProcessor.slotKey(threadId, catId)) && this.deps.queue.hasQueuedForThread(threadId)
+      );
+    }
+    // Backward compat: check if any slot for this thread is paused
+    for (const key of this.pausedSlots.keys()) {
+      if (key.startsWith(`${threadId}:`)) {
+        if (this.deps.queue.hasQueuedForThread(threadId)) return true;
+      }
+    }
+    return false;
   }
 
   /** Expose queued-state for route fairness decisions in non-queue entry paths (retry/connector). */
@@ -80,47 +95,66 @@ export class QueueProcessor {
   }
 
   /** Returns pause reason when paused; otherwise undefined. */
-  getPauseReason(threadId: string): 'canceled' | 'failed' | undefined {
-    if (!this.isPaused(threadId)) return undefined;
-    return this.pausedThreads.get(threadId);
+  getPauseReason(threadId: string, catId?: string): 'canceled' | 'failed' | undefined {
+    if (!this.isPaused(threadId, catId)) return undefined;
+    if (catId) {
+      return this.pausedSlots.get(QueueProcessor.slotKey(threadId, catId));
+    }
+    // Backward compat: return first paused slot's reason
+    for (const [key, reason] of this.pausedSlots.entries()) {
+      if (key.startsWith(`${threadId}:`)) return reason;
+    }
+    return undefined;
   }
 
   /**
    * System-level entry: called when an invocation completes.
+   * F108: Now slot-aware — catId identifies which slot completed.
    * - succeeded → auto-dequeue oldest across users
-   * - canceled/failed → pause, notify relevant users
+   * - canceled/failed → pause slot, notify relevant users
    */
-  async onInvocationComplete(threadId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void> {
+  async onInvocationComplete(
+    threadId: string,
+    catId: string,
+    status: 'succeeded' | 'failed' | 'canceled',
+  ): Promise<void> {
+    const sk = QueueProcessor.slotKey(threadId, catId);
     if (status === 'succeeded') {
-      this.pausedThreads.delete(threadId);
+      this.pausedSlots.delete(sk);
       // Auto-dequeue: pick oldest entry across all users
       if (this.deps.queue.hasQueuedForThread(threadId)) {
-        await this.tryExecuteNextAcrossUsers(threadId);
+        await this.tryExecuteNextAcrossUsers(threadId, catId);
       }
     } else {
       // canceled or failed → pause ONLY if there are queued entries to manage.
-      // (Processing-only queue should not be "paused 0" — this is a common steer/force race.)
       if (!this.deps.queue.hasQueuedForThread(threadId)) {
-        this.pausedThreads.delete(threadId);
+        this.pausedSlots.delete(sk);
         return;
       }
-      this.pausedThreads.set(threadId, status);
+      this.pausedSlots.set(sk, status);
       this.emitPausedToQueuedUsers(threadId, status);
     }
   }
 
   /**
-   * Preemptively clear paused state for a thread.
+   * Preemptively clear paused state for a slot.
    * Used by force-send: the old invocation's async cleanup will call
-   * onInvocationComplete('canceled'/'failed') which pauses the thread,
+   * onInvocationComplete('canceled'/'failed') which pauses the slot,
    * but force-send already starts a new invocation — the pause is stale.
    */
-  clearPause(threadId: string): void {
-    this.pausedThreads.delete(threadId);
+  clearPause(threadId: string, catId?: string): void {
+    if (catId) {
+      this.pausedSlots.delete(QueueProcessor.slotKey(threadId, catId));
+    } else {
+      // Backward compat: clear all paused slots for this thread
+      for (const key of [...this.pausedSlots.keys()]) {
+        if (key.startsWith(`${threadId}:`)) this.pausedSlots.delete(key);
+      }
+    }
   }
 
   /**
-   * Force-release the per-thread mutex.
+   * F108: Force-release the per-slot mutex.
    *
    * Used by queue steer immediate: we cancel the current invocation, but the
    * old queue execution's `.then()` cleanup that deletes the mutex may not have
@@ -128,39 +162,62 @@ export class QueueProcessor {
    *
    * Idempotent: repeated deletes are safe.
    */
-  releaseThread(threadId: string): void {
-    this.processingThreads.delete(threadId);
+  releaseSlot(threadId: string, catId: string): void {
+    this.processingSlots.delete(QueueProcessor.slotKey(threadId, catId));
   }
 
   /**
-   * User-level entry: team lead manually triggers processing their next entry.
+   * @deprecated Use releaseSlot(threadId, catId) instead. Kept for backward compat during migration.
+   */
+  releaseThread(threadId: string): void {
+    for (const key of [...this.processingSlots.keys()]) {
+      if (key.startsWith(`${threadId}:`)) this.processingSlots.delete(key);
+    }
+  }
+
+  /**
+   * User-level entry: 铲屎官 manually triggers processing their next entry.
    */
   async processNext(threadId: string, userId: string): Promise<{ started: boolean; entry?: QueueEntry }> {
-    this.pausedThreads.delete(threadId);
+    // Clear all paused slots for this thread (manual resume clears all)
+    this.clearPause(threadId);
     return this.tryExecuteNextForUser(threadId, userId);
   }
 
   // ── Internal ──
 
-  private async tryExecuteNextAcrossUsers(threadId: string): Promise<{ started: boolean; entry?: QueueEntry }> {
-    // Mutex check
-    if (this.processingThreads.has(threadId)) {
+  private async tryExecuteNextAcrossUsers(
+    threadId: string,
+    catId: string,
+  ): Promise<{ started: boolean; entry?: QueueEntry }> {
+    const sk = QueueProcessor.slotKey(threadId, catId);
+    // Mutex check — per-slot
+    if (this.processingSlots.has(sk)) {
       return { started: false };
     }
 
     const entry = this.deps.queue.markProcessingAcrossUsers(threadId);
     if (!entry) return { started: false };
 
-    this.processingThreads.add(threadId);
+    const entryCat = entry.targetCats[0] ?? catId;
+    const entrySk = QueueProcessor.slotKey(threadId, entryCat);
+
+    // F108 P1-2 fix: check the *entry's* cat slot, not just the completing cat's slot
+    if (this.processingSlots.has(entrySk)) {
+      this.deps.queue.rollbackProcessing(threadId, entry.id);
+      return { started: false };
+    }
+
+    this.processingSlots.add(entrySk);
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
     void this.executeEntry(entry).then(
       (status) => {
-        this.processingThreads.delete(threadId);
-        this.onInvocationComplete(threadId, status).catch(() => {});
+        this.processingSlots.delete(entrySk);
+        this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
       },
       () => {
-        this.processingThreads.delete(threadId);
-        this.onInvocationComplete(threadId, 'failed').catch(() => {});
+        this.processingSlots.delete(entrySk);
+        this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
       },
     );
 
@@ -171,24 +228,33 @@ export class QueueProcessor {
     threadId: string,
     userId: string,
   ): Promise<{ started: boolean; entry?: QueueEntry }> {
-    // Mutex check
-    if (this.processingThreads.has(threadId)) {
+    // F108 P1-3 fix: peek at next entry's target cat to check slot mutex BEFORE marking processing.
+    // This prevents entries from getting stuck as 'processing' when the slot is busy.
+    const nextEntry = this.deps.queue.peekNextQueued(threadId, userId);
+    if (!nextEntry) return { started: false };
+
+    const entryCat = nextEntry.targetCats[0] ?? 'unknown';
+    const sk = QueueProcessor.slotKey(threadId, entryCat);
+
+    // Mutex check — per-slot (before mutating queue state)
+    if (this.processingSlots.has(sk)) {
       return { started: false };
     }
 
+    // Now safe to mark processing — slot is available
     const entry = this.deps.queue.markProcessing(threadId, userId);
     if (!entry) return { started: false };
 
-    this.processingThreads.add(threadId);
+    this.processingSlots.add(sk);
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
     void this.executeEntry(entry).then(
       (status) => {
-        this.processingThreads.delete(threadId);
-        this.onInvocationComplete(threadId, status).catch(() => {});
+        this.processingSlots.delete(sk);
+        this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
       },
       () => {
-        this.processingThreads.delete(threadId);
-        this.onInvocationComplete(threadId, 'failed').catch(() => {});
+        this.processingSlots.delete(sk);
+        this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
       },
     );
 
@@ -203,6 +269,7 @@ export class QueueProcessor {
   private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed'> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
     const { threadId, userId, content, targetCats, intent, messageId } = entry;
+    const primaryCat = targetCats[0] ?? 'unknown';
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
@@ -223,8 +290,8 @@ export class QueueProcessor {
       }
       invocationId = createResult.invocationId;
 
-      // 2. Start tracking
-      controller = invocationTracker.start(threadId, userId, targetCats);
+      // 2. Start tracking (slot key = primary target cat)
+      controller = invocationTracker.start(threadId, primaryCat, userId, targetCats);
 
       // 3. Backfill message ID
       if (messageId) {
@@ -238,7 +305,15 @@ export class QueueProcessor {
         status: 'running',
       });
 
-      // 5. Emit queue_updated (processing)
+      // 5. Broadcast invocation state for queued execution.
+      socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
+        threadId,
+        mode: intent,
+        targetCats,
+        invocationId,
+      });
+
+      // 6. Emit queue_updated (processing)
       socketManager.emitToUser(userId, 'queue_updated', {
         threadId,
         queue: queue.list(threadId, userId),
@@ -246,27 +321,50 @@ export class QueueProcessor {
       });
 
       // F098-D: Mark queued messages as delivered (set deliveredAt = now)
+      // F117: Collect full message objects for frontend bubble rendering
       const allMessageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? [])].filter(Boolean);
       const deliveredNow = Date.now();
       const deliveredIds: string[] = [];
+      const deliveredMessages: Array<{
+        id: string;
+        content: string;
+        catId: string | null;
+        timestamp: number;
+        mentions: readonly string[];
+        userId: string;
+        contentBlocks?: readonly unknown[];
+      }> = [];
       for (const mid of allMessageIds) {
         try {
           const result = await messageStore.markDelivered(mid, deliveredNow);
-          if (result) deliveredIds.push(mid);
+          if (result) {
+            deliveredIds.push(mid);
+            deliveredMessages.push({
+              id: result.id,
+              content: result.content,
+              catId: result.catId,
+              timestamp: result.timestamp,
+              mentions: result.mentions,
+              userId: result.userId,
+              contentBlocks: result.contentBlocks,
+            });
+          }
         } catch {
           /* best-effort: delivery timestamp is non-critical */
         }
       }
       // Notify frontend only for successfully persisted IDs (cloud P2: avoid phantom timestamps)
+      // F117: Include messages array so frontend can render user bubble on delivery
       if (deliveredIds.length > 0) {
         socketManager.emitToUser(userId, 'messages_delivered', {
           threadId,
           messageIds: deliveredIds,
           deliveredAt: deliveredNow,
+          messages: deliveredMessages,
         });
       }
 
-      // 6. Route execution
+      // 7. Route execution
       const cursorBoundaries = new Map<string, string>();
 
       // F039 remaining: queued image messages must be visible to cats.
@@ -299,12 +397,13 @@ export class QueueProcessor {
           ...(controller.signal ? { signal: controller.signal } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedForThread(tid),
           cursorBoundaries,
+          ...(invocationId ? { parentInvocationId: invocationId } : {}),
         },
       )) {
-        socketManager.broadcastAgentMessage(msg, threadId);
+        socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
       }
 
-      // 7. Ack cursors + mark succeeded
+      // 8. Ack cursors + mark succeeded
       await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
       await invocationRecordStore.update(invocationId, {
         status: 'succeeded',
@@ -339,7 +438,7 @@ export class QueueProcessor {
       return 'failed';
     } finally {
       // Always cleanup tracker + queue
-      invocationTracker.complete(threadId, controller);
+      invocationTracker.complete(threadId, primaryCat, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
       // Chain auto-dequeue is handled by tryExecuteNext* (calls onInvocationComplete
       // AFTER releasing processingThreads mutex to avoid self-blocking).

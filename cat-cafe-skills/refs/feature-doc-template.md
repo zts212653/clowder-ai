@@ -23,7 +23,7 @@ created: {YYYY-MM-DD}
 
 ## Why
 
-{一段话说清楚为什么要做。team experience如有请引用。}
+{一段话说清楚为什么要做。铲屎官原话如有请引用。}
 
 ## What
 

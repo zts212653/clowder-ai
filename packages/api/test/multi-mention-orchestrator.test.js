@@ -443,4 +443,50 @@ describe('MultiMentionOrchestrator', () => {
     const empty = orch.findActiveByThread('thread999');
     assert.equal(empty.length, 0);
   });
+
+  // --- F108: Slot-specific cancel (AC-A9) ---
+
+  test('abortBySlot aborts only dispatches for a specific cat (F108 AC-A9)', () => {
+    const req = orch.create({
+      threadId: 'thread-slot-cancel',
+      initiator,
+      callbackTo: initiator,
+      targets: [catA, catB],
+      question: 'test',
+      timeoutMinutes: 8,
+    });
+    orch.start(req.id);
+
+    // Register dispatches
+    const ctrlA = new AbortController();
+    const ctrlB = new AbortController();
+    orch.registerDispatch(req.id, catA, ctrlA);
+    orch.registerDispatch(req.id, catB, ctrlB);
+
+    // Abort only catA
+    const aborted = orch.abortBySlot('thread-slot-cancel', catA);
+    assert.equal(aborted, 1, 'should abort exactly 1 dispatch');
+    assert.equal(ctrlA.signal.aborted, true, 'catA controller aborted');
+    assert.equal(ctrlB.signal.aborted, false, 'catB controller untouched');
+  });
+
+  test('abortBySlot returns 0 when no dispatches match', () => {
+    const req = orch.create({
+      threadId: 'thread-no-match',
+      initiator,
+      callbackTo: initiator,
+      targets: [catA],
+      question: 'test',
+      timeoutMinutes: 8,
+    });
+    orch.start(req.id);
+
+    const ctrlA = new AbortController();
+    orch.registerDispatch(req.id, catA, ctrlA);
+
+    // Try to abort catB which is not a target
+    const aborted = orch.abortBySlot('thread-no-match', catB);
+    assert.equal(aborted, 0);
+    assert.equal(ctrlA.signal.aborted, false, 'catA should be untouched');
+  });
 });

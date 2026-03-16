@@ -15,6 +15,7 @@ const mockSetCatStatus = vi.fn();
 const mockClearCatStatuses = vi.fn();
 const mockSetCatInvocation = vi.fn();
 const mockSetMessageUsage = vi.fn();
+const mockRequestStreamCatchUp = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
 
@@ -45,6 +46,7 @@ const storeState = {
   clearCatStatuses: mockClearCatStatuses,
   setCatInvocation: mockSetCatInvocation,
   setMessageUsage: mockSetMessageUsage,
+  requestStreamCatchUp: mockRequestStreamCatchUp,
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
 

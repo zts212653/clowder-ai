@@ -9,7 +9,7 @@ created: 2026-02-26
 
 > 状态：已决策
 > 日期：2026-02-10
-> 决策者：team lead + Ragdoll
+> 决策者：铲屎官 + Ragdoll
 
 ## 背景
 

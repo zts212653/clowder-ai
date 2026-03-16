@@ -34,7 +34,7 @@ describe('P1-1: duplicate request must not abort active invocation', () => {
     const tracker = new InvocationTracker();
 
     // Start an active invocation
-    const controller1 = tracker.start('thread-1', 'user-1');
+    const controller1 = tracker.start('thread-1', 'opus', 'user-1');
     assert.equal(controller1.signal.aborted, false);
 
     // isDeleting check should NOT abort it
@@ -42,7 +42,7 @@ describe('P1-1: duplicate request must not abort active invocation', () => {
     assert.equal(controller1.signal.aborted, false);
 
     // But start() WOULD abort it
-    const controller2 = tracker.start('thread-1', 'user-1');
+    const controller2 = tracker.start('thread-1', 'opus', 'user-1');
     assert.equal(controller1.signal.aborted, true); // old one aborted
     assert.equal(controller2.signal.aborted, false); // new one active
   });
@@ -212,7 +212,7 @@ describe('Integration: dedup does not trigger tracker abort', () => {
       idempotencyKey: 'same-key',
     });
     assert.equal(first.outcome, 'created');
-    const controller = tracker.start('thread-1', 'user-1');
+    const controller = tracker.start('thread-1', 'opus', 'user-1');
     assert.equal(controller.signal.aborted, false);
 
     // Simulate duplicate request: dedup check → duplicate → no start needed
@@ -252,10 +252,15 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
     const messageStore = new MessageStore();
     const invocationRecordStore = new InvocationRecordStore();
 
-    // Mock tracker: isDeleting() → false, start() → pre-aborted controller (simulates race)
+    // Mock tracker: isDeleting() → false, tryStartThread()/start() → pre-aborted controller (simulates race)
     const raceTracker = {
       isDeleting: () => false,
       has: () => false,
+      tryStartThread: () => {
+        const ctrl = new AbortController();
+        ctrl.abort();
+        return ctrl;
+      },
       start: () => {
         const ctrl = new AbortController();
         ctrl.abort();

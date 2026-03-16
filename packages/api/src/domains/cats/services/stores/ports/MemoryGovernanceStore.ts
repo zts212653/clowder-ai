@@ -5,7 +5,7 @@
  * Phase 5.0 Step 2a: 发布门禁
  * - 首版内存 Map 实现，接口预留 Redis
  * - 状态迁移是纯函数可测
- * - 不做 24h 自动提醒（team lead决策）
+ * - 不做 24h 自动提醒（铲屎官决策）
  */
 
 export type GovernanceStatus = 'draft' | 'pending_review' | 'published' | 'archived';

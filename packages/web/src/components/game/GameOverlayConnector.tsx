@@ -12,6 +12,8 @@ interface GameOverlayConnectorProps {
   godScopeFilter: string;
 
   isGodView?: boolean;
+  isDetective?: boolean;
+  detectiveBoundName?: string;
   godSeats?: GodSeat[];
   godNightSteps?: GodNightStep[];
   hasTargetedAction?: boolean;
@@ -24,6 +26,7 @@ interface GameOverlayConnectorProps {
   onClose: () => void;
   onSelectTarget: (seatId: SeatId) => void;
   onGodScopeChange: (scope: string) => void;
+  onGodAction?: (action: string) => void;
   onVote: () => void;
   onSpeak: (content: string) => void;
   onConfirmAction: () => void;
@@ -37,6 +40,8 @@ export function GameOverlayConnector({
   selectedTarget,
   godScopeFilter,
   isGodView,
+  isDetective,
+  detectiveBoundName,
   godSeats,
   godNightSteps,
   hasTargetedAction,
@@ -48,6 +53,7 @@ export function GameOverlayConnector({
   onClose,
   onSelectTarget,
   onGodScopeChange,
+  onGodAction,
   onVote,
   onSpeak,
   onConfirmAction,
@@ -62,6 +68,8 @@ export function GameOverlayConnector({
       selectedTarget={selectedTarget}
       godScopeFilter={godScopeFilter}
       isGodView={isGodView}
+      isDetective={isDetective}
+      detectiveBoundName={detectiveBoundName}
       godSeats={godSeats}
       godNightSteps={godNightSteps}
       hasTargetedAction={hasTargetedAction}
@@ -73,6 +81,7 @@ export function GameOverlayConnector({
       onClose={onClose}
       onSelectTarget={onSelectTarget}
       onGodScopeChange={onGodScopeChange}
+      onGodAction={onGodAction}
       onVote={onVote}
       onSpeak={onSpeak}
       onConfirmAction={onConfirmAction}

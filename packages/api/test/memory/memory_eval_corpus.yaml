@@ -85,3 +85,14 @@ queries:
     query: "auto guardian SOP"
     expected_anchors: [F073]
     note: "F073 feature spec title: SOP Auto-Guardian"
+
+  # --- Phase C: semantic cases (lexical might miss, embedding should catch) ---
+  - id: S-01
+    query: "记忆组件怎么存储"
+    expected_anchors: [F102]
+    note: "Chinese query for memory storage — needs semantic match"
+
+  - id: S-02
+    query: "how does the cat communication work"
+    expected_anchors: [F088]
+    note: "English paraphrase — FTS might miss, embedding should catch"

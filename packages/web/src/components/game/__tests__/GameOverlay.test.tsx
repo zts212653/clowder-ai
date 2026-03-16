@@ -66,7 +66,7 @@ describe('GameOverlay', () => {
   it('renders TopBar with phase info', () => {
     const html = render(makeView());
     expect(html).toContain('data-testid="top-bar"');
-    expect(html).toContain('day_discuss');
+    expect(html).toContain('白天讨论');
   });
 
   it('renders PlayerGrid with seats', () => {
@@ -125,5 +125,23 @@ describe('GameOverlay', () => {
   it('renders PhaseTimeline', () => {
     const html = render(makeView());
     expect(html).toContain('data-testid="phase-timeline"');
+  });
+
+  it('renders detective mode with GodInspector and indicator', () => {
+    const html = render(
+      makeView({ config: { timeoutMs: 120000, voiceMode: false, humanRole: 'detective', detectiveSeatId: 'P1' } }),
+      { isDetective: true, detectiveBoundName: '宪宪' },
+    );
+    expect(html).toContain('data-testid="god-inspector"');
+    expect(html).toContain('data-testid="detective-indicator"');
+    expect(html).toContain('绑定: 宪宪');
+  });
+
+  it('detective mode hides god action buttons', () => {
+    const html = render(
+      makeView({ config: { timeoutMs: 120000, voiceMode: false, humanRole: 'detective', detectiveSeatId: 'P1' } }),
+      { isDetective: true, gameStatus: 'playing' },
+    );
+    expect(html).not.toContain('data-testid="god-actions"');
   });
 });

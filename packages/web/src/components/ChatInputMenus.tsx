@@ -132,7 +132,7 @@ export function ChatInputMenus({
                     (e.target as HTMLImageElement).style.display = 'none';
                   }}
                 />
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold" style={{ color: opt.color }}>
                     {opt.label}
                   </div>

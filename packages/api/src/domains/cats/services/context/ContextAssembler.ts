@@ -8,7 +8,7 @@
 
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
-import type { StoredMessage } from '../stores/ports/MessageStore.js';
+import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 
 export interface ContextAssemblerOptions {
   /** Maximum number of recent messages to include (default: 20) */
@@ -36,11 +36,11 @@ const DEFAULT_MAX_TOTAL_TOKENS = 2000;
 
 /**
  * Get display name for a message sender.
- * catId === null → user ("team lead"), otherwise look up CAT_CONFIGS.
+ * catId === null → user ("铲屎官"), otherwise look up CAT_CONFIGS.
  * For variant cats (e.g. sonnet, opus-45), includes variantLabel to distinguish same-family members.
  */
 function getSenderName(catId: string | null): string {
-  if (catId === null) return 'team lead';
+  if (catId === null) return '铲屎官';
   const entry = catRegistry.tryGet(catId);
   const config = entry?.config ?? CAT_CONFIGS[catId];
   if (!config) return catId;
@@ -105,12 +105,15 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   // F8: token-based budget (maxTotalTokens preferred, maxTotalChars fallback for compat)
   const maxTotalTokens = options?.maxTotalTokens ?? options?.maxTotalChars ?? DEFAULT_MAX_TOTAL_TOKENS;
 
-  if (messages.length === 0) {
+  // F117: exclude undelivered messages (queued/canceled) from prompt context
+  const deliveredMessages = messages.filter(isDelivered);
+
+  if (deliveredMessages.length === 0) {
     return { contextText: '', messageCount: 0, estimatedTokens: 0 };
   }
 
   // Take the most recent N messages (messages are already chronological from store)
-  const recent = messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
+  const recent = deliveredMessages.length > maxMessages ? deliveredMessages.slice(-maxMessages) : deliveredMessages;
 
   // Format all messages, then apply token budget from most-recent backward
   const formatted = recent.map((m) => formatMessage(m, { truncate: maxContentLength }));

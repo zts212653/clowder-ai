@@ -1,10 +1,18 @@
 // F102: IIndexBuilder — scan docs, parse frontmatter, build/rebuild evidence index
 
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { ConsistencyReport, EvidenceItem, EvidenceKind, IIndexBuilder, RebuildResult } from './interfaces.js';
+import type {
+  ConsistencyReport,
+  EvidenceItem,
+  EvidenceKind,
+  IEmbeddingService,
+  IIndexBuilder,
+  RebuildResult,
+} from './interfaces.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import type { VectorStore } from './VectorStore.js';
 
 const KIND_DIRS: Record<string, EvidenceKind> = {
   features: 'feature',
@@ -26,7 +34,12 @@ export class IndexBuilder implements IIndexBuilder {
   constructor(
     private readonly store: SqliteEvidenceStore,
     private readonly docsRoot: string,
+    private embedDeps?: { embedding: IEmbeddingService; vectorStore: VectorStore },
   ) {}
+
+  setEmbedDeps(deps: { embedding: IEmbeddingService; vectorStore: VectorStore }): void {
+    this.embedDeps = deps;
+  }
 
   async rebuild(options?: { force?: boolean }): Promise<RebuildResult> {
     const start = Date.now();
@@ -35,6 +48,7 @@ export class IndexBuilder implements IIndexBuilder {
 
     const files = this.discoverFiles();
     const currentAnchors = new Set<string>();
+    const indexedItems: EvidenceItem[] = [];
 
     for (const file of files) {
       const parsed = this.parseFile(file.path);
@@ -55,30 +69,37 @@ export class IndexBuilder implements IIndexBuilder {
       }
 
       // Kind-priority guard: don't let lower-priority docs overwrite higher-priority ones
+      // BUT: if the existing owner's source file no longer exists on disk, allow takeover
       const existing = await this.store.getByAnchor(parsed.anchor);
       if (existing) {
         const existingPriority = KIND_PRIORITY[existing.kind] ?? 0;
         const newPriority = KIND_PRIORITY[parsed.kind] ?? 0;
-        if (newPriority < existingPriority) {
+        const existingFileExists = existing.sourcePath ? existsSync(join(this.docsRoot, existing.sourcePath)) : false;
+        if (newPriority < existingPriority && existingFileExists) {
           skipped++;
           continue;
         }
       }
 
       await this.store.upsert([parsed]);
+      indexedItems.push(parsed);
       indexed++;
     }
 
     // Remove stale anchors that no longer exist on disk
     const db = this.store.getDb();
     const allAnchors = db.prepare('SELECT anchor FROM evidence_docs').all() as Array<{ anchor: string }>;
-    let _removed = 0;
+    const removedAnchors: string[] = [];
     for (const row of allAnchors) {
       if (!currentAnchors.has(row.anchor)) {
         await this.store.deleteByAnchor(row.anchor);
-        _removed++;
+        this.embedDeps?.vectorStore.delete(row.anchor);
+        removedAnchors.push(row.anchor);
       }
     }
+
+    // Phase C: generate embeddings for indexed items
+    await this.embedIndexedItems(indexedItems);
 
     return { docsIndexed: indexed, docsSkipped: skipped, durationMs: Date.now() - start };
   }
@@ -99,7 +120,8 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
-    // Pass 1: deletions
+    // Pass 1: deletions (P1: sync vector deletion) + backfill from candidate docs
+    const deletedAnchors: string[] = [];
     for (const filePath of toDelete) {
       const relPath = relative(this.docsRoot, filePath);
       const db = this.store.getDb();
@@ -108,10 +130,31 @@ export class IndexBuilder implements IIndexBuilder {
         | undefined;
       if (row) {
         await this.store.deleteByAnchor(row.anchor);
+        this.embedDeps?.vectorStore.delete(row.anchor);
+        deletedAnchors.push(row.anchor);
       }
     }
 
-    // Pass 2: upserts (with kind-priority guard)
+    // Backfill: for each deleted anchor, scan for remaining docs that claim it
+    if (deletedAnchors.length > 0) {
+      const allFiles = this.discoverFiles();
+      for (const anchor of deletedAnchors) {
+        const candidates = allFiles
+          .map((f) => this.parseFile(f.path))
+          .filter((p): p is EvidenceItem => p !== null && p.anchor === anchor);
+        if (candidates.length > 0) {
+          // Pick highest-priority candidate
+          candidates.sort((a, b) => (KIND_PRIORITY[b.kind] ?? 0) - (KIND_PRIORITY[a.kind] ?? 0));
+          const best = candidates[0]!;
+          // Only backfill if not already queued for upsert
+          if (!toUpsert.some((u) => u.parsed.anchor === anchor)) {
+            toUpsert.push({ filePath: join(this.docsRoot, best.sourcePath!), parsed: best });
+          }
+        }
+      }
+    }
+
+    // Pass 2: upserts (with kind-priority guard) + embed new/changed docs
     for (const { parsed } of toUpsert) {
       const existing = await this.store.getByAnchor(parsed.anchor);
       if (existing) {
@@ -122,6 +165,15 @@ export class IndexBuilder implements IIndexBuilder {
         }
       }
       await this.store.upsert([parsed]);
+      // Embed the new/changed doc
+      if (this.embedDeps?.embedding.isReady()) {
+        try {
+          const [vec] = await this.embedDeps.embedding.embed([`${parsed.title} ${parsed.summary ?? ''}`]);
+          this.embedDeps.vectorStore.upsert(parsed.anchor, vec);
+        } catch {
+          // fail-open: skip embedding on error
+        }
+      }
     }
   }
 
@@ -139,6 +191,44 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   // ── Private ──────────────────────────────────────────────────────
+
+  /**
+   * Batch-embed indexed items when embedding service is ready.
+   * AC-C6: check meta consistency — if model changed, clearAll + re-embed all docs.
+   */
+  private async embedIndexedItems(items: EvidenceItem[]): Promise<void> {
+    if (!this.embedDeps?.embedding.isReady() || items.length === 0) return;
+
+    const { embedding, vectorStore } = this.embedDeps;
+
+    // Version anchor check: model/dim change → full re-embed
+    const consistency = vectorStore.checkMetaConsistency(embedding.getModelInfo());
+    let itemsToEmbed = items;
+    if (!consistency.consistent) {
+      vectorStore.clearAll();
+      // Re-embed ALL docs in store, not just newly indexed ones
+      const db = this.store.getDb();
+      const allDocs = db.prepare('SELECT anchor, title, summary FROM evidence_docs').all() as Array<{
+        anchor: string;
+        title: string;
+        summary: string | null;
+      }>;
+      itemsToEmbed = allDocs.map(
+        (d) => ({ anchor: d.anchor, title: d.title, summary: d.summary ?? undefined }) as EvidenceItem,
+      );
+    }
+
+    try {
+      const texts = itemsToEmbed.map((i) => `${i.title} ${i.summary ?? ''}`);
+      const vectors = await embedding.embed(texts);
+      for (let i = 0; i < itemsToEmbed.length; i++) {
+        vectorStore.upsert(itemsToEmbed[i].anchor, vectors[i]);
+      }
+      vectorStore.initMeta(embedding.getModelInfo());
+    } catch {
+      // fail-open: embedding errors don't block indexing
+    }
+  }
 
   private discoverFiles(): Array<{ path: string; kind: EvidenceKind }> {
     const results: Array<{ path: string; kind: EvidenceKind }> = [];

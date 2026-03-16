@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-03-13
+> 维护者：三猫 | 最后更新：2026-03-16
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -40,16 +40,19 @@ created: 2026-02-26
 | F091 | Signal Study Mode — 信号学习伴侣 | in-progress | Ragdoll | internal | [F091](features/F091-signal-study-mode.md) |
 | F092 | Cats & U 语音陪伴体验 — hands-free 语音交互 | spec | Ragdoll | internal | [F092](features/F092-voice-companion-experience.md) |
 | F093 | Cats & U 陪伴式共创世界引擎 — 万物有灵 | spec | Ragdoll | internal | [F093](features/F093-cats-and-u-world-engine.md) |
-| F095 | Thread Sidebar 导航体验升级 | in-progress | Ragdoll | internal | [F095](features/F095-sidebar-collapse-memory.md) |
 | F100 | Self-Evolution — 猫猫自我进化机制（行为层 + 知识对象化） | in-progress | Ragdoll | internal | [F100](features/F100-self-evolution.md) |
 | F102 | 记忆组件 Adapter 化重构 — IEvidenceStore + 本地索引 | in-progress | Ragdoll | internal | [F102](features/F102-memory-adapter-refactor.md) |
-| F103 | 猫猫独立声线 — Per-Cat Voice Identity | spec | TBD | internal | [F103](features/F103-per-cat-voice-identity.md) |
 | F104 | 本地全感知升级 — Qwen Omni + VL MoE 替换管道 | spec | Ragdoll | internal | [F104](features/F104-local-omni-perception.md) |
-| F107 | 猫猫杀（脑门贴词）— 坏猫战术推理游戏 | spec | Ragdoll | internal | [F107](features/F107-headband-guess-game.md) |
-| F108 | Side-Dispatch — 同一 Thread 多猫并发执行 | spec | TBD | internal | [F108](features/F108-side-dispatch-concurrent-invocation.md) |
+| F107 | 脑门贴词 — 坏猫战术推理游戏 #1 | spec | Ragdoll | internal | [F107](features/F107-headband-guess-game.md) |
+| F108 | Side-Dispatch — 同一 Thread 多猫并发执行 | in-progress | Ragdoll | internal | [F108](features/F108-side-dispatch-concurrent-invocation.md) |
 | F109 | Message Actions 修复与增强 — 软删除/Branch/编辑/通知 | spec | Ragdoll | internal | [F109](features/F109-message-actions-overhaul.md) |
 | F110 | 训练营愿景引导增强 — CVO 需求挖掘 + SOP 显式加载 | spec | Ragdoll | internal | [F110](features/F110-bootcamp-vision-elicitation.md) |
 | F111 | Streaming TTS Chunker — 流式分句合成管线 | spec | Ragdoll | internal | [F111](features/F111-streaming-tts-chunker.md) |
 | F112 | Voice Playback Queue — 语音播放队列 + Intent 调度 | spec | Ragdoll | internal | [F112](features/F112-voice-playback-queue.md) |
 | F113 | Multi-Platform One-Click Deploy — 多平台一键部署 | spec | community | community [#14](https://github.com/zts212653/clowder-ai/issues/14) | [F113](features/F113-multi-platform-one-click-deploy.md) |
-| F114 | 喵约治理升级 — 四层架构 + Magic Words + Evidence Gate | spec | Ragdoll | internal | [F114](features/F114-governance-magic-words.md) |
+| F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
+| F118 | CLI Liveness Watchdog — CLI 进程活性守卫 + Follow-up Hardening | in-progress | Ragdoll + Maine Coon | internal | [F118](features/F118-cli-liveness-watchdog.md) |
+| F121 | Community Frontend UX Triage — 社区前端交互体验侦查与分诊 | in-progress | 三猫 | community [#28](https://github.com/zts212653/clowder-ai/issues/28) [#89](https://github.com/zts212653/clowder-ai/issues/89) [#27](https://github.com/zts212653/clowder-ai/issues/27) [#22](https://github.com/zts212653/clowder-ai/issues/22) [#88](https://github.com/zts212653/clowder-ai/issues/88) [#16](https://github.com/zts212653/clowder-ai/issues/16) | [F121](features/F121-community-frontend-ux-triage.md) |
+| F122 | 执行通道统一 — A2A/multi_mention 入 Dispatch Queue | in-progress | Ragdoll | internal | [F122](features/F122-unified-dispatch-queue.md) |
+| F123 | Bubble Runtime Correctness — 消息身份契约 + Reconcile 状态机 | in-progress | Maine Coon | internal | [F123](features/F123-bubble-runtime-correctness.md) |
+| F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |

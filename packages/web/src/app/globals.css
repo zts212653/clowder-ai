@@ -98,6 +98,76 @@ body {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
 
+/* === F101 AC-D5: Werewolf Cute Theme (狼人猫猫风) === */
+/* Token-only layer: components consume these vars, no hardcoded colors */
+[data-theme="werewolf-cute"] {
+  /* Backgrounds */
+  --ww-bg-base: #0b1020; /* Moon Indigo — shell background */
+  --ww-bg-card: #2a2340; /* Grape Mist — card/panel surfaces */
+  --ww-bg-surface: #1a1835; /* Deep Grape — chat bubbles, input fields */
+  --ww-bg-topbar: #0d1428; /* Darker Indigo — top bar */
+
+  /* Text */
+  --ww-text-main: #e2e8f0; /* Soft white */
+  --ww-text-muted: #94a3b8; /* Slate gray */
+  --ww-text-dim: #64748b; /* Dim slate */
+
+  /* Accents */
+  --ww-accent-danger: #d45a6a; /* Claw Red — kill/vote/key actions */
+  --ww-accent-cute: #f2b7a8; /* Cat Peach — hover/avatar border/secondary */
+  --ww-accent-success: #8bd7c8; /* Moon Mint — guard/success */
+  --ww-accent-info: #e6c36a; /* Lantern Gold — divine/tips */
+
+  /* State indicators */
+  --ww-state-alive: var(--ww-accent-cute);
+  --ww-state-dead: #475569;
+  --ww-state-speaking: var(--ww-accent-info);
+  --ww-state-active: var(--ww-accent-cute);
+
+  /* Role colors (God View event flow) */
+  --ww-role-wolf: var(--ww-accent-danger);
+  --ww-role-seer: var(--ww-accent-info);
+  --ww-role-witch: #c084fc; /* Soft purple */
+  --ww-role-guard: var(--ww-accent-success);
+  --ww-role-villager: var(--ww-text-muted);
+
+  /* Faction colors (result screen) */
+  --ww-faction-wolf: var(--ww-accent-danger);
+  --ww-faction-village: var(--ww-accent-success);
+
+  /* Translucent variants (explicit, no /opacity modifier) */
+  --ww-danger-soft: rgba(212, 90, 106, 0.1); /* Claw Red 10% — wolf row bg */
+  --ww-info-soft: rgba(230, 195, 106, 0.3); /* Lantern Gold 30% — MVP border */
+  --ww-subtle-soft: rgba(242, 183, 168, 0.08); /* Cat Peach 8% — table dividers */
+  --ww-cute-soft: rgba(242, 183, 168, 0.1); /* Cat Peach 10% — selected preset */
+  --ww-base-overlay: rgba(11, 16, 32, 0.9); /* Moon Indigo 90% — modal backdrop */
+
+  /* Borders & shadows */
+  --ww-border-subtle: rgba(242, 183, 168, 0.15); /* Cat Peach 15% */
+  --ww-border-active: rgba(242, 183, 168, 0.4); /* Cat Peach 40% */
+  --ww-shadow-glow: rgba(212, 90, 106, 0.25); /* Claw Red glow */
+}
+
+/* Day phase: same hues, brightness +10%, saturation -8% */
+[data-theme="werewolf-cute"][data-phase="day"] {
+  --ww-bg-base: #111828;
+  --ww-bg-card: #302a4a;
+  --ww-bg-surface: #201e40;
+  --ww-bg-topbar: #141a30;
+  --ww-text-main: #f1f5f9;
+  --ww-border-subtle: rgba(242, 183, 168, 0.2);
+}
+
+/* Night phase: slightly deeper, cooler */
+[data-theme="werewolf-cute"][data-phase="night"] {
+  --ww-bg-base: #080c18;
+  --ww-bg-card: #221d38;
+  --ww-bg-surface: #151230;
+  --ww-bg-topbar: #0a0e1e;
+  --ww-accent-cute: #e8a99a; /* Slightly muted peach at night */
+  --ww-shadow-glow: rgba(212, 90, 106, 0.35); /* Stronger red glow */
+}
+
 /* F097: Dark-theme table overrides for CLI output + Thinking bubbles */
 .cli-output-md thead {
   background: rgba(255, 255, 255, 0.06);

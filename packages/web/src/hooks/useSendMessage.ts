@@ -23,6 +23,8 @@ export function useSendMessage(activeThreadId?: string) {
   const {
     addMessage,
     addMessageToThread,
+    removeMessage,
+    removeThreadMessage,
     replaceThreadMessageId,
     setLoading,
     setHasActiveInvocation,
@@ -92,11 +94,14 @@ export function useSendMessage(activeThreadId?: string) {
           })),
         ];
       }
-      // Write optimistic message to the target thread
-      if (threadId !== activeThread) {
-        addMessageToThread(threadId, userMsg);
-      } else {
-        addMessage(userMsg);
+      // F117: Queue sends skip optimistic insert — bubble appears only on messages_delivered
+      // (prevents queued message from showing in chat timeline before delivery)
+      if (!isQueueSend) {
+        if (threadId !== activeThread) {
+          addMessageToThread(threadId, userMsg);
+        } else {
+          addMessage(userMsg);
+        }
       }
 
       // F39: Queue sends don't flip loading/invocation flags — cat is already running,
@@ -110,6 +115,30 @@ export function useSendMessage(activeThreadId?: string) {
           setHasActiveInvocation(true);
         }
       }
+
+      const reconcileQueuedResponse = (
+        body: { status?: string; userMessageId?: string; gameThreadId?: string } | null,
+      ) => {
+        // Game started in independent thread — remove optimistic message from source
+        // and clear loading/invocation flags (game runs in its own thread, source is idle).
+        // Always use thread-scoped APIs here: by the time the HTTP response arrives,
+        // the user may have navigated to the game thread (via game:thread_created),
+        // so the source thread may no longer be active. Thread-scoped APIs check
+        // currentThreadId at call-time, correctly targeting flat or background state.
+        if (body?.status === 'game_started' && body.gameThreadId) {
+          removeThreadMessage(threadId, optimisticMessageId);
+          setThreadLoading(threadId, false);
+          setThreadHasActiveInvocation(threadId, false);
+          return true;
+        }
+        if (body?.status !== 'queued' || isQueueSend) return false;
+        if (threadId !== activeThread) {
+          removeThreadMessage(threadId, optimisticMessageId);
+        } else {
+          removeMessage(optimisticMessageId);
+        }
+        return true;
+      };
 
       try {
         const deliveryModePayload = deliveryMode ? { deliveryMode } : {};
@@ -138,7 +167,7 @@ export function useSendMessage(activeThreadId?: string) {
             throw new Error(body?.detail ?? `Server error: ${res.status}`);
           }
           const body = await res.json().catch(() => null);
-          if (body?.userMessageId) {
+          if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
         } else {
@@ -158,7 +187,7 @@ export function useSendMessage(activeThreadId?: string) {
             throw new Error(body?.detail ?? `Server error: ${res.status}`);
           }
           const body = await res.json().catch(() => null);
-          if (body?.userMessageId) {
+          if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
         }
@@ -200,6 +229,8 @@ export function useSendMessage(activeThreadId?: string) {
       processCommand,
       addMessage,
       addMessageToThread,
+      removeMessage,
+      removeThreadMessage,
       replaceThreadMessageId,
       setLoading,
       setHasActiveInvocation,

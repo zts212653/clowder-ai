@@ -2,13 +2,21 @@
  * Game API Routes (F101)
  *
  * CRUD for game lifecycle within a thread.
+ * Includes high-level POST /api/game/start for frontend-driven game creation.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { getAllCatIdsFromConfig } from '../config/cat-config-loader.js';
+import { GameAutoPlayer } from '../domains/cats/services/game/GameAutoPlayer.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
 import { GameViewBuilder } from '../domains/cats/services/game/GameViewBuilder.js';
+import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { resolveUserId } from '../utils/request-identity.js';
+import { buildGameSeats, sanitizeCatIds } from './game-command-interceptor.js';
 
 interface SocketLike {
   broadcastToRoom(room: string, event: string, data: unknown): void;
@@ -18,6 +26,8 @@ interface SocketLike {
 export interface GameRoutesOptions {
   gameStore: IGameStore;
   socketManager: SocketLike;
+  threadStore: IThreadStore;
+  messageStore: IMessageStore;
 }
 
 const seatSchema = z.object({
@@ -97,11 +107,132 @@ const actionSchema = z.object({
   params: z.record(z.unknown()).optional(),
 });
 
+/** Valid board preset player counts */
+const VALID_PLAYER_COUNTS = [6, 7, 8, 9, 10, 12] as const;
+const DEFAULT_PLAYER_COUNT = 7;
+
+const gameStartSchema = z.object({
+  gameType: z.enum(['werewolf']),
+  humanRole: z.enum(['player', 'god-view', 'detective']),
+  playerCount: z.number().int().min(6).max(12).default(DEFAULT_PLAYER_COUNT),
+  catIds: z.array(z.string().min(1)).min(1),
+  voiceMode: z.boolean().default(false),
+  detectiveCatId: z.string().min(1).optional(),
+});
+
 export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opts) => {
-  const { gameStore, socketManager } = opts;
+  const { gameStore, socketManager, threadStore, messageStore } = opts;
   const orchestrator = new GameOrchestrator({ gameStore, socketManager });
 
-  // POST /api/threads/:threadId/game — Start a game
+  // POST /api/game/start — High-level game creation (frontend-driven)
+  // Accepts structured payload, creates game thread, builds seats, starts game,
+  // returns { gameId, gameThreadId } for immediate navigation.
+  app.post('/api/game/start', async (request, reply) => {
+    const parseResult = gameStartSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parseResult.error.issues };
+    }
+
+    const { gameType, humanRole, playerCount, catIds: rawCatIds, voiceMode, detectiveCatId } = parseResult.data;
+
+    // Detective mode requires detectiveCatId
+    if (humanRole === 'detective' && !detectiveCatId) {
+      reply.status(400);
+      return { error: 'detectiveCatId is required for detective mode' };
+    }
+
+    // Sanitize catIds against known config
+    const allCatIds = getAllCatIdsFromConfig();
+    const sanitized = sanitizeCatIds(rawCatIds, allCatIds);
+    const catIds = sanitized.length > 0 ? sanitized : [...allCatIds];
+
+    // Clamp to valid preset
+    const clampedCount = VALID_PLAYER_COUNTS.reduce((best, preset) => (preset <= playerCount ? preset : best));
+
+    // Resolve user identity (matches messages.ts behavior)
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Could not determine user identity' };
+    }
+    const seats = buildGameSeats({ humanRole, userId, catIds, playerCount: clampedCount });
+
+    // Validate detectiveCatId maps to an actual seat BEFORE creating any persistent resources
+    let resolvedDetectiveSeatId: import('@cat-cafe/shared').SeatId | undefined;
+    if (humanRole === 'detective' && detectiveCatId) {
+      const seat = seats.find((s) => s.actorId === detectiveCatId);
+      if (!seat) {
+        reply.status(400);
+        return { error: 'detectiveCatId does not match any seat in this game' };
+      }
+      resolvedDetectiveSeatId = seat.seatId;
+    }
+
+    // Create independent game thread
+    const gameTitle = `狼人杀 — ${clampedCount}人局`;
+    const gameThread = await threadStore.create(userId, gameTitle, `games/${gameType}`);
+    const gameThreadId = gameThread.id;
+
+    // Store a system message in the game thread for context
+    await messageStore.append({
+      userId,
+      catId: null,
+      content: `🎮 ${gameTitle} 开始`,
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: gameThreadId,
+    });
+
+    // WerewolfLobby for role assignment, then orchestrator for persistence + broadcast
+    const lobby = new WerewolfLobby();
+    const lobbyRuntime = lobby.createLobby({
+      threadId: gameThreadId,
+      playerCount: clampedCount,
+      players: seats.map((s) => ({ actorType: s.actorType, actorId: s.actorId })),
+    });
+    lobby.startGame(lobbyRuntime);
+
+    let gameRuntime;
+    try {
+      gameRuntime = await orchestrator.startGame({
+        threadId: gameThreadId,
+        definition: lobbyRuntime.definition,
+        seats: lobbyRuntime.seats,
+        config: {
+          timeoutMs: 30000,
+          voiceMode,
+          humanRole,
+          ...(humanRole === 'player' ? { humanSeat: 'P1' as const } : {}),
+          ...(resolvedDetectiveSeatId ? { detectiveSeatId: resolvedDetectiveSeatId } : {}),
+          ...(humanRole !== 'player' ? { observerUserId: userId } : {}),
+        },
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('already has an active game')) {
+        reply.status(409);
+        return { error: message };
+      }
+      reply.status(500);
+      return { error: message };
+    }
+
+    // Broadcast scoped views so frontend receives game:state_update
+    await orchestrator.broadcastGameState(gameRuntime.gameId);
+
+    // Start AI auto-play loop
+    const autoPlayer = new GameAutoPlayer({ gameStore, orchestrator });
+    autoPlayer.startLoop(gameRuntime.gameId);
+
+    return {
+      status: 'game_started',
+      gameId: gameRuntime.gameId,
+      gameThreadId,
+    };
+  });
+
+  // POST /api/threads/:threadId/game — Start a game (low-level, pre-built definition)
   app.post<{ Params: { threadId: string } }>('/api/threads/:threadId/game', async (request, reply) => {
     const parseResult = startGameSchema.safeParse(request.body);
     if (!parseResult.success) {
@@ -149,6 +280,14 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       if (runtime.config.humanRole === 'god-view') {
         // God-view mode: allow god or any seat
         viewer = requestedViewer ?? 'god';
+      } else if (runtime.config.humanRole === 'detective') {
+        // Detective mode: locked to detective:{boundSeatId}
+        const boundSeat = runtime.config.detectiveSeatId;
+        if (!boundSeat) {
+          reply.status(400);
+          return { error: 'detective mode requires detectiveSeatId in game config' };
+        }
+        viewer = `detective:${boundSeat}`;
       } else {
         // Player mode: lock to humanSeat, reject god/other-seat requests
         const humanSeat = runtime.config.humanSeat;
@@ -163,7 +302,10 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
         viewer = humanSeat;
       }
 
-      const view = GameViewBuilder.buildView(runtime, viewer as import('@cat-cafe/shared').SeatId | 'god');
+      const view = GameViewBuilder.buildView(
+        runtime,
+        viewer as import('@cat-cafe/shared').SeatId | 'god' | `detective:${string}`,
+      );
       return view;
     },
   );
@@ -183,10 +325,10 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       return { error: 'No active game in this thread' };
     }
 
-    // God-view cannot submit actions
-    if (runtime.config.humanRole === 'god-view') {
+    // God-view and detective cannot submit actions
+    if (runtime.config.humanRole === 'god-view' || runtime.config.humanRole === 'detective') {
       reply.status(403);
-      return { error: 'god-view mode: actions are not allowed' };
+      return { error: `${runtime.config.humanRole} mode: actions are not allowed` };
     }
 
     const { seatId, actionName, targetSeat, params } = parseResult.data;
@@ -207,6 +349,48 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       if (params) action.params = params;
       await orchestrator.handlePlayerAction(runtime.gameId, seatId, action);
       return { ok: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      reply.status(400);
+      return { error: message };
+    }
+  });
+
+  // POST /api/threads/:threadId/game/god-action — God actions (pause/resume/skip)
+  app.post<{ Params: { threadId: string } }>('/api/threads/:threadId/game/god-action', async (request, reply) => {
+    const { threadId } = request.params;
+    const runtime = await gameStore.getActiveGame(threadId);
+    if (!runtime) {
+      reply.status(404);
+      return { error: 'No active game in this thread' };
+    }
+
+    if (runtime.config.humanRole !== 'god-view') {
+      reply.status(403);
+      return { error: 'God actions require god-view mode' };
+    }
+
+    const body = request.body as { action?: string };
+    if (!body?.action) {
+      reply.status(400);
+      return { error: 'Missing action field' };
+    }
+
+    try {
+      switch (body.action) {
+        case 'pause':
+          await orchestrator.pauseGame(runtime.gameId);
+          return { ok: true, action: 'pause' };
+        case 'resume':
+          await orchestrator.resumeGame(runtime.gameId);
+          return { ok: true, action: 'resume' };
+        case 'skip_phase':
+          await orchestrator.skipPhase(runtime.gameId);
+          return { ok: true, action: 'skip_phase' };
+        default:
+          reply.status(400);
+          return { error: `Unknown god action: ${body.action}` };
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       reply.status(400);

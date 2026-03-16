@@ -113,6 +113,12 @@ export function isValidRichBlock(b: unknown): b is RichBlock {
       }
       return true;
     }
+    case 'html_widget': {
+      if (typeof obj.html !== 'string' || (obj.html as string).trim().length === 0) return false;
+      if ('title' in obj && typeof obj.title !== 'string') return false;
+      if ('height' in obj && typeof obj.height !== 'number') return false;
+      return true;
+    }
     default:
       return false;
   }

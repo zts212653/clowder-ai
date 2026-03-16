@@ -61,7 +61,7 @@ function resolveCatById(getCatById: CatLookup, catId: string): CatData | undefin
 function getSenderLabel(msg: ChatMessageData, resolveCat: (catId: string) => CatData | undefined): string {
   const catId = msg.catId;
   const isOwner = msg.type === 'user' && !catId;
-  if (isOwner) return 'team lead';
+  if (isOwner) return '铲屎官';
 
   const isAssistant = msg.type === 'assistant' || (msg.type === 'user' && !!catId);
   if (!isAssistant) return '系统';

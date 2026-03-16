@@ -231,3 +231,41 @@ describe('A2A Chain Integration (AgentRouter end-to-end)', () => {
     assert.equal(handoffs.length, 0, 'no A2A handoffs');
   });
 });
+
+// --- F122 AC-A5/A6: queue behavior regression coverage ---
+// These tests verify that queue gating behaves correctly during A2A activity.
+// Primary coverage lives in dedicated test files; this section cross-references
+// them as explicit regression anchors for F122.
+
+describe('F122 regression: queue behavior during active invocations (AC-A5, AC-A6)', () => {
+  test('AC-A5: user message during A2A must be queued (cross-ref: queue-gate-thread-level)', async () => {
+    // Core test: queue-gate-thread-level.test.js → "cat B active → message to cat A queued"
+    // This test verifies the same invariant via WorklistRegistry: when a worklist
+    // is active (A2A chain running), the thread-level tracker check returns true,
+    // so messages go through the queue path.
+    const { registerWorklist, unregisterWorklist, hasWorklist } = await import(
+      '../../dist/domains/cats/services/agents/routing/WorklistRegistry.js'
+    );
+
+    const threadId = 'f122-regression-a5';
+    const entry = registerWorklist(threadId, ['opus', 'codex'], 10);
+    try {
+      // While worklist is active, hasWorklist should be true
+      assert.equal(hasWorklist(threadId), true, 'worklist active during A2A chain');
+      // This is the signal that messages.ts uses to decide queue vs immediate
+    } finally {
+      unregisterWorklist(threadId, entry);
+    }
+  });
+
+  test('AC-A6: pushToWorklist structured reason enables safe fallback (cross-ref: worklist-registry)', async () => {
+    // Core test: worklist-registry.test.js → F122 PushResult structured reason tests
+    // This test verifies that pushToWorklist returns actionable reasons that allow
+    // enqueueA2ATargets (callback-a2a-trigger.ts) to make correct fallback decisions.
+    const { pushToWorklist } = await import('../../dist/domains/cats/services/agents/routing/WorklistRegistry.js');
+
+    const result = pushToWorklist('nonexistent-f122', ['opus']);
+    assert.deepEqual(result.added, [], 'no targets added when worklist missing');
+    assert.equal(result.reason, 'not_found', 'reason tells caller to fall back');
+  });
+});

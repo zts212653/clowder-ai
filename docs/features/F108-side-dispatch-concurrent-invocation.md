@@ -8,7 +8,7 @@ created: 2026-03-12
 
 # F108: Side-Dispatch — 同一 Thread 多猫并发执行
 
-> **Status**: spec | **Owner**: TBD | **Priority**: P1
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -27,7 +27,7 @@ team experience（2026-03-12）：
 
 ## What
 
-### Phase A: 运行时并发基座
+### Phase A: 运行时并发基座 ✅
 
 **核心改动**：InvocationTracker 从 per-thread 单锁改为 per-thread-per-cat 多槽。
 
@@ -78,12 +78,12 @@ team lead发消息有两种模式：
 
 ## Acceptance Criteria
 
-### Phase A（运行时并发基座）
-- [ ] AC-A1: 同一 thread 中，两只不同的猫可以有并发 invocation，互不 abort
-- [ ] AC-A2: 旁路 invocation 的消息在 thread 中对所有参与者可见
-- [ ] AC-A3: 同一 catId 在同一 thread 仍保持单锁语义（不能自己和自己并发）
-- [ ] AC-A4: InvocationRecord 存储结构支持 per-thread 多条并发记录
-- [ ] AC-A5: 现有 multi_mention 等编排工具继续正常工作（向后兼容）
+### Phase A（运行时并发基座）✅
+- [x] AC-A1: 同一 thread 中，两只不同的猫可以有并发 invocation，互不 abort
+- [x] AC-A2: 旁路 invocation 的消息在 thread 中对所有参与者可见
+- [x] AC-A3: 同一 catId 在同一 thread 仍保持单锁语义（不能自己和自己并发）
+- [x] AC-A4: InvocationRecord 存储结构支持 per-thread 多条并发记录
+- [x] AC-A5: 现有 multi_mention 等编排工具继续正常工作（向后兼容）
 
 ### Phase B（双模发送 UX）
 - [ ] AC-B1: 锁头按钮 → 猫选择器 → 悄悄话发送，不打断当前执行猫

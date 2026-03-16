@@ -21,6 +21,33 @@ const PHASE_ACTING_ROLE: Record<string, string> = {
   day_hunter: 'hunter',
 };
 
+/** Role → Chinese display name */
+export const ROLE_NAMES_ZH: Record<string, string> = {
+  wolf: '狼人',
+  seer: '预言家',
+  witch: '女巫',
+  hunter: '猎人',
+  guard: '守卫',
+  villager: '村民',
+  idiot: '白痴',
+};
+
+/** Phase → Chinese display name */
+export const PHASE_NAMES_ZH: Record<string, string> = {
+  night_guard: '守卫守护',
+  night_wolf: '狼人袭击',
+  night_seer: '预言家查验',
+  night_witch: '女巫行动',
+  night_resolve: '夜晚结算',
+  day_announce: '天亮公告',
+  day_last_words: '遗言时间',
+  day_hunter: '猎人开枪',
+  day_discuss: '白天讨论',
+  day_vote: '投票放逐',
+  day_pk: 'PK 发言',
+  day_exile: '放逐结算',
+};
+
 /** Role → night action label mapping */
 const ROLE_ACTION_LABELS: Record<string, string> = {
   seer: '查验',
@@ -74,6 +101,9 @@ export interface GameStoreState {
   mySeatId: SeatId | null;
   myRole: string | null;
   isGodView: boolean;
+  isDetective: boolean;
+  /** Display name of the cat bound in detective mode */
+  detectiveBoundName: string | null;
   myActionLabel: string | null;
   myRoleIcon: string | null;
   myActionHint: string | null;
@@ -98,13 +128,17 @@ function deriveIsNight(phase: string): boolean {
 }
 
 function deriveGodSeats(view: GameView): GodSeat[] {
-  return view.seats.map((s) => ({
-    seatId: s.seatId,
-    role: s.role ?? '?',
-    faction: s.faction,
-    alive: s.alive,
-    status: s.alive ? 'alive' : 'dead',
-  }));
+  return view.seats.map((s) => {
+    const raw = s.role ?? '?';
+    const zh = ROLE_NAMES_ZH[raw];
+    return {
+      seatId: s.seatId,
+      role: zh ? `${zh} ${raw}` : raw,
+      faction: s.faction,
+      alive: s.alive,
+      status: s.alive ? 'alive' : 'dead',
+    };
+  });
 }
 
 function deriveGodNightSteps(view: GameView): GodNightStep[] {
@@ -155,6 +189,8 @@ const CLEAR_STATE = {
   mySeatId: null,
   myRole: null,
   isGodView: false,
+  isDetective: false,
+  detectiveBoundName: null,
   myActionLabel: null,
   myRoleIcon: null,
   myActionHint: null,
@@ -173,29 +209,40 @@ function deriveFromView(
 ): Omit<GameStoreState, 'setGameView' | 'clearGame' | 'setSelectedTarget' | 'setGodScopeFilter'> {
   const humanSeat = view.config.humanSeat ?? null;
   const isGodView = view.config.humanRole === 'god-view';
+  const isDetective = view.config.humanRole === 'detective';
   const mySeat = humanSeat ? view.seats.find((s) => s.seatId === humanSeat) : null;
   const myRole = mySeat?.role ?? null;
   const isNight = deriveIsNight(view.currentPhase);
+  const showInspector = isGodView || isDetective;
+
+  // Detective bound cat display name
+  const detectiveBoundName =
+    isDetective && view.config.detectiveSeatId
+      ? (view.seats.find((s) => s.seatId === view.config.detectiveSeatId)?.displayName ?? null)
+      : null;
 
   return {
     gameView: view,
     gameId,
     threadId,
-    isGameActive: view.status === 'playing' || view.status === 'lobby',
+    isGameActive:
+      view.status === 'playing' || view.status === 'lobby' || view.status === 'paused' || view.status === 'finished',
     isNight,
     selectedTarget: null,
     godScopeFilter: 'all',
     mySeatId: humanSeat,
     myRole,
     isGodView,
+    isDetective,
+    detectiveBoundName,
     myActionLabel: myRole ? (ROLE_ACTION_LABELS[myRole] ?? null) : null,
     myRoleIcon: myRole ? (ROLE_ICONS[myRole] ?? null) : null,
     myActionHint: deriveActionHint(myRole, isNight, view.currentPhase),
     currentActionName: PHASE_ACTION_MAP[view.currentPhase] ?? null,
-    hasTargetedAction: !isGodView && myRole != null && PHASE_ACTING_ROLE[view.currentPhase] === myRole,
+    hasTargetedAction: !isGodView && !isDetective && myRole != null && PHASE_ACTING_ROLE[view.currentPhase] === myRole,
     altActionName: view.currentPhase === 'night_witch' ? 'poison' : null,
-    godSeats: isGodView ? deriveGodSeats(view) : [],
-    godNightSteps: isGodView && isNight ? deriveGodNightSteps(view) : [],
+    godSeats: showInspector ? deriveGodSeats(view) : [],
+    godNightSteps: showInspector && isNight ? deriveGodNightSteps(view) : [],
   };
 }
 

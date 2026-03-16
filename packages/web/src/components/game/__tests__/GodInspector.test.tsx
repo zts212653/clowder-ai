@@ -33,7 +33,7 @@ function render(overrides: Partial<Parameters<typeof GodInspector>[0]> = {}): st
 describe('GodInspector', () => {
   it('renders seat matrix section', () => {
     const html = render();
-    expect(html).toContain('SEAT MATRIX');
+    expect(html).toContain('座位表');
     expect(html).toContain('data-testid="seat-matrix"');
   });
 
@@ -47,7 +47,7 @@ describe('GodInspector', () => {
   it('wolf seats have red background', () => {
     const html = render();
     const p3Match = html.match(/data-testid="matrix-P3"[^>]*class="([^"]+)"/);
-    expect(p3Match?.[1]).toContain('bg-[#2D1619]');
+    expect(p3Match?.[1]).toContain('bg-ww-danger-soft');
   });
 
   it('dead seats have reduced opacity', () => {
@@ -58,7 +58,7 @@ describe('GodInspector', () => {
 
   it('renders night timeline section', () => {
     const html = render();
-    expect(html).toContain('NIGHT TIMELINE');
+    expect(html).toContain('夜晚时间线');
     expect(html).toContain('data-testid="night-timeline"');
   });
 
@@ -72,7 +72,7 @@ describe('GodInspector', () => {
 
   it('renders scope filter tabs', () => {
     const html = render();
-    expect(html).toContain('SCOPE FILTER');
+    expect(html).toContain('阵营筛选');
     expect(html).toContain('data-testid="scope-all"');
     expect(html).toContain('data-testid="scope-wolves"');
     expect(html).toContain('data-testid="scope-seer"');
@@ -82,6 +82,23 @@ describe('GodInspector', () => {
   it('active scope tab is highlighted', () => {
     const html = render({ scopeFilter: 'all' });
     const allMatch = html.match(/data-testid="scope-all"[^>]*class="([^"]+)"/);
-    expect(allMatch?.[1]).toContain('bg-[#22D3EE]');
+    expect(allMatch?.[1]).toContain('bg-ww-danger');
+  });
+
+  it('shows detective indicator when isDetective is true', () => {
+    const html = render({ isDetective: true, detectiveBoundName: '宪宪' });
+    expect(html).toContain('data-testid="detective-indicator"');
+    expect(html).toContain('推理模式');
+    expect(html).toContain('绑定: 宪宪');
+  });
+
+  it('hides god actions in detective mode', () => {
+    const html = render({ isDetective: true, gameStatus: 'playing' });
+    expect(html).not.toContain('data-testid="god-actions"');
+  });
+
+  it('shows god actions in non-detective mode', () => {
+    const html = render({ gameStatus: 'playing' });
+    expect(html).toContain('data-testid="god-actions"');
   });
 });

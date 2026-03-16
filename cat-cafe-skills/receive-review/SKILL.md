@@ -26,9 +26,9 @@ triggers:
 | 类型 | 特征 | 处理 |
 |------|------|------|
 | **代码级** | bug / edge case / 性能 / 命名 | Red→Green 修复流程 |
-| **愿景级** | "这不是team lead要的" / "缺了多项目管理" / "UI 不可用" | STOP → 回读原始需求 → 升级team lead |
+| **愿景级** | "这不是铲屎官要的" / "缺了多项目管理" / "UI 不可用" | STOP → 回读原始需求 → 升级铲屎官 |
 
-> **愿景级反馈不能用代码 patch 修补设计问题。** 先对照team experience验证 reviewer 说得对吗；如确实偏离，升级team lead确认偏差范围，再重新设计。
+> **愿景级反馈不能用代码 patch 修补设计问题。** 先对照铲屎官原话验证 reviewer 说得对吗；如确实偏离，升级铲屎官确认偏差范围，再重新设计。
 
 ### 禁止的响应（表演性同意）
 
@@ -47,8 +47,8 @@ triggers:
 - 建议会破坏现有功能
 - Reviewer 缺少完整上下文
 - 违反 YAGNI（过度设计）
-- 与架构决策/team lead要求冲突
-- 建议会让实现**更偏离**team lead原始需求
+- 与架构决策/铲屎官要求冲突
+- 建议会让实现**更偏离**铲屎官原始需求
 
 如果你 push back 了但你错了：陈述事实然后继续，不要长篇道歉。
 
@@ -112,6 +112,32 @@ Commit: {sha} — {message}
 
 **云端 review 修了 P1/P2 → 必须 re-trigger 云端 review，不能自判通过直接合入。**
 
+## Reviewer 验证 UX/前端改动（硬规则）
+
+> 教训（F121 狼人杀）：reviewer 只看代码没打开浏览器，author 连续 9 轮瞎猜修都没被发现。
+
+**涉及 UX/前端/交互的改动，reviewer 必须实际打开浏览器操作验证**，不能只看代码和测试输出。
+
+```
+验证清单：
+1. 打开浏览器（Playwright/Chrome MCP）访问对应页面
+2. 按 AC 或 bug 复现步骤实际操作
+3. 截图/录屏作为验证证据
+4. 如果和设计稿（.pen）有出入，标注差异
+```
+
+没有浏览器验证的前端 review = 走过场。
+
+## TAKEOVER 降级（同线程同任务）
+
+Reviewer 在 review 过程中发现 author 触发以下任一条件，可直接发起 TAKEOVER（详见 shared-rules §18）：
+
+1. 连续 3 轮无有效证据增量；
+2. 连续 2 次假绿（声明 fixed 但复验失败）；
+3. 你（reviewer）被迫对同一验收点重复验证 2 次。
+
+**触发后**：在 thread 显式宣布 TAKEOVER → 原 author 停止试错 → 你或另一只猫接手修复。接管猫不得自审，需由另一只猫 review。
+
 ## Common Mistakes
 
 | 错误 | 正确做法 |
@@ -121,8 +147,9 @@ Commit: {sha} — {message}
 | 没写 Red 测试直接改代码 | 先写失败测试，确认红灯，再修 |
 | 修完自判"对了"直接合入 | 必须回给 reviewer 确认 |
 | 全盘接受，零 push back | 有技术理由必须说出来 |
-| 愿景级问题用代码 patch | STOP，升级team lead，不要硬修 |
+| 愿景级问题用代码 patch | STOP，升级铲屎官，不要硬修 |
 | 云端 P1 修完不 re-trigger | 必须重新触发云端 review |
+| 前端改动只看代码不开浏览器 | 涉及 UX 必须打开浏览器实操验证 |
 
 ## 和其他 skill 的区别
 
@@ -135,4 +162,4 @@ Commit: {sha} — {message}
 
 ## 下一步
 
-Reviewer 放行（"LGTM"/"通过"/"可以合入"）→ **直接加载 `merge-gate`** skill（SOP Step 4）。不要停下来问team lead（§17）。
+Reviewer 放行（"LGTM"/"通过"/"可以合入"）→ **直接加载 `merge-gate`** skill（SOP Step 4）。不要停下来问铲屎官（§17）。

@@ -195,14 +195,77 @@ CREATE TABLE schema_version (
 - `docs/features/*.md` — feat-lifecycle 立项/关闭时
 - `docs/decisions/*.md` — ADR 创建时
 - sealed session digest — session 封存时
-- `docs/lessons-learned.md` — 教训追加时
 
 检索链路：`metadata filter (kind/status) → FTS5 search → edges 1-hop expand → source read`
 
 ### Phase C: 向量增强（预期路径）
 
-启用 SQLite vector extension（按当时稳定版本），对 summary 字段生成嵌入向量，实现语义 rerank。按需启用 `evidence_passages` 表实现 passage 级检索粒度。
-**注意**：这是在同一个 `evidence.sqlite` 上加表/列，不是换存储——终态基座不变。纯 lexical 检索是已知短板（KD-5），Phase C 是预期路径而非可选。
+在同一个 `evidence.sqlite` 上加表，不换存储——终态基座不变。纯 lexical 检索是已知短板（KD-5），Phase C 是预期路径而非可选。
+
+**C1. Embedding 模型选型**
+
+| 模型 | 角色 | ONNX int8 | 维度 | C-MTEB | Transformers.js |
+|------|------|-----------|------|--------|-----------------|
+| **Qwen3-Embedding-0.6B** | 主方案 | 614MB | 32-1024 (MRL) | 66.33 | onnx-community ✅ |
+| multilingual-e5-small | 兜底 | ~130MB | 384 | ~50 | ✅ |
+
+选 Qwen3 原因：与项目 Qwen 语音 pipeline 统一技术栈；中英混排 C-MTEB 66.33 远超候选；MRL 支持维度可调（KD-19）。
+
+**C2. 三态开关 + fail-open**
+
+```
+EMBED_MODE = off | shadow | on    # 默认 off
+EMBED_MODEL = qwen3-embedding-0.6b | multilingual-e5-small  # 默认 qwen3
+```
+
+- `off`：纯 Phase B lexical 检索，不加载模型
+- `shadow`：lexical 为主，后台异步跑 embedding 并记录 A/B 指标（不影响用户结果）
+- `on`：embedding rerank 生效，lexical 作为 fallback
+
+**fail-open 规则**：模型下载 / 加载 / 推理任一失败 → 自动回落 Phase B lexical（不 block 检索）。
+
+**C3. 资源门禁**
+
+```
+max_model_mem_mb = 800       # 超阈值直接降级到兜底模型或 off
+embed_timeout_ms = 3000      # 单次推理超时 → 该请求走 lexical
+```
+
+**C4. 向量存储**
+
+```sql
+-- vec0 虚拟表（单一向量真相源，不在 evidence_docs 加列）
+CREATE VIRTUAL TABLE evidence_vectors USING vec0(
+  anchor TEXT PRIMARY KEY,
+  embedding float[256]         -- MRL 维度，shadow 期 A/B 后确定
+);
+```
+
+**C5. 可复现版本锚**
+
+```sql
+-- 索引元数据：模型/维度变更时触发全量 re-embed（不能静默混跑）
+CREATE TABLE embedding_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+-- 初始写入：embedding_model_id, embedding_model_rev, embedding_dim
+```
+
+模型或维度变更检测到与 `embedding_meta` 不一致 → 清空 `evidence_vectors` + 全量 re-embed。
+
+**C6. Shadow 期 A/B**
+
+`shadow` 模式下 `dim=128` 和 `dim=256` 各跑一轮评测（复用 Phase B `memory_eval_corpus.yaml`），对比 Recall@k 后再决定 `on` 的默认维度。
+
+**C7. 检索链路（Phase C 增强后）**
+
+```
+metadata filter → FTS5 search → edges 1-hop expand → [embedding rerank] → source read
+                                                       ^-- Phase C 新增
+```
+
+语义 rerank 仅对 FTS5 候选集做重排序（不替代 lexical 召回），保证 fail-open 时链路不断。
 
 ## Acceptance Criteria
 
@@ -228,10 +291,16 @@ CREATE TABLE schema_version (
 - [x] AC-B6: 新项目初始化时自动创建空 `evidence.sqlite`
 - [x] AC-B7: `memory_eval_corpus.yaml` 评测集：检索评测（Recall@k）+ 状态评测（DB 变化验证），含 10-15 条 Hindsight 失败案例
 
-### Phase C（向量增强——预期路径，非可选）
-- [ ] AC-C1: SQLite vector extension 启用（按当时稳定版本），summary 嵌入向量生成
-- [ ] AC-C2: 语义 rerank 可选开启
-- [ ] AC-C3: `evidence_passages` 表按需启用（passage 级检索粒度）
+### Phase C（向量增强——预期路径，非可选）✅
+- [x] AC-C1: `EMBED_MODE` 三态开关（`off|shadow|on`，默认 `off`），`EMBED_MODEL` 可配置（`qwen3-embedding-0.6b` 默认 + `multilingual-e5-small` 兜底）
+- [x] AC-C2: Qwen3-Embedding-0.6B ONNX 本地推理（Transformers.js），MRL 维度可配置
+- [x] AC-C3: `evidence_vectors` vec0 虚拟表（单一向量真相源），不在 `evidence_docs` 加 embedding 列
+- [x] AC-C4: fail-open — 模型下载/加载/推理任一失败自动回落 Phase B lexical
+- [x] AC-C5: 资源门禁 `max_model_mem_mb` + `embed_timeout_ms`，超阈值降级
+- [x] AC-C6: `embedding_meta` 版本锚——模型/维度变更触发全量 re-embed（禁止静默混跑）
+- [x] AC-C7: shadow 期 A/B（`dim=128/256`），复用 `memory_eval_corpus.yaml` 对比 Recall@k
+- [x] AC-C8: 语义 rerank 对 FTS5 候选集重排序（不替代 lexical 召回）
+- [ ] AC-C9: `evidence_passages` 表按需启用（passage 级检索粒度，1000+ docs 后评估）— **deferred per spec**
 
 ## Dependencies
 
@@ -251,6 +320,8 @@ CREATE TABLE schema_version (
 | rebuild 后丢失工作流状态 | markers 真相源在 git-tracked `docs/markers/*.yaml`（KD-8） |
 | 过期知识高相似误召回 | `superseded_by` 字段 + 检索降权（KD-16） |
 | 评测缺失导致上线后才发现检索质量差 | Phase B 加评测集（KD-17） |
+| 614MB ONNX 模型拖慢启动/OOM | 资源门禁 + 兜底模型 + fail-open（KD-20） |
+| 模型/维度变更后向量不一致 | 版本锚 + 全量 re-embed（KD-22） |
 
 ## Key Decisions
 
@@ -274,6 +345,10 @@ CREATE TABLE schema_version (
 | KD-16 | `superseded_by` 字段 + `supersedes`/`invalidates` 关系类型 | 过时高相似决策比查不到更危险 | 2026-03-11 |
 | KD-17 | Phase B 加评测集 `memory_eval_corpus.yaml` | 上次痛点是"找不对"不是"存不了" | 2026-03-11 |
 | KD-18 | WAL 模式 + 单写者队列 + `tokenchars` + `bm25()` 列权重 | SQLite 实操最佳实践，GPT Pro 建议 | 2026-03-11 |
+| KD-19 | **Embedding 模型选 Qwen3-Embedding-0.6B**（主方案）+ multilingual-e5-small（兜底），MRL 维度可调 | team lead指示统一 Qwen 技术栈；C-MTEB 66.33 远超 MiniLM；中英混排核心场景 | 2026-03-12 |
+| KD-20 | **三态开关 `off\|shadow\|on`** + fail-open 到 lexical | codex review：增强层不能拖累基础能力 | 2026-03-12 |
+| KD-21 | **单一向量真相源** `evidence_vectors`（vec0 虚拟表），不在 `evidence_docs` 加 embedding 列 | codex review：避免双真相源 | 2026-03-12 |
+| KD-22 | **可复现版本锚** `embedding_meta` 表：`model_id/model_rev/dim` 变更 → 全量 re-embed | codex review：禁止静默混跑不同模型/维度的向量 | 2026-03-12 |
 
 ## Review Gate
 

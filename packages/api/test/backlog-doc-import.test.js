@@ -31,6 +31,62 @@ describe('backlog-doc-import parser', () => {
     assert.equal(rows[1].id, 'F011');
   });
 
+  test('parses table with extra Source column (6 columns)', async () => {
+    const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
+    const markdown = [
+      '| ID | 名称 | Status | Owner | Source | Link |',
+      '|----|------|--------|-------|--------|------|',
+      '| F010 | 手机端猫猫 | in-progress | 三猫 | internal | [F010](features/F010.md) |',
+      '| F044 | Channel System | spec | 布偶猫 | community | [F044](features/F044.md) |',
+    ].join('\n');
+
+    const rows = parseActiveFeaturesFromBacklog(markdown);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].id, 'F010');
+    assert.equal(rows[0].name, '手机端猫猫');
+    assert.equal(rows[0].status, 'in-progress');
+    assert.equal(rows[0].owner, '三猫');
+    assert.equal(rows[0].link, 'features/F010.md');
+    assert.equal(rows[1].id, 'F044');
+    assert.equal(rows[1].status, 'spec');
+    assert.equal(rows[1].owner, '布偶猫');
+    assert.equal(rows[1].link, 'features/F044.md');
+  });
+
+  test('parses table with reordered columns', async () => {
+    const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
+    const markdown = [
+      '| ID | Status | 名称 | Owner | Link |',
+      '|----|--------|------|-------|------|',
+      '| F010 | in-progress | 手机端猫猫 | 三猫 | [F010](a.md) |',
+    ].join('\n');
+
+    const rows = parseActiveFeaturesFromBacklog(markdown);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, '手机端猫猫');
+    assert.equal(rows[0].status, 'in-progress');
+  });
+
+  test('throws when required columns are missing from header', async () => {
+    const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
+    const markdown = [
+      '| ID | Name | Status | Owner | Link |',
+      '|----|------|--------|-------|------|',
+      '| F010 | A | in-progress | 三猫 | [F010](a) |',
+    ].join('\n');
+
+    assert.throws(() => parseActiveFeaturesFromBacklog(markdown), {
+      message: /missing required columns/i,
+    });
+  });
+
+  test('throws when no table header found at all', async () => {
+    const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
+    assert.throws(() => parseActiveFeaturesFromBacklog('# Just a heading\n\nNo table here'), {
+      message: /missing required columns/i,
+    });
+  });
+
   test('accepts header rows without trailing pipe', async () => {
     const { parseActiveFeaturesFromBacklog } = await import('../dist/routes/backlog-doc-import.js');
     const markdown = [
@@ -232,12 +288,9 @@ describe('parseFeatureDocName', () => {
 describe('gitShowFile', () => {
   test('reads a file from origin/main', async () => {
     const { gitShowFile } = await import('../dist/routes/git-doc-reader.js');
-    const content = await gitShowFile('docs/ROADMAP.md');
+    const content = await gitShowFile('docs/BACKLOG.md');
     assert.ok(content, 'should return content');
-    assert.ok(
-      content.includes('Roadmap') || content.includes('roadmap') || content.includes('Feature'),
-      'should contain expected content',
-    );
+    assert.ok(content.includes('| ID |') || content.includes('backlog'), 'should contain expected content');
   });
 
   test('returns null for non-existent path', async () => {
@@ -252,10 +305,10 @@ describe('fetch throttle (storm prevention)', () => {
     const { _resetFetchTimer, gitShowFile } = await import('../dist/routes/git-doc-reader.js');
     _resetFetchTimer();
     // First call triggers a real fetch (succeeds in CI/local)
-    await gitShowFile('docs/ROADMAP.md');
+    await gitShowFile('docs/BACKLOG.md');
     // Measure time for a second call — should be throttled (no new fetch)
     const start = Date.now();
-    await gitShowFile('docs/ROADMAP.md');
+    await gitShowFile('docs/BACKLOG.md');
     const elapsed = Date.now() - start;
     // Throttled call should be fast (<500ms), not a 10s timeout
     assert.ok(elapsed < 500, `second call should be throttled but took ${elapsed}ms`);

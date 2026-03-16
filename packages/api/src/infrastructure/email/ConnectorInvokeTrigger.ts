@@ -95,15 +95,15 @@ export class ConnectorInvokeTrigger {
 
     // Urgent connector policy: preempt active invocation in the same thread.
     // Used for GitHub review comments so cats don't get stuck behind long queue chatter.
-    if (priority === 'urgent' && invocationTracker.has(threadId)) {
+    if (priority === 'urgent' && invocationTracker.has(threadId, catId)) {
       this.handleUrgentTrigger(threadId, catId, userId, message, messageId, policy?.reason).catch((err) => {
         this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
       });
       return;
     }
 
-    // Normal connector policy: if a cat is already running in this thread, enqueue.
-    if (invocationTracker.has(threadId)) {
+    // Normal connector policy: if this cat is already running in this thread, enqueue.
+    if (invocationTracker.has(threadId, catId)) {
       this.enqueueWhileActive(threadId, catId, userId, message, messageId);
       return;
     }
@@ -173,7 +173,7 @@ export class ConnectorInvokeTrigger {
   ): Promise<void> {
     const { invocationTracker, invocationRecordStore, log } = this.opts;
     const idempotencyKey = `connector-${messageId}`;
-    const activeOwner = invocationTracker.getUserId(threadId);
+    const activeOwner = invocationTracker.getUserId(threadId, catId);
     if (activeOwner && activeOwner !== userId) {
       this.enqueueWhileActive(threadId, catId, userId, message, messageId);
       return;
@@ -195,23 +195,23 @@ export class ConnectorInvokeTrigger {
       return;
     }
 
-    const cancelResult = invocationTracker.cancel(threadId, userId, 'preempted');
-    // Also abort any active multi-mention dispatches for this thread
-    getMultiMentionOrchestrator().abortByThread(threadId);
+    const cancelResult = invocationTracker.cancel(threadId, catId, userId, 'preempted');
+    // F108 P1-4 fix: abort only the target cat's dispatches, not the entire thread
+    getMultiMentionOrchestrator().abortBySlot(threadId, catId);
     log.info(
       { threadId, catId, cancelled: cancelResult.cancelled, reason: reason ?? 'connector_urgent' },
       '[ConnectorInvokeTrigger] Urgent connector preempt',
     );
 
-    if (cancelResult.cancelled || !invocationTracker.has(threadId)) {
+    if (cancelResult.cancelled || !invocationTracker.has(threadId, catId)) {
       if (cancelResult.cancelled) {
-        this.opts.queueProcessor?.clearPause(threadId);
+        this.opts.queueProcessor?.clearPause(threadId, catId);
       }
       await this.executeInBackground(threadId, catId, userId, message, messageId, createResult.invocationId);
       return;
     }
 
-    if (invocationTracker.has(threadId)) {
+    if (invocationTracker.has(threadId, catId)) {
       // Avoid queue race: enqueue first while thread is still observed active.
       const enqueueOutcome = this.enqueueWhileActive(threadId, catId, userId, message, messageId);
       if (enqueueOutcome !== 'full') {
@@ -221,7 +221,7 @@ export class ConnectorInvokeTrigger {
         });
         return;
       }
-      const activeOwner = invocationTracker.getUserId(threadId);
+      const activeOwner = invocationTracker.getUserId(threadId, catId);
       if (activeOwner && activeOwner !== userId) {
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'failed',
@@ -264,7 +264,7 @@ export class ConnectorInvokeTrigger {
     }
 
     // Tracker started here — must be completed in finally no matter what
-    const controller = invocationTracker.start(threadId, userId, targetCats);
+    const controller = invocationTracker.start(threadId, catId, userId, targetCats);
 
     const HEARTBEAT_INTERVAL_MS = 30_000;
     let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
@@ -315,6 +315,7 @@ export class ConnectorInvokeTrigger {
         queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedForThread(tid),
         cursorBoundaries,
         persistenceContext,
+        parentInvocationId: createResult.invocationId,
       })) {
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
@@ -332,7 +333,7 @@ export class ConnectorInvokeTrigger {
             });
           }
         }
-        socketManager.broadcastAgentMessage(msg, threadId);
+        socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
       }
 
       // ⑤ Finalize: abort guard → persistence check → ack + succeeded
@@ -439,10 +440,10 @@ export class ConnectorInvokeTrigger {
       );
     } finally {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
-      invocationTracker.complete(threadId, controller);
+      invocationTracker.complete(threadId, catId, controller);
       // F39 P1 fix: Notify queue processor for auto-dequeue chain
       // (same pattern as messages.ts and invocations.ts)
-      this.opts.queueProcessor?.onInvocationComplete(threadId, finalStatus).catch(() => {
+      this.opts.queueProcessor?.onInvocationComplete(threadId, catId, finalStatus).catch(() => {
         /* best-effort, don't crash background task */
       });
     }

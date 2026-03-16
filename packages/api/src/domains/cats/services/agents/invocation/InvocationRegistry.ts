@@ -24,6 +24,10 @@ export interface InvocationRecord {
   catId: CatId;
   /** Thread this invocation belongs to (for WebSocket room scoping) */
   threadId: string;
+  /** F108 fix: InvocationRecordStore's parent invocation ID for worklist key alignment */
+  parentInvocationId?: string;
+  /** F121: The A2A trigger message ID — the @mention message that caused this cat to be invoked */
+  a2aTriggerMessageId?: string;
   /** In-invocation idempotency keys for callback post-message de-duplication. */
   clientMessageIds: Set<string>;
   createdAt: number;
@@ -58,7 +62,13 @@ export class InvocationRegistry {
    * Create a new invocation and return the auth credentials.
    * The caller should pass these as env vars to the CLI subprocess.
    */
-  create(userId: string, catId: CatId, threadId: string = 'default'): { invocationId: string; callbackToken: string } {
+  create(
+    userId: string,
+    catId: CatId,
+    threadId: string = 'default',
+    parentInvocationId?: string,
+    a2aTriggerMessageId?: string,
+  ): { invocationId: string; callbackToken: string } {
     this.cleanup();
 
     // Evict oldest if at capacity
@@ -80,6 +90,8 @@ export class InvocationRegistry {
       userId,
       catId,
       threadId,
+      ...(parentInvocationId ? { parentInvocationId } : {}),
+      ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
       clientMessageIds: new Set<string>(),
       createdAt: now,
       expiresAt: now + this.ttlMs,

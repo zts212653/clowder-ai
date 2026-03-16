@@ -18,9 +18,11 @@ import { EvidencePanel } from './EvidencePanel';
 import { Lightbox } from './Lightbox';
 import { MarkdownContent } from './MarkdownContent';
 import { MetadataBadge } from './MetadataBadge';
+import { ReplyPill } from './ReplyPill';
 import { RichBlocks } from './rich/RichBlocks';
 import { SummaryCard } from './SummaryCard';
 import { ThinkingContent } from './ThinkingContent';
+import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
 
 /** Breed-level aesthetics — only changes when a new BREED is added */
 const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
@@ -200,6 +202,18 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
     const isError = message.variant === 'error' || isLegacyError;
     const isTool = message.variant === 'tool';
     const isFollowup = message.variant === 'a2a_followup';
+
+    // F118 AC-C3: Enhanced timeout diagnostics panel
+    if (isError && message.extra?.timeoutDiagnostics) {
+      return (
+        <div data-message-id={message.id} className="flex justify-center mb-3">
+          <div className="max-w-[85%] w-full">
+            <TimeoutDiagnosticsPanel errorMessage={message.content} diagnostics={message.extra.timeoutDiagnostics} />
+          </div>
+        </div>
+      );
+    }
+
     const toneClass = isTool
       ? 'text-gray-400 bg-gray-50/50 font-mono text-xs py-1'
       : isFollowup
@@ -234,8 +248,11 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 {isRevealed ? '已揭秘' : `悄悄话 → ${message.whisperTo?.join(', ') ?? ''}`}
               </span>
             )}
+            {message.replyTo && message.replyPreview && (
+              <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
+            )}
             <span className="text-xs text-gray-400">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
-            <span className="text-xs font-semibold text-owner-dark">team lead</span>
+            <span className="text-xs font-semibold text-owner-dark">铲屎官</span>
           </div>
           <div
             className={`rounded-2xl rounded-br-sm px-4 py-3 transition-transform hover:-translate-y-0.5 ${
@@ -254,7 +271,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
         <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 ring-owner-light bg-owner-primary flex items-center justify-center">
           <img
             src="/avatars/owner.jpg"
-            alt="team lead"
+            alt="铲屎官"
             width={32}
             height={32}
             className="object-cover w-full h-full"
@@ -296,6 +313,9 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 </span>
               )}
               {!isWhisper && direction && <DirectionPill direction={direction} getCatById={getCatById} />}
+              {message.replyTo && message.replyPreview && (
+                <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
+              )}
               {hasTextContent && !message.isStreaming && (
                 <TtsPlayButton
                   messageId={message.id}
@@ -353,7 +373,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           {/* F097: Content first, then Thinking (reasoning before execution), then CLI output */}
           {/* 1. Content — callback messages or non-stream text shown as normal content.
               If CLI block exists, text is already inside it — never render outside. */}
-          {hasCliBlock ? null : !isStreamOrigin && hasBlocks ? (
+          {hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (
             <ContentBlocks blocks={message.contentBlocks!} />
           ) : !isStreamOrigin && hasTextContent ? (
             <MarkdownContent content={message.content} className={catStyle?.font} />

@@ -99,7 +99,7 @@ export function SuggestionDrawer({
   const statusLabel = useMemo(() => {
     if (!item) return '未选择任务';
     if (item.status === 'open') return '待建议领取';
-    if (item.status === 'suggested') return '等待team lead决策';
+    if (item.status === 'suggested') return '等待铲屎官决策';
     if (item.status === 'dispatched') return '已派发';
     return '已批准';
   }, [item]);

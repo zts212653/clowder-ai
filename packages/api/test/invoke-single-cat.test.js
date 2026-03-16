@@ -1159,6 +1159,53 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(sessionStores.includes('new-sess'), 'new session should be stored after recovery');
   });
 
+  it('F118 P2-fix: self-heal retry clears cliSessionId from baseOptions', async () => {
+    const optionsSeen = [];
+    let invokeCount = 0;
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push({ ...options });
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'opus',
+            error: 'No conversation found with session ID: stale-sess',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'text', catId: 'opus', content: 'ok', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'stale-sess',
+      store: async () => {},
+      delete: async () => {},
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 't-p2-fix',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(invokeCount, 2);
+    // First attempt should carry cliSessionId
+    assert.equal(optionsSeen[0].cliSessionId, 'stale-sess', 'first attempt should have cliSessionId');
+    // Retry after self-heal should NOT carry stale cliSessionId
+    assert.equal(optionsSeen[1].cliSessionId, undefined, 'retry should clear cliSessionId');
+  });
+
   it('F-BLOAT cloud P1: self-heal retry re-injects systemPrompt when session drops', async () => {
     const optionsSeen = [];
     let invokeCount = 0;
@@ -1248,6 +1295,161 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(invokeCount, 1, 'non-session errors should not trigger retry');
     assert.equal(sessionDeletes.length, 0, 'non-session errors should not clear session');
     assert.ok(msgs.some((m) => m.type === 'error' && String(m.error).includes('upstream timeout')));
+  });
+
+  it('opencode self-heal: retries once without --resume when resumed session hits prompt token limit', async () => {
+    let invokeCount = 0;
+    const sessionDeletes = [];
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options);
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'opencode',
+            error: 'prompt token count of 128625 exceeds the limit of 128000',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'session_init', catId: 'opencode', sessionId: 'fresh-opencode-sess', timestamp: Date.now() };
+        yield { type: 'text', catId: 'opencode', content: 'recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'poisoned-opencode-sess',
+      store: async () => {},
+      delete: async (u, c, t) => {
+        sessionDeletes.push(`${u}:${c}:${t}`);
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opencode',
+        service,
+        prompt: 'test',
+        userId: 'user-opencode-retry',
+        threadId: 'thread-opencode-retry',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(invokeCount, 2, 'should re-invoke service once after poisoned opencode session error');
+    assert.equal(optionsSeen[0].sessionId, 'poisoned-opencode-sess', 'first attempt should include stored session');
+    assert.equal(optionsSeen[1].sessionId, undefined, 'retry attempt should drop --resume session');
+    assert.deepEqual(
+      sessionDeletes,
+      ['user-opencode-retry:opencode:thread-opencode-retry'],
+      'should delete poisoned session before retry',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'recovered'),
+      'should recover and stream retry result',
+    );
+    assert.equal(
+      msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
+      false,
+      'poisoned-session overflow error should be suppressed when retry succeeds',
+    );
+  });
+
+  it('opencode self-heal: does not retry prompt limit after content already streamed', async () => {
+    let invokeCount = 0;
+    const sessionDeletes = [];
+    const service = {
+      async *invoke() {
+        invokeCount++;
+        yield { type: 'text', catId: 'opencode', content: 'partial-output', timestamp: Date.now() };
+        yield {
+          type: 'error',
+          catId: 'opencode',
+          error: 'prompt token count of 128625 exceeds the limit of 128000',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'poisoned-opencode-sess',
+      store: async () => {},
+      delete: async (u, c, t) => {
+        sessionDeletes.push(`${u}:${c}:${t}`);
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opencode',
+        service,
+        prompt: 'test',
+        userId: 'user-opencode-no-retry-after-output',
+        threadId: 'thread-opencode-no-retry-after-output',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(invokeCount, 1, 'must not retry after partial output to avoid duplicate side effects');
+    assert.deepEqual(sessionDeletes, [], 'must not delete session when prompt-limit happens after content output');
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'partial-output'),
+      'already-streamed content should be preserved',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
+      'prompt-limit error should surface when retry is unsafe',
+    );
+  });
+
+  it('opencode self-heal: flushes prompt limit error when invoke ends without done', async () => {
+    let invokeCount = 0;
+    const sessionDeletes = [];
+    const service = {
+      async *invoke() {
+        invokeCount++;
+        yield {
+          type: 'error',
+          catId: 'opencode',
+          error: 'prompt token count of 128625 exceeds the limit of 128000',
+          timestamp: Date.now(),
+        };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'poisoned-opencode-sess',
+      store: async () => {},
+      delete: async (u, c, t) => {
+        sessionDeletes.push(`${u}:${c}:${t}`);
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opencode',
+        service,
+        prompt: 'test',
+        userId: 'user-opencode-no-done',
+        threadId: 'thread-opencode-no-done',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(invokeCount, 1, 'should not retry when the prompt-limit path never reaches done');
+    assert.deepEqual(sessionDeletes, [], 'must not delete session when retry precondition was never met');
+    assert.ok(
+      msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
+      'prompt-limit error must be surfaced instead of being swallowed',
+    );
   });
 
   it('transient CLI self-heal: retries once when Claude exits code 1 before any stream output', async () => {
@@ -2383,342 +2585,354 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY, 'sk-root-profile');
   });
 
-  it(
-    'F062-fix: skips auto-seal for api_key mode when context health is approx',
-    { skip: 'requires internal config for context_health emission' },
-    async () => {
-      const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-      const root = await mkdtemp(join(tmpdir(), 'f062-approx-no-seal-'));
-      await createProviderProfile(root, {
-        provider: 'anthropic',
-        name: 'sponsor-gateway',
-        mode: 'api_key',
-        baseUrl: 'https://api.sponsor.example',
-        apiKey: 'sk-sponsor',
-        setActive: true,
-      });
+  it('F062-fix: skips auto-seal for api_key mode when context health is approx', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const root = await mkdtemp(join(tmpdir(), 'f062-approx-no-seal-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'sponsor-gateway',
+      mode: 'api_key',
+      baseUrl: 'https://api.sponsor.example',
+      apiKey: 'sk-sponsor',
+      setActive: true,
+    });
 
-      const activeRecord = {
-        id: 'sess-approx-no-seal',
-        catId: 'opus',
-        threadId: 'thread-f062-approx-no-seal',
-        userId: 'user-f062-approx-no-seal',
-        seq: 0,
-        status: 'active',
-        compressionCount: 0,
-      };
+    const activeRecord = {
+      id: 'sess-approx-no-seal',
+      catId: 'opus',
+      threadId: 'thread-f062-approx-no-seal',
+      userId: 'user-f062-approx-no-seal',
+      seq: 0,
+      status: 'active',
+      compressionCount: 0,
+      cliSessionId: 'cli-approx-no-seal',
+    };
 
-      const sealRequests = [];
-      const sessionChainStore = {
-        getChain: async () => [activeRecord],
-        getActive: async () => activeRecord,
-        create: async () => activeRecord,
-        update: async () => activeRecord,
-      };
-      const sessionSealer = {
-        requestSeal: async (input) => {
-          sealRequests.push(input);
-          return { accepted: true, status: 'sealing' };
-        },
-        finalize: async () => {},
-      };
+    const sealRequests = [];
+    const sessionChainStore = {
+      getChain: async () => [activeRecord],
+      getActive: async () => activeRecord,
+      create: async () => activeRecord,
+      update: async () => activeRecord,
+    };
+    const sessionSealer = {
+      requestSeal: async (input) => {
+        sealRequests.push(input);
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+    };
 
-      const service = {
-        async *invoke() {
-          yield { type: 'session_init', catId: 'opus', sessionId: 'cli-approx-no-seal', timestamp: Date.now() };
-          yield {
-            type: 'done',
-            catId: 'opus',
-            timestamp: Date.now(),
-            metadata: {
-              provider: 'anthropic',
-              model: 'claude-opus-4-6',
-              usage: {
-                // Simulate non-standard gateway semantics where this value is
-                // not a trustworthy "current context fill" signal.
-                inputTokens: 195000,
-                outputTokens: 10,
-                // Intentionally omit contextWindowSize so source becomes approx.
-              },
+    const service = {
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-approx-no-seal', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'anthropic',
+            model: 'claude-opus-4-6',
+            usage: {
+              // Simulate non-standard gateway semantics where this value is
+              // not a trustworthy "current context fill" signal.
+              inputTokens: 195000,
+              outputTokens: 10,
+              // Intentionally omit contextWindowSize so source becomes approx.
             },
-          };
-        },
-      };
+          },
+        };
+      },
+    };
 
-      const deps = {
-        ...makeDeps(),
-        threadStore: {
-          get: async () => ({ projectPath: root }),
-        },
-        sessionChainStore,
-        sessionSealer,
-      };
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore,
+      sessionSealer,
+    };
 
-      try {
-        const msgs = await collect(
-          invokeSingleCat(deps, {
-            catId: 'opus',
-            service,
-            prompt: 'test',
-            userId: 'user-f062-approx-no-seal',
-            threadId: 'thread-f062-approx-no-seal',
-            isLastCat: true,
-          }),
-        );
-
-        const healthInfo = msgs.find((m) => {
-          if (m.type !== 'system_info') return false;
-          try {
-            return JSON.parse(m.content).type === 'context_health';
-          } catch {
-            return false;
-          }
-        });
-        assert.ok(healthInfo, 'should still emit context_health for observability');
-        const healthPayload = JSON.parse(healthInfo.content);
-        assert.equal(healthPayload.health.source, 'approx');
-
-        const hasSealRequested = msgs.some((m) => {
-          if (m.type !== 'system_info') return false;
-          try {
-            return JSON.parse(m.content).type === 'session_seal_requested';
-          } catch {
-            return false;
-          }
-        });
-        assert.equal(hasSealRequested, false, 'should not emit session_seal_requested on approx api_key telemetry');
-        assert.equal(sealRequests.length, 0, 'should not request seal on approx api_key telemetry');
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it(
-    'F062-fix: skips auto-seal for api_key + compress strategy even when context health is exact',
-    { skip: 'requires internal config for context_health emission' },
-    async () => {
-      const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-      const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
-        '../dist/config/session-strategy.js'
+    const previousCwd = process.cwd();
+    const previousProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
+    try {
+      process.env.ANTHROPIC_PROXY_ENABLED = '0';
+      process.chdir(apiDir);
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service,
+          prompt: 'test',
+          userId: 'user-f062-approx-no-seal',
+          threadId: 'thread-f062-approx-no-seal',
+          isLastCat: true,
+        }),
       );
-      _setTestStrategyOverride('opus', {
-        strategy: 'compress',
-        thresholds: { warn: 0.8, action: 0.9 },
-        turnBudget: 12000,
-        safetyMargin: 4000,
+
+      const healthInfo = msgs.find((m) => {
+        if (m.type !== 'system_info') return false;
+        try {
+          return JSON.parse(m.content).type === 'context_health';
+        } catch {
+          return false;
+        }
       });
-      const root = await mkdtemp(join(tmpdir(), 'f062-exact-no-seal-'));
-      await createProviderProfile(root, {
-        provider: 'anthropic',
-        name: 'sponsor-gateway',
-        mode: 'api_key',
-        baseUrl: 'https://api.sponsor.example',
-        apiKey: 'sk-sponsor',
-        setActive: true,
+      assert.ok(healthInfo, 'should still emit context_health for observability');
+      const healthPayload = JSON.parse(healthInfo.content);
+      assert.equal(healthPayload.health.source, 'approx');
+
+      const hasSealRequested = msgs.some((m) => {
+        if (m.type !== 'system_info') return false;
+        try {
+          return JSON.parse(m.content).type === 'session_seal_requested';
+        } catch {
+          return false;
+        }
       });
+      assert.equal(hasSealRequested, false, 'should not emit session_seal_requested on approx api_key telemetry');
+      assert.equal(sealRequests.length, 0, 'should not request seal on approx api_key telemetry');
+    } finally {
+      process.chdir(previousCwd);
+      if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
+      else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
-      const activeRecord = {
-        id: 'sess-exact-no-seal',
-        catId: 'opus',
-        threadId: 'thread-f062-exact-no-seal',
-        userId: 'user-f062-exact-no-seal',
-        seq: 0,
-        status: 'active',
-        compressionCount: 0,
-      };
+  it('F062-fix: skips auto-seal for api_key + compress strategy even when context health is exact', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
+      '../dist/config/session-strategy.js'
+    );
+    _setTestStrategyOverride('opus', {
+      strategy: 'compress',
+      thresholds: { warn: 0.8, action: 0.9 },
+      turnBudget: 12000,
+      safetyMargin: 4000,
+    });
+    const root = await mkdtemp(join(tmpdir(), 'f062-exact-no-seal-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'sponsor-gateway',
+      mode: 'api_key',
+      baseUrl: 'https://api.sponsor.example',
+      apiKey: 'sk-sponsor',
+      setActive: true,
+    });
 
-      const sealRequests = [];
-      const sessionChainStore = {
-        getChain: async () => [activeRecord],
-        getActive: async () => activeRecord,
-        create: async () => activeRecord,
-        update: async () => activeRecord,
-      };
-      const sessionSealer = {
-        requestSeal: async (input) => {
-          sealRequests.push(input);
-          return { accepted: true, status: 'sealing' };
-        },
-        finalize: async () => {},
-      };
+    const activeRecord = {
+      id: 'sess-exact-no-seal',
+      catId: 'opus',
+      threadId: 'thread-f062-exact-no-seal',
+      userId: 'user-f062-exact-no-seal',
+      seq: 0,
+      status: 'active',
+      compressionCount: 0,
+      cliSessionId: 'cli-exact-no-seal',
+    };
 
-      const service = {
-        async *invoke() {
-          yield { type: 'session_init', catId: 'opus', sessionId: 'cli-exact-no-seal', timestamp: Date.now() };
-          yield {
-            type: 'done',
-            catId: 'opus',
-            timestamp: Date.now(),
-            metadata: {
-              provider: 'anthropic',
-              model: 'claude-opus-4-6',
-              usage: {
-                // Simulate gateway telemetry that reports at/over window.
-                inputTokens: 128211,
-                outputTokens: 10,
-                contextWindowSize: 128000,
-              },
+    const sealRequests = [];
+    const sessionChainStore = {
+      getChain: async () => [activeRecord],
+      getActive: async () => activeRecord,
+      create: async () => activeRecord,
+      update: async () => activeRecord,
+    };
+    const sessionSealer = {
+      requestSeal: async (input) => {
+        sealRequests.push(input);
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+    };
+
+    const service = {
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-exact-no-seal', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'anthropic',
+            model: 'claude-opus-4-6',
+            usage: {
+              // Simulate gateway telemetry that reports at/over window.
+              inputTokens: 128211,
+              outputTokens: 10,
+              contextWindowSize: 128000,
             },
-          };
-        },
-      };
+          },
+        };
+      },
+    };
 
-      const deps = {
-        ...makeDeps(),
-        threadStore: {
-          get: async () => ({ projectPath: root }),
-        },
-        sessionChainStore,
-        sessionSealer,
-      };
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore,
+      sessionSealer,
+    };
 
-      try {
-        const msgs = await collect(
-          invokeSingleCat(deps, {
-            catId: 'opus',
-            service,
-            prompt: 'test',
-            userId: 'user-f062-exact-no-seal',
-            threadId: 'thread-f062-exact-no-seal',
-            isLastCat: true,
-          }),
-        );
-
-        const healthInfo = msgs.find((m) => {
-          if (m.type !== 'system_info') return false;
-          try {
-            return JSON.parse(m.content).type === 'context_health';
-          } catch {
-            return false;
-          }
-        });
-        assert.ok(healthInfo, 'should emit context_health for observability');
-        const healthPayload = JSON.parse(healthInfo.content);
-        assert.equal(healthPayload.health.source, 'exact');
-        assert.equal(healthPayload.health.fillRatio, 1);
-
-        const hasSealRequested = msgs.some((m) => {
-          if (m.type !== 'system_info') return false;
-          try {
-            return JSON.parse(m.content).type === 'session_seal_requested';
-          } catch {
-            return false;
-          }
-        });
-        assert.equal(hasSealRequested, false, 'should not emit session_seal_requested in api_key mode');
-        assert.equal(sealRequests.length, 0, 'should not request seal in api_key mode');
-      } finally {
-        _clearTestStrategyOverrides();
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it(
-    'F062-fix: keeps auto-seal for api_key + handoff strategy on exact budget overflow',
-    { skip: 'requires internal config for context_health emission' },
-    async () => {
-      const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-      const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
-        '../dist/config/session-strategy.js'
+    const previousCwd = process.cwd();
+    const previousProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
+    try {
+      process.env.ANTHROPIC_PROXY_ENABLED = '0';
+      process.chdir(apiDir);
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service,
+          prompt: 'test',
+          userId: 'user-f062-exact-no-seal',
+          threadId: 'thread-f062-exact-no-seal',
+          isLastCat: true,
+        }),
       );
-      _setTestStrategyOverride('opus', {
-        strategy: 'handoff',
-        thresholds: { warn: 0.8, action: 0.9 },
-        turnBudget: 12000,
-        safetyMargin: 4000,
+
+      const healthInfo = msgs.find((m) => {
+        if (m.type !== 'system_info') return false;
+        try {
+          return JSON.parse(m.content).type === 'context_health';
+        } catch {
+          return false;
+        }
       });
-      const root = await mkdtemp(join(tmpdir(), 'f062-exact-handoff-seal-'));
-      await createProviderProfile(root, {
-        provider: 'anthropic',
-        name: 'sponsor-gateway',
-        mode: 'api_key',
-        baseUrl: 'https://api.sponsor.example',
-        apiKey: 'sk-sponsor',
-        setActive: true,
+      assert.ok(healthInfo, 'should emit context_health for observability');
+      const healthPayload = JSON.parse(healthInfo.content);
+      assert.equal(healthPayload.health.source, 'exact');
+      assert.equal(healthPayload.health.fillRatio, 1);
+
+      const hasSealRequested = msgs.some((m) => {
+        if (m.type !== 'system_info') return false;
+        try {
+          return JSON.parse(m.content).type === 'session_seal_requested';
+        } catch {
+          return false;
+        }
       });
+      assert.equal(hasSealRequested, false, 'should not emit session_seal_requested in api_key mode');
+      assert.equal(sealRequests.length, 0, 'should not request seal in api_key mode');
+    } finally {
+      process.chdir(previousCwd);
+      if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
+      else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
+      _clearTestStrategyOverrides();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
-      const activeRecord = {
-        id: 'sess-exact-handoff-seal',
-        catId: 'opus',
-        threadId: 'thread-f062-exact-handoff-seal',
-        userId: 'user-f062-exact-handoff-seal',
-        seq: 0,
-        status: 'active',
-        compressionCount: 0,
-      };
+  it('F062-fix: keeps auto-seal for api_key + handoff strategy on exact budget overflow', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
+      '../dist/config/session-strategy.js'
+    );
+    _setTestStrategyOverride('opus', {
+      strategy: 'handoff',
+      thresholds: { warn: 0.8, action: 0.9 },
+      turnBudget: 12000,
+      safetyMargin: 4000,
+    });
+    const root = await mkdtemp(join(tmpdir(), 'f062-exact-handoff-seal-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'sponsor-gateway',
+      mode: 'api_key',
+      baseUrl: 'https://api.sponsor.example',
+      apiKey: 'sk-sponsor',
+      setActive: true,
+    });
 
-      const sealRequests = [];
-      const sessionChainStore = {
-        getChain: async () => [activeRecord],
-        getActive: async () => activeRecord,
-        create: async () => activeRecord,
-        update: async () => activeRecord,
-      };
-      const sessionSealer = {
-        requestSeal: async (input) => {
-          sealRequests.push(input);
-          return { accepted: true, status: 'sealing' };
-        },
-        finalize: async () => {},
-      };
+    const activeRecord = {
+      id: 'sess-exact-handoff-seal',
+      catId: 'opus',
+      threadId: 'thread-f062-exact-handoff-seal',
+      userId: 'user-f062-exact-handoff-seal',
+      seq: 0,
+      status: 'active',
+      compressionCount: 0,
+      cliSessionId: 'cli-exact-handoff-seal',
+    };
 
-      const service = {
-        async *invoke() {
-          yield { type: 'session_init', catId: 'opus', sessionId: 'cli-exact-handoff-seal', timestamp: Date.now() };
-          yield {
-            type: 'done',
-            catId: 'opus',
-            timestamp: Date.now(),
-            metadata: {
-              provider: 'anthropic',
-              model: 'claude-opus-4-6',
-              usage: {
-                inputTokens: 128211,
-                outputTokens: 10,
-                contextWindowSize: 128000,
-              },
+    const sealRequests = [];
+    const sessionChainStore = {
+      getChain: async () => [activeRecord],
+      getActive: async () => activeRecord,
+      create: async () => activeRecord,
+      update: async () => activeRecord,
+    };
+    const sessionSealer = {
+      requestSeal: async (input) => {
+        sealRequests.push(input);
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+    };
+
+    const service = {
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-exact-handoff-seal', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'anthropic',
+            model: 'claude-opus-4-6',
+            usage: {
+              inputTokens: 128211,
+              outputTokens: 10,
+              contextWindowSize: 128000,
             },
-          };
-        },
-      };
+          },
+        };
+      },
+    };
 
-      const deps = {
-        ...makeDeps(),
-        threadStore: {
-          get: async () => ({ projectPath: root }),
-        },
-        sessionChainStore,
-        sessionSealer,
-      };
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore,
+      sessionSealer,
+    };
 
-      try {
-        const msgs = await collect(
-          invokeSingleCat(deps, {
-            catId: 'opus',
-            service,
-            prompt: 'test',
-            userId: 'user-f062-exact-handoff-seal',
-            threadId: 'thread-f062-exact-handoff-seal',
-            isLastCat: true,
-          }),
-        );
+    const previousCwd = process.cwd();
+    const previousProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
+    try {
+      process.env.ANTHROPIC_PROXY_ENABLED = '0';
+      process.chdir(apiDir);
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service,
+          prompt: 'test',
+          userId: 'user-f062-exact-handoff-seal',
+          threadId: 'thread-f062-exact-handoff-seal',
+          isLastCat: true,
+        }),
+      );
 
-        const sealEvent = msgs.find((m) => {
-          if (m.type !== 'system_info') return false;
-          try {
-            return JSON.parse(m.content).type === 'session_seal_requested';
-          } catch {
-            return false;
-          }
-        });
-        assert.ok(sealEvent, 'should emit session_seal_requested in handoff mode');
-        assert.equal(sealRequests.length, 1, 'should request seal in handoff mode');
-      } finally {
-        _clearTestStrategyOverrides();
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
+      const sealEvent = msgs.find((m) => {
+        if (m.type !== 'system_info') return false;
+        try {
+          return JSON.parse(m.content).type === 'session_seal_requested';
+        } catch {
+          return false;
+        }
+      });
+      assert.ok(sealEvent, 'should emit session_seal_requested in handoff mode');
+      assert.equal(sealRequests.length, 1, 'should request seal in handoff mode');
+    } finally {
+      process.chdir(previousCwd);
+      if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
+      else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
+      _clearTestStrategyOverrides();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

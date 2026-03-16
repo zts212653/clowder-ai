@@ -181,10 +181,12 @@ describe('useVoiceInput', () => {
   });
 
   it('cleans up stream on MediaRecorder constructor failure', async () => {
-    const Failing = (() => {
-      throw new Error('NotSupportedError');
-    }) as unknown as typeof MediaRecorder;
-    Failing.isTypeSupported = vi.fn(() => true);
+    class Failing {
+      static isTypeSupported = vi.fn(() => true);
+      constructor() {
+        throw new Error('NotSupportedError');
+      }
+    }
     Object.defineProperty(globalThis, 'MediaRecorder', { value: Failing, writable: true, configurable: true });
 
     await act(async () => {

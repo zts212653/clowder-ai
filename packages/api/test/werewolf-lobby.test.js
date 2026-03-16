@@ -69,12 +69,11 @@ describe('WerewolfLobby', () => {
       roleCounts[seat.role] = (roleCounts[seat.role] ?? 0) + 1;
     }
 
-    // 9-player preset: wolf:2, seer:1, witch:1, hunter:1, guard:1, villager:3
-    assert.equal(roleCounts.wolf, 2);
+    // 9-player preset: wolf:3, seer:1, witch:1, hunter:1, villager:3
+    assert.equal(roleCounts.wolf, 3);
     assert.equal(roleCounts.seer, 1);
     assert.equal(roleCounts.witch, 1);
     assert.equal(roleCounts.hunter, 1);
-    assert.equal(roleCounts.guard, 1);
     assert.equal(roleCounts.villager, 3);
   });
 
