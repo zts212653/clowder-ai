@@ -74,11 +74,11 @@ describe('SystemPromptBuilder', () => {
     // Dynamic teammate listing absent, but static collaboration guide still present
     assert.ok(!prompt.includes('你的队友'));
     assert.ok(prompt.includes('@队友'));
-    // Still mentions team lead
-    assert.ok(prompt.includes('team lead'));
+    // Still mentions 铲屎官
+    assert.ok(prompt.includes('铲屎官'));
   });
 
-  test('contains team lead reference', async () => {
+  test('contains 铲屎官 reference', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -86,7 +86,7 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('team lead'));
+    assert.ok(prompt.includes('铲屎官'));
   });
 
   test('contains serial chain context when mode is serial', async () => {
@@ -165,7 +165,7 @@ describe('SystemPromptBuilder', () => {
     assert.equal(a, b);
   });
 
-  test('output size is under 2300 chars (raised for quality discipline section)', async () => {
+  test('output size is under 2900 chars (raised for F114 magic words)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -176,7 +176,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 2600, `Prompt is ${prompt.length} chars, expected < 2600`);
+    assert.ok(prompt.length < 2900, `Prompt is ${prompt.length} chars, expected < 2900`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -428,7 +428,7 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
-  test('buildStaticIdentity roster size with full runtime config is under 2700 (raised for L0 governance digest)', async () => {
+  test('buildStaticIdentity roster size with full runtime config is under 3650 (raised for F114 magic words)', async () => {
     const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
 
@@ -449,7 +449,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 3500, `Full runtime prompt is ${prompt.length} chars, expected < 3500`);
+      assert.ok(prompt.length < 3650, `Full runtime prompt is ${prompt.length} chars, expected < 3650`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -540,8 +540,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('## 协作'), 'Should not contain collaboration guide');
     // MCP tools moved to static identity (session-level, not per-message)
     assert.ok(!ctx.includes('cat_cafe_post_message'), 'MCP tools should be in static identity, not invocation context');
-    // team lead reference also moved to static identity
-    assert.ok(!ctx.includes('team lead是真人用户'), 'team lead reference should be in static identity');
+    // 铲屎官 reference also moved to static identity
+    assert.ok(!ctx.includes('铲屎官是真人用户'), '铲屎官 reference should be in static identity');
   });
 
   test('buildStaticIdentity includes MCP tools when mcpAvailable', async () => {
@@ -567,18 +567,19 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!identity.includes('HTTP 回调'), 'Codex should not have callback instructions in static identity');
   });
 
-  test('buildStaticIdentity includes team lead reference', async () => {
+  test('buildStaticIdentity includes 铲屎官 reference', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    assert.ok(identity.includes('team lead'), 'Should contain team lead reference in static identity');
+    assert.ok(identity.includes('铲屎官'), 'Should contain 铲屎官 reference in static identity');
   });
 
   test('buildStaticIdentity includes configured owner name and mention handles', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    // Owner config has name: "Co-worker", mentionPatterns: ["@co-worker", "@owner"]
-    assert.ok(identity.includes('Co-worker'), 'Should include owner name from config');
-    assert.ok(identity.includes('@co-worker') || identity.includes('@owner'), 'Should include owner mention handle');
+    // Owner config has name: "Owner", mentionPatterns: ["@owner", "@owner", "@owner"]
+    assert.ok(identity.includes('Owner'), 'Should include owner name from config');
+    assert.ok(identity.includes('@owner'), 'Should include @owner mention handle');
+    assert.ok(identity.includes('@owner'), 'Should include @owner mention handle');
     assert.ok(identity.includes('行首'), 'Should teach line-start rule for owner mentions');
   });
 
@@ -690,7 +691,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no non-self participant has activity');
   });
 
-  test('buildSystemPrompt size with activeParticipants stays under 2050 chars', async () => {
+  test('buildSystemPrompt size with activeParticipants stays under 2950 chars (raised for F114 magic words)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -705,7 +706,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 2650, `Prompt with activity is ${prompt.length} chars, expected < 2650`);
+    assert.ok(prompt.length < 2950, `Prompt with activity is ${prompt.length} chars, expected < 2950`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -888,7 +889,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('skill'), 'Should not contain skill reference when null');
   });
 
-  test('buildSystemPrompt size stays under 2200 chars with SOP hint', async () => {
+  test('buildSystemPrompt size stays under 2900 chars with SOP hint (raised for F114 magic words)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -905,7 +906,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 2600, `Prompt with SOP hint is ${prompt.length} chars, expected < 2600`);
+    assert.ok(prompt.length < 2900, `Prompt with SOP hint is ${prompt.length} chars, expected < 2900`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -934,7 +935,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Voice Mode ON'), 'Should not include voice mode header');
   });
 
-  test('buildSystemPrompt size stays under 2400 chars with voice mode + SOP hint', async () => {
+  test('buildSystemPrompt size stays under 3100 chars with voice mode + SOP hint (raised for F114 magic words)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -952,7 +953,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 2800, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 2800`);
+    assert.ok(prompt.length < 3100, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3100`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {

@@ -16,6 +16,7 @@ import { backfillBoundSessionHistory } from '../domains/cats/services/session/Bo
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
+import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -28,10 +29,11 @@ interface SessionChainRouteOptions extends FastifyPluginOptions {
   threadStore: IThreadStore;
   messageStore?: IMessageStore;
   transcriptReader?: TranscriptReader;
+  sessionSealer?: ISessionSealer;
 }
 
 export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChainRouteOptions): Promise<void> {
-  const { sessionChainStore, threadStore, messageStore, transcriptReader } = opts;
+  const { sessionChainStore, threadStore, messageStore, transcriptReader, sessionSealer } = opts;
 
   app.get<{
     Params: { threadId: string };
@@ -127,11 +129,44 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
 
     const active = await sessionChainStore.getActive(session.catId, session.threadId);
     if (active && active.id !== session.id) {
-      reply.status(409);
-      return {
-        error: 'Another active session already exists for this cat/thread',
-        activeSessionId: active.id,
-      };
+      // Only displace the active session if it's empty (no messages).
+      // A non-empty active session is real work — refuse to destroy it.
+      if ((active.messageCount ?? 0) > 0) {
+        reply.status(409);
+        return {
+          error: 'Another active session with messages already exists for this cat/thread',
+          activeSessionId: active.id,
+        };
+      }
+      // Empty replacement (e.g., auto-seal created it) → safe to displace.
+      // Use sessionSealer when available for consistent seal semantics.
+      let displaced = false;
+      if (sessionSealer) {
+        try {
+          const result = await sessionSealer.requestSeal({ sessionId: active.id, reason: 'unseal_displacement' });
+          if (result.accepted) {
+            sessionSealer.finalize({ sessionId: active.id }).catch(() => {});
+            displaced = true;
+          }
+        } catch {
+          /* best-effort — empty session, no data to lose */
+        }
+      } else {
+        await sessionChainStore.update(active.id, {
+          status: 'sealed',
+          sealReason: 'unseal_displacement',
+          sealedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        displaced = true;
+      }
+      if (!displaced) {
+        reply.status(409);
+        return {
+          error: 'Failed to displace active session (CAS race) — retry unseal',
+          activeSessionId: active.id,
+        };
+      }
     }
 
     const reopened = await sessionChainStore.create({
@@ -166,7 +201,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
   });
 
   // PATCH /api/threads/:threadId/sessions/:catId/bind — Manual bind (#72)
-  // Allows team lead to bind a known-good CLI session ID to a cat's thread session.
+  // Allows 铲屎官 to bind a known-good CLI session ID to a cat's thread session.
   // If active session exists → update cliSessionId; otherwise → create new session.
   app.patch<{
     Params: { threadId: string; catId: string };

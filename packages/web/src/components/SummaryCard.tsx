@@ -23,8 +23,8 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
   // F032 P2: Use dynamic cat data instead of hardcoded CAT_NAMES
   const { getCatById } = useCatData();
   const catData = getCatById(createdBy);
-  // Special case: 'system' createdBy → '系统纪要', otherwise use cat displayName or 'team lead'
-  const creatorLabel = createdBy === 'system' ? '系统纪要' : (catData?.displayName ?? 'team lead');
+  // Special case: 'system' createdBy → '系统纪要', otherwise use cat displayName or '铲屎官'
+  const creatorLabel = createdBy === 'system' ? '系统纪要' : (catData?.displayName ?? '铲屎官');
 
   return (
     <div className="flex justify-center mb-4">

@@ -2,11 +2,20 @@
 
 # Cat Cafe 启动脚本
 # 用法:
-#   pnpm start              — 开发模式 (next dev + Redis 持久化)
-#   pnpm start --quick      — 跳过 rebuild
-#   pnpm start --memory     — 使用内存存储 (重启丢数据)
-#   pnpm start --no-redis   — 同 --memory
-#   pnpm start --prod-web   — 前端 production build (PWA + Tailscale 友好)
+#   pnpm start                        — 开发模式 (next dev + Redis 持久化)
+#   pnpm start --profile=dev          — 家里开发默认值 (proxy ON, sidecar ON)
+#   pnpm start --profile=opensource   — 开源仓默认值 (proxy OFF, sidecar OFF)
+#   pnpm start --quick                — 跳过 rebuild
+#   pnpm start --memory               — 使用内存存储 (重启丢数据)
+#   pnpm start --no-redis             — 同 --memory
+#   pnpm start --prod-web             — 前端 production build (PWA + Tailscale 友好)
+#
+# Profile 说明:
+#   dev        — proxy ON, ASR/TTS/LLM ON, TTL=永久, redis-dev
+#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=86400s, redis-opensource
+#   (无)       — 保持原有行为（各项 ENABLED 默认 0）
+#
+# .env 中的显式值覆盖 profile 默认值。启动摘要标注每个值的来源。
 #
 # --prod-web 模式 (runtime-worktree.sh 自动传入):
 #   - next build + next start（非 next dev）
@@ -41,11 +50,13 @@ NC='\033[0m' # No Color
 QUICK_MODE=false
 USE_REDIS=true
 PROD_WEB=false
+PROFILE=""
 for arg in "$@"; do
     case $arg in
         --quick|-q) QUICK_MODE=true ;;
         --memory|--no-redis) USE_REDIS=false ;;
         --prod-web) PROD_WEB=true ;;
+        --profile=*) PROFILE="${arg#*=}" ;;
     esac
 done
 
@@ -85,11 +96,107 @@ load_dare_env_from_local() {
 
 load_dare_env_from_local
 
-# 默认端口
+# Profile 默认值（env 变量优先，profile 作 fallback）
+apply_profile_defaults() {
+    local profile="$1"
+    # Clear previous profile state
+    unset _PROF_ANTHROPIC_PROXY_ENABLED _PROF_ASR_ENABLED _PROF_TTS_ENABLED
+    unset _PROF_LLM_POSTPROCESS_ENABLED _PROF_REDIS_PROFILE
+    unset _PROF_MESSAGE_TTL_SECONDS _PROF_THREAD_TTL_SECONDS
+    unset _PROF_TASK_TTL_SECONDS _PROF_SUMMARY_TTL_SECONDS
+    case "$profile" in
+        dev)
+            _PROF_ANTHROPIC_PROXY_ENABLED=1
+            _PROF_ASR_ENABLED=1
+            _PROF_TTS_ENABLED=1
+            _PROF_LLM_POSTPROCESS_ENABLED=1
+            _PROF_MESSAGE_TTL_SECONDS=0
+            _PROF_THREAD_TTL_SECONDS=0
+            _PROF_TASK_TTL_SECONDS=0
+            _PROF_SUMMARY_TTL_SECONDS=0
+            _PROF_REDIS_PROFILE=dev
+            ;;
+        opensource)
+            _PROF_ANTHROPIC_PROXY_ENABLED=0
+            _PROF_ASR_ENABLED=0
+            _PROF_TTS_ENABLED=0
+            _PROF_LLM_POSTPROCESS_ENABLED=0
+            _PROF_MESSAGE_TTL_SECONDS=86400
+            _PROF_THREAD_TTL_SECONDS=86400
+            _PROF_TASK_TTL_SECONDS=86400
+            _PROF_SUMMARY_TTL_SECONDS=86400
+            _PROF_REDIS_PROFILE=opensource
+            ;;
+        "")
+            # No profile — all _PROF_ vars stay unset, existing behavior preserved
+            ;;
+        *)
+            echo -e "${RED}ERROR: Unknown profile '$profile'. Valid: dev, opensource${NC}"
+            exit 1
+            ;;
+    esac
+}
+
+apply_profile_defaults "$PROFILE"
+
+# resolve_config: env override > profile default (sets var + _SRC_ annotation)
+# Usage: resolve_config "VAR_NAME" — sets VAR_NAME and _SRC_VAR_NAME in current shell
+resolve_config() {
+    local var_name="$1"
+    local prof_var="_PROF_${var_name}"
+    local env_val="${!var_name}"
+    local prof_val="${!prof_var}"
+    if [ -n "$env_val" ]; then
+        eval "_SRC_${var_name}=\".env override\""
+    elif [ -n "$prof_val" ]; then
+        eval "_SRC_${var_name}=\"profile default ($PROFILE)\""
+        eval "${var_name}=\"${prof_val}\""
+    else
+        eval "_SRC_${var_name}=\"built-in default\""
+    fi
+}
+
+# print_config_summary: display each profile-aware config with its source
+print_config_summary() {
+    echo "  配置来源："
+    local key src_var val source
+    for key in ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED \
+               MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS \
+               REDIS_PROFILE; do
+        val="${!key}"
+        src_var="_SRC_${key}"
+        source="${!src_var:-built-in default}"
+        printf "    %-30s = %-10s ← %s\n" "$key" "$val" "$source"
+    done
+}
+
+# 默认端口 (not profile-dependent)
 API_PORT=${API_SERVER_PORT:-3003}
 WEB_PORT=${FRONTEND_PORT:-3004}
 REDIS_PORT=${REDIS_PORT:-6399}
-REDIS_PROFILE=${REDIS_PROFILE:-dev}
+
+# Profile-aware config resolution
+resolve_config "ANTHROPIC_PROXY_ENABLED"
+resolve_config "ASR_ENABLED"
+resolve_config "TTS_ENABLED"
+resolve_config "LLM_POSTPROCESS_ENABLED"
+resolve_config "MESSAGE_TTL_SECONDS"
+resolve_config "THREAD_TTL_SECONDS"
+resolve_config "TASK_TTL_SECONDS"
+resolve_config "SUMMARY_TTL_SECONDS"
+resolve_config "REDIS_PROFILE"
+
+# Apply built-in fallbacks for vars with no profile and no env
+: "${ANTHROPIC_PROXY_ENABLED:=0}"
+: "${ASR_ENABLED:=0}"
+: "${TTS_ENABLED:=0}"
+: "${LLM_POSTPROCESS_ENABLED:=0}"
+: "${MESSAGE_TTL_SECONDS:=0}"
+: "${THREAD_TTL_SECONDS:=0}"
+: "${TASK_TTL_SECONDS:=0}"
+: "${SUMMARY_TTL_SECONDS:=0}"
+: "${REDIS_PROFILE:=dev}"
+
 REDIS_DATA_DIR=${REDIS_DATA_DIR:-"$HOME/.cat-cafe/redis-${REDIS_PROFILE}"}
 REDIS_BACKUP_DIR=${REDIS_BACKUP_DIR:-"$HOME/.cat-cafe/redis-backups/${REDIS_PROFILE}"}
 REDIS_DBFILE=${REDIS_DBFILE:-dump.rdb}
@@ -97,11 +204,6 @@ REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
 
-# 默认永久保留（用户无需手动配置 TTL）
-MESSAGE_TTL_SECONDS=${MESSAGE_TTL_SECONDS:-0}
-THREAD_TTL_SECONDS=${THREAD_TTL_SECONDS:-0}
-TASK_TTL_SECONDS=${TASK_TTL_SECONDS:-0}
-SUMMARY_TTL_SECONDS=${SUMMARY_TTL_SECONDS:-0}
 export MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
 
 # 杀掉占用端口的进程
@@ -142,6 +244,52 @@ wait_for_port() {
     done
     echo -e "${RED}  ✗ $name 启动超时（端口 $port, ${max_wait}s 内未监听）${NC}"
     return 1
+}
+
+# Sidecar 状态机：disabled → launching → ready | failed
+# 用法: start_sidecar <name> <state_var> <port> <timeout> <launch_cmd...>
+start_sidecar() {
+    local name="$1" state_var="$2" port="$3" timeout="$4"
+    shift 4
+    local launch_cmd="$*"
+
+    eval "${state_var}=launching"
+    echo "  启动 ${name} (端口 ${port})..."
+    eval "$launch_cmd" &
+    if wait_for_port "$port" "$name" "$timeout"; then
+        eval "${state_var}=ready"
+    else
+        eval "${state_var}=failed"
+    fi
+}
+
+# Sidecar summary: ready → 地址, failed → 报告, disabled → 静默
+print_sidecar_summary_all() {
+    local name state_var port state
+    for entry in "ASR:_STATE_ASR:${ASR_PORT:-9876}" "TTS:_STATE_TTS:${TTS_PORT_VAL:-9879}" "LLM后修:_STATE_LLM_PP:${LLM_PP_PORT:-9878}"; do
+        name="${entry%%:*}"
+        local rest="${entry#*:}"
+        state_var="${rest%%:*}"
+        port="${rest#*:}"
+        state="${!state_var}"
+        case "$state" in
+            ready)   echo "  - ${name}:      http://localhost:${port}" ;;
+            failed)  echo -e "  - ${name}:      ${RED:-}启动失败${NC:-}" ;;
+        esac
+    done
+}
+
+# 检查 sidecar 依赖是否存在（ENABLED=1 时调用）
+# 用法: check_sidecar_dep <name> <command>
+# 返回 0 = 存在, 1 = 缺失（并打印安装提示）
+check_sidecar_dep() {
+    local name="$1" cmd="$2"
+    if ! command -v "$cmd" &>/dev/null; then
+        echo -e "${RED:-}  ✗ ${name} 需要 ${cmd}，但未安装${NC:-}"
+        echo "    请运行: ./scripts/setup.sh 或手动安装 ${cmd}"
+        return 1
+    fi
+    return 0
 }
 
 # 清理缓存
@@ -458,61 +606,57 @@ main() {
         echo -e "${YELLOW}  ⚠ Anthropic Proxy 已禁用 (ANTHROPIC_PROXY_ENABLED=0)${NC}"
     fi
 
-    # Qwen3-ASR Server (语音输入 — 替代 Whisper，同端口 drop-in)
+    # Sidecar 状态初始化
     ASR_PORT=${WHISPER_PORT:-9876}
-    STARTED_ASR=false
+    TTS_PORT_VAL=${TTS_PORT:-9879}
+    LLM_PP_PORT=${LLM_POSTPROCESS_PORT:-9878}
+    _STATE_ASR=disabled
+    _STATE_TTS=disabled
+    _STATE_LLM_PP=disabled
+
+    # Qwen3-ASR Server (语音输入 — 替代 Whisper，同端口 drop-in)
     if [ "${ASR_ENABLED:-0}" = "1" ]; then
-        if [ -f "scripts/qwen3-asr-server.sh" ]; then
-            echo "  启动 Qwen3-ASR (端口 $ASR_PORT)..."
-            WHISPER_PORT=$ASR_PORT bash scripts/qwen3-asr-server.sh &
-            if wait_for_port $ASR_PORT "Qwen3-ASR" 30; then
-                STARTED_ASR=true
-            fi
+        if ! check_sidecar_dep "ASR" "python3"; then
+            _STATE_ASR=failed
+        elif [ -f "scripts/qwen3-asr-server.sh" ]; then
+            start_sidecar "Qwen3-ASR" "_STATE_ASR" "$ASR_PORT" "${ASR_TIMEOUT:-30}" \
+                "WHISPER_PORT=$ASR_PORT bash scripts/qwen3-asr-server.sh"
         elif [ -f "scripts/whisper-server.sh" ]; then
-            echo "  启动 Whisper ASR fallback (端口 $ASR_PORT)..."
-            WHISPER_PORT=$ASR_PORT bash scripts/whisper-server.sh &
-            if wait_for_port $ASR_PORT "Whisper ASR" 30; then
-                STARTED_ASR=true
-            fi
+            start_sidecar "Whisper ASR" "_STATE_ASR" "$ASR_PORT" "${ASR_TIMEOUT:-30}" \
+                "WHISPER_PORT=$ASR_PORT bash scripts/whisper-server.sh"
         else
-            echo -e "${YELLOW}  ⚠ ASR 已启用，但脚本未找到，跳过语音输入服务${NC}"
+            echo -e "${RED}  ✗ ASR 已启用，但脚本未找到${NC}"
+            echo "    请运行: ./scripts/setup.sh"
+            _STATE_ASR=failed
         fi
-    else
-        echo -e "${YELLOW}  ⚠ ASR 已禁用 (ASR_ENABLED=0)${NC}"
     fi
 
     # TTS Server (语音合成 — Qwen3-TTS / Kokoro / edge-tts)
-    TTS_PORT_VAL=${TTS_PORT:-9879}
-    STARTED_TTS=false
     if [ "${TTS_ENABLED:-0}" = "1" ]; then
-        if [ -f "scripts/tts-server.sh" ]; then
-            echo "  启动 TTS (端口 $TTS_PORT_VAL)..."
-            TTS_PORT=$TTS_PORT_VAL bash scripts/tts-server.sh &
-            if wait_for_port $TTS_PORT_VAL "TTS" 30; then
-                STARTED_TTS=true
-            fi
+        if ! check_sidecar_dep "TTS" "python3"; then
+            _STATE_TTS=failed
+        elif [ -f "scripts/tts-server.sh" ]; then
+            start_sidecar "TTS" "_STATE_TTS" "$TTS_PORT_VAL" "${TTS_TIMEOUT:-30}" \
+                "TTS_PORT=$TTS_PORT_VAL bash scripts/tts-server.sh"
         else
-            echo -e "${YELLOW}  ⚠ TTS 已启用，但 tts-server.sh 未找到，跳过语音合成服务${NC}"
+            echo -e "${RED}  ✗ TTS 已启用，但脚本未找到${NC}"
+            echo "    请运行: ./scripts/setup.sh"
+            _STATE_TTS=failed
         fi
-    else
-        echo -e "${YELLOW}  ⚠ TTS 已禁用 (TTS_ENABLED=0)${NC}"
     fi
 
     # LLM 后修 Server (语音转写纠正 — Qwen3-4B)
-    LLM_PP_PORT=${LLM_POSTPROCESS_PORT:-9878}
-    STARTED_LLM_PP=false
     if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
-        if [ -f "scripts/llm-postprocess-server.sh" ]; then
-            echo "  启动 LLM 后修 (端口 $LLM_PP_PORT)..."
-            LLM_POSTPROCESS_PORT=$LLM_PP_PORT bash scripts/llm-postprocess-server.sh &
-            if wait_for_port $LLM_PP_PORT "LLM 后修" 20; then
-                STARTED_LLM_PP=true
-            fi
+        if ! check_sidecar_dep "LLM 后修" "python3"; then
+            _STATE_LLM_PP=failed
+        elif [ -f "scripts/llm-postprocess-server.sh" ]; then
+            start_sidecar "LLM 后修" "_STATE_LLM_PP" "$LLM_PP_PORT" "${LLM_TIMEOUT:-60}" \
+                "LLM_POSTPROCESS_PORT=$LLM_PP_PORT bash scripts/llm-postprocess-server.sh"
         else
-            echo -e "${YELLOW}  ⚠ LLM 后修已启用，但脚本未找到，跳过语音纠正${NC}"
+            echo -e "${RED}  ✗ LLM 后修已启用，但脚本未找到${NC}"
+            echo "    请运行: ./scripts/setup.sh"
+            _STATE_LLM_PP=failed
         fi
-    else
-        echo -e "${YELLOW}  ⚠ LLM 后修已禁用 (LLM_POSTPROCESS_ENABLED=0)${NC}"
     fi
 
     # API Server
@@ -555,14 +699,15 @@ main() {
     echo ""
     echo "========================"
     echo -e "${GREEN}🎉 Cat Café 已启动！${NC}"
+    [ -n "$PROFILE" ] && echo -e "  Profile: ${CYAN}${PROFILE}${NC}"
+    echo ""
+    print_config_summary
     echo ""
     echo "服务地址："
     echo "  - Frontend: http://localhost:$WEB_PORT"
     echo "  - API:      http://localhost:$API_PORT"
     [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ] && echo "  - Proxy:    http://localhost:$PROXY_PORT"
-    [ "$STARTED_ASR" = true ] && echo "  - ASR:      http://localhost:$ASR_PORT"
-    [ "$STARTED_TTS" = true ] && echo "  - TTS:      http://localhost:$TTS_PORT_VAL"
-    [ "$STARTED_LLM_PP" = true ] && echo "  - LLM后修:  http://localhost:$LLM_PP_PORT"
+    print_sidecar_summary_all
     echo -e "  - 前端模式: $PWA_INFO"
     echo -e "  - 存储:     $STORAGE_INFO"
     echo ""

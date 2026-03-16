@@ -1,27 +1,26 @@
 /**
- * F34/F066: Cat Voice Configuration
+ * F34/F066/F103: Cat Voice Configuration
  * Per-cat TTS voice settings, mirroring cat-budgets.ts pattern.
  *
- * Priority: env var override > cat-config.json voiceConfig > hardcoded defaults
+ * Priority: env var override > cat-config.json voiceConfig > hardcoded defaults (by breedId)
  *
- * F066 E-type: All three cats use Qwen3-TTS Base clone mode with Genshin
- * character reference audio (流浪者/魈/班尼特). ref_audio paths are relative
- * to GENSHIN_VOICE_DIR env var (defaults to ~/projects/relay-station/
- * GPT-SoVITS/character-models/genshin/).
+ * F103: Each cat (not each breed) has independent voice config in cat-config.json.
+ * loadVoicesFromJson() iterates ALL variants, keyed by catId — same pattern as avatar/color.
+ * Hardcoded breed defaults remain as fallback for cats without explicit voiceConfig.
  *
  * Env vars:
- *   CAT_OPUS_TTS_VOICE    → 布偶猫 voice ID override
- *   CAT_CODEX_TTS_VOICE   → 缅因猫 voice ID override
- *   CAT_GEMINI_TTS_VOICE  → 暹罗猫 voice ID override
  *   GENSHIN_VOICE_DIR     → base dir for genshin reference audio
+ *   CAT_OPUS_TTS_VOICE    → per-cat voice ID override (legacy)
+ *   CAT_CODEX_TTS_VOICE   → per-cat voice ID override (legacy)
+ *   CAT_GEMINI_TTS_VOICE  → per-cat voice ID override (legacy)
  */
 
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import type { VoiceConfig } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveBreedId } from './breed-resolver.js';
-import { getAllCatIdsFromConfig, getDefaultVariant, loadCatConfig } from './cat-config-loader.js';
+import { getAllCatIdsFromConfig, loadCatConfig } from './cat-config-loader.js';
 
 const VOICE_ENV_KEYS = {
   opus: 'CAT_OPUS_TTS_VOICE',
@@ -35,6 +34,17 @@ const VOICE_ENV_KEYS = {
  */
 function genshinVoiceDir(): string {
   return process.env.GENSHIN_VOICE_DIR ?? join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models/genshin');
+}
+
+/**
+ * F103: Base directory for all character voice models (parent of genshin/ and honkai-starrail/).
+ * Priority: CHARACTER_VOICE_DIR > dirname(GENSHIN_VOICE_DIR) > hardcoded default.
+ * This ensures backward compat: users who only set GENSHIN_VOICE_DIR still get correct paths.
+ */
+function characterVoiceBaseDir(): string {
+  if (process.env.CHARACTER_VOICE_DIR) return process.env.CHARACTER_VOICE_DIR;
+  if (process.env.GENSHIN_VOICE_DIR) return dirname(process.env.GENSHIN_VOICE_DIR);
+  return join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models');
 }
 
 /**
@@ -97,16 +107,28 @@ function getDefaultVoices(): Record<string, VoiceConfig> {
 // Cache from cat-config.json
 let cachedJsonVoices: Record<string, VoiceConfig> | null = null;
 
+/**
+ * F103: Load per-catId voices from all variants (not just breed defaults).
+ * Each variant's catId gets its own voice config — same pattern as avatar/color.
+ *
+ * Relative refAudio paths (not starting with /) are resolved against CHARACTER_VOICE_DIR.
+ * This lets cat-config.json use clean paths like "genshin/流浪者/xxx.wav".
+ */
 function loadVoicesFromJson(): Record<string, VoiceConfig> {
   if (cachedJsonVoices) return cachedJsonVoices;
 
   try {
     const config = loadCatConfig();
+    const baseDir = characterVoiceBaseDir();
     cachedJsonVoices = {};
     for (const breed of config.breeds) {
-      const variant = getDefaultVariant(breed);
-      if (variant.voiceConfig) {
-        cachedJsonVoices[breed.catId] = variant.voiceConfig;
+      for (const variant of breed.variants) {
+        if (variant.voiceConfig) {
+          const catId = variant.catId ?? breed.catId;
+          const vc = variant.voiceConfig;
+          cachedJsonVoices[catId] =
+            vc.refAudio && !isAbsolute(vc.refAudio) ? { ...vc, refAudio: join(baseDir, vc.refAudio) } : vc;
+        }
       }
     }
     return cachedJsonVoices;

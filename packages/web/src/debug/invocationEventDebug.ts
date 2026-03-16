@@ -105,13 +105,21 @@ function sanitizeEvent(input: DebugEventInput): StoredDebugEvent {
       continue;
     }
 
+    if (key === 'origin' && (value === 'stream' || value === 'callback')) {
+      out.origin = value;
+      continue;
+    }
+
     if (
       (key === 'threadId' ||
         key === 'action' ||
         key === 'mode' ||
         key === 'reason' ||
         key === 'routeThreadId' ||
-        key === 'storeThreadId') &&
+        key === 'storeThreadId' ||
+        key === 'catId' ||
+        key === 'messageId' ||
+        key === 'invocationId') &&
       typeof value === 'string'
     ) {
       out[key] = value;
@@ -162,6 +170,21 @@ function makeDumpEvents(rawThreadId: boolean): StoredDebugEvent[] {
   return copy.map(maskEvent);
 }
 
+function makeDumpResult(events: StoredDebugEvent[], rawThreadId: boolean): DebugDumpResult {
+  return {
+    meta: {
+      generatedAt: Date.now(),
+      count: events.length,
+      enabled,
+      size: maxSize,
+      rawThreadId,
+      marker: rawThreadId ? 'RAW' : 'MASKED',
+      expiresAt,
+    },
+    events,
+  };
+}
+
 export function configureDebug(input: DebugConfigureInput): DebugStatus {
   if (input.enabled === false) {
     resetToDisabled();
@@ -207,18 +230,13 @@ export function clearDebugEvents() {
 
 export function dumpDebugEvents(options: DebugDumpOptions = {}): DebugDumpResult {
   const rawThreadId = options.rawThreadId === true;
-  return {
-    meta: {
-      generatedAt: Date.now(),
-      count: records.length,
-      enabled,
-      size: maxSize,
-      rawThreadId,
-      marker: rawThreadId ? 'RAW' : 'MASKED',
-      expiresAt,
-    },
-    events: makeDumpEvents(rawThreadId),
-  };
+  return makeDumpResult(makeDumpEvents(rawThreadId), rawThreadId);
+}
+
+export function dumpBubbleTimeline(options: DebugDumpOptions = {}): DebugDumpResult {
+  const rawThreadId = options.rawThreadId === true;
+  const events = makeDumpEvents(rawThreadId).filter((item) => item.event === 'bubble_lifecycle');
+  return makeDumpResult(events, rawThreadId);
 }
 
 export function getDebugStatus(): DebugStatus {
@@ -252,6 +270,7 @@ export function ensureWindowDebugApi() {
       return status;
     },
     dump: (options?: DebugDumpOptions) => JSON.stringify(dumpDebugEvents(options), null, 2),
+    dumpBubbleTimeline: (options?: DebugDumpOptions) => JSON.stringify(dumpBubbleTimeline(options), null, 2),
     clear: () => {
       clearDebugEvents();
     },

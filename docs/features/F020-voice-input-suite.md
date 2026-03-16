@@ -22,6 +22,8 @@ created: 2026-02-26
 - **F20b**: 1ec0910 + 23a5c30 — requestData() 轮询 + partialTranscript + streamSeqRef 竞态保护。
 - **F20c**: 已独立实现为 relay-station 平级项目（非 cat-cafe 子包）。macOS 全局热键（⌥Space）+ Whisper 转写 + 术语纠正 + 打字到任意 app。
 - **F20d**: CatCafeHub "语音设置" tab：可编辑术语纠正表 + initial_prompt 编辑 + 语言选择。内置词典 + localStorage 用户自定义合并。计划: 2026-02-15-voice-accuracy-and-system-whisper.md Phase B
+- **F20e**: 语音 ASR 自修正 — 干掉 LLM 后修中间人。前端标记 `isVoiceInput: true`，system prompt 注入提示大模型"这条消息来自语音输入，可能有识别错误，请自行理解原意"。大模型本身有完整上下文（项目术语、猫名、feature 编号），是最好的后修者，零额外延迟零额外成本。LLM 后修服务（`scripts/llm-postprocess-*`）保留但不再用于语音后修。起因：Qwen3.5 35B MoE 无上下文时把"magic word"修不回来，而主模型天然理解。2026-03-13 team lead提出。
+- **F20f**: ASR streaming 质量退化修复。**根因**：`useVoiceInput.ts` 的 streaming 逻辑每 3 秒把全部累积 chunks 拼成 blob 重新发给 ASR（Qwen3-ASR），音频越长质量越差（幻觉、乱码、奇怪符号）。Qwen3-ASR 还多一步 ffmpeg 转 WAV，长音频开销更大。**修复方向**：前端改增量发送（只发最近 chunk，不重发历史音频）；加 backpressure（上一次转写没完成不发下一次）。Qwen3-ASR 可调参数有限（仅 `context`），优化主要在前端。2026-03-13 team lead发现录音越长识别越差。
 
 ## Acceptance Criteria
 - [x] AC-A1: 本文档已补齐模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。

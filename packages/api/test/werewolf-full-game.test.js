@@ -1,7 +1,9 @@
 /**
- * Full 9-Person Werewolf Integration Test (F101 Task B9)
+ * Full 12-Person Werewolf Integration Test (F101 Task B9)
  *
  * Simulates a complete game: lobby → deal → night/day cycles → win.
+ * Uses 12-player preset (wolf:4, seer:1, witch:1, hunter:1, guard:1, villager:4)
+ * to exercise guard role mechanics.
  * Verifies information isolation at each step.
  */
 
@@ -18,18 +20,18 @@ function makePlayers(count) {
   }));
 }
 
-describe('Full 9-Person Werewolf Game', () => {
+describe('Full 12-Person Werewolf Game', () => {
   it('complete game: lobby → role assignment → night/day → village wins', () => {
     // === Phase 1: Lobby + Role Assignment ===
     const lobby = new WerewolfLobby();
     const runtime = lobby.createLobby({
       threadId: 'thread-full-game',
-      playerCount: 9,
-      players: makePlayers(9),
+      playerCount: 12,
+      players: makePlayers(12),
     });
 
     assert.equal(runtime.status, 'lobby');
-    assert.equal(runtime.seats.length, 9);
+    assert.equal(runtime.seats.length, 12);
 
     lobby.startGame(runtime);
 
@@ -41,21 +43,21 @@ describe('Full 9-Person Werewolf Game', () => {
       assert.ok(seat.role, `${seat.seatId} should have role`);
     }
 
-    // Count roles — should match 9p preset
+    // Count roles — should match 12p preset: wolf:4, seer:1, witch:1, hunter:1, guard:1, villager:4
     const roleCounts = {};
     for (const seat of runtime.seats) {
       roleCounts[seat.role] = (roleCounts[seat.role] ?? 0) + 1;
     }
-    assert.equal(roleCounts.wolf, 2);
+    assert.equal(roleCounts.wolf, 4);
     assert.equal(roleCounts.seer, 1);
     assert.equal(roleCounts.witch, 1);
     assert.equal(roleCounts.hunter, 1);
     assert.equal(roleCounts.guard, 1);
-    assert.equal(roleCounts.villager, 3);
+    assert.equal(roleCounts.villager, 4);
 
     // Verify role_assigned events are seat-scoped
     const roleEvents = runtime.eventLog.filter((e) => e.type === 'role_assigned');
-    assert.equal(roleEvents.length, 9);
+    assert.equal(roleEvents.length, 12);
     for (const e of roleEvents) {
       assert.ok(e.scope.startsWith('seat:'));
     }
@@ -89,9 +91,6 @@ describe('Full 9-Person Werewolf Game', () => {
       const canSee = otherView.visibleEvents.find(
         (ev) => ev.type === 'role_assigned' && ev.payload.seatId === targetSeatId,
       );
-      // Only same-faction wolves can see each other's role events (they share faction:wolf... no, these are seat-scoped)
-      // Actually role_assigned events are seat-scoped, so only the seat owner can see them
-      // Exception: wolves don't get each other's role_assigned event (those are seat:Px scoped)
       if (otherSeatId !== targetSeatId) {
         assert.equal(canSee, undefined, `${otherSeatId} must not see ${targetSeatId}'s role_assigned`);
       }
@@ -104,7 +103,7 @@ describe('Full 9-Person Werewolf Game', () => {
     engine.setNightAction(guard.seatId, 'guard', seer.seatId);
     // Wolves kill a villager
     engine.setNightAction(wolves[0].seatId, 'kill', villagers[0].seatId);
-    // Seer divines wolf (add divine result event manually for isolation check)
+    // Seer divines wolf
     engine.appendEvent({
       round: 1,
       phase: 'night_seer',
@@ -131,12 +130,10 @@ describe('Full 9-Person Werewolf Game', () => {
     assert.equal(wolfSeeDivine, undefined, 'wolf must not see seer divine result');
 
     // === Phase 4: Day 1 — Vote out wolf ===
-    // All alive players vote for wolf (seer's guidance)
     const aliveNonWolf = engine.getRuntime().seats.filter((s) => s.alive && s.role !== 'wolf');
     for (const s of aliveNonWolf) {
       engine.castVote(s.seatId, wolves[0].seatId);
     }
-    // Wolves vote for seer
     for (const w of wolves.filter((w) => w.alive)) {
       engine.castVote(w.seatId, seer.seatId);
     }
@@ -145,18 +142,14 @@ describe('Full 9-Person Werewolf Game', () => {
     assert.equal(day1.exiled, wolves[0].seatId, 'wolf should be exiled');
     assert.equal(day1.tied, false);
 
-    // Record last words
     engine.recordLastWords(wolves[0].seatId, 'Good game.');
 
     // === Phase 5: Night 2 ===
     engine.getRuntime().round = 2;
 
-    // Remaining wolf kills seer
     engine.setNightAction(wolves[1].seatId, 'kill', seer.seatId);
-    // Guard protects seer again (but already guarded last night — should be rejected)
-    // Actually guard tracked protection via lastGuardTarget, so cannot guard same target
+    // Guard can't guard same target two nights in a row
     assert.throws(() => engine.setNightAction(guard.seatId, 'guard', seer.seatId), /cannot guard same target/i);
-    // Guard protects witch instead
     engine.setNightAction(guard.seatId, 'guard', witch.seatId);
     // Witch saves seer
     engine.setNightAction(witch.seatId, 'heal', seer.seatId);
@@ -169,16 +162,49 @@ describe('Full 9-Person Werewolf Game', () => {
     for (const s of aliveDay2.filter((s) => s.role !== 'wolf')) {
       engine.castVote(s.seatId, wolves[1].seatId);
     }
-    engine.castVote(wolves[1].seatId, seer.seatId);
+    for (const w of wolves.filter((w) => w.alive && w !== wolves[1])) {
+      engine.castVote(w.seatId, seer.seatId);
+    }
 
     const day2 = engine.resolveVotes();
     assert.equal(day2.exiled, wolves[1].seatId, 'second wolf exiled');
 
-    // === Phase 7: Win Condition ===
+    // === Phase 7: Night 3 — wolves kill villager ===
+    engine.getRuntime().round = 3;
+    engine.setNightAction(wolves[2].seatId, 'kill', villagers[1].seatId);
+    engine.setNightAction(guard.seatId, 'guard', seer.seatId);
+    engine.resolveNight();
+
+    // === Phase 8: Day 3 — Vote out third wolf ===
+    const aliveDay3 = engine.getRuntime().seats.filter((s) => s.alive);
+    for (const s of aliveDay3.filter((s) => s.role !== 'wolf')) {
+      engine.castVote(s.seatId, wolves[2].seatId);
+    }
+    engine.castVote(wolves[2].seatId, seer.seatId);
+    engine.castVote(wolves[3].seatId, seer.seatId);
+
+    const day3 = engine.resolveVotes();
+    assert.equal(day3.exiled, wolves[2].seatId, 'third wolf exiled');
+
+    // === Phase 9: Night 4 — last wolf kills villager ===
+    engine.getRuntime().round = 4;
+    engine.setNightAction(wolves[3].seatId, 'kill', villagers[2].seatId);
+    engine.resolveNight();
+
+    // === Phase 10: Day 4 — Vote out last wolf ===
+    const aliveDay4 = engine.getRuntime().seats.filter((s) => s.alive);
+    for (const s of aliveDay4.filter((s) => s.role !== 'wolf')) {
+      engine.castVote(s.seatId, wolves[3].seatId);
+    }
+    engine.castVote(wolves[3].seatId, seer.seatId);
+
+    const day4 = engine.resolveVotes();
+    assert.equal(day4.exiled, wolves[3].seatId, 'last wolf exiled');
+
+    // === Win Condition ===
     const winner = engine.checkWinCondition();
     assert.equal(winner, 'village', 'village should win (all wolves dead)');
 
-    // Verify both wolves are dead
     for (const w of wolves) {
       const seat = engine.getRuntime().seats.find((s) => s.seatId === w.seatId);
       assert.equal(seat.alive, false, `${w.seatId} should be dead`);
@@ -189,17 +215,16 @@ describe('Full 9-Person Werewolf Game', () => {
     const lobby = new WerewolfLobby();
     const runtime = lobby.createLobby({
       threadId: 'thread-wolf-wins',
-      playerCount: 9,
-      players: makePlayers(9),
+      playerCount: 12,
+      players: makePlayers(12),
     });
     lobby.startGame(runtime);
 
     const engine = new WerewolfEngine(runtime);
-    const _wolves = runtime.seats.filter((s) => s.role === 'wolf');
     const good = runtime.seats.filter((s) => s.role !== 'wolf');
 
     // Kill good players until wolves >= good
-    // Need to kill 5 of 7 good (leave 2 good, 2 wolves)
+    // 12p: 4 wolves, 8 good → kill 5 good → 3 good vs 4 wolves
     for (let i = 0; i < 5; i++) {
       good[i].alive = false;
     }
@@ -212,8 +237,8 @@ describe('Full 9-Person Werewolf Game', () => {
     const lobby = new WerewolfLobby();
     const runtime = lobby.createLobby({
       threadId: 'thread-dead-iso',
-      playerCount: 9,
-      players: makePlayers(9),
+      playerCount: 12,
+      players: makePlayers(12),
     });
     lobby.startGame(runtime);
 

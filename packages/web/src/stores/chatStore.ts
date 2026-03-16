@@ -1,10 +1,12 @@
 import { CAT_CONFIGS } from '@cat-cafe/shared';
 import { create } from 'zustand';
+import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import type {
   CatInvocationInfo,
   CatStatusType,
   ChatMessage,
   ChatMessageMetadata,
+  ChatMessagePatch,
   GameState,
   QueueEntry,
   RichBlock,
@@ -21,6 +23,7 @@ export type {
   CatStatusType,
   ChatMessage,
   ChatMessageMetadata,
+  ChatMessagePatch,
   EvidenceData,
   EvidenceResultData,
   GameState,
@@ -52,6 +55,7 @@ function snapshotActive(s: ChatState): ThreadState {
     isLoadingHistory: s.isLoadingHistory,
     hasMore: s.hasMore,
     hasActiveInvocation: s.hasActiveInvocation,
+    activeInvocations: s.activeInvocations,
     intentMode: s.intentMode,
     targetCats: s.targetCats,
     catStatuses: s.catStatuses,
@@ -76,6 +80,7 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     isLoadingHistory: ts.isLoadingHistory,
     hasMore: ts.hasMore,
     hasActiveInvocation: ts.hasActiveInvocation,
+    activeInvocations: ts.activeInvocations,
     intentMode: ts.intentMode,
     targetCats: ts.targetCats,
     catStatuses: ts.catStatuses,
@@ -148,16 +153,69 @@ function revokeRemovedBlobUrls(previousMessages: ChatMessage[], nextMessages: Ch
   }
 }
 
-function replaceMessageIdInList(messages: ChatMessage[], fromId: string, toId: string): ChatMessage[] {
-  if (fromId === toId) return messages;
-  const fromIndex = messages.findIndex((msg) => msg.id === fromId);
-  if (fromIndex === -1) return messages;
+type ReplaceMessageIdResult = {
+  messages: ChatMessage[];
+  droppedMessage?: ChatMessage;
+  retainedMessage?: ChatMessage;
+};
 
-  if (messages.some((msg) => msg.id === toId)) {
-    return messages.filter((msg) => msg.id !== fromId);
+function replaceMessageIdInList(messages: ChatMessage[], fromId: string, toId: string): ReplaceMessageIdResult {
+  if (fromId === toId) return { messages };
+  const fromIndex = messages.findIndex((msg) => msg.id === fromId);
+  if (fromIndex === -1) return { messages };
+
+  const fromMessage = messages[fromIndex];
+  const retainedMessage = messages.find((msg) => msg.id === toId);
+  if (retainedMessage) {
+    return {
+      messages: messages.filter((msg) => msg.id !== fromId),
+      droppedMessage: fromMessage,
+      retainedMessage,
+    };
   }
 
-  return messages.map((msg) => (msg.id === fromId ? { ...msg, id: toId } : msg));
+  return { messages: messages.map((msg) => (msg.id === fromId ? { ...msg, id: toId } : msg)) };
+}
+
+function recordMessageIdDedupDrop(
+  threadId: string,
+  droppedMessage: ChatMessage | undefined,
+  retainedMessage: ChatMessage | undefined,
+  toId: string,
+) {
+  if (!droppedMessage || !retainedMessage) return;
+  recordDebugEvent({
+    event: 'bubble_lifecycle',
+    threadId,
+    timestamp: Date.now(),
+    action: 'drop',
+    reason: 'replace_message_id_dedup',
+    catId: droppedMessage.catId ?? retainedMessage.catId,
+    messageId: toId,
+    invocationId: droppedMessage.extra?.stream?.invocationId ?? retainedMessage.extra?.stream?.invocationId,
+    origin: droppedMessage.origin ?? retainedMessage.origin,
+  });
+}
+
+function applyMessagePatch(message: ChatMessage, patch: ChatMessagePatch): ChatMessage {
+  return {
+    ...message,
+    ...patch,
+    ...(patch.extra ? { extra: { ...message.extra, ...patch.extra } } : {}),
+    ...(patch.metadata
+      ? { metadata: message.metadata ? { ...message.metadata, ...patch.metadata } : patch.metadata }
+      : {}),
+  };
+}
+
+function patchMessageInList(messages: ChatMessage[], id: string, patch: ChatMessagePatch): ChatMessage[] {
+  let changed = false;
+  const nextMessages = messages.map((msg) => {
+    if (msg.id !== id) return msg;
+    changed = true;
+    return applyMessagePatch(msg, patch);
+  });
+  return changed ? nextMessages : messages;
 }
 
 /** F067 Phase 2: Fire macOS notification when a cat @mentions the owner */
@@ -213,6 +271,8 @@ interface ChatState {
   hasMore: boolean;
   /** Whether the thread has an active invocation (broader than isLoading — stays true during A2A chains) */
   hasActiveInvocation: boolean;
+  /** F108: Per-invocation slot tracking — key=invocationId, value=slot info */
+  activeInvocations: Record<string, { catId: string; mode: string }>;
   intentMode: 'execute' | 'ideate' | null;
   targetCats: string[];
   catStatuses: Record<string, CatStatusType>;
@@ -254,6 +314,7 @@ interface ChatState {
   prependHistory: (msgs: ChatMessage[], hasMore: boolean) => void;
   replaceMessages: (msgs: ChatMessage[], hasMore: boolean) => void;
   replaceMessageId: (fromId: string, toId: string) => void;
+  patchMessage: (id: string, patch: ChatMessagePatch) => void;
   appendToLastMessage: (content: string) => void;
   appendToMessage: (id: string, content: string) => void;
   appendToolEvent: (id: string, event: ToolEvent) => void;
@@ -264,6 +325,12 @@ interface ChatState {
   setStreaming: (id: string, streaming: boolean) => void;
   setLoading: (loading: boolean) => void;
   setHasActiveInvocation: (v: boolean) => void;
+  /** F108: Register a new active invocation slot */
+  addActiveInvocation: (invocationId: string, catId: string, mode: string) => void;
+  /** F108: Remove an active invocation slot; derives hasActiveInvocation */
+  removeActiveInvocation: (invocationId: string) => void;
+  /** F108: Clear all active invocations (timeout/error/stop recovery) */
+  clearAllActiveInvocations: () => void;
   setLoadingHistory: (loading: boolean) => void;
   setIntentMode: (mode: 'execute' | 'ideate' | null) => void;
   setTargetCats: (cats: string[]) => void;
@@ -278,6 +345,10 @@ interface ChatState {
   /** F081: Persist stream invocation identity onto a message for replace/hydration reconcile */
   setMessageStreamInvocation: (messageId: string, invocationId: string) => void;
   clearMessages: () => void;
+  /** Bug C: Monotonic counter + target threadId — increment to request a history catch-up fetch */
+  streamCatchUpVersion: number;
+  streamCatchUpThreadId: string | null;
+  requestStreamCatchUp: (threadId: string) => void;
   /** F101: Update current game state */
   setCurrentGame: (game: GameState | null) => void;
 
@@ -296,9 +367,13 @@ interface ChatState {
 
   // ── Multi-thread actions (new) ──
   addMessageToThread: (threadId: string, msg: ChatMessage) => void;
+  removeThreadMessage: (threadId: string, messageId: string) => void;
   replaceThreadMessageId: (threadId: string, fromId: string, toId: string) => void;
+  patchThreadMessage: (threadId: string, messageId: string, patch: ChatMessagePatch) => void;
   appendToThreadMessage: (threadId: string, messageId: string, content: string) => void;
   appendToolEventToThread: (threadId: string, messageId: string, event: ToolEvent) => void;
+  /** F22: Append a rich block to a message in a specific thread */
+  appendRichBlockToThread: (threadId: string, messageId: string, block: RichBlock) => void;
   setThreadCatInvocation: (threadId: string, catId: string, info: Partial<CatInvocationInfo>) => void;
   setThreadMessageMetadata: (threadId: string, messageId: string, metadata: ChatMessageMetadata) => void;
   setThreadMessageUsage: (threadId: string, messageId: string, usage: TokenUsage) => void;
@@ -307,6 +382,12 @@ interface ChatState {
   setThreadMessageStreaming: (threadId: string, messageId: string, streaming: boolean) => void;
   setThreadLoading: (threadId: string, loading: boolean) => void;
   setThreadHasActiveInvocation: (threadId: string, active: boolean) => void;
+  /** F108: Add an active invocation to a thread (background or active) */
+  addThreadActiveInvocation: (threadId: string, invocationId: string, catId: string, mode: string) => void;
+  /** F108: Remove an active invocation from a thread; derives hasActiveInvocation */
+  removeThreadActiveInvocation: (threadId: string, invocationId: string) => void;
+  /** F108: Clear all active invocations for a thread (cancel fallback when invocationId unknown) */
+  clearAllThreadActiveInvocations: (threadId: string) => void;
   setThreadIntentMode: (threadId: string, mode: 'execute' | 'ideate' | null) => void;
   setThreadTargetCats: (threadId: string, cats: string[]) => void;
   getThreadState: (threadId: string) => ThreadState;
@@ -341,8 +422,19 @@ interface ChatState {
   setQueue: (threadId: string, queue: QueueEntry[]) => void;
   setQueuePaused: (threadId: string, paused: boolean, reason?: 'canceled' | 'failed') => void;
   setQueueFull: (threadId: string, source: 'user' | 'connector') => void;
-  /** F098-D: Mark queued messages as delivered (set deliveredAt on matching messages) */
-  markMessagesDelivered: (threadId: string, messageIds: string[], deliveredAt: number) => void;
+  /** F098-D + F117: Mark queued messages as delivered (set deliveredAt) + insert user bubbles for queue-sent messages */
+  markMessagesDelivered: (
+    threadId: string,
+    messageIds: string[],
+    deliveredAt: number,
+    messages?: Array<{
+      id: string;
+      content: string;
+      catId: string | null;
+      timestamp: number;
+      contentBlocks?: readonly unknown[];
+    }>,
+  ) => void;
 
   // ── F63: Workspace Explorer ──
   rightPanelMode: 'status' | 'workspace';
@@ -358,6 +450,11 @@ interface ChatState {
   closeWorkspaceTab: (path: string) => void;
   restoreWorkspaceTabs: (tabs: string[], openFile: string | null) => void;
   setWorkspaceEditToken: (token: string | null, expiresIn?: number) => void;
+
+  // ── F120: Preview auto-open (always-mounted listener) ──
+  pendingPreviewAutoOpen: { port: number; path: string } | null;
+  setPendingPreviewAutoOpen: (data: { port: number; path: string }) => void;
+  consumePreviewAutoOpen: () => { port: number; path: string } | null;
 
   // ── F63-AC15: Code-to-chat reference ──
   pendingChatInsert: { threadId: string; text: string } | null;
@@ -379,6 +476,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoadingHistory: false,
   hasMore: true,
   hasActiveInvocation: false,
+  activeInvocations: {},
   intentMode: null,
   targetCats: [],
   catStatuses: {},
@@ -471,10 +569,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     }),
 
-  markMessagesDelivered: (threadId, messageIds, deliveredAt) =>
+  markMessagesDelivered: (threadId, messageIds, deliveredAt, serverMessages) =>
     set((state) => {
       const idSet = new Set(messageIds);
-      const updateMsgs = (msgs: ChatMessage[]) => msgs.map((m) => (idSet.has(m.id) ? { ...m, deliveredAt } : m));
+      const updateMsgs = (msgs: ChatMessage[]) => {
+        // Update deliveredAt on existing messages
+        const updated = msgs.map((m) => (idSet.has(m.id) ? { ...m, deliveredAt } : m));
+        // F117: Insert user bubbles for queue-sent messages not yet in the store
+        if (serverMessages) {
+          const existingIds = new Set(updated.map((m) => m.id));
+          for (const sm of serverMessages) {
+            if (!existingIds.has(sm.id)) {
+              updated.push({
+                id: sm.id,
+                type: 'user',
+                content: sm.content,
+                timestamp: sm.timestamp,
+                deliveredAt,
+                contentBlocks: sm.contentBlocks as ChatMessage['contentBlocks'],
+              });
+            }
+          }
+          // Re-sort: delivered messages use deliveredAt so they appear at delivery
+          // position (current tail), not their original send-time slot.
+          updated.sort((a, b) => (a.deliveredAt ?? a.timestamp) - (b.deliveredAt ?? b.timestamp));
+        }
+        return updated;
+      };
 
       if (threadId === state.currentThreadId) {
         return { messages: updateMsgs(state.messages) };
@@ -563,6 +684,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       workspaceEditTokenExpiry: token && expiresIn ? Date.now() + expiresIn * 1000 : null,
     }),
 
+  // ── F120: Preview auto-open ──
+  pendingPreviewAutoOpen: null,
+  setPendingPreviewAutoOpen: (data) => set({ pendingPreviewAutoOpen: data, rightPanelMode: 'workspace' }),
+  consumePreviewAutoOpen: () => {
+    const pending = get().pendingPreviewAutoOpen;
+    if (pending) set({ pendingPreviewAutoOpen: null });
+    return pending;
+  },
+
   // ── F63-AC15: Code-to-chat reference ──
   pendingChatInsert: null,
   setPendingChatInsert: (insert) => set({ pendingChatInsert: insert }),
@@ -609,9 +739,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   replaceMessageId: (fromId, toId) =>
     set((state) => {
-      const nextMessages = replaceMessageIdInList(state.messages, fromId, toId);
+      const result = replaceMessageIdInList(state.messages, fromId, toId);
+      if (result.messages === state.messages) return state;
+      recordMessageIdDedupDrop(state.currentThreadId, result.droppedMessage, result.retainedMessage, toId);
+      revokeRemovedBlobUrls(state.messages, result.messages);
+      return { messages: result.messages };
+    }),
+
+  patchMessage: (id, patch) =>
+    set((state) => {
+      const nextMessages = patchMessageInList(state.messages, id, patch);
       if (nextMessages === state.messages) return state;
-      revokeRemovedBlobUrls(state.messages, nextMessages);
       return { messages: nextMessages };
     }),
 
@@ -671,6 +809,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setLoading: (loading) => set({ isLoading: loading }),
   setHasActiveInvocation: (v) => set({ hasActiveInvocation: v }),
+  /** F108: Register a new active invocation slot */
+  addActiveInvocation: (invocationId, catId, mode) =>
+    set((state) => {
+      const activeInvocations = { ...state.activeInvocations, [invocationId]: { catId, mode } };
+      return { activeInvocations, hasActiveInvocation: true };
+    }),
+  /** F108: Remove an active invocation slot; derives hasActiveInvocation */
+  removeActiveInvocation: (invocationId) =>
+    set((state) => {
+      if (!(invocationId in state.activeInvocations)) {
+        return { hasActiveInvocation: Object.keys(state.activeInvocations).length > 0 };
+      }
+      const rest = Object.fromEntries(Object.entries(state.activeInvocations).filter(([k]) => k !== invocationId));
+      return { activeInvocations: rest, hasActiveInvocation: Object.keys(rest).length > 0 };
+    }),
+  /** F108: Clear all active invocations (timeout/error/stop recovery) */
+  clearAllActiveInvocations: () => set({ activeInvocations: {}, hasActiveInvocation: false }),
   setLoadingHistory: (loading) => set({ isLoadingHistory: loading }),
   setIntentMode: (mode) => set({ intentMode: mode }),
 
@@ -732,6 +887,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       revokeBlobUrls(state.messages);
       return { messages: [], hasMore: true };
     }),
+
+  streamCatchUpVersion: 0,
+  streamCatchUpThreadId: null,
+  requestStreamCatchUp: (threadId: string) =>
+    set((state) => ({
+      streamCatchUpVersion: state.streamCatchUpVersion + 1,
+      streamCatchUpThreadId: threadId,
+    })),
 
   setCurrentGame: (game) => set({ currentGame: game }),
 
@@ -838,20 +1001,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     }),
 
-  replaceThreadMessageId: (threadId, fromId, toId) =>
+  removeThreadMessage: (threadId, messageId) =>
     set((state) => {
       if (threadId === state.currentThreadId) {
-        const nextMessages = replaceMessageIdInList(state.messages, fromId, toId);
-        if (nextMessages === state.messages) return state;
+        const nextMessages = state.messages.filter((m) => m.id !== messageId);
+        if (nextMessages.length === state.messages.length) return state;
         revokeRemovedBlobUrls(state.messages, nextMessages);
         return { messages: nextMessages };
       }
 
       const existing = state.threadStates[threadId];
       if (!existing) return state;
-
-      const nextMessages = replaceMessageIdInList(existing.messages, fromId, toId);
-      if (nextMessages === existing.messages) return state;
+      const nextMessages = existing.messages.filter((m) => m.id !== messageId);
+      if (nextMessages.length === existing.messages.length) return state;
       revokeRemovedBlobUrls(existing.messages, nextMessages);
       return {
         threadStates: {
@@ -864,6 +1026,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       };
     }),
+
+  replaceThreadMessageId: (threadId, fromId, toId) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        const result = replaceMessageIdInList(state.messages, fromId, toId);
+        if (result.messages === state.messages) return state;
+        recordMessageIdDedupDrop(threadId, result.droppedMessage, result.retainedMessage, toId);
+        revokeRemovedBlobUrls(state.messages, result.messages);
+        return { messages: result.messages };
+      }
+
+      const existing = state.threadStates[threadId];
+      if (!existing) return state;
+
+      const result = replaceMessageIdInList(existing.messages, fromId, toId);
+      if (result.messages === existing.messages) return state;
+      recordMessageIdDedupDrop(threadId, result.droppedMessage, result.retainedMessage, toId);
+      revokeRemovedBlobUrls(existing.messages, result.messages);
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
+            messages: result.messages,
+            lastActivity: Date.now(),
+          },
+        },
+      };
+    }),
+
+  patchThreadMessage: (threadId, messageId, patch) =>
+    set((state) => updateThreadMessage(state, threadId, messageId, (m) => applyMessagePatch(m, patch))),
 
   /** Append chunk content to a specific message in a specific thread. */
   appendToThreadMessage: (threadId, messageId, content) =>
@@ -881,6 +1075,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...m,
         toolEvents: [...(m.toolEvents ?? []), event],
       })),
+    ),
+
+  /** F22: Append a rich block to a message in a specific thread. */
+  appendRichBlockToThread: (threadId, messageId, block) =>
+    set((state) =>
+      updateThreadMessage(state, threadId, messageId, (m) => {
+        const rich = m.extra?.rich ?? { v: 1 as const, blocks: [] };
+        if (rich.blocks.some((b: { id: string }) => b.id === block.id)) return m;
+        return { ...m, extra: { ...m.extra, rich: { ...rich, blocks: [...rich.blocks, block] } } };
+      }),
     ),
 
   /** Set/merge cat invocation info for a specific thread (active or background). */
@@ -988,6 +1192,67 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [threadId]: {
             ...existing,
             hasActiveInvocation: active,
+            lastActivity: Date.now(),
+          },
+        },
+      };
+    }),
+
+  /** F108: Add an active invocation to a thread (background or active) */
+  addThreadActiveInvocation: (threadId, invocationId, catId, mode) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        const activeInvocations = { ...state.activeInvocations, [invocationId]: { catId, mode } };
+        return { activeInvocations, hasActiveInvocation: true };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      const activeInvocations = { ...existing.activeInvocations, [invocationId]: { catId, mode } };
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: { ...existing, activeInvocations, hasActiveInvocation: true, lastActivity: Date.now() },
+        },
+      };
+    }),
+
+  /** F108: Remove an active invocation from a thread; derives hasActiveInvocation */
+  removeThreadActiveInvocation: (threadId, invocationId) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        const rest = Object.fromEntries(Object.entries(state.activeInvocations).filter(([k]) => k !== invocationId));
+        return { activeInvocations: rest, hasActiveInvocation: Object.keys(rest).length > 0 };
+      }
+      const existing = state.threadStates[threadId];
+      if (!existing) return state;
+      const rest = Object.fromEntries(Object.entries(existing.activeInvocations).filter(([k]) => k !== invocationId));
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
+            activeInvocations: rest,
+            hasActiveInvocation: Object.keys(rest).length > 0,
+            lastActivity: Date.now(),
+          },
+        },
+      };
+    }),
+
+  /** F108: Clear all active invocations for a thread (cancel fallback when invocationId unknown). */
+  clearAllThreadActiveInvocations: (threadId) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        return { activeInvocations: {}, hasActiveInvocation: false };
+      }
+      const existing = state.threadStates[threadId];
+      if (!existing) return state;
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
+            activeInvocations: {},
+            hasActiveInvocation: false,
             lastActivity: Date.now(),
           },
         },
@@ -1169,7 +1434,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       // Active thread — clear flat state
       if (threadId === state.currentThreadId) {
-        return { hasActiveInvocation: false };
+        return { hasActiveInvocation: false, activeInvocations: {} };
       }
       // Background thread — update in threadStates map (no-op if unknown)
       const ts = state.threadStates[threadId];
@@ -1177,7 +1442,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return {
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...ts, hasActiveInvocation: false },
+          [threadId]: { ...ts, hasActiveInvocation: false, activeInvocations: {} },
         },
       };
     }),

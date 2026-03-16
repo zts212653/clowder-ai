@@ -7,6 +7,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
+import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
 
 type CliErrorReasonCode = 'invalid_thinking_signature';
 
@@ -43,19 +44,8 @@ function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.Proces
 
 /**
  * Spawns a CLI process and yields parsed NDJSON events from stdout.
- *
- * Handles: NDJSON parsing, stderr buffering (for debug logging only),
- * timeout with SIGTERM->SIGKILL, AbortSignal, cleanup on generator return,
- * zombie prevention.
- *
- * On non-zero exit: yields `{ __cliError, exitCode, signal, message }`.
- *   No exceptions — callers that want to suppress specific exit codes
- *   should handle `isCliError()` events in their own loop.
- * On timeout: yields `{ __cliTimeout, timeoutMs, message }`.
- * Note: `message` is sanitized for user display; raw stderr is logged to
- * console only (never exposed to users).
- *
- * On spawn error (e.g. ENOENT): throws.
+ * On non-zero exit: yields __cliError. On timeout: yields __cliTimeout.
+ * On spawn error (ENOENT): throws. Messages are sanitized (no raw stderr).
  */
 export async function* spawnCli(
   options: CliSpawnOptions,
@@ -96,6 +86,9 @@ export async function* spawnCli(
 
   let killed = false;
   let timedOut = false;
+  // F118 P1-fix: Snapshot process liveness at the moment timeout fires,
+  // BEFORE killChild() — otherwise childExited is always true by yield time.
+  let processAliveAtTimeout = false;
   let escalationTimer: ReturnType<typeof setTimeout> | undefined;
 
   function killChild(): void {
@@ -111,15 +104,24 @@ export async function* spawnCli(
     });
   }
 
-  // Timeout (distinct from user cancel via AbortSignal)
-  // Reset on any output — only triggers if CLI goes completely silent
-  // timeoutMs = 0 disables timeout (rely on user cancel)
+  // Timeout: reset on any output, timeoutMs=0 disables
   let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  const startedAt = Date.now(); // F118: for hard cap calculation
+  let probe: ProcessLivenessProbe | undefined; // F118: declared early for closure access
   const resetTimeout = (): void => {
     if (timeoutMs === 0) return; // Disabled
     if (timeoutTimer) clearTimeout(timeoutTimer);
     timeoutTimer = setTimeout(() => {
+      // F118: If busy-silent (CPU growing), extend timeout unless hard cap exceeded
+      if (probe?.shouldExtendTimeout()) {
+        const elapsed = Date.now() - startedAt;
+        if (!probe.isHardCapExceeded(elapsed, timeoutMs)) {
+          resetTimeout(); // extend once more
+          return;
+        }
+      }
       timedOut = true;
+      processAliveAtTimeout = !childExited;
       killChild();
     }, timeoutMs);
     timeoutTimer.unref();
@@ -131,6 +133,7 @@ export async function* spawnCli(
   child.stderr?.on('data', (chunk: Buffer) => {
     stderrBuffer += chunk.toString();
     resetTimeout();
+    probe?.notifyActivity(); // F118: stderr = CLI alive, sync to probe
   });
 
   // AbortSignal
@@ -155,6 +158,17 @@ export async function* spawnCli(
   };
   process.on('exit', exitHandler);
 
+  // F118: Track NDJSON event timestamps for timeout diagnostics
+  let firstEventAt: number | null = null;
+  let lastEventAt: number | null = null;
+  let lastEventType: string | null = null;
+
+  // F118 Phase B: Initialize liveness probe
+  if (options.livenessProbe && child.pid !== undefined) {
+    probe = new ProcessLivenessProbe(child.pid, options.livenessProbe);
+    probe.start();
+  }
+
   try {
     if (!child.stdout) {
       throw new Error(`CLI process ${options.command} has no stdout`);
@@ -165,16 +179,58 @@ export async function* spawnCli(
       throw spawnError;
     }
 
-    for await (const event of parseNDJSON(child.stdout)) {
+    const ndjson = parseNDJSON(child.stdout)[Symbol.asyncIterator]();
+    let pendingNext = ndjson.next();
+
+    for (;;) {
       if (spawnError) throw spawnError;
-      // Reset timeout on any output — CLI is still alive
-      resetTimeout();
-      if (isParseError(event)) {
-        const parseErr = event as { line: string };
+
+      // F118: Drain probe warnings and check for dead process
+      if (probe) {
+        for (const warning of probe.drainWarnings()) yield warning;
+        if (probe.getState() === 'dead') {
+          killChild();
+          break;
+        }
+      }
+
+      // Race NDJSON event vs probe poll interval
+      let raceTimer: ReturnType<typeof setTimeout> | undefined;
+      const raceResult = probe
+        ? await Promise.race([
+            pendingNext.then((r) => {
+              if (raceTimer !== undefined) clearTimeout(raceTimer);
+              return { source: 'ndjson' as const, result: r };
+            }),
+            new Promise<{ source: 'probe' }>((r) => {
+              raceTimer = setTimeout(() => r({ source: 'probe' }), probe.config.sampleIntervalMs);
+            }),
+          ])
+        : { source: 'ndjson' as const, result: await pendingNext };
+
+      if (raceResult.source === 'probe') continue;
+      const { done, value } = raceResult.result;
+      if (done) break;
+
+      if (isParseError(value)) {
+        const parseErr = value as { line: string };
         console.error(`[cli-spawn] JSON parse error from ${options.command}: ${parseErr.line}`);
+        pendingNext = ndjson.next();
         continue;
       }
-      yield event;
+      // Reset timeout only after a valid NDJSON event.
+      // Invalid chatter should not keep a stuck invocation alive forever.
+      resetTimeout();
+      if (probe) probe.notifyActivity();
+      // F118: Record event timestamps for diagnostic enrichment
+      const now = Date.now();
+      if (firstEventAt === null) firstEventAt = now;
+      lastEventAt = now;
+      if (typeof value === 'object' && value !== null && 'type' in value) {
+        lastEventType = String((value as Record<string, unknown>).type);
+      }
+      yield value;
+      pendingNext = ndjson.next();
     }
 
     // Check for spawn error that arrived during/after iteration
@@ -216,6 +272,15 @@ export async function* spawnCli(
         // Sanitized message — no raw stderr exposed to users
         message: `CLI 响应超时 (${Math.round(timeoutMs / 1000)}s)`,
         command: options.command,
+        // F118: Diagnostic enrichment
+        firstEventAt,
+        lastEventAt,
+        lastEventType,
+        silenceDurationMs: lastEventAt ? Date.now() - lastEventAt : timeoutMs,
+        processAlive: processAliveAtTimeout,
+        ...(options.invocationId ? { invocationId: options.invocationId } : {}),
+        ...(options.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
+        ...(options.rawArchivePath ? { rawArchivePath: options.rawArchivePath } : {}),
       };
     }
   } finally {
@@ -225,6 +290,7 @@ export async function* spawnCli(
       options.signal.removeEventListener('abort', abortHandler);
     }
     process.off('exit', exitHandler);
+    probe?.stop();
     killChild();
   }
 }
@@ -253,14 +319,38 @@ export function isCliError(value: unknown): value is {
  * Type guard for CLI timeout objects (process killed due to timeout)
  * Note: `message` is sanitized for user display; raw stderr is logged to console only.
  */
-export function isCliTimeout(
-  value: unknown,
-): value is { __cliTimeout: true; timeoutMs: number; message: string; command: string } {
+export function isCliTimeout(value: unknown): value is {
+  __cliTimeout: true;
+  timeoutMs: number;
+  message: string;
+  command: string;
+  // F118 AC-C3: Diagnostic enrichment fields
+  silenceDurationMs?: number;
+  processAlive?: boolean;
+  lastEventType?: string;
+  firstEventAt?: number;
+  lastEventAt?: number;
+  cliSessionId?: string;
+  invocationId?: string;
+  rawArchivePath?: string;
+} {
   return (
     typeof value === 'object' &&
     value !== null &&
     '__cliTimeout' in value &&
     (value as Record<string, unknown>).__cliTimeout === true
+  );
+}
+
+/**
+ * Type guard for liveness warning events from ProcessLivenessProbe (F118 Phase C)
+ */
+export function isLivenessWarning(value: unknown): value is import('./ProcessLivenessProbe.js').LivenessWarningEvent {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '__livenessWarning' in value &&
+    (value as Record<string, unknown>).__livenessWarning === true
   );
 }
 

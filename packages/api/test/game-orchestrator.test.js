@@ -366,4 +366,101 @@ describe('GameOrchestrator', () => {
       assert.equal(villagerHasKill, false, 'villager must NOT see wolf_kill event');
     });
   });
+
+  describe('advancePhase — auto-skip when no actors for role', () => {
+    it('skips night_guard phase when no guard role exists in seats', async () => {
+      // Definition includes night_guard → night_wolf → day_vote
+      // But seats have NO guard role — only wolf + villager
+      const def = {
+        gameType: 'werewolf',
+        displayName: 'Werewolf',
+        minPlayers: 2,
+        maxPlayers: 8,
+        roles: [
+          { name: 'wolf', faction: 'wolf', description: 'Kills at night' },
+          { name: 'villager', faction: 'village', description: 'Votes by day' },
+          { name: 'guard', faction: 'village', description: 'Protects at night' },
+        ],
+        phases: [
+          { name: 'night_guard', type: 'night_action', actingRole: 'guard', timeoutMs: 30000, autoAdvance: true },
+          { name: 'night_wolf', type: 'night_action', actingRole: 'wolf', timeoutMs: 30000, autoAdvance: true },
+          { name: 'day_vote', type: 'day_vote', actingRole: '*', timeoutMs: 60000, autoAdvance: true },
+        ],
+        actions: [
+          { name: 'guard', allowedRole: 'guard', allowedPhase: 'night_guard', targetRequired: true, schema: {} },
+          { name: 'kill', allowedRole: 'wolf', allowedPhase: 'night_wolf', targetRequired: true, schema: {} },
+          { name: 'vote', allowedRole: '*', allowedPhase: 'day_vote', targetRequired: true, schema: {} },
+        ],
+        winConditions: [],
+      };
+
+      // Seats: wolf + villager — NO guard
+      const seats = [
+        { seatId: 'P1', actorType: 'cat', actorId: 'opus', role: 'wolf', alive: true, properties: {} },
+        { seatId: 'P2', actorType: 'cat', actorId: 'codex', role: 'villager', alive: true, properties: {} },
+      ];
+
+      const runtime = await orchestrator.startGame({
+        threadId: 'thread-skip-test',
+        definition: def,
+        seats,
+        config: { timeoutMs: 30000, voiceMode: false, humanRole: 'god-view' },
+      });
+
+      // Game should start at night_guard but immediately skip to night_wolf
+      // because no seat has role 'guard'
+      const game = await store.getGame(runtime.gameId);
+      assert.notEqual(game.currentPhase, 'night_guard', 'Should NOT stay on night_guard when no guard exists');
+      assert.equal(game.currentPhase, 'night_wolf', 'Should auto-skip to night_wolf');
+
+      // Should have a phase_skip event for the skipped phase
+      const skipEvent = game.eventLog.find((e) => e.type === 'phase_skip' && e.payload?.skippedPhase === 'night_guard');
+      assert.ok(skipEvent, 'Should log a phase_skip event for night_guard');
+    });
+
+    it('skips multiple consecutive phases with no actors', async () => {
+      // night_guard → night_seer → night_wolf → day_vote
+      // Only wolf + villager seats — no guard, no seer
+      const def = {
+        gameType: 'werewolf',
+        displayName: 'Werewolf',
+        minPlayers: 2,
+        maxPlayers: 8,
+        roles: [
+          { name: 'wolf', faction: 'wolf', description: 'Kills' },
+          { name: 'villager', faction: 'village', description: 'Votes' },
+          { name: 'guard', faction: 'village', description: 'Protects' },
+          { name: 'seer', faction: 'village', description: 'Divines' },
+        ],
+        phases: [
+          { name: 'night_guard', type: 'night_action', actingRole: 'guard', timeoutMs: 30000, autoAdvance: true },
+          { name: 'night_seer', type: 'night_action', actingRole: 'seer', timeoutMs: 30000, autoAdvance: true },
+          { name: 'night_wolf', type: 'night_action', actingRole: 'wolf', timeoutMs: 30000, autoAdvance: true },
+          { name: 'day_vote', type: 'day_vote', actingRole: '*', timeoutMs: 60000, autoAdvance: true },
+        ],
+        actions: [
+          { name: 'guard', allowedRole: 'guard', allowedPhase: 'night_guard', targetRequired: true, schema: {} },
+          { name: 'divine', allowedRole: 'seer', allowedPhase: 'night_seer', targetRequired: true, schema: {} },
+          { name: 'kill', allowedRole: 'wolf', allowedPhase: 'night_wolf', targetRequired: true, schema: {} },
+          { name: 'vote', allowedRole: '*', allowedPhase: 'day_vote', targetRequired: true, schema: {} },
+        ],
+        winConditions: [],
+      };
+
+      const seats = [
+        { seatId: 'P1', actorType: 'cat', actorId: 'opus', role: 'wolf', alive: true, properties: {} },
+        { seatId: 'P2', actorType: 'cat', actorId: 'codex', role: 'villager', alive: true, properties: {} },
+      ];
+
+      const runtime = await orchestrator.startGame({
+        threadId: 'thread-multi-skip',
+        definition: def,
+        seats,
+        config: { timeoutMs: 30000, voiceMode: false, humanRole: 'god-view' },
+      });
+
+      const game = await store.getGame(runtime.gameId);
+      assert.equal(game.currentPhase, 'night_wolf', 'Should skip guard + seer, land on night_wolf');
+    });
+  });
 });

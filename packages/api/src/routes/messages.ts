@@ -19,17 +19,21 @@ import type { SessionStore } from '@cat-cafe/shared/utils';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getDefaultCatId } from '../config/cat-config-loader.js';
+import { getAllCatIdsFromConfig, getDefaultCatId } from '../config/cat-config-loader.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
+import { GameAutoPlayer } from '../domains/cats/services/game/GameAutoPlayer.js';
+import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
+import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { AutoSummarizer } from '../domains/cats/services/orchestration/AutoSummarizer.js';
 import { getPushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
+import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
@@ -38,6 +42,7 @@ import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 
@@ -64,6 +69,8 @@ export interface MessagesRoutesOptions {
   invocationQueue?: InvocationQueue;
   /** F39: Queue processor for auto-dequeue on invocation complete */
   queueProcessor?: QueueProcessor;
+  /** F101: Game store for /game command interception */
+  gameStore?: IGameStore;
 }
 
 const getMessagesSchema = z.object({
@@ -198,6 +205,99 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       };
     }
 
+    // F101: /game command interception — start game directly, skip AI routing
+    const parsedGame = parseGameCommand(content);
+    if (parsedGame && opts.gameStore && opts.threadStore) {
+      const DEFAULT_PLAYER_COUNT = 7;
+      const allCatIds = getAllCatIdsFromConfig();
+      const sanitized = parsedGame.catIds ? sanitizeCatIds(parsedGame.catIds, allCatIds) : [];
+      // Fallback to all cats if sanitize filtered everything out (or no catIds provided)
+      const catIds = sanitized.length > 0 ? sanitized : [...allCatIds];
+      const playerCount = parsedGame.playerCount ?? DEFAULT_PLAYER_COUNT;
+      const seats = buildGameSeats({
+        humanRole: parsedGame.humanRole,
+        userId,
+        catIds,
+        playerCount,
+      });
+
+      // Phase D: Create independent game thread with project categorization
+      const gameTitle = `狼人杀 — ${playerCount}人局`;
+      const gameThread = await opts.threadStore.create(userId, gameTitle, `games/${parsedGame.gameType}`);
+      const gameThreadId = gameThread.id;
+
+      // Notify source thread about the new game thread (include initiator for frontend guard)
+      opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'game:thread_created', {
+        gameThreadId,
+        gameTitle,
+        initiatorUserId: userId,
+        timestamp: Date.now(),
+      });
+
+      // Store user message in the game thread
+      const userMessage = await opts.messageStore.append({
+        userId,
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: gameThreadId,
+      });
+
+      // Use WerewolfLobby for role assignment, then orchestrator for persistence + broadcast
+      const lobby = new WerewolfLobby();
+      const lobbyRuntime = lobby.createLobby({
+        threadId: gameThreadId,
+        playerCount,
+        players: seats.map((s) => ({ actorType: s.actorType, actorId: s.actorId })),
+      });
+      lobby.startGame(lobbyRuntime);
+
+      const orchestrator = new GameOrchestrator({
+        gameStore: opts.gameStore,
+        socketManager: opts.socketManager,
+      });
+
+      let gameRuntime;
+      try {
+        gameRuntime = await orchestrator.startGame({
+          threadId: gameThreadId,
+          definition: lobbyRuntime.definition,
+          seats: lobbyRuntime.seats,
+          config: {
+            timeoutMs: 30000,
+            voiceMode: parsedGame.voiceMode,
+            humanRole: parsedGame.humanRole,
+            ...(parsedGame.humanRole === 'player' ? { humanSeat: 'P1' } : {}),
+          },
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('already has an active game')) {
+          reply.status(409);
+          return { error: message };
+        }
+        throw err;
+      }
+
+      // Broadcast scoped views so frontend receives game:state_update
+      await orchestrator.broadcastGameState(gameRuntime.gameId);
+
+      // AC-C3: Start AI auto-play loop — cats submit actions asynchronously
+      const autoPlayer = new GameAutoPlayer({
+        gameStore: opts.gameStore,
+        orchestrator,
+      });
+      autoPlayer.startLoop(gameRuntime.gameId);
+
+      return {
+        status: 'game_started',
+        gameId: gameRuntime.gameId,
+        gameThreadId,
+        userMessageId: userMessage.id,
+      };
+    }
+
     // ADR-008 S1: Pre-resolve targets + intent, persisting @mentions as participants
     const { targetCats: resolvedTargetCats, intent } = await router.resolveTargetsAndIntent(content, resolvedThreadId, {
       persist: true,
@@ -208,11 +308,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       whisperVisibility === 'whisper' && whisperRecipients?.length
         ? [...new Set(whisperRecipients)]
         : [...resolvedTargetCats];
+    const primaryCat = targetCats[0] ?? 'unknown';
 
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
 
-    // F39: Queue routing — determine delivery mode
+    // F39+F108: Queue routing — thread-level delivery mode
+    // Any active invocation in the thread → new user messages should queue.
+    // Using thread-level check (no catId) instead of slot-level to prevent
+    // concurrent execution when different cats are active (regression fix).
     const hasActive = opts.invocationTracker?.has(resolvedThreadId) ?? false;
     const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
 
@@ -245,7 +349,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
       let storedUserMessageId: string | null = null;
 
-      // ② Write user message (message becomes visible to frontend)
+      // ② Write user message (F117: mark as queued — invisible until dequeue)
       try {
         const userMessage = await opts.messageStore.append({
           userId,
@@ -254,6 +358,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           mentions: targetCats,
           timestamp: Date.now(),
           threadId: resolvedThreadId,
+          deliveryStatus: 'queued', // F117: not visible in history/context/mentions until delivered
           ...(contentBlocks ? { contentBlocks } : {}),
           ...(whisperVisibility && whisperRecipients
             ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
@@ -301,7 +406,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     if (mode === 'force' && hasActive) {
       // Cancel current invocation (same logic as WS cancel)
-      const cancelResult = opts.invocationTracker?.cancel(resolvedThreadId, userId);
+      const cancelResult = opts.invocationTracker?.cancel(resolvedThreadId, primaryCat, userId);
       if (cancelResult?.cancelled) {
         for (const m of buildCancelMessages(cancelResult)) {
           opts.socketManager.broadcastAgentMessage(m, resolvedThreadId);
@@ -310,7 +415,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       // F39 bugfix: Prevent QueueProcessor state poisoning — the old invocation's
       // async cleanup will call onInvocationComplete('failed'/'canceled') which pauses
       // the thread. Clear that preemptively since we're about to start a new invocation.
-      opts.queueProcessor?.clearPause(resolvedThreadId);
+      opts.queueProcessor?.clearPause(resolvedThreadId, primaryCat);
 
       // F39 bugfix: Notify frontend that force-cancel happened (clear stale queue UI)
       if (opts.invocationQueue) {
@@ -323,24 +428,130 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       // Fall through to immediate execution below
     }
 
-    // ① Atomic create InvocationRecord (Lua in Redis, sync Map in memory)
+    // ① F122 A.1: Occupy tracker slot BEFORE creating InvocationRecord to close TOCTOU window.
+    // Non-force paths use tryStartThread (non-preemptive); force uses start() (preemptive, already cancelled above).
     if (opts.invocationRecordStore) {
-      const createResult = await opts.invocationRecordStore.create({
-        threadId: resolvedThreadId,
-        userId,
-        targetCats,
-        intent: intent.intent,
-        idempotencyKey: resolvedIdempotencyKey,
-      });
+      let controller: AbortController | undefined;
+
+      if (mode !== 'force' && opts.invocationTracker) {
+        // F122 AC-A8: Atomic thread-level busy gate + slot registration.
+        // If thread became busy since initial has() check at line 306, degrade to queue.
+        const tryResult = opts.invocationTracker.tryStartThread(resolvedThreadId, primaryCat, userId, targetCats);
+        if (tryResult === null) {
+          // TOCTOU: thread became busy between has() and here — degrade to queue
+          if (opts.invocationQueue) {
+            const enqueueResult = opts.invocationQueue.enqueue({
+              threadId: resolvedThreadId,
+              userId,
+              content,
+              source: 'user',
+              targetCats,
+              intent: intent.intent,
+            });
+            if (enqueueResult.outcome === 'full') {
+              opts.socketManager.emitToUser(userId, 'queue_full_warning', {
+                threadId: resolvedThreadId,
+                source: 'user',
+                queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
+                queue: opts.invocationQueue.list(resolvedThreadId, userId),
+              });
+              reply.status(429);
+              return { error: '消息队列已满', code: 'QUEUE_FULL' };
+            }
+            // F122 R1-gpt52 P1-1: Wrap append+backfill in try/catch with rollback,
+            // matching original queue path (lines 340-374) to prevent ghost queue entries.
+            let toctouUserMessage: { id: string };
+            try {
+              toctouUserMessage = await opts.messageStore.append({
+                userId,
+                catId: null,
+                content,
+                mentions: targetCats,
+                timestamp: Date.now(),
+                threadId: resolvedThreadId,
+                deliveryStatus: 'queued',
+                ...(contentBlocks ? { contentBlocks } : {}),
+                ...(whisperVisibility && whisperRecipients
+                  ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+                  : {}),
+              });
+              const queueEntryId = enqueueResult.entry?.id;
+              if (queueEntryId) {
+                if (enqueueResult.outcome === 'enqueued') {
+                  opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
+                } else {
+                  opts.invocationQueue.appendMergedMessageId(
+                    resolvedThreadId,
+                    userId,
+                    queueEntryId,
+                    toctouUserMessage.id,
+                  );
+                }
+              }
+            } catch (err) {
+              // Write failed → rollback queue entry (no ghost data)
+              const queueEntryId = enqueueResult.entry?.id;
+              if (queueEntryId && enqueueResult.outcome === 'enqueued') {
+                opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
+              } else if (queueEntryId) {
+                opts.invocationQueue.rollbackMerge(resolvedThreadId, userId, queueEntryId);
+              }
+              throw err;
+            }
+            opts.socketManager.emitToUser(userId, 'queue_updated', {
+              threadId: resolvedThreadId,
+              queue: opts.invocationQueue.list(resolvedThreadId, userId),
+              action: enqueueResult.outcome,
+            });
+            reply.status(202);
+            return {
+              status: 'queued',
+              queuePosition: enqueueResult.queuePosition,
+              entryId: enqueueResult.entry?.id,
+              merged: enqueueResult.outcome === 'merged',
+              userMessageId: toctouUserMessage.id,
+            };
+          }
+          // No queue available — thread is busy but we can't queue. Reject.
+          reply.status(409);
+          return { error: '猫猫正在忙', code: 'THREAD_BUSY' };
+        }
+        controller = tryResult;
+      }
+
+      // F122 R1 P1: Wrap create/update/append in try/catch to release slot on error.
+      // The background coroutine has its own finally for normal completion, but if we
+      // throw before entering it, the slot would leak (thread stuck as "busy").
+      let createResult: { outcome: string; invocationId: string };
+      try {
+        createResult = await opts.invocationRecordStore.create({
+          threadId: resolvedThreadId,
+          userId,
+          targetCats,
+          intent: intent.intent,
+          idempotencyKey: resolvedIdempotencyKey,
+        });
+      } catch (createErr) {
+        // Release slot occupied by tryStartThread — prevent "假忙" leak
+        if (controller) {
+          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+        }
+        throw createErr;
+      }
 
       if (createResult.outcome === 'duplicate') {
-        // Deduplicated — no start(), no abort, just return existing ID
+        // AC-A11: tryStartThread succeeded but create returned duplicate — release slot
+        if (controller) {
+          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+        }
         reply.status(200);
         return { status: 'duplicate', invocationId: createResult.invocationId };
       }
 
-      // Not duplicate → safe to start() (may abort prior invocation for this thread)
-      const controller = opts.invocationTracker?.start(resolvedThreadId, userId, targetCats);
+      // Force path: still uses start() (preemptive — cancel already happened above)
+      if (!controller) {
+        controller = opts.invocationTracker?.start(resolvedThreadId, primaryCat, userId, targetCats);
+      }
 
       // Race: thread entered deleting between isDeleting() and start()
       if (controller?.signal.aborted) {
@@ -355,24 +566,39 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         };
       }
 
-      // ② Write user message (decoupled from cat execution)
-      const storedUserMessage = await opts.messageStore.append({
-        userId,
-        catId: null,
-        content,
-        mentions: targetCats,
-        timestamp: Date.now(),
-        threadId: resolvedThreadId,
-        ...(contentBlocks ? { contentBlocks } : {}),
-        ...(whisperVisibility && whisperRecipients
-          ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-          : {}),
-      });
+      // F122 R1 P1 cont: wrap message write + update before background coroutine.
+      // If any of these throw, release the slot to prevent "假忙" leak.
+      let storedUserMessage: { id: string };
+      try {
+        // ② Write user message (decoupled from cat execution)
+        storedUserMessage = await opts.messageStore.append({
+          userId,
+          catId: null,
+          content,
+          mentions: targetCats,
+          timestamp: Date.now(),
+          threadId: resolvedThreadId,
+          ...(contentBlocks ? { contentBlocks } : {}),
+          ...(whisperVisibility && whisperRecipients
+            ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+            : {}),
+        });
 
-      // ③ Backfill InvocationRecord.userMessageId
-      await opts.invocationRecordStore.update(createResult.invocationId, {
-        userMessageId: storedUserMessage.id,
-      });
+        // ③ Backfill InvocationRecord.userMessageId
+        await opts.invocationRecordStore.update(createResult.invocationId, {
+          userMessageId: storedUserMessage.id,
+        });
+      } catch (preExecErr) {
+        // Release slot — we haven't entered background coroutine yet
+        opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+        // Mark record as failed if it was created
+        try {
+          await opts.invocationRecordStore?.update(createResult.invocationId, { status: 'failed' });
+        } catch {
+          /* best-effort cleanup */
+        }
+        throw preExecErr;
+      }
 
       // ④ Reply with invocationId
       reply.send({
@@ -404,6 +630,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             threadId: resolvedThreadId,
             mode: intent.intent,
             targetCats,
+            invocationId: createResult.invocationId,
           });
 
           // ADR-008 S3: collect cursor boundaries; ack only after succeeded
@@ -432,6 +659,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 : {}),
               cursorBoundaries,
               persistenceContext,
+              parentInvocationId: createResult.invocationId,
             },
           )) {
             // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
@@ -442,7 +670,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
             }
-            opts.socketManager.broadcastAgentMessage(msg, resolvedThreadId);
+            opts.socketManager.broadcastAgentMessage(
+              { ...msg, invocationId: createResult.invocationId },
+              resolvedThreadId,
+            );
           }
 
           // F39 P1 fix (砚砚 R1): abort guard after loop — when signal is aborted
@@ -593,16 +824,26 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           } // end else (non-abort error)
         } finally {
           clearInterval(heartbeatInterval);
-          opts.invocationTracker?.complete(resolvedThreadId, controller);
+          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
           // F39: Notify queue processor for auto-dequeue chain
-          opts.queueProcessor?.onInvocationComplete(resolvedThreadId, finalStatus).catch(() => {
+          opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch(() => {
             /* best-effort, don't crash background task */
           });
         }
       })();
     } else {
       // Fallback: no invocationRecordStore (legacy path, uses route())
-      const controller = opts.invocationTracker?.start(resolvedThreadId, userId, targetCats);
+      // F122 A.1: Try non-preemptive first. Legacy path has no InvocationQueue so it
+      // cannot degrade to queue — fall back to preemptive start() as temporary compat.
+      // TODO(F122 Phase B): Legacy path should be removed or given queue support.
+      let controller: AbortController | undefined;
+      if (mode !== 'force' && opts.invocationTracker) {
+        controller =
+          opts.invocationTracker.tryStartThread(resolvedThreadId, primaryCat, userId, targetCats) ??
+          opts.invocationTracker.start(resolvedThreadId, primaryCat, userId, targetCats);
+      } else {
+        controller = opts.invocationTracker?.start(resolvedThreadId, primaryCat, userId, targetCats);
+      }
       if (controller?.signal.aborted) {
         reply.status(409);
         return {
@@ -628,6 +869,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             threadId: resolvedThreadId,
             mode: intent.intent,
             targetCats,
+            // Legacy path: no invocationId (no InvocationRecord). Frontend falls back gracefully.
           });
 
           for await (const msg of router.route(
@@ -654,7 +896,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           );
         } finally {
           clearInterval(heartbeatInterval);
-          opts.invocationTracker?.complete(resolvedThreadId, controller);
+          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
         }
       })();
     }
@@ -744,8 +986,23 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             },
           }
         : {}),
+      ...(m.replyTo ? { replyTo: m.replyTo } : {}),
       timestamp: m.timestamp,
     }));
+
+    // F121: Hydrate reply previews for messages with replyTo
+    const replyItems = chatItems.filter((item) => item.replyTo);
+    if (replyItems.length > 0) {
+      const { hydrateReplyPreview } = await import('../domains/cats/services/stores/ports/MessageStore.js');
+      await Promise.all(
+        replyItems.map(async (item) => {
+          const preview = await hydrateReplyPreview(opts.messageStore, item.replyTo as string);
+          if (preview) {
+            item.replyPreview = preview;
+          }
+        }),
+      );
+    }
 
     // #80: Merge active streaming drafts (first page only — no before cursor)
     if (!before && opts.draftStore) {
@@ -824,7 +1081,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           },
         });
       }
-      chatItems.sort((a, b) => a.timestamp - b.timestamp);
+      chatItems.sort((a, b) => {
+        const ta = typeof a.deliveredAt === 'number' ? a.deliveredAt : a.timestamp;
+        const tb = typeof b.deliveredAt === 'number' ? b.deliveredAt : b.timestamp;
+        return ta - tb;
+      });
     }
 
     return {

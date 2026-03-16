@@ -243,4 +243,32 @@ describe('RightStatusPanel', () => {
     expect(html).toContain('Adding caching');
     expect(html).toContain('Write tests');
   });
+
+  // clowder-ai#28: resize width prop regression tests
+  it('renders with custom width via style attribute', () => {
+    const html = render({
+      intentMode: null,
+      targetCats: [],
+      catStatuses: {},
+      catInvocations: {},
+      threadId: 'test-thread',
+      messageSummary: { total: 0, assistant: 0, system: 0, evidence: 0, followup: 0 },
+      width: 350,
+    });
+
+    expect(html).toContain('width:350px');
+  });
+
+  it('falls back to 288px when width is omitted', () => {
+    const html = render({
+      intentMode: null,
+      targetCats: [],
+      catStatuses: {},
+      catInvocations: {},
+      threadId: 'test-thread',
+      messageSummary: { total: 0, assistant: 0, system: 0, evidence: 0, followup: 0 },
+    });
+
+    expect(html).toContain('width:288px');
+  });
 });

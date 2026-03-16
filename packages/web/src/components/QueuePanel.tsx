@@ -5,7 +5,6 @@ import { type QueueEntry, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { type SteerMode, SteerQueuedEntryModal } from './SteerQueuedEntryModal';
-
 interface QueuePanelProps {
   threadId: string;
 }
@@ -138,7 +137,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   // Don't render when queue is empty
   if (queue.length === 0) return null;
 
-  // User-facing entries: show queued entries (processing steer is out-of-scope for F047)
+  // Only show queued entries — processing entries are already executing and visible in chat
   const visibleEntries = queue.filter((e) => e.status === 'queued');
   if (visibleEntries.length === 0 && !queuePaused) return null;
 
@@ -225,7 +224,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   );
 }
 
-/** Single queue entry row with reorder/remove controls */
+/** Single queue entry row with reorder/remove controls (F122: processing entries get distinct UI) */
 function QueueEntryRow({
   entry,
   index,
@@ -261,7 +260,7 @@ function QueueEntryRow({
         <p className="text-sm text-gray-700 truncate">{entry.content}</p>
         <div className="flex items-center gap-1 mt-0.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
-          <span className="text-xs text-gray-400">{entry.source === 'connector' ? 'Connector' : 'team lead'}</span>
+          <span className="text-xs text-gray-400">{entry.source === 'connector' ? 'Connector' : '铲屎官'}</span>
           {imageCount > 0 && (
             <span className="flex items-center gap-0.5 text-xs text-gray-400 ml-1">
               <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
@@ -277,68 +276,73 @@ function QueueEntryRow({
         </div>
       </div>
 
-      {/* Reorder buttons */}
-      <div className="flex flex-col gap-0.5 shrink-0">
-        {!isFirst && (
+      {/* Reorder + action buttons (only queued entries reach here) */}
+      {
+        <>
+          {/* Reorder buttons */}
+          <div className="flex flex-col gap-0.5 shrink-0">
+            {!isFirst && (
+              <button
+                onClick={() => onMove(entry.id, 'up')}
+                className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+                title="上移"
+                aria-label="Move up"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            )}
+            {!isLast && (
+              <button
+                onClick={() => onMove(entry.id, 'down')}
+                className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+                title="下移"
+                aria-label="Move down"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Steer button (F047) */}
           <button
-            onClick={() => onMove(entry.id, 'up')}
-            className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
-            title="上移"
-            aria-label="Move up"
+            type="button"
+            data-testid={`steer-${entry.id}`}
+            onClick={() => onSteer(entry.id)}
+            className="text-xs px-3 py-1 rounded-full bg-[#9B7EBD] text-white hover:bg-[#8B6FAE] transition-colors shrink-0"
+            aria-label="Steer"
           >
-            <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+            Steer
+          </button>
+
+          {/* Remove button */}
+          <button
+            onClick={() => onRemove(entry.id)}
+            className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+            title="撤回"
+            aria-label="撤回"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
               <path
                 fillRule="evenodd"
-                d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
                 clipRule="evenodd"
               />
             </svg>
           </button>
-        )}
-        {!isLast && (
-          <button
-            onClick={() => onMove(entry.id, 'down')}
-            className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
-            title="下移"
-            aria-label="Move down"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-        )}
-      </div>
-
-      {/* Steer button (F047) */}
-      <button
-        type="button"
-        data-testid={`steer-${entry.id}`}
-        onClick={() => onSteer(entry.id)}
-        className="text-xs px-3 py-1 rounded-full bg-[#9B7EBD] text-white hover:bg-[#8B6FAE] transition-colors shrink-0"
-        aria-label="Steer"
-      >
-        Steer
-      </button>
-
-      {/* Remove button */}
-      <button
-        onClick={() => onRemove(entry.id)}
-        className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
-        title="撤回"
-        aria-label="撤回"
-      >
-        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-          <path
-            fillRule="evenodd"
-            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-            clipRule="evenodd"
-          />
-        </svg>
-      </button>
+        </>
+      }
     </div>
   );
 }

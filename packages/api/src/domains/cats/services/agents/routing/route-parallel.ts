@@ -282,6 +282,12 @@ export async function* routeParallel(
   const FLUSH_CHAR_DELTA = 2000;
   const noop = () => {};
 
+  // Issue #83: Independent keepalive timer — touch draft every 60s during long tool calls.
+  const KEEPALIVE_INTERVAL_MS = 60_000;
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+  // Track which cats have had their keepalive started
+  let keepaliveStarted = false;
+
   for await (const msg of mergeStreams(streams, (idx, err) => {
     console.error(`[routeParallel] Stream ${idx} error:`, err);
   })) {
@@ -294,6 +300,15 @@ export async function* routeParallel(
           catInvocationId.set(msg.catId, parsed.invocationId);
           // #80 fix: seed flush baseline so interval triggers after FLUSH_INTERVAL_MS
           catFlushTime.set(msg.catId, Date.now());
+          // Issue #83: Start a single keepalive timer that touches all active drafts.
+          if (deps.draftStore && !keepaliveStarted) {
+            keepaliveStarted = true;
+            keepaliveTimer = setInterval(() => {
+              for (const [, invId] of catInvocationId) {
+                deps.draftStore!.touch(userId, threadId, invId)?.catch?.(noop);
+              }
+            }, KEEPALIVE_INTERVAL_MS);
+          }
         }
       } catch {
         /* ignore parse errors */
@@ -409,6 +424,10 @@ export async function* routeParallel(
       // F22: Consume MCP-buffered rich blocks BEFORE text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
       const ownInvId = catInvocationId.get(msg.catId);
+      // Issue #83 P2 fix: Remove completed cat from keepalive set.
+      // Without this, the shared keepalive timer would touch() a deleted draft,
+      // recreating an orphan Redis hash key via HSET.
+      catInvocationId.delete(msg.catId);
       const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
       const text = catText.get(msg.catId);
       if (text) {
@@ -723,5 +742,11 @@ export async function* routeParallel(
     } else {
       yield msg;
     }
+  }
+
+  // Issue #83: Stop keepalive timer — streaming loop has exited.
+  if (keepaliveTimer) {
+    clearInterval(keepaliveTimer);
+    keepaliveTimer = undefined;
   }
 }

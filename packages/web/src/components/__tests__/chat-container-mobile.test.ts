@@ -29,6 +29,7 @@ const mockStoreState = () => ({
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
+  threads: [],
 });
 
 vi.mock('@/stores/chatStore', () => {

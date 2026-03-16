@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { computeWorkStats, parseGitLog } from '../../dist/domains/leaderboard/work-stats.js';
 
-const CAT_NAMES = { opus: '布偶猫', codex: '缅因猫', gemini: '暹罗猫', owner: 'team lead' };
+const CAT_NAMES = { opus: '布偶猫', codex: '缅因猫', gemini: '暹罗猫', owner: '铲屎官' };
 
 describe('parseGitLog', () => {
   it('parses pipe-delimited git log lines', () => {

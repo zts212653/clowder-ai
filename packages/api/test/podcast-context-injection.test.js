@@ -7,7 +7,7 @@ import { describe, it } from 'node:test';
  * The podcast generator must inject study discussion history (thread messages)
  * and study notes into the prompt — not just the original article content.
  *
- * Root cause (team lead 04:36): "有问题你这个只给人发了原文？study的内容呢？"
+ * Root cause (铲屎官 04:36): "有问题你这个只给人发了原文？study的内容呢？"
  */
 
 const VALID_PODCAST_JSON = JSON.stringify({

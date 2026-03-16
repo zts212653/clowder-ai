@@ -37,10 +37,30 @@ function extractLink(linkCell: string): string | undefined {
 
 export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeatureRow[] {
   const lines = markdown.split(/\r?\n/);
-  const headerIndex = lines.findIndex((line) =>
-    /^\|\s*ID\s*\|\s*名称\s*\|\s*Status\s*\|\s*Owner\s*\|\s*Link\s*\|?\s*$/i.test(line.trim()),
-  );
-  if (headerIndex < 0) return [];
+  const requiredColumns = ['id', '名称', 'status', 'owner'];
+  const headerIndex = lines.findIndex((line) => {
+    if (!line.trim().startsWith('|')) return false;
+    const cells = parseTableCells(line);
+    const lowerCells = cells.map((c) => c.trim().toLowerCase());
+    return requiredColumns.every((col) => lowerCells.includes(col));
+  });
+  if (headerIndex < 0) {
+    throw new Error(
+      `BACKLOG.md missing required columns: ${requiredColumns.join(', ')}. ` +
+        'Refusing to proceed — an empty parse result would cause sync to mark all features as done.',
+    );
+  }
+
+  const headerCells = parseTableCells(lines[headerIndex]!);
+  const colIndex = new Map<string, number>();
+  for (const [i, cell] of headerCells.entries()) {
+    colIndex.set(cell.trim().toLowerCase(), i);
+  }
+  const idCol = colIndex.get('id')!;
+  const nameCol = colIndex.get('名称')!;
+  const statusCol = colIndex.get('status')!;
+  const ownerCol = colIndex.get('owner')!;
+  const linkCol = colIndex.get('link');
 
   const rows: BacklogFeatureRow[] = [];
   const seen = new Set<string>();
@@ -50,19 +70,19 @@ export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeature
     if (!line.startsWith('|')) break;
 
     const cells = parseTableCells(line);
-    if (cells.length < 5 || isSeparatorRow(cells)) continue;
+    if (cells.length < requiredColumns.length || isSeparatorRow(cells)) continue;
 
-    const id = cells[0]?.trim().toUpperCase() ?? '';
+    const id = cells[idCol]?.trim().toUpperCase() ?? '';
     if (!/^F\d{3}$/.test(id)) continue;
     if (seen.has(id)) continue;
     seen.add(id);
 
-    const link = extractLink(cells[4] ?? '');
+    const link = linkCol != null ? extractLink(cells[linkCol] ?? '') : undefined;
     rows.push({
       id,
-      name: cells[1]?.trim() ?? '',
-      status: cells[2]?.trim() ?? 'idea',
-      owner: cells[3]?.trim() ?? '三猫',
+      name: cells[nameCol]?.trim() ?? '',
+      status: cells[statusCol]?.trim() ?? 'idea',
+      owner: cells[ownerCol]?.trim() ?? '三猫',
       ...(link ? { link } : {}),
     });
   }

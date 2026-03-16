@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { API_URL } from '@/utils/api-client';
 
 // Dynamic import to avoid polluting test environment (esbuild-wasm checks TextEncoder at import time)
 type EsbuildModule = typeof import('esbuild-wasm');
@@ -38,8 +39,7 @@ const ESM_SH_MAP: Record<string, string> = {
 
 /** Fetch file content from workspace API */
 async function fetchWorkspaceFile(worktreeId: string, filePath: string): Promise<string | null> {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3101';
-  const url = `${apiBase}/api/workspace/file?worktreeId=${encodeURIComponent(worktreeId)}&path=${encodeURIComponent(filePath)}`;
+  const url = `${API_URL}/api/workspace/file?worktreeId=${encodeURIComponent(worktreeId)}&path=${encodeURIComponent(filePath)}`;
   try {
     const res = await fetch(url);
     if (!res.ok) return null;

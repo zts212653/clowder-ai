@@ -13,6 +13,7 @@ export function ScrollToBottomButton({
   scrollContainerRef,
   messagesEndRef,
   thresholdPx = 120,
+  recomputeSignal,
 }: {
   scrollContainerRef: React.RefObject<HTMLElement | null>;
   messagesEndRef: React.RefObject<HTMLElement | null>;
@@ -80,7 +81,7 @@ export function ScrollToBottomButton({
   // firing scroll events; recompute when callers signal content changes.
   useEffect(() => {
     update();
-  }, [update]);
+  }, [update, recomputeSignal]);
 
   const handleClick = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

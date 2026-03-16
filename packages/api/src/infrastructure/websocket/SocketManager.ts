@@ -47,7 +47,10 @@ export function buildCancelMessages(result: CancelResult): AgentMessage[] {
 export class SocketManager {
   private io: Server;
   private invocationTracker: InvocationTracker | null;
-  private multiMentionOrchestrator: { abortByThread(threadId: string): number } | null;
+  private multiMentionOrchestrator: {
+    abortByThread(threadId: string): number;
+    abortBySlot?(threadId: string, catId: string): number;
+  } | null;
 
   constructor(httpServer: HttpServer, invocationTracker?: InvocationTracker) {
     this.invocationTracker = invocationTracker ?? null;
@@ -80,6 +83,11 @@ export class SocketManager {
       });
 
       socket.on('join_room', (room: string) => {
+        // Validate room name format — only allow known prefixes
+        if (!/^(thread:|worktree:|preview:global$|user:)/.test(room)) {
+          console.warn(`[ws] ${socket.id} attempted to join invalid room: ${room}`);
+          return;
+        }
         socket.join(room);
         console.log(`[ws] ${socket.id} joined room: ${room}`);
       });
@@ -89,7 +97,7 @@ export class SocketManager {
         console.log(`[ws] ${socket.id} left room: ${room}`);
       });
 
-      socket.on('cancel_invocation', (data: { threadId: string }) => {
+      socket.on('cancel_invocation', (data: { threadId: string; catId?: string }) => {
         if (!this.invocationTracker || !data?.threadId) return;
         // Only allow cancel if the socket is in the target thread's room
         const room = `thread:${data.threadId}`;
@@ -97,22 +105,35 @@ export class SocketManager {
           console.warn(`[ws] ${socket.id} tried to cancel thread ${data.threadId} without being in room`);
           return;
         }
-        const result = this.invocationTracker.cancel(data.threadId, userId);
-        if (result.cancelled) {
-          // Only abort multi-mention dispatches when ownership check passed
-          this.multiMentionOrchestrator?.abortByThread(data.threadId);
-          const catIds = result.catIds.length > 0 ? result.catIds : ['opus'];
-          console.log(`[ws] Cancelled invocation for thread: ${data.threadId} (cats: ${catIds.join(',')})`);
-          for (const msg of buildCancelMessages(result)) {
-            this.broadcastAgentMessage(msg, data.threadId);
+        if (data.catId) {
+          // F108: Slot-specific cancel
+          const result = this.invocationTracker.cancel(data.threadId, data.catId, userId);
+          if (result.cancelled) {
+            const catIds = result.catIds.length > 0 ? result.catIds : [data.catId];
+            console.log(
+              `[ws] Cancelled slot for thread: ${data.threadId} cat: ${data.catId} (cats: ${catIds.join(',')})`,
+            );
+            for (const msg of buildCancelMessages(result)) {
+              this.broadcastAgentMessage(msg, data.threadId);
+            }
           }
+          // F108 + F086: Also abort multi-mention dispatches for this specific cat
+          this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, data.catId);
+        } else {
+          // Backward compat: cancel all slots in thread
+          this.invocationTracker.cancelAll(data.threadId);
+          this.multiMentionOrchestrator?.abortByThread(data.threadId);
+          console.log(`[ws] Cancelled all invocations for thread: ${data.threadId}`);
         }
       });
     });
   }
 
   /** Wire MultiMentionOrchestrator for cancel propagation (set after construction to avoid circular imports). */
-  setMultiMentionOrchestrator(orch: { abortByThread(threadId: string): number }): void {
+  setMultiMentionOrchestrator(orch: {
+    abortByThread(threadId: string): number;
+    abortBySlot?(threadId: string, catId: string): number;
+  }): void {
     this.multiMentionOrchestrator = orch;
   }
 

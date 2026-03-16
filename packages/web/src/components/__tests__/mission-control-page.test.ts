@@ -149,7 +149,7 @@ describe('MissionControlPage', () => {
 
     const importButton = container.querySelector('[data-testid="mc-import-docs"]') as HTMLButtonElement | null;
     expect(importButton).not.toBeNull();
-    expect(importButton?.textContent).toContain('从文档导入');
+    expect(importButton?.textContent).toContain('导入 Backlog');
     if (!importButton) return;
 
     await act(async () => {

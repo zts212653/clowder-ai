@@ -136,7 +136,9 @@ describe('useChatHistory task-progress hydration', () => {
         );
       }
       if (typeof url === 'string' && url.includes('/queue')) {
-        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+        return Promise.resolve(
+          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: ['codex'] }), { status: 200 }),
+        );
       }
       return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
     });

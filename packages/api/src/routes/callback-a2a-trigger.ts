@@ -25,7 +25,7 @@ import type { StoredMessage } from '../domains/cats/services/stores/ports/Messag
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface QueueProcessorLike {
-  onInvocationComplete(threadId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
+  onInvocationComplete(threadId: string, catId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
 }
 
 export interface A2ATriggerDeps {
@@ -54,6 +54,8 @@ export async function enqueueA2ATargets(
     triggerMessage: StoredMessage;
     /** The cat that triggered this A2A callback (for worklist caller guard). */
     callerCatId?: CatId;
+    /** F108: parentInvocationId for concurrent worklist isolation. */
+    parentInvocationId?: string;
   },
 ): Promise<{ enqueued: CatId[]; fallback: boolean }> {
   const { log } = deps;
@@ -63,7 +65,8 @@ export async function enqueueA2ATargets(
 
   // F27: Try to push to parent worklist first
   if (hasWorklist(threadId)) {
-    const enqueued = pushToWorklist(threadId, targetCats, callerCatId);
+    const pushResult = pushToWorklist(threadId, targetCats, callerCatId, opts.parentInvocationId, triggerMessageId);
+    const enqueued = pushResult.added;
     if (enqueued.length > 0) {
       if (deliveryCursorStore) {
         // F27 + #77: Best-effort auto-ack to prevent surprise backlog when cats later
@@ -101,32 +104,52 @@ export async function enqueueA2ATargets(
         },
         '[F27] A2A callback: enqueued targets to parent worklist',
       );
+      return { enqueued, fallback: false };
+    } else if (pushResult.reason === 'not_found') {
+      // F122 AC-A3: Race condition — worklist vanished between hasWorklist() and pushToWorklist().
+      // Fall through to standalone invocation path below.
+      log.warn(
+        { threadId, triggerMessageId, targetCats },
+        '[F27] A2A callback: worklist vanished between has/push, falling back to standalone',
+      );
     } else {
       log.info(
         {
           threadId,
           triggerMessageId,
           targetCats,
+          reason: pushResult.reason,
         },
-        '[F27] A2A callback: targets not enqueued (depth limit or already in worklist)',
+        `[F27] A2A callback: targets not enqueued (${pushResult.reason})`,
       );
+      return { enqueued, fallback: false };
     }
-    return { enqueued, fallback: false };
   }
 
-  // Fallback: no parent worklist (shouldn't normally happen)
-  // Guard: if parent invocation is active (e.g. routeParallel), don't start
-  // a standalone fallback because tracker.start() would abort it. (缅因猫 R1 P1-2)
+  // Fallback: no parent worklist — start standalone invocation.
+  // F108 slot-aware: tracker.start() only aborts same (threadId, catId) slot,
+  // so starting codex won't abort opus. Only skip targets already running.
   const { invocationTracker } = deps;
   if (invocationTracker?.has(threadId)) {
-    log.warn(
-      {
-        threadId,
-        targetCats,
-      },
-      '[F27] A2A fallback skipped: no worklist but parent invocation active, refusing to abort',
-    );
-    return { enqueued: [], fallback: true };
+    // Guard: shims may not implement getActiveSlots — fall back to empty (allow all)
+    const activeSlots = invocationTracker.getActiveSlots?.(threadId) ?? [];
+    const nonConflicting = targetCats.filter((catId) => !activeSlots.includes(catId));
+    if (nonConflicting.length === 0) {
+      log.info(
+        { threadId, targetCats, activeSlots },
+        '[F27] A2A fallback skipped: all targets already active in thread slots',
+      );
+      return { enqueued: [], fallback: true };
+    }
+    if (nonConflicting.length < targetCats.length) {
+      log.info(
+        { threadId, targetCats, activeSlots, nonConflicting },
+        '[F27] A2A fallback: filtered already-active targets, proceeding with remaining',
+      );
+    }
+    // Proceed with non-conflicting targets only
+    await triggerA2AInvocation(deps, { ...opts, targetCats: nonConflicting });
+    return { enqueued: nonConflicting, fallback: true };
   }
 
   // Create standalone invocation like the old triggerA2AInvocation
@@ -161,11 +184,12 @@ export async function triggerA2AInvocation(
   const statusCatId = targetCats[0] ?? getDefaultCatId();
   const intent = parseIntent(content, targetCats.length);
 
-  // Guard: if parent invocation is active, don't start a standalone fallback.
-  // tracker.start() would abort the running parent (e.g. routeParallel). (缅因猫 R1 P1-2)
+  // F108 slot-aware: tracker.start(threadId, catId) only aborts the SAME slot,
+  // so starting a different cat won't abort the parent. Only skip if all targets
+  // are already covered by active slots (redundancy short-circuit).
   const parentActive = invocationTracker?.has(threadId) ?? false;
   if (parentActive) {
-    const activeCats = invocationTracker?.getCatIds?.(threadId) ?? [];
+    const activeCats = invocationTracker?.getActiveSlots?.(threadId) ?? [];
     // Redundant A2A short-circuit (砚砚 4ee660b defense-in-depth):
     // if parent already includes all targets, skip entirely.
     if (targetCats.length > 0 && targetCats.every((catId) => activeCats.includes(catId))) {
@@ -180,18 +204,17 @@ export async function triggerA2AInvocation(
       );
       return;
     }
-    // Parent is active but targets differ — cannot safely start standalone
-    // because tracker.start() would abort the parent. Log and bail.
-    log.warn(
+    // Targets differ from active slots — safe to proceed because
+    // tracker.start() is slot-aware and won't abort other cats' slots.
+    log.info(
       {
         threadId,
         targetCats,
         activeCats,
         triggerMessageId: triggerMessage.id,
       },
-      '[F27] A2A fallback skipped: parent invocation active, refusing to abort it',
+      '[F27] A2A standalone: parent active in different slots, safe to start new targets',
     );
-    return;
   }
 
   const createResult = await invocationRecordStore.create({
@@ -205,9 +228,9 @@ export async function triggerA2AInvocation(
   if (createResult.outcome === 'duplicate') return;
 
   // Safe: no active parent invocation, so tracker.start() won't abort anything unexpected.
-  const controller = invocationTracker?.start(threadId, userId, targetCats);
+  const controller = invocationTracker?.start(threadId, statusCatId, userId, targetCats);
   if (controller?.signal.aborted) {
-    invocationTracker?.complete(threadId, controller);
+    invocationTracker?.complete(threadId, statusCatId, controller);
     await invocationRecordStore.update(createResult.invocationId, {
       status: 'canceled',
     });
@@ -232,9 +255,10 @@ export async function triggerA2AInvocation(
 
       for await (const msg of router.routeExecution(userId, content, threadId, triggerMessage.id, targetCats, intent, {
         ...(controller?.signal ? { signal: controller.signal } : {}),
+        parentInvocationId: createResult.invocationId,
       })) {
         if (controller?.signal.aborted) break;
-        socketManager.broadcastAgentMessage(msg, threadId);
+        socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
       }
 
       if (controller?.signal.aborted) {
@@ -285,9 +309,9 @@ export async function triggerA2AInvocation(
       }
     } finally {
       if (controller) {
-        invocationTracker?.complete(threadId, controller);
+        invocationTracker?.complete(threadId, statusCatId, controller);
       }
-      queueProcessor?.onInvocationComplete(threadId, finalStatus).catch(() => {
+      queueProcessor?.onInvocationComplete(threadId, statusCatId, finalStatus).catch(() => {
         /* best-effort */
       });
     }

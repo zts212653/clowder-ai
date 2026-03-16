@@ -25,7 +25,7 @@ import {
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
-import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import { hydrateReplyPreview, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
@@ -76,9 +76,10 @@ export async function* routeSerial(
 
   // Worklist pattern: starts with targetCats, may grow via A2A mentions
   // F27: Register worklist so callback A2A can push targets here
+  // F108: Key by parentInvocationId for concurrent isolation
   const worklist = [...targetCats];
   const maxDepth = options.maxA2ADepth ?? getMaxA2ADepth();
-  const worklistEntry = registerWorklist(threadId, worklist, maxDepth);
+  const worklistEntry = registerWorklist(threadId, worklist, maxDepth, options.parentInvocationId);
 
   let index = 0;
   // F27: Track how many worklist entries have had a2a_handoff emitted
@@ -147,6 +148,10 @@ export async function* routeSerial(
         catRegistry.tryGet(catId as string)?.config ?? CAT_CONFIGS[catId as string];
       const teammates = [...new Set(worklist.filter((id) => id !== catId))];
       const directMessageFrom = worklistEntry.a2aFrom.get(catId);
+      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId);
+      const streamReplyPreview = streamReplyTo
+        ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
+        : undefined;
       let mentionRoutingFeedback = null;
       if (deps.invocationDeps.threadStore) {
         try {
@@ -309,6 +314,11 @@ export async function* routeSerial(
       const FLUSH_CHAR_DELTA = 2000;
       const noop = () => {};
 
+      // Issue #83: Independent keepalive timer — touch draft every 60s during long tool calls.
+      // Stream events alone can't keep draft alive when tools execute silently for >300s.
+      const KEEPALIVE_INTERVAL_MS = 60_000;
+      let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+
       // Always pass isLastCat:false — we set isFinal AFTER A2A detection
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
@@ -320,6 +330,11 @@ export async function* routeSerial(
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(signal ? { signal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
+        ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+        // F121: Pass A2A trigger message ID for auto-replyTo threading
+        ...(worklistEntry.a2aTriggerMessageId.get(catId)
+          ? { a2aTriggerMessageId: worklistEntry.a2aTriggerMessageId.get(catId) }
+          : {}),
         isLastCat: false,
       })) {
         // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
@@ -332,6 +347,14 @@ export async function* routeSerial(
             const parsed = JSON.parse(msg.content);
             if (parsed.type === 'invocation_created') {
               ownInvocationId = parsed.invocationId;
+              // Issue #83: Start keepalive timer once we have an invocationId.
+              // This ensures draft TTL is renewed even during long silent tool calls.
+              if (deps.draftStore && !keepaliveTimer) {
+                const keepInvId = ownInvocationId!;
+                keepaliveTimer = setInterval(() => {
+                  deps.draftStore!.touch(userId, threadId, keepInvId)?.catch?.(noop);
+                }, KEEPALIVE_INTERVAL_MS);
+              }
             }
           } catch {
             /* ignore parse errors */
@@ -430,8 +453,21 @@ export async function* routeSerial(
           doneMsg = msg; // Buffer — yield after A2A detection
         } else {
           // Tag CLI stdout text with origin: 'stream' (thinking/internal)
-          yield msg.type === 'text' ? { ...msg, origin: 'stream' as const } : msg;
+          yield msg.type === 'text'
+            ? {
+                ...msg,
+                origin: 'stream' as const,
+                ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+                ...(streamReplyPreview ? { replyPreview: streamReplyPreview } : {}),
+              }
+            : msg;
         }
+      }
+
+      // Issue #83: Stop keepalive timer — streaming loop has exited.
+      if (keepaliveTimer) {
+        clearInterval(keepaliveTimer);
+        keepaliveTimer = undefined;
       }
 
       let a2aMentions: CatId[] = [];
@@ -559,8 +595,9 @@ export async function* routeSerial(
 
         // Store with actual mentions — degrade on failure to ensure done reaches frontend
         // (缅因猫 review P1-2: Redis failure must not block done yield)
+        let storedMsgId: string | undefined;
         try {
-          await deps.messageStore.append({
+          const storedMsg = await deps.messageStore.append({
             userId,
             catId,
             content: storedContent,
@@ -572,11 +609,13 @@ export async function* routeSerial(
             ...(thinkingContent ? { thinking: thinkingContent } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+            ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
               ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
             },
           });
+          storedMsgId = storedMsg.id;
           // F088-P3: Stash rich blocks for outbound delivery
           if (options.persistenceContext && allRichBlocks.length > 0) {
             options.persistenceContext.richBlocks = allRichBlocks;
@@ -628,6 +667,8 @@ export async function* routeSerial(
               // Keep original user-selected targets replying to user, not to another cat.
               if (!pendingOriginalTargets.includes(nextCat)) {
                 worklistEntry.a2aFrom.set(nextCat, catId);
+                // F121: response-text path — set trigger message for auto-replyTo
+                if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
               }
               continue;
             }
@@ -636,6 +677,8 @@ export async function* routeSerial(
             worklistEntry.a2aCount++;
             pendingTail.push(nextCat); // Keep dedup view in sync
             worklistEntry.a2aFrom.set(nextCat, catId);
+            // F121: response-text path — set trigger message for auto-replyTo
+            if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
           }
         }
 
@@ -702,6 +745,7 @@ export async function* routeSerial(
             origin: 'stream',
             timestamp: Date.now(),
             threadId,
+            ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(thinkingContent ? { thinking: thinkingContent } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
@@ -760,6 +804,7 @@ export async function* routeSerial(
             origin: 'stream',
             timestamp: Date.now(),
             threadId,
+            ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             toolEvents: collectedToolEvents,
             ...(ownInvocationId ? { extra: { stream: { invocationId: ownInvocationId } } } : {}),
@@ -831,6 +876,6 @@ export async function* routeSerial(
   } finally {
     // F27: Always unregister worklist, even on error/abort.
     // Pass owner ref so preempting new invocation's worklist is not deleted (缅因猫 R1 P1-1)
-    unregisterWorklist(threadId, worklistEntry);
+    unregisterWorklist(threadId, worklistEntry, options.parentInvocationId);
   }
 }

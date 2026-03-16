@@ -17,8 +17,9 @@ const { buildCancelMessages } = await import('../dist/infrastructure/websocket/S
 describe('buildCancelMessages (production function)', () => {
   test('single cat cancel: 1 system_info + 1 done with correct catId', () => {
     const tracker = new InvocationTracker();
-    tracker.start('t1', 'user1', ['gemini']);
-    const result = tracker.cancel('t1', 'user1');
+    // start(threadId, catId, userId, catIds)
+    tracker.start('t1', 'gemini', 'user1', ['gemini']);
+    const result = tracker.cancel('t1', 'gemini', 'user1');
     const messages = buildCancelMessages(result);
 
     assert.equal(messages.length, 2);
@@ -31,8 +32,9 @@ describe('buildCancelMessages (production function)', () => {
 
   test('multi-cat cancel: 1 system_info + N done (no cancel chorus)', () => {
     const tracker = new InvocationTracker();
-    tracker.start('t1', 'user1', ['opus', 'codex', 'gemini']);
-    const result = tracker.cancel('t1', 'user1');
+    // start(threadId, catId, userId, catIds) — primary cat is opus
+    tracker.start('t1', 'opus', 'user1', ['opus', 'codex', 'gemini']);
+    const result = tracker.cancel('t1', 'opus', 'user1');
     const messages = buildCancelMessages(result);
 
     // 1 system_info + 3 done = 4 total
@@ -55,8 +57,9 @@ describe('buildCancelMessages (production function)', () => {
 
   test('empty catIds fallback: defaults to opus', () => {
     const tracker = new InvocationTracker();
-    tracker.start('t1', 'user1'); // no catIds
-    const result = tracker.cancel('t1', 'user1');
+    // start(threadId, catId, userId) — no catIds
+    tracker.start('t1', 'opus', 'user1');
+    const result = tracker.cancel('t1', 'opus', 'user1');
     const messages = buildCancelMessages(result);
 
     assert.equal(messages.length, 2);

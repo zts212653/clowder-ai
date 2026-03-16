@@ -1653,3 +1653,76 @@ describe('Import sync marks suggested items as done when disappeared', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 });
+
+describe('Import sync hard-fails on parse error (zero writes)', () => {
+  let backlogStore;
+  let threadStore;
+  let messageStore;
+
+  beforeEach(async () => {
+    const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    backlogStore = new BacklogStore();
+    threadStore = new ThreadStore();
+    messageStore = new MessageStore();
+  });
+
+  const H = { 'x-cat-cafe-user': 'default-user' };
+
+  test('returns 500 and does not markDone when BACKLOG.md header has missing required columns', async () => {
+    const { backlogRoutes } = await import('../dist/routes/backlog.js');
+    const tempDir = await mkdtemp(join(tmpdir(), 'backlog-badhdr-'));
+    const backlogPath = join(tempDir, 'BACKLOG.md');
+    // Header uses "Name" instead of "名称" — required column missing
+    await writeFile(
+      backlogPath,
+      [
+        '| ID | Name | Status | Owner | Link |',
+        '|---|---|---|---|---|',
+        '| F001 | Active Feature | in-progress | 布偶猫 | [F001](features/F001.md) |',
+      ].join('\n'),
+    );
+
+    const app = Fastify();
+    await app.register(backlogRoutes, {
+      backlogStore,
+      threadStore,
+      messageStore,
+      backlogDocPath: backlogPath,
+    });
+
+    // Create an existing dispatched item
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: H,
+      payload: {
+        title: '[F777] Existing',
+        summary: 'S',
+        priority: 'p2',
+        tags: ['source:docs-backlog', 'feature:f777'],
+      },
+    });
+    const itemId = createRes.json().id;
+
+    // Import should fail — bad header
+    const importRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/import-active-features',
+      headers: H,
+    });
+    assert.strictEqual(importRes.statusCode, 500);
+    assert.ok(
+      importRes.json().error.includes('missing required columns'),
+      'error message should mention missing columns',
+    );
+
+    // Verify existing item was NOT marked done (zero writes)
+    const afterList = await app.inject({ method: 'GET', url: '/api/backlog/items', headers: H });
+    const item = afterList.json().items.find((i) => i.id === itemId);
+    assert.strictEqual(item.status, 'open', 'item should remain open — parse failure must not trigger markDone');
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+});

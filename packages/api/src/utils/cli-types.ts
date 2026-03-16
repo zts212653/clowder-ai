@@ -23,6 +23,19 @@ export interface CliSpawnOptions {
   signal?: AbortSignal;
   /** Environment overrides. `null` means delete inherited var from child env. */
   env?: Record<string, string | null>;
+  /** F118: Invocation context for diagnostic enrichment of __cliTimeout */
+  invocationId?: string;
+  /** F118: CLI session ID for diagnostic enrichment of __cliTimeout */
+  cliSessionId?: string;
+  /** F118 Phase B: Liveness probe config (undefined = disabled) */
+  livenessProbe?: {
+    sampleIntervalMs?: number;
+    softWarningMs?: number;
+    stallWarningMs?: number;
+    boundedExtensionFactor?: number;
+  };
+  /** F118 Phase B: Provider-scoped raw archive path for diagnostic enrichment */
+  rawArchivePath?: string;
 }
 
 /**

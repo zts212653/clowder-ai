@@ -12,19 +12,37 @@ import { apiFetch } from '@/utils/api-client';
  * Watches the message list for new assistant messages containing audio blocks.
  * When voice mode is on + autoplay unlocked, plays them automatically.
  *
- * Uses a module-level singleton Audio element (same pattern as useTts)
+ * Uses a module-level singleton Audio element **attached to the DOM**
  * to ensure only one auto-play at a time.
+ *
+ * F124 fix: on iOS, a detached `new Audio()` element may not route audio
+ * to hardware output (speakers/AirPods) even though screen recording
+ * captures it.  We now create a persistent hidden `<audio>` element in the
+ * DOM and reuse it for all auto-play, matching how AudioBlock.tsx works.
  */
 
 let autoplayAudio: HTMLAudioElement | null = null;
 let autoplayBlobUrl: string | null = null;
 
+/** Get or create a persistent, DOM-attached audio element for autoplay. */
+function getAutoplayAudio(): HTMLAudioElement {
+  if (autoplayAudio) return autoplayAudio;
+  const audio = document.createElement('audio');
+  audio.id = 'voice-autoplay-audio';
+  audio.style.display = 'none';
+  audio.preload = 'auto';
+  document.body.appendChild(audio);
+  autoplayAudio = audio;
+  return audio;
+}
+
 function cleanupAutoplay(): void {
   if (autoplayAudio) {
     autoplayAudio.pause();
+    autoplayAudio.removeAttribute('src');
     autoplayAudio.onended = null;
     autoplayAudio.onerror = null;
-    autoplayAudio = null;
+    // Keep the element in the DOM — reuse across plays
   }
   if (autoplayBlobUrl) {
     URL.revokeObjectURL(autoplayBlobUrl);
@@ -65,17 +83,15 @@ async function fetchAndPlay(block: RichAudioBlock, originSessionId: string): Pro
       return;
     }
 
-    const audio = new Audio(blobUrl);
-    autoplayAudio = audio;
+    const audio = getAutoplayAudio();
+    audio.src = blobUrl;
     setPlaybackState('playing');
 
     audio.onended = () => {
       setPlaybackState('idle');
-      autoplayAudio = null;
     };
     audio.onerror = () => {
       setPlaybackState('idle');
-      autoplayAudio = null;
     };
 
     await audio.play();

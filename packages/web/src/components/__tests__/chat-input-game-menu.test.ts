@@ -22,9 +22,15 @@ describe('GAME_LIST (layer 1)', () => {
 });
 
 describe('WEREWOLF_MODES (layer 2)', () => {
-  it('has 4 mode entries', () => {
-    expect(WEREWOLF_MODES).toHaveLength(4);
-    expect(WEREWOLF_MODES.map((m) => m.id)).toEqual(['player', 'god-view', 'player-voice', 'god-view-voice']);
+  it('has 5 mode entries', () => {
+    expect(WEREWOLF_MODES).toHaveLength(5);
+    expect(WEREWOLF_MODES.map((m) => m.id)).toEqual([
+      'player',
+      'god-view',
+      'detective',
+      'player-voice',
+      'god-view-voice',
+    ]);
   });
 
   it('each mode command starts with /game werewolf', () => {

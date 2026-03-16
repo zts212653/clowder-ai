@@ -3,7 +3,7 @@
  * Used by GET /api/config/env-summary to report current values to the frontend.
  *
  * ⚠️  ALL CATS: 新增 process.env.XXX → 必须在下方 ENV_VARS 数组注册！
- *    不注册 = 前端「环境 & 文件」页面看不到 = team lead不知道 = 不存在。
+ *    不注册 = 前端「环境 & 文件」页面看不到 = 铲屎官不知道 = 不存在。
  *    SOP.md「环境变量注册」章节有说明。
  *
  * To add a new env var:
@@ -69,6 +69,13 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
 export const ENV_VARS: EnvDefinition[] = [
   // --- server ---
   { name: 'API_SERVER_PORT', defaultValue: '3003', description: 'API 服务端口', category: 'server', sensitive: false },
+  {
+    name: 'PREVIEW_GATEWAY_PORT',
+    defaultValue: '4100',
+    description: 'Preview Gateway 端口（F120 独立 origin 反向代理）',
+    category: 'server',
+    sensitive: false,
+  },
   {
     name: 'API_SERVER_HOST',
     defaultValue: '127.0.0.1',

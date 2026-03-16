@@ -24,7 +24,7 @@ describe('GameShell', () => {
 
   it('applies dark background', () => {
     const html = render({ onClose: () => {} });
-    expect(html).toContain('bg-[#0A0F1C]');
+    expect(html).toContain('bg-ww-base');
   });
 
   it('applies night filter when isNight=true', () => {

@@ -330,4 +330,40 @@ describe('Information Isolation Red-Line Tests', () => {
     const viewWolfEvent = deadWolfView.visibleEvents.find((e) => e.type === 'wolf_kill');
     assert.equal(viewWolfEvent, undefined, 'Dead wolf GameView must NOT include faction:wolf events');
   });
+
+  it('RED-LINE 11: hasActed must NOT leak during night phases to non-god players', () => {
+    const runtime = createRuntime();
+    runtime.currentPhase = 'night_wolf';
+    // Wolf (P1) has acted, others haven't
+    runtime.pendingActions = { P1: { actionName: 'kill', target: 'P2' } };
+
+    // Villager (P2) should NOT see wolf's hasActed during night
+    const villagerView = GameViewBuilder.buildView(runtime, 'P2');
+    const wolfSeat = villagerView.seats.find((s) => s.seatId === 'P1');
+    assert.equal(wolfSeat.hasActed, undefined, 'Villager must NOT see wolf hasActed during night');
+    // Villager can see own hasActed
+    const selfSeat = villagerView.seats.find((s) => s.seatId === 'P2');
+    assert.equal(selfSeat.hasActed, false, 'Villager can see own hasActed');
+
+    // God CAN see all hasActed
+    const godView = GameViewBuilder.buildView(runtime, 'god');
+    const godWolfSeat = godView.seats.find((s) => s.seatId === 'P1');
+    assert.equal(godWolfSeat.hasActed, true, 'God can see wolf hasActed during night');
+
+    // Detective CAN see all hasActed
+    const detectiveView = GameViewBuilder.buildView(runtime, 'detective:P3');
+    const detectiveWolfSeat = detectiveView.seats.find((s) => s.seatId === 'P1');
+    assert.equal(detectiveWolfSeat.hasActed, true, 'Detective can see wolf hasActed during night');
+  });
+
+  it('RED-LINE 12: hasActed is visible to all during day phases', () => {
+    const runtime = createRuntime();
+    runtime.currentPhase = 'day_vote';
+    runtime.pendingActions = { P1: { actionName: 'vote', target: 'P3' } };
+
+    // During day phase, everyone can see hasActed (e.g. who has voted)
+    const villagerView = GameViewBuilder.buildView(runtime, 'P2');
+    const wolfSeat = villagerView.seats.find((s) => s.seatId === 'P1');
+    assert.equal(wolfSeat.hasActed, true, 'Villager CAN see hasActed during day phase');
+  });
 });

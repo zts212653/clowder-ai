@@ -16,8 +16,10 @@ import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.j
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { resolveAnthropicRuntimeProfile } from '../../../../../config/provider-profiles.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
+import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
+import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
@@ -34,9 +36,37 @@ import {
   classifyResumeFailure,
   extractTaskProgress,
   isMissingClaudeSessionError,
+  isPromptTokenLimitExceededError,
   isTransientCliExitCode1,
 } from './invoke-helpers.js';
+import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
+
+/** F118: Module-level singleton — guards per-cliSessionId serialization */
+const sessionMutex = new SessionMutex();
+
+/**
+ * F089: Race an async iterator's .next() against an AbortSignal.
+ * Returns the iterator result, or throws the abort reason if the signal fires first.
+ * This is necessary because `for await` blocks on gen.next() and cannot be interrupted.
+ */
+function abortableNext<T>(iter: AsyncIterator<T>, signal: AbortSignal): Promise<IteratorResult<T>> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+  return new Promise<IteratorResult<T>>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason ?? new Error('aborted'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    iter.next().then(
+      (result) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(result);
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
 
 const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
 const ANTHROPIC_PROFILE_MODE_API_KEY = 'api_key';
@@ -142,6 +172,10 @@ export interface InvocationParams {
   readonly isLastCat: boolean;
   /** Static identity prompt — prepended to prompt on new sessions (gated by F-BLOAT logic) */
   readonly systemPrompt?: string;
+  /** F108 fix: InvocationRecordStore's parent invocation ID for worklist key alignment */
+  readonly parentInvocationId?: string;
+  /** F121: The A2A trigger message ID for auto-replyTo */
+  readonly a2aTriggerMessageId?: string;
 }
 
 /**
@@ -154,9 +188,39 @@ export interface InvocationParams {
  */
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
   const { registry, sessionManager, threadStore, apiUrl } = deps;
-  const { catId, service, prompt, userId, threadId, isLastCat, signal } = params;
+  const { catId, service, prompt, userId, threadId, isLastCat, signal: callerSignal } = params;
 
-  const { invocationId, callbackToken } = registry.create(userId, catId, threadId);
+  const { invocationId, callbackToken } = registry.create(
+    userId,
+    catId,
+    threadId,
+    params.parentInvocationId,
+    params.a2aTriggerMessageId,
+  );
+
+  // F089: Invocation-level hard timeout — independent of NDJSON stream / CLI timeout.
+  // Must be > CLI_TIMEOUT_MS to avoid racing the inner timeout.
+  // When CLI_TIMEOUT_MS=0 (disable), fall back to DEFAULT (5min) so invocation still has a ceiling.
+  const INVOCATION_TIMEOUT_MULTIPLIER = 2;
+  const cliTimeoutMs = resolveCliTimeoutMs(undefined);
+  const invocationTimeoutMs =
+    (cliTimeoutMs > 0 ? cliTimeoutMs : DEFAULT_CLI_TIMEOUT_MS) * INVOCATION_TIMEOUT_MULTIPLIER;
+  const invocationAc = new AbortController();
+  const invocationTimer = setTimeout(() => {
+    console.error('[invoke-single-cat] invocation hard timeout fired', {
+      invocationId,
+      catId,
+      threadId,
+      timeoutMs: invocationTimeoutMs,
+    });
+    invocationAc.abort(new Error('invocation_timeout'));
+  }, invocationTimeoutMs);
+  invocationTimer.unref();
+
+  // Merge caller signal (user cancel) with invocation timeout — neither loses semantics.
+  const signal: AbortSignal | undefined = callerSignal
+    ? AbortSignal.any([callerSignal, invocationAc.signal])
+    : invocationAc.signal;
 
   // DIAG: ghost-thread bug — log invocation creation with thread binding
   console.info('[DIAG/ghost-thread] invokeSingleCat: created invocation', {
@@ -188,6 +252,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const promptDigest = createPromptDigest(prompt);
   const startTime = Date.now();
 
+  // F118 AC-C5: Flags for finally block fallback audit (must be before any early return)
+  let hadError = false;
+  let didWriteAudit = false;
+  let didComplete = false;
+  let didResetRestoreFailures = false;
+
   // Shared-state preflight — covers ALL cats (Claude/Codex/Gemini), vendor-agnostic.
   // Three-layer defense model (shared-rules §14):
   //   L1 .githooks/pre-commit = hard block (prevents committing on wrong branch)
@@ -217,6 +287,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           timestamp: Date.now(),
         };
         yield { type: 'done', catId, isFinal: params.isLastCat, timestamp: Date.now() };
+        didComplete = true; // F118 AC-C5: Normal early exit (governance block), not force-return
         return;
       }
       // Warn-only: uncommitted changes — cat can help fix this
@@ -254,7 +325,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     });
 
   let hadStreamError = false;
-  let hadError = false;
   let lastTasks: TaskProgressItem[] | null = null;
   let terminalTaskProgressStatus: TaskProgressStatus | null = null;
   let terminalInterruptReason: 'error' | 'aborted' | null = null;
@@ -350,6 +420,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
   };
 
+  // F118: Declared before try so it's accessible in finally
+  let sessionMutexRelease: (() => void) | undefined;
+
   try {
     let sessionId: string | undefined;
     try {
@@ -373,6 +446,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // so a freshly-bound session would be missed if we gate on sessionId being truthy.
     const sessionChainActive = isSessionChainEnabled(catId);
     if (deps.sessionChainStore && sessionChainActive) {
+      // Reaper: reconcile any sessions stuck in 'sealing' > 5 minutes (best-effort).
+      if (deps.sessionSealer && 'reconcileStuck' in deps.sessionSealer) {
+        try {
+          await (
+            deps.sessionSealer as { reconcileStuck: (catId: string, threadId: string) => Promise<number> }
+          ).reconcileStuck(catId, threadId);
+        } catch {
+          /* best-effort reconcile */
+        }
+      }
       try {
         const chain = await deps.sessionChainStore.getChain(catId, threadId);
         if (chain.length > 0) {
@@ -381,8 +464,37 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             // Chain exists but no active session → previous was sealed; don't resume
             sessionId = undefined;
           } else if (activeRec.cliSessionId) {
-            // Active record's cliSessionId is authoritative (includes F33 manual bind)
-            sessionId = activeRec.cliSessionId;
+            // F118 AC-C6: Overflow circuit breaker — too many consecutive restore failures (#86)
+            // Note: time-based "stale" check removed — idle sessions are healthy,
+            // only repeated restore failures indicate a toxic session.
+            const MAX_CONSECUTIVE_FAILURES = 3;
+            const isOverflow = (activeRec.consecutiveRestoreFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES;
+            if (isOverflow && deps.sessionSealer) {
+              let sealOk = false;
+              try {
+                const result = await deps.sessionSealer.requestSeal({
+                  sessionId: activeRec.id,
+                  reason: 'overflow_circuit_breaker',
+                });
+                sealOk = result.accepted;
+                if (sealOk) {
+                  // Must finalize to write transcript + digest to disk,
+                  // otherwise session recall tools get 404 (no data on disk).
+                  deps.sessionSealer.finalize({ sessionId: activeRec.id }).catch(() => {});
+                }
+              } catch {
+                /* best-effort seal */
+              }
+              // Only drop sessionId if seal succeeded — otherwise resume with existing
+              if (sealOk) {
+                sessionId = undefined;
+              } else {
+                sessionId = activeRec.cliSessionId;
+              }
+            } else {
+              // Active record's cliSessionId is authoritative (includes F33 manual bind)
+              sessionId = activeRec.cliSessionId;
+            }
           }
         }
       } catch {
@@ -392,6 +504,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // into a sealed session. Lost resume is recoverable; sealed-session
         // corruption is not.
         sessionId = undefined;
+      }
+    }
+
+    // F118: Acquire per-cliSessionId mutex to prevent concurrent resume
+    if (sessionId) {
+      try {
+        sessionMutexRelease = await sessionMutex.acquire(sessionId, signal);
+      } catch (err) {
+        // Abort while queued is not a runtime error — clean exit
+        if (signal?.aborted) {
+          yield { type: 'done' as const, catId, isFinal: isLastCat, timestamp: Date.now() };
+          didComplete = true; // F118 AC-C5: Abort early exit, not force-return
+          return;
+        }
+        throw err; // unexpected error — let outer catch handle
       }
     }
 
@@ -426,6 +553,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           timestamp: Date.now(),
         };
         yield { type: 'done', catId, isFinal: params.isLastCat, timestamp: Date.now() };
+        didComplete = true; // F118 AC-C5: Normal early exit (governance preflight), not force-return
         return;
       }
     }
@@ -464,13 +592,27 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (profile.baseUrl) {
             // Route through local proxy gateway if enabled (default: on).
             // Proxy uses slug-based routing: /SLUG/v1/messages → upstream/v1/messages
-            const proxyPort = process.env.ANTHROPIC_PROXY_PORT || '9877';
+            const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
+            const proxyPortNum = parseInt(proxyPortStr, 10);
             const proxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED !== '0';
-            if (proxyEnabled) {
-              const slug = deriveProxySlug(profile.id);
-              registerProxyUpstream(projectRoot, slug, profile.baseUrl);
-              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}/${slug}`;
+            if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
+              const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
+              if (proxyAlive) {
+                const slug = deriveProxySlug(profile.id);
+                registerProxyUpstream(projectRoot, slug, profile.baseUrl);
+                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
+              } else {
+                console.warn(
+                  `[invoke] proxy 127.0.0.1:${proxyPortStr} unreachable, falling back to direct upstream: ${profile.baseUrl}`,
+                );
+                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
+              }
             } else {
+              if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
+                console.warn(
+                  `[invoke] invalid ANTHROPIC_PROXY_PORT="${proxyPortStr}", falling back to direct upstream`,
+                );
+              }
               callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
             }
           }
@@ -542,6 +684,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(params.uploadDir ? { uploadDir: params.uploadDir } : {}),
       ...(signal ? { signal } : {}),
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
+      invocationId,
+      ...(sessionId ? { cliSessionId: sessionId } : {}),
+      // F118 Phase B: Enable liveness probe with defaults for all CLI providers
+      livenessProbe: {},
     };
 
     let lastErrorMessage: string | undefined;
@@ -576,20 +722,43 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             if (existing) {
               if (existing.cliSessionId !== msg.sessionId) {
                 // CLI session changed → old context is lost (resume failed / CLI restarted).
-                // This is a seal boundary: seal the old record, create a new one.
-                const now = Date.now();
-                await deps.sessionChainStore.update(existing.id, {
-                  status: 'sealed',
-                  sealReason: 'cli_session_replaced',
-                  sealedAt: now,
-                  updatedAt: now,
-                });
-                await deps.sessionChainStore.create({
-                  cliSessionId: msg.sessionId,
-                  threadId,
-                  catId,
-                  userId,
-                });
+                // Use requestSeal + finalize to ensure transcript/digest are written,
+                // not bare update(status:'sealed') which skips flush.
+                let sealAccepted = false;
+                if (deps.sessionSealer) {
+                  try {
+                    const result = await deps.sessionSealer.requestSeal({
+                      sessionId: existing.id,
+                      reason: 'cli_session_replaced',
+                    });
+                    sealAccepted = result.accepted;
+                    if (sealAccepted) {
+                      deps.sessionSealer.finalize({ sessionId: existing.id }).catch(() => {});
+                    }
+                  } catch {
+                    /* best-effort seal */
+                  }
+                } else {
+                  // Fallback: no sealer available — bare update (legacy path)
+                  const now = Date.now();
+                  await deps.sessionChainStore.update(existing.id, {
+                    status: 'sealed',
+                    sealReason: 'cli_session_replaced',
+                    sealedAt: now,
+                    updatedAt: now,
+                  });
+                  sealAccepted = true;
+                }
+                // Only create new active record if old one was successfully sealed.
+                // Otherwise we'd have two active records — a dirty state.
+                if (sealAccepted || !deps.sessionSealer) {
+                  await deps.sessionChainStore.create({
+                    cliSessionId: msg.sessionId,
+                    threadId,
+                    catId,
+                    userId,
+                  });
+                }
               }
             } else {
               // No active session (first invocation or previous was sealed)
@@ -652,6 +821,23 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           .catch((err) => {
             console.warn(`[audit] ${auditType} write failed`, { threadId, invocationId, err });
           });
+
+        // Increment session messageCount (best-effort).
+        // This counter is critical for unseal safety: empty sessions (0 messages)
+        // can be displaced, but sessions with messages must not be silently sealed.
+        if (deps.sessionChainStore && sessionChainActive) {
+          try {
+            const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
+            if (activeRec) {
+              await deps.sessionChainStore.update(activeRec.id, {
+                messageCount: (activeRec.messageCount ?? 0) + 1,
+                updatedAt: Date.now(),
+              });
+            }
+          } catch {
+            /* best-effort: messageCount miss won't break invocation */
+          }
+        }
 
         // Push completion metrics for frontend status panel
         outputs.push({
@@ -894,9 +1080,36 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       return outputs;
     };
 
+    const streamProcessedOutputs = async function* (sourceMsg: AgentMessage | undefined): AsyncIterable<AgentMessage> {
+      if (!sourceMsg) return;
+      for (const out of await processMessage(sourceMsg)) {
+        if (out.type === 'error') {
+          hadError = true;
+          terminalTaskProgressStatus = 'interrupted';
+          terminalInterruptReason = 'error';
+        }
+        await maybePersistTaskProgress(out);
+        if (out.type === 'done' && terminalTaskProgressStatus === null) {
+          if (hadError) {
+            terminalTaskProgressStatus = 'interrupted';
+            terminalInterruptReason = 'error';
+          } else if (signal?.aborted) {
+            terminalTaskProgressStatus = 'interrupted';
+            terminalInterruptReason = 'aborted';
+          } else {
+            terminalTaskProgressStatus = 'completed';
+            terminalInterruptReason = null;
+          }
+        }
+        if (out.type === 'done') await finalizeTaskProgress();
+        yield out;
+      }
+    };
+
     // Self-heal policy (at most one retry total):
     // 1) stale --resume session: "No conversation found with session ID ..."
-    // 2) transient CLI bootstrap exit: "CLI 异常退出 (code: 1, signal: none)"
+    // 2) poisoned --resume session: "prompt token count ... exceeds the limit ..."
+    // 3) transient CLI bootstrap exit: "CLI 异常退出 (code: 1, signal: none)"
     const initialResumeSessionId = sessionId;
     const shouldTrackGeminiResumeFailures = catId === 'gemini' && Boolean(initialResumeSessionId);
     const resumeFailureCounts: Partial<Record<ResumeFailureKind, number>> = {};
@@ -910,12 +1123,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         ...baseOptions,
       };
       let suppressedMissingSessionError: AgentMessage | undefined;
+      let suppressedPromptLimitError: AgentMessage | undefined;
       let suppressedTransientCliError: AgentMessage | undefined;
       let shouldRetryWithoutSession = false;
       let shouldRetryOnTransientCliExit = false;
       let attemptHasContentOutput = false;
 
-      for await (const msg of service.invoke(effectivePrompt, options)) {
+      // F089: Use abortableNext instead of `for await` so the invocation timeout
+      // can break out even when the service generator is stuck on an unresolvable await.
+      const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
+      for (;;) {
+        const iterResult = await abortableNext(serviceIter, signal);
+        if (iterResult.done) break;
+        const msg = iterResult.value;
         if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
           const failureKind = classifyResumeFailure(msg.error);
           if (failureKind) {
@@ -928,6 +1148,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           continue;
         }
         if (
+          allowSessionRetry &&
+          !attemptHasContentOutput &&
+          msg.type === 'error' &&
+          isPromptTokenLimitExceededError(msg.error)
+        ) {
+          suppressedPromptLimitError = msg;
+          continue;
+        }
+        if (
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
@@ -937,89 +1166,53 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           continue;
         }
 
-        if (suppressedMissingSessionError || suppressedTransientCliError) {
+        if (suppressedMissingSessionError || suppressedPromptLimitError || suppressedTransientCliError) {
           if (msg.type === 'done') {
-            shouldRetryWithoutSession = Boolean(suppressedMissingSessionError);
+            shouldRetryWithoutSession = Boolean(suppressedMissingSessionError || suppressedPromptLimitError);
             shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
             break;
           }
 
           if (suppressedMissingSessionError) {
-            for (const out of await processMessage(suppressedMissingSessionError)) {
-              if (out.type === 'error') {
-                hadError = true;
-                terminalTaskProgressStatus = 'interrupted';
-                terminalInterruptReason = 'error';
-              }
-              await maybePersistTaskProgress(out);
-              if (out.type === 'done' && terminalTaskProgressStatus === null) {
-                if (hadError) {
-                  terminalTaskProgressStatus = 'interrupted';
-                  terminalInterruptReason = 'error';
-                } else if (signal?.aborted) {
-                  terminalTaskProgressStatus = 'interrupted';
-                  terminalInterruptReason = 'aborted';
-                } else {
-                  terminalTaskProgressStatus = 'completed';
-                  terminalInterruptReason = null;
-                }
-              }
-              if (out.type === 'done') await finalizeTaskProgress();
+            for await (const out of streamProcessedOutputs(suppressedMissingSessionError)) {
               yield out;
             }
             suppressedMissingSessionError = undefined;
           }
+          if (suppressedPromptLimitError) {
+            for await (const out of streamProcessedOutputs(suppressedPromptLimitError)) {
+              yield out;
+            }
+            suppressedPromptLimitError = undefined;
+          }
           if (suppressedTransientCliError) {
-            for (const out of await processMessage(suppressedTransientCliError)) {
-              if (out.type === 'error') {
-                hadError = true;
-                terminalTaskProgressStatus = 'interrupted';
-                terminalInterruptReason = 'error';
-              }
-              await maybePersistTaskProgress(out);
-              if (out.type === 'done' && terminalTaskProgressStatus === null) {
-                if (hadError) {
-                  terminalTaskProgressStatus = 'interrupted';
-                  terminalInterruptReason = 'error';
-                } else if (signal?.aborted) {
-                  terminalTaskProgressStatus = 'interrupted';
-                  terminalInterruptReason = 'aborted';
-                } else {
-                  terminalTaskProgressStatus = 'completed';
-                  terminalInterruptReason = null;
-                }
-              }
-              if (out.type === 'done') await finalizeTaskProgress();
+            for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
               yield out;
             }
             suppressedTransientCliError = undefined;
           }
         }
 
-        for (const out of await processMessage(msg)) {
-          if (out.type === 'error') {
-            hadError = true;
-            terminalTaskProgressStatus = 'interrupted';
-            terminalInterruptReason = 'error';
-          }
-          await maybePersistTaskProgress(out);
-          if (out.type === 'done' && terminalTaskProgressStatus === null) {
-            if (hadError) {
-              terminalTaskProgressStatus = 'interrupted';
-              terminalInterruptReason = 'error';
-            } else if (signal?.aborted) {
-              terminalTaskProgressStatus = 'interrupted';
-              terminalInterruptReason = 'aborted';
-            } else {
-              terminalTaskProgressStatus = 'completed';
-              terminalInterruptReason = null;
-            }
-          }
-          if (out.type === 'done') await finalizeTaskProgress();
+        for await (const out of streamProcessedOutputs(msg)) {
           yield out;
         }
         if (msg.type !== 'error' && msg.type !== 'done' && msg.type !== 'session_init') {
           attemptHasContentOutput = true;
+          // F118 AC-C6: Reset consecutive restore failure counter on successful content
+          if (deps.sessionChainStore && !didResetRestoreFailures) {
+            didResetRestoreFailures = true; // only reset once per invocation
+            try {
+              const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
+              if (activeRec && (activeRec.consecutiveRestoreFailures ?? 0) > 0) {
+                await deps.sessionChainStore.update(activeRec.id, {
+                  consecutiveRestoreFailures: 0,
+                  updatedAt: Date.now(),
+                });
+              }
+            } catch {
+              /* best-effort reset */
+            }
+          }
         }
       }
 
@@ -1041,7 +1234,23 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         } catch {
           // Redis delete failure — best-effort only
         }
+        // F118 AC-C6: Increment consecutive restore failure counter
+        if (deps.sessionChainStore) {
+          try {
+            const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
+            if (activeRec) {
+              await deps.sessionChainStore.update(activeRec.id, {
+                consecutiveRestoreFailures: (activeRec.consecutiveRestoreFailures ?? 0) + 1,
+                updatedAt: Date.now(),
+              });
+            }
+          } catch {
+            /* best-effort counter update */
+          }
+        }
         sessionId = undefined;
+        // F118 P2-fix: Clear stale cliSessionId so retry diagnostics don't mis-attribute
+        delete baseOptions.cliSessionId;
         // F-BLOAT P1: self-heal drops session → retry is now a fresh session.
         // Must re-inject systemPrompt since baseOptions may have omitted it
         // when the original attempt was a resume (injectSystemPrompt=false).
@@ -1069,50 +1278,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
 
       if (suppressedMissingSessionError) {
-        for (const out of await processMessage(suppressedMissingSessionError)) {
-          if (out.type === 'error') {
-            hadError = true;
-            terminalTaskProgressStatus = 'interrupted';
-            terminalInterruptReason = 'error';
-          }
-          await maybePersistTaskProgress(out);
-          if (out.type === 'done' && terminalTaskProgressStatus === null) {
-            if (hadError) {
-              terminalTaskProgressStatus = 'interrupted';
-              terminalInterruptReason = 'error';
-            } else if (signal?.aborted) {
-              terminalTaskProgressStatus = 'interrupted';
-              terminalInterruptReason = 'aborted';
-            } else {
-              terminalTaskProgressStatus = 'completed';
-              terminalInterruptReason = null;
-            }
-          }
-          if (out.type === 'done') await finalizeTaskProgress();
+        for await (const out of streamProcessedOutputs(suppressedMissingSessionError)) {
+          yield out;
+        }
+      }
+      if (suppressedPromptLimitError) {
+        for await (const out of streamProcessedOutputs(suppressedPromptLimitError)) {
           yield out;
         }
       }
       if (suppressedTransientCliError) {
-        for (const out of await processMessage(suppressedTransientCliError)) {
-          if (out.type === 'error') {
-            hadError = true;
-            terminalTaskProgressStatus = 'interrupted';
-            terminalInterruptReason = 'error';
-          }
-          await maybePersistTaskProgress(out);
-          if (out.type === 'done' && terminalTaskProgressStatus === null) {
-            if (hadError) {
-              terminalTaskProgressStatus = 'interrupted';
-              terminalInterruptReason = 'error';
-            } else if (signal?.aborted) {
-              terminalTaskProgressStatus = 'interrupted';
-              terminalInterruptReason = 'aborted';
-            } else {
-              terminalTaskProgressStatus = 'completed';
-              terminalInterruptReason = null;
-            }
-          }
-          if (out.type === 'done') await finalizeTaskProgress();
+        for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
           yield out;
         }
       }
@@ -1138,6 +1314,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         yield out;
       }
     }
+    didComplete = true; // F118 AC-C5: Normal completion reached
   } catch (err) {
     // === CAT_ERROR 审计 (fire-and-forget, 缅因猫 review P2-3) ===
     const durationMs = Date.now() - startTime;
@@ -1158,6 +1335,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       });
 
     hadError = true;
+    didWriteAudit = true; // F118 AC-C5: Catch block wrote audit, don't double-write in finally
     yield {
       type: 'error' as const,
       catId,
@@ -1167,6 +1345,34 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     await finalizeTaskProgress();
     yield { type: 'done' as const, catId, isFinal: isLastCat, timestamp: Date.now() };
   } finally {
+    // F089: Clear invocation hard timeout
+    clearTimeout(invocationTimer);
+
+    // F118: Release session mutex (idempotent — safe if never acquired)
+    sessionMutexRelease?.();
+
+    // F118 AC-C5: Fallback audit for generator .return() path (#99)
+    // If generator was force-returned (e.g. AbortController, client disconnect)
+    // and the catch block didn't fire, write a fallback CAT_ERROR audit entry.
+    if (!didWriteAudit && !hadError && !didComplete) {
+      const durationMs = Date.now() - startTime;
+      auditLog
+        .append({
+          type: AuditEventTypes.CAT_ERROR,
+          threadId,
+          data: {
+            catId,
+            userId,
+            invocationId,
+            durationMs,
+            error: 'generator_returned_without_completion',
+          },
+        })
+        .catch((auditErr) => {
+          console.warn('[audit] finally fallback CAT_ERROR write failed', { threadId, invocationId, err: auditErr });
+        });
+    }
+
     await finalizeTaskProgress();
 
     // F089: Mark agent pane status when invocation completes

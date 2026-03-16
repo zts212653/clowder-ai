@@ -170,13 +170,13 @@ describe('GET /api/evidence/search', () => {
       {
         recall: async () => [
           {
-            content: 'ADR-001 decided agent invocation approach',
-            metadata: { anchor: 'docs/decisions/001-agent-invocation-approach.md', author: 'opus' },
+            content: 'ADR-005 decided single bank strategy for Hindsight integration',
+            metadata: { anchor: 'docs/decisions/005-hindsight-integration-decisions.md', author: 'opus' },
             score: 0.92,
           },
           {
-            content: 'Phase overview',
-            metadata: { anchor: 'phases/overview.md' },
+            content: 'Phase 4 completed with 460 tests',
+            metadata: { anchor: 'docs/phases/phase-4.0-direction.md' },
             score: 0.75,
           },
         ],
@@ -471,8 +471,8 @@ describe('GET /api/evidence/search', () => {
       {
         recall: async () => [
           {
-            content: 'ADR-001 agent invocation decisions',
-            metadata: { anchor: 'docs/decisions/001-agent-invocation-approach.md' },
+            content: 'ADR-005 hindsight decisions',
+            metadata: { anchor: 'docs/decisions/005-hindsight-integration-decisions.md' },
             score: 0.95,
           },
         ],

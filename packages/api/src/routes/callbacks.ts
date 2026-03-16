@@ -19,7 +19,7 @@ import type { IHindsightClient } from '../domains/cats/services/orchestration/Hi
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { hydrateReplyPreview, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
@@ -74,7 +74,7 @@ export interface CallbackRoutesOptions {
   reflectionService?: IReflectionService;
   /** Queue auto-dequeue on A2A invocation completion */
   queueProcessor?: {
-    onInvocationComplete(threadId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
+    onInvocationComplete(threadId: string, catId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
   };
 }
 
@@ -187,6 +187,15 @@ const richBlockSchema = z.discriminatedUnion('kind', [
     disabled: z.boolean().optional(),
     selectedIds: z.array(z.string()).optional(),
     groupId: z.string().min(1).optional(),
+  }),
+  // F120 Phase C: html_widget — inline sandboxed HTML/JS visualization
+  z.object({
+    id: z.string().min(1),
+    kind: z.literal('html_widget'),
+    v: z.literal(1),
+    html: z.string().min(1).max(500_000),
+    title: z.string().optional(),
+    height: z.number().int().min(50).max(2000).optional(),
   }),
 ]);
 const createRichBlockSchema = callbackAuthSchema.extend({
@@ -333,16 +342,64 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const senderCatId = createCatId(record.catId);
     const contentTargets = parseA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
     // F098-C1: Merge explicit targetCats with content-parsed mentions (deduped)
-    const mergedTargets = new Set<CatId>([...contentTargets, ...((explicitTargetCats ?? []) as CatId[])]);
+    // Filter out invalid catIds (e.g. "default-user") — graceful degradation, not 400
+    const validExplicitTargets: CatId[] = [];
+    for (const id of explicitTargetCats ?? []) {
+      if (catRegistry.has(id)) {
+        validExplicitTargets.push(createCatId(id));
+      } else {
+        app.log.warn(
+          { droppedId: id, catId: record.catId, invocationId },
+          '[callbacks/post-message] Dropped invalid catId from targetCats',
+        );
+      }
+    }
+    const mergedTargets = new Set<CatId>([...contentTargets, ...validExplicitTargets]);
     const mentions: CatId[] = [...mergedTargets];
     const mentionsUser = detectUserMention(storedContent);
     const crossPostExtra = isCrossThread
       ? { crossPost: { sourceThreadId: record.threadId, sourceInvocationId: invocationId } }
       : {};
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
-    const targetCatsExtra = explicitTargetCats?.length ? { targetCats: explicitTargetCats } : {};
+    const targetCatsExtra = validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
     const extraParts = { ...richExtra, ...crossPostExtra, ...targetCatsExtra };
     const extra = Object.keys(extraParts).length > 0 ? extraParts : undefined;
+
+    // F121: Validate replyTo — must exist in the same thread
+    let validatedReplyTo: string | undefined;
+    // F121 enhancement: Auto-fill replyTo for A2A-triggered invocations.
+    // Priority: 1) explicit replyTo  2) a2aTriggerMessageId (worklist path)  3) InvocationRecordStore fallback
+    let autoFilledReplyTo: string | undefined;
+    if (!replyTo) {
+      // Worklist path: a2aTriggerMessageId is set by route-serial from WorklistEntry
+      if (record.a2aTriggerMessageId) {
+        autoFilledReplyTo = record.a2aTriggerMessageId;
+      } else if (record.parentInvocationId && invocationRecordStore) {
+        // Fallback path (standalone invocation): look up InvocationRecordStore
+        const parentRecord = (await invocationRecordStore.get(record.parentInvocationId)) as {
+          userMessageId?: string | null;
+          threadId?: string | null;
+        } | null;
+        // P3-2 hardening: only trust userMessageId if parentRecord's threadId matches
+        if (parentRecord?.userMessageId && (!parentRecord.threadId || parentRecord.threadId === effectiveThreadId)) {
+          autoFilledReplyTo = parentRecord.userMessageId;
+        }
+      }
+    }
+    const effectiveReplyTo = replyTo ?? autoFilledReplyTo;
+    if (effectiveReplyTo) {
+      const parentMsg = await messageStore.getById(effectiveReplyTo);
+      if (parentMsg && parentMsg.threadId === effectiveThreadId) {
+        validatedReplyTo = effectiveReplyTo;
+      } else if (replyTo) {
+        // Only warn for explicit replyTo failures — auto-fill mismatches are expected
+        // (e.g. cross-thread A2A where trigger is in a different thread)
+        app.log.warn(
+          { replyTo, effectiveThreadId, parentThreadId: parentMsg?.threadId },
+          '[callbacks/post-message] replyTo rejected: not found or wrong thread',
+        );
+      }
+    }
 
     // Store the message (scoped to the effective thread)
     const storedMsg = await messageStore.append({
@@ -355,7 +412,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       timestamp: Date.now(),
       threadId: effectiveThreadId,
       ...(extra ? { extra } : {}),
+      ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
     });
+
+    // F121: Hydrate reply preview for broadcast
+    const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
 
     socketManager.broadcastAgentMessage(
       {
@@ -365,17 +426,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         origin: 'callback',
         messageId: storedMsg.id,
         // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
-        ...(isCrossThread || explicitTargetCats?.length
+        ...(isCrossThread || validExplicitTargets.length
           ? {
               extra: {
                 ...(isCrossThread
                   ? { crossPost: { sourceThreadId: record.threadId, sourceInvocationId: invocationId } }
                   : {}),
-                ...(explicitTargetCats?.length ? { targetCats: explicitTargetCats } : {}),
+                ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
               },
             }
           : {}),
         ...(mentionsUser ? { mentionsUser } : {}),
+        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+        ...(replyPreview ? { replyPreview } : {}),
         timestamp: Date.now(),
       },
       effectiveThreadId,
@@ -414,6 +477,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           threadId: effectiveThreadId,
           triggerMessage: storedMsg,
           callerCatId: senderCatId,
+          parentInvocationId: record.parentInvocationId,
         },
       );
     }
@@ -421,7 +485,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     return {
       status: 'ok',
       threadId: effectiveThreadId,
-      replyTo,
+      ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
     };
   });
@@ -581,7 +645,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     let filtered: Awaited<ReturnType<typeof messageStore.getByThread>>;
 
     // F35: Viewer for whisper filtering.
-    // Debug mode: cats see everything (like team lead) — full transparency for debugging.
+    // Debug mode: cats see everything (like 铲屎官) — full transparency for debugging.
     // Play mode: cats only see whispers addressed to them — game privacy.
     const viewer = needsPlayFilter
       ? { type: 'cat' as const, catId: createCatId(record.catId) }

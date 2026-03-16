@@ -5,7 +5,7 @@
  * Routing strategy (砚砚 R1/R2 design):
  *   1. PrTrackingStore lookup (主路径: repo+pr → catId+threadId)
  *   2. Fallback: PR title [猫名🐾] → cat's Review Inbox thread
- *   3. Triage: no cat identified → team lead Triage thread
+ *   3. Triage: no cat identified → 铲屎官 Triage thread
  *
  * BACKLOG #81
  */
@@ -202,7 +202,7 @@ export class ReviewRouter {
       `Review 类型: ${reviewTypeLabel}`,
       event.reviewer ? `Reviewer: @${event.reviewer}` : '',
       ``,
-      `请处理 review 意见。完成后通知team lead确认合入。`,
+      `请处理 review 意见。完成后通知铲屎官确认合入。`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -242,7 +242,7 @@ export class ReviewRouter {
       event.reviewer ? `Reviewer: @${event.reviewer}` : '',
       ``,
       `无法自动路由：注册表无匹配 + PR title 无猫名标签。`,
-      `请team lead手动指派或补注册。`,
+      `请铲屎官手动指派或补注册。`,
     ]
       .filter(Boolean)
       .join('\n');

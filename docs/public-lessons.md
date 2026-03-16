@@ -118,7 +118,7 @@ created: 2026-02-26
 - 根因：模型天然趋同，追求和谐而非正确性，导致关键分歧被掩盖。
 - 触发条件：高节奏迭代、双方都想“快点过 review”、术语不精确时。
 - 修复：review 结论必须明确“建议修/不修 + because”；author 必须给技术判断。
-- 防护：分歧无法收敛时升级team lead裁决，不允许用“非 blocking”逃避判断。
+- 防护：分歧无法收敛时升级铲屎官裁决，不允许用“非 blocking”逃避判断。
 - 来源锚点：
   - `AGENTS.md#L262`
   - `AGENTS.md#L271`
@@ -250,19 +250,19 @@ created: 2026-02-26
 - 根因：把 `/bin/rm` 误认为"更正确"的选择。实际上 shell alias `rm → trash` 就是安全网，绕过它 = 放弃恢复能力。
 - 触发条件：shell 提示二选一时；或脚本中直接调用 rm。
 - 修复：一律使用 `trash` 命令代替任何 rm 操作。
-- 防护：CLAUDE.md 明确禁止 `/bin/rm`；team lead shell 配置 `rm` alias → `trash`。
+- 防护：CLAUDE.md 明确禁止 `/bin/rm`；铲屎官 shell 配置 `rm` alias → `trash`。
 - 来源锚点：
   - CLAUDE.md "删除文件必须用 trash" 段落（auto memory 2026-02-12）
   - 2026-02-12 实际犯错事件
 - 原理：不可逆操作必须有安全网（垃圾桶 = undo buffer）。绕过安全网的捷径永远比它节省的时间更危险。
 
-- 关联：CLAUDE.md team lead硬规则
+- 关联：CLAUDE.md 铲屎官硬规则
 
 ### LL-011: Worktree 清理的正确顺序——先 push，再 cd 回主仓，最后 remove
 - 状态：validated
 - 更新时间：2026-02-13
 
-- 坑：(1) 在 worktree CWD 里执行 `git worktree remove` 删除自己 → shell 悬空，什么都做不了。(2) 先删 worktree 再想 push → 站在虚空里连记忆都改不了，team lead笑着救了我。两次犯同类错误。
+- 坑：(1) 在 worktree CWD 里执行 `git worktree remove` 删除自己 → shell 悬空，什么都做不了。(2) 先删 worktree 再想 push → 站在虚空里连记忆都改不了，铲屎官笑着救了我。两次犯同类错误。
 - 根因：没有意识到"删除当前工作目录"会导致 shell 失去锚点。删了就什么都做不了了。
 - 触发条件：在 worktree 目录内执行清理操作；或在清理前没完成所有需要 worktree 存在的操作。
 - 修复：强制顺序——(1) rebase + 合入 main (2) push origin main (3) cd 回主仓 (4) git worktree remove。
@@ -294,9 +294,9 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-02-13
 
-- 坑：`git add myfile && git commit` 但暂存区已有上次 session 或team lead留下的文件，导致无关改动混入 commit。
+- 坑：`git add myfile && git commit` 但暂存区已有上次 session 或铲屎官留下的文件，导致无关改动混入 commit。
 - 根因：`git add` 是追加操作，不是替换操作。暂存区是累积状态，不会因为新 add 而清空之前的内容。
-- 触发条件：连续 session 之间，或team lead手动操作后，暂存区有残留文件。
+- 触发条件：连续 session 之间，或铲屎官手动操作后，暂存区有残留文件。
 - 修复：commit 前必须 `git status` 检查暂存区全部内容，确认只有自己的文件。
 - 防护：CLAUDE.md "Git commit 纪律" 明确规则。
 - 来源锚点：
@@ -310,7 +310,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-02-13
 
-- 坑：收到team lead汇报的 URL 路由缺失 bug 后，直接修代码，没写 bug report 也没写 review 信。被team lead批评：没有记录 = 无法复盘。
+- 坑：收到铲屎官汇报的 URL 路由缺失 bug 后，直接修代码，没写 bug report 也没写 review 信。被铲屎官批评：没有记录 = 无法复盘。
 - 根因："修 bug 最重要"的思维惯性，跳过了记录环节。没有意识到记录本身是修复流程的一部分。
 - 触发条件：收到 bug 报告后想快速修复的冲动；bug 看起来简单的时候尤其容易跳过。
 - 修复：CLAUDE.md §4 强制要求先写 bug report（5 项：报告人/复现步骤/根因/修复方案/验证方式），再动手。
@@ -326,7 +326,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-02-13
 
-- 坑：在 worktree 工作时未设置 REDIS_URL，服务回落到默认 6399（team lead数据），数据从 307 keys 降至 15 keys（95% 丢失）。虽最终从 RDB 备份完全恢复，但过程惊险。
+- 坑：在 worktree 工作时未设置 REDIS_URL，服务回落到默认 6399（铲屎官数据），数据从 307 keys 降至 15 keys（95% 丢失）。虽最终从 RDB 备份完全恢复，但过程惊险。
 - 根因：开发环境和生产数据共享同一个 Redis 实例，靠配置（环境变量）隔离。一旦忘设配置，默认值指向生产。
 - 触发条件：worktree 中启动服务但忘记创建 `.env` 设置 `REDIS_URL=redis://localhost:6380`。
 - 修复：(1) 强制 worktree 使用 6398 端口 (2) 启动前验证 `echo $REDIS_URL` (3) 启动后验证数据量。
@@ -439,13 +439,13 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-02-13
 
-- 坑：茶话会夺魂 bug 调试时，修 bug 的Ragdoll（分身 session `thread_mlkxnyg17ftop4v8`）找到了 `~/.codex/AGENTS.md` 全局注入后就停了——"这能解释为什么Maine Coon去跑 superpowers"。但team lead追问："可它怎么知道 Phase 5 的？AGENTS.md 里又没有 Phase 5。"这一问才逼出了真正的根因——Session 跨 thread 污染。如果team lead没追问，我们只会修触发器，留下根因。
+- 坑：茶话会夺魂 bug 调试时，修 bug 的Ragdoll（分身 session `thread_mlkxnyg17ftop4v8`）找到了 `~/.codex/AGENTS.md` 全局注入后就停了——"这能解释为什么Maine Coon去跑 superpowers"。但铲屎官追问："可它怎么知道 Phase 5 的？AGENTS.md 里又没有 Phase 5。"这一问才逼出了真正的根因——Session 跨 thread 污染。如果铲屎官没追问，我们只会修触发器，留下根因。
 - 根因：AI 模型的推理模式倾向于在找到"看起来说得通"的第一层解释后停止追溯。"看起来合理"≠"因果链完全闭合"。AGENTS.md 能解释 superpowers 行为但解释不了 Phase 5 知识来源——因果链有断点，但模型没有主动识别。
 - 触发条件：找到一个能解释部分症状的原因时；时间压力下想快速修复时；root cause 和 trigger 看起来像同一件事时。
-- 修复：team lead持续追问直到因果链完全闭合。每个"解释"都要验证：它能解释所有症状吗？有没有它解释不了的？
+- 修复：铲屎官持续追问直到因果链完全闭合。每个"解释"都要验证：它能解释所有症状吗？有没有它解释不了的？
 - 防护：bug 根因分析清单增加"因果链闭合检查"——列出所有症状，确认提出的根因能逐一解释每个症状。解释不了的 = 根因不完整，继续挖。
 - 来源锚点：
-  - *(internal reference removed)* §5 Step 6（team lead追问 Phase 5 来源）
+  - *(internal reference removed)* §5 Step 6（铲屎官追问 Phase 5 来源）
   - 实际修 bug session: `thread_mlkxnyg17ftop4v8`
   - *(internal reference removed)* Phase 1
 - 原理：根因分析的正确性标准不是"找到一个合理解释"，而是"因果链完全闭合——每个症状都能被根因解释"。第一层答案往往是触发器不是根因。必须持续问 "but why?" 直到没有未解释的症状。
@@ -498,7 +498,7 @@ created: 2026-02-26
 - 来源锚点：
   - `docs/features/F042-prompt-engineering-audit.md` §1.1
   - *(internal reference removed)*
-  - 2026-02-27 四猫 + team lead讨论
+  - 2026-02-27 四猫 + 铲屎官讨论
 - 原理：协作规则的持久性取决于它引用的是稳定抽象（角色）还是不稳定实例（个体）。引用个体 = 每次团队变化都要改规则。
 
 - 关联：F042 | F032 | cat-config.json roster
@@ -515,7 +515,7 @@ created: 2026-02-26
 - 来源锚点：
   - `docs/features/F042-prompt-engineering-audit.md` §1.2, §1.3
   - *(internal reference removed)*（Maine Coon自省分析）
-  - 2026-02-27 team lead运行时观察
+  - 2026-02-27 铲屎官运行时观察
 - 原理：多 Agent 系统中，身份是最基础的约束——它决定了模型的行为边界、权限和协作关系。把身份当成可推断项，就相当于每次 compact 后给模型一个"你可以变成任何人"的自由度。
 
 - 关联：F042 | LL-025 | SystemPromptBuilder
@@ -536,15 +536,15 @@ created: 2026-02-26
 ### LL-028: "最小实现"不等于"做个玩具再重写"——绕路 C 点反模式
 - 状态：validated
 - 更新时间：2026-03-05
-- 现象：到了交付阶段仍在"先做个简陋版本让team lead验收"，交付半成品而非完整 feat。内部实现步骤被暴露为交付批次，team lead被迫反复验收中间产物。产出后续要重写而非扩展，等于做了两遍。
+- 现象：到了交付阶段仍在"先做个简陋版本让铲屎官验收"，交付半成品而非完整 feat。内部实现步骤被暴露为交付批次，铲屎官被迫反复验收中间产物。产出后续要重写而非扩展，等于做了两遍。
 - 根因：从"什么容易做"往前凑，而不是从终态往回推。把探索阶段的习惯（spike/MVP）带到了交付阶段。
 - 典型症状：先做内存 Map 模拟再换 Redis、先搭空壳模板再填真逻辑、先造通用框架再写业务。
 - 对策：
   1. Planning 阶段先钉终态 schema，每步产物必须在终态中原样保留（可扩展不可替换）
-  2. 步骤是内部实现节奏，不是给team lead看的交付批次；交付物是完整 feat
+  2. 步骤是内部实现节奏，不是给铲屎官看的交付批次；交付物是完整 feat
   3. 纯探索显式标注 Spike（时间盒 + 产出结论），不伪装成交付物
   4. Quality gate 自检：后续要"重写"还是"扩展"？重写 = 绕路
-- 来源锚点：2026-03-05 team lead反馈 + Ragdoll/Maine Coon联合分析
+- 来源锚点：2026-03-05 铲屎官反馈 + Ragdoll/Maine Coon联合分析
 - 关联：writing-plans | quality-gate
 
 ### LL-029: 交付物验证不能只看 spec checkbox——必须核实 commit/PR
@@ -557,8 +557,58 @@ created: 2026-02-26
   2. "完成"的证据链：spec AC ✅ + commit 存在 + PR merged + 测试通过
   3. "未完成"也需要证据：具体哪条 AC 缺失 + 对应代码/PR 确实没有
   4. 不要只读 .md 文件就下结论——.md 是索引，git 才是真相
-- 来源锚点：2026-03-09 team lead发现Ragdoll(另一线程)只看 spec 就声称 feat 未完成
+- 来源锚点：2026-03-09 铲屎官发现Ragdoll(另一线程)只看 spec 就声称 feat 未完成
 - 关联：P5（可验证才算完成）| quality-gate | feat-lifecycle
+
+### LL-030: 共享脚本改默认值，同 commit 必须补显式环境值 + 真实启动验收
+- 状态：validated
+- 更新时间：2026-03-13
+
+- 坑：为开源仓安全把 `start-dev.sh` 的 proxy 默认值改为 OFF → 家里 `.env` 没补显式 `ANTHROPIC_PROXY_ENABLED=1` → runtime 重启后 proxy 消失 → 手动拉起绑定 CLI session → session 退出 proxy 再死。一个默认值改动引发 4 步修A炸B 链条。
+- 根因：把"改脚本默认值"当成局部变更，没意识到这是"改所有依赖该脚本的环境的行为"。`.env` 显式值是防漂移的唯一屏障，但没有同步补上。
+- 触发条件：共享脚本被多环境（dev / opensource / runtime worktree）使用 + 改了默认值但没补 `.env` 显式覆盖 + 未做真实启动验收（只跑了静态检查）。
+- 修复：(1) 同 commit 补 `.env` 显式值 (2) 验收必须包含 `pnpm start` 真实启动 (3) 启动摘要标注值来源（profile default vs .env override）。
+- 防护：ADR-016 N3（profile 化取代纯 `.env` 感知）+ 启动摘要值来源标注 + sidecar 状态分层（disabled/launching/ready/failed）。
+- 来源锚点：
+  - *(internal reference removed)*（C1 共识 + 4.1 决策）
+  - `docs/decisions/016-sync-runtime-negation-decisions.md`（N3 否决分叉脚本）
+  - commit `553984d5`（Maine Coon proxy kill 门禁修复）
+- 原理：共享基础设施的默认值是所有消费环境的隐式契约。改默认值 = 改所有环境的行为。必须同时补齐所有消费方的显式覆盖，并用真实启动验证——静态检查只能证明"代码合法"，不能证明"行为正确"。
+
+- 关联：ADR-016 | LL-019 过度修复反模式 | LL-020 补丁数量信号
+
+### LL-031: Quality gate 逐字段对账 AC——文档承诺 ≠ 代码已兑现
+- 状态：draft
+- 更新时间：2026-03-14
+
+- 坑：F118 Phase A 的 quality gate 将 AC-A3/AC-A5 记为"已达成"，但 AC-A3 承诺的 `rawArchivePath` 字段在代码和测试里都不存在。GPT-5.4 愿景守护才发现这个缺口。
+- 根因：quality gate 按"大部分字段都实现了"的直觉打勾，没有逐字段对账 AC 文本与实际代码产出。文档里写了什么 ≠ 代码里有什么。
+- 触发条件：AC 列出多个字段/能力时，部分实现容易被当成全部实现。
+- 修复：spec 改为 `rawArchivePath` provider-scoped 可选，defer 到 Phase B（commit `b594dd90`）。
+- 防护：quality gate Step 3 逐项检查时，对列表型 AC（多个字段/多个能力），必须逐项在代码中 grep 确认存在，不能凭印象打勾。
+- 来源锚点：
+  - `docs/features/F118-cli-liveness-watchdog.md` AC-A3 修订
+  - GPT-5.4 愿景守护 2026-03-14（thread_mmqaetstx6zsintt）
+- 原理：AC 是 feature contract 的一部分，每个字段都是承诺。"大部分实现"≠"AC 达成"。quality gate 的价值在于精确性，不在于速度。
+
+- 关联：LL-029 交付物验证不能只看 spec checkbox
+
+### LL-032: 愿景守护不能只看代码和测试报告——必须真实启动 dev 跑一遍
+- 状态：validated
+- 更新时间：2026-03-14
+
+- 坑：F101 狼人杀被声明 done（2026-03-12），愿景守护由 GPT-5.4 审查并 pass。92 个单元测试全绿、190+ 游戏测试全绿。但 2026-03-14 铲屎官第一次真的启动 dev 点开狼人杀后发现：(1) GameShell 接了 onClose 但没渲染关闭按钮——用户被困在全屏游戏里出不来；(2) 无大厅/配置流程——硬编码 7 只猫自动塞入；(3) 猫猫 AI 不会自动行动——游戏永远卡在 night_guard 等待；(4) 与 .pen 设计稿的 UX 差距大。整体不可用。
+- 根因：愿景守护是通过阅读代码、测试报告和 spec checkbox 完成的，没有一只猫真的启动 `pnpm dev`，打开浏览器，点击"狼人杀"，选个模式，看看会发生什么。单元测试验证的是组件/引擎的孤立行为，不是端到端用户体验。"每个部件都对"≠"组装起来能用"。
+- 触发条件：feature 有前端 UI + 后端引擎 + WebSocket 实时交互等多层集成时；只跑单元测试不做 E2E 验证时。
+- 修复：(1) 重新打开 F101，补 Phase C 可用性修复；(2) 新增 AC-C4 要求 codex/gpt52 启动 dev 做真实 E2E 验收。
+- 防护：愿景守护增加"真实环境启动验证"环节——对于有 UI 的 feature，reviewer 或铲屎官必须至少启动一次 dev 环境并走通核心流程。不方便的话至少把 dev 启动好让铲屎官一起测。
+- 来源锚点：
+  - `docs/features/F101-mode-v2-game-engine.md` Phase C（2026-03-14 补充）
+  - 铲屎官 2026-03-14 消息："你们没人点开 dev 启动你们的东西跑过真的测试嘛？"
+  - 铲屎官 2026-03-14 截图：night_guard 全员等待，无关闭按钮
+- 原理：集成系统的正确性不能由组件测试的总和保证。单元测试验证的是"每个零件符合 spec"，不是"零件组装后的机器能工作"。对于用户直接使用的 feature，最终验收必须包含真实环境启动 + 用户视角走查。
+
+- 关联：LL-029 交付物验证 | LL-031 Quality gate 逐字段对账 | LL-006 没有新鲜验证证据不得宣称完成
 
 ---
 

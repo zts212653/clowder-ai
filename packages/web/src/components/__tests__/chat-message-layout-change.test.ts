@@ -63,7 +63,7 @@ describe('ChatMessage layout-change event timing', () => {
 
     let expandedPresentAtEvent: boolean | null = null;
     const handler = () => {
-      expandedPresentAtEvent = Boolean(container.querySelector('div.border-l-2'));
+      expandedPresentAtEvent = Boolean(container.querySelector('div.cli-output-md'));
     };
     window.addEventListener('catcafe:chat-layout-changed', handler);
 
@@ -85,7 +85,7 @@ describe('ChatMessage layout-change event timing', () => {
       (thinkingToggle as HTMLButtonElement).click();
     });
 
-    expect(container.querySelector('div.border-l-2')).toBeTruthy();
+    expect(container.querySelector('div.cli-output-md')).toBeTruthy();
     expect(expandedPresentAtEvent).toBe(true);
 
     window.removeEventListener('catcafe:chat-layout-changed', handler);
@@ -133,7 +133,9 @@ describe('ChatMessage layout-change event timing', () => {
     });
 
     // F097: now uses CliOutputBlock summary line instead of ToolEventsPanel
-    const cliToggle = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('CLI 输出'));
+    const cliToggle = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('CLI Output'),
+    );
     expect(cliToggle).toBeTruthy();
 
     act(() => {

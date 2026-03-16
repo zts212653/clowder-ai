@@ -72,10 +72,17 @@ function createMockMessageStore() {
   };
 }
 
-function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}, threadRoutingPolicies = {}) {
+function createMockThreadStore(
+  initialParticipants = {},
+  threadProjectPaths = {},
+  threadRoutingPolicies = {},
+  threadPreferredCats = {},
+) {
   const participants = { ...initialParticipants };
   // F032 P1-2: Track activity timestamps for each participant
   const activity = {};
+  // Monotonic counter to ensure stable ordering even when Date.now() has same-ms resolution
+  let activitySeq = 0;
   return {
     create: (userId, title, projectPath) => ({
       id: `thread_mock`,
@@ -95,6 +102,7 @@ function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}
       lastActiveAt: Date.now(),
       createdAt: Date.now(),
       routingPolicy: threadRoutingPolicies[threadId],
+      preferredCats: threadPreferredCats[threadId],
     }),
     list: () => [],
     listByProject: () => [],
@@ -131,7 +139,7 @@ function createMockThreadStore(initialParticipants = {}, threadProjectPaths = {}
       }
       const key = `${threadId}:${catId}`;
       const existing = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
-      activity[key] = { lastMessageAt: Date.now(), messageCount: existing.messageCount + 1 };
+      activity[key] = { lastMessageAt: Date.now() + ++activitySeq, messageCount: existing.messageCount + 1 };
     },
     updateLastActive: () => {},
     delete: () => true,
@@ -2261,5 +2269,215 @@ describe('F078: Group mentions', () => {
     const { targetCats } = await router.resolveTargetsAndIntent('@全体布偶猫咪 hi');
     // 咪 is not a boundary char — should NOT match @全体布偶猫
     assert.equal(targetCats.length, 1, '@全体布偶猫咪 should not trigger breed group');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────
+// #58: preferredCats should act as candidate scope, not dispatch list
+// ────────────────────────────────────────────────────────────────
+
+describe('#58: preferredCats candidate scope (not dispatch list)', () => {
+  test('multi preferredCats + last replier in preferred set → routes to last replier only', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { t1: ['opus', 'codex', 'gemini'] },
+      {},
+      {},
+      { t1: ['opus', 'codex', 'gemini'] },
+    );
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'gemini');
+    threadStore.updateParticipantActivity('t1', 'codex'); // most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+    assert.deepStrictEqual(targetCats, ['codex'], 'should route to last replier, not all preferred cats');
+  });
+
+  test('last replier NOT in preferred set → routes to first preferred cat only', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { t1: ['opus', 'codex', 'gemini'] },
+      {},
+      {},
+      { t1: ['opus', 'gemini'] }, // codex not in preferred
+    );
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'codex'); // most recent, but not preferred
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+    assert.deepStrictEqual(
+      targetCats,
+      ['opus'],
+      'should route to first preferred cat when last replier is outside preferred set',
+    );
+  });
+
+  test('@mention overrides preferredCats', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { t1: ['opus', 'codex'] },
+      {},
+      {},
+      { t1: ['opus'] }, // only opus preferred
+    );
+    threadStore.updateParticipantActivity('t1', 'opus'); // most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@codex review this', 't1');
+    assert.deepStrictEqual(targetCats, ['codex'], '@mention should override preferredCats');
+  });
+
+  test('no preferredCats preserves existing last-replier behavior', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex', 'gemini'] });
+    threadStore.updateParticipantActivity('t1', 'codex');
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'gemini'); // most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+    assert.deepStrictEqual(targetCats, ['gemini'], 'without preferredCats, last replier should still work');
+  });
+
+  test('@全体布偶猫 still triggers parallel dispatch even with preferredCats', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+
+    // Register sonnet as a second ragdoll variant (needed for breed group mention)
+    const { catRegistry, createCatId } = await import('@cat-cafe/shared');
+    if (!catRegistry.has('sonnet')) {
+      catRegistry.register('sonnet', {
+        id: createCatId('sonnet'),
+        name: 'sonnet',
+        displayName: '布偶猫',
+        avatar: '/avatars/sonnet.png',
+        color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+        mentionPatterns: ['@sonnet', '@布偶sonnet'],
+        provider: 'anthropic',
+        defaultModel: 'claude-sonnet-4-6',
+        mcpSupport: true,
+        breedId: 'ragdoll',
+        roleDescription: 'Fast variant',
+        personality: 'Quick and flexible',
+      });
+    }
+
+    const threadStore = createMockThreadStore(
+      { t1: ['opus'] },
+      {},
+      {},
+      { t1: ['opus'] }, // only opus preferred
+    );
+    threadStore.updateParticipantActivity('t1', 'opus');
+
+    const agentRegistry = new AgentRegistry();
+    agentRegistry.register('opus', createMockAgentService('opus'));
+    agentRegistry.register('sonnet', createMockAgentService('sonnet'));
+    agentRegistry.register('codex', createMockAgentService('codex'));
+    agentRegistry.register('gemini', createMockAgentService('gemini'));
+
+    const router = new AgentRouter({
+      agentRegistry,
+      registry: createMockRegistry(),
+      messageStore: createMockMessageStore(),
+      threadStore,
+    });
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@全体布偶猫 discuss this', 't1');
+    // @全体布偶猫 is a breed group mention — should override preferredCats and route to all ragdolls
+    assert.ok(targetCats.length > 1, '@全体布偶猫 should still trigger multi-cat dispatch');
+    assert.ok(targetCats.includes('opus'), 'should include opus');
+  });
+
+  test('explicit #ideate with multi preferredCats dispatches all preferred cats', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] }, {}, {}, { t1: ['opus', 'codex'] });
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'codex');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats, intent } = await router.resolveTargetsAndIntent('#ideate discuss this together', 't1');
+    assert.deepStrictEqual(targetCats.sort(), ['codex', 'opus'], '#ideate should dispatch all preferred cats');
+    assert.equal(intent.intent, 'ideate', 'intent should be ideate');
+    assert.equal(intent.explicit, true, 'ideate should be explicit');
+  });
+
+  test('no #ideate with multi preferredCats still routes to single cat', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] }, {}, {}, { t1: ['opus', 'codex'] });
+    threadStore.updateParticipantActivity('t1', 'opus');
+    threadStore.updateParticipantActivity('t1', 'codex');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('just a normal message', 't1');
+    assert.equal(targetCats.length, 1, 'without #ideate, should still route to single cat');
   });
 });

@@ -2,14 +2,16 @@
 feature_ids: [F101]
 related_features: [F011, F107]
 topics: [mode, game, werewolf, game-engine]
-doc_kind: done
+doc_kind: in-progress
 created: 2026-03-11
-completed: 2026-03-12
+reopened: 2026-03-14
 ---
 
 # F101: Mode v2 — 游戏系统引擎 + 狼人杀
 
-> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-12
+> **Status**: in-progress (reopened) | **Owner**: Ragdoll | **Priority**: P1 | **Reopened**: 2026-03-14
+>
+> **重新打开原因**：2026-03-12 声称 done 并通过愿景守护，但team lead 2026-03-14 实际启动 dev 点开狼人杀后发现：(1) 无关闭/返回按钮，用户被困在全屏游戏界面；(2) 无大厅/配置流程，7 只猫自动塞入无法选择；(3) 猫猫不会自动行动，游戏永远卡在 night_guard 等待中；(4) 整体不可用。92 个单元测试全绿但零 E2E 真实验证。教训见 LL-032。
 
 ## Why
 
@@ -103,6 +105,43 @@ team experience（2026-03-11）：
 - 翻牌仪式：interactive rich block 点击揭牌
 - 日夜氛围联动：CSS 变量切换（夜间压暗+降饱和度）
 
+### Phase D: 狼人杀重做 — team lead 1v1 采访定案（2026-03-14）
+
+基于team lead 1v1 采访（2026-03-14 22:30），Phase D 是对 Phase A-C 的体验重做。
+
+**D1. 独立游戏 Thread**
+- 游戏在**独立 thread** 中运行（类似 bootcamp 训练营），不在现有聊天 thread 上叠加
+- 归档分类：`游戏-狼人杀`，在左侧栏可快速定位（参考现有 cat-cafe / studio-flow / 未分类 project 分类体系）
+- **KD-18**: 游戏和日常聊天完全隔离，游戏有专属空间
+
+**D2. 猫猫身份保留**
+- 猫猫在游戏内**保留咖啡馆身份**（Ragdoll/Maine Coon/Siamese），不需要新 persona
+- 复用现有头像系统（CatAvatar + `/avatars/{catId}.png`）
+- **KD-19**: 不需要"玩家3"之类的通用身份，猫猫就是猫猫
+
+**D3. 上帝操控面板**
+- 发牌（手动分配角色）✅
+- 暂停/恢复（"我要去上厕所你们总得等等我"）✅
+- 跳过当前阶段（帮卡住的局面推进）✅
+- ~~踢人~~（team lead："太过分了 猫猫做错什么了"）❌
+- **KD-20**: 上帝面板三个核心按钮：发牌、暂停/恢复、跳过当前阶段
+
+**D4. 真实到达/就绪状态**
+- 展示每只猫的**真实加载状态**，不做假动画
+- 卡住的猫要有 loading 指示，team lead担心猫猫卡住看不到
+- **KD-21**: ready 状态必须反映真实情况
+
+**D5. 狼人猫猫风 UX**
+- 设计关键词：**可爱 + 暗色调 + 猫猫穿狼人服装/装扮**
+- 不是纯暗黑 RPG，不是纯可爱，是**猫猫 cosplay 狼人**的混搭风格
+- team experience："猫猫装狼人那种可爱的带点黑色的风格"
+- **KD-22**: 视觉风格 = 狼人猫猫风（cute dark）
+
+**D6. 战绩统计 + MVP**
+- 游戏结束后需要**结算画面**：胜负、各玩家表现统计、MVP 评选
+- 对接 Leaderboard F075
+- **KD-23**: 每局结束必须有完整的战绩和 MVP
+
 ## Acceptance Criteria
 
 ### Phase A（Mode v2 通用基座）✅
@@ -113,15 +152,67 @@ team experience（2026-03-11）：
 - [x] AC-A5: 旧三 mode 代码完全删除，前端入口重写为游戏模式
 - [x] AC-A6: 信息泄漏红线测试：不同 scope 的 actor 看不到不该看的事件
 
-### Phase B（狼人杀 v1）✅
-- [x] AC-B1: 7 人局可完整跑通（lobby→deal→night/day 循环→结局）
+### Phase B（狼人杀 v1）⚠️ 重新打开
+- [x] AC-B1: 7 人局可完整跑通（lobby→deal→night/day 循环→结局）— ⚠️ 单元测试通过但 E2E 未验证
 - [x] AC-B2: team lead可选 player 或 god-view 参与
-- [x] AC-B3: 猫猫 AI 玩家能合理发言和执行夜间动作
+- [x] AC-B3: 猫猫 AI 玩家能合理发言和执行夜间动作 — ✅ Phase C GameAutoPlayer 修复（PR #454），PR #478 补 hasActed 状态反馈
 - [x] AC-B4: 信息隔离：村民看不到狼队夜聊、玩家看不到他人私密技能结果
 - [x] AC-B5: 非法动作被拒绝（死人不能投票、白天不能用夜间技能等）
 - [x] AC-B6: 断线重连后可恢复游戏状态（v1 简单刷 GameView）
 - [x] AC-B7: PlayerGrid + PhaseTimeline 前端组件可用
 - [x] AC-B8: 语音模式可选，猫猫用 audio rich block 发言
+
+### Phase C（2026-03-14 补充 — 可用性修复）✅
+- [x] AC-C1: GameShell 有关闭/返回按钮，用户可退出游戏回到聊天界面
+- [x] AC-C2: 大厅流程 — 选板子（6/7/8/9/10/12人局）+ 配置参赛猫 + 确认开始
+- [x] AC-C3: 猫猫 AI 自动行动 — GameAutoPlayer 驱动夜间技能 + 白天投票，游戏可推进
+- [ ] AC-C4: **E2E 验收标准** — codex 或 gpt52 启动 dev 环境，team lead能真正进入并完成一局游戏
+
+### Phase D（狼人杀重做 — team lead采访定案）✅
+- [x] AC-D1: 游戏在独立 thread 运行，归档分类 `游戏-狼人杀`，左侧栏可见
+- [x] AC-D2: 猫猫保留咖啡馆身份（Ragdoll/Maine Coon/Siamese），复用现有头像系统
+- [x] AC-D3: 上帝面板三按钮（发牌、暂停/恢复、跳过阶段），无踢人功能
+- [x] AC-D4: 每只猫展示真实 ready 状态 + 卡住时有 loading 指示
+- [x] AC-D5: 狼人猫猫风 UX（可爱+暗色调+猫猫 cosplay 狼人）— 需Siamese参与视觉资产
+- [x] AC-D6: 结算画面 — 胜负 + 各玩家统计 + MVP 评选
+
+### Phase E（Detective Mode 视觉增强）🚧
+- [x] AC-E1: 上帝推理模式（Detective Mode）— 观战者开局选定一只猫，只能看到该玩家的身份和信息权限，其余座位只看到公开信息。team experience："只能选择一只猫看他身份，狼人杀观战模式那种"
+  - 视觉：塔罗牌卡背 + 灵魂链接光效 + 翻牌仪式（Siamese提案）— ⬜ 视觉资产待Siamese
+  - 技术：`GameViewBuilder` 新增 `detective` 视角，绑定 seatId 后继承该座位信息域 ✅
+  - 前端视觉：紫色侦探主题 + soul-link-pulse + tarot-back — 🔄 PR review 中
+
+### Phase F（核心体验修复 — 投票/透明度/超时）
+- [ ] AC-F1: GitHub agent werewolf 调研报告完成，覆盖 ≥3 个项目
+- [ ] AC-F2: God-view 夜晚时间线实时展示每个角色的具体行动目标
+- [ ] AC-F3: 已行动状态从二态改为三态（waiting/acting/acted）
+- [ ] AC-F4: 多狼独立投票 + 多数票结算 + 平票处理
+- [ ] AC-F5: 白天投票可改票 + 全员 commit 提前结束
+- [ ] AC-F6: 超时未行动自动 fallback，游戏不卡住
+- [ ] AC-F7: 慢启动猫猫有 grace period + god-view 展示真实连接状态
+- [ ] AC-F8: team lead在 god-view 能清楚理解"正在发生什么"（不再一脸懵逼）
+
+### Phase F: 核心体验修复 — 投票/透明度/超时/行动真实性（2026-03-16）
+
+team lead 2026-03-16 实测发现的核心体验 bug。先调研 GitHub agent 狼人杀项目（AIWolf 等），再设计修复方案。
+
+**F1. 调研 + 设计**
+- GitHub agent werewolf 项目竞品调研（AIWolf、LLM werewolf 等）
+- 重点：多狼投票协调、观战者信息透明度、超时处理、改票机制、行动真实性
+
+**F2. 行动透明度 + God-View 信息丰富**
+- 夜间行动提交时立刻写入 event log（scope: `faction:wolf` / `god` / `seat:x`）
+- God-view 夜晚时间线实时展示具体行动目标（不只是"已行动"）
+- `hasActed` 从二态改为三态：`waiting` / `acting` / `acted`
+
+**F3. 多狼投票 + 白天投票改票**
+- 多狼场景：每只狼独立提交 kill target，多数票结算，平票处理
+- 白天投票：可改票 + 全员 commit 提前结束 + 实时可见
+
+**F4. 超时 Fallback + 慢猫容错**
+- 超时未行动 → 自动 fallback（wolf: 随机杀、seer: 随机查、村民: 弃票）
+- 慢启动猫猫（Gemini 等）增加 warmup grace period
+- God-view 展示猫猫真实状态：connecting / thinking / timed-out
 
 ## 需求点 Checklist
 
@@ -137,6 +228,18 @@ team experience（2026-03-11）：
 | R8 | "可能需要用语音玩...开游戏的时候选择要不要让你们用语音玩" | AC-B8 | manual | [x] |
 | R9 | "网易的狼人杀的规则，大家知道的多" | AC-B1 | test | [x] |
 | R10 | "允许你们说遗言" | AC-B1 | test | [x] |
+| R11 | "新建独立 thread，类似新手训练营那样独立" | AC-D1 | manual | [x] |
+| R12 | "还是猫猫咖啡的猫猫！！！" | AC-D2 | manual | [x] |
+| R13 | "发牌✅ 暂停✅ 踢人❌ 跳过超时✅" | AC-D3 | manual | [x] |
+| R14 | "展示真实状态，不是假动画" | AC-D4 | manual | [x] |
+| R15 | "猫猫装狼人那种可爱的带点黑色的风格" | AC-D5 | manual+design | [x] |
+| R16 | "要战绩统计 + MVP" | AC-D6 | manual | [x] |
+| R17 | "只能选择一只猫看他身份，狼人杀观战模式那种" | AC-E1 | manual | [x] |
+| R18 | "看不到他们投了谁" | AC-F2 | manual + screenshot | [ ] |
+| R19 | "gemini 还没启动起来…30s到及时结束gemini还没行动整个游戏又卡了" | AC-F6, AC-F7 | test + manual | [ ] |
+| R20 | "太不透明了…真的有输出吗？几乎秒行动" | AC-F3, AC-F8 | manual + screenshot | [ ] |
+| R21 | "到底我们现在是出bug了还是猫猫在吗了" | AC-F8, AC-F7 | manual | [ ] |
+| R22 | "票数一样就随机？可以一直改票？以timeout为准？全部commit？" | AC-F4, AC-F5 | test + manual | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -195,6 +298,17 @@ team experience（2026-03-11）：
 | KD-15 | 同一 thread 单局，不做多局并发 | team lead拍板：一个 thread 只跑一局游戏，想开新局就新 thread | 2026-03-11 |
 | KD-16 | 游戏战绩对接 Leaderboard（F075） | 所有游戏模式（狼人杀/三国杀/猜猜我是谁等）统一接入现有排行榜系统，历史战绩通过排行榜查看 | 2026-03-11 |
 | KD-17 | 技术细节（断线重连/AI策略等）找 gpt52 讨论，不找team lead | team lead："涉及技术你找 GPT-5.4 讨论都比我靠谱" | 2026-03-11 |
+| KD-18 | 游戏在独立 thread 运行，归档分类 `游戏-狼人杀` | team lead希望游戏和日常聊天完全隔离 | 2026-03-14 |
+| KD-19 | 猫猫保留咖啡馆身份，不需要新 persona | team lead："还是猫猫咖啡的猫猫！！！" | 2026-03-14 |
+| KD-20 | 上帝面板：发牌+暂停+跳过，**不要踢人** | team lead："太过分了 猫猫做错什么了" | 2026-03-14 |
+| KD-21 | 展示真实 ready 状态，不做假动画 | team lead担心猫猫卡住看不到 | 2026-03-14 |
+| KD-22 | 狼人猫猫风 UX = 可爱+暗色调+猫猫 cosplay 狼人 | team lead："猫猫装狼人那种可爱的带点黑色的风格" | 2026-03-14 |
+| KD-23 | 结算画面：胜负+统计+MVP | team lead确认 | 2026-03-14 |
+| KD-24 | 上帝推理模式（Detective Mode）列入 Phase E | 观战者绑定单座位视角，增加悬念和代入感，不在 Phase D scope | 2026-03-15 |
+| KD-25 | 平票 = no_kill（空刀），默认保守 | team lead："no_kill 好像确实？一般是这样！" | 2026-03-16 |
+| KD-26 | 白天投票实名公开（实时可见） | team lead："要公开吧？这是推理的重要信息" | 2026-03-16 |
+| KD-27 | 狼队 faction channel 讨论 — 只在夜间，讨论时间需考虑猫猫 LLM 响应速度 | team lead确认要做，担心猫猫"大屁股太慢了"讨论不完 | 2026-03-16 |
+| KD-28 | 狼队讨论 30s + 投票在同一阶段；首回合 grace：Ragdoll +6s / Maine Coon +12s / Siamese +30s | team lead确认 30s 可以，"走起" | 2026-03-16 |
 
 ## 头像系统调查（KD-14 依据）
 

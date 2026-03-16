@@ -9,6 +9,7 @@ export const IMarkerQueueSymbol = Symbol.for('IMarkerQueue');
 export const IMaterializationServiceSymbol = Symbol.for('IMaterializationService');
 export const IReflectionServiceSymbol = Symbol.for('IReflectionService');
 export const IKnowledgeResolverSymbol = Symbol.for('IKnowledgeResolver');
+export const IEmbeddingServiceSymbol = Symbol.for('IEmbeddingService');
 
 // ── Value enums ──────────────────────────────────────────────────────
 
@@ -142,4 +143,45 @@ export interface IReflectionService {
 
 export interface IKnowledgeResolver {
   resolve(query: string, options?: SearchOptions): Promise<KnowledgeResult>;
+}
+
+// ── Phase C: Embedding / Vector types ─────────────────────────────
+
+export interface EmbedConfig {
+  embedMode: 'off' | 'shadow' | 'on';
+  embedModel: 'qwen3-embedding-0.6b' | 'multilingual-e5-small';
+  embedDim: number;
+  maxModelMemMb: number;
+  embedTimeoutMs: number;
+}
+
+export interface EmbedModelInfo {
+  modelId: string;
+  modelRev: string;
+  dim: number;
+}
+
+export interface IEmbeddingService {
+  load(): Promise<void>;
+  embed(texts: string[]): Promise<Float32Array[]>;
+  isReady(): boolean;
+  getModelInfo(): EmbedModelInfo;
+  dispose(): void;
+}
+
+const VALID_EMBED_MODES = new Set(['off', 'shadow', 'on']);
+const VALID_EMBED_MODELS = new Set(['qwen3-embedding-0.6b', 'multilingual-e5-small']);
+
+export function resolveEmbedConfig(partial?: Partial<EmbedConfig>): EmbedConfig {
+  const mode = partial?.embedMode ?? 'off';
+  if (!VALID_EMBED_MODES.has(mode)) throw new Error(`Invalid embedMode: ${mode}`);
+  const model = partial?.embedModel ?? 'qwen3-embedding-0.6b';
+  if (!VALID_EMBED_MODELS.has(model)) throw new Error(`Invalid embedModel: ${model}`);
+  return {
+    embedMode: mode as EmbedConfig['embedMode'],
+    embedModel: model as EmbedConfig['embedModel'],
+    embedDim: partial?.embedDim ?? 256,
+    maxModelMemMb: partial?.maxModelMemMb ?? 800,
+    embedTimeoutMs: partial?.embedTimeoutMs ?? 3000,
+  };
 }

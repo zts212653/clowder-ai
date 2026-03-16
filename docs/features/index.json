@@ -585,7 +585,7 @@
     {
       "id": "F095",
       "name": "Thread Sidebar 导航体验升级",
-      "status": "in-progress (Phase D) | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F095-sidebar-collapse-memory.md"
     },
     {
@@ -621,7 +621,7 @@
     {
       "id": "F101",
       "name": "Mode v2 — 游戏系统引擎 + 狼人杀",
-      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-12",
+      "status": "in-progress (reopened) | **Owner**: Ragdoll | **Priority**: P1 | **Reopened**: 2026-03-14",
       "file": "F101-mode-v2-game-engine.md"
     },
     {
@@ -633,7 +633,7 @@
     {
       "id": "F103",
       "name": "猫猫独立声线 — Per-Cat Voice Identity",
-      "status": "spec | **Owner**: TBD（team lead另派Ragdoll） | **Priority**: P2",
+      "status": "done | **Owner**: opus | **Priority**: P2",
       "file": "F103-per-cat-voice-identity.md"
     },
     {
@@ -656,14 +656,14 @@
     },
     {
       "id": "F107",
-      "name": "猫猫杀（脑门贴词）— 坏猫战术推理游戏",
+      "name": "脑门贴词 — 坏猫战术推理游戏 #1",
       "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F107-headband-guess-game.md"
     },
     {
       "id": "F108",
       "name": "Side-Dispatch — 同一 Thread 多猫并发执行",
-      "status": "spec | **Owner**: TBD | **Priority**: P1",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F108-side-dispatch-concurrent-invocation.md"
     },
     {
@@ -698,10 +698,76 @@
     },
     {
       "id": "F114",
-      "name": "喵约治理升级 — 四层架构 + Magic Words + Evidence Gate",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "name": "Magic Words + 愿景守护 Gate",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-13",
       "file": "F114-governance-magic-words.md"
+    },
+    {
+      "id": "F115",
+      "name": "Runtime 启动链优化",
+      "status": "done | **Owner**: Maine Coon/gpt52 | **Priority**: P1 | **Completed**: 2026-03-16",
+      "file": "F115-runtime-startup-optimization.md"
+    },
+    {
+      "id": "F116",
+      "name": "Open-Source Ops — 开源社区运营 Skill",
+      "status": "done | **Completed**: 2026-03-14 | **Owner**: Ragdoll + Maine Coon | **Priority**: P1",
+      "file": "F116-opensource-ops.md"
+    },
+    {
+      "id": "F117",
+      "name": "Message Delivery Lifecycle — 消息投递生命周期真相源",
+      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1",
+      "file": "F117-message-delivery-lifecycle.md"
+    },
+    {
+      "id": "F118",
+      "name": "CLI Liveness Watchdog & Session Recovery — CLI 进程活性守卫 + 会话恢复",
+      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: open",
+      "file": "F118-cli-liveness-watchdog.md"
+    },
+    {
+      "id": "F119",
+      "name": "谁是卧底 — 坏猫战术推理游戏 #2",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F119-who-is-spy-game.md"
+    },
+    {
+      "id": "F120",
+      "name": "Hub Embedded Browser — 在 Hub 内嵌浏览器预览运行中的前端应用",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-15",
+      "file": "F120-hub-embedded-browser.md"
+    },
+    {
+      "id": "F121",
+      "name": "Community Frontend UX Triage — 社区前端交互体验侦查与分诊",
+      "status": "in-progress (community fixes merged + follow-up hotfix in review, pending outbound sync) | **Owner**: Ragdoll | **Priority**: P2",
+      "file": "F121-community-frontend-ux-triage.md"
+    },
+    {
+      "id": "F122",
+      "name": "执行通道统一 — A2A/multi_mention 入 Dispatch Queue",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F122-unified-dispatch-queue.md"
+    },
+    {
+      "id": "F123",
+      "name": "Bubble Runtime Correctness（消息身份契约 + Reconcile 状态机）",
+      "status": "in-progress | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "file": "F123-bubble-runtime-correctness.md"
+    },
+    {
+      "id": "F124",
+      "name": "Apple Ecosystem × Cat Café 语音交互系统",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F124-apple-ecosystem-voice-interaction.md"
+    },
+    {
+      "id": "F125",
+      "name": "Alpha 验收通道 — main-test 升级为正式 alpha 测试基础设施",
+      "status": "done | **Owner**: Maine Coon(gpt52) + Ragdoll(opus) | **Priority**: P1 | **Completed**: 2026-03-16",
+      "file": "F125-alpha-test-channel.md"
     }
   ],
-  "generated_at": "2026-03-13T23:30:46.103Z"
+  "generated_at": "2026-03-16T14:03:44.071Z"
 }

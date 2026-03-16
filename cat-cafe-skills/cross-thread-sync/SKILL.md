@@ -64,7 +64,7 @@ Action Needed 必须标注级别：
 |------|------|---------|
 | `[FYI]` | 知悉即可 | 不需要回复，不需要动作 |
 | `[ACTION]` | 需要动作 | 执行指定动作（rebase / rebuild / 确认兼容） |
-| `[BLOCKING]` | 阻塞依赖 | **必须 ack**。超时未 ack → 升级team lead |
+| `[BLOCKING]` | 阻塞依赖 | **必须 ack**。超时未 ack → 升级铲屎官 |
 
 ### 升级到五件套
 
@@ -107,7 +107,7 @@ Action Needed 必须标注级别：
    其他 session 可以重新 claim
 
 5. 升级 — 双方都不能让：
-   升级team lead决定优先级
+   升级铲屎官决定优先级
 ```
 
 ### 场景速查
@@ -125,7 +125,7 @@ Action Needed 必须标注级别：
 |---------|-----------|
 | `[FYI]` | 不等 |
 | `[ACTION]` | 不等（PR tracking / @ 机制保证对方会看到） |
-| `[BLOCKING]` | **必须等 ack** → 超时未 ack → 升级team lead |
+| `[BLOCKING]` | **必须等 ack** → 超时未 ack → 升级铲屎官 |
 
 **§15 家规**：BLOCKING 信息不能只留在 cross-post 消息里，必须同时写入可追溯状态（feature doc / workflow / task）。
 
@@ -163,4 +163,4 @@ Action Needed 必须标注级别：
 ## 下一步
 
 - 需要交接工作给其他猫 → `cross-cat-handoff`
-- 争用升级到team lead → 直接在 thread 里说明情况
+- 争用升级到铲屎官 → 直接在 thread 里说明情况

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { useChatStore } from '@/stores/chatStore';
 import { compactToolResultDetail } from '@/utils/toolPreview';
 
@@ -29,6 +30,12 @@ interface AgentMsg {
   mentionsUser?: boolean;
   /** F52: Cross-thread origin metadata */
   extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };
+  /** F121: Reply-to message ID */
+  replyTo?: string;
+  /** F121: Server-hydrated reply preview */
+  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+  /** F108: Invocation ID — distinguishes messages from concurrent invocations */
+  invocationId?: string;
 }
 
 function truncate(text: string, maxLength: number): string {
@@ -43,6 +50,19 @@ function safeJsonPreview(value: unknown, maxLength: number): string {
   } catch {
     return '[unserializable input]';
   }
+}
+
+function findLatestActiveInvocationIdForCat(
+  activeInvocations: Record<string, { catId: string; mode: string }> | undefined,
+  catId: string,
+): string | undefined {
+  if (!activeInvocations) return undefined;
+  const entries = Object.entries(activeInvocations);
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const [invocationId, info] = entries[i]!;
+    if (info.catId === catId) return invocationId;
+  }
+  return undefined;
 }
 
 /**
@@ -60,9 +80,13 @@ export function useAgentMessages() {
     appendToMessage,
     appendToolEvent,
     appendRichBlock,
+    replaceMessageId,
+    patchMessage,
     setStreaming,
     setLoading,
     setHasActiveInvocation,
+    removeActiveInvocation,
+    clearAllActiveInvocations,
     setIntentMode,
     setCatStatus,
     clearCatStatuses,
@@ -71,15 +95,22 @@ export function useAgentMessages() {
     setMessageMetadata,
     setMessageThinking,
     setMessageStreamInvocation,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    currentThreadId,
+    requestStreamCatchUp,
   } = useChatStore();
 
   /** Map<catId, { id: messageId, catId }> — one entry per active stream */
   const activeRefs = useRef<Map<string, { id: string; catId: string }>>(new Map());
+  /** Track callback-replaced invocations so delayed stream chunks do not recreate ghost bubbles. */
+  const replacedInvocationsRef = useRef<Map<string, string>>(new Map());
+
+  /** Bug C P2: Track whether stream data was received per cat (avoids false catch-up on callback-only flows) */
+  const sawStreamDataRef = useRef<Set<string>>(new Set());
 
   /** Current A2A group ID — set on a2a_handoff, cleared on done(isFinal) */
   const a2aGroupRef = useRef<string | null>(null);
+
+  /** F118 AC-C3: Pending timeout diagnostics keyed by catId to prevent cross-cat mismatch */
+  const pendingTimeoutDiagRef = useRef<Map<string, Record<string, unknown>>>(new Map());
 
   /** Timeout ref for done(isFinal) reachability */
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,7 +150,7 @@ export function useAgentMessages() {
 
       // Timeout fired — stop loading and show system message
       setLoading(false);
-      setHasActiveInvocation(false);
+      clearAllActiveInvocations();
       setIntentMode(null);
       clearCatStatuses();
       for (const ref of activeRefs.current.values()) {
@@ -134,7 +165,7 @@ export function useAgentMessages() {
         timestamp: Date.now(),
       });
     }, DONE_TIMEOUT_MS);
-  }, [setLoading, setHasActiveInvocation, setIntentMode, clearCatStatuses, setStreaming, addMessage]);
+  }, [setLoading, clearAllActiveInvocations, setIntentMode, clearCatStatuses, setStreaming, addMessage]);
 
   /** Clear the timeout (called on done with isFinal) */
   const clearDoneTimeout = useCallback((threadId?: string) => {
@@ -159,9 +190,43 @@ export function useAgentMessages() {
     [],
   );
 
-  const getCurrentInvocationIdForCat = useCallback((catId: string): string | undefined => {
-    return useChatStore.getState().catInvocations?.[catId]?.invocationId;
+  const getCurrentInvocationStateForCat = useCallback(
+    (catId: string): { invocationId?: string; source: 'catInvocations' | 'activeInvocations' | 'none' } => {
+      const state = useChatStore.getState();
+      const direct = state.catInvocations?.[catId]?.invocationId;
+      if (direct) {
+        return { invocationId: direct, source: 'catInvocations' };
+      }
+      const active = findLatestActiveInvocationIdForCat(state.activeInvocations, catId);
+      if (active) {
+        return { invocationId: active, source: 'activeInvocations' };
+      }
+      return { source: 'none' };
+    },
+    [],
+  );
+
+  const recordLateBindBubbleCreate = useCallback((catId: string, messageId: string, invocationId?: string) => {
+    if (!invocationId) return;
+    recordDebugEvent({
+      event: 'bubble_lifecycle',
+      threadId: useChatStore.getState().currentThreadId,
+      timestamp: Date.now(),
+      action: 'create',
+      reason: 'active_late_bind',
+      catId,
+      messageId,
+      invocationId,
+      origin: 'stream',
+    });
   }, []);
+
+  const getCurrentInvocationIdForCat = useCallback(
+    (catId: string): string | undefined => {
+      return getCurrentInvocationStateForCat(catId).invocationId;
+    },
+    [getCurrentInvocationStateForCat],
+  );
 
   const findRecoverableAssistantMessage = useCallback(
     (catId: string) => {
@@ -187,6 +252,22 @@ export function useAgentMessages() {
     },
     [getCurrentInvocationIdForCat],
   );
+
+  const findCallbackReplacementTarget = useCallback((catId: string, invocationId: string): { id: string } | null => {
+    const currentMessages = useChatStore.getState().messages;
+    for (let i = currentMessages.length - 1; i >= 0; i -= 1) {
+      const msg = currentMessages[i];
+      if (
+        msg?.type === 'assistant' &&
+        msg.catId === catId &&
+        msg.origin === 'stream' &&
+        msg.extra?.stream?.invocationId === invocationId
+      ) {
+        return { id: msg.id };
+      }
+    }
+    return null;
+  }, []);
 
   const getOrRecoverActiveAssistantMessageId = useCallback(
     (catId: string, metadata?: AgentMsg['metadata'], options?: { ensureStreaming?: boolean }): string | null => {
@@ -229,7 +310,8 @@ export function useAgentMessages() {
       }
 
       const id = `msg-${Date.now()}-${catId}`;
-      const invocationId = getCurrentInvocationIdForCat(catId);
+      const invocation = getCurrentInvocationStateForCat(catId);
+      const invocationId = invocation.invocationId;
       activeRefs.current.set(catId, { id, catId });
       addMessage({
         id,
@@ -243,9 +325,38 @@ export function useAgentMessages() {
         timestamp: Date.now(),
         isStreaming: true,
       });
+      if (invocation.source === 'activeInvocations') {
+        recordLateBindBubbleCreate(catId, id, invocationId);
+      }
       return id;
     },
-    [addMessage, getCurrentInvocationIdForCat, getOrRecoverActiveAssistantMessageId],
+    [addMessage, getCurrentInvocationStateForCat, getOrRecoverActiveAssistantMessageId, recordLateBindBubbleCreate],
+  );
+
+  const shouldSuppressLateStreamChunk = useCallback(
+    (catId: string, invocationId?: string): boolean => {
+      const replacedInvocationId = replacedInvocationsRef.current.get(catId);
+      if (!replacedInvocationId) return false;
+
+      const currentInvocationId = invocationId ?? getCurrentInvocationIdForCat(catId);
+      if (currentInvocationId && currentInvocationId !== replacedInvocationId) {
+        replacedInvocationsRef.current.delete(catId);
+        return false;
+      }
+
+      recordDebugEvent({
+        event: 'bubble_lifecycle',
+        threadId: useChatStore.getState().currentThreadId,
+        timestamp: Date.now(),
+        action: 'drop',
+        reason: 'late_stream_after_callback_replace',
+        catId,
+        invocationId: replacedInvocationId,
+        origin: 'stream',
+      });
+      return true;
+    },
+    [getCurrentInvocationIdForCat],
   );
 
   const handleAgentMessage = useCallback(
@@ -254,33 +365,74 @@ export function useAgentMessages() {
       resetTimeout();
 
       if (msg.type === 'text' && msg.content) {
+        if (msg.origin !== 'callback' && shouldSuppressLateStreamChunk(msg.catId, msg.invocationId)) {
+          return;
+        }
         setCatStatus(msg.catId, 'streaming');
+        // F118: Clear liveness warning when cat resumes output
+        setCatInvocation(msg.catId, { livenessWarning: undefined });
+        if (msg.origin !== 'callback') {
+          sawStreamDataRef.current.add(msg.catId);
+        }
 
         if (msg.origin === 'callback') {
-          // MCP callback message: always a separate bubble (never merge into stream)
-          // Use backend messageId when available for rich_block correlation (#83 P2)
-          const id = msg.messageId ?? `msg-${Date.now()}-${msg.catId}-cb-${++cbSeq}`;
-          addMessage({
-            id,
-            type: 'assistant',
-            catId: msg.catId,
-            content: msg.content,
-            origin: 'callback',
-            ...(msg.metadata ? { metadata: msg.metadata } : {}),
-            ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
-            ...(msg.mentionsUser ? { mentionsUser: true } : {}),
-            ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
-            timestamp: Date.now(),
-          });
+          const invocationId = msg.invocationId ?? getCurrentInvocationIdForCat(msg.catId);
+          const replacementTarget = invocationId ? findCallbackReplacementTarget(msg.catId, invocationId) : null;
+
+          if (replacementTarget) {
+            const finalId = msg.messageId ?? replacementTarget.id;
+            if (finalId !== replacementTarget.id) {
+              replaceMessageId(replacementTarget.id, finalId);
+            }
+            patchMessage(finalId, {
+              content: msg.content,
+              origin: 'callback',
+              isStreaming: false,
+              ...(msg.metadata ? { metadata: msg.metadata } : {}),
+              ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
+              ...(msg.mentionsUser ? { mentionsUser: true } : {}),
+              ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
+              ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+              ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+            });
+            activeRefs.current.delete(msg.catId);
+            if (invocationId) {
+              replacedInvocationsRef.current.set(msg.catId, invocationId);
+            }
+          } else {
+            // Use backend messageId when available for rich_block correlation (#83 P2)
+            const id = msg.messageId ?? `msg-${Date.now()}-${msg.catId}-cb-${++cbSeq}`;
+            addMessage({
+              id,
+              type: 'assistant',
+              catId: msg.catId,
+              content: msg.content,
+              origin: 'callback',
+              ...(msg.metadata ? { metadata: msg.metadata } : {}),
+              ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
+              ...(msg.mentionsUser ? { mentionsUser: true } : {}),
+              ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
+              ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+              ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+              timestamp: Date.now(),
+            });
+          }
         } else {
           // CLI stream message (thinking): append to active stream bubble
           const messageId = getOrRecoverActiveAssistantMessageId(msg.catId, msg.metadata, { ensureStreaming: true });
           if (messageId) {
             appendToMessage(messageId, msg.content);
+            if (msg.replyTo || msg.replyPreview) {
+              patchMessage(messageId, {
+                ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+                ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+              });
+            }
           } else {
             // New stream message for this cat
             const id = `msg-${Date.now()}-${msg.catId}`;
-            const invocationId = getCurrentInvocationIdForCat(msg.catId);
+            const invocation = getCurrentInvocationStateForCat(msg.catId);
+            const invocationId = invocation.invocationId;
             activeRefs.current.set(msg.catId, { id, catId: msg.catId });
             addMessage({
               id,
@@ -291,13 +443,19 @@ export function useAgentMessages() {
               ...(msg.metadata ? { metadata: msg.metadata } : {}),
               ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
               ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
+              ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+              ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
               timestamp: Date.now(),
               isStreaming: true,
             });
+            if (invocation.source === 'activeInvocations') {
+              recordLateBindBubbleCreate(msg.catId, id, invocationId);
+            }
           }
         }
       } else if (msg.type === 'tool_use') {
         setCatStatus(msg.catId, 'streaming');
+        sawStreamDataRef.current.add(msg.catId);
         const toolName = msg.toolName ?? 'unknown';
         const detail = msg.toolInput ? safeJsonPreview(msg.toolInput, 200) : undefined;
         const isFileChange = toolName === 'file_change';
@@ -370,10 +528,40 @@ export function useAgentMessages() {
         if (msg.isFinal) {
           clearDoneTimeout();
           setLoading(false);
-          setHasActiveInvocation(false);
+          // F108: Remove specific invocation slot; fall back to cat-scoped lookup.
+          // Steer/force cancel broadcasts done(isFinal) without invocationId — find and
+          // remove only this cat's latest active slot to avoid clearing other cats' slots
+          // during multi-cat concurrent dispatch.
+          if (msg.invocationId) {
+            removeActiveInvocation(msg.invocationId);
+          } else {
+            const catSlot = findLatestActiveInvocationIdForCat(useChatStore.getState().activeInvocations, msg.catId);
+            if (catSlot) {
+              removeActiveInvocation(catSlot);
+            } else {
+              setHasActiveInvocation(false);
+            }
+          }
           setIntentMode(null);
           clearCatStatuses();
           a2aGroupRef.current = null;
+          // Bug C safety net: if done(isFinal) arrived but no streaming bubble
+          // was ever created for this cat, text events were lost (socket transport
+          // drop, dual-pointer guard mismatch, etc.). Request a history catch-up
+          // so the user sees the response without needing F5.
+          // P2: Only trigger if stream data was actually received (avoids false
+          // catch-up on callback-only flows where addMessage handles delivery).
+          if (!messageId && sawStreamDataRef.current.has(msg.catId)) {
+            const tid = useChatStore.getState().currentThreadId;
+            console.warn('[stream-catchup] done(isFinal) with no active bubble — requesting catch-up', {
+              catId: msg.catId,
+              threadId: tid,
+            });
+            if (tid) {
+              requestStreamCatchUp(tid);
+            }
+          }
+          sawStreamDataRef.current.delete(msg.catId);
         }
       } else if (msg.type === 'a2a_handoff') {
         // Start or continue an A2A group
@@ -389,6 +577,7 @@ export function useAgentMessages() {
           timestamp: Date.now(),
         });
       } else if (msg.type === 'system_info') {
+        sawStreamDataRef.current.add(msg.catId);
         // System notifications: budget warnings, cancel feedback, A2A follow-up hints, invocation metrics
         let sysContent = msg.content ?? '';
         let sysVariant: 'info' | 'a2a_followup' = 'info';
@@ -518,11 +707,35 @@ export function useAgentMessages() {
               setMessageThinking(messageId, thinkingText);
             }
             consumed = true;
+          } else if (parsed?.type === 'liveness_warning') {
+            // F118 Phase C: Liveness warning — update cat status + invocation snapshot
+            const level = parsed.level as 'alive_but_silent' | 'suspected_stall';
+            setCatStatus(msg.catId, level);
+            setCatInvocation(msg.catId, {
+              livenessWarning: {
+                level,
+                state: parsed.state as 'active' | 'busy-silent' | 'idle-silent' | 'dead',
+                silenceDurationMs: parsed.silenceDurationMs as number,
+                cpuTimeMs: typeof parsed.cpuTimeMs === 'number' ? parsed.cpuTimeMs : undefined,
+                processAlive: parsed.processAlive as boolean,
+                receivedAt: Date.now(),
+              },
+            });
+            consumed = true;
+          } else if (parsed?.type === 'timeout_diagnostics') {
+            // F118 AC-C3: Store diagnostics keyed by catId to prevent cross-cat mismatch
+            if (msg.catId) {
+              pendingTimeoutDiagRef.current.set(msg.catId, parsed as Record<string, unknown>);
+            }
+            consumed = true;
           } else if (parsed?.type === 'warning') {
             // F045: item-level warning — render as readable system message (avoid raw JSON blob)
             const warningText = typeof parsed.message === 'string' ? parsed.message : '';
             sysContent = warningText ? `⚠️ ${warningText}` : '⚠️ Warning';
             sysVariant = 'info';
+          } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
+            // Internal telemetry — suppress to avoid raw JSON bubbles
+            consumed = true;
           } else if (parsed?.type === 'silent_completion') {
             // Bugfix: silent-exit — cat ran tools but produced no text response
             const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
@@ -609,6 +822,10 @@ export function useAgentMessages() {
           setStreaming(messageId, false);
           activeRefs.current.delete(msg.catId);
         }
+        // F118 AC-C3: Attach pending timeout diagnostics matched by catId
+        const timeoutDiag = msg.catId ? (pendingTimeoutDiagRef.current.get(msg.catId) ?? null) : null;
+        if (msg.catId) pendingTimeoutDiagRef.current.delete(msg.catId);
+
         addMessage({
           id: `err-${Date.now()}-${msg.catId}`,
           type: 'system',
@@ -634,12 +851,38 @@ export function useAgentMessages() {
             return base;
           })(),
           timestamp: Date.now(),
+          ...(timeoutDiag
+            ? {
+                extra: {
+                  timeoutDiagnostics: {
+                    silenceDurationMs: timeoutDiag.silenceDurationMs as number,
+                    processAlive: timeoutDiag.processAlive as boolean,
+                    lastEventType: timeoutDiag.lastEventType as string | undefined,
+                    firstEventAt: timeoutDiag.firstEventAt as number | undefined,
+                    lastEventAt: timeoutDiag.lastEventAt as number | undefined,
+                    cliSessionId: timeoutDiag.cliSessionId as string | undefined,
+                    invocationId: timeoutDiag.invocationId as string | undefined,
+                    rawArchivePath: timeoutDiag.rawArchivePath as string | undefined,
+                  },
+                },
+              }
+            : {}),
         });
         // Only stop loading on isFinal; size===0 would false-positive in serial gaps
         if (msg.isFinal) {
           clearDoneTimeout(); // prevent 5-min timer from firing timeout text after error
           setLoading(false);
-          setHasActiveInvocation(false);
+          // F108: clear this cat's invocation slot on terminal error
+          if (msg.invocationId) {
+            removeActiveInvocation(msg.invocationId);
+          } else {
+            const catSlot = findLatestActiveInvocationIdForCat(useChatStore.getState().activeInvocations, msg.catId);
+            if (catSlot) {
+              removeActiveInvocation(catSlot);
+            } else {
+              setHasActiveInvocation(false);
+            }
+          }
           setIntentMode(null);
           // Clear ALL remaining streaming refs — global catch uses catId='opus' which may
           // not match the cat that was actually running (e.g. codex/gemini)
@@ -650,6 +893,7 @@ export function useAgentMessages() {
         }
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       addMessage,
       appendToMessage,
@@ -657,19 +901,27 @@ export function useAgentMessages() {
       appendRichBlock,
       setStreaming,
       setLoading,
-      setHasActiveInvocation,
+      removeActiveInvocation,
       setIntentMode,
       setCatStatus,
       clearCatStatuses,
       setCatInvocation,
       setMessageThinking,
       setMessageStreamInvocation,
+      replaceMessageId,
+      patchMessage,
       resetTimeout,
       clearDoneTimeout,
+      findCallbackReplacementTarget,
       getCurrentInvocationIdForCat,
+      getCurrentInvocationStateForCat,
       getOrRecoverActiveAssistantMessageId,
       ensureActiveAssistantMessage,
+      recordLateBindBubbleCreate,
+      shouldSuppressLateStreamChunk,
+      setHasActiveInvocation,
       setMessageUsage,
+      requestStreamCatchUp,
     ],
   );
 
@@ -693,7 +945,8 @@ export function useAgentMessages() {
 
       clearDoneTimeout(threadId);
       setLoading(false);
-      setHasActiveInvocation(false);
+      // F108: stop clears all invocation slots (user cancel-all)
+      clearAllActiveInvocations();
       setIntentMode(null);
       clearCatStatuses();
       // Stop all active streams
@@ -701,12 +954,14 @@ export function useAgentMessages() {
         setStreaming(ref.id, false);
       }
       activeRefs.current.clear();
+      replacedInvocationsRef.current.clear();
     },
-    [setLoading, setHasActiveInvocation, setStreaming, setIntentMode, clearCatStatuses, clearDoneTimeout],
+    [setLoading, clearAllActiveInvocations, setStreaming, setIntentMode, clearCatStatuses, clearDoneTimeout],
   );
 
   const resetRefs = useCallback(() => {
     activeRefs.current.clear();
+    replacedInvocationsRef.current.clear();
   }, []);
 
   return { handleAgentMessage, handleStop, resetRefs, resetTimeout, clearDoneTimeout };

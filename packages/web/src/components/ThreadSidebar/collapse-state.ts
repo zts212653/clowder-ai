@@ -80,13 +80,22 @@ export function collapseAllGroups(allKnownKeys: string[]): Set<string> {
 
 /**
  * Find the group key that contains a given thread ID.
+ * When a thread appears in multiple groups (e.g. both 'recent' and a project group),
+ * prefer project/pinned groups over 'recent' to avoid sidebar jumping. (clowder-ai#89)
  */
 export function findGroupKeyForThread(
   threadId: string,
-  groups: { groupKey: string; threadIds: string[] }[],
+  groups: { groupKey: string; threadIds: string[]; type?: string }[],
 ): string | undefined {
+  let recentFallback: string | undefined;
   for (const g of groups) {
-    if (g.threadIds.includes(threadId)) return g.groupKey;
+    if (g.threadIds.includes(threadId)) {
+      if (g.type === 'recent') {
+        if (!recentFallback) recentFallback = g.groupKey;
+      } else {
+        return g.groupKey;
+      }
+    }
   }
-  return undefined;
+  return recentFallback;
 }

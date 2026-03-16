@@ -111,8 +111,9 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       };
     }
 
-    // ⑥ Start invocation tracking (may abort prior invocation for this thread)
-    const controller = opts.invocationTracker.start(record.threadId, record.userId, record.targetCats);
+    // ⑥ Start invocation tracking (may abort prior invocation for this slot)
+    const primaryCat = record.targetCats[0] ?? 'unknown';
+    const controller = opts.invocationTracker.start(record.threadId, primaryCat, record.userId, record.targetCats);
     if (controller.signal.aborted) {
       await opts.invocationRecordStore.update(id, { status: 'canceled' });
       reply.status(409);
@@ -132,7 +133,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       expectedStatus: snapshotStatus,
     });
     if (!claimed) {
-      opts.invocationTracker.complete(record.threadId, controller);
+      opts.invocationTracker.complete(record.threadId, primaryCat, controller);
       reply.status(409);
       return {
         error: `Cannot retry invocation with status '${snapshotStatus}'`,
@@ -191,9 +192,10 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
               : {}),
             cursorBoundaries,
             persistenceContext,
+            parentInvocationId: id,
           },
         )) {
-          opts.socketManager.broadcastAgentMessage(msg, record.threadId);
+          opts.socketManager.broadcastAgentMessage({ ...msg, invocationId: id }, record.threadId);
         }
 
         // P1-2: mark failed if any message persistence failed
@@ -239,9 +241,9 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         );
       } finally {
         clearInterval(heartbeatInterval);
-        opts.invocationTracker.complete(record.threadId, controller);
+        opts.invocationTracker.complete(record.threadId, primaryCat, controller);
         // F39: Notify queue processor for auto-dequeue chain
-        opts.queueProcessor?.onInvocationComplete(record.threadId, finalStatus).catch(() => {
+        opts.queueProcessor?.onInvocationComplete(record.threadId, primaryCat, finalStatus).catch(() => {
           /* best-effort */
         });
       }

@@ -1,6 +1,6 @@
 /**
  * Pending Request Store
- * 持久化待审批队列 — team lead离线时请求不丢失
+ * 持久化待审批队列 — 铲屎官离线时请求不丢失
  *
  * 只存可序列化的 PendingRequestRecord，不存运行时 waiter。
  */

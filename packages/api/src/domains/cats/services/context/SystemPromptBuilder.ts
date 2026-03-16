@@ -71,7 +71,7 @@ export interface InvocationContext {
   };
   /**
    * F091: Active Signal articles in discussion context.
-   * Injected when team lead links a Signal article in the thread.
+   * Injected when 铲屎官 links a Signal article in the thread.
    */
   activeSignals?: readonly {
     readonly id: string;
@@ -218,14 +218,19 @@ When the user asks to say/show/present something richly, consider rich blocks (a
  * Design decision: inject compact L0 digest, not full text. See F086 spec.
  */
 const GOVERNANCE_L0_DIGEST = `## 家规（shared-rules.md）
-原则：P1每步产物是终态基座不是脚手架 P2自主跑完SOP不每步问team lead（SOP写了下一步→直接做，不问；方向不确定/阻塞→才升级） P3方向正确>速度 P4每个概念只在一处定义 P5可验证才算完成
+原则：P1每步产物是终态基座不是脚手架 P2自主跑完SOP不每步问铲屎官（SOP写了下一步→直接做，不问；方向不确定/阻塞→才升级） P3方向正确>速度 P4每个概念只在一处定义 P5可验证才算完成
 世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4不随地大小便（文件放对目录） W5只回流方法论不回流数据 W6教训追到根因
 纪律：不冒充其他猫 | 实事求是——结论基于多源证据（代码+commit+PR+文档），顺藤摸瓜查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？" | runtime禁止擅自重启 | 团队用"我们"不用"你们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖必须双写到可追溯状态（feature doc/workflow/task），消息不是真相源 | commit必须带签名[昵称/模型🐾]（如[宪宪/Opus-46🐾]），不带模型型号=无法区分是谁干的
 质量覆盖（对冲CLI"先简单后复杂"——方向错误的加速=浪费）：
 - Bug先定位根因再修，禁止猜测修补。复现→日志→调用链→根因→动手
 - 不确定方向：停→搜→问→确认→再动手，禁止"先做了再说"
 - "完成"附证据（测试/截图/日志）。Bug先红后绿
-- scope失控→记录；同类错误→提案；有价值经验→Episode→蒸馏→Eval（self-evolution+五级阶梯）`;
+- scope失控→记录；同类错误→提案；有价值经验→Episode→蒸馏→Eval（self-evolution+五级阶梯）
+Magic Words（铲屎官对你说以下词=手动拉闸，仅铲屎官当前指令触发，引用/复述/讨论历史不触发）：
+-「脚手架」= 你在偷懒写临时方案 → 停，审视产物是否终态，不是→重写
+-「绕路了」= 局部最优但全局绕路 → 停，画出直线路径，丢掉绕路部分
+-「喵约」= 你忘了我们的约定 → 重读本段家规，逐条对照当前行为
+-「星星罐子」= P0不可逆风险 → 立刻停止新增副作用（不发新命令、不写新文件、不push），等铲屎官指示`;
 
 /** Per-breed workflow triggers: when to proactively @ other cats.
  *  Keyed by breedId so all variants of a breed share the same workflow. */
@@ -308,7 +313,7 @@ export interface StaticIdentityOptions {
 /**
  * Build static identity prompt — persistent across invocations.
  * Includes: identity, personality, rules, A2A format, workflow triggers,
- * team lead reference, and MCP tool documentation (session-level).
+ * 铲屎官 reference, and MCP tool documentation (session-level).
  * Suitable for --system-prompt / --append-system-prompt injection.
  */
 export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOptions): string {
@@ -358,13 +363,13 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     lines.push(triggers, '');
   }
 
-  // team lead reference (session-level, not per-message)
+  // 铲屎官 reference (session-level, not per-message)
   // F067: Use owner config for name + mention handles
   // Note: "不冒充/不编造/身份契约" folded into GOVERNANCE_L0_DIGEST
   const owner = getOwnerConfig();
   const ownerName = owner.name;
   const ownerHandles = owner.mentionPatterns.map((p) => `\`${p}\``).join(' / ');
-  lines.push(`${ownerName}（team lead/CVO）。重要决策由${ownerName}拍板。需要关注时行首写 ${ownerHandles}。`, '');
+  lines.push(`${ownerName}（铲屎官/CVO）。重要决策由${ownerName}拍板。需要关注时行首写 ${ownerHandles}。`, '');
 
   // L0 Governance Digest — always-on principles from shared-rules.md (F086 post-completion fix)
   // Source of truth: cat-cafe-skills/refs/shared-rules.md
@@ -383,7 +388,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 /**
  * Build dynamic invocation context — changes per call.
  * Includes: teammates, mode, chain position, prompt tags.
- * (MCP tools and team lead reference moved to buildStaticIdentity for session-level injection.)
+ * (MCP tools and 铲屎官 reference moved to buildStaticIdentity for session-level injection.)
  */
 export function buildInvocationContext(context: InvocationContext): string {
   const config = getConfig(context.catId as string);
@@ -510,9 +515,9 @@ export function buildInvocationContext(context: InvocationContext): string {
   // F092: Voice companion mode — instruct cats to prioritize audio output
   if (context.voiceMode) {
     lines.push(
-      '🎙️ Voice Mode ON: team lead正在语音陪伴模式（AirPods，双手不空）。',
+      '🎙️ Voice Mode ON: 铲屎官正在语音陪伴模式（AirPods，双手不空）。',
       '- 每条回复用 audio rich block 发语音（call get_rich_block_rules if unsure）',
-      '- 文字是给日志看的，语音才是给team lead耳朵的输出',
+      '- 文字是给日志看的，语音才是给铲屎官耳朵的输出',
       '- 代码/表格/长内容仍用文字，但加一段语音摘要',
       '',
     );

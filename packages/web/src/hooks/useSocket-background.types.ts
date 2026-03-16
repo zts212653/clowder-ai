@@ -3,6 +3,8 @@ import type {
   CatStatusType,
   ChatMessage,
   ChatMessageMetadata,
+  ChatMessagePatch,
+  RichBlock,
   ThreadState,
   TokenUsage,
   ToolEvent,
@@ -22,8 +24,14 @@ export interface BackgroundAgentMessage {
   metadata?: { provider: string; model: string; sessionId?: string; usage?: TokenUsage };
   /** F52: Cross-thread origin metadata */
   extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };
-  /** F057-C2: Whether this message mentions the user (@user / @team lead) */
+  /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
   mentionsUser?: boolean;
+  /** F121: Reply-to message ID */
+  replyTo?: string;
+  /** F121: Server-hydrated reply preview */
+  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+  /** F108: Invocation ID — distinguishes messages from concurrent invocations */
+  invocationId?: string;
   timestamp: number;
 }
 
@@ -45,6 +53,8 @@ export interface BackgroundStoreLike {
   addMessageToThread: (threadId: string, msg: ChatMessage) => void;
   appendToThreadMessage: (threadId: string, messageId: string, content: string) => void;
   appendToolEventToThread: (threadId: string, messageId: string, event: ToolEvent) => void;
+  /** F22: Append a rich block to a message in a specific thread */
+  appendRichBlockToThread: (threadId: string, messageId: string, block: RichBlock) => void;
   setThreadCatInvocation: (threadId: string, catId: string, info: Partial<CatInvocationInfo>) => void;
   setThreadMessageMetadata: (threadId: string, messageId: string, metadata: ChatMessageMetadata) => void;
   setThreadMessageUsage: (threadId: string, messageId: string, usage: TokenUsage) => void;
@@ -55,6 +65,10 @@ export interface BackgroundStoreLike {
   setThreadMessageStreaming: (threadId: string, messageId: string, streaming: boolean) => void;
   setThreadLoading: (threadId: string, loading: boolean) => void;
   setThreadHasActiveInvocation: (threadId: string, active: boolean) => void;
+  /** F108: Add an active invocation slot to a thread */
+  addThreadActiveInvocation: (threadId: string, invocationId: string, catId: string, mode: string) => void;
+  /** F108: Remove an active invocation slot from a thread */
+  removeThreadActiveInvocation: (threadId: string, invocationId: string) => void;
   updateThreadCatStatus: (threadId: string, catId: string, status: CatStatusType) => void;
   /** Batch content-append + metadata + streaming + catStatus into one set(). */
   batchStreamChunkUpdate: (params: {
@@ -68,11 +82,14 @@ export interface BackgroundStoreLike {
   }) => void;
   clearThreadActiveInvocation: (threadId: string) => void;
   getThreadState: (threadId: string) => ThreadState;
+  replaceThreadMessageId: (threadId: string, fromId: string, toId: string) => void;
+  patchThreadMessage: (threadId: string, messageId: string, patch: ChatMessagePatch) => void;
 }
 
 export interface HandleBackgroundMessageOptions {
   store: BackgroundStoreLike;
   bgStreamRefs: Map<string, BackgroundStreamRef>;
+  replacedInvocations: Map<string, string>;
   nextBgSeq: () => number;
   addToast: (toast: BackgroundToastInput) => void;
   /** #80 fix-C: Clear the done-timeout guard when a background thread completes */

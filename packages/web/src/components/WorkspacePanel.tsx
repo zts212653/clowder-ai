@@ -8,6 +8,7 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { MarkdownContent } from './MarkdownContent';
+import { BrowserPanel } from './workspace/BrowserPanel';
 import { ChangesPanel } from './workspace/ChangesPanel';
 import { CodeViewer } from './workspace/CodeViewer';
 import { FileIcon } from './workspace/FileIcons';
@@ -150,9 +151,25 @@ export function WorkspacePanel() {
   const editTokenExpiry = useChatStore((s) => s.workspaceEditTokenExpiry);
   const setEditToken = useChatStore((s) => s.setWorkspaceEditToken);
 
+  const pendingPreviewAutoOpen = useChatStore((s) => s.pendingPreviewAutoOpen);
+  const consumePreviewAutoOpen = useChatStore((s) => s.consumePreviewAutoOpen);
   const { createFile, createDir, deleteItem, renameItem, uploadFile } = useFileManagement();
 
-  const [viewMode, setViewMode] = useState<'files' | 'changes' | 'git' | 'terminal'>('files');
+  const [viewMode, setViewMode] = useState<'files' | 'changes' | 'git' | 'terminal' | 'browser'>('files');
+  const [previewPort, setPreviewPort] = useState<number | undefined>();
+  const [previewPath, setPreviewPath] = useState<string>('/');
+
+  // F120: Consume pending auto-open from always-mounted listener (ChatContainer)
+  useEffect(() => {
+    if (!pendingPreviewAutoOpen) return;
+    const data = consumePreviewAutoOpen();
+    if (data) {
+      setPreviewPort(data.port);
+      setPreviewPath(data.path);
+      setViewMode('browser');
+    }
+  }, [pendingPreviewAutoOpen, consumePreviewAutoOpen]);
+  const [portDiscoveryToast, setPortDiscoveryToast] = useState<{ port: number; framework?: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'content' | 'filename' | 'all'>('all');
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
@@ -190,6 +207,35 @@ export function WorkspacePanel() {
     prevThreadRef.current = currentThreadId;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only trigger on thread change
   }, [currentThreadId, expandedPaths, openFilePath, openTabs, restoreWorkspaceTabs]);
+  // F120: Listen for port discovery via Socket.IO
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+    import('socket.io-client').then(({ io }) => {
+      if (cancelled) return;
+      const apiUrl = new URL(API_URL);
+      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
+      // Join worktree-scoped room for targeted preview events
+      const room = worktreeId ? `worktree:${worktreeId}` : 'preview:global';
+      socket.emit('join_room', room);
+      const handler = (data: { port: number; framework?: string }) => {
+        setPortDiscoveryToast(data);
+        setTimeout(() => setPortDiscoveryToast(null), 8000);
+      };
+      socket.on('preview:port-discovered', handler);
+      // F120: auto-open listener moved to ChatContainer (usePreviewAutoOpen hook)
+      // WorkspacePanel consumes pendingPreviewAutoOpen from store on mount
+      cleanup = () => {
+        socket.off('preview:port-discovered', handler);
+        socket.disconnect();
+      };
+    });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [worktreeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [editMode, setEditMode] = useState(false);
   const [markdownRendered, setMarkdownRendered] = useState(true);
   const [htmlPreview, setHtmlPreview] = useState(false);
@@ -535,26 +581,82 @@ export function WorkspacePanel() {
 
       {/* Files / Changes toggle */}
       <div className="flex border-b border-owner-light/40">
-        {(['files', 'changes', 'git', 'terminal'] as const).map((mode) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => setViewMode(mode)}
-            className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-              viewMode === mode
-                ? 'text-owner-primary border-b-2 border-owner-primary'
-                : 'text-owner-dark/40 hover:text-owner-dark/60'
-            }`}
-          >
-            {mode === 'files' ? 'Files' : mode === 'changes' ? 'Changes' : mode === 'git' ? 'Git' : 'Term'}
-          </button>
-        ))}
+        {(['files', 'changes', 'git', 'terminal', 'browser'] as const).map((mode) => {
+          const labels: Record<typeof mode, string> = {
+            files: 'Files',
+            changes: 'Changes',
+            git: 'Git',
+            terminal: 'Term',
+            browser: '🌐',
+          };
+          return (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                viewMode === mode
+                  ? 'text-owner-primary border-b-2 border-owner-primary'
+                  : 'text-owner-dark/40 hover:text-owner-dark/60'
+              }`}
+            >
+              {labels[mode]}
+            </button>
+          );
+        })}
       </div>
 
       {/* Error */}
       {error && <div className="px-3 py-2 text-xs text-red-600 bg-red-50/80 border-b border-red-100">{error}</div>}
 
-      {viewMode === 'terminal' ? (
+      {/* F120: Port Discovery Toast — matches design Scene 2 */}
+      {portDiscoveryToast && (
+        <div className="mx-3 my-2 p-4 rounded-xl bg-white shadow-md border border-[#E8E7E5]">
+          <div className="flex items-start justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[#E29578] text-base">◉</span>
+              <span className="text-sm font-semibold text-[#1A1918]">Dev Server Detected</span>
+            </div>
+            <button
+              type="button"
+              className="text-[#9C9B99] hover:text-[#5a4a42] text-xs"
+              onClick={() => setPortDiscoveryToast(null)}
+            >
+              ✕
+            </button>
+          </div>
+          <p className="text-xs text-[#6D6C6A] ml-6 mb-3">
+            localhost:{portDiscoveryToast.port} is now listening
+            {portDiscoveryToast.framework && portDiscoveryToast.framework !== 'unknown'
+              ? ` (${portDiscoveryToast.framework})`
+              : ''}
+          </p>
+          <div className="flex items-center gap-2 ml-6">
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-md bg-[#E29578] text-white text-xs font-medium hover:bg-[#d4856a] transition-colors"
+              onClick={() => {
+                setPreviewPort(portDiscoveryToast.port);
+                setViewMode('browser');
+                setPortDiscoveryToast(null);
+              }}
+            >
+              Open Preview
+            </button>
+            <button
+              type="button"
+              className="px-3 py-1.5 text-xs text-[#5a4a42]/70 hover:text-[#5a4a42]"
+              onClick={() => setPortDiscoveryToast(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'browser' ? (
+        <BrowserPanel initialPort={previewPort} initialPath={previewPath} />
+      ) : viewMode === 'terminal' ? (
         worktreeId ? (
           <TerminalTab worktreeId={worktreeId} />
         ) : (

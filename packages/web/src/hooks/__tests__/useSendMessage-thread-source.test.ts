@@ -5,6 +5,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const mockApiFetch = vi.fn();
 const mockAddMessage = vi.fn();
 const mockAddMessageToThread = vi.fn();
+const mockRemoveMessage = vi.fn();
+const mockRemoveThreadMessage = vi.fn();
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
 const mockSetThreadLoading = vi.fn();
@@ -32,6 +34,8 @@ vi.mock('@/stores/chatStore', () => ({
     () => ({
       addMessage: mockAddMessage,
       addMessageToThread: mockAddMessageToThread,
+      removeMessage: mockRemoveMessage,
+      removeThreadMessage: mockRemoveThreadMessage,
       setLoading: mockSetLoading,
       setHasActiveInvocation: mockSetHasActiveInvocation,
       setThreadLoading: mockSetThreadLoading,
@@ -87,6 +91,8 @@ describe('useSendMessage thread source', () => {
     mockApiFetch.mockReset();
     mockAddMessage.mockReset();
     mockAddMessageToThread.mockReset();
+    mockRemoveMessage.mockReset();
+    mockRemoveThreadMessage.mockReset();
     mockSetLoading.mockReset();
     mockSetHasActiveInvocation.mockReset();
     mockSetThreadLoading.mockReset();
@@ -245,6 +251,29 @@ describe('useSendMessage thread source', () => {
     expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-route', optimisticMessage.id, 'msg-server-1');
   });
 
+  it('removes an optimistic active-thread user bubble when server smart-defaults to queued', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'queued', userMessageId: 'msg-server-queued' }),
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          overrideThreadId: undefined,
+          onDone: () => {},
+        }),
+      );
+    });
+
+    const optimisticUserCall = mockAddMessage.mock.calls[0];
+    const optimisticMessage = optimisticUserCall?.[0] as { id: string };
+    expect(optimisticMessage).toMatchObject({ type: 'user' });
+    expect(mockRemoveMessage).toHaveBeenCalledWith(optimisticMessage.id);
+    expect(mockReplaceThreadMessageId).not.toHaveBeenCalled();
+  });
+
   it('uses a valid UUIDv4-shaped idempotencyKey when crypto.randomUUID is unavailable', async () => {
     const originalCrypto = globalThis.crypto;
     Object.defineProperty(globalThis, 'crypto', {
@@ -278,7 +307,7 @@ describe('useSendMessage thread source', () => {
     }
   });
 
-  it('reconciles an optimistic split-pane user message on the target thread to the persisted server message id', async () => {
+  it('removes an optimistic split-pane user bubble when server smart-defaults to queued', async () => {
     mockApiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ status: 'queued', userMessageId: 'msg-server-2' }),
@@ -300,6 +329,7 @@ describe('useSendMessage thread source', () => {
     );
     const optimisticMessage = optimisticUserCall?.[1] as { id: string };
     expect(optimisticUserCall?.[0]).toBe('thread-target');
-    expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-target', optimisticMessage.id, 'msg-server-2');
+    expect(mockRemoveThreadMessage).toHaveBeenCalledWith('thread-target', optimisticMessage.id);
+    expect(mockReplaceThreadMessageId).not.toHaveBeenCalled();
   });
 });

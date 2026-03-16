@@ -231,7 +231,7 @@ describe('RedisThreadReadStateStore', { skip: !REDIS_URL ? 'REDIS_URL not set' :
     await messageStore.append({
       userId: 'user1',
       catId: 'opus',
-      content: '@team lead look',
+      content: '@铲屎官 look',
       mentions: [],
       mentionsUser: true,
       timestamp: Date.now() - 1000,
