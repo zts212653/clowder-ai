@@ -99,36 +99,9 @@ export interface WorktreeEntry {
   head: string;
 }
 
-function isNotGitRepositoryError(error: unknown): boolean {
-  const details = String((error as { stderr?: string; message?: string })?.stderr ?? (error as { message?: string })?.message ?? '');
-  return details.includes('not a git repository');
-}
-
-/** Check if a directory is inside a git work tree (HEAD may still be unborn). */
-export async function isGitReady(cwd: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, timeout: 3000 });
-    return stdout.trim() === 'true';
-  } catch (error) {
-    if (isNotGitRepositoryError(error)) return false;
-    throw error;
-  }
-}
-
-/** Check if a git work tree already has a valid HEAD commit. */
-export async function hasGitHead(cwd: string): Promise<boolean> {
-  try {
-    await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd, timeout: 3000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function listWorktrees(repoRoot?: string): Promise<WorktreeEntry[]> {
   const cwd = repoRoot ?? process.cwd();
-  if (!(await isGitReady(cwd))) return [];
-  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd, timeout: 3000 });
+  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd });
   const entries: WorktreeEntry[] = [];
   let current: Partial<WorktreeEntry> = {};
 

@@ -26,7 +26,6 @@ import {
   getLinkedRootsAsync,
   getWorktreeRoot,
   isDenylisted,
-  isGitReady,
   listWorktrees,
   registerWorktrees,
   removeLinkedRoot,
@@ -467,11 +466,6 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const root = await getWorktreeRoot(worktreeId);
-
-      // Guard: non-git or empty repo — return empty diff instead of crashing
-      if (!(await isGitReady(root))) {
-        return { worktreeId, changedFiles: [], diff: '' };
-      }
 
       // Get list of changed files (staged + unstaged)
       const { stdout: statusOut } = await execFileAsync('git', ['status', '--porcelain', '-uall'], {
