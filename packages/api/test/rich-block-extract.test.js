@@ -451,4 +451,32 @@ describe('extractRichFromText F34-b audio voice messages', () => {
     assert.equal(result.blocks[0].url, '/api/tts/audio/x.wav');
     assert.equal(result.blocks[0].text, 'Transcript');
   });
+
+  // F120 Phase C: html_widget extraction
+  it('extracts html_widget block from cc_rich', () => {
+    const input = `\`\`\`cc_rich
+{"v":1,"blocks":[{"id":"hw1","kind":"html_widget","v":1,"html":"<h1>Hello</h1>","title":"Demo"}]}
+\`\`\``;
+    const result = extractRichFromText(input);
+    assert.equal(result.blocks.length, 1);
+    assert.equal(result.blocks[0].kind, 'html_widget');
+    assert.equal(result.blocks[0].html, '<h1>Hello</h1>');
+    assert.equal(result.blocks[0].title, 'Demo');
+  });
+
+  it('rejects html_widget with empty html', () => {
+    const input = `\`\`\`cc_rich
+{"v":1,"blocks":[{"id":"hw2","kind":"html_widget","v":1,"html":""}]}
+\`\`\``;
+    const result = extractRichFromText(input);
+    assert.equal(result.blocks.length, 0); // rejected by isValidRichBlock
+  });
+
+  it('rejects html_widget with non-string height', () => {
+    const input = `\`\`\`cc_rich
+{"v":1,"blocks":[{"id":"hw3","kind":"html_widget","v":1,"html":"<p>X</p>","height":"tall"}]}
+\`\`\``;
+    const result = extractRichFromText(input);
+    assert.equal(result.blocks.length, 0);
+  });
 });

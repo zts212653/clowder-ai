@@ -9,6 +9,14 @@
 
 set -e
 
+# Parse args
+INSTALL_MISSING=false
+for arg in "$@"; do
+    case $arg in
+        --install-missing) INSTALL_MISSING=true ;;
+    esac
+done
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -125,11 +133,16 @@ if [ "$HAS_PYTHON" = true ]; then
     echo "        - 4GB+ RAM recommended / 建议 4GB+ 内存"
     echo "        - GPU optional but faster / GPU 可选但更快"
     echo ""
-    read -p "      Enable voice input? (y/N): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$INSTALL_MISSING" = true ]; then
         ENABLE_ASR=true
-        echo -e "      ${GREEN}✓${NC} Voice input enabled"
+        echo -e "      ${GREEN}✓${NC} Voice input enabled (--install-missing)"
+    else
+        read -p "      Enable voice input? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            ENABLE_ASR=true
+            echo -e "      ${GREEN}✓${NC} Voice input enabled"
+        fi
     fi
 else
     echo -e "      ${YELLOW}⚠ Requires Python3 (not installed). Skipping.${NC}"
@@ -149,11 +162,16 @@ if [ "$HAS_PYTHON" = true ]; then
     echo "        - edge-tts: no download, uses Microsoft online API / 无需下载"
     echo "        - 2GB+ RAM for Kokoro, minimal for edge-tts"
     echo ""
-    read -p "      Enable voice output? (y/N): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$INSTALL_MISSING" = true ]; then
         ENABLE_TTS=true
-        echo -e "      ${GREEN}✓${NC} Voice output enabled"
+        echo -e "      ${GREEN}✓${NC} Voice output enabled (--install-missing)"
+    else
+        read -p "      Enable voice output? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            ENABLE_TTS=true
+            echo -e "      ${GREEN}✓${NC} Voice output enabled"
+        fi
     fi
 else
     echo -e "      ${YELLOW}⚠ Requires Python3 (not installed). Skipping.${NC}"
@@ -173,11 +191,16 @@ if [ "$HAS_PYTHON" = true ] && [ "$ENABLE_ASR" = true ]; then
     echo "        - 8GB+ RAM / 8GB+ 内存"
     echo "        - GPU strongly recommended / 强烈建议 GPU"
     echo ""
-    read -p "      Enable speech correction? (y/N): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$INSTALL_MISSING" = true ]; then
         ENABLE_LLM_PP=true
-        echo -e "      ${GREEN}✓${NC} Speech correction enabled"
+        echo -e "      ${GREEN}✓${NC} Speech correction enabled (--install-missing)"
+    else
+        read -p "      Enable speech correction? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            ENABLE_LLM_PP=true
+            echo -e "      ${GREEN}✓${NC} Speech correction enabled"
+        fi
     fi
 elif [ "$ENABLE_ASR" = false ]; then
     echo -e "      ${YELLOW}○ Skipped (requires Voice Input above)${NC}"
@@ -196,11 +219,16 @@ echo "      Use this if you need to go through a load balancer or"
 echo "      third-party API provider instead of direct Anthropic access."
 echo "      如需通过负载均衡或第三方 API 提供商访问，而非直连 Anthropic。"
 echo ""
-read -p "      Enable API proxy? (y/N): " -n 1 -r
-echo ""
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+if [ "$INSTALL_MISSING" = true ]; then
     ENABLE_PROXY=true
-    echo -e "      ${GREEN}✓${NC} API proxy enabled"
+    echo -e "      ${GREEN}✓${NC} API proxy enabled (--install-missing)"
+else
+    read -p "      Enable API proxy? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        ENABLE_PROXY=true
+        echo -e "      ${GREEN}✓${NC} API proxy enabled"
+    fi
 fi
 echo ""
 
@@ -289,6 +317,55 @@ fi
 
 echo -e "  ${GREEN}✓${NC} $ENV_FILE generated"
 
+# ── Step 4b: Install sidecar venvs (--install-missing) ──────
+
+# Creates venvs + installs pip deps for each enabled sidecar.
+# Extracted as a function so tests can verify behavior independently.
+install_sidecar_venvs() {
+    local venv_base="${HOME}/.cat-cafe"
+
+    # ASR venv
+    local asr_venv="$venv_base/asr-venv"
+    if [ ! -d "$asr_venv" ]; then
+        echo "  Creating ASR venv: $asr_venv ..."
+        python3 -m venv "$asr_venv"
+    else
+        echo "  Updating ASR venv: $asr_venv ..."
+    fi
+    "$asr_venv/bin/pip" install --quiet -U pip
+    "$asr_venv/bin/pip" install --quiet mlx-audio fastapi uvicorn python-multipart
+
+    # TTS venv
+    local tts_venv="$venv_base/tts-venv"
+    if [ ! -d "$tts_venv" ]; then
+        echo "  Creating TTS venv: $tts_venv ..."
+        python3 -m venv "$tts_venv"
+    else
+        echo "  Updating TTS venv: $tts_venv ..."
+    fi
+    "$tts_venv/bin/pip" install --quiet -U pip
+    "$tts_venv/bin/pip" install --quiet mlx-audio 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
+
+    # LLM post-processing venv
+    local llm_venv="$venv_base/llm-venv"
+    if [ ! -d "$llm_venv" ]; then
+        echo "  Creating LLM venv: $llm_venv ..."
+        python3 -m venv "$llm_venv"
+    else
+        echo "  Updating LLM venv: $llm_venv ..."
+    fi
+    "$llm_venv/bin/pip" install --quiet -U pip
+    "$llm_venv/bin/pip" install --quiet mlx-vlm "httpx[socks]" torchvision fastapi uvicorn pydantic
+}
+
+if [ "$INSTALL_MISSING" = true ] && [ "$HAS_PYTHON" = true ]; then
+    echo ""
+    echo -e "${CYAN}[4b/5] Installing sidecar venvs / 安装语音服务依赖...${NC}"
+    echo ""
+    install_sidecar_venvs
+    echo -e "  ${GREEN}✓${NC} Sidecar venvs installed"
+fi
+
 # ── Step 5: Summary ─────────────────────────────────────────
 
 echo ""
@@ -321,8 +398,13 @@ echo "       打开 http://localhost:3003"
 echo ""
 
 if [ "$ENABLE_ASR" = true ] || [ "$ENABLE_TTS" = true ] || [ "$ENABLE_LLM_PP" = true ]; then
-    echo -e "  ${YELLOW}Note:${NC} Voice models will be downloaded on first use."
-    echo "  语音模型将在首次使用时自动下载。"
+    if [ "$INSTALL_MISSING" = true ]; then
+        echo -e "  ${GREEN}✓${NC} Sidecar venvs pre-installed. Models download on first use."
+        echo "  语音服务 venv 已预装。模型将在首次使用时下载。"
+    else
+        echo -e "  ${YELLOW}Note:${NC} Voice models will be downloaded on first use."
+        echo "  语音模型将在首次使用时自动下载。"
+    fi
     echo ""
 fi
 

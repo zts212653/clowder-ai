@@ -91,6 +91,11 @@ export class GameEngine {
     this.runtime.pendingActions = {};
   }
 
+  /** Check win condition. Override in subclass for game-specific logic. */
+  checkWinCondition(): string | null {
+    return null;
+  }
+
   // --- Private helpers ---
 
   private getExpectedActors(actingRole?: string): string[] {

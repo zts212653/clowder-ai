@@ -114,6 +114,121 @@ describe('spawnCliInTmux', () => {
     assert.equal(valEvent.val, 'hello-tmux');
   });
 
+  it('parse-error noise does not reset timeout forever', async () => {
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        args: ['-c', 'while true; do echo not-json-line; sleep 0.05; done'],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-timeout-noise',
+        cwd: '/tmp',
+        timeoutMs: 200,
+        firstEventTimeoutMs: 200, // No valid events → firstEventTimeout fires
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const timeoutEvent = events.find((e) => e.__cliTimeout);
+    assert.ok(timeoutEvent, 'invalid tmux output noise should still hit timeout');
+  });
+
+  it('firstEventTimeout fires when CLI produces no valid NDJSON', async () => {
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        // Sleep forever — never produces any output at all
+        args: ['-c', 'sleep 3600'],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-first-event-timeout',
+        cwd: '/tmp',
+        firstEventTimeoutMs: 300,
+        timeoutMs: 60000, // idle timeout much larger — should NOT be the one that fires
+      },
+      { tmuxGateway: gateway },
+    );
+
+    const start = Date.now();
+    for await (const event of gen) {
+      events.push(event);
+    }
+    const elapsed = Date.now() - start;
+
+    const timeoutEvent = events.find((e) => e.__cliTimeout);
+    assert.ok(timeoutEvent, 'should yield __cliTimeout from firstEventTimeout');
+    assert.match(timeoutEvent.message, /启动超时/, 'message should mention startup timeout');
+    // Should converge around firstEventTimeoutMs, not idleTimeoutMs
+    assert.ok(elapsed < 5000, `should converge via firstEventTimeout, took ${elapsed}ms`);
+  });
+
+  it('idleTimeout fires after first event when CLI goes silent', async () => {
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        // Emit one valid event, then sleep forever
+        args: ['-c', 'echo \'{"type":"init"}\'; sleep 3600'],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-idle-timeout',
+        cwd: '/tmp',
+        firstEventTimeoutMs: 60000, // first event timeout much larger
+        timeoutMs: 300, // idle timeout should fire
+      },
+      { tmuxGateway: gateway },
+    );
+
+    const start = Date.now();
+    for await (const event of gen) {
+      events.push(event);
+    }
+    const elapsed = Date.now() - start;
+
+    const timeoutEvent = events.find((e) => e.__cliTimeout);
+    assert.ok(timeoutEvent, 'should yield __cliTimeout from idleTimeout');
+    assert.match(timeoutEvent.message, /idle/, 'message should mention idle timeout');
+    // Should have received the init event before timeout
+    const initEvent = events.find((e) => e.type === 'init');
+    assert.ok(initEvent, 'should have received the init event before idle timeout fired');
+    // killAgent's C-c + 3s grace + kill-pane adds overhead, especially when
+    // the tmux server has accumulated panes from previous tests. 15s is generous.
+    assert.ok(elapsed < 15000, `should converge via idleTimeout, took ${elapsed}ms`);
+  });
+
+  it('AbortSignal unblocks FIFO read (no deadlock)', async () => {
+    const ac = new AbortController();
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        args: ['-c', 'sleep 3600'],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-abort-fifo',
+        cwd: '/tmp',
+        signal: ac.signal,
+        firstEventTimeoutMs: 60000,
+        timeoutMs: 60000,
+      },
+      { tmuxGateway: gateway },
+    );
+
+    // Abort after 200ms — should unblock FIFO read
+    setTimeout(() => ac.abort(), 200);
+
+    const start = Date.now();
+    for await (const event of gen) {
+      events.push(event);
+    }
+    const elapsed = Date.now() - start;
+
+    // Should converge quickly via abort, not hang forever
+    assert.ok(elapsed < 5000, `abort should unblock FIFO read, took ${elapsed}ms`);
+  });
+
   it('pane has remain-on-exit set', async () => {
     // Create an agent pane and verify remain-on-exit
     const paneId = await gateway.createAgentPane(WORKTREE, { cwd: '/tmp' });

@@ -1,10 +1,10 @@
 ---
 feature_ids: [F050]
-related_features: [F002, F005, F027, F032, F041, F043, F061]
-topics: [a2a, external-agent, cli-integration, interoperability, dare]
+related_features: [F002, F005, F027, F032, F041, F043, F061, F105]
+topics: [a2a, external-agent, cli-integration, interoperability, dare, system-prompt, governance]
 doc_kind: spec
 created: 2026-03-02
-updated: 2026-03-04
+updated: 2026-03-13
 ---
 
 # F050: External Agent Onboarding（A2A/CLI 接入契约）
@@ -114,6 +114,31 @@ updated: 2026-03-04
 - 源文件放 `assets/avatars/`，public 目录是运行时服务路径，缺文件 = 聊天界面无头像
 - 每个 variant 如有独立 avatar 字段，对应文件也必须同步
 - 接入 checklist 中必须包含"头像文件已复制到 web/public"验收项
+
+### H. System Prompt Configuration Map（必须）
+
+Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文本中，但各 agent **也有自己的原生系统提示词配置**。更新家规/身份时，**两层都要同步**。
+
+| Agent | 原生配置路径 | 格式 | 说明 |
+|-------|-------------|------|------|
+| Claude (Ragdoll) | 仓库根 `CLAUDE.md` | Markdown | 自动注入 system prompt，改完即生效 |
+| Codex (Maine Coon) | `~/.codex/AGENTS.md` + App Personalization | Markdown | CLI 和 App 都读；截图里的 Custom instructions |
+| Gemini (Siamese) | `~/.gemini/GEMINI.md` | Markdown | 项目级可用 `.gemini/GEMINI.md` |
+| OpenCode (金渐层) | `~/.config/opencode/opencode.json` | JSON | 系统提示词走 OMOC plugin；底层 Claude Code 运行时共享 `~/.claude/` 配置和 skills（见下方说明） |
+| Antigravity (孟加拉猫) | CDP bridge / prompt 注入 | — | 无独立配置文件，纯靠 Cat Café 动态注入 |
+
+**变更 SOP**：
+1. 改了 Codex/Gemini 原生配置相关内容 → 编辑 `assets/system-prompts/` 分片文件（Codex/Gemini 原生配置的仓库内真相源）
+2. 跑 `npx tsx scripts/sync-system-prompts.ts --check` 检测 drift
+3. 跑 `npx tsx scripts/sync-system-prompts.ts --apply` 写入 `~/.codex/AGENTS.md` + `~/.gemini/GEMINI.md`
+4. Commit 分片变更
+
+**OpenCode 配置共享说明**：OpenCode 底层使用 Claude Code 运行时（`claude-opus-4-6`），因此天然共享 `~/.claude/` 下的配置和 skills。这意味着：
+- `~/.claude/skills/` 中的 Cat Café symlink skills 金渐层可直接加载
+- `~/.claude/projects/` 中的项目级配置也会生效
+- 无需为金渐层单独维护 skills 同步链
+
+**决策**：禁止 runtime 自动覆写 `~/` 配置 → [ADR-017](../decisions/017-no-runtime-home-overwrite.md)
 
 ---
 
@@ -294,6 +319,35 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 - [x] DARE CLI 兼容性测试套件完成（含 session/event/auth；`resume` 用例因 DARE #184 暂以 `test.skip` 标注）
 - [x] 与现有三猫回归测试共跑通过
 - [x] DARE 通过 L1 验收
+
+### Phase 4: Native Prompt Sync for Codex + Gemini（2026-03-13 起）
+
+**背景**：F105（金渐层接入）过程中发现系统提示词存在动态层（SystemPromptBuilder）与静态层（各猫 `~/` 原生配置）不同步问题。team lead直接 CLI 裸跑 opencode 时完全无身份/家规意识（回复"大猫猫你好"），而 Codex 因team lead手动在 `~/.codex/AGENTS.md` 写了身份所以裸跑也正常。
+
+**愿景**：
+1. Codex/Gemini 原生配置有**仓库内真相源**（`assets/system-prompts/`），不再在各猫 `~/` 中各自为政
+2. team lead改了原生配置相关内容后，跑一条命令就能同步到 Codex + Gemini 的 `~/` 配置，**不会漏改 `~/`**
+3. 不支持原生配置的猫（OpenCode、Antigravity）继续靠 Cat Café 动态注入，**不假装有配置**
+4. 禁止 runtime 自动覆写 `~/` 配置（ADR 记录）
+
+**本 Phase 不覆盖**：Cat Café 运行时动态注入层（`SystemPromptBuilder` 的 `GOVERNANCE_L0_DIGEST` 等常量）仍维持现状。将动态层也收拢到分片源是 Phase 5 候选方向（见 Open Questions）。
+
+**方案**（Ragdoll × Maine Coon讨论收敛）：
+- 真相源：`assets/system-prompts/` 语义分片（`governance-l0.md`、`collab-rules.md`、`cats/{catId}.md`）
+- 渲染器：`scripts/sync-system-prompts.ts` — 按 provider 差异拼装为各猫目标格式
+- 同步：`--apply`（写入 `~/` 对应位置）+ `--check`（drift 检查，CI 可跑）
+- 不做：runtime 动态改 `~/`、OpenCode wrapper（team lead否决，非真实使用场景）
+
+**否决记录**：
+- ❌ 调度时动态覆写各猫 home 配置 — 侵入性强、易竞态、污染个人环境
+- ❌ OpenCode wrapper（`scripts/opencode-cat-cafe-run`）— team lead否决，裸跑场景是测试触发非日常使用
+
+- [x] AC-P4-1: `assets/system-prompts/` 语义分片结构建立（governance-l0 + collab-rules + 各猫身份）
+- [x] AC-P4-2: `scripts/sync-system-prompts.ts --check` 能检测 Codex/Gemini `~/` 配置 drift
+- [x] AC-P4-3: `scripts/sync-system-prompts.ts --apply` 能渲染并写入 `~/.codex/AGENTS.md` + `~/.gemini/GEMINI.md`
+- [x] AC-P4-4: ADR 记录"禁止 runtime 覆写 `~/` 配置"决策 → [ADR-017](../decisions/017-no-runtime-home-overwrite.md)
+- [x] AC-P4-5: F050 §H 配置地图与实际同步脚本一致
+- [ ] AC-P4-6: 愿景守护 — 改了 governance-l0 后跑 `--check` 能发现 Codex/Gemini 未同步（merge 后由守护猫验证）
 
 ### Phase 3: A2A L2（future）
 - [ ] `A2AAgentService` 设计稿 + 接口定义完成

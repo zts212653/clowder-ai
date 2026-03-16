@@ -3,7 +3,7 @@
  */
 
 export type IntentMode = 'execute' | 'ideate' | null;
-export type CatStatus = 'pending' | 'streaming' | 'done' | 'error';
+export type CatStatus = 'pending' | 'streaming' | 'done' | 'error' | 'alive_but_silent' | 'suspected_stall';
 
 export function modeLabel(mode: IntentMode): string {
   if (mode === 'ideate') return '独立观点采样';
@@ -21,6 +21,10 @@ export function statusLabel(status: CatStatus): string {
       return '完成';
     case 'error':
       return '异常';
+    case 'alive_but_silent':
+      return '静默等待';
+    case 'suspected_stall':
+      return '疑似卡住';
     default:
       return '未知';
   }
@@ -36,6 +40,10 @@ export function statusTone(status: CatStatus): string {
       return 'text-emerald-700';
     case 'error':
       return 'text-red-600';
+    case 'alive_but_silent':
+      return 'text-amber-500';
+    case 'suspected_stall':
+      return 'text-orange-600';
     default:
       return 'text-gray-500';
   }

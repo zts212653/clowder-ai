@@ -12,7 +12,7 @@ const messages: ChatMessageType[] = [
   {
     id: 'u-1',
     type: 'user',
-    content: '跨线程那条消息怎么把作者标错了？（这是正常的team lead消息）',
+    content: '跨线程那条消息怎么把作者标错了？（这是正常的铲屎官消息）',
     timestamp: now - 1000 * 60 * 5,
   },
   {
@@ -50,7 +50,7 @@ export default function ShowcaseF052CrossThreadAuthorLabel() {
       <p className="mt-2 text-sm text-gray-600">
         Fixture: one message is <code className="font-mono">type=&quot;user&quot;</code> but still has a{' '}
         <code className="font-mono">catId</code>. UI should render it as a cat message (avatar/name/color), not as
-        &quot;team lead&quot;.
+        &quot;铲屎官&quot;.
       </p>
 
       <div className="relative mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">

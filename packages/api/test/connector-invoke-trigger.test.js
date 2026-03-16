@@ -136,12 +136,13 @@ function mockInvocationRecordStore() {
 }
 
 function mockInvocationTracker() {
-  const starts = /** @type {Array<{threadId: string}>} */ ([]);
-  const completes = /** @type {Array<{threadId: string}>} */ ([]);
-  const cancelCalls = /** @type {Array<{threadId: string, userId: (string|undefined)}>} */ ([]);
+  const starts = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
+  const completes = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
+  const cancelCalls = /** @type {Array<{threadId: string, catId: string, userId: (string|undefined)}>} */ ([]);
   let aborted = false;
   let cancelDenied = false;
-  const activeThreads = new Map();
+  /** @type {Map<string, string>} key = "threadId:catId" or "threadId" for legacy */
+  const activeSlots = new Map();
 
   return {
     starts,
@@ -153,36 +154,36 @@ function mockInvocationTracker() {
     setCancelDenied(val) {
       cancelDenied = val;
     },
-    /** Mark a thread as having an active invocation (for queue tests) */
+    /** Mark a slot as having an active invocation (for queue tests) */
     setActive(threadId, userId = 'user-1') {
-      activeThreads.set(threadId, userId);
+      activeSlots.set(threadId, userId);
     },
     clearActive(threadId) {
-      activeThreads.delete(threadId);
+      activeSlots.delete(threadId);
     },
     /** @type {any} */
     tracker: {
-      start(threadId, _userId, _targetCats) {
-        starts.push({ threadId });
+      start(threadId, catId, _userId, _targetCats) {
+        starts.push({ threadId, catId });
         const controller = { signal: { aborted } };
         return controller;
       },
-      complete(threadId, _controller) {
-        completes.push({ threadId });
+      complete(threadId, catId, _controller) {
+        completes.push({ threadId, catId });
       },
-      has(threadId) {
-        return activeThreads.has(threadId);
+      has(threadId, _catId) {
+        return activeSlots.has(threadId);
       },
-      getUserId(threadId) {
-        return activeThreads.get(threadId);
+      getUserId(threadId, _catId) {
+        return activeSlots.get(threadId);
       },
-      cancel(threadId, userId) {
-        cancelCalls.push({ threadId, userId });
+      cancel(threadId, catId, userId) {
+        cancelCalls.push({ threadId, catId, userId });
         if (cancelDenied) return { cancelled: false, catIds: [] };
-        const owner = activeThreads.get(threadId);
+        const owner = activeSlots.get(threadId);
         if (!owner) return { cancelled: false, catIds: [] };
         if (userId && owner !== userId) return { cancelled: false, catIds: [] };
-        activeThreads.delete(threadId);
+        activeSlots.delete(threadId);
         return { cancelled: true, catIds: ['opus'] };
       },
     },
@@ -457,15 +458,15 @@ describe('ConnectorInvokeTrigger', () => {
 
       // Should attempt to cancel active invocation owned by same user
       assert.strictEqual(trackerMock.cancelCalls.length, 1, 'Should call invocationTracker.cancel');
-      assert.deepStrictEqual(trackerMock.cancelCalls[0], { threadId: 'thread-1', userId: 'user-1' });
+      assert.deepStrictEqual(trackerMock.cancelCalls[0], { threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     });
 
     it('clears queue pause before urgent preempt replacement execution', async () => {
       trackerMock.setActive('thread-1', 'user-1');
-      const clearPauseCalls = /** @type {string[]} */ ([]);
+      const clearPauseCalls = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
-        clearPause(threadId) {
-          clearPauseCalls.push(threadId);
+        clearPause(threadId, catId) {
+          clearPauseCalls.push({ threadId, catId });
         },
         async onInvocationComplete() {},
       });
@@ -482,7 +483,11 @@ describe('ConnectorInvokeTrigger', () => {
       await waitForTrigger();
 
       assert.strictEqual(routerMock.calls.length, 1, 'Should execute urgent replacement');
-      assert.deepStrictEqual(clearPauseCalls, ['thread-1'], 'Should clear stale pause before replacement execution');
+      assert.deepStrictEqual(
+        clearPauseCalls,
+        [{ threadId: 'thread-1', catId: 'opus' }],
+        'Should clear stale pause before replacement execution',
+      );
     });
 
     it('does not preempt when urgent cancel is denied (owner mismatch)', async () => {
@@ -792,10 +797,10 @@ describe('ConnectorInvokeTrigger', () => {
     it('P1 fix: direct execution calls queueProcessor.onInvocationComplete on success', async () => {
       // Codex cloud review P1: connector direct execution doesn't notify QueueProcessor,
       // so queued follow-ups stall forever. This test verifies the fix.
-      const qpCalls = /** @type {Array<{threadId: string, status: string}>} */ ([]);
+      const qpCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
-        async onInvocationComplete(threadId, status) {
-          qpCalls.push({ threadId, status });
+        async onInvocationComplete(threadId, catId, status) {
+          qpCalls.push({ threadId, catId, status });
         },
       });
 
@@ -810,10 +815,10 @@ describe('ConnectorInvokeTrigger', () => {
     });
 
     it('P1 fix: direct execution calls queueProcessor.onInvocationComplete on failure', async () => {
-      const qpCalls = /** @type {Array<{threadId: string, status: string}>} */ ([]);
+      const qpCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
-        async onInvocationComplete(threadId, status) {
-          qpCalls.push({ threadId, status });
+        async onInvocationComplete(threadId, catId, status) {
+          qpCalls.push({ threadId, catId, status });
         },
       });
 

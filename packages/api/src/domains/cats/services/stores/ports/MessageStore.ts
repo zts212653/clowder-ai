@@ -13,6 +13,14 @@ import { DEFAULT_THREAD_ID } from './ThreadStore.js';
 export { DEFAULT_THREAD_ID };
 
 /**
+ * F117: Check if a message should be visible in timeline/history/context.
+ * Legacy messages (no deliveryStatus) are treated as delivered.
+ */
+export function isDelivered(msg: StoredMessage): boolean {
+  return !msg.deliveryStatus || msg.deliveryStatus === 'delivered';
+}
+
+/**
  * A tool event recorded during agent invocation (tool_use / tool_result).
  * Persisted alongside the assistant message so history reload can display them.
  */
@@ -50,7 +58,7 @@ export interface StoredMessage {
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];
-  /** F057-C2: Whether this message mentions the user (@user / @team lead) */
+  /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
   mentionsUser?: boolean;
   timestamp: number;
   /** F045: Extended thinking content (accumulated from CLI thinking blocks). Persisted for F5 recovery. */
@@ -67,6 +75,10 @@ export interface StoredMessage {
   source?: ConnectorSource;
   /** F098-D: Timestamp when a queued message was actually dequeued and processed by a cat */
   deliveredAt?: number;
+  /** F117: Delivery lifecycle status. undefined = legacy (treated as delivered) */
+  deliveryStatus?: 'queued' | 'delivered' | 'canceled';
+  /** F121: ID of the message this is replying to (same thread only) */
+  replyTo?: string;
   /** ADR-008 D3: Soft delete timestamp (present = deleted) */
   deletedAt?: number;
   /** ADR-008 D3: Who deleted this message */
@@ -147,6 +159,8 @@ export interface IMessageStore {
   ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F098-D: Mark a queued message as delivered (set deliveredAt). Returns null if not found. */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
+  /** F117: Mark a queued message as canceled (withdraw/clear). Returns null if not found. */
+  markCanceled(id: string): StoredMessage | null | Promise<StoredMessage | null>;
 }
 
 /** Max messages to keep in memory */
@@ -275,6 +289,7 @@ export class MessageStore {
     for (let i = 0; i < this.messages.length && matches.length < n; i++) {
       const msg = this.messages[i]!;
       if (msg.deletedAt) continue;
+      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (afterMessageId && msg.id <= afterMessageId) continue;
       if (threadId && msg.threadId !== threadId) continue;
       if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
@@ -296,6 +311,7 @@ export class MessageStore {
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
       if (msg.deletedAt) continue;
+      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (threadId && msg.threadId !== threadId) continue;
       if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
         matches.push(msg);
@@ -319,6 +335,7 @@ export class MessageStore {
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
       if (msg.deletedAt) continue;
+      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (msg.timestamp > timestamp) continue;
       if (msg.timestamp === timestamp) {
         // Same timestamp: use id as tiebreaker (skip if id >= beforeId)
@@ -343,6 +360,7 @@ export class MessageStore {
       const msg = this.messages[i]!;
       if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
+      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (userId && msg.userId !== userId) continue;
       matches.push(msg);
     }
@@ -364,6 +382,7 @@ export class MessageStore {
       if (msg.threadId !== threadId) continue;
       if (userId && msg.userId !== userId) continue;
       if (afterId && msg.id <= afterId) continue;
+      if (!isDelivered(msg)) continue;
       matches.push(msg);
     }
 
@@ -387,6 +406,7 @@ export class MessageStore {
       const msg = this.messages[i]!;
       if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
+      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (userId && msg.userId !== userId) continue;
       if (msg.timestamp > timestamp) continue;
       if (msg.timestamp === timestamp) {
@@ -487,6 +507,15 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     msg.deliveredAt = deliveredAt;
+    msg.deliveryStatus = 'delivered';
+    return msg;
+  }
+
+  /** F117: Mark a queued message as canceled (withdraw/clear). */
+  markCanceled(id: string): StoredMessage | null {
+    const msg = this.messages.find((m) => m.id === id);
+    if (!msg) return null;
+    msg.deliveryStatus = 'canceled';
     return msg;
   }
 
@@ -496,4 +525,32 @@ export class MessageStore {
   get size(): number {
     return this.messages.length;
   }
+}
+
+/** F121: Reply preview for frontend rendering */
+export interface ReplyPreview {
+  senderCatId: CatId | null;
+  content: string;
+  deleted?: true;
+}
+
+const PREVIEW_MAX_LENGTH = 80;
+
+/**
+ * F121: Hydrate a reply preview from message store.
+ * Returns null if the referenced message doesn't exist.
+ * Returns { deleted: true } if the parent was soft/hard-deleted.
+ */
+export async function hydrateReplyPreview(store: IMessageStore, replyToId: string): Promise<ReplyPreview | null> {
+  const parent = await store.getById(replyToId);
+  if (!parent) return null;
+
+  if (parent.deletedAt || parent._tombstone) {
+    return { senderCatId: parent.catId, content: '', deleted: true };
+  }
+
+  const truncated =
+    parent.content.length > PREVIEW_MAX_LENGTH ? parent.content.slice(0, PREVIEW_MAX_LENGTH) : parent.content;
+
+  return { senderCatId: parent.catId, content: truncated };
 }

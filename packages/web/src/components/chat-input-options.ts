@@ -55,6 +55,7 @@ export const GAME_LIST = [
 export const WEREWOLF_MODES = [
   { id: 'player', label: '玩家模式', desc: '当一名玩家参与', command: '/game werewolf player' },
   { id: 'god-view', label: '上帝视角', desc: '观战所有角色动态', command: '/game werewolf god-view' },
+  { id: 'detective', label: '推理模式', desc: '绑定一只猫的视角推理', command: '/game werewolf detective' },
   { id: 'player-voice', label: '玩家模式（语音）', desc: '语音发言+互动', command: '/game werewolf player voice' },
   { id: 'god-view-voice', label: '上帝视角（语音）', desc: '语音观战体验', command: '/game werewolf god-view voice' },
 ] as const;

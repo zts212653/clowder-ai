@@ -37,7 +37,7 @@ describe('cat-config.json — 金渐层 (opencode) validation', () => {
     const variant = breed.variants.find((v) => v.id === 'opencode-default');
     assert.ok(variant, 'opencode-default variant should exist');
     assert.strictEqual(variant.provider, 'opencode');
-    assert.strictEqual(variant.defaultModel, 'claude-sonnet-4-6');
+    assert.strictEqual(variant.defaultModel, 'claude-opus-4-6');
     assert.strictEqual(variant.mcpSupport, true);
   });
 

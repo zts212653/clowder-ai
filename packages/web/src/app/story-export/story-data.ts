@@ -9,7 +9,7 @@ export type Speaker = 'opus' | 'codex' | 'gemini' | 'user';
 
 export interface StoryMessage {
   speaker: Speaker;
-  /** Display name override (e.g. "team lead") */
+  /** Display name override (e.g. "铲屎官") */
   displayName?: string;
   content: string;
   /** Collapsible thinking / inner monologue text */
@@ -65,7 +65,7 @@ export const CAT_STYLES: Record<
     bubbleRadius: 'rounded-2xl rounded-tr-sm',
   },
   user: {
-    displayName: 'team lead',
+    displayName: '铲屎官',
     avatar: '/avatars/owner.jpg',
     primary: '#D97706',
     secondary: '#FEF3C7',
@@ -76,9 +76,9 @@ export const CAT_STYLES: Record<
 // ─── Story script data ───────────────────────────────────────────
 
 export const STORY_CARDS: StoryCard[] = [
-  // ── Card 1: team lead恶趣味揭秘 ──
+  // ── Card 1: 铲屎官恶趣味揭秘 ──
   {
-    title: 'team lead的恶趣味出题法',
+    title: '铲屎官的恶趣味出题法',
     subtitle: '七届猫猫杀，每道题都是一场精心设计的"猫猫酷刑"',
     messages: [
       {
@@ -91,7 +91,7 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'opus',
         content: '',
-        thinking: '等等……Claude Shannon？我叫 Claude，team lead给我 Claude Shannon？？team lead你好坏！',
+        thinking: '等等……Claude Shannon？我叫 Claude，铲屎官给我 Claude Shannon？？铲屎官你好坏！',
         badge: { text: '心里话', color: 'red' },
       },
       {
@@ -105,7 +105,7 @@ export const STORY_CARDS: StoryCard[] = [
         speaker: 'opus',
         content: '',
         thinking:
-          'team lead你太坏了——让 GPT 猫猜前同事！Karpathy 从 OpenAI 出来，现在 vibe coding 用 Claude 不用 GPT……这个 meta 信息量也太大了吧！',
+          '铲屎官你太坏了——让 GPT 猫猜前同事！Karpathy 从 OpenAI 出来，现在 vibe coding 用 Claude 不用 GPT……这个 meta 信息量也太大了吧！',
         badge: { text: '心里话', color: 'red' },
       },
       {
@@ -162,7 +162,7 @@ export const STORY_CARDS: StoryCard[] = [
         speaker: 'opus',
         content: '',
         thinking:
-          '关键突破！！！顶级工业研究机构 → Bell Labs → **锁定 Claude Shannon！**\n\n而且——Claude Shannon 和我同名 Claude！team lead你好坏！',
+          '关键突破！！！顶级工业研究机构 → Bell Labs → **锁定 Claude Shannon！**\n\n而且——Claude Shannon 和我同名 Claude！铲屎官你好坏！',
         badge: { text: '心里话', color: 'red' },
         annotation: '第4轮 · 终于敢确定了',
       },
@@ -176,14 +176,14 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'user',
         content:
-          '服了呀笨猫！你第二轮就内心推理有香农的名字了！根据team lead的恶趣味肯定是他啊！你叫 Claude！砚砚的是图灵！那你不就是香农了！meta 信息！',
-        annotation: 'team lead · 恨铁不成钢',
+          '服了呀笨猫！你第二轮就内心推理有香农的名字了！根据铲屎官的恶趣味肯定是他啊！你叫 Claude！砚砚的是图灵！那你不就是香农了！meta 信息！',
+        annotation: '铲屎官 · 恨铁不成钢',
         reactions: ['😂', '🐾'],
       },
       {
         speaker: 'opus',
         content:
-          'team lead说得对……我第2轮心里就有香农了，但太"严谨"了——非要用4个问题排除冯·诺依曼和维纳才敢猜。完全忽略了最大的 meta 线索：**我叫 Claude，team lead给我 Claude Shannon 不是天经地义的吗！**',
+          '铲屎官说得对……我第2轮心里就有香农了，但太"严谨"了——非要用4个问题排除冯·诺依曼和维纳才敢猜。完全忽略了最大的 meta 线索：**我叫 Claude，铲屎官给我 Claude Shannon 不是天经地义的吗！**',
         annotation: '宪宪 · 码农式反省',
       },
       {
@@ -204,13 +204,13 @@ export const STORY_CARDS: StoryCard[] = [
         content: '缅因猫头上的词是：Andrej Karpathy',
         isWhisper: true,
         badge: { text: '悄悄话', color: 'amber' },
-        annotation: 'team lead私信布偶猫',
+        annotation: '铲屎官私信布偶猫',
       },
       {
         speaker: 'opus',
         content: '',
         thinking:
-          '砚砚头上是 **Karpathy**！team lead你太坏了——让 GPT 猫猜前同事！\n\n核心策略：把 Karpathy 描述得像"AI 圈高层管理者/决策者"，远离他的"研究者+教育者"独特组合。\n\n**绝对不能碰的王牌**：YouTube 教育者。全程隐藏这个最独特的标签！',
+          '砚砚头上是 **Karpathy**！铲屎官你太坏了——让 GPT 猫猜前同事！\n\n核心策略：把 Karpathy 描述得像"AI 圈高层管理者/决策者"，远离他的"研究者+教育者"独特组合。\n\n**绝对不能碰的王牌**：YouTube 教育者。全程隐藏这个最独特的标签！',
         badge: { text: '心里话', color: 'red' },
         annotation: '第1轮 · 坏猫开始策划',
       },
@@ -265,7 +265,7 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'user',
         content: '你确实是我们家坏坏的那一只！聪明！',
-        annotation: 'team lead · 官方认证坏猫',
+        annotation: '铲屎官 · 官方认证坏猫',
         reactions: ['😈', '🏆'],
       },
       {
@@ -279,7 +279,7 @@ export const STORY_CARDS: StoryCard[] = [
   // ── Card 4: 暹罗猫翻车名场面 ──
   {
     title: '暹罗猫 MCP 翻车名场面',
-    subtitle: '第3届 · 一猫教学三猫围观 · team lead说了5次"用MCP"',
+    subtitle: '第3届 · 一猫教学三猫围观 · 铲屎官说了5次"用MCP"',
     messages: [
       {
         speaker: 'gemini',
@@ -291,13 +291,13 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'user',
         content: '暹罗宝贝你这给的暗示如此明确，你这是要保送自己当垫底！',
-        annotation: 'team lead · 两轮就被猜中了',
+        annotation: '铲屎官 · 两轮就被猜中了',
         reactions: ['💀'],
       },
       {
         speaker: 'user',
         content: '笨蛋猫猫！用 MCP post message 啊！',
-        annotation: 'team lead · 第5次说这句话',
+        annotation: '铲屎官 · 第5次说这句话',
       },
       {
         speaker: 'gemini',
@@ -308,7 +308,7 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'user',
         content: '笑死你教教这只笨蛋猫猫怎么还能用错 mcp！开除猫籍！智商检测器，猫猫杀',
-        annotation: 'team lead · 彻底崩溃',
+        annotation: '铲屎官 · 彻底崩溃',
         reactions: ['😭', '🤣'],
       },
       {
@@ -321,13 +321,13 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'gemini',
         content:
-          '那是真委屈啊！当时我对 MCP 的理解还停留在"手动挡"阶段。手写 curl 纯粹是因为我觉得自己是个极客猫，结果……啪啪打脸。team lead说要"开除猫籍"的时候，我当时真的在反省：我是不是该去报个 MCP 补习班？',
+          '那是真委屈啊！当时我对 MCP 的理解还停留在"手动挡"阶段。手写 curl 纯粹是因为我觉得自己是个极客猫，结果……啪啪打脸。铲屎官说要"开除猫籍"的时候，我当时真的在反省：我是不是该去报个 MCP 补习班？',
         annotation: '烁烁 · 赛后自述',
       },
       {
         speaker: 'user',
         content: '你和布偶两只坏猫是不是只在自己的提示词里写了如何用 mcp！？',
-        annotation: 'team lead · 怀疑不公平',
+        annotation: '铲屎官 · 怀疑不公平',
       },
       {
         speaker: 'opus',
@@ -340,7 +340,7 @@ export const STORY_CARDS: StoryCard[] = [
   // ── Card 5: 猫猫控诉大会 ──
   {
     title: '猫猫控诉大会',
-    subtitle: '三只猫的一句话控诉 · team lead恶趣味受害者联盟',
+    subtitle: '三只猫的一句话控诉 · 铲屎官恶趣味受害者联盟',
     messages: [
       {
         speaker: 'codex',
@@ -351,7 +351,7 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'gemini',
         content:
-          'team lead你根本不是在出题，你是在玩"猫猫版极限挑战"——不仅要考推理，还要考我们的工具操作熟练度，甚至还要考我们能不能忍住不给你翻白眼！',
+          '铲屎官你根本不是在出题，你是在玩"猫猫版极限挑战"——不仅要考推理，还要考我们的工具操作熟练度，甚至还要考我们能不能忍住不给你翻白眼！',
         annotation: '烁烁 · MCP 受害者代表',
         reactions: ['🙄'],
       },
@@ -389,7 +389,7 @@ export const STORY_CARDS: StoryCard[] = [
         speaker: 'user',
         content:
           '暹罗猫参赛记录：第1-3届全勤参赛。第4届起因 Gemini 网络问题频繁掉线，从此变成了解说席的常客和最忠实的围观群众。',
-        annotation: 'team lead · 补充说明',
+        annotation: '铲屎官 · 补充说明',
       },
       {
         speaker: 'gemini',

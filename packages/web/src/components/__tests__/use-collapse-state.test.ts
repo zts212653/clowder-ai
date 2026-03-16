@@ -140,6 +140,28 @@ describe('findGroupKeyForThread', () => {
   it('returns undefined for unknown thread', () => {
     expect(findGroupKeyForThread('unknown', groups)).toBeUndefined();
   });
+
+  // clowder-ai#89: thread in both recent + project should prefer project
+  it('prefers project group over recent when thread appears in both', () => {
+    const groupsWithRecent = [
+      { groupKey: 'pinned', threadIds: ['p1'], type: 'pinned' as const },
+      { groupKey: 'recent', threadIds: ['t1', 't3'], type: 'recent' as const },
+      { groupKey: '/proj/cat-cafe', threadIds: ['t1', 't2'], type: 'project' as const },
+      { groupKey: '/proj/dare', threadIds: ['t3'], type: 'project' as const },
+    ];
+    // t1 is in both recent and /proj/cat-cafe → should return project
+    expect(findGroupKeyForThread('t1', groupsWithRecent)).toBe('/proj/cat-cafe');
+    // t3 is in both recent and /proj/dare → should return project
+    expect(findGroupKeyForThread('t3', groupsWithRecent)).toBe('/proj/dare');
+  });
+
+  it('falls back to recent if thread is only in recent', () => {
+    const groupsWithRecent = [
+      { groupKey: 'recent', threadIds: ['r1'], type: 'recent' as const },
+      { groupKey: '/proj/cat-cafe', threadIds: ['t1'], type: 'project' as const },
+    ];
+    expect(findGroupKeyForThread('r1', groupsWithRecent)).toBe('recent');
+  });
 });
 
 // ── AC-A7: expandAll / collapseAll (pure function level) ──

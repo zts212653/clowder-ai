@@ -14,9 +14,9 @@
 {为什么做、约束、目标}
 
 ## Original Requirements（必填）
-> {直接粘贴team experience，≤5 行}
+> {直接粘贴铲屎官原话，≤5 行}
 - 来源：*(internal reference removed)*
-- **请对照上面的摘录判断交付物是否解决了team lead的问题**
+- **请对照上面的摘录判断交付物是否解决了铲屎官的问题**
 
 ## Tradeoff
 {放弃了什么方案，为什么}

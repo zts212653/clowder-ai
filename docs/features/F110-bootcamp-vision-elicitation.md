@@ -4,12 +4,14 @@ related_features: [F087, F106]
 topics: [bootcamp, onboarding, cvo, vision, ux]
 doc_kind: spec
 created: 2026-03-12
+community_issue: https://github.com/zts212653/clowder-ai/issues/16
 ---
 
 # F110: 训练营愿景引导增强 — CVO 需求挖掘 + SOP 显式加载
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
 > **Evolved from**: F087（CVO Bootcamp — 训练营基础设施已完成，但 Phase 5+ 引导能力不足）
+> **Community issue**: [#16](https://github.com/zts212653/clowder-ai/issues/16)（Bootcamp Phase Transition UX，已吸收进 F110）
 
 ## Why
 

@@ -164,7 +164,8 @@ export async function generateScriptViaThread(
   });
 
   // ③ Track invocation
-  const controller = deps.invocationTracker.start(threadId, request.requestedBy, targetCats);
+  const primaryCat = targetCats[0] ?? 'opus';
+  const controller = deps.invocationTracker.start(threadId, primaryCat, request.requestedBy, targetCats);
 
   // ④ Route execution and collect text response
   const intent = { intent: 'execute' as const, explicit: false, promptTags: [] as string[] };
@@ -180,7 +181,7 @@ export async function generateScriptViaThread(
       userMsg.id,
       targetCats,
       intent,
-      { signal: controller.signal },
+      { signal: controller.signal, parentInvocationId: createResult.invocationId },
     )) {
       if (msg.type === 'text' && msg.content) {
         fullText += msg.content;
@@ -195,7 +196,7 @@ export async function generateScriptViaThread(
     });
     throw err;
   } finally {
-    deps.invocationTracker.complete(threadId, controller);
+    deps.invocationTracker.complete(threadId, primaryCat, controller);
   }
 
   return parseScriptResponse(fullText, request.mode);

@@ -82,7 +82,7 @@ export interface GameRuntime {
   round: number;
   eventLog: GameEvent[];
   pendingActions: Record<string, GameAction>;
-  status: 'lobby' | 'playing' | 'finished';
+  status: 'lobby' | 'playing' | 'paused' | 'finished';
   winner?: string;
   config: GameConfig;
   phaseStartedAt?: number;
@@ -113,7 +113,11 @@ export interface GameConfig {
   timeoutMs: number;
   voiceMode: boolean;
   humanSeat?: SeatId;
-  humanRole: 'player' | 'god-view';
+  humanRole: 'player' | 'god-view' | 'detective';
+  /** Detective mode: the seat whose perspective the observer inherits */
+  detectiveSeatId?: SeatId;
+  /** UserId of the human observer (god-view/detective) for state broadcast */
+  observerUserId?: string;
 }
 
 // === Game View (scoped read-only) ===
@@ -122,14 +126,41 @@ export interface GameView {
   gameId: string;
   threadId: string;
   gameType: string;
-  status: 'lobby' | 'playing' | 'finished';
+  status: 'lobby' | 'playing' | 'paused' | 'finished';
   currentPhase: string;
   round: number;
   seats: SeatView[];
   visibleEvents: GameEvent[];
   myActions?: GameAction[];
   winner?: string;
-  config: Pick<GameConfig, 'timeoutMs' | 'voiceMode' | 'humanRole'> & { humanSeat?: SeatId };
+  /** Epoch ms when current phase started (for countdown timer) */
+  phaseStartedAt?: number;
+  config: Pick<GameConfig, 'timeoutMs' | 'voiceMode' | 'humanRole'> & {
+    humanSeat?: SeatId;
+    detectiveSeatId?: SeatId;
+  };
+  /** Filled when status === 'finished' — per-player stats + MVP */
+  gameStats?: GameResultStats;
+}
+
+/** Post-game result stats for display in the result screen */
+export interface GameResultStats {
+  winner: string;
+  rounds: number;
+  duration: number;
+  mvpSeatId: string;
+  mvpReason: string;
+  players: Array<{
+    seatId: string;
+    actorId: string;
+    role: string;
+    faction: string;
+    survived: boolean;
+    won: boolean;
+    killCount: number;
+    savedCount: number;
+    divineCount: number;
+  }>;
 }
 
 export interface SeatView {
@@ -140,6 +171,8 @@ export interface SeatView {
   role?: string;
   faction?: string;
   alive: boolean;
+  /** Whether this seat has submitted an action for the current phase */
+  hasActed?: boolean;
 }
 
 // === Type Guards ===

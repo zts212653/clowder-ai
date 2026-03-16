@@ -5,13 +5,13 @@
 export function normalizeErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
-  if (
-    typeof err === 'object' &&
-    err !== null &&
-    'message' in err &&
-    typeof (err as { message: unknown }).message === 'string'
-  ) {
-    return (err as { message: string }).message;
+  if (typeof err === 'object' && err !== null) {
+    try {
+      const message = Reflect.get(err, 'message');
+      if (typeof message === 'string') return message;
+    } catch {
+      // Fall through to the generic fallback path when message access is hostile.
+    }
   }
   try {
     const s = String(err);

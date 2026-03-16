@@ -241,6 +241,25 @@ export class MultiMentionOrchestrator {
   }
 
   /**
+   * F108: Abort dispatches for a specific cat in a thread (slot-specific cancel).
+   * Called when a user cancels a specific slot, not the entire thread.
+   */
+  abortBySlot(threadId: string, catId: CatId): number {
+    let aborted = 0;
+    for (const entry of this.entries.values()) {
+      if (entry.request.threadId !== threadId) continue;
+      if (MULTI_MENTION_TERMINAL_STATES.has(entry.request.status)) continue;
+      const key = `${entry.request.id}:${catId as string}`;
+      const controller = this.dispatchControllers.get(key);
+      if (controller && !controller.signal.aborted) {
+        controller.abort();
+        aborted++;
+      }
+    }
+    return aborted;
+  }
+
+  /**
    * Check if any dispatches are actively running for a thread.
    * Called by delete guard to prevent deletion while dispatches are in-flight.
    */

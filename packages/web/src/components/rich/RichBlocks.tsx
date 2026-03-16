@@ -5,6 +5,7 @@ import { AudioBlock } from './AudioBlock';
 import { CardBlock } from './CardBlock';
 import { ChecklistBlock } from './ChecklistBlock';
 import { DiffBlock } from './DiffBlock';
+import { HtmlWidgetBlock } from './HtmlWidgetBlock';
 import { InteractiveBlock } from './InteractiveBlock';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
 import { MediaGalleryBlock } from './MediaGalleryBlock';
@@ -23,6 +24,8 @@ function RichBlockRenderer({ block, catId, messageId }: { block: RichBlock; catI
       return <AudioBlock block={block} catId={catId} />;
     case 'interactive':
       return <InteractiveBlock block={block} messageId={messageId} />;
+    case 'html_widget':
+      return <HtmlWidgetBlock block={block} />;
     default:
       return (
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-400">

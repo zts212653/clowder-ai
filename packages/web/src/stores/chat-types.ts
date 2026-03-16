@@ -62,7 +62,7 @@ export interface ToolEvent {
 }
 
 /** F22: Rich block types for frontend rendering */
-export type RichBlockKind = 'card' | 'diff' | 'checklist' | 'media_gallery' | 'audio' | 'interactive';
+export type RichBlockKind = 'card' | 'diff' | 'checklist' | 'media_gallery' | 'audio' | 'interactive' | 'html_widget';
 
 /** F066 Phase 4: Card action button */
 export interface CardAction {
@@ -156,13 +156,27 @@ export interface RichInteractiveBlock {
   groupId?: string;
 }
 
+/** F120 Phase C: Inline HTML/JS widget rendered in sandboxed iframe (srcdoc) */
+export interface RichHtmlWidgetBlock {
+  id: string;
+  kind: 'html_widget';
+  v: 1;
+  /** Complete HTML document or fragment to render */
+  html: string;
+  /** Optional title displayed above the widget */
+  title?: string;
+  /** iframe height in px (default: 300) */
+  height?: number;
+}
+
 export type RichBlock =
   | RichCardBlock
   | RichDiffBlock
   | RichChecklistBlock
   | RichMediaGalleryBlock
   | RichAudioBlock
-  | RichInteractiveBlock;
+  | RichInteractiveBlock
+  | RichHtmlWidgetBlock;
 
 /** F97: External connector source info (only when type='connector') */
 export interface ConnectorSourceData {
@@ -206,6 +220,8 @@ export interface ChatMessage {
     stream?: { invocationId?: string };
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
+    /** F118 AC-C3: Timeout diagnostics for enhanced error display */
+    timeoutDiagnostics?: TimeoutDiagnostics;
   };
   /** A2A chain group ID — messages in the same A2A chain share this ID */
   a2aGroupId?: string;
@@ -219,9 +235,15 @@ export interface ChatMessage {
   whisperTo?: string[];
   /** F35: Timestamp when whisper was revealed (made public) */
   revealedAt?: number;
-  /** F057-C2: Whether this message mentions the user (@user / @team lead) */
+  /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
   mentionsUser?: boolean;
+  /** F121: ID of the message this is replying to */
+  replyTo?: string;
+  /** F121: Server-hydrated reply preview (sender + truncated content) */
+  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
 }
+
+export type ChatMessagePatch = Omit<Partial<ChatMessage>, 'id' | 'type'>;
 
 export interface Thread {
   id: string;
@@ -340,9 +362,33 @@ export interface CatInvocationInfo {
   sessionSealed?: boolean;
   /** F26: Real-time task progress from cat's tool usage */
   taskProgress?: TaskProgressState;
+  /** F118 Phase C: Latest liveness warning snapshot */
+  livenessWarning?: LivenessWarningSnapshot;
 }
 
-export type CatStatusType = 'pending' | 'streaming' | 'done' | 'error';
+/** F118 Phase C: Liveness warning snapshot from ProcessLivenessProbe */
+export interface LivenessWarningSnapshot {
+  level: 'alive_but_silent' | 'suspected_stall';
+  state: 'active' | 'busy-silent' | 'idle-silent' | 'dead';
+  silenceDurationMs: number;
+  cpuTimeMs?: number;
+  processAlive: boolean;
+  receivedAt: number;
+}
+
+/** F118 Phase C AC-C3: Timeout diagnostics data from CLI */
+export interface TimeoutDiagnostics {
+  silenceDurationMs: number;
+  processAlive: boolean;
+  lastEventType?: string;
+  firstEventAt?: number;
+  lastEventAt?: number;
+  cliSessionId?: string;
+  invocationId?: string;
+  rawArchivePath?: string;
+}
+
+export type CatStatusType = 'pending' | 'streaming' | 'done' | 'error' | 'alive_but_silent' | 'suspected_stall';
 
 /** F39: Queue entry from backend InvocationQueue */
 export interface QueueEntry {
@@ -379,6 +425,8 @@ export interface ThreadState {
   hasMore: boolean;
   /** Whether the thread has an active invocation (broader than isLoading — stays true during A2A chains) */
   hasActiveInvocation: boolean;
+  /** F108: Per-invocation slot tracking — key=invocationId, value=slot info */
+  activeInvocations: Record<string, { catId: string; mode: string }>;
   intentMode: 'execute' | 'ideate' | null;
   targetCats: string[];
   catStatuses: Record<string, CatStatusType>;
@@ -429,6 +477,7 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   hasUserMention: false,
   lastActivity: 0,
   queue: [],
+  activeInvocations: {},
   queuePaused: false,
   queueFull: false,
 };

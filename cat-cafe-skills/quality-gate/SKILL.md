@@ -30,7 +30,7 @@ triggers:
 >
 > 自问："我是这次真的运行了命令并看到输出，还是我只是相信它能工作？"
 
-**为什么 AC 可能不够**：AC 是人写的，可能遗漏 UX 要求或场景覆盖。F041 教训：AC 全打勾，但team lead的原始需求（能力显示描述、多项目管理）根本没进 AC——spec compliance check 检查了 AC，但 AC 本身就是错的。
+**为什么 AC 可能不够**：AC 是人写的，可能遗漏 UX 要求或场景覆盖。F041 教训：AC 全打勾，但铲屎官的原始需求（能力显示描述、多项目管理）根本没进 AC——spec compliance check 检查了 AC，但 AC 本身就是错的。
 
 ## 流程
 
@@ -38,23 +38,23 @@ triggers:
 BEFORE 声称完成 / 提 review:
 
 Step 0: VISION CHECK（愿景核对）
-  ① 找原始 Discussion/Interview 文档（team experience在里面）
+  ① 找原始 Discussion/Interview 文档（铲屎官原话在里面）
   ② 读核心痛点："我要..."、"我不想..."
-  ③ 问自己：team lead坐在 Hub 前用这个功能，体验是什么样的？
-  ④ AC 是否完整覆盖了team lead的原始需求？
+  ③ 问自己：铲屎官坐在 Hub 前用这个功能，体验是什么样的？
+  ④ AC 是否完整覆盖了铲屎官的原始需求？
      → 如有遗漏，先补 AC 再继续
 
 Step 0.5: DELIVERY COMPLETENESS CHECK
   ① 这次交付的是完整 feat 还是 feat 的一部分？
      → 完整 feat：继续
-     → 部分：有team lead明确同意分批交付的记录吗？没有就继续做完
+     → 部分：有铲屎官明确同意分批交付的记录吗？没有就继续做完
   ② 本次产出后续需要"重写"还是"扩展"？
      → 扩展：通过
      → 重写：如果是已标注 Spike 且有结论，通过；否则不通过，回去重做
 
 Step 1: FIND — 找 spec/plan 文档
   - the active feature spec or implementation plan
-  - 同时找 Discussion/Interview（team experience所在）
+  - 同时找 Discussion/Interview（铲屎官原话所在）
 
 Step 2: CREATE — 建检查清单
   - 列出每一个 AC / 功能点 / 边界条件
@@ -72,7 +72,8 @@ Step 4: RUNTIME GUARD — 前端证据采集前先做运行态保护
   - 服务已在线时直接复用，禁止在该会话执行 `pnpm start` / `pnpm runtime:start` / `./scripts/start-dev.sh`
   - `localhost:3004/3003` 默认按 runtime 处理；如果你要验证未合入改动，不能把这两个端口的页面/接口响应当成当前分支的证据
   - 证明“这是我当前 worktree 的验证证据”时，必须同时说清：`worktree/cwd` + 目标 URL。两者对不上 = 证据无效
-  - 确需重启时，先获team lead明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行
+  - 确需重启时，先获铲屎官明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行
+  - **Alpha 优先**：验证已合入 main 的改动时，优先用 `pnpm alpha:start`（3011/3012/4111/6398）取证，而非 runtime。Alpha 环境每次启动自动同步 origin/main
 
 Step 5: PEN CHECK — 自动化设计稿对照（不可跳过！）
   ① glob designs/**/*.pen，匹配当前 feat 编号或关键词
@@ -90,9 +91,15 @@ Step 6: RUN — 运行验证命令（必须这次真实运行）
   pnpm --filter @cat-cafe/api test:redis
   # ⚠️ pnpm check 包含 biome format + lint 规则。
   # 如果有 format 问题，先跑 pnpm check:fix 自动修复。
-  # 不能带着 biome errors 提 review！（2026-03-12 team lead定调）
+  # 不能带着 biome errors 提 review！（2026-03-12 铲屎官定调）
 
 Step 7: READ — 完整读输出，看 exit code，数失败数
+
+Step 7.5: ARTIFACT HYGIENE CHECK — 根目录媒体垃圾闸门
+  - 执行：`git status --short | rg '^\?\? [^/]+\.(png|jpe?g|webm|mp4)$'`
+  - 若有输出 → BLOCK：说明仓库根目录出现了未跟踪媒体工件
+  - 处理方式：移到 `${TMPDIR}/cat-cafe-evidence/...` 或显式归档到正式目录后再继续
+  - 规则真相源：`cat-cafe-skills/refs/evidence-output-contract.md`
 
 Step 8: REPORT — 输出合规报告 + 证据
 ```
@@ -133,7 +140,7 @@ Spec: feature spec or implementation note
 检查时间: YYYY-MM-DD HH:MM
 
 ### 愿景覆盖（Step 0）
-| # | team lead原始需求 | AC 覆盖？ | 实现？ |
+| # | 铲屎官原始需求 | AC 覆盖？ | 实现？ |
 |---|---------------|-----------|--------|
 | 1 | "我要 XXX"    | AC#3      | ✅     |
 
@@ -145,6 +152,9 @@ Spec: feature spec or implementation note
 ### 设计稿对照（Step 5）
 glob designs/**/*.pen 匹配结果: [列出匹配文件或"无匹配"]
 对照状态: ✅ 已对照 / ⚠️ 无设计稿（有 UI 改动）/ ➖ 无 UI 改动
+
+### Artifact Hygiene（Step 7.5）
+仓库根目录未跟踪媒体文件: 无 ✅
 
 ### 验证命令输出（必须是这次真实运行）
 pnpm test → 34/34 pass ✅
@@ -162,12 +172,13 @@ pnpm -r --if-present run build → exit 0 ✅
 | "应该没问题" / "probably works" | Run the command. Read the output. |
 | 测试通过就声称 phase 完成 | 还要对照 spec 逐项检查 |
 | 部分实现就提 review | P1/P2 遗漏必须当轮补完再提 review |
-| 交付半成品让team lead"先看看" | 交付完整 feat，步骤是内部节奏不是交付批次 |
+| 交付半成品让铲屎官"先看看" | 交付完整 feat，步骤是内部节奏不是交付批次 |
 | 产出后续要重写而非扩展 | 如果要重写，说明绕路了（Spike 除外） |
 | 前端功能没有截图证据 | ≤3 张截图 + 15s 录屏 + 映射表 |
 | 有 .pen 设计稿但没对照实现 | Step 5 自动 glob 检测，匹配到就强制对照，不靠记忆 |
 | 为了截图在 runtime 会话里重跑 `pnpm start` | 先探活复用现有 runtime；确需重启必须显式授权 |
 | 拿 runtime 的 `3004/3003` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3004/3003`，默认这是 runtime 证据，不是未合入改动证据 |
+| 截图顺手掉进仓库根目录 | Step 7.5 必查；先移到 `${TMPDIR}/cat-cafe-evidence/...` 或正式归档目录，再继续 |
 | Redis 改动用默认测试命令 | 必须跑 `test:redis`，禁止直连 6399 |
 | 只看 spec checkbox 就声称完成/未完成 | 核实 `git log --grep` + `gh pr list` + 实际 commit（LL-029）|
 
@@ -188,7 +199,7 @@ pnpm -r --if-present run build → exit 0 ✅
 
 ## 下一步
 
-Quality Gate 通过后 → **直接加载 `request-review`** skill 请求 review（SOP Step 3a）。不要停下来问team lead"要不要继续"（§17）。
+Quality Gate 通过后 → **直接加载 `request-review`** skill 请求 review（SOP Step 3a）。不要停下来问铲屎官"要不要继续"（§17）。
 
 Gate 未通过时：
 - **P1 遗漏** → 补完再过 gate

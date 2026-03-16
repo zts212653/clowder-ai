@@ -2,7 +2,7 @@
 name: self-evolution
 description: >
   Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
-  Use when: team lead scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
+  Use when: 铲屎官 scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
   Not for: 日常 SOP 推进（正常执行）、一次性个案 bug fix。
   Output: Scope Guard Log 记录 / Evolution Proposal 提案 / Episode Card → Method/Skill 蒸馏 → Eval 验证。
 ---
@@ -17,7 +17,7 @@ description: >
 
 | 模式 | 方向 | 保护/推动什么 | 触发 | 产出物 |
 |------|------|---------------|------|--------|
-| **A: Scope Guard** | 防御 | 当前 feat 验收边界 | team lead讨论偏离愿景 | Scope Guard Log 记录 |
+| **A: Scope Guard** | 防御 | 当前 feat 验收边界 | 铲屎官讨论偏离愿景 | Scope Guard Log 记录 |
 | **B: Process Evolution** | 防御→改进 | 团队流程持续改进 | 重复犯错 / 流程缺口 | Evolution Proposal |
 | **C: Knowledge Evolution** | 进攻→成长 | 团队能力边界扩展 | 有价值的知识/方法论产生 | Episode Card → Method/Skill |
 
@@ -38,10 +38,10 @@ description: >
 
 ### 行为
 
-> team lead，先收一下：当前 feat 愿景是 **{愿景}**。刚才提到的 **{新方向}** 更像独立 feat / 下一 phase。要不要拆出去方便验收？
+> 铲屎官，先收一下：当前 feat 愿景是 **{愿景}**。刚才提到的 **{新方向}** 更像独立 feat / 下一 phase。要不要拆出去方便验收？
 
 - 同一 phase **最多两次**：第一次温柔，第二次明确说"建议碰头"
-- team lead说"不拆" → 复述新验收边界，不再追问
+- 铲屎官说"不拆" → 复述新验收边界，不再追问
 - 出口：继续 / 拆 feat / parking lot / 碰头
 
 ### 触发后记录
@@ -53,7 +53,7 @@ description: >
 ```
 
 - **同一 feat ≥3 次**触发 → 强烈建议拆 feat
-- **效果追踪**：成功率 = team lead聚焦 / 总触发，用于调节灵敏度
+- **效果追踪**：成功率 = 铲屎官聚焦 / 总触发，用于调节灵敏度
 
 ---
 
@@ -62,7 +62,7 @@ description: >
 ### 触发（任一）
 
 1. Memory 中同类错误 **≥ 2 次**
-2. team lead纠正了**可泛化为规则**的行为
+2. 铲屎官纠正了**可泛化为规则**的行为
 3. SOP 执行中发现**没有指引**
 4. Review 指出**系统性问题**（非个案 bug）
 
@@ -70,7 +70,7 @@ description: >
 
 1. **写提案**：用 `docs/evolution-proposals/TEMPLATE.md` 创建 `EP-XXX.md`
 2. **5 槽模板**：Trigger / Evidence(≥2 源) / Root Cause / Lever(最小杠杆) / Verify
-3. **审批**：影响单猫→直接提team lead；影响三猫→先 1 猫 sanity check→team lead拍板
+3. **审批**：影响单猫→直接提铲屎官；影响三猫→先 1 猫 sanity check→铲屎官拍板
 4. **落地闭环**：accepted → 必须关联 commit/PR，不能停在"提了"
 5. **30 天验证**：落地 30 天后自动触发 replay check——同类错误还出现吗？
 
@@ -97,7 +97,7 @@ description: >
 1. **Deep research** 产出了跨场景可复用的知识或框架
 2. **专业领域讨论**（医疗/法律/投资/技术调研等）形成了可迁移的分析方法论
 3. **跨域协作**中发现了可复用的协作模式或思维框架
-4. **team lead说"这个值得记住"** 或猫猫自主判断有高复用价值
+4. **铲屎官说"这个值得记住"** 或猫猫自主判断有高复用价值
 
 ### 判断标准：值得沉淀吗？
 

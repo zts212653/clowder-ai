@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import * as pty from 'node-pty';
+import type { PortDiscoveryService } from '../domains/preview/port-discovery.js';
 import type { AgentPaneRegistry } from '../domains/terminal/agent-pane-registry.js';
 import { TerminalSessionStore } from '../domains/terminal/session-store.js';
 import type { TmuxGateway } from '../domains/terminal/tmux-gateway.js';
@@ -9,13 +10,14 @@ import { resolveUserId } from '../utils/request-identity.js';
 interface TerminalRouteOpts {
   tmuxGateway?: TmuxGateway;
   agentPaneRegistry?: AgentPaneRegistry;
+  portDiscovery?: PortDiscoveryService;
 }
 interface PtyBinding {
   pty: pty.IPty;
 }
 
 export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app, opts) => {
-  const { tmuxGateway, agentPaneRegistry } = opts;
+  const { tmuxGateway, agentPaneRegistry, portDiscovery } = opts;
   const store = new TerminalSessionStore();
   const ptys = new Map<string, PtyBinding>();
 
@@ -104,6 +106,12 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
     const dataHandler = ptyProcess.onData((data) => {
       if (socket.readyState === 1) {
         socket.send(data);
+      }
+      // F120: Feed terminal output to port discovery (non-blocking)
+      if (portDiscovery && session?.worktreeId) {
+        for (const line of data.split('\n')) {
+          if (line.trim()) portDiscovery.feedStdout(session.worktreeId, sessionId, line).catch(() => {});
+        }
       }
     });
 
@@ -239,6 +247,12 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
 
     const dataHandler = ptyProcess.onData((data) => {
       if (socket.readyState === 1) socket.send(data);
+      // F120: Feed agent pane output to port discovery (non-blocking)
+      if (portDiscovery && worktreeId) {
+        for (const line of data.split('\n')) {
+          if (line.trim()) portDiscovery.feedStdout(worktreeId, paneId, line).catch(() => {});
+        }
+      }
     });
 
     socket.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {

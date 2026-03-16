@@ -9,13 +9,13 @@ created: 2026-02-26
 
 > **状态**: 已决定
 > **日期**: 2026-02-06
-> **决策者**: team lead + Ragdoll
+> **决策者**: 铲屎官 + Ragdoll
 > **上下文**: Phase 3.2 完成后复盘, 参考 Codex App 的 Project/Thread 模型
 
 ## 背景
 
 Phase 3.2 实现了扁平的 Thread（对话）管理，但缺少 **Project 层**。
-team lead指出参考 Codex App 的组织方式：
+铲屎官指出参考 Codex App 的组织方式：
 
 ```
 Codex App 侧栏:
@@ -38,7 +38,7 @@ Codex App 侧栏:
 
 2. **文件系统即记忆**: 目录结构本身就是知识的组织方式 — CLAUDE.md, AGENTS.md, GEMINI.md, docs/, src/ 都是项目记忆的一部分。
 
-3. **跨项目天然隔离**: 当猫咖帮team lead做别的项目时（非 cat-cafe 本身），`AgentServiceOptions.workingDirectory` 已支持设置不同 cwd。Project = Directory 让这个变得自然。
+3. **跨项目天然隔离**: 当猫咖帮铲屎官做别的项目时（非 cat-cafe 本身），`AgentServiceOptions.workingDirectory` 已支持设置不同 cwd。Project = Directory 让这个变得自然。
 
 4. **与 Phase 3.5 一致**: Task (毛线球) 附着到 Thread, Thread 归属 Project。Task 的文件操作天然在 Project 目录内。
 
@@ -190,9 +190,9 @@ spawn CLI → cwd = projectPath
 
 ## 给未来Ragdoll的备忘
 
-1. **不要忘记 Project = 目录**。这是team lead明确确认的设计决策。
+1. **不要忘记 Project = 目录**。这是铲屎官明确确认的设计决策。
 2. **Thread 是 Project 内的会话**，不是全局扁平的。
 3. **身份注入是万物之基** — 不做身份注入，Phase 3.5 的一切都是空中楼阁。
-4. **参考 Codex App** — `reference-pictures/codex-app-multi-thread.png` 是team lead给的参考截图。
+4. **参考 Codex App** — `reference-pictures/codex-app-multi-thread.png` 是铲屎官给的参考截图。
 5. **双轨制 (Task + Roundtable)** — Maine Coon的设计 (`dual-track-collaboration-design.md`) 已获共识。
 6. **Demo 发现** — *(internal reference removed)* 记录了所有 P0-P3 问题。

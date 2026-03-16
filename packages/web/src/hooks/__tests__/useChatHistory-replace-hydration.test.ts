@@ -273,6 +273,57 @@ describe('useChatHistory replace hydration', () => {
     expect(useChatStore.getState().messages.find((m) => m.id === 'live-1')).toBeUndefined();
   });
 
+  it('prefers a formal server callback bubble over a richer local stream bubble for the same invocation', async () => {
+    const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 1000;
+    mountReplaceHydrationThread(
+      makeThreadBState(cachedAssistantTs, {
+        catInvocations: { opus: { invocationId: 'inv-1', startedAt: cachedAssistantTs } },
+      }),
+    );
+
+    act(() => {
+      useChatStore.getState().addMessage({
+        id: 'live-stream-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'local stream bubble is richer than the final callback but should still lose during hydration',
+        timestamp: Date.now(),
+        isStreaming: true,
+        origin: 'stream',
+        extra: { stream: { invocationId: 'inv-1' } },
+      });
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    await history.resolve({
+      messages: [
+        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
+        {
+          id: 'server-callback-1',
+          catId: 'opus',
+          content: 'final callback answer',
+          origin: 'callback',
+          timestamp: Date.now(),
+          extra: { stream: { invocationId: 'inv-1' } },
+        },
+      ],
+      hasMore: false,
+    });
+
+    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'server-callback-1']);
+    expect(useChatStore.getState().messages.find((m) => m.id === 'live-stream-1')).toBeUndefined();
+    expect(useChatStore.getState().messages.find((m) => m.id === 'server-callback-1')).toEqual(
+      expect.objectContaining({
+        origin: 'callback',
+        content: 'final callback answer',
+        extra: { stream: { invocationId: 'inv-1' } },
+      }),
+    );
+  });
+
   it('reconciles a completed draft bubble with its formal message (Bug B: no duplicate)', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;

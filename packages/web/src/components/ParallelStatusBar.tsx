@@ -18,6 +18,10 @@ function StatusDot({ status }: { status: string }) {
       return <span className="text-green-500 text-xs">&#10003;</span>;
     case 'error':
       return <span className="text-red-500 text-xs">&#10007;</span>;
+    case 'alive_but_silent':
+      return <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />;
+    case 'suspected_stall':
+      return <span className="inline-block w-2 h-2 rounded-full bg-orange-500 animate-pulse" />;
     default:
       return null;
   }

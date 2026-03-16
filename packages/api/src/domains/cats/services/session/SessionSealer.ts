@@ -13,11 +13,14 @@
 import type { CatId, SealResult, SessionStatus } from '@cat-cafe/shared';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
+import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import { buildThreadMemory } from './buildThreadMemory.js';
 import { generateHandoffDigest } from './HandoffDigestGenerator.js';
 import { formatEventsChat, formatEventsHandoff } from './TranscriptFormatter.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1, TranscriptWriter } from './TranscriptWriter.js';
+
+const FINALIZE_TIMEOUT_MS = 30_000;
 
 export type SealReason = 'threshold' | 'manual' | 'error' | (string & {});
 
@@ -105,6 +108,78 @@ export class SessionSealer implements ISessionSealer {
 
     const now = Date.now();
 
+    try {
+      await withTimeout(this.doFinalize(record, now), FINALIZE_TIMEOUT_MS);
+    } catch (err) {
+      // Finalize timed out or threw — force-seal to prevent stuck sealing state.
+      getEventAuditLog().append({
+        type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+        threadId: record.threadId,
+        data: {
+          sessionId: args.sessionId,
+          catId: record.catId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+
+    // Always attempt terminal transition — even if doFinalize failed/timed out.
+    // A sealed session with missing transcript is recoverable; a stuck sealing session is not.
+    try {
+      await this.store.update(args.sessionId, {
+        status: 'sealed',
+        sealedAt: now,
+        updatedAt: now,
+      });
+    } catch (err) {
+      getEventAuditLog().append({
+        type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+        threadId: record.threadId,
+        data: {
+          sessionId: args.sessionId,
+          phase: 'terminal_update',
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
+
+  /**
+   * Reconcile sessions stuck in 'sealing' state.
+   * Scans all sessions for the given cat/thread and force-seals any that have been
+   * in 'sealing' longer than maxAgeMs. Returns count of reconciled sessions.
+   */
+  async reconcileStuck(catId: string, threadId: string, maxAgeMs = 5 * 60_000): Promise<number> {
+    const sessions = await this.store.getChain(catId as CatId, threadId);
+    const now = Date.now();
+    let count = 0;
+    for (const s of sessions) {
+      if (s.status === 'sealing' && now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
+        await this.store.update(s.id, {
+          status: 'sealed',
+          sealedAt: now,
+          updatedAt: now,
+        });
+        getEventAuditLog().append({
+          type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+          threadId: s.threadId,
+          data: {
+            sessionId: s.id,
+            catId: s.catId,
+            phase: 'reconcile_stuck',
+            stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
+          },
+        });
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private async doFinalize(
+    record: { id: string; threadId: string; catId: string; cliSessionId: string; seq: number; createdAt: number },
+    now: number,
+  ): Promise<void> {
     // Phase C: Flush transcript + index + extractive digest
     if (this.transcriptWriter) {
       try {
@@ -182,11 +257,21 @@ export class SessionSealer implements ISessionSealer {
         // best-effort: handoff digest failure doesn't prevent sealing
       }
     }
-
-    await this.store.update(args.sessionId, {
-      status: 'sealed',
-      sealedAt: now,
-      updatedAt: now,
-    });
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`finalize timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }

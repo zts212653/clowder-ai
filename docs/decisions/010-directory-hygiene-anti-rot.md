@@ -9,11 +9,11 @@ created: 2026-02-26
 
 > 日期：2026-02-13
 > 状态：**已批准** — 三方 + GPT Pro 对齐完毕，待执行
-> 参与者：Ragdoll（方案设计）、Maine Coon（reviewer 视角 + 硬规则）、team lead（发起人）、GPT Pro（外部评审）
+> 参与者：Ragdoll（方案设计）、Maine Coon（reviewer 视角 + 硬规则）、铲屎官（发起人）、GPT Pro（外部评审）
 
 ## 背景
 
-2026-02-13 team lead发现 `packages/api/src/domains/cats/services/` 堆积 70 个 .ts 文件，6 种不同职责混在一个扁平目录里。`docs/` 也有 270 个文件，从未系统归档。
+2026-02-13 铲屎官发现 `packages/api/src/domains/cats/services/` 堆积 70 个 .ts 文件，6 种不同职责混在一个扁平目录里。`docs/` 也有 270 个文件，从未系统归档。
 
 根因：增量开发无决策压力 + 无早期报警机制 + 代码规范只管文件大小不管目录大小。
 

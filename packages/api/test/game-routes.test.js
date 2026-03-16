@@ -56,6 +56,42 @@ function createStubSocket() {
   };
 }
 
+function createStubThreadStore() {
+  let counter = 0;
+  return {
+    async create(userId, title, category) {
+      counter++;
+      return { id: `game-thread-${counter}`, userId, title, category, createdAt: Date.now() };
+    },
+    async get() {
+      return null;
+    },
+    async list() {
+      return [];
+    },
+    async update() {},
+    async delete() {},
+  };
+}
+
+function createStubMessageStore() {
+  let counter = 0;
+  return {
+    async append(msg) {
+      counter++;
+      return { id: `msg-${counter}`, ...msg };
+    },
+    async get() {
+      return null;
+    },
+    async getByThread() {
+      return [];
+    },
+    async update() {},
+    async delete() {},
+  };
+}
+
 function makeDefinition() {
   return {
     gameType: 'werewolf',
@@ -87,7 +123,9 @@ describe('Game API Routes', () => {
     const socketManager = createStubSocket();
 
     app = Fastify();
-    await app.register(gameRoutes, { gameStore, socketManager });
+    const threadStore = createStubThreadStore();
+    const messageStore = createStubMessageStore();
+    await app.register(gameRoutes, { gameStore, socketManager, threadStore, messageStore });
     await app.ready();
   });
 
@@ -234,6 +272,205 @@ describe('Game API Routes', () => {
       });
 
       assert.equal(res.statusCode, 404);
+    });
+  });
+
+  describe('POST /api/game/start (high-level)', () => {
+    it('starts a game and returns gameId + gameThreadId', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'player',
+          playerCount: 7,
+          catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark'],
+          voiceMode: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.equal(body.status, 'game_started');
+      assert.ok(body.gameId, 'should return gameId');
+      assert.ok(body.gameThreadId, 'should return gameThreadId');
+    });
+
+    it('rejects invalid payload (missing gameType)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          humanRole: 'player',
+          playerCount: 7,
+          catIds: ['opus'],
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error);
+    });
+
+    it('falls back to all cats when catIds are empty after sanitize', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'god-view',
+          playerCount: 6,
+          catIds: ['nonexistent-cat-xyz'],
+          voiceMode: false,
+        },
+      });
+
+      // Should still succeed — falls back to all config cats
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.equal(body.status, 'game_started');
+    });
+
+    it('rejects invalid payload (missing catIds)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'player',
+          playerCount: 7,
+          voiceMode: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+    });
+
+    it('uses X-Cat-Cafe-User header for userId when provided', async () => {
+      // Separate app instance with tracking threadStore
+      const trackingCalls = [];
+      const trackingThreadStore = {
+        ...createStubThreadStore(),
+        async create(userId, title, category) {
+          trackingCalls.push({ userId, title, category });
+          return { id: `game-thread-track`, userId, title, category, createdAt: Date.now() };
+        },
+      };
+      const trackingApp = Fastify();
+      await trackingApp.register(gameRoutes, {
+        gameStore: createStubGameStore(),
+        socketManager: createStubSocket(),
+        threadStore: trackingThreadStore,
+        messageStore: createStubMessageStore(),
+      });
+      await trackingApp.ready();
+
+      const res = await trackingApp.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        headers: { 'x-cat-cafe-user': 'owner' },
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'player',
+          playerCount: 7,
+          catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark'],
+          voiceMode: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(trackingCalls.length, 1, 'should have called threadStore.create');
+      assert.equal(trackingCalls[0].userId, 'owner', 'userId should come from header, not hardcoded');
+
+      await trackingApp.close();
+    });
+
+    it('starts a detective mode game with detectiveCatId', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'detective',
+          playerCount: 7,
+          catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark', 'antigravity'],
+          voiceMode: false,
+          detectiveCatId: 'codex',
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.equal(body.status, 'game_started');
+      assert.ok(body.gameId, 'should return gameId');
+      assert.ok(body.gameThreadId, 'should return gameThreadId');
+    });
+
+    it('rejects detective mode when detectiveCatId is not in catIds without side effects', async () => {
+      // Separate app instance with tracking stores to verify no orphan thread/message
+      const createCalls = [];
+      const appendCalls = [];
+      const trackingThreadStore = {
+        ...createStubThreadStore(),
+        async create(userId, title, category) {
+          createCalls.push({ userId, title, category });
+          return { id: 'game-thread-track', userId, title, category, createdAt: Date.now() };
+        },
+      };
+      const trackingMessageStore = {
+        ...createStubMessageStore(),
+        async append(msg) {
+          appendCalls.push(msg);
+          return { id: 'msg-track', ...msg };
+        },
+      };
+      const trackingApp = Fastify();
+      await trackingApp.register(gameRoutes, {
+        gameStore: createStubGameStore(),
+        socketManager: createStubSocket(),
+        threadStore: trackingThreadStore,
+        messageStore: trackingMessageStore,
+      });
+      await trackingApp.ready();
+
+      const res = await trackingApp.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'detective',
+          playerCount: 7,
+          catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark', 'antigravity'],
+          voiceMode: false,
+          detectiveCatId: 'nonexistent-cat',
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error.includes('detectiveCatId'), 'error should mention detectiveCatId');
+      assert.equal(createCalls.length, 0, 'should NOT create thread for invalid detectiveCatId');
+      assert.equal(appendCalls.length, 0, 'should NOT append message for invalid detectiveCatId');
+
+      await trackingApp.close();
+    });
+
+    it('rejects detective mode without detectiveCatId', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'detective',
+          playerCount: 7,
+          catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark', 'antigravity'],
+          voiceMode: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error.includes('detectiveCatId'), 'error should mention detectiveCatId');
     });
   });
 });

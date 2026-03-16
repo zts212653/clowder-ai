@@ -23,7 +23,7 @@ describe('NightStatus', () => {
   it('renders status dot', () => {
     const html = render('守卫', '请选择守护目标');
     expect(html).toContain('data-testid="status-dot"');
-    expect(html).toContain('bg-[#22D3EE]');
+    expect(html).toContain('bg-ww-success');
   });
 
   it('renders combined text format', () => {

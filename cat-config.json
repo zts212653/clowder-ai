@@ -80,7 +80,7 @@
       "family": "golden-chinchilla",
       "roles": ["coding", "multi-agent"],
       "lead": true,
-      "available": false,
+      "available": true,
       "evaluation": "开源多模型编码猫，自带 Oh My OpenCode 多专家编排 + LSP (F105)"
     }
   },
@@ -111,7 +111,7 @@
         {
           "id": "opus-default",
           "provider": "anthropic",
-          "defaultModel": "claude-opus-4-6",
+          "defaultModel": "claude-opus-4-6[1m]",
           "mcpSupport": true,
           "cli": {
             "command": "claude",
@@ -125,6 +125,15 @@
             "maxContextTokens": 160000,
             "maxMessages": 200,
             "maxContentLengthPerMsg": 10000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/流浪者/vo_wanderer_dialog_greetingMorning.wav",
+            "refText": "快醒醒，太阳要晒屁股咯。哈，你不会以为我会这么叫你起床吧？",
+            "instruct": "用一个调皮狡黠的少年语气说话，带着得意和戏弄",
+            "temperature": 0.3
           }
         },
         {
@@ -155,6 +164,15 @@
             "maxContextTokens": 160000,
             "maxMessages": 200,
             "maxContentLengthPerMsg": 10000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "honkai-starrail/帕姆/chapter0_7_pompom_104.wav",
+            "refText": "既然选择了上车，就得遵守这里的规矩。特殊的并不只你一个，这点你可给我记好了。",
+            "instruct": "用一个装作严肃但声音很可爱的小动物语气说话",
+            "temperature": 0.3
           }
         },
         {
@@ -162,7 +180,7 @@
           "catId": "opus-45",
           "variantLabel": "Opus 4.5",
           "displayName": "布偶猫",
-          "mentionPatterns": ["@opus45", "@opus-45", "@布偶opus45"],
+          "mentionPatterns": ["@opus45", "@opus-45", "@布偶opus45", "@布偶猫4.5"],
           "provider": "anthropic",
           "defaultModel": "claude-opus-4-5-20251101",
           "mcpSupport": true,
@@ -185,6 +203,15 @@
             "maxContextTokens": 160000,
             "maxMessages": 200,
             "maxContentLengthPerMsg": 10000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/万叶/vo_kazuha_dialog_greetingMorning.wav",
+            "refText": "清晨的鸟鸣，是大自然的馈赠。启程吧，属于我们的旅途也要开始了。",
+            "instruct": "用一个清澈温和的少年语气说话，带着从容的力量感",
+            "temperature": 0.3
           }
         }
       ]
@@ -227,6 +254,15 @@
             "maxContextTokens": 216000,
             "maxMessages": 200,
             "maxContentLengthPerMsg": 10000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/魈/vo_xiao_dialog_close2.wav",
+            "refText": "别被污染，我不会留情的。我是说，既然是你，你应该能够保持坚定。",
+            "instruct": "用一个傲娇冰山少年的语气说话，表面严厉实际关心",
+            "temperature": 0.3
           }
         },
         {
@@ -268,6 +304,15 @@
             "maxContextTokens": 216000,
             "maxMessages": 200,
             "maxContentLengthPerMsg": 10000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/赛诺/vo_cyno_dialog_greetingMorning.wav",
+            "refText": "打起精神，该出发了。",
+            "instruct": "用一个严肃冷静的少年语气说话，像审判官一样认真但偶尔冒出奇怪的冷笑话",
+            "temperature": 0.3
           }
         },
         {
@@ -298,6 +343,15 @@
             "maxContextTokens": 40000,
             "maxMessages": 100,
             "maxContentLengthPerMsg": 8000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/雷泽/vo_razor_dialog_greetingMorning.wav",
+            "refText": "太阳出来了。狩猎一起去？",
+            "instruct": "用一个简单直接的野性少年语气说话，短句为主，像狼一样直觉敏锐",
+            "temperature": 0.3
           }
         }
       ]
@@ -339,6 +393,15 @@
             "maxContextTokens": 300000,
             "maxMessages": 300,
             "maxContentLengthPerMsg": 15000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/班尼特/vo_bennett_dialog_greetingNight.wav",
+            "refText": "晚上好！今天的冒险怎么样？",
+            "instruct": "用一个超级阳光开心的小男孩语气说话，充满热情和兴奋",
+            "temperature": 0.3
           }
         },
         {
@@ -367,6 +430,15 @@
             "maxContextTokens": 300000,
             "maxMessages": 300,
             "maxContentLengthPerMsg": 15000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/米卡/vo_mika_dialog_annoyed.wav",
+            "refText": "说实在的，我不擅长和陌生人打交道，也许是我不懂说话的技巧吧。这方面的窍门，能请你教一教我吗？",
+            "instruct": "用一个有点害羞但很努力的少年语气说话，温柔可爱",
+            "temperature": 0.3
           }
         }
       ]
@@ -449,6 +521,15 @@
             "maxContextTokens": 300000,
             "maxMessages": 300,
             "maxContentLengthPerMsg": 15000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "honkai-starrail/叽米/side2_yanwu_owlbert_101.wav",
+            "refText": "不管各位的世界有没有昼夜的概念，总之先祝你早上中午晚上好！我是你们的好朋友——叽米！",
+            "instruct": "用一个精力旺盛的、像吉祥物一样的可爱语气说话，充满热情和好奇心",
+            "temperature": 0.3
           }
         },
         {
@@ -477,6 +558,15 @@
             "maxContextTokens": 160000,
             "maxMessages": 200,
             "maxContentLengthPerMsg": 10000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/鹿野院平藏/vo_heizou_dialog_greetingMorning.wav",
+            "refText": "早呀，看你精神不好，没做噩梦吧？早知道的话，就该晚些再让你接触重案嘛。",
+            "instruct": "用一个轻松俏皮的少年语气说话，聪明但不端架子",
+            "temperature": 0.3
           }
         }
       ]
@@ -504,7 +594,7 @@
         {
           "id": "opencode-default",
           "provider": "opencode",
-          "defaultModel": "claude-sonnet-4-6",
+          "defaultModel": "claude-opus-4-6",
           "mcpSupport": true,
           "cli": {
             "command": "opencode",
@@ -518,6 +608,15 @@
             "maxContextTokens": 160000,
             "maxMessages": 200,
             "maxContentLengthPerMsg": 10000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/重云/vo_chongyun_dialog_close.wav",
+            "refText": "你的本事不错，对丘丘…咳…邪魔从不手软，我们结伴而行如何。",
+            "instruct": "用一个正直可靠的少年语气说话，话不多但每句都认真",
+            "temperature": 0.3
           }
         }
       ]

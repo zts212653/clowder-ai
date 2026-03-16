@@ -1,15 +1,30 @@
 // F102: SQLite implementation of IEvidenceStore
 
 import Database from 'better-sqlite3';
-import type { Edge, EvidenceItem, IEvidenceStore, SearchOptions } from './interfaces.js';
-import { CURRENT_SCHEMA_VERSION, FTS_TRIGGER_STATEMENTS, SCHEMA_V1 } from './schema.js';
+import type { Edge, EvidenceItem, IEmbeddingService, IEvidenceStore, SearchOptions } from './interfaces.js';
+import { SemanticReranker } from './SemanticReranker.js';
+import { applyMigrations } from './schema.js';
+import type { VectorStore } from './VectorStore.js';
+
+export interface EmbedDeps {
+  embedding: IEmbeddingService;
+  vectorStore: VectorStore;
+  mode: 'off' | 'shadow' | 'on';
+}
 
 export class SqliteEvidenceStore implements IEvidenceStore {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
+  private embedDeps?: EmbedDeps;
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, embedDeps?: EmbedDeps) {
     this.dbPath = dbPath;
+    this.embedDeps = embedDeps;
+  }
+
+  /** @internal Allow late-binding of embed deps (factory sets after construction) */
+  setEmbedDeps(deps: EmbedDeps): void {
+    this.embedDeps = deps;
   }
 
   async initialize(): Promise<void> {
@@ -18,20 +33,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
 
-    this.db.exec(SCHEMA_V1);
-    for (const stmt of FTS_TRIGGER_STATEMENTS) {
-      this.db.exec(stmt);
-    }
-
-    // Record schema version
-    const existing = this.db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get() as
-      | { version: number }
-      | undefined;
-    if (!existing) {
-      this.db
-        .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
-        .run(CURRENT_SCHEMA_VERSION, new Date().toISOString());
-    }
+    applyMigrations(this.db);
   }
 
   async search(query: string, options?: SearchOptions): Promise<EvidenceItem[]> {
@@ -113,7 +115,28 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       }
     }
 
-    return results.slice(0, limit);
+    let lexicalResults = results.slice(0, limit);
+
+    // Phase C: semantic rerank
+    if (this.embedDeps && this.embedDeps.embedding.isReady()) {
+      try {
+        const queryVec = await this.embedDeps.embedding.embed([query]);
+        const vecResults = this.embedDeps.vectorStore.search(queryVec[0], limit * 2);
+        const reranker = new SemanticReranker();
+
+        if (this.embedDeps.mode === 'on') {
+          lexicalResults = reranker.rerankWithDistances(lexicalResults, vecResults);
+        } else if (this.embedDeps.mode === 'shadow') {
+          // Shadow: compute rerank but return lexical order (log comparison)
+          const _reranked = reranker.rerankWithDistances(lexicalResults, vecResults);
+          // Silent comparison — actual logging added in eval phase
+        }
+      } catch {
+        // AC-C4 fail-open: rerank failed → return lexical order
+      }
+    }
+
+    return lexicalResults;
   }
 
   async upsert(items: EvidenceItem[]): Promise<void> {

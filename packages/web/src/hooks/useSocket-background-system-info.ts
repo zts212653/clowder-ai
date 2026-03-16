@@ -157,6 +157,87 @@ export function consumeBackgroundSystemInfo(
         timestamp: msg.timestamp,
       });
       consumed = true;
+    } else if (parsed?.type === 'rich_block') {
+      // F22: Append rich block — mirror foreground path (useAgentMessages.ts)
+      let targetId: string | undefined;
+
+      // Prefer messageId correlation from callback post-message path
+      if (parsed.messageId) {
+        const found = options.store
+          .getThreadState(msg.threadId)
+          .messages.find((m: { id: string }) => m.id === parsed.messageId);
+        if (found) targetId = found.id;
+      }
+
+      // Fallback: most recent callback message from this cat
+      if (!targetId) {
+        const threadMessages = options.store.getThreadState(msg.threadId).messages;
+        for (let i = threadMessages.length - 1; i >= 0; i--) {
+          const m = threadMessages[i];
+          if (m.type !== 'assistant' || m.catId !== msg.catId) continue;
+          if (m.origin === 'stream' && m.isStreaming) break;
+          if (m.origin === 'callback') {
+            targetId = m.id;
+            break;
+          }
+        }
+      }
+
+      // Final fallback: recover active stream bubble or create placeholder
+      if (!targetId) {
+        targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
+      }
+      if (!targetId) {
+        // No existing bubble — create placeholder (mirrors foreground ensureActiveAssistantMessage)
+        const streamKey = `${msg.threadId}::${msg.catId}`;
+        targetId = `bg-rich-${Date.now()}-${msg.catId}-${options.nextBgSeq()}`;
+        const invocationId = options.store.getThreadState(msg.threadId).catInvocations[msg.catId]?.invocationId;
+        options.bgStreamRefs.set(streamKey, { id: targetId, threadId: msg.threadId, catId: msg.catId });
+        options.store.addMessageToThread(msg.threadId, {
+          id: targetId,
+          type: 'assistant',
+          catId: msg.catId,
+          content: '',
+          ...(msg.metadata ? { metadata: msg.metadata } : {}),
+          ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
+          timestamp: msg.timestamp,
+          isStreaming: true,
+          origin: 'stream',
+        });
+      }
+
+      if (parsed.block) {
+        options.store.appendRichBlockToThread(msg.threadId, targetId, parsed.block);
+      }
+      consumed = true;
+    } else if (parsed?.type === 'liveness_warning') {
+      // F118 Phase C: Liveness warning — update cat status + invocation snapshot (mirror foreground)
+      const level = parsed.level as 'alive_but_silent' | 'suspected_stall';
+      options.store.updateThreadCatStatus(msg.threadId, msg.catId, level);
+      options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
+        livenessWarning: {
+          level,
+          state: parsed.state as 'active' | 'busy-silent' | 'idle-silent' | 'dead',
+          silenceDurationMs: parsed.silenceDurationMs as number,
+          cpuTimeMs: typeof parsed.cpuTimeMs === 'number' ? parsed.cpuTimeMs : undefined,
+          processAlive: parsed.processAlive as boolean,
+          receivedAt: Date.now(),
+        },
+      });
+      consumed = true;
+    } else if (parsed?.type === 'timeout_diagnostics') {
+      // F118 AC-C3: Timeout diagnostics — consume silently in background threads.
+      // Foreground uses pendingTimeoutDiagRef (React ref) to attach to error messages;
+      // background threads don't have that mechanism, so we just suppress the raw JSON.
+      consumed = true;
+    } else if (parsed?.type === 'warning') {
+      // F045: item-level warning — render as readable system message (mirror foreground)
+      const warningText = typeof parsed.message === 'string' ? parsed.message : '';
+      sysContent = warningText ? `⚠️ ${warningText}` : '⚠️ Warning';
+      sysVariant = 'info';
+    } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
+      // Internal telemetry — suppress to avoid raw JSON bubbles in background threads
+      consumed = true;
     } else if (parsed?.type === 'session_seal_requested') {
       if (parsed.catId) {
         options.store.setThreadCatInvocation(msg.threadId, parsed.catId, {

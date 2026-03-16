@@ -30,6 +30,7 @@ export interface UseCollapseStateOptions {
 export function useCollapseState({ threadGroups, searchQuery, currentThreadId }: UseCollapseStateOptions) {
   const initialized = useRef(false);
   const allKnownKeys = useRef<Set<string>>(new Set());
+  const lastAutoExpandedThreadId = useRef<string | undefined>(undefined);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   // Accumulate all ever-seen group keys (P1-1 fix: collapseAll needs full set)
@@ -54,20 +55,27 @@ export function useCollapseState({ threadGroups, searchQuery, currentThreadId }:
 
   // Auto-expand group containing the current active thread
   useEffect(() => {
+    // Reset guard when navigating away (including to undefined/"no thread"),
+    // so returning to the same thread will auto-expand its group again.
+    if (lastAutoExpandedThreadId.current && lastAutoExpandedThreadId.current !== currentThreadId) {
+      lastAutoExpandedThreadId.current = undefined;
+    }
     if (!currentThreadId || !initialized.current) return;
+    if (lastAutoExpandedThreadId.current === currentThreadId) return;
     const groupsMeta = threadGroups.map((g) => ({
       groupKey: getGroupKey(g),
       threadIds: g.threads.map((t) => t.id),
+      type: g.type,
     }));
     const key = findGroupKeyForThread(currentThreadId, groupsMeta);
-    if (key) {
-      setCollapsed((prev) => {
-        if (!prev.has(key)) return prev;
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
+    if (!key) return;
+    lastAutoExpandedThreadId.current = currentThreadId;
+    setCollapsed((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
   }, [currentThreadId, threadGroups]);
 
   const isCollapsed = useCallback(

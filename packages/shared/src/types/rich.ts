@@ -7,7 +7,7 @@
 
 // ── Block Kinds ─────────────────────────────────────────────
 
-export type RichBlockKind = 'card' | 'diff' | 'checklist' | 'media_gallery' | 'audio' | 'interactive';
+export type RichBlockKind = 'card' | 'diff' | 'checklist' | 'media_gallery' | 'audio' | 'interactive' | 'html_widget';
 
 // ── Base ────────────────────────────────────────────────────
 
@@ -107,6 +107,18 @@ export interface RichInteractiveBlock extends RichBlockBase {
   groupId?: string;
 }
 
+/** F120 Phase C: Inline HTML/JS widget rendered in sandboxed iframe (srcdoc).
+ *  Similar to Claude.ai's visualize:show_widget — for charts, calculators, etc. */
+export interface RichHtmlWidgetBlock extends RichBlockBase {
+  kind: 'html_widget';
+  /** Complete HTML document or fragment to render */
+  html: string;
+  /** Optional title displayed above the widget */
+  title?: string;
+  /** iframe height in px (default: 300) */
+  height?: number;
+}
+
 // ── Union ───────────────────────────────────────────────────
 
 export type RichBlock =
@@ -115,7 +127,8 @@ export type RichBlock =
   | RichChecklistBlock
   | RichMediaGalleryBlock
   | RichAudioBlock
-  | RichInteractiveBlock;
+  | RichInteractiveBlock
+  | RichHtmlWidgetBlock;
 
 // ── Container (stored in StoredMessage.extra.rich) ──────────
 
@@ -126,7 +139,15 @@ export interface RichMessageExtra {
 
 // ── Normalization (#85 format tolerance) ────────────────────
 
-const VALID_KINDS: readonly string[] = ['card', 'diff', 'checklist', 'media_gallery', 'audio', 'interactive'];
+const VALID_KINDS: readonly string[] = [
+  'card',
+  'diff',
+  'checklist',
+  'media_gallery',
+  'audio',
+  'interactive',
+  'html_widget',
+];
 
 /**
  * #85: Normalize a raw rich block object (mutating).

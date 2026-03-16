@@ -42,6 +42,7 @@ function buildDeps() {
     },
     invocationTracker: {
       start: mock.fn(() => new AbortController()),
+      tryStartThread: mock.fn(() => new AbortController()),
       complete: mock.fn(),
       has: mock.fn(() => false),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),

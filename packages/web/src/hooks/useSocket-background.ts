@@ -1,3 +1,4 @@
+import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import type { CatStatusType } from '@/stores/chat-types';
 import { compactToolResultDetail } from '@/utils/toolPreview';
 import type {
@@ -27,6 +28,19 @@ function getStreamKey(msg: Pick<BackgroundAgentMessage, 'threadId' | 'catId'>): 
   return `${msg.threadId}::${msg.catId}`;
 }
 
+function findLatestActiveInvocationIdForCat(
+  activeInvocations: Record<string, { catId: string; mode: string }> | undefined,
+  catId: string,
+): string | undefined {
+  if (!activeInvocations) return undefined;
+  const entries = Object.entries(activeInvocations);
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const [invocationId, info] = entries[i]!;
+    if (info.catId === catId) return invocationId;
+  }
+  return undefined;
+}
+
 function shouldClearBackgroundRefOnActiveEvent(msg: ActiveRoutedAgentMessage): boolean {
   if (!msg.threadId) return false;
   if (msg.type === 'done') return true;
@@ -39,7 +53,11 @@ function getThreadInvocationId(
   msg: Pick<BackgroundAgentMessage, 'threadId' | 'catId'>,
   options: HandleBackgroundMessageOptions,
 ): string | undefined {
-  return options.store.getThreadState(msg.threadId).catInvocations[msg.catId]?.invocationId;
+  const threadState = options.store.getThreadState(msg.threadId);
+  return (
+    threadState.catInvocations[msg.catId]?.invocationId ??
+    findLatestActiveInvocationIdForCat(threadState.activeInvocations, msg.catId)
+  );
 }
 
 export function clearBackgroundStreamRefForActiveEvent(
@@ -107,10 +125,71 @@ function recoverStreamingMessage(
     const m = threadMessages[i];
     if (m.type === 'assistant' && m.catId === msg.catId && m.isStreaming) {
       options.bgStreamRefs.set(streamKey, { id: m.id, threadId: msg.threadId, catId: msg.catId });
+      recordDebugEvent({
+        event: 'bubble_lifecycle',
+        threadId: msg.threadId,
+        timestamp: msg.timestamp,
+        action: 'recover',
+        reason: 'background_ref_lost',
+        catId: msg.catId,
+        messageId: m.id,
+        invocationId: m.extra?.stream?.invocationId,
+        origin: 'stream',
+      });
       return m.id;
     }
   }
   return undefined;
+}
+
+function findBackgroundCallbackReplacementTarget(
+  msg: BackgroundAgentMessage,
+  options: HandleBackgroundMessageOptions,
+): { id: string; invocationId: string } | null {
+  const invocationId = msg.invocationId ?? getThreadInvocationId(msg, options);
+  if (!invocationId) return null;
+
+  const threadMessages = options.store.getThreadState(msg.threadId).messages;
+  for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
+    const m = threadMessages[i];
+    if (
+      m?.type === 'assistant' &&
+      m.catId === msg.catId &&
+      m.origin === 'stream' &&
+      m.extra?.stream?.invocationId === invocationId
+    ) {
+      return { id: m.id, invocationId };
+    }
+  }
+
+  return null;
+}
+
+function shouldSuppressLateBackgroundStreamChunk(
+  msg: BackgroundAgentMessage,
+  streamKey: string,
+  options: HandleBackgroundMessageOptions,
+): boolean {
+  const replacedInvocationId = options.replacedInvocations.get(streamKey);
+  if (!replacedInvocationId) return false;
+
+  const currentInvocationId = msg.invocationId ?? getThreadInvocationId(msg, options);
+  if (currentInvocationId && currentInvocationId !== replacedInvocationId) {
+    options.replacedInvocations.delete(streamKey);
+    return false;
+  }
+
+  recordDebugEvent({
+    event: 'bubble_lifecycle',
+    threadId: msg.threadId,
+    timestamp: msg.timestamp,
+    action: 'drop',
+    reason: 'late_stream_after_callback_replace',
+    catId: msg.catId,
+    invocationId: replacedInvocationId,
+    origin: 'stream',
+  });
+  return true;
 }
 
 function ensureBackgroundAssistantMessage(
@@ -157,14 +236,31 @@ function markThreadInvocationActive(msg: BackgroundAgentMessage, options: Handle
   if (!threadState.isLoading) {
     options.store.setThreadLoading(msg.threadId, true);
   }
-  if (!threadState.hasActiveInvocation) {
+  // F108: slot-aware — register specific invocation if ID available
+  if (msg.invocationId) {
+    options.store.addThreadActiveInvocation(msg.threadId, msg.invocationId, msg.catId, 'execute');
+  } else if (!threadState.hasActiveInvocation) {
     options.store.setThreadHasActiveInvocation(msg.threadId, true);
   }
 }
 
 function markThreadInvocationComplete(msg: BackgroundAgentMessage, options: HandleBackgroundMessageOptions): void {
   options.store.setThreadLoading(msg.threadId, false);
-  options.store.setThreadHasActiveInvocation(msg.threadId, false);
+  options.store.setThreadCatInvocation(msg.threadId, msg.catId, { invocationId: undefined });
+  // F108: slot-aware — remove specific invocation if ID available.
+  // Cancel fallback: find and remove only this cat's latest active slot to avoid
+  // clearing other cats' slots during multi-cat concurrent dispatch.
+  if (msg.invocationId) {
+    options.store.removeThreadActiveInvocation(msg.threadId, msg.invocationId);
+  } else {
+    const threadState = options.store.getThreadState(msg.threadId);
+    const catSlot = findLatestActiveInvocationIdForCat(threadState.activeInvocations, msg.catId);
+    if (catSlot) {
+      options.store.removeThreadActiveInvocation(msg.threadId, catSlot);
+    } else {
+      options.store.setThreadHasActiveInvocation(msg.threadId, false);
+    }
+  }
 }
 
 export function handleBackgroundAgentMessage(
@@ -183,21 +279,46 @@ export function handleBackgroundAgentMessage(
     let finalMsgId: string | undefined;
 
     if (msg.origin === 'callback') {
-      // MCP callback message: always a separate bubble (never merge into stream)
-      const cbId = msg.messageId ?? `bg-cb-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`;
-      options.store.addMessageToThread(msg.threadId, {
-        id: cbId,
-        type: 'assistant',
-        catId: msg.catId,
-        content: msg.content,
-        ...(msg.metadata ? { metadata: msg.metadata } : {}),
-        ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
-        ...(msg.mentionsUser ? { mentionsUser: true } : {}),
-        timestamp: msg.timestamp,
-        origin: 'callback',
-      });
-      finalMsgId = cbId;
+      const replacementTarget = findBackgroundCallbackReplacementTarget(msg, options);
+      if (replacementTarget) {
+        const cbId = msg.messageId ?? replacementTarget.id;
+        if (cbId !== replacementTarget.id) {
+          options.store.replaceThreadMessageId(msg.threadId, replacementTarget.id, cbId);
+        }
+        options.store.patchThreadMessage(msg.threadId, cbId, {
+          content: msg.content,
+          origin: 'callback',
+          isStreaming: false,
+          ...(msg.metadata ? { metadata: msg.metadata } : {}),
+          ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
+          ...(msg.mentionsUser ? { mentionsUser: true } : {}),
+          ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+          ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+        });
+        options.bgStreamRefs.delete(streamKey);
+        options.replacedInvocations.set(streamKey, replacementTarget.invocationId);
+        finalMsgId = cbId;
+      } else {
+        const cbId = msg.messageId ?? `bg-cb-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`;
+        options.store.addMessageToThread(msg.threadId, {
+          id: cbId,
+          type: 'assistant',
+          catId: msg.catId,
+          content: msg.content,
+          ...(msg.metadata ? { metadata: msg.metadata } : {}),
+          ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
+          ...(msg.mentionsUser ? { mentionsUser: true } : {}),
+          ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+          ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+          timestamp: msg.timestamp,
+          origin: 'callback',
+        });
+        finalMsgId = cbId;
+      }
     } else {
+      if (shouldSuppressLateBackgroundStreamChunk(msg, streamKey, options)) {
+        return;
+      }
       // CLI stream text (thinking): merge into existing stream bubble
       let messageId = existing?.id;
       // Active→background transition recovery: find existing streaming bubble
@@ -216,6 +337,12 @@ export function handleBackgroundAgentMessage(
           streaming: !msg.isFinal,
           catStatus: msg.isFinal ? 'done' : 'streaming',
         });
+        if (msg.replyTo || msg.replyPreview) {
+          options.store.patchThreadMessage(msg.threadId, messageId, {
+            ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+            ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+          });
+        }
         if (msg.isFinal) {
           options.bgStreamRefs.delete(streamKey);
         }
@@ -230,6 +357,8 @@ export function handleBackgroundAgentMessage(
           content: msg.content,
           ...(msg.metadata ? { metadata: msg.metadata } : {}),
           ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
+          ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+          ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
           timestamp: msg.timestamp,
           isStreaming: !msg.isFinal,
           origin: 'stream',

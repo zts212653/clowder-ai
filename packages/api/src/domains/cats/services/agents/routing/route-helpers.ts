@@ -70,6 +70,9 @@ export interface RouteOptions {
   modeSystemPromptByCat?: Record<string, string> | undefined;
   /** Thinking visibility: play = cats don't see each other's thinking, debug = cats share thinking. Default: play */
   thinkingMode?: 'debug' | 'play' | undefined;
+  /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
+   *  When provided, worklist is keyed by this ID instead of threadId. */
+  parentInvocationId?: string | undefined;
 }
 
 export interface IncrementalContextResult {

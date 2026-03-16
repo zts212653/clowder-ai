@@ -15,7 +15,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { AppendMessageInput, StoredMessage } from '../ports/MessageStore.js';
-import { DEFAULT_THREAD_ID, generateSortableId } from '../ports/MessageStore.js';
+import { DEFAULT_THREAD_ID, generateSortableId, isDelivered } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
   safeParseConnectorSource,
@@ -109,6 +109,8 @@ export class RedisMessageStore {
       ...(msg.whisperTo ? { whisperTo: JSON.stringify(msg.whisperTo) } : {}),
       ...(msg.source ? { source: JSON.stringify(msg.source) } : {}),
       ...(msg.mentionsUser ? { mentionsUser: '1' } : {}),
+      ...(msg.deliveryStatus ? { deliveryStatus: msg.deliveryStatus } : {}),
+      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
     });
     if (this.ttlSeconds !== null) {
       pipeline.expire(hashKey, this.ttlSeconds);
@@ -196,19 +198,17 @@ export class RedisMessageStore {
       ...(data.whisperTo ? { whisperTo: safeParseMentions(data.whisperTo) } : {}),
       ...(data.revealedAt ? { revealedAt: parseInt(data.revealedAt, 10) } : {}),
       ...(data.deliveredAt ? { deliveredAt: parseInt(data.deliveredAt, 10) } : {}),
+      ...(data.deliveryStatus ? { deliveryStatus: data.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
       ...(parsedSource ? { source: parsedSource } : {}),
       ...(data.mentionsUser === '1' ? { mentionsUser: true } : {}),
+      ...(data.replyTo ? { replyTo: data.replyTo } : {}),
     };
   }
 
   async getRecent(limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const key = userId ? MessageKeys.user(userId) : MessageKeys.TIMELINE;
-
-    const ids = await this.redis.zrevrange(key, 0, n - 1);
-    if (ids.length === 0) return [];
-
-    return this.hydrateMessages(ids.reverse());
+    return this.fetchDeliveredDesc(key, n);
   }
 
   /**
@@ -274,7 +274,8 @@ export class RedisMessageStore {
     }
 
     if (ids.length === 0) return [];
-    return this.hydrateMessages(ids); // Already ascending
+    const messages = await this.hydrateMessages(ids); // Already ascending
+    return messages.filter(isDelivered);
   }
 
   /**
@@ -313,7 +314,8 @@ export class RedisMessageStore {
     }
 
     if (ids.length === 0) return [];
-    return this.hydrateMessages(ids.reverse());
+    const messages = await this.hydrateMessages(ids.reverse());
+    return messages.filter(isDelivered);
   }
 
   async getBefore(timestamp: number, limit?: number, userId?: string, beforeId?: string): Promise<StoredMessage[]> {
@@ -321,28 +323,35 @@ export class RedisMessageStore {
     const key = userId ? MessageKeys.user(userId) : MessageKeys.TIMELINE;
 
     if (!beforeId) {
-      const ids = await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'LIMIT', 0, n);
-      if (ids.length === 0) return [];
-      return this.hydrateMessages(ids.reverse());
+      // F117: Chunked scan (desc) to collect N delivered messages
+      const CHUNK = Math.max(n, 50);
+      const result: StoredMessage[] = []; // desc order (newest first)
+      let offset = 0;
+      while (result.length < n) {
+        const ids = await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'LIMIT', offset, CHUNK);
+        if (ids.length === 0) break;
+        // Keep desc order — don't reverse
+        const messages = await this.hydrateMessages(ids);
+        for (const msg of messages) {
+          if (isDelivered(msg)) result.push(msg);
+          if (result.length >= n) break;
+        }
+        if (ids.length < CHUNK) break;
+        offset += CHUNK;
+      }
+      // Take first N (newest) and reverse to ascending
+      return result.slice(0, n).reverse();
     }
 
-    const ids = await this.fetchBeforeWithCursor(key, timestamp, beforeId, n);
-    if (ids.length === 0) return [];
-    return this.hydrateMessages(ids.reverse());
+    // F117: Scan cursor path with integrated isDelivered filtering
+    const result = await this.fetchDeliveredBeforeCursor(key, timestamp, beforeId, n);
+    return result.reverse();
   }
 
   async getByThread(threadId: string, limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const key = MessageKeys.thread(threadId);
-
-    // Over-fetch when userId filter is needed, then trim after hydration
-    const fetchN = userId ? n * 2 : n;
-    const ids = await this.redis.zrevrange(key, 0, fetchN - 1);
-    if (ids.length === 0) return [];
-
-    const messages = await this.hydrateMessages(ids.reverse());
-    if (!userId) return messages.slice(-n);
-    return messages.filter((m) => m.userId === userId).slice(-n);
+    return this.fetchDeliveredDesc(key, n, userId ? (m) => m.userId === userId : undefined);
   }
 
   /**
@@ -372,12 +381,15 @@ export class RedisMessageStore {
         ids = await this.redis.zrange(key, 0, -1);
         ids = ids.filter((id) => id > afterId);
       } else {
-        // Fetch from cursor score onward, then trim strictly by ID.
-        const allAfterScore = await this.redis.zrangebyscore(key, afterScore, '+inf');
-        ids = allAfterScore.filter((id) => {
-          if (id === afterId) return false;
-          return id > afterId;
-        });
+        // Split into two ranges to avoid filtering by ID across different
+        // scores — deliveredAt can shift a message's score forward while
+        // its ID still embeds the original send timestamp.
+        // 1) Same score as cursor: use ID as tiebreaker
+        const sameScore = await this.redis.zrangebyscore(key, afterScore, afterScore);
+        const sameFiltered = sameScore.filter((id) => id !== afterId && id > afterId);
+        // 2) Strictly higher scores: include all (no ID filter needed)
+        const higherScore = await this.redis.zrangebyscore(key, `(${afterScore}`, '+inf');
+        ids = [...sameFiltered, ...higherScore];
       }
       if (limit && limit > 0 && ids.length > limit) {
         ids = ids.slice(0, limit);
@@ -388,8 +400,9 @@ export class RedisMessageStore {
 
     // ADR-008 D3: cursor path must include deleted messages (tombstones)
     const messages = await this.hydrateMessages(ids, { includeDeleted: true });
-    if (!userId) return messages;
-    return messages.filter((m) => m.userId === userId);
+    const delivered = messages.filter(isDelivered);
+    if (!userId) return delivered;
+    return delivered.filter((m) => m.userId === userId);
   }
 
   async getByThreadBefore(
@@ -401,21 +414,69 @@ export class RedisMessageStore {
   ): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const key = MessageKeys.thread(threadId);
-    const fetchN = userId ? n * 2 : n;
+    const userFilter = userId ? (m: StoredMessage) => m.userId === userId : undefined;
 
     if (!beforeId) {
-      const ids = await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'LIMIT', 0, fetchN);
-      if (ids.length === 0) return [];
-      const messages = await this.hydrateMessages(ids.reverse());
-      if (!userId) return messages;
-      return messages.filter((m) => m.userId === userId).slice(-n);
+      // F117: Chunked desc scan — collect N delivered, scan until full or exhausted
+      const CHUNK = Math.max(n, 50);
+      const result: StoredMessage[] = []; // desc order (newest first)
+      let offset = 0;
+      while (result.length < n) {
+        const ids = await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'LIMIT', offset, CHUNK);
+        if (ids.length === 0) break;
+        // Keep desc order — don't reverse
+        const messages = await this.hydrateMessages(ids);
+        for (const msg of messages) {
+          if (!isDelivered(msg)) continue;
+          if (userFilter && !userFilter(msg)) continue;
+          result.push(msg);
+          if (result.length >= n) break;
+        }
+        if (ids.length < CHUNK) break;
+        offset += CHUNK;
+      }
+      return result.slice(0, n).reverse();
     }
 
-    const ids = await this.fetchBeforeWithCursor(key, timestamp, beforeId, fetchN);
-    if (ids.length === 0) return [];
-    const messages = await this.hydrateMessages(ids.reverse());
-    if (!userId) return messages;
-    return messages.filter((m) => m.userId === userId).slice(-n);
+    // F117: Scan cursor path with integrated isDelivered + user filtering
+    const result = await this.fetchDeliveredBeforeCursor(key, timestamp, beforeId, n, userFilter);
+    return result.reverse();
+  }
+
+  /**
+   * F117: Scan a sorted set in reverse (newest first), hydrate + filter by isDelivered,
+   * collecting up to `n` delivered messages. Returns messages in ascending order (oldest first).
+   * Scans until N delivered collected or sorted set exhausted.
+   */
+  private async fetchDeliveredDesc(
+    key: string,
+    n: number,
+    extraFilter?: (msg: StoredMessage) => boolean,
+  ): Promise<StoredMessage[]> {
+    const CHUNK = Math.max(n, 50);
+    const result: StoredMessage[] = []; // Collects in desc order (newest first)
+    let offset = 0;
+
+    while (result.length < n) {
+      const ids = await this.redis.zrevrange(key, offset, offset + CHUNK - 1);
+      if (ids.length === 0) break; // Sorted set exhausted
+
+      // Hydrate in desc order (don't reverse — preserve newest-first)
+      const messages = await this.hydrateMessages(ids);
+      for (const msg of messages) {
+        if (!isDelivered(msg)) continue;
+        if (extraFilter && !extraFilter(msg)) continue;
+        result.push(msg);
+        if (result.length >= n) break;
+      }
+
+      // If Redis returned fewer than CHUNK, the set is exhausted
+      if (ids.length < CHUNK) break;
+      offset += CHUNK;
+    }
+
+    // Take first N (newest) and reverse to ascending order
+    return result.slice(0, n).reverse();
   }
 
   /**
@@ -449,6 +510,54 @@ export class RedisMessageStore {
     }
 
     return filtered;
+  }
+
+  /**
+   * F117: Scan before a cursor (desc), hydrate + filter by isDelivered + optional extra,
+   * collecting exactly N delivered messages or until sorted set exhausted.
+   * Returns messages in desc order (newest first). Caller must reverse for asc.
+   */
+  private async fetchDeliveredBeforeCursor(
+    key: string,
+    timestamp: number,
+    beforeId: string,
+    n: number,
+    extraFilter?: (msg: StoredMessage) => boolean,
+  ): Promise<StoredMessage[]> {
+    const CHUNK = 50;
+    const result: StoredMessage[] = [];
+    let offset = 0;
+
+    while (result.length < n) {
+      const chunk = await this.redis.zrevrangebyscore(key, String(timestamp), '-inf', 'LIMIT', offset, CHUNK);
+      if (chunk.length === 0) break;
+
+      // Filter cursor boundary (same logic as fetchBeforeWithCursor)
+      const validIds: string[] = [];
+      for (const id of chunk) {
+        const score = await this.redis.zscore(key, id);
+        if (score !== null && Number.parseInt(score, 10) === timestamp && id >= beforeId) {
+          continue;
+        }
+        validIds.push(id);
+      }
+
+      if (validIds.length > 0) {
+        // Hydrate in desc order (don't reverse)
+        const messages = await this.hydrateMessages(validIds);
+        for (const msg of messages) {
+          if (!isDelivered(msg)) continue;
+          if (extraFilter && !extraFilter(msg)) continue;
+          result.push(msg);
+          if (result.length >= n) break;
+        }
+      }
+
+      if (chunk.length < CHUNK) break;
+      offset += CHUNK;
+    }
+
+    return result;
   }
 
   /**
@@ -573,8 +682,29 @@ export class RedisMessageStore {
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    await this.redis.hset(MessageKeys.detail(id), { deliveredAt: String(deliveredAt) });
+    const pipeline = this.redis.multi();
+    pipeline.hset(MessageKeys.detail(id), {
+      deliveredAt: String(deliveredAt),
+      deliveryStatus: 'delivered',
+    });
+    // Update sorted set scores so history queries return messages at delivery
+    // position, not original send-time slot (Bug A: queue message ordering).
+    const scoreStr = String(deliveredAt);
+    pipeline.zadd(MessageKeys.thread(msg.threadId), scoreStr, id);
+    pipeline.zadd(MessageKeys.TIMELINE, scoreStr, id);
+    pipeline.zadd(MessageKeys.user(msg.userId), scoreStr, id);
+    await pipeline.exec();
     msg.deliveredAt = deliveredAt;
+    msg.deliveryStatus = 'delivered';
+    return msg;
+  }
+
+  /** F117: Mark a queued message as canceled (withdraw/clear). */
+  async markCanceled(id: string): Promise<StoredMessage | null> {
+    const msg = await this.getById(id);
+    if (!msg) return null;
+    await this.redis.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
+    msg.deliveryStatus = 'canceled';
     return msg;
   }
 
@@ -623,8 +753,10 @@ export class RedisMessageStore {
         ...(d.whisperTo ? { whisperTo: safeParseMentions(d.whisperTo) } : {}),
         ...(d.revealedAt ? { revealedAt: parseInt(d.revealedAt, 10) } : {}),
         ...(d.deliveredAt ? { deliveredAt: parseInt(d.deliveredAt, 10) } : {}),
+        ...(d.deliveryStatus ? { deliveryStatus: d.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
         ...(parsedSource ? { source: parsedSource } : {}),
         ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
+        ...(d.replyTo ? { replyTo: d.replyTo } : {}),
       });
     }
     return messages;

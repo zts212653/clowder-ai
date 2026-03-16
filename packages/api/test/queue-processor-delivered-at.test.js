@@ -73,7 +73,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     deps.queue.backfillMessageId('t1', 'u1', result.entry.id, 'msg-1');
 
     // Trigger execution
-    await processor.onInvocationComplete('t1', 'succeeded');
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
 
     // Wait for async fire-and-forget
     await new Promise((r) => setTimeout(r, 100));
@@ -102,7 +102,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     deps.queue.appendMergedMessageId('t1', 'u1', result.entry.id, 'msg-2');
 
     // Trigger execution
-    await processor.onInvocationComplete('t1', 'succeeded');
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
     await new Promise((r) => setTimeout(r, 100));
 
     const calls = deps.messageStore.markDelivered.mock.calls;
@@ -124,7 +124,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     deps.queue.backfillMessageId('t1', 'u1', result.entry.id, 'msg-1');
 
     const before = Date.now();
-    await processor.onInvocationComplete('t1', 'succeeded');
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
     await new Promise((r) => setTimeout(r, 100));
     const after = Date.now();
 
@@ -152,7 +152,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     });
     deps.queue.backfillMessageId('t1', 'u1', result.entry.id, 'msg-1');
 
-    await processor.onInvocationComplete('t1', 'succeeded');
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
     await new Promise((r) => setTimeout(r, 100));
 
     // messages_delivered should NOT have been emitted (no IDs persisted)
@@ -179,7 +179,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     });
     deps.queue.backfillMessageId('t1', 'u1', result.entry.id, 'msg-missing');
 
-    await processor.onInvocationComplete('t1', 'succeeded');
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
     await new Promise((r) => setTimeout(r, 100));
 
     const emitCalls = deps.socketManager.emitToUser.mock.calls;

@@ -8,6 +8,7 @@
  * We extract the expected behavior from useSocket and verify the store actions.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
+import { configureDebug, dumpBubbleTimeline, ensureWindowDebugApi } from '@/debug/invocationEventDebug';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import {
@@ -19,6 +20,7 @@ import {
 /** Monotonic counter matching useSocket.ts bgSeq */
 let testBgSeq = 0;
 const testBgStreamRefs = new Map<string, { id: string; threadId: string; catId: string }>();
+const testBgReplacedInvocations = new Map<string, string>();
 
 /** #80 fix-C: Track clearDoneTimeout calls */
 let clearDoneTimeoutCalls: Array<string | undefined> = [];
@@ -38,11 +40,13 @@ function simulateBackgroundMessage(msg: {
   isFinal?: boolean;
   metadata?: { provider: string; model: string };
   origin?: 'stream' | 'callback';
+  invocationId?: string;
   timestamp: number;
 }) {
   handleBackgroundAgentMessage(msg as BackgroundAgentMessage, {
     store: useChatStore.getState(),
     bgStreamRefs: testBgStreamRefs,
+    replacedInvocations: testBgReplacedInvocations,
     nextBgSeq: () => testBgSeq++,
     addToast: (toast) => useToastStore.getState().addToast(toast),
     clearDoneTimeout: (threadId) => {
@@ -53,6 +57,8 @@ function simulateBackgroundMessage(msg: {
 
 describe('background thread socket handling', () => {
   beforeEach(() => {
+    configureDebug({ enabled: false });
+    delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
     useChatStore.setState({
       messages: [],
       isLoading: false,
@@ -77,6 +83,7 @@ describe('background thread socket handling', () => {
     useToastStore.setState({ toasts: [] });
     testBgSeq = 0;
     testBgStreamRefs.clear();
+    testBgReplacedInvocations.clear();
     clearDoneTimeoutCalls = [];
   });
 
@@ -245,6 +252,216 @@ describe('background thread socket handling', () => {
       expect(ts.messages).toHaveLength(1);
       expect(ts.messages[0]?.id).toBe('msg-callback-1');
       expect(ts.messages[0]?.origin).toBe('callback');
+    });
+
+    it('callback-origin text replaces overlapping background stream bubble from the same invocation', () => {
+      const now = Date.now();
+      useChatStore.getState().setThreadCatInvocation('thread-bg', 'opus', { invocationId: 'inv-bg-1' });
+      useChatStore.getState().addMessageToThread('thread-bg', {
+        id: 'bg-stream-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'thinking...',
+        origin: 'stream',
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-bg-1' } },
+        timestamp: now,
+      });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'final answer',
+        origin: 'callback',
+        messageId: 'bg-callback-1',
+        timestamp: now + 1,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toEqual([
+        expect.objectContaining({
+          id: 'bg-callback-1',
+          catId: 'opus',
+          content: 'final answer',
+          origin: 'callback',
+          isStreaming: false,
+          extra: { stream: { invocationId: 'inv-bg-1' } },
+        }),
+      ]);
+    });
+
+    it('callback-origin text replaces a finalized background stream bubble from the same invocation', () => {
+      const now = Date.now();
+      useChatStore.getState().setThreadCatInvocation('thread-bg', 'opus', { invocationId: 'inv-bg-2' });
+      useChatStore.getState().addMessageToThread('thread-bg', {
+        id: 'bg-stream-final',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'thinking...',
+        origin: 'stream',
+        isStreaming: false,
+        extra: { stream: { invocationId: 'inv-bg-2' } },
+        timestamp: now,
+      });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'final answer',
+        origin: 'callback',
+        messageId: 'bg-callback-final',
+        timestamp: now + 1,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toEqual([
+        expect.objectContaining({
+          id: 'bg-callback-final',
+          catId: 'opus',
+          content: 'final answer',
+          origin: 'callback',
+          isStreaming: false,
+          extra: { stream: { invocationId: 'inv-bg-2' } },
+        }),
+      ]);
+    });
+
+    it('drops late background stream chunks after callback replacement', () => {
+      configureDebug({ enabled: true });
+      ensureWindowDebugApi();
+
+      const now = Date.now();
+      useChatStore.getState().setThreadCatInvocation('thread-bg', 'opus', { invocationId: 'inv-bg-3' });
+      useChatStore.getState().addMessageToThread('thread-bg', {
+        id: 'bg-stream-3',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'thinking...',
+        origin: 'stream',
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-bg-3' } },
+        timestamp: now,
+      });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'final answer',
+        origin: 'callback',
+        messageId: 'bg-callback-3',
+        timestamp: now + 1,
+      });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: ' late chunk',
+        origin: 'stream',
+        timestamp: now + 2,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toEqual([
+        expect.objectContaining({
+          id: 'bg-callback-3',
+          catId: 'opus',
+          content: 'final answer',
+          origin: 'callback',
+          isStreaming: false,
+        }),
+      ]);
+
+      expect(dumpBubbleTimeline({ rawThreadId: true }).events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event: 'bubble_lifecycle',
+            threadId: 'thread-bg',
+            action: 'drop',
+            reason: 'late_stream_after_callback_replace',
+            catId: 'opus',
+            invocationId: 'inv-bg-3',
+            origin: 'stream',
+          }),
+        ]),
+      );
+    });
+
+    it('keeps suppressing unlabeled background late chunks until a different invocation is observed', () => {
+      const now = Date.now();
+      useChatStore.getState().setThreadCatInvocation('thread-bg', 'opus', { invocationId: 'inv-bg-old' });
+      useChatStore.getState().addMessageToThread('thread-bg', {
+        id: 'bg-stream-old',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'thinking...',
+        origin: 'stream',
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-bg-old' } },
+        timestamp: now,
+      });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'final answer',
+        origin: 'callback',
+        messageId: 'bg-callback-old',
+        timestamp: now + 1,
+      });
+
+      useChatStore.getState().setThreadCatInvocation('thread-bg', 'opus', { invocationId: undefined });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'stale unlabeled chunk from old invocation',
+        origin: 'stream',
+        timestamp: now + 2,
+      });
+
+      expect(useChatStore.getState().getThreadState('thread-bg').messages).toEqual([
+        expect.objectContaining({
+          id: 'bg-callback-old',
+          catId: 'opus',
+          content: 'final answer',
+          origin: 'callback',
+          isStreaming: false,
+        }),
+      ]);
+
+      useChatStore.getState().setThreadCatInvocation('thread-bg', 'opus', { invocationId: 'inv-bg-new' });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'verified new invocation first chunk',
+        origin: 'stream',
+        timestamp: now + 3,
+      });
+
+      expect(useChatStore.getState().getThreadState('thread-bg').messages).toEqual([
+        expect.objectContaining({
+          id: 'bg-callback-old',
+          catId: 'opus',
+          content: 'final answer',
+          origin: 'callback',
+          isStreaming: false,
+        }),
+        expect.objectContaining({
+          type: 'assistant',
+          catId: 'opus',
+          content: 'verified new invocation first chunk',
+          origin: 'stream',
+          isStreaming: true,
+        }),
+      ]);
     });
   });
 
@@ -959,6 +1176,53 @@ describe('background thread socket handling', () => {
       expect(testBgStreamRefs.get('thread-bg::opus')?.id).toBe('active-bubble-1');
     });
 
+    it('records bubble timeline when background path recovers a lost stream ref', () => {
+      const now = Date.now();
+      configureDebug({ enabled: true });
+      ensureWindowDebugApi();
+
+      useChatStore.getState().addMessageToThread('thread-bg', {
+        id: 'active-bubble-debug',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'thinking...',
+        timestamp: now,
+        isStreaming: true,
+        origin: 'stream',
+        extra: { stream: { invocationId: 'inv-bg-1' } },
+      });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: ' recovered',
+        timestamp: now + 1,
+      });
+
+      const debugApi = (
+        window as typeof window & {
+          __catCafeDebug?: { dumpBubbleTimeline?: (options?: { rawThreadId?: boolean }) => string };
+        }
+      ).__catCafeDebug;
+      const dump = JSON.parse(debugApi!.dumpBubbleTimeline!({ rawThreadId: true })) as {
+        events: Array<Record<string, unknown>>;
+      };
+
+      expect(dump.events).toContainEqual(
+        expect.objectContaining({
+          event: 'bubble_lifecycle',
+          threadId: 'thread-bg',
+          action: 'recover',
+          reason: 'background_ref_lost',
+          catId: 'opus',
+          messageId: 'active-bubble-debug',
+          invocationId: 'inv-bg-1',
+          origin: 'stream',
+        }),
+      );
+    });
+
     it('tool_use after thread switch recovers existing streaming bubble', () => {
       const now = Date.now();
       useChatStore.getState().addMessageToThread('thread-bg', {
@@ -1271,6 +1535,122 @@ describe('background thread socket handling', () => {
       expect(ts.messages[0].content).toBe('start end');
       expect(ts.messages[0].isStreaming).toBe(false);
       expect(ts.catStatuses.opus).toBe('done');
+    });
+  });
+
+  describe('F108: slot-aware background invocation tracking', () => {
+    it('seeds a new background stream bubble with invocationId from activeInvocations when catInvocations is still empty', () => {
+      useChatStore.getState().addThreadActiveInvocation('thread-bg', 'inv-slot-1', 'opus', 'execute');
+
+      simulateBackgroundMessage({
+        type: 'tool_use',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        toolName: 'command_execution',
+        toolInput: { command: 'git status' },
+        timestamp: Date.now(),
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toHaveLength(1);
+      expect(ts.messages[0]).toMatchObject({
+        type: 'assistant',
+        catId: 'opus',
+        origin: 'stream',
+        extra: { stream: { invocationId: 'inv-slot-1' } },
+      });
+    });
+
+    it('markThreadInvocationActive registers invocationId when available', () => {
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'hello',
+        invocationId: 'inv-1',
+        timestamp: Date.now(),
+      });
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.hasActiveInvocation).toBe(true);
+      expect(ts.activeInvocations['inv-1']).toEqual({ catId: 'opus', mode: 'execute' });
+    });
+
+    it('markThreadInvocationComplete removes specific invocationId, preserves others', () => {
+      // Activate two invocations
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'a',
+        invocationId: 'inv-1',
+        timestamp: Date.now(),
+      });
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        content: 'b',
+        invocationId: 'inv-2',
+        timestamp: Date.now(),
+      });
+
+      let ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(Object.keys(ts.activeInvocations)).toHaveLength(2);
+
+      // Complete inv-1 (opus done, codex still running)
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: '',
+        isFinal: true,
+        invocationId: 'inv-1',
+        timestamp: Date.now(),
+      });
+
+      ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.activeInvocations['inv-1']).toBeUndefined();
+      expect(ts.activeInvocations['inv-2']).toEqual({ catId: 'codex', mode: 'execute' });
+      expect(ts.hasActiveInvocation).toBe(true);
+
+      // Complete inv-2 → all clear
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        content: '',
+        isFinal: true,
+        invocationId: 'inv-2',
+        timestamp: Date.now(),
+      });
+
+      ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(Object.keys(ts.activeInvocations)).toHaveLength(0);
+      expect(ts.hasActiveInvocation).toBe(false);
+    });
+
+    it('catA cancel (done without invocationId) does not clear catB active slot', () => {
+      // Two cats running concurrently on background thread
+      useChatStore.getState().addThreadActiveInvocation('thread-bg', 'inv-opus', 'opus', 'execute');
+      useChatStore.getState().addThreadActiveInvocation('thread-bg', 'inv-codex', 'codex', 'execute');
+      let ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(Object.keys(ts.activeInvocations)).toHaveLength(2);
+
+      // Steer cancels opus — done(isFinal) arrives without invocationId
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        isFinal: true,
+        timestamp: Date.now(),
+        // No invocationId — this is the cancel broadcast path
+      });
+
+      // codex slot must survive
+      ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.activeInvocations['inv-codex']).toEqual({ catId: 'codex', mode: 'execute' });
+      expect(ts.activeInvocations['inv-opus']).toBeUndefined();
+      expect(ts.hasActiveInvocation).toBe(true); // codex still active
     });
   });
 });
