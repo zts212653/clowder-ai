@@ -107,7 +107,7 @@ export async function* spawnCli(options: CliSpawnOptions): AsyncGenerator<unknow
 
 | 问题 | 解决方案 |
 |------|----------|
-| 进程超时 | 可配置超时 (`CLI_TIMEOUT_MS`)，默认 30 分钟，`0` 禁用 |
+| 进程超时 | 可配置超时 (`CLI_TIMEOUT_MS`)，默认 10 分钟，`0` 禁用 |
 | 优雅终止 | 先 SIGTERM，3 秒后 SIGKILL |
 | 僵尸进程 | `process.on('exit')` 钩子强制清理 |
 | 用户取消 | 支持 `AbortSignal` |

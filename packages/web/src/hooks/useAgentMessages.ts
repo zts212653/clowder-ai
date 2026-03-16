@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { compactToolResultDetail } from '@/utils/toolPreview';
 
-/** Timeout for done(isFinal) - 5 minutes */
-const DONE_TIMEOUT_MS = 5 * 60 * 1000;
+/** Timeout for done(isFinal) - 10 minutes (matches CLI timeout) */
+const DONE_TIMEOUT_MS = 10 * 60 * 1000;
 /** Monotonic counter for collision-safe callback bubble IDs */
 let cbSeq = 0;
 const DEBUG_SKIP_FILE_CHANGE_UI = process.env.NEXT_PUBLIC_DEBUG_SKIP_FILE_CHANGE_UI === '1';
@@ -77,6 +77,8 @@ export function useAgentMessages() {
 
   /** Map<catId, { id: messageId, catId }> — one entry per active stream */
   const activeRefs = useRef<Map<string, { id: string; catId: string }>>(new Map());
+  /** #30 fix: Track whether tool events were seen in this invocation (for timeout message) */
+  const sawToolEventsRef = useRef(false);
 
   /** Current A2A group ID — set on a2a_handoff, cleared on done(isFinal) */
   const a2aGroupRef = useRef<string | null>(null);
@@ -99,6 +101,11 @@ export function useAgentMessages() {
       const store = useChatStore.getState();
       const isActiveThreadTimeout = store.currentThreadId === timeoutThreadId;
 
+      // #30 fix: Context-aware timeout message
+      const timeoutContent = sawToolEventsRef.current
+        ? '⏱ 工具已执行但最终响应未返回。CLI 可能仍在后台运行，或已超时终止。'
+        : '⏱ Response timed out. The operation may still be running in the background.';
+
       if (!isActiveThreadTimeout) {
         const threadState = store.getThreadState(timeoutThreadId);
         for (const message of threadState.messages) {
@@ -111,7 +118,7 @@ export function useAgentMessages() {
           id: `sysinfo-timeout-${Date.now()}`,
           type: 'system',
           variant: 'info',
-          content: '⏱ Response timed out. The operation may still be running in the background.',
+          content: timeoutContent,
           timestamp: Date.now(),
         });
         return;
@@ -130,7 +137,7 @@ export function useAgentMessages() {
         id: `sysinfo-timeout-${Date.now()}`,
         type: 'system',
         variant: 'info',
-        content: '⏱ Response timed out. The operation may still be running in the background.',
+        content: timeoutContent,
         timestamp: Date.now(),
       });
     }, DONE_TIMEOUT_MS);
@@ -297,6 +304,7 @@ export function useAgentMessages() {
           }
         }
       } else if (msg.type === 'tool_use') {
+        sawToolEventsRef.current = true;
         setCatStatus(msg.catId, 'streaming');
         const toolName = msg.toolName ?? 'unknown';
         const detail = msg.toolInput ? safeJsonPreview(msg.toolInput, 200) : undefined;
@@ -374,6 +382,7 @@ export function useAgentMessages() {
           setIntentMode(null);
           clearCatStatuses();
           a2aGroupRef.current = null;
+          sawToolEventsRef.current = false;
         }
       } else if (msg.type === 'a2a_handoff') {
         // Start or continue an A2A group
@@ -637,6 +646,7 @@ export function useAgentMessages() {
         });
         // Only stop loading on isFinal; size===0 would false-positive in serial gaps
         if (msg.isFinal) {
+          sawToolEventsRef.current = false;
           clearDoneTimeout(); // prevent 5-min timer from firing timeout text after error
           setLoading(false);
           setHasActiveInvocation(false);

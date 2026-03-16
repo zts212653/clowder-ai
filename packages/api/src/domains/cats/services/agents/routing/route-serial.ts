@@ -81,6 +81,8 @@ export async function* routeSerial(
   const worklistEntry = registerWorklist(threadId, worklist, maxDepth);
 
   let index = 0;
+  // #30 fix: Track whether done(isFinal=true) has been yielded to prevent double-emit
+  let yieldedFinalDone = false;
   // F27: Track how many worklist entries have had a2a_handoff emitted
   let handoffEmitted = targetCats.length; // Original targets don't get handoff events
   // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
@@ -820,9 +822,18 @@ export async function* routeSerial(
 
       // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)
       // MUST always reach here regardless of append success (缅因猫 review P1-2)
-      if (doneMsg) {
-        yield { ...doneMsg, ...(mentionsUser ? { mentionsUser } : {}), isFinal: index === worklist.length - 1 };
+      // #30 fix: Synthesize done if missing (signal abort or invokeSingleCat didn't yield one)
+      if (!doneMsg) {
+        doneMsg = {
+          type: 'done' as AgentMessageType,
+          catId,
+          timestamp: Date.now(),
+          ...(firstMetadata ? { metadata: firstMetadata } : {}),
+        } as AgentMessage;
       }
+      const isFinal = index === worklist.length - 1;
+      if (isFinal) yieldedFinalDone = true;
+      yield { ...doneMsg, ...(mentionsUser ? { mentionsUser } : {}), isFinal };
 
       // F27: Advance executedIndex so pushToWorklist knows which cats are done
       worklistEntry.executedIndex = index + 1;
@@ -832,5 +843,18 @@ export async function* routeSerial(
     // F27: Always unregister worklist, even on error/abort.
     // Pass owner ref so preempting new invocation's worklist is not deleted (缅因猫 R1 P1-1)
     unregisterWorklist(threadId, worklistEntry);
+
+    // #30 fix: If we exited the while loop without yielding done(isFinal=true)
+    // (e.g. unhandled exception, signal abort at loop top), yield a synthetic terminal
+    // event so the frontend ALWAYS receives isFinal and can clear its loading state.
+    if (!yieldedFinalDone && worklist.length > 0) {
+      const lastCatId = worklist[Math.min(index, worklist.length - 1)]!;
+      yield {
+        type: 'done' as AgentMessageType,
+        catId: lastCatId,
+        isFinal: true,
+        timestamp: Date.now(),
+      } as AgentMessage;
+    }
   }
 }
