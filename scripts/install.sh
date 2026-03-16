@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Clowder AI — Linux One-Click Install (F113 Phase A)
-# Usage: curl -fsSL https://.../scripts/install.sh | bash
-#   or:  ./scripts/install.sh [--start] [--memory] [--registry=URL]
+# Clowder AI — Linux One-Click Install (F113)
+# Usage: ./scripts/install.sh [--start] [--memory] [--registry=URL]
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
 
 set -euo pipefail
@@ -57,9 +56,9 @@ if [[ -f /etc/os-release ]]; then
     . /etc/os-release; DISTRO_NAME="${ID:-unknown}"
     case "$DISTRO_NAME" in
         ubuntu|debian|linuxmint|pop) DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
-            PKG_INSTALL="apt-get install -y -qq"; export DEBIAN_FRONTEND=noninteractive ;;
+            PKG_INSTALL="apt-get install -y"; export DEBIAN_FRONTEND=noninteractive ;;
         centos|rhel|rocky|almalinux|fedora) DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
-            if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y -q"; else PKG_INSTALL="yum install -y -q"; fi ;;
+            if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y"; else PKG_INSTALL="yum install -y"; fi ;;
     esac
 fi
 
@@ -92,6 +91,7 @@ case "$DISTRO_FAMILY" in
     rhel) rpm -q ca-certificates &>/dev/null || NEED_PKGS+=(ca-certificates); rpm -q gnupg2 &>/dev/null || NEED_PKGS+=(gnupg2) ;;
 esac
 if [[ ${#NEED_PKGS[@]} -gt 0 ]]; then
+    info "  Installing: ${NEED_PKGS[*]}..."
     $SUDO $PKG_UPDATE 2>/dev/null || true
     $SUDO $PKG_INSTALL "${NEED_PKGS[@]}"; ok "System dependencies installed"
 else ok "All system dependencies present"
