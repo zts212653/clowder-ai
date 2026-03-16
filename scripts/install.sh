@@ -145,7 +145,7 @@ if ! command -v pnpm &>/dev/null; then
     warn "pnpm not found — installing"
     if command -v corepack &>/dev/null; then
         $SUDO corepack enable 2>/dev/null || true
-        timeout 30 corepack prepare pnpm@latest --activate 2>/dev/null || true
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 timeout 30 corepack prepare pnpm@latest --activate 2>/dev/null || true
     fi
     if ! command -v pnpm &>/dev/null; then
         $SUDO npm install -g pnpm \
