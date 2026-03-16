@@ -10,6 +10,7 @@ describe('workspace-security', () => {
 
   beforeEach(async () => {
     mod = await import('../dist/domains/workspace/workspace-security.js');
+    // Create a temp directory to simulate a workspace root
     testRoot = join(tmpdir(), `ws-test-${Date.now()}`);
     await mkdir(join(testRoot, 'src'), { recursive: true });
     await mkdir(join(testRoot, 'certs'), { recursive: true });
@@ -18,6 +19,8 @@ describe('workspace-security', () => {
     await writeFile(join(testRoot, '.env.local'), 'SECRET=456');
     await writeFile(join(testRoot, 'certs', 'server.pem'), 'CERT');
   });
+
+  // -- Traversal --
 
   it('resolves valid relative path within root', async () => {
     const result = await mod.resolveWorkspacePath(testRoot, 'src/index.ts');
@@ -45,6 +48,8 @@ describe('workspace-security', () => {
       (err) => err.code === 'TRAVERSAL',
     );
   });
+
+  // -- Denylist --
 
   it('rejects .env file', async () => {
     await assert.rejects(
@@ -81,6 +86,8 @@ describe('workspace-security', () => {
     );
   });
 
+  // -- Symlink escape --
+
   it('rejects symlink that escapes root', async () => {
     const linkPath = join(testRoot, 'src', 'escape-link');
     try {
@@ -94,6 +101,7 @@ describe('workspace-security', () => {
     }
   });
 
+  // P1: directory symlink escape (intermediate symlink dir, not just final segment)
   it('rejects path traversing through a directory symlink that escapes root', async () => {
     const linkDir = join(testRoot, 'src', 'escape-dir');
     try {
@@ -106,6 +114,8 @@ describe('workspace-security', () => {
       await rm(linkDir, { force: true });
     }
   });
+
+  // -- isDenylisted (P2: search result filtering) --
 
   it('isDenylisted blocks .env files', () => {
     assert.ok(mod.isDenylisted('.env'));
@@ -136,6 +146,8 @@ describe('workspace-security', () => {
     assert.ok(!mod.isDenylisted('docs/README.md'));
   });
 
+  // -- Worktree listing --
+
   it('listWorktrees returns at least one entry', async () => {
     const entries = await mod.listWorktrees();
     assert.ok(entries.length >= 1);
@@ -150,6 +162,8 @@ describe('workspace-security', () => {
       (err) => err.code === 'NOT_FOUND',
     );
   });
+
+  // -- resolveWorktreeIdByPath (F089 Phase 3a) --
 
   it('resolveWorktreeIdByPath returns canonical id for known worktree root', async () => {
     const entries = await mod.listWorktrees();

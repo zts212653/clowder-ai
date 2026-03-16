@@ -22,16 +22,19 @@ import { after, before, describe, it } from 'node:test';
 
 let checkSharedStatePreflight;
 
+/** Create a temp git repo, optionally with a bare remote for push/fetch. */
 function createTempRepo(name) {
   const dir = mkdtempSync(join(tmpdir(), `ss-test-${name}-`));
   execSync('git init -b main', { cwd: dir, stdio: 'ignore' });
   execSync('git config user.email "test@test.com"', { cwd: dir, stdio: 'ignore' });
   execSync('git config user.name "test"', { cwd: dir, stdio: 'ignore' });
+  // Initial commit so HEAD exists
   writeFileSync(join(dir, 'README.md'), '# test');
   execSync('git add README.md && git commit -m "init"', { cwd: dir, stdio: 'ignore' });
   return dir;
 }
 
+/** Create a bare remote and link to it from the repo. */
 function addBareRemote(repoDir) {
   const bare = mkdtempSync(join(tmpdir(), 'ss-test-bare-'));
   execSync('git init --bare -b main', { cwd: bare, stdio: 'ignore' });
@@ -63,6 +66,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Commit BACKLOG.md but don't push
     mkdirSync(join(repo, 'docs'), { recursive: true });
     writeFileSync(join(repo, 'docs/BACKLOG.md'), '# Backlog');
     execSync('git add docs/BACKLOG.md && git commit -m "add backlog"', { cwd: repo, stdio: 'ignore' });
@@ -78,6 +82,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Stage cat-config.json but don't commit — git diff --cached catches this
     writeFileSync(join(repo, 'cat-config.json'), '{}');
     execSync('git add cat-config.json', { cwd: repo, stdio: 'ignore' });
 
@@ -92,6 +97,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Stage BACKLOG.md but don't commit
     mkdirSync(join(repo, 'docs'), { recursive: true });
     writeFileSync(join(repo, 'docs/BACKLOG.md'), '# Backlog');
     execSync('git add docs/BACKLOG.md', { cwd: repo, stdio: 'ignore' });
@@ -106,10 +112,12 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Commit BACKLOG.md but don't push
     mkdirSync(join(repo, 'docs'), { recursive: true });
     writeFileSync(join(repo, 'docs/BACKLOG.md'), '# Backlog');
     execSync('git add docs/BACKLOG.md && git commit -m "add backlog"', { cwd: repo, stdio: 'ignore' });
 
+    // Also have staged (uncommitted) cat-config.json
     writeFileSync(join(repo, 'cat-config.json'), '{}');
     execSync('git add cat-config.json', { cwd: repo, stdio: 'ignore' });
 
@@ -124,6 +132,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // All pushed, nothing dirty
     const result = checkSharedStatePreflight(repo);
     assert.deepEqual(result, { ok: true });
   });
@@ -133,6 +142,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Commit a non-shared file but don't push
     writeFileSync(join(repo, 'src-index.ts'), 'console.log("hi")');
     execSync('git add src-index.ts && git commit -m "add src"', { cwd: repo, stdio: 'ignore' });
 
@@ -153,10 +163,13 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Create a new branch, push it with tracking so origin/<branch> exists
     execSync('git checkout -b feat/test-branch', { cwd: repo, stdio: 'ignore' });
     execSync('git push -u origin feat/test-branch', { cwd: repo, stdio: 'ignore' });
+    // Unset upstream tracking to test origin/<branch> fallback
     execSync('git branch --unset-upstream', { cwd: repo, stdio: 'ignore' });
 
+    // Commit shared-state file
     writeFileSync(join(repo, 'cat-config.json'), '{}');
     execSync('git add cat-config.json && git commit -m "add config"', { cwd: repo, stdio: 'ignore' });
 
@@ -170,8 +183,10 @@ describe('checkSharedStatePreflight (integration)', () => {
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Create a new branch that does NOT exist on remote
     execSync('git checkout -b feat/brand-new', { cwd: repo, stdio: 'ignore' });
 
+    // Commit shared-state file on the new branch
     mkdirSync(join(repo, 'docs'), { recursive: true });
     writeFileSync(join(repo, 'docs/BACKLOG.md'), '# New');
     execSync('git add docs/BACKLOG.md && git commit -m "add backlog on new branch"', { cwd: repo, stdio: 'ignore' });
@@ -182,10 +197,14 @@ describe('checkSharedStatePreflight (integration)', () => {
   });
 
   it('returns ok:true when local is only behind upstream (no local unpushed commits)', () => {
+    // Codex cloud review P1: git diff --name-only upstream..HEAD is a tree diff,
+    // so when local is behind upstream it falsely reports upstream-only files.
+    // Fix: check rev-list ahead count first; if ahead=0, skip diff.
     const repo = createTempRepo('behind-only');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
+    // Simulate another clone pushing a shared-state file
     const cloneA = mkdtempSync(join(tmpdir(), 'ss-test-cloneA-'));
     tempDirs.push(cloneA);
     execSync(`git clone ${bare} .`, { cwd: cloneA, stdio: 'ignore' });
@@ -195,6 +214,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(cloneA, 'docs/BACKLOG.md'), '# Backlog from A');
     execSync('git add docs/BACKLOG.md && git commit -m "A adds backlog" && git push', { cwd: cloneA, stdio: 'ignore' });
 
+    // Original repo fetches but doesn't merge — HEAD is behind upstream
     execSync('git fetch origin', { cwd: repo, stdio: 'ignore' });
 
     const result = checkSharedStatePreflight(repo);
@@ -202,15 +222,19 @@ describe('checkSharedStatePreflight (integration)', () => {
   });
 
   it('returns ok:true when no upstream + no origin/<branch> + no merge-base (fail-open)', () => {
+    // Create a completely isolated repo with no remote at all
     const repo = createTempRepo('isolated');
     tempDirs.push(repo);
 
+    // Create a new branch (no remote, no origin/main)
     execSync('git checkout -b feat/orphan', { cwd: repo, stdio: 'ignore' });
 
+    // Commit shared-state file — but since there's no remote, nothing to compare against
     writeFileSync(join(repo, 'cat-config.json'), '{}');
     execSync('git add cat-config.json && git commit -m "add config"', { cwd: repo, stdio: 'ignore' });
 
     const result = checkSharedStatePreflight(repo);
+    // Fail-open: no way to determine if it's pushed or not
     assert.deepEqual(result, { ok: true }, 'should fail-open when no merge-base available');
   });
 });
