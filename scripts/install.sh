@@ -22,30 +22,24 @@ use_registry() {
     npm config set registry "$reg" 2>/dev/null || true
     command -v pnpm &>/dev/null && pnpm config set registry "$reg" 2>/dev/null || true
 }
-if [[ -n "$NPM_REGISTRY" ]]; then
-    use_registry "$NPM_REGISTRY"
-fi
+[[ -n "$NPM_REGISTRY" ]] && use_registry "$NPM_REGISTRY"
 
 info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
 step() { echo ""; echo -e "${BOLD}$*${NC}"; }
 USED_FNM=false
 persist_user_bin() {
-    local bin="$1" path=""
-    path="$(command -v "$bin" 2>/dev/null || true)"
-    [[ -n "$path" ]] || return 0
-    $SUDO mkdir -p /usr/local/bin
+    local bin="$1" path=""; path="$(command -v "$bin" 2>/dev/null || true)"
+    [[ -n "$path" ]] || return 0; $SUDO mkdir -p /usr/local/bin
     $SUDO ln -sfn "$(readlink -f "$path" 2>/dev/null || echo "$path")" "/usr/local/bin/$bin"
 }
 
-# TTY-safe read: works even when stdin is a pipe (curl | bash)
+# TTY-safe read + pnpm install with registry fallback
 HAS_TTY=false; [[ -r /dev/tty ]] && HAS_TTY=true
 tty_read() { local prompt="$1" var="$2"; read -rp "$prompt" "$var" </dev/tty; }
 pnpm_install_with_fallback() {
-    pnpm install --frozen-lockfile && return 0
-    [[ -n "$NPM_REGISTRY" ]] && return 1
-    warn "pnpm install failed — retrying with npmmirror"
-    use_registry "https://registry.npmmirror.com"
+    pnpm install --frozen-lockfile && return 0; [[ -n "$NPM_REGISTRY" ]] && return 1
+    warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
     pnpm install --frozen-lockfile
 }
 
@@ -58,24 +52,16 @@ fi
 
 DISTRO_FAMILY=""; DISTRO_NAME=""; PKG_INSTALL=""; PKG_UPDATE=""
 if [[ -f /etc/os-release ]]; then
-    . /etc/os-release  # shellcheck source=/dev/null
-    DISTRO_NAME="${ID:-unknown}"
+    . /etc/os-release; DISTRO_NAME="${ID:-unknown}"
     case "$DISTRO_NAME" in
-        ubuntu|debian|linuxmint|pop)
-            DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
-            PKG_INSTALL="apt-get install -y -qq"; export DEBIAN_FRONTEND=noninteractive
-            ;;
-        centos|rhel|rocky|almalinux|fedora)
-            DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
-            if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y -q"
-            else PKG_INSTALL="yum install -y -q"; fi
-            ;;
+        ubuntu|debian|linuxmint|pop) DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
+            PKG_INSTALL="apt-get install -y -qq"; export DEBIAN_FRONTEND=noninteractive ;;
+        centos|rhel|rocky|almalinux|fedora) DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
+            if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y -q"; else PKG_INSTALL="yum install -y -q"; fi ;;
     esac
 fi
 
-if [[ -z "$DISTRO_FAMILY" ]]; then
-    fail "Unsupported: ${DISTRO_NAME:-unknown}. Supported: Ubuntu/Debian, CentOS/RHEL/Fedora"; exit 1
-fi
+if [[ -z "$DISTRO_FAMILY" ]]; then fail "Unsupported: ${DISTRO_NAME:-unknown}. Need: Ubuntu/Debian or CentOS/RHEL/Fedora"; exit 1; fi
 ok "OS: ${PRETTY_NAME:-$DISTRO_NAME} ($DISTRO_FAMILY)"
 
 SUDO=""
@@ -98,8 +84,10 @@ for cmd in git curl gcc; do
         esac
     fi
 done
-case "$DISTRO_FAMILY" in  # always ensure HTTPS deps
-    debian) NEED_PKGS+=(ca-certificates gnupg) ;; rhel) NEED_PKGS+=(ca-certificates gnupg2) ;;
+# Ensure HTTPS/GPG deps exist (needed for NodeSource)
+case "$DISTRO_FAMILY" in
+    debian) for p in ca-certificates gnupg; do dpkg -s "$p" &>/dev/null || NEED_PKGS+=("$p"); done ;;
+    rhel) rpm -q ca-certificates &>/dev/null || NEED_PKGS+=(ca-certificates); rpm -q gnupg2 &>/dev/null || NEED_PKGS+=(gnupg2) ;;
 esac
 if [[ ${#NEED_PKGS[@]} -gt 0 ]]; then
     $SUDO $PKG_UPDATE 2>/dev/null || true
