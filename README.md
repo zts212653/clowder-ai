@@ -143,35 +143,22 @@ You don't need to be a developer. You need to know what you want — and who you
 
 > CVO Bootcamp coming soon — a guided onboarding where your AI team walks you through a complete feature lifecycle.
 
-### One-Click Install (Linux / Docker)
-
-The install script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools, and authentication setup.
-
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
 bash scripts/install.sh
 ```
 
+The script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools (Claude / Codex / Gemini), and authentication — with interactive prompts to guide you through each step.
+
 Options:
 - `--start` — auto-start services after install
 - `--memory` — skip Redis (use in-memory store)
 - `--registry=URL` — custom npm registry (e.g. for China mirrors)
 
-### Manual Setup
+Then open `http://localhost:3003` and start talking to your team.
 
-```bash
-git clone https://github.com/zts212653/clowder-ai.git
-cd clowder-ai
-cp .env.example .env   # add at least one model API key
-pnpm install
-pnpm build
-pnpm start
-```
-
-Open `http://localhost:3003` and start talking to your team.
-
-**Full setup guide** — required vs optional config, voice, IM platforms: **[SETUP.md](SETUP.md)**
+**Full setup guide** (manual install, advanced config, voice, IM platforms): **[SETUP.md](SETUP.md)**
 
 ## Usage Guide
 
@@ -515,35 +502,22 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 
 > CVO 训练营即将推出 — AI 团队亲自带你走完一个完整的 feature 生命周期。
 
-### 一键安装（Linux / Docker）
-
-安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具和认证配置。
-
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
 bash scripts/install.sh
 ```
 
+安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具（Claude / Codex / Gemini）和认证配置 — 全程交互式引导。
+
 可选参数：
 - `--start` — 安装完成后自动启动服务
 - `--memory` — 跳过 Redis（使用内存模式）
 - `--registry=URL` — 自定义 npm 镜像源（适用于国内网络）
 
-### 手动安装
+然后打开 `http://localhost:3003`，开始和你的团队对话。
 
-```bash
-git clone https://github.com/zts212653/clowder-ai.git
-cd clowder-ai
-cp .env.example .env   # 至少填一个模型 API key
-pnpm install
-pnpm build
-pnpm start
-```
-
-打开 `http://localhost:3003`，开始和你的团队对话。
-
-**完整安装指南** — 必选 vs 可选配置、语音、IM 平台：**[SETUP.md](SETUP.md)**
+**完整安装指南**（手动安装、高级配置、语音、IM 平台）：**[SETUP.md](SETUP.md)**
 
 ## 使用指南
 
