@@ -2,7 +2,7 @@ function Get-ToolCommandCandidates {
     param([string]$Name)
     $candidates = @()
     if ($env:APPDATA) {
-        $candidates += @(Join-Path $env:APPDATA "npm\$Name.cmd", Join-Path $env:APPDATA "npm\$Name.ps1", Join-Path $env:APPDATA "npm\$Name")
+        $candidates += @((Join-Path $env:APPDATA "npm\$Name.cmd"), (Join-Path $env:APPDATA "npm\$Name.ps1"), (Join-Path $env:APPDATA "npm\$Name"))
     }
     $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
     if ($npmCommand) {
@@ -10,7 +10,7 @@ function Get-ToolCommandCandidates {
         try {
             $npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1
             if ($npmPrefix) {
-                $candidates += @(Join-Path $npmPrefix "$Name.cmd", Join-Path $npmPrefix "$Name.ps1", Join-Path $npmPrefix $Name)
+                $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
             }
         } catch {}
     }
@@ -19,7 +19,7 @@ function Get-ToolCommandCandidates {
         $nodePath = if ($nodeCommand.Path) { $nodeCommand.Path } else { $nodeCommand.Source }
         if ($nodePath) {
             $nodeDir = Split-Path -Parent $nodePath
-            $candidates += @(Join-Path $nodeDir "$Name.cmd", Join-Path $nodeDir "$Name.ps1", Join-Path $nodeDir $Name)
+            $candidates += @((Join-Path $nodeDir "$Name.cmd"), (Join-Path $nodeDir "$Name.ps1"), (Join-Path $nodeDir $Name))
         }
     }
     return @($candidates | Where-Object { $_ } | Select-Object -Unique)
