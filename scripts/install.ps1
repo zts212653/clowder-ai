@@ -170,6 +170,7 @@ if (-not $pnpmOk) {
         } catch {}
     }
     if (-not $pnpmOk) {
+        Write-ToolResolutionDiagnostics -Name "pnpm"
         Write-Err "Could not install pnpm. Run: npm install -g pnpm"
         exit 1
     }

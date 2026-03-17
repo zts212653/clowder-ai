@@ -91,12 +91,21 @@ test('Windows command forwarding helpers avoid PowerShell automatic $args collis
 
 test('Windows installer probes the npm shim path when pnpm is installed but not yet on PATH', () => {
   assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\\$Name\.cmd"/);
+  assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\\$Name\.ps1"/);
   assert.match(commandHelpersScript, /prefix -g/);
   assert.match(commandHelpersScript, /Select-Object -Last 1/);
   assert.match(commandHelpersScript, /Join-Path \$npmPrefix "\$Name\.cmd"/);
+  assert.match(commandHelpersScript, /Join-Path \$npmPrefix "\$Name\.ps1"/);
   assert.match(installScript, /Resolve-PnpmCommand/);
   assert.match(installScript, /Invoke-Pnpm/);
   assert.match(installScript, /Resolve-ToolCommand -Name "pnpm"/);
+});
+
+test('Windows installer prints pnpm resolver diagnostics before giving up', () => {
+  assert.match(commandHelpersScript, /function Get-ToolCommandCandidates/);
+  assert.match(commandHelpersScript, /Write-Warn "\$Name resolver candidates:"/);
+  assert.match(commandHelpersScript, /Write-Warn "  \[\$status\] \$candidate"/);
+  assert.match(installScript, /Write-ToolResolutionDiagnostics -Name "pnpm"/);
 });
 
 test('Windows scripts share a generic npm shim resolver for pnpm and agent CLIs', () => {
