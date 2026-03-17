@@ -109,13 +109,18 @@ try {
 
 if (-not $nodeOk) {
     if ($hasWinget) {
-        Write-Host "  Installing Node.js LTS via winget..."
-        winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent 2>$null
-        Refresh-Path
-        $nodeRaw = & node --version 2>$null
-        if ($nodeRaw) {
-            Write-Ok "Node.js $nodeRaw installed"
-            $nodeOk = $true
+        try {
+            Write-Host "  Installing Node.js LTS via winget..."
+            winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent 2>$null
+            Refresh-Path
+            $nodeRaw = & node --version 2>$null
+            if ($nodeRaw) {
+                Write-Ok "Node.js $nodeRaw installed"
+                $nodeOk = $true
+            }
+        } catch {}
+        if (-not $nodeOk) {
+            Write-Warn "winget Node.js install failed — falling back to manual prerequisite check"
         }
     }
     if (-not $nodeOk) {
@@ -178,8 +183,12 @@ Set-Location $ProjectRoot
 Write-Ok "Using project root: $ProjectRoot"
 
 Write-Host "  Running pnpm install..."
-Invoke-Pnpm -Args @("install", "--frozen-lockfile") 2>$null
-if ($LASTEXITCODE -ne 0) {
+$frozenInstallOk = $false
+try {
+    Invoke-Pnpm -Args @("install", "--frozen-lockfile") 2>$null
+    $frozenInstallOk = $LASTEXITCODE -eq 0
+} catch {}
+if (-not $frozenInstallOk) {
     Write-Warn "Frozen lockfile failed, retrying..."
     Invoke-Pnpm -Args @("install")
     if ($LASTEXITCODE -ne 0) { Write-Err "pnpm install failed"; exit 1 }

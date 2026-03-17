@@ -36,6 +36,39 @@ test('Windows installer treats non-git directories as a warning instead of a Pow
   assert.ok(catchIndex < warningIndex, 'expected warning path after the protected git probe');
 });
 
+test('Windows installer treats winget Node install failures as retryable instead of terminating native command errors', () => {
+  const wingetInstallIndex = installScript.indexOf('winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent 2>$null');
+  const tryIndex = installScript.lastIndexOf('try {', wingetInstallIndex);
+  const catchIndex = installScript.indexOf('} catch {}', wingetInstallIndex);
+  const manualInstallIndex = installScript.indexOf('Write-Err "Node.js >= 20 required. Install from https://nodejs.org/"');
+
+  assert.notEqual(wingetInstallIndex, -1, 'expected winget-based Node install path');
+  assert.notEqual(tryIndex, -1, 'expected winget install to be wrapped in try/catch');
+  assert.notEqual(catchIndex, -1, 'expected winget install to swallow native command errors');
+  assert.notEqual(manualInstallIndex, -1, 'expected manual install fallback after winget failure');
+  assert.ok(tryIndex < wingetInstallIndex, 'expected try block before winget install');
+  assert.ok(wingetInstallIndex < catchIndex, 'expected catch block after winget install');
+  assert.ok(catchIndex < manualInstallIndex, 'expected manual install fallback after protected winget path');
+});
+
+test('Windows installer retries plain pnpm install when frozen lockfile mode hits a native command error', () => {
+  const frozenInstallIndex = installScript.indexOf('Invoke-Pnpm -Args @("install", "--frozen-lockfile") 2>$null');
+  const tryIndex = installScript.lastIndexOf('try {', frozenInstallIndex);
+  const catchIndex = installScript.indexOf('} catch {}', frozenInstallIndex);
+  const retryWarnIndex = installScript.indexOf('Write-Warn "Frozen lockfile failed, retrying..."');
+  const retryInstallIndex = installScript.indexOf('Invoke-Pnpm -Args @("install")', retryWarnIndex);
+
+  assert.notEqual(frozenInstallIndex, -1, 'expected frozen lockfile install attempt');
+  assert.notEqual(tryIndex, -1, 'expected frozen lockfile attempt to be wrapped in try/catch');
+  assert.notEqual(catchIndex, -1, 'expected frozen lockfile attempt to swallow native command errors');
+  assert.notEqual(retryWarnIndex, -1, 'expected retry warning after frozen lockfile failure');
+  assert.notEqual(retryInstallIndex, -1, 'expected plain pnpm install retry after frozen lockfile failure');
+  assert.ok(tryIndex < frozenInstallIndex, 'expected try block before frozen lockfile install');
+  assert.ok(frozenInstallIndex < catchIndex, 'expected catch block after frozen lockfile install');
+  assert.ok(catchIndex < retryWarnIndex, 'expected retry warning after protected frozen lockfile path');
+  assert.ok(retryWarnIndex < retryInstallIndex, 'expected plain install retry after warning');
+});
+
 test('Windows installer probes the npm shim path when pnpm is installed but not yet on PATH', () => {
   assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\\$Name\.cmd"/);
   assert.match(installScript, /Resolve-PnpmCommand/);
