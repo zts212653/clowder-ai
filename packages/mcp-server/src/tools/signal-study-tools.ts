@@ -2,7 +2,9 @@ import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3003';
+import { DEFAULT_API_URL } from '../constants.js';
+
+const API_URL = DEFAULT_API_URL;
 const SIGNAL_USER = process.env['CAT_CAFE_SIGNAL_USER']?.trim() || 'codex';
 
 async function apiJson(
