@@ -119,6 +119,15 @@ test('Windows scripts share a generic npm shim resolver for pnpm and agent CLIs'
   assert.match(helpersScript, /\$hasGemini = \$null -ne \(Resolve-ToolCommand -Name "gemini"\)/);
 });
 
+test('Windows tool resolution prefers explicit shim candidates before generic Get-Command resolution', () => {
+  const candidatesIndex = commandHelpersScript.indexOf('foreach ($candidate in (Get-ToolCommandCandidates -Name $Name))');
+  const getCommandIndex = commandHelpersScript.indexOf('$toolCommand = Get-Command $Name -ErrorAction SilentlyContinue');
+
+  assert.notEqual(candidatesIndex, -1, 'expected explicit shim candidate loop');
+  assert.notEqual(getCommandIndex, -1, 'expected Get-Command fallback');
+  assert.ok(candidatesIndex < getCommandIndex, 'expected shim candidates to be preferred before generic Get-Command lookup');
+});
+
 test('Windows installer resolves corepack and npm explicitly when bootstrapping pnpm', () => {
   assert.match(installScript, /\$corepackCommand = Resolve-ToolCommand -Name "corepack"/);
   assert.match(installScript, /& \$corepackCommand enable 2>\$null/);

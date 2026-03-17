@@ -27,15 +27,15 @@ function Get-ToolCommandCandidates {
 
 function Resolve-ToolCommand {
     param([string]$Name)
-    $toolCommand = Get-Command $Name -ErrorAction SilentlyContinue
-    if ($toolCommand -and $toolCommand.Path) { return $toolCommand.Path }
-    if ($toolCommand -and $toolCommand.Source) { return $toolCommand.Source }
     foreach ($candidate in (Get-ToolCommandCandidates -Name $Name)) {
         if (Test-Path $candidate) {
             Add-ProcessPathPrefix -Directory (Split-Path -Parent $candidate)
             return $candidate
         }
     }
+    $toolCommand = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($toolCommand -and $toolCommand.Path) { return $toolCommand.Path }
+    if ($toolCommand -and $toolCommand.Source) { return $toolCommand.Source }
     return $null
 }
 
