@@ -235,6 +235,35 @@ kill_port() {
     fi
 }
 
+# Anti-self-TERM guard: refuse to kill a running runtime worktree (F115 KD-5)
+guard_runtime_port() {
+    local port=$1
+    local name=$2
+    local pids
+    pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+    [ -n "$pids" ] || return 0  # port free
+
+    if [ "${CAT_CAFE_ALLOW_KILL_RUNTIME:-0}" = "1" ]; then
+        return 0  # explicit override
+    fi
+
+    local pid cwd
+    for pid in $pids; do
+        cwd=$(lsof -p "$pid" -Fn 2>/dev/null | grep '^ncwd' | sed 's/^n//' || true)
+        [ -n "$cwd" ] || continue
+        if echo "$cwd" | grep -q "cat-cafe-runtime"; then
+            echo ""
+            echo -e "${RED}✗ 端口 $port ($name) 被 runtime worktree 占用 (PID $pid)${NC}"
+            echo "  runtime 路径: $cwd"
+            echo ""
+            echo "  请先停止 runtime (Ctrl+C in the runtime terminal),"
+            echo "  或显式覆盖:"
+            echo "    CAT_CAFE_ALLOW_KILL_RUNTIME=1 pnpm start"
+            exit 1
+        fi
+    done
+}
+
 # 轮询等待端口监听（ML 模型加载需要时间）
 # 用法: wait_for_port <port> <name> [max_seconds=15]
 wait_for_port() {
@@ -573,9 +602,11 @@ main() {
     guard_main_branch_start
     guard_runtime_redis_sanctuary
 
-    # 1. 杀掉残余进程
+    # 1. 检查 runtime 保护 + 杀掉残余进程
     echo ""
     echo -e "${CYAN}检查端口...${NC}"
+    guard_runtime_port $API_PORT "API"
+    guard_runtime_port $WEB_PORT "Frontend"
     kill_port $API_PORT "API"
     kill_port $WEB_PORT "Frontend"
     if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
