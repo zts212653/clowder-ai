@@ -529,6 +529,7 @@ async function main(): Promise<void> {
     prTrackingStore,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
+    invocationQueue,
     ...(memoryServices
       ? {
           evidenceStore: memoryServices.evidenceStore,
@@ -780,6 +781,30 @@ async function main(): Promise<void> {
       app.log.warn(`[api] Startup sweep failed (best-effort): ${String(err)}`);
     }
   }
+
+  // F118 Hardening: Global session reaper — startup sweep + periodic scan.
+  // Reconciles sessions stuck in 'sealing' state that the per-invoke lazy
+  // reaper would never visit (e.g., threads with no subsequent invocations).
+  const GLOBAL_REAPER_INTERVAL_MS = 5 * 60_000;
+  try {
+    const startupReaped = await sessionSealer.reconcileAllStuck();
+    if (startupReaped > 0) {
+      app.log.info(`[api] F118 global reaper: reconciled ${startupReaped} stuck sealing session(s) at startup`);
+    }
+  } catch (err) {
+    app.log.warn(`[api] F118 global reaper startup sweep failed (best-effort): ${String(err)}`);
+  }
+  const globalReaperTimer = setInterval(async () => {
+    try {
+      const reaped = await sessionSealer.reconcileAllStuck();
+      if (reaped > 0) {
+        app.log.info(`[api] F118 global reaper: reconciled ${reaped} stuck sealing session(s)`);
+      }
+    } catch {
+      // best-effort periodic reaper
+    }
+  }, GLOBAL_REAPER_INTERVAL_MS);
+  globalReaperTimer.unref();
 
   // Log server startup to audit log (best-effort: don't crash if audit dir unwritable)
   const auditLog = getEventAuditLog();

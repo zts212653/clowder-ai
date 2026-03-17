@@ -81,7 +81,7 @@ export interface GameRuntime {
   currentPhase: string;
   round: number;
   eventLog: GameEvent[];
-  pendingActions: Record<string, GameAction>;
+  pendingActions: Record<string, PendingAction>;
   status: 'lobby' | 'playing' | 'paused' | 'finished';
   winner?: string;
   config: GameConfig;
@@ -99,6 +99,8 @@ export interface GameEvent {
   scope: EventScope;
   payload: Record<string, unknown>;
   timestamp: number;
+  /** When this event becomes visible: live (immediately), phase_end, game_end */
+  revealPolicy?: 'live' | 'phase_end' | 'game_end';
 }
 
 export interface GameAction {
@@ -107,6 +109,38 @@ export interface GameAction {
   targetSeat?: SeatId;
   params?: Record<string, unknown>;
   submittedAt: number;
+}
+
+// === Phase F: Action Status + Ballot + Resolution ===
+
+export type ActionStatus = 'waiting' | 'acting' | 'acted' | 'timed_out' | 'fallback';
+
+const VALID_ACTION_STATUSES = new Set<string>(['waiting', 'acting', 'acted', 'timed_out', 'fallback']);
+
+export function isValidActionStatus(value: unknown): value is ActionStatus {
+  return typeof value === 'string' && VALID_ACTION_STATUSES.has(value);
+}
+
+export interface PendingAction extends GameAction {
+  status: ActionStatus;
+  requestedAt: number;
+  fallbackSource?: 'heuristic' | 'random';
+}
+
+export interface Ballot {
+  voterSeat: string;
+  choice: string | null;
+  revision: number;
+  locked: boolean;
+  source: 'player' | 'llm' | 'fallback' | 'random';
+  submittedAt: number;
+}
+
+export interface Resolution {
+  winningChoice: string | null;
+  tiePolicy: 'no_kill' | 'random_tied';
+  revoteCount: number;
+  fallbackApplied: boolean;
 }
 
 export interface GameConfig {
@@ -139,6 +173,10 @@ export interface GameView {
     humanSeat?: SeatId;
     detectiveSeatId?: SeatId;
   };
+  /** Aggregate action progress: how many expected actors have submitted */
+  submittedCount?: number;
+  /** Total expected actors for current phase */
+  totalExpected?: number;
   /** Filled when status === 'finished' — per-player stats + MVP */
   gameStats?: GameResultStats;
 }
@@ -173,6 +211,8 @@ export interface SeatView {
   alive: boolean;
   /** Whether this seat has submitted an action for the current phase */
   hasActed?: boolean;
+  /** Action status — only populated in god-view */
+  actionStatus?: ActionStatus;
 }
 
 // === Type Guards ===

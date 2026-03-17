@@ -182,6 +182,61 @@ describe('useChatHistory thread switch ordering', () => {
     expect(historyCall).toBeUndefined();
   });
 
+  it('forces replace hydration when cached thread already contains duplicate same-invocation bubbles', () => {
+    const now = Date.now();
+    useChatStore.setState({
+      currentThreadId: 'thread-e',
+      threadStates: {
+        'thread-e': {
+          messages: [
+            {
+              id: 'stream-e-1',
+              type: 'assistant',
+              catId: 'opus',
+              content: 'partial stream bubble',
+              origin: 'stream',
+              timestamp: now - 2_000,
+              extra: { stream: { invocationId: 'inv-e-1' } },
+            },
+            {
+              id: 'callback-e-1',
+              type: 'assistant',
+              catId: 'opus',
+              content: 'final callback bubble',
+              origin: 'callback',
+              timestamp: now - 1_000,
+              extra: { stream: { invocationId: 'inv-e-1' } },
+            },
+          ],
+          isLoading: false,
+          isLoadingHistory: false,
+          hasMore: true,
+          hasActiveInvocation: false,
+          intentMode: null,
+          targetCats: [],
+          catStatuses: {},
+          catInvocations: {},
+          currentGame: null,
+
+          unreadCount: 0,
+          hasUserMention: false,
+          lastActivity: now,
+          queue: [],
+          queuePaused: false,
+          queueFull: false,
+        },
+      },
+    });
+
+    act(() => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-e' }));
+    });
+
+    const calls = apiFetchMock.mock.calls;
+    const historyCall = calls.find(([url]) => typeof url === 'string' && url.includes('/api/messages'));
+    expect(historyCall).toBeDefined();
+  });
+
   it('#80 fix-A: thread with cached messages AND activeInvocation still triggers fetchHistory', () => {
     // Set up: thread-b has cached messages + activeInvocation (streaming in background)
     useChatStore.setState({
@@ -219,5 +274,95 @@ describe('useChatHistory thread switch ordering', () => {
     const calls = apiFetchMock.mock.calls;
     const historyCall = calls.find(([url]) => typeof url === 'string' && url.includes('/api/messages'));
     expect(historyCall).toBeDefined();
+  });
+
+  it('preserves server-reported processing status when queue hydration beats setCurrentThread on thread switch', async () => {
+    vi.useFakeTimers();
+    let resolveMessages: ((value: Response) => void) | null = null;
+    const messagesPromise = new Promise<Response>((resolve) => {
+      resolveMessages = resolve;
+    });
+
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/api/messages')) {
+        return messagesPromise;
+      }
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: ['opus'] }), { status: 200 }),
+        );
+      }
+      if (typeof url === 'string' && url.includes('/task-progress')) {
+        return Promise.resolve(new Response(JSON.stringify({ taskProgress: {} }), { status: 200 }));
+      }
+      if (typeof url === 'string' && url.includes('/api/tasks')) {
+        return Promise.resolve(new Response(JSON.stringify({ tasks: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+
+    const now = Date.now();
+    useChatStore.setState({
+      currentThreadId: 'thread-a',
+      threadStates: {
+        'thread-race': {
+          messages: [
+            {
+              id: 'race-msg-1',
+              type: 'assistant',
+              catId: 'opus',
+              content: 'cached stale processing bubble',
+              timestamp: now - 10_000,
+            },
+          ],
+          isLoading: true,
+          isLoadingHistory: false,
+          hasMore: true,
+          hasActiveInvocation: false,
+          activeInvocations: {},
+          intentMode: null,
+          targetCats: [],
+          catStatuses: {},
+          catInvocations: {},
+          currentGame: null,
+          unreadCount: 0,
+          hasUserMention: false,
+          lastActivity: now,
+          queue: [],
+          queuePaused: false,
+          queueFull: false,
+        },
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-race' }));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350);
+    });
+
+    const backgroundStateAfterQueueHydration = useChatStore.getState().threadStates['thread-race'];
+    expect(backgroundStateAfterQueueHydration?.hasActiveInvocation).toBe(true);
+    expect(backgroundStateAfterQueueHydration?.targetCats).toEqual(['opus']);
+    expect(backgroundStateAfterQueueHydration?.catStatuses).toEqual({ opus: 'streaming' });
+
+    act(() => {
+      useChatStore.getState().setCurrentThread('thread-race');
+    });
+
+    const stateAfterThreadSwitch = useChatStore.getState();
+    expect(stateAfterThreadSwitch.currentThreadId).toBe('thread-race');
+    expect(stateAfterThreadSwitch.hasActiveInvocation).toBe(true);
+    expect(stateAfterThreadSwitch.targetCats).toEqual(['opus']);
+    expect(stateAfterThreadSwitch.catStatuses).toEqual({ opus: 'streaming' });
+
+    resolveMessages?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    vi.useRealTimers();
   });
 });

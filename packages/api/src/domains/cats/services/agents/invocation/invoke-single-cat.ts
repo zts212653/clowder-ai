@@ -447,11 +447,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const sessionChainActive = isSessionChainEnabled(catId);
     if (deps.sessionChainStore && sessionChainActive) {
       // Reaper: reconcile any sessions stuck in 'sealing' > 5 minutes (best-effort).
-      if (deps.sessionSealer && 'reconcileStuck' in deps.sessionSealer) {
+      if (deps.sessionSealer) {
         try {
-          await (
-            deps.sessionSealer as { reconcileStuck: (catId: string, threadId: string) => Promise<number> }
-          ).reconcileStuck(catId, threadId);
+          await deps.sessionSealer.reconcileStuck(catId, threadId);
         } catch {
           /* best-effort reconcile */
         }

@@ -1733,6 +1733,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         finalizeResolved = true;
         return realSealer.finalize(opts);
       },
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
     };
 
     // Track delete timing relative to finalize
@@ -2203,6 +2205,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const sealer = {
       requestSeal: async () => ({ accepted: false }),
       finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
     };
     const writer = {
       appendEvent: () => {
@@ -2624,6 +2628,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         return { accepted: true, status: 'sealing' };
       },
       finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
     };
 
     const service = {
@@ -2748,6 +2754,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         return { accepted: true, status: 'sealing' };
       },
       finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
     };
 
     const service = {
@@ -2873,6 +2881,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         return { accepted: true, status: 'sealing' };
       },
       finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
     };
 
     const service = {

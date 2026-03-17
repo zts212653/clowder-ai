@@ -194,6 +194,14 @@ export async function* routeParallel(
       if (incrementalMode) {
         const inc = await assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode);
         boundaryByCat.set(catId, inc.boundaryId);
+        if (inc.degradation) {
+          degradationMsgs.push({
+            type: 'system_info' as AgentMessageType,
+            catId,
+            content: inc.degradation,
+            timestamp: Date.now(),
+          } as AgentMessage);
+        }
         const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);

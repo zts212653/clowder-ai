@@ -243,6 +243,29 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return code < 0 ? null : code;
   }
 
+  async listSealingSessions(): Promise<string[]> {
+    const detailKeys = await this.scanKeys('session:*');
+    if (detailKeys.length === 0) return [];
+
+    const ids: string[] = [];
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < detailKeys.length; i += BATCH_SIZE) {
+      const batch = detailKeys.slice(i, i + BATCH_SIZE);
+      const pipeline = this.redis.pipeline();
+      for (const key of batch) {
+        pipeline.hmget(key, 'id', 'status');
+      }
+      const results = await pipeline.exec();
+      if (!results) continue;
+      for (const [err, data] of results) {
+        if (err || !data) continue;
+        const [id, status] = data as [string | null, string | null];
+        if (id && status === 'sealing') ids.push(id);
+      }
+    }
+    return ids;
+  }
+
   private hydrate(data: Record<string, string>): SessionRecord {
     const contextHealth = safeParseJson<ContextHealth>(data.contextHealth);
     const lastUsage = safeParseJson<SessionUsageSnapshot>(data.lastUsage);

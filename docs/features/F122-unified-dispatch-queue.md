@@ -154,8 +154,44 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 - [x] AC-A11: 回归测试：`tryStartThread` 成功但 create 返回 duplicate → slot 必释放
 - [x] AC-A12: 回归测试：multi_mention create/update 抛错 → slot 必释放
 
-### Phase B（语义收敛，待 OQ-1 决策后定义）
-- [ ] AC-B1: TBD（取决于产品方向决策）
+### Phase B（语义收敛 — 后端核心）✅
+> OQ-1/2/4 已由team lead拍板（ADR-018），Phase B 后端核心已合入。
+
+**已完成（PR #499 merged）：**
+- [x] AC-B1: QueueEntry 支持 `source: 'agent'` + `autoExecute` + `callerCatId`
+- [x] AC-B2: QueueProcessor `tryAutoExecute` — agent 条目入队后目标猫 slot 空闲时立即执行
+- [x] AC-B3: A2A callback (`enqueueA2ATargets`) 通过 InvocationQueue 产出 agent entry（替代 pushToWorklist）
+- [x] AC-B4: steer 可以管控 agent-sourced queue entries（promote + immediate 均验证通过）
+- [x] AC-B5: `invocationQueue` dep 注入到 callback routes → 生产环境激活 F122B 路径
+
+**Deferred（Phase B.1 follow-up）：**
+- [ ] AC-B6: multi_mention dispatch 改走 InvocationQueue（MultiMentionOrchestrator 的 response 聚合需要 QueueProcessor 回调机制，复杂度高，单独 PR）
+- [ ] AC-B6-P1: **A2A 消息上下文可见性修复**（P1 前置，team lead 2026-03-16 提出）— 详见下方「已知问题」
+- [ ] AC-B7: QueuePanel 前端渲染 agent-sourced entries（显示"猫A → 猫B handoff"格式）— 设计稿已完成 `designs/F122-queue-panel-agent-entries.pen`
+- [ ] AC-B8: Thread 执行状态指示（per-cat 活跃状态 + 头像 indicator）— 复用 F108 设计稿 Scene 3
+- [ ] AC-B9: Per-cat Stop 按钮 — 复用 F108 设计稿 Scene 4
+- [ ] AC-B10: 双模发送 UX（锁头悄悄话 + 广播排队）— 复用 F108 设计稿 Scene 1/2/5
+
+#### 已知问题：A2A 消息上下文提前可见（P1，AC-B6 前置修复）
+
+> team lead 2026-03-16 17:07 提出：
+> "我怕你这个发生了，你的这条消息还在队列里，但是你的历史上下文里面已经把别人的这条消息给塞进去了。"
+
+**现象**：A2A callback 消息（`post_message` with @mention）入库后 `deliveryStatus` 为 `undefined`，`isDelivered()` 返回 true → ContextAssembler 立即将其纳入猫的上下文 → 猫在处理其他任务时就"看到了"排队中的 A2A 消息。
+
+**代码证据**（codex 2026-03-16 核实确认）：
+- `callbacks.ts:408` — A2A 消息 `messageStore.append()` 未设 `deliveryStatus`
+- `MessageStore.ts:16-21` — `isDelivered()` 对 `undefined` 返回 true（向后兼容）
+- `ContextAssembler.ts:109` — `messages.filter(isDelivered)` → 未标记的 A2A 消息通过过滤
+
+**安全部分**：用户取消（`markCanceled`）的消息 ContextAssembler 已正确过滤。
+
+**修复方案**（opus + codex 共识）：
+1. A2A/multi_mention callback 消息入库时写 `deliveryStatus: 'queued'`
+2. enqueue 后 `backfillMessageId` 绑定 queue entry 和 messageId
+3. `QueueProcessor.executeEntry` 时沿用 `markDelivered` 使消息对上下文可见
+4. 被 depth/dedup/full 拒绝时 `markCanceled` + `system_info` 通知（防悬挂）
+5. 回归测试：「排队中不可见」「执行后可见」「拒绝路径不悬挂」
 
 ## Roadmap（F108 × F122 统一执行计划）
 
@@ -234,5 +270,6 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 
 ## Review Gate
 
-- Phase A: 跨家族 review（Maine Coon优先，codex 或 gpt52）
-- Phase A.1: 跨家族 review（codex 或 gpt52）
+- Phase A: 跨家族 review（Maine Coon优先，codex 或 gpt52）✅
+- Phase A.1: 跨家族 review（codex 或 gpt52）✅
+- Phase B: 跨家族 review（codex R5→R6 放行）✅

@@ -510,6 +510,29 @@ describe('Queue Management API', () => {
     assert.equal(codexDone, undefined, 'codex should NOT receive cancel done when not steered');
   });
 
+  it('POST /queue/:entryId/steer promote works on agent-sourced entries (F122B)', async () => {
+    // Agent entry under user-a's scope (A2A on behalf of user)
+    const r1 = enqueueEntry(deps.invocationQueue, {
+      content: 'A2A handoff',
+      source: 'agent',
+      autoExecute: true,
+      callerCatId: 'codex',
+    });
+    // User entry after it
+    enqueueEntry(deps.invocationQueue, { content: 'user msg', targetCats: ['codex'] });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${r1.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'promote' },
+    });
+    assert.equal(res.statusCode, 200);
+    // Agent entry should be promoted to front
+    const queue = deps.invocationQueue.list('t1', 'user-a');
+    assert.equal(queue[0].source, 'agent', 'agent entry should be first after promote');
+  });
+
   it('POST /queue/:entryId/steer returns 404 for another user entry', async () => {
     const r = enqueueEntry(deps.invocationQueue, { userId: 'user-a' });
     const res = await app.inject({

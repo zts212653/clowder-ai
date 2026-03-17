@@ -390,6 +390,7 @@ interface ChatState {
   clearAllThreadActiveInvocations: (threadId: string) => void;
   setThreadIntentMode: (threadId: string, mode: 'execute' | 'ideate' | null) => void;
   setThreadTargetCats: (threadId: string, cats: string[]) => void;
+  replaceThreadTargetCats: (threadId: string, cats: string[]) => void;
   getThreadState: (threadId: string) => ThreadState;
   incrementUnread: (threadId: string) => void;
   clearUnread: (threadId: string) => void;
@@ -830,7 +831,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setIntentMode: (mode) => set({ intentMode: mode }),
 
   setTargetCats: (cats) =>
-    set({ targetCats: cats, catStatuses: Object.fromEntries(cats.map((c) => [c, 'pending' as const])) }),
+    set((state) => {
+      if (cats.length === 0) return { targetCats: [], catStatuses: {} };
+      const merged = [...new Set([...state.targetCats, ...cats])];
+      const statuses = { ...state.catStatuses };
+      for (const c of cats) {
+        if (!(c in statuses)) statuses[c] = 'pending' as const;
+      }
+      return { targetCats: merged, catStatuses: statuses };
+    }),
 
   setCatStatus: (catId, status) => set((state) => ({ catStatuses: { ...state.catStatuses, [catId]: status } })),
 
@@ -1286,16 +1295,72 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setThreadTargetCats: (threadId, cats) =>
     set((state) => {
       if (threadId === state.currentThreadId) {
-        return { targetCats: cats, catStatuses: Object.fromEntries(cats.map((c) => [c, 'pending' as const])) };
+        if (cats.length === 0) return { targetCats: [], catStatuses: {} };
+        const merged = [...new Set([...state.targetCats, ...cats])];
+        const statuses = { ...state.catStatuses };
+        for (const c of cats) {
+          if (!(c in statuses)) statuses[c] = 'pending' as const;
+        }
+        return { targetCats: merged, catStatuses: statuses };
       }
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      if (cats.length === 0) {
+        return {
+          threadStates: {
+            ...state.threadStates,
+            [threadId]: { ...existing, targetCats: [], catStatuses: {}, lastActivity: Date.now() },
+          },
+        };
+      }
+      const prevCats = existing.targetCats ?? [];
+      const prevStatuses = (existing.catStatuses ?? {}) as Record<string, CatStatusType>;
+      const merged = [...new Set([...prevCats, ...cats])];
+      const statuses: Record<string, CatStatusType> = { ...prevStatuses };
+      for (const c of cats) {
+        if (!(c in statuses)) statuses[c] = 'pending' as const;
+      }
       return {
         threadStates: {
           ...state.threadStates,
           [threadId]: {
             ...existing,
-            targetCats: cats,
-            catStatuses: Object.fromEntries(cats.map((c) => [c, 'pending' as const])),
+            targetCats: merged,
+            catStatuses: statuses,
+            lastActivity: Date.now(),
+          },
+        },
+      };
+    }),
+
+  /** Server-authoritative replace for queue hydration / history restore.
+   *  Unlike setThreadTargetCats (merge), this overwrites targetCats entirely
+   *  so stale cats are removed. */
+  replaceThreadTargetCats: (threadId, cats) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        if (cats.length === 0) return { targetCats: [], catStatuses: {} };
+        const statuses: Record<string, CatStatusType> = {};
+        for (const c of cats) statuses[c] = 'pending' as const;
+        return { targetCats: [...cats], catStatuses: statuses };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      if (cats.length === 0) {
+        return {
+          threadStates: {
+            ...state.threadStates,
+            [threadId]: { ...existing, targetCats: [], catStatuses: {}, lastActivity: Date.now() },
+          },
+        };
+      }
+      const statuses: Record<string, CatStatusType> = {};
+      for (const c of cats) statuses[c] = 'pending' as const;
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
+            targetCats: [...cats],
+            catStatuses: statuses,
             lastActivity: Date.now(),
           },
         },

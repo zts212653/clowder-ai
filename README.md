@@ -143,8 +143,6 @@ You don't need to be a developer. You need to know what you want — and who you
 
 > CVO Bootcamp coming soon — a guided onboarding where your AI team walks you through a complete feature lifecycle.
 
-**Prerequisites:** Node.js >= 20, pnpm >= 9 (`npm install -g pnpm`). Full details in [SETUP.md](SETUP.md).
-
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
@@ -505,8 +503,6 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 ## 快速开始
 
 > CVO 训练营即将推出 — AI 团队亲自带你走完一个完整的 feature 生命周期。
-
-**前置要求：** Node.js >= 20、pnpm >= 9（`npm install -g pnpm`）。完整说明见 [SETUP.md](SETUP.md)。
 
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git

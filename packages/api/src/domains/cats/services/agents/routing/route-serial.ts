@@ -248,6 +248,14 @@ export async function* routeSerial(
         // We still explicitly include `message` when that message is not present in unseen rows.
         const inc = await assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode);
         deliveryBoundaryId = inc.boundaryId;
+        if (inc.degradation) {
+          yield {
+            type: 'system_info' as AgentMessageType,
+            catId,
+            content: inc.degradation,
+            timestamp: Date.now(),
+          } as AgentMessage;
+        }
         const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parts = [invocationContext, catModePrompt, bootstrapContext, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);

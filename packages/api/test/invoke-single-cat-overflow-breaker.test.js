@@ -94,6 +94,8 @@ describe('F118 overflow circuit breaker (AC-C6)', () => {
           return { accepted: true, status: 'sealing' };
         },
         finalize: async () => {},
+        reconcileStuck: async () => 0,
+        reconcileAllStuck: async () => 0,
       },
     });
 
@@ -148,6 +150,8 @@ describe('F118 overflow circuit breaker (AC-C6)', () => {
           return { accepted: true, status: 'sealing' };
         },
         finalize: async () => {},
+        reconcileStuck: async () => 0,
+        reconcileAllStuck: async () => 0,
       },
     });
 

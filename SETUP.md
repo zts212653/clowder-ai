@@ -217,19 +217,6 @@ pnpm redis:user:backup  # Manual backup
 - Make sure `NEXT_PUBLIC_API_URL=http://localhost:3004` is set
 - API must be running before frontend loads
 
-**`pnpm` not found?**
-- Install pnpm: `npm install -g pnpm` (requires Node.js >= 20)
-- Verify: `pnpm --version` should show >= 9.0.0
-- If `npm` is also missing, install Node.js first from [nodejs.org](https://nodejs.org/)
-
-**`tsc` not found or TypeScript compile errors?**
-- Run `pnpm install` first — TypeScript is a project dependency, no global install needed
-- If errors persist: `rm -rf node_modules && pnpm install`
-
-**`Cannot find module 'zod'` or type resolution errors?**
-- Same fix: `rm -rf node_modules && pnpm install`
-- Check Node.js version: `node -v` (must be >= 20)
-
 ---
 
 <a id="中文"></a>
@@ -444,16 +431,3 @@ pnpm redis:user:backup  # 手动备份
 **前端连不上 API？**
 - 确认设了 `NEXT_PUBLIC_API_URL=http://localhost:3004`
 - API 必须在前端加载前启动
-
-**找不到 `pnpm`？**
-- 安装：`npm install -g pnpm`（需要 Node.js >= 20）
-- 验证：`pnpm --version` 应显示 >= 9.0.0
-- 如果 `npm` 也没有，先从 [nodejs.org](https://nodejs.org/) 安装 Node.js
-
-**`tsc` 找不到或 TypeScript 编译报错？**
-- 先运行 `pnpm install` — TypeScript 是项目依赖，不需要全局安装
-- 仍然报错：`rm -rf node_modules && pnpm install`
-
-**`Cannot find module 'zod'` 或类型解析报错？**
-- 同样的修复：`rm -rf node_modules && pnpm install`
-- 检查 Node.js 版本：`node -v`（必须 >= 20）

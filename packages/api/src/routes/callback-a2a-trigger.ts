@@ -15,6 +15,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { hasWorklist, pushToWorklist } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
@@ -26,6 +27,7 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface QueueProcessorLike {
   onInvocationComplete(threadId: string, catId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
+  tryAutoExecute?(threadId: string): Promise<void>;
 }
 
 export interface A2ATriggerDeps {
@@ -35,6 +37,8 @@ export interface A2ATriggerDeps {
   invocationTracker?: InvocationTracker;
   deliveryCursorStore?: DeliveryCursorStore;
   queueProcessor?: QueueProcessorLike;
+  /** F122B: InvocationQueue for agent-sourced entries */
+  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat'>;
   log: FastifyBaseLogger;
 }
 
@@ -63,6 +67,56 @@ export async function enqueueA2ATargets(
   const triggerMessageId = opts.triggerMessage.id;
   const { deliveryCursorStore } = deps;
 
+  // F122B: If InvocationQueue is available, enqueue as agent entry (unified dispatch).
+  // This replaces both the worklist path and the fallback standalone invocation.
+  // Guards mirror worklist protections: depth limit, duplicate detection.
+  if (deps.invocationQueue) {
+    const MAX_A2A_DEPTH = 10;
+
+    const enqueued: CatId[] = [];
+    for (const catId of targetCats) {
+      // Guard 1: A2A depth limit — re-check per target to prevent multi-target overflow
+      const currentDepth = deps.invocationQueue.countAgentEntriesForThread(threadId);
+      if (currentDepth >= MAX_A2A_DEPTH) {
+        log.warn(
+          { threadId, triggerMessageId, currentDepth, catId },
+          '[F122B] A2A callback: depth limit reached, skipping remaining targets',
+        );
+        break;
+      }
+      // Guard 2: Duplicate detection — skip cats already queued as agent entries
+      if (deps.invocationQueue.hasQueuedAgentForCat(threadId, catId)) {
+        log.info({ threadId, triggerMessageId, catId }, '[F122B] A2A callback: skipping duplicate agent entry for cat');
+        continue;
+      }
+      const result = deps.invocationQueue.enqueue({
+        threadId,
+        userId: opts.userId,
+        content: opts.content,
+        source: 'agent',
+        targetCats: [catId],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: callerCatId ?? undefined,
+      });
+      if (result.outcome === 'enqueued' || result.outcome === 'merged') {
+        enqueued.push(catId);
+      }
+    }
+    // Best-effort auto-ack mentions (same as worklist path)
+    if (deliveryCursorStore && enqueued.length > 0) {
+      const ackTargets = enqueued.filter((catId) => opts.triggerMessage.mentions.includes(catId));
+      await Promise.allSettled(
+        ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, threadId, triggerMessageId)),
+      );
+    }
+    // Trigger auto-execute for entries whose target slot is free
+    await deps.queueProcessor?.tryAutoExecute?.(threadId);
+    log.info({ threadId, triggerMessageId, enqueued, targetCats }, '[F122B] A2A callback: enqueued to InvocationQueue');
+    return { enqueued, fallback: false };
+  }
+
+  // Legacy path: F27 worklist + standalone fallback (when invocationQueue dep not wired)
   // F27: Try to push to parent worklist first
   if (hasWorklist(threadId)) {
     const pushResult = pushToWorklist(threadId, targetCats, callerCatId, opts.parentInvocationId, triggerMessageId);

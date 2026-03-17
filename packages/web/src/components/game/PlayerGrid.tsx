@@ -1,20 +1,43 @@
 'use client';
 
-import type { SeatId, SeatView } from '@cat-cafe/shared';
+import type { ActionStatus, SeatId, SeatView } from '@cat-cafe/shared';
 
 interface SeatStatusInput {
   alive: boolean;
   ready?: boolean;
   gameStatus?: string;
   hasActed?: boolean;
+  actionStatus?: ActionStatus;
 }
+
+const ACTION_STATUS_TEXT: Record<ActionStatus, string> = {
+  waiting: '等待',
+  acting: '行动中…',
+  acted: '✓ 已行动',
+  timed_out: '超时',
+  fallback: '系统代行',
+};
 
 export function deriveSeatStatus(input: SeatStatusInput): string {
   if (!input.alive) return '死亡';
   if (input.gameStatus === 'lobby') return input.ready ? '准备中' : '加载中…';
   if (input.gameStatus === 'paused') return '暂停';
   if (input.gameStatus === 'finished') return '结束';
+  if (input.actionStatus) return ACTION_STATUS_TEXT[input.actionStatus] ?? '等待';
   return input.hasActed ? '✓ 已行动' : '等待';
+}
+
+const ACTION_STATUS_CLASS: Record<ActionStatus, string> = {
+  waiting: 'pulse-gray',
+  acting: 'pulse-yellow',
+  acted: 'solid-green',
+  timed_out: 'solid-red',
+  fallback: 'solid-orange',
+};
+
+export function deriveActionStatusClass(status?: ActionStatus): string {
+  if (!status) return '';
+  return ACTION_STATUS_CLASS[status] ?? '';
 }
 
 interface PlayerGridProps {
@@ -55,8 +78,17 @@ export function PlayerGrid({ seats, activeSeatId, gameStatus, onSeatClick }: Pla
             >
               {seat.seatId} {seat.displayName}
             </span>
-            <span className={`text-[8px] font-mono ${isActive ? 'text-ww-base font-semibold' : 'text-ww-dim'}`}>
-              {isActive ? '发言中' : deriveSeatStatus({ alive: seat.alive, gameStatus, hasActed: seat.hasActed })}
+            <span
+              className={`text-[8px] font-mono ${isActive ? 'text-ww-base font-semibold' : 'text-ww-dim'} ${deriveActionStatusClass(seat.actionStatus)}`}
+            >
+              {isActive
+                ? '发言中'
+                : deriveSeatStatus({
+                    alive: seat.alive,
+                    gameStatus,
+                    hasActed: seat.hasActed,
+                    actionStatus: seat.actionStatus,
+                  })}
             </span>
           </button>
         );

@@ -135,7 +135,9 @@ export type {
 // Game engine types (F101)
 export type {
   ActionDefinition,
+  ActionStatus,
   ActorType,
+  Ballot,
   EventScope,
   GameAction,
   GameConfig,
@@ -144,7 +146,9 @@ export type {
   GameRuntime,
   GameResultStats,
   GameView,
+  PendingAction,
   PhaseDefinition,
+  Resolution,
   RoleDefinition,
   Seat,
   SeatId,
@@ -154,6 +158,7 @@ export type {
 export {
   isGameEvent,
   isSeatId,
+  isValidActionStatus,
   isValidScope,
 } from './game.js';
 // ID types

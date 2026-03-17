@@ -235,6 +235,65 @@ describe('SessionSealer', () => {
     });
   });
 
+  describe('reconcileAllStuck()', () => {
+    test('reaps stuck sealing sessions across multiple cats/threads', async () => {
+      const { store, sealer } = await createFixtures();
+      const r1 = store.create(BASE_INPUT);
+      const r2 = store.create({ cliSessionId: 'cli-2', threadId: 'thread-2', catId: 'codex', userId: 'user-1' });
+      const r3 = store.create({ cliSessionId: 'cli-3', threadId: 'thread-3', catId: 'gemini', userId: 'user-1' });
+
+      store.update(r1.id, { status: 'sealing', updatedAt: Date.now() - 10 * 60_000 });
+      store.update(r2.id, { status: 'sealing', updatedAt: Date.now() - 10 * 60_000 });
+      // r3 is still active — should not be touched
+
+      const count = await sealer.reconcileAllStuck(5 * 60_000);
+      assert.equal(count, 2);
+      assert.equal(store.get(r1.id)?.status, 'sealed');
+      assert.equal(store.get(r2.id)?.status, 'sealed');
+      assert.equal(store.get(r3.id)?.status, 'active');
+    });
+
+    test('returns 0 when no sessions are stuck', async () => {
+      const { store, sealer } = await createFixtures();
+      store.create(BASE_INPUT);
+      const count = await sealer.reconcileAllStuck();
+      assert.equal(count, 0);
+    });
+
+    test('skips sealing sessions younger than maxAge', async () => {
+      const { store, sealer } = await createFixtures();
+      const r1 = store.create(BASE_INPUT);
+      store.update(r1.id, { status: 'sealing', updatedAt: Date.now() - 60_000 });
+
+      const count = await sealer.reconcileAllStuck(5 * 60_000);
+      assert.equal(count, 0);
+      assert.equal(store.get(r1.id)?.status, 'sealing');
+    });
+  });
+
+  describe('listSealingSessions()', () => {
+    test('returns only sessions in sealing status', async () => {
+      const { store } = await createFixtures();
+      const r1 = store.create(BASE_INPUT);
+      const r2 = store.create({ cliSessionId: 'cli-2', threadId: 'thread-2', catId: 'codex', userId: 'user-1' });
+      const r3 = store.create({ cliSessionId: 'cli-3', threadId: 'thread-3', catId: 'gemini', userId: 'user-1' });
+
+      store.update(r1.id, { status: 'sealing' });
+      store.update(r3.id, { status: 'sealed', sealedAt: Date.now() });
+
+      const ids = store.listSealingSessions();
+      assert.equal(ids.length, 1);
+      assert.equal(ids[0], r1.id);
+    });
+
+    test('returns empty array when no sealing sessions', async () => {
+      const { store } = await createFixtures();
+      store.create(BASE_INPUT);
+      const ids = store.listSealingSessions();
+      assert.equal(ids.length, 0);
+    });
+  });
+
   describe('full lifecycle: active → sealing → sealed', () => {
     test('complete seal + finalize + new session creation', async () => {
       const { store, sealer } = await createFixtures();

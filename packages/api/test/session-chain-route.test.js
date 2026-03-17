@@ -40,6 +40,8 @@ describe('Session Chain Routes', () => {
     const mockSealer = sealerOverride ?? {
       requestSeal: async () => ({ accepted: true }),
       finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
     };
     await app.register(sessionChainRoutes, { sessionChainStore: store, threadStore, sessionSealer: mockSealer });
     await app.ready();

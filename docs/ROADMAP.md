@@ -54,5 +54,5 @@ created: 2026-02-26
 | F118 | CLI Liveness Watchdog — CLI 进程活性守卫 + Follow-up Hardening | in-progress | Ragdoll + Maine Coon | internal | [F118](features/F118-cli-liveness-watchdog.md) |
 | F121 | Community Frontend UX Triage — 社区前端交互体验侦查与分诊 | in-progress | 三猫 | community [#28](https://github.com/zts212653/clowder-ai/issues/28) [#89](https://github.com/zts212653/clowder-ai/issues/89) [#27](https://github.com/zts212653/clowder-ai/issues/27) [#22](https://github.com/zts212653/clowder-ai/issues/22) [#88](https://github.com/zts212653/clowder-ai/issues/88) [#16](https://github.com/zts212653/clowder-ai/issues/16) | [F121](features/F121-community-frontend-ux-triage.md) |
 | F122 | 执行通道统一 — A2A/multi_mention 入 Dispatch Queue | in-progress | Ragdoll | internal | [F122](features/F122-unified-dispatch-queue.md) |
-| F123 | Bubble Runtime Correctness — 消息身份契约 + Reconcile 状态机 | in-progress | Maine Coon | internal | [F123](features/F123-bubble-runtime-correctness.md) |
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
+| F126 | 四肢控制面 — Cat Café Limb Control Plane | spec | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
