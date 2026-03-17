@@ -21,6 +21,21 @@ test('Windows installer resolves its script path via PSCommandPath before MyInvo
   assert.match(installScript, /\$MyInvocation\.MyCommand\.Path/);
 });
 
+test('Windows installer treats non-git directories as a warning instead of a PowerShell native command error', () => {
+  const gitProbeIndex = installScript.indexOf('& git -C $projectRoot rev-parse --is-inside-work-tree 1>$null 2>$null');
+  const tryIndex = installScript.lastIndexOf('try {', gitProbeIndex);
+  const catchIndex = installScript.indexOf('} catch {}', gitProbeIndex);
+  const warningIndex = installScript.indexOf('Write-Warn "No .git directory detected');
+
+  assert.notEqual(gitProbeIndex, -1, 'expected git worktree probe');
+  assert.notEqual(tryIndex, -1, 'expected git probe to be wrapped in try/catch');
+  assert.notEqual(catchIndex, -1, 'expected git probe to swallow PowerShell native command errors');
+  assert.notEqual(warningIndex, -1, 'expected non-git installs to warn instead of exiting');
+  assert.ok(tryIndex < gitProbeIndex, 'expected try block to begin before git probe');
+  assert.ok(gitProbeIndex < catchIndex, 'expected catch block after git probe');
+  assert.ok(catchIndex < warningIndex, 'expected warning path after the protected git probe');
+});
+
 test('Windows installer probes the npm shim path when pnpm is installed but not yet on PATH', () => {
   assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\\$Name\.cmd"/);
   assert.match(installScript, /Resolve-PnpmCommand/);

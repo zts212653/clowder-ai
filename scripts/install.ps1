@@ -59,8 +59,12 @@ function Resolve-ProjectRoot {
         Write-Err "Run this helper from a checked-out clowder-ai repo: .\scripts\install.ps1"
         exit 1
     }
-    & git -C $projectRoot rev-parse --is-inside-work-tree 1>$null 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $gitRepoUnavailable = $false
+    try {
+        & git -C $projectRoot rev-parse --is-inside-work-tree 1>$null 2>$null
+        $gitRepoUnavailable = $LASTEXITCODE -ne 0
+    } catch {}
+    if ($gitRepoUnavailable) {
         Write-Warn "No .git directory detected — git-dependent features will be unavailable"
     }
     return $projectRoot
