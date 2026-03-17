@@ -49,6 +49,8 @@ export interface ISessionChainStore {
   getByCliSessionId(cliSessionId: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** Atomically increment compressionCount and return the new value. Returns null if session not found. */
   incrementCompressionCount(id: string): number | null | Promise<number | null>;
+  /** F118: List IDs of all sessions currently in 'sealing' status (for global reaper). */
+  listSealingSessions(): string[] | Promise<string[]>;
 }
 
 const MAX_RECORDS = 1000;
@@ -193,6 +195,14 @@ export class SessionChainStore implements ISessionChainStore {
     record.compressionCount = (record.compressionCount ?? 0) + 1;
     record.updatedAt = Date.now();
     return record.compressionCount;
+  }
+
+  listSealingSessions(): string[] {
+    const ids: string[] = [];
+    for (const [id, record] of this.records) {
+      if (record.status === 'sealing') ids.push(id);
+    }
+    return ids;
   }
 
   /**

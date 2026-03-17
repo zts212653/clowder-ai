@@ -1,5 +1,37 @@
 'use client';
 
+export interface NightBallotRow {
+  seatId: string;
+  target: string;
+  source: 'submitted' | 'fallback';
+}
+
+/** Extract night ballot display rows from god-visible events.
+ *  When currentRound is provided, only events from that round are included. */
+export function deriveNightBallotRows(
+  events: Array<{ type: string; payload: Record<string, unknown>; round?: number }>,
+  currentRound?: number,
+): NightBallotRow[] {
+  const rows: NightBallotRow[] = [];
+  for (const e of events) {
+    if (currentRound !== undefined && e.round !== currentRound) continue;
+    if (e.type === 'action.submitted' && e.payload.actionName === 'kill') {
+      rows.push({
+        seatId: e.payload.seatId as string,
+        target: e.payload.target as string,
+        source: 'submitted',
+      });
+    } else if (e.type === 'action.fallback' && e.payload.actionName === 'kill') {
+      rows.push({
+        seatId: e.payload.seatId as string,
+        target: e.payload.target as string,
+        source: 'fallback',
+      });
+    }
+  }
+  return rows;
+}
+
 interface SeatMatrixRow {
   seatId: string;
   role: string;
@@ -21,6 +53,8 @@ interface GodInspectorProps {
   gameStatus?: string;
   isDetective?: boolean;
   detectiveBoundName?: string;
+  godEvents?: Array<{ type: string; payload: Record<string, unknown>; round?: number }>;
+  currentRound?: number;
   onScopeChange: (scope: string) => void;
   onGodAction?: (action: string) => void;
 }
@@ -72,10 +106,13 @@ export function GodInspector({
   gameStatus,
   isDetective = false,
   detectiveBoundName,
+  godEvents,
+  currentRound,
   onScopeChange,
   onGodAction,
 }: GodInspectorProps) {
   const buttons = deriveGodButtons(gameStatus ?? '');
+  const nightBallotRows = godEvents ? deriveNightBallotRows(godEvents, currentRound) : [];
   return (
     <div
       data-testid="god-inspector"
@@ -155,6 +192,29 @@ export function GodInspector({
           );
         })}
       </div>
+
+      {/* Night Ballot Panel — who voted for whom (wolf kill phase) */}
+      {nightBallotRows.length > 0 && (
+        <>
+          <div className="h-px bg-ww-card w-full" />
+          <span className="text-ww-dim text-[10px] font-bold font-mono tracking-widest">狼人投票</span>
+          <div data-testid="night-ballot-panel" className="flex flex-col gap-1">
+            {nightBallotRows.map((row) => (
+              <div
+                key={row.seatId}
+                className={`flex items-center justify-between rounded px-2 py-1 h-7 ${
+                  row.source === 'fallback' ? 'bg-ww-danger-soft' : 'bg-ww-card'
+                }`}
+              >
+                <span className="text-[10px] font-mono font-semibold text-ww-danger">{row.seatId}</span>
+                <span className="text-[10px] font-mono text-ww-dim">→</span>
+                <span className="text-[10px] font-mono font-semibold text-ww-main">{row.target}</span>
+                {row.source === 'fallback' && <span className="text-[9px] font-mono text-ww-danger">系统代行</span>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Divider */}
       <div className="h-px bg-ww-card w-full" />

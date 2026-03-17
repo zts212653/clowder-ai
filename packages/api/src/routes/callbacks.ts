@@ -75,7 +75,10 @@ export interface CallbackRoutesOptions {
   /** Queue auto-dequeue on A2A invocation completion */
   queueProcessor?: {
     onInvocationComplete(threadId: string, catId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
+    tryAutoExecute?(threadId: string): Promise<void>;
   };
+  /** F122B: InvocationQueue for agent-sourced A2A entries */
+  invocationQueue?: import('../domains/cats/services/agents/invocation/InvocationQueue.js').InvocationQueue;
 }
 
 const postMessageSchema = callbackAuthSchema.extend({
@@ -468,6 +471,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           ...(invocationTracker ? { invocationTracker } : {}),
           ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
           ...(queueProcessor ? { queueProcessor } : {}),
+          ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
           log: app.log,
         },
         {

@@ -98,6 +98,8 @@ describe('F118 resume health check (AC-C4 + AC-C6)', () => {
         finalize: async (args) => {
           finalizeCalls.push(args);
         },
+        reconcileStuck: async () => 0,
+        reconcileAllStuck: async () => 0,
       },
     });
 
@@ -159,6 +161,8 @@ describe('F118 resume health check (AC-C4 + AC-C6)', () => {
           return { accepted: true, status: 'sealing' };
         },
         finalize: async () => {},
+        reconcileStuck: async () => 0,
+        reconcileAllStuck: async () => 0,
       },
     });
 
@@ -210,6 +214,8 @@ describe('F118 resume health check (AC-C4 + AC-C6)', () => {
           return { accepted: true, status: 'sealing' };
         },
         finalize: async () => {},
+        reconcileStuck: async () => 0,
+        reconcileAllStuck: async () => 0,
       },
     });
 

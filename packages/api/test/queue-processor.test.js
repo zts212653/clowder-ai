@@ -511,4 +511,110 @@ describe('QueueProcessor', () => {
       assert.equal(msgArg.invocationId, 'inv-stub', 'broadcast message should carry invocationId');
     });
   });
+
+  // ── F122B: tryAutoExecute ──
+
+  describe('tryAutoExecute (F122B agent auto-execute)', () => {
+    it('immediately executes autoExecute entry when target cat slot is free', async () => {
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['opus'],
+        autoExecute: true,
+        callerCatId: 'codex',
+      });
+
+      await processor.tryAutoExecute('t1');
+      // Give fire-and-forget a tick
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.ok(deps.invocationTracker.start.mock.calls.length > 0, 'should start execution');
+    });
+
+    it('does not execute autoExecute entry when target cat slot is busy', async () => {
+      // Occupy opus slot
+      deps.invocationTracker.has = mock.fn(() => true);
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['opus'],
+        autoExecute: true,
+        callerCatId: 'codex',
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Entry stays queued, not executed
+      assert.equal(deps.invocationTracker.start.mock.calls.length, 0, 'should not start when slot busy');
+      const queued = deps.queue.list('t1', 'system');
+      assert.equal(queued.length, 1, 'entry should remain in queue');
+      assert.equal(queued[0].status, 'queued', 'entry should still be queued');
+    });
+
+    it('skips non-autoExecute entries', async () => {
+      enqueueEntry(deps.queue, {
+        userId: 'u1',
+        source: 'user',
+        targetCats: ['opus'],
+        // no autoExecute
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.equal(deps.invocationTracker.start.mock.calls.length, 0, 'should not execute user entries');
+    });
+
+    it('autoExecute entry bypasses pause state', async () => {
+      // Set up a paused state
+      enqueueEntry(deps.queue, { userId: 'u1', source: 'user' });
+      await processor.onInvocationComplete('t1', 'opus', 'failed');
+      assert.ok(processor.isPaused('t1', 'opus'), 'should be paused');
+
+      // Now enqueue an agent auto-execute entry
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['codex'], // different cat slot — not paused
+        autoExecute: true,
+        callerCatId: 'opus',
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.ok(deps.invocationTracker.start.mock.calls.length > 0, 'should execute on free slot despite thread pause');
+    });
+
+    it('skips busy-slot entry and executes next free-slot autoExecute entry (P2 scan)', async () => {
+      // Entry 1: opus slot busy
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['opus'],
+        autoExecute: true,
+        callerCatId: 'gemini',
+      });
+      // Entry 2: codex slot free
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'gemini',
+      });
+
+      // Mock: opus is busy, codex is free
+      deps.invocationTracker.has = mock.fn((threadId, catId) => catId === 'opus');
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      // First start should be codex (skipped opus because slot is busy)
+      assert.ok(deps.invocationTracker.start.mock.calls.length >= 1, 'should start at least one');
+      const firstStartCall = deps.invocationTracker.start.mock.calls[0];
+      assert.equal(firstStartCall.arguments[1], 'codex', 'should start codex (free slot) first, not opus (busy)');
+    });
+  });
 });

@@ -8,7 +8,7 @@ created: 2026-03-14
 
 # F118: CLI Liveness Watchdog & Session Recovery — CLI 进程活性守卫 + 会话恢复
 
-> **Status**: done | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: open
+> **Status**: done | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: closed (PR #492, 2026-03-16)
 
 ## Why
 
@@ -216,8 +216,23 @@ CLI 挂了 (liveness, Phase A+B ✅)
 
 ### 剩余非阻塞 hardening（避免遗忘）
 
-- [ ] 把 `reconcileStuck()` 从“invoke 前按当前 `catId/threadId` best-effort 扫描”升级成启动时 / 定时的全局 reaper。当前实现只能在同一 thread 再次被 invoke 时自愈，长期无人触碰的旧 thread 仍可能保留 `sealing` 终态垃圾。
-- [ ] 把 `reconcileStuck()` 正式纳入 `ISessionSealer` 契约，移除调用侧的 `'reconcileStuck' in deps.sessionSealer` + type cast，收干净类型层和运行时能力的漂移。
+- [x] 把 `reconcileStuck()` 从"invoke 前按当前 `catId/threadId` best-effort 扫描"升级成启动时 / 定时的全局 reaper。当前实现只能在同一 thread 再次被 invoke 时自愈，长期无人触碰的旧 thread 仍可能保留 `sealing` 终态垃圾。 → `reconcileAllStuck()` + `listSealingSessions()` + startup sweep + 5min periodic timer (feat/f118-hardening)
+- [x] 把 `reconcileStuck()` 正式纳入 `ISessionSealer` 契约，移除调用侧的 `'reconcileStuck' in deps.sessionSealer` + type cast，收干净类型层和运行时能力的漂移。 → `ISessionSealer` 接口扩展 + invoke-single-cat.ts 类型安全调用 (feat/f118-hardening)
+
+## Known Gaps
+
+### GAP-1: 跨猫交接时的初始上下文注入溢出（2026-03-16）✅ Fixed
+
+**现象**：在 F118 hardening review 过程中，Maine Coon因为首次被 @mention 加入讨论时注入了过多上下文（完整 thread 历史 + 审计报告 + 代码 diff），导致 Codex CLI context window 溢出崩溃。
+
+**根因**：`assembleIncrementalContext()` 在 `route-helpers.ts` 中没有总消息数或 token 预算守卫。当 `cursor=undefined`（首次参与的猫）或 cursor 过期时，`fetchAfterCursor()` 返回全部 thread 消息，无截断地注入。
+
+**修复（PR #498, squash `7621d25b`）**：
+- **第一刀**：无条件 `maxMessages` 尾截（`relevant.slice(-budget.maxMessages)`）
+- **第二刀**：Aggregate token budget guard — 逐行 token 预计算 + 线性扫描从最旧开始丢弃，至少保留 1 条消息
+- **第三刀**：`IncrementalContextResult.degradation` 字段 + route-serial/route-parallel 的 `system_info` yield
+
+**测试覆盖**：14 个测试（10 count-cap + 4 token-budget），覆盖 cursor=undefined、stale cursor 大批量、fallback 注入不回归、极端 token 压力（200 条长消息 ~500K tokens >> 160K budget）
 
 ## Key Decisions
 

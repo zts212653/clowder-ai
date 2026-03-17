@@ -6,6 +6,8 @@
  * Day: vote, PK, exile, hunter shoot, idiot reveal, speeches, last words.
  */
 
+import type { Ballot, Resolution } from '@cat-cafe/shared';
+
 import { GameEngine } from '../GameEngine.js';
 
 interface NightActions {
@@ -32,7 +34,53 @@ interface ExileResult {
 
 export class WerewolfEngine extends GameEngine {
   private nightActions: NightActions = {};
+  private nightBallots: Map<string, Ballot> = new Map();
+  private dayBallots: Map<string, Ballot> = new Map();
   private votes: Map<string, string> = new Map();
+
+  /** Submit a wolf kill ballot (multi-wolf independent voting). */
+  submitNightBallot(wolfSeatId: string, targetSeatId: string): void {
+    const existing = this.nightBallots.get(wolfSeatId);
+    const revision = existing ? existing.revision + 1 : 1;
+    this.nightBallots.set(wolfSeatId, {
+      voterSeat: wolfSeatId,
+      choice: targetSeatId,
+      revision,
+      locked: false,
+      source: 'llm',
+      submittedAt: Date.now(),
+    });
+  }
+
+  /** Resolve wolf kill ballots by majority. Tie → no_kill. Clears ballots after. */
+  resolveNightBallots(): Resolution {
+    const tally = new Map<string, number>();
+    for (const ballot of this.nightBallots.values()) {
+      if (ballot.choice) {
+        tally.set(ballot.choice, (tally.get(ballot.choice) ?? 0) + 1);
+      }
+    }
+    this.nightBallots.clear();
+
+    if (tally.size === 0) {
+      return { winningChoice: null, tiePolicy: 'no_kill', revoteCount: 0, fallbackApplied: false };
+    }
+
+    const maxVotes = Math.max(...tally.values());
+    const topCandidates = [...tally.entries()].filter(([, count]) => count === maxVotes).map(([seatId]) => seatId);
+
+    if (topCandidates.length !== 1) {
+      // Tie → no_kill (KD-25)
+      return { winningChoice: null, tiePolicy: 'no_kill', revoteCount: 0, fallbackApplied: false };
+    }
+
+    return {
+      winningChoice: topCandidates[0]!,
+      tiePolicy: 'no_kill',
+      revoteCount: 0,
+      fallbackApplied: false,
+    };
+  }
 
   /** Register a night action. Validates guard consecutive-night rule. */
   setNightAction(seatId: string, action: string, targetSeatId: string): void {
@@ -61,7 +109,14 @@ export class WerewolfEngine extends GameEngine {
     const deaths: string[] = [];
     let hunterCanShoot = false;
 
-    const knifed = this.nightActions.kill?.target;
+    // Multi-wolf ballot takes priority; fallback to legacy setNightAction kill
+    let knifed: string | undefined;
+    if (this.nightBallots.size > 0) {
+      const ballotResult = this.resolveNightBallots();
+      knifed = ballotResult.winningChoice ?? undefined;
+    } else {
+      knifed = this.nightActions.kill?.target;
+    }
     const guarded = this.nightActions.guard?.target;
     const healed = this.nightActions.heal?.target;
     const poisoned = this.nightActions.poison?.target;
@@ -121,7 +176,7 @@ export class WerewolfEngine extends GameEngine {
 
   // --- Day Phase Methods ---
 
-  /** Cast a vote. Validates alive + not revealed idiot. */
+  /** Legacy: Cast a vote (simple Map-based). Use castDayVote for ballot-based. */
   castVote(voterSeatId: string, targetSeatId: string): void {
     const runtime = this.getRuntime();
     const voter = runtime.seats.find((s) => s.seatId === voterSeatId);
@@ -133,7 +188,110 @@ export class WerewolfEngine extends GameEngine {
     this.votes.set(voterSeatId, targetSeatId);
   }
 
-  /** Resolve votes → exile or tie. Clears vote map after resolution. */
+  /** Ballot-based day vote with revision tracking (Phase F). */
+  castDayVote(voterSeatId: string, targetSeatId: string): void {
+    const runtime = this.getRuntime();
+    const voter = runtime.seats.find((s) => s.seatId === voterSeatId);
+    if (!voter) throw new Error(`Seat ${voterSeatId} not found`);
+    if (!voter.alive) throw new Error(`${voterSeatId} is not alive, cannot vote`);
+    if (voter.properties.idiotRevealed) {
+      throw new Error(`${voterSeatId} is revealed idiot, cannot vote`);
+    }
+
+    const existing = this.dayBallots.get(voterSeatId);
+    if (existing?.locked) {
+      throw new Error(`${voterSeatId} vote is locked, cannot change`);
+    }
+
+    const revision = existing ? existing.revision + 1 : 1;
+    this.dayBallots.set(voterSeatId, {
+      voterSeat: voterSeatId,
+      choice: targetSeatId,
+      revision,
+      locked: false,
+      source: voter.actorType === 'human' ? 'player' : 'llm',
+      submittedAt: Date.now(),
+    });
+
+    // Log ballot.updated event (KD-26: 实名公开)
+    this.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'ballot.updated',
+      scope: 'public',
+      payload: { voterSeat: voterSeatId, choice: targetSeatId, revision },
+      revealPolicy: 'live',
+    });
+  }
+
+  /** Feed a day ballot without emitting events (for resolution reconstruction) */
+  feedDayBallotSilent(voterSeatId: string, targetSeatId: string): void {
+    this.dayBallots.set(voterSeatId, {
+      voterSeat: voterSeatId,
+      choice: targetSeatId,
+      revision: 1,
+      locked: false,
+      source: 'llm',
+      submittedAt: Date.now(),
+    });
+  }
+
+  /** Get day ballot for a seat */
+  getDayBallot(seatId: string): Ballot | undefined {
+    return this.dayBallots.get(seatId);
+  }
+
+  /** Lock a day vote — prevents further changes */
+  lockDayVote(voterSeatId: string): void {
+    const ballot = this.dayBallots.get(voterSeatId);
+    if (!ballot) throw new Error(`${voterSeatId} has no ballot to lock`);
+    ballot.locked = true;
+
+    const runtime = this.getRuntime();
+    this.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'ballot.locked',
+      scope: 'public',
+      payload: { voterSeat: voterSeatId, choice: ballot.choice },
+    });
+  }
+
+  /** Check if all alive non-revealed-idiot seats have locked ballots */
+  allDayVotesLocked(): boolean {
+    const runtime = this.getRuntime();
+    const eligibleSeats = runtime.seats.filter((s) => s.alive && !s.properties.idiotRevealed);
+    return eligibleSeats.every((s) => {
+      const ballot = this.dayBallots.get(s.seatId);
+      return ballot?.locked === true;
+    });
+  }
+
+  /** Resolve ballot-based day votes → exile or tie */
+  resolveDayVotes(): VoteResult {
+    const tally = new Map<string, number>();
+    for (const ballot of this.dayBallots.values()) {
+      if (ballot.choice) {
+        tally.set(ballot.choice, (tally.get(ballot.choice) ?? 0) + 1);
+      }
+    }
+    this.dayBallots.clear();
+
+    if (tally.size === 0) return { exiled: null, tied: false, pkCandidates: [] };
+
+    const maxVotes = Math.max(...tally.values());
+    const topCandidates = [...tally.entries()].filter(([, count]) => count === maxVotes).map(([seatId]) => seatId);
+
+    if (topCandidates.length !== 1) {
+      return { exiled: null, tied: topCandidates.length > 1, pkCandidates: topCandidates };
+    }
+
+    const exiled = topCandidates[0]!;
+    this.applyExile(exiled);
+    return { exiled, tied: false, pkCandidates: [] };
+  }
+
+  /** Legacy: Resolve votes → exile or tie. Clears vote map after resolution. */
   resolveVotes(): VoteResult {
     const tally = new Map<string, number>();
     for (const target of this.votes.values()) {

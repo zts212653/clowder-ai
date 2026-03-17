@@ -25,13 +25,10 @@ const BUDGET_ENV_KEYS = {
 /**
  * Hardcoded defaults — keyed by breedId so all variants share the same budget.
  *
- * ⚠️ ADVISORY in incremental mode: when incremental delivery is enabled
- * (requires both `currentUserMessageId` AND `deliveryCursorStore` — see
- * route-serial.ts / route-parallel.ts), context delivery uses the cursor-based
- * path which only enforces maxContentLengthPerMsg per message — NOT the total
- * maxPromptTokens budget. In this mode, context window management is delegated
- * to the CLI itself (e.g. Claude Code's internal compact). The full budget
- * enforcement only applies in the legacy (full-history) delivery path.
+ * ⚠️ NOTE on incremental mode (GAP-1 fix): The incremental delivery path
+ * (assembleIncrementalContext in route-helpers.ts) now enforces BOTH
+ * maxMessages (count cap) and maxContextTokens (aggregate token budget).
+ * Per-message content is still truncated by maxContentLengthPerMsg.
  */
 const DEFAULT_BUDGETS: Record<string, ContextBudget> = {
   // Keep these in sync with project cat-config.json defaults (方案 A) so

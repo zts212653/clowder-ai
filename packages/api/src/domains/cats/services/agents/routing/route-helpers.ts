@@ -5,6 +5,7 @@
 
 import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
+import { estimateTokens } from '../../../../../utils/token-counter.js';
 import { formatMessage } from '../../context/ContextAssembler.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
@@ -83,6 +84,8 @@ export interface IncrementalContextResult {
    *  (e.g. whisper not intended for this cat). Callers must NOT inject the raw
    *  message text as fallback when this is true — doing so would leak whisper content. */
   currentMessageFilteredOut: boolean;
+  /** GAP-1: User-facing message when incremental batch was truncated by budget cap */
+  degradation?: string;
 }
 
 /**
@@ -276,22 +279,33 @@ export async function assembleIncrementalContext(
     if ((thinkingMode ?? 'play') === 'play' && m.catId !== null && m.origin === 'stream') return false;
     return true;
   });
-  const includesCurrentUserMessage = Boolean(
-    currentUserMessageId && relevant.some((m) => m.id === currentUserMessageId),
-  );
+
   // F35 fix: detect when the current message was present but filtered out by visibility
   // (e.g. whisper not intended for this cat). Must NOT fallback-inject in that case.
+  // Computed on `unseen` — independent of budget cap (砚砚 review: don't mix budget and visibility semantics).
   const currentMessageFilteredOut = Boolean(
-    currentUserMessageId && !includesCurrentUserMessage && unseen.some((m) => m.id === currentUserMessageId),
+    currentUserMessageId &&
+      !relevant.some((m) => m.id === currentUserMessageId) &&
+      unseen.some((m) => m.id === currentUserMessageId),
   );
-  if (relevant.length === 0) {
+
+  // GAP-1: Unconditional budget cap — protects both first-time cats (cursor=undefined)
+  // and stale cursor scenarios where large unseen batches accumulate.
+  const budget = getCatContextBudget(catId as string);
+  const wasCapped = relevant.length > budget.maxMessages;
+  const capped = wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
+
+  // Metadata must be based on the FINAL capped set, not pre-cap `relevant`
+  const includesCurrentUserMessage = Boolean(currentUserMessageId && capped.some((m) => m.id === currentUserMessageId));
+
+  if (capped.length === 0) {
     return cursor
       ? { contextText: '', boundaryId: cursor, includesCurrentUserMessage, currentMessageFilteredOut }
       : { contextText: '', includesCurrentUserMessage, currentMessageFilteredOut };
   }
 
-  const truncateLimit = getCatContextBudget(catId as string).maxContentLengthPerMsg;
-  const lines = relevant.map((m) => {
+  const truncateLimit = budget.maxContentLengthPerMsg;
+  const lines = capped.map((m) => {
     // F22: Digest rich blocks into compact summaries for context
     const contentWithDigest = digestRichBlocks(m);
     const cleanContent = sanitizeInjectedContent(contentWithDigest);
@@ -300,11 +314,63 @@ export async function assembleIncrementalContext(
     return `[${m.id}] ${rendered}`;
   });
 
-  const boundaryId = relevant[relevant.length - 1]?.id;
+  // 第二刀: Aggregate token budget — trim oldest lines until within maxContextTokens
+  let tokenTrimmed = false;
+  let tokenTrimStart = 0;
+  if (budget.maxContextTokens > 0) {
+    const perLineTokens = lines.map((l) => estimateTokens(l));
+    const totalTokens = perLineTokens.reduce((a, b) => a + b, 0);
+    if (totalTokens > budget.maxContextTokens) {
+      tokenTrimmed = true;
+      // Scan from oldest: accumulate tokens to drop until remainder fits budget
+      let dropTokens = 0;
+      for (let i = 0; i < perLineTokens.length - 1; i++) {
+        dropTokens += perLineTokens[i];
+        if (totalTokens - dropTokens <= budget.maxContextTokens) {
+          tokenTrimStart = i + 1;
+          break;
+        }
+      }
+      if (totalTokens - dropTokens > budget.maxContextTokens) {
+        // Even after dropping all but one message, the last message alone may exceed
+        // maxContextTokens (e.g. a single huge message). We still keep it because
+        // returning empty context is worse — the cat gets no context at all. The
+        // degradation notice below will flag this situation so the cat knows the
+        // context was force-trimmed.
+        tokenTrimStart = perLineTokens.length - 1;
+      }
+    }
+  }
+
+  const finalLines = tokenTrimmed ? lines.slice(tokenTrimStart) : lines;
+  const finalCapped = tokenTrimmed ? capped.slice(tokenTrimStart) : capped;
+
+  // Recompute metadata on FINAL post-token-trim set
+  const finalIncludesCurrentUserMessage = tokenTrimmed
+    ? Boolean(currentUserMessageId && finalCapped.some((m) => m.id === currentUserMessageId))
+    : includesCurrentUserMessage;
+
+  if (finalCapped.length === 0) {
+    return cursor
+      ? { contextText: '', boundaryId: cursor, includesCurrentUserMessage: false, currentMessageFilteredOut }
+      : { contextText: '', includesCurrentUserMessage: false, currentMessageFilteredOut };
+  }
+
+  let degradation: string | undefined;
+  if (wasCapped && tokenTrimmed) {
+    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条经 maxMessages(${budget.maxMessages}) 和 token 预算(${budget.maxContextTokens}) 双重截断，已保留最近 ${finalCapped.length} 条`;
+  } else if (wasCapped) {
+    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条超出预算 ${budget.maxMessages}，已保留最近 ${finalCapped.length} 条`;
+  } else if (tokenTrimmed) {
+    degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${budget.maxContextTokens})，已保留最近 ${finalCapped.length} 条`;
+  }
+
+  const boundaryId = finalCapped[finalCapped.length - 1]?.id;
   return {
-    contextText: `[对话历史增量 - 未发送过 ${relevant.length} 条]\n${lines.join('\n')}\n[/对话历史]`,
+    contextText: `[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
     boundaryId,
-    includesCurrentUserMessage,
+    includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
+    degradation,
   };
 }

@@ -11,9 +11,9 @@
  */
 
 import type { CatId, SealResult, SessionStatus } from '@cat-cafe/shared';
+import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
-import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import { buildThreadMemory } from './buildThreadMemory.js';
 import { generateHandoffDigest } from './HandoffDigestGenerator.js';
 import { formatEventsChat, formatEventsHandoff } from './TranscriptFormatter.js';
@@ -47,6 +47,21 @@ export interface ISessionSealer {
    * Phase C will add transcript + digest logic.
    */
   finalize(args: { sessionId: string }): Promise<void>;
+
+  /**
+   * F118 Hardening: Reconcile sessions stuck in 'sealing' state for a specific cat/thread.
+   * Force-seals any session that has been in 'sealing' longer than maxAgeMs.
+   * Returns count of reconciled sessions.
+   */
+  reconcileStuck(catId: string, threadId: string, maxAgeMs?: number): Promise<number>;
+
+  /**
+   * F118 Hardening: Global reaper — reconcile ALL sessions stuck in 'sealing' across
+   * all cats/threads. Runs at startup and periodically to catch orphaned sealing sessions
+   * that would never be visited by per-invoke lazy scanning.
+   * Returns total count of reconciled sessions.
+   */
+  reconcileAllStuck(maxAgeMs?: number): Promise<number>;
 }
 
 /**
@@ -112,15 +127,17 @@ export class SessionSealer implements ISessionSealer {
       await withTimeout(this.doFinalize(record, now), FINALIZE_TIMEOUT_MS);
     } catch (err) {
       // Finalize timed out or threw — force-seal to prevent stuck sealing state.
-      getEventAuditLog().append({
-        type: AuditEventTypes.SEAL_FINALIZE_FAILED,
-        threadId: record.threadId,
-        data: {
-          sessionId: args.sessionId,
-          catId: record.catId,
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
+      getEventAuditLog()
+        .append({
+          type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+          threadId: record.threadId,
+          data: {
+            sessionId: args.sessionId,
+            catId: record.catId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        })
+        .catch(() => {});
     }
 
     // Always attempt terminal transition — even if doFinalize failed/timed out.
@@ -132,15 +149,17 @@ export class SessionSealer implements ISessionSealer {
         updatedAt: now,
       });
     } catch (err) {
-      getEventAuditLog().append({
-        type: AuditEventTypes.SEAL_FINALIZE_FAILED,
-        threadId: record.threadId,
-        data: {
-          sessionId: args.sessionId,
-          phase: 'terminal_update',
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
+      getEventAuditLog()
+        .append({
+          type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+          threadId: record.threadId,
+          data: {
+            sessionId: args.sessionId,
+            phase: 'terminal_update',
+            error: err instanceof Error ? err.message : String(err),
+          },
+        })
+        .catch(() => {});
     }
   }
 
@@ -160,16 +179,51 @@ export class SessionSealer implements ISessionSealer {
           sealedAt: now,
           updatedAt: now,
         });
-        getEventAuditLog().append({
-          type: AuditEventTypes.SEAL_FINALIZE_FAILED,
-          threadId: s.threadId,
-          data: {
-            sessionId: s.id,
-            catId: s.catId,
-            phase: 'reconcile_stuck',
-            stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
-          },
+        getEventAuditLog()
+          .append({
+            type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+            threadId: s.threadId,
+            data: {
+              sessionId: s.id,
+              catId: s.catId,
+              phase: 'reconcile_stuck',
+              stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
+            },
+          })
+          .catch(() => {});
+        count++;
+      }
+    }
+    return count;
+  }
+
+  async reconcileAllStuck(maxAgeMs = 5 * 60_000): Promise<number> {
+    const sealingIds = await this.store.listSealingSessions();
+    if (sealingIds.length === 0) return 0;
+
+    const now = Date.now();
+    let count = 0;
+    for (const id of sealingIds) {
+      const s = await this.store.get(id);
+      if (!s || s.status !== 'sealing') continue;
+      if (now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
+        await this.store.update(s.id, {
+          status: 'sealed',
+          sealedAt: now,
+          updatedAt: now,
         });
+        getEventAuditLog()
+          .append({
+            type: AuditEventTypes.SEAL_FINALIZE_FAILED,
+            threadId: s.threadId,
+            data: {
+              sessionId: s.id,
+              catId: s.catId,
+              phase: 'global_reaper',
+              stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
+            },
+          })
+          .catch(() => {});
         count++;
       }
     }

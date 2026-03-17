@@ -5,7 +5,7 @@
  * Coordinates GameEngine (logic) + GameStore (persistence) + Socket (broadcast).
  */
 
-import type { GameAction, GameConfig, GameDefinition, GameRuntime, Seat } from '@cat-cafe/shared';
+import type { GameAction, GameConfig, GameDefinition, GameRuntime, PendingAction, Seat } from '@cat-cafe/shared';
 import type { IGameStore } from '../stores/ports/GameStore.js';
 import { GameEngine } from './GameEngine.js';
 import { GameViewBuilder } from './GameViewBuilder.js';
@@ -83,7 +83,45 @@ export class GameOrchestrator {
     if (runtime.status !== 'playing') throw new Error('Game is not active');
 
     const engine = this.createEngine(runtime);
+
+    // Log action.requested
+    engine.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'action.requested',
+      scope: 'god',
+      payload: { seatId, actionName: action.actionName },
+      revealPolicy: 'live',
+    });
+
     engine.submitAction(seatId, action);
+
+    // Mark as acted + log action.submitted
+    const pending = engine.getRuntime().pendingActions[seatId] as PendingAction | undefined;
+    if (pending) {
+      pending.status = 'acted';
+    }
+
+    engine.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'action.submitted',
+      scope: 'god',
+      payload: { seatId, actionName: action.actionName, target: action.targetSeat },
+      revealPolicy: 'live',
+    });
+
+    // Emit real-time ballot.updated for day votes (KD-26: live transparency)
+    if (action.actionName === 'vote' && action.targetSeat) {
+      engine.appendEvent({
+        round: runtime.round,
+        phase: runtime.currentPhase,
+        type: 'ballot.updated',
+        scope: 'public',
+        payload: { voterSeat: seatId, choice: action.targetSeat, revision: 1 },
+        revealPolicy: 'live',
+      });
+    }
 
     if (engine.allActionsCollected()) {
       this.advancePhase(engine);
@@ -93,7 +131,7 @@ export class GameOrchestrator {
     await this.broadcastGameState(gameId);
   }
 
-  /** System tick — check timeouts and advance if expired */
+  /** System tick — check timeouts, apply fallbacks, and advance if expired */
   async tick(gameId: string): Promise<void> {
     const runtime = await this.store.getGame(gameId);
     if (!runtime) return;
@@ -105,10 +143,17 @@ export class GameOrchestrator {
     const phaseStart = runtime.phaseStartedAt ?? runtime.updatedAt;
     const elapsed = Date.now() - phaseStart;
 
-    if (elapsed < phaseDef.timeoutMs) return; // not expired
+    // Grace period: on round 1, extend timeout by max grace among seated cats
+    const graceMs = runtime.round === 1 ? this.getMaxGraceMs(runtime) : 0;
+    const effectiveTimeout = phaseDef.timeoutMs + graceMs;
 
-    // Timeout — advance phase
+    if (elapsed < effectiveTimeout) return; // not expired
+
     const engine = this.createEngine(runtime);
+
+    // Apply fallbacks for missing seats before advancing
+    this.applyFallbacks(engine);
+
     engine.appendEvent({
       round: runtime.round,
       phase: runtime.currentPhase,
@@ -211,6 +256,114 @@ export class GameOrchestrator {
 
   // --- Private helpers ---
 
+  /** Grace periods per cat breed (KD-28). Only applied on round 1. */
+  private static readonly GRACE_MS: Record<string, number> = {
+    opus: 6000,
+    codex: 12000,
+    gpt52: 12000,
+    gemini: 30000,
+  };
+
+  /** Get max grace period among all cat actors in the game */
+  private getMaxGraceMs(runtime: GameRuntime): number {
+    let maxGrace = 0;
+    for (const seat of runtime.seats) {
+      if (seat.actorType === 'cat') {
+        const grace = GameOrchestrator.GRACE_MS[seat.actorId] ?? 0;
+        if (grace > maxGrace) maxGrace = grace;
+      }
+    }
+    return maxGrace;
+  }
+
+  /** Apply fallbacks for seats that haven't submitted actions */
+  private applyFallbacks(engine: GameEngine): void {
+    const runtime = engine.getRuntime();
+    const phaseDef = runtime.definition.phases.find((p) => p.name === runtime.currentPhase);
+    if (!phaseDef) return;
+
+    const actingRole = phaseDef.actingRole;
+    const expectedSeats =
+      actingRole === '*'
+        ? runtime.seats.filter((s) => s.alive && !s.properties.idiotRevealed)
+        : runtime.seats.filter((s) => s.alive && s.role === actingRole);
+
+    const aliveSeatIds = runtime.seats.filter((s) => s.alive).map((s) => s.seatId);
+
+    for (const seat of expectedSeats) {
+      if (runtime.pendingActions[seat.seatId]) continue; // already acted
+
+      // Log timeout for this seat
+      engine.appendEvent({
+        round: runtime.round,
+        phase: runtime.currentPhase,
+        type: 'action.timeout',
+        scope: 'god',
+        payload: { seatId: seat.seatId, reason: 'timeout' },
+      });
+
+      // Generate random fallback target (any alive seat except self and same-faction)
+      const wolfRoles = new Set(runtime.definition.roles.filter((r) => r.faction === 'wolf').map((r) => r.name));
+      const isWolf = wolfRoles.has(seat.role);
+      const validTargets = aliveSeatIds.filter((id) => {
+        if (id === seat.seatId) return false;
+        if (isWolf) {
+          const targetSeat = runtime.seats.find((s) => s.seatId === id);
+          return targetSeat ? !wolfRoles.has(targetSeat.role) : false;
+        }
+        return true;
+      });
+
+      const randomTarget =
+        validTargets.length > 0
+          ? validTargets[Math.floor(Math.random() * validTargets.length)]
+          : (aliveSeatIds.find((id) => id !== seat.seatId) ?? seat.seatId);
+
+      // Create fallback pending action — use phase-specific action definition
+      const phaseActions = runtime.definition.actions.filter((a) => a.allowedPhase === runtime.currentPhase);
+      const actionForSeat =
+        phaseActions.find((a) => a.allowedRole === seat.role) ?? phaseActions.find((a) => a.allowedRole === '*');
+      const fallbackActionName = actionForSeat?.name ?? 'vote';
+
+      const fallbackAction: PendingAction = {
+        seatId: seat.seatId as import('@cat-cafe/shared').SeatId,
+        actionName: fallbackActionName,
+        targetSeat: randomTarget as import('@cat-cafe/shared').SeatId,
+        submittedAt: Date.now(),
+        status: 'fallback',
+        requestedAt: runtime.phaseStartedAt ?? runtime.updatedAt,
+        fallbackSource: 'random',
+      };
+      runtime.pendingActions[seat.seatId] = fallbackAction;
+
+      engine.appendEvent({
+        round: runtime.round,
+        phase: runtime.currentPhase,
+        type: 'action.fallback',
+        scope: 'god',
+        payload: {
+          seatId: seat.seatId,
+          actionName: fallbackActionName,
+          fallbackSource: 'random',
+          target: randomTarget,
+          reason: 'timeout',
+        },
+      });
+
+      // Emit public ballot.updated for day-vote fallbacks (transparency trail)
+      if (fallbackActionName === 'vote') {
+        engine.appendEvent({
+          round: runtime.round,
+          phase: runtime.currentPhase,
+          type: 'ballot.updated',
+          scope: 'public',
+          payload: { voterSeat: seat.seatId, choice: randomTarget, revision: 1, source: 'fallback' },
+          revealPolicy: 'live',
+        });
+      }
+    }
+  }
+
   private createEngine(runtime: GameRuntime): GameEngine {
     if (runtime.gameType === 'werewolf') return new WerewolfEngine(runtime);
     return new GameEngine(runtime);
@@ -220,6 +373,9 @@ export class GameOrchestrator {
     const runtime = engine.getRuntime();
     const phases = runtime.definition.phases;
     const currentIdx = phases.findIndex((p) => p.name === runtime.currentPhase);
+
+    // Resolve current phase's actions before clearing
+    this.resolveCurrentPhase(engine);
 
     engine.clearPendingActions();
 
@@ -273,6 +429,75 @@ export class GameOrchestrator {
 
     // Auto-skip if new phase has no actors (system-driven, not cat-driven)
     this.skipEmptyPhases(runtime);
+  }
+
+  /** Resolve current phase's actions into game state via WerewolfEngine */
+  private resolveCurrentPhase(engine: GameEngine): void {
+    if (!(engine instanceof WerewolfEngine)) return;
+
+    const werewolf = engine as WerewolfEngine;
+    const runtime = engine.getRuntime();
+    const phaseName = runtime.currentPhase;
+    const phaseDef = runtime.definition.phases.find((p) => p.name === phaseName);
+    if (!phaseDef) return;
+
+    if (phaseName === 'night_resolve') {
+      this.resolveNightFromEvents(werewolf, runtime);
+    } else if (phaseDef.type === 'day_vote') {
+      this.resolveDayVoteFromPending(werewolf, runtime);
+    }
+  }
+
+  /** Reconstruct night actions from event log and resolve */
+  private resolveNightFromEvents(werewolf: WerewolfEngine, runtime: GameRuntime): void {
+    const roundEvents = runtime.eventLog.filter((e) => e.round === runtime.round);
+
+    for (const evt of roundEvents) {
+      if (evt.type !== 'action.submitted' && evt.type !== 'action.fallback') continue;
+      const { seatId, actionName, target } = evt.payload as Record<string, string>;
+      if (!seatId || !target) continue;
+
+      if (actionName === 'kill') {
+        werewolf.submitNightBallot(seatId, target);
+      } else if (actionName === 'guard' || actionName === 'heal' || actionName === 'poison') {
+        werewolf.setNightAction(seatId, actionName, target);
+      }
+    }
+
+    const result = werewolf.resolveNight();
+
+    werewolf.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'night_resolved',
+      scope: 'god',
+      payload: { deaths: result.deaths, hunterCanShoot: result.hunterCanShoot },
+      revealPolicy: 'phase_end',
+    });
+  }
+
+  /** Feed pending day votes into engine and resolve.
+   *  Uses silent ballot feed — ballot.updated events were already emitted at submission time. */
+  private resolveDayVoteFromPending(werewolf: WerewolfEngine, runtime: GameRuntime): void {
+    for (const [seatId, pending] of Object.entries(runtime.pendingActions)) {
+      const pa = pending as PendingAction;
+      if (pa.actionName === 'vote' && pa.targetSeat) {
+        // Skip revealed idiots — they lose voting rights (consistent with castDayVote)
+        const seat = runtime.seats.find((s) => s.seatId === seatId);
+        if (seat?.properties.idiotRevealed) continue;
+        werewolf.feedDayBallotSilent(seatId, pa.targetSeat as string);
+      }
+    }
+
+    const result = werewolf.resolveDayVotes();
+
+    werewolf.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'vote_resolved',
+      scope: 'public',
+      payload: { exiled: result.exiled, tied: result.tied, pkCandidates: result.pkCandidates },
+    });
   }
 
   /** Skip consecutive phases that have no alive actors for the acting role.

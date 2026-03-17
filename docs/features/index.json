@@ -723,7 +723,7 @@
     {
       "id": "F118",
       "name": "CLI Liveness Watchdog & Session Recovery — CLI 进程活性守卫 + 会话恢复",
-      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: open",
+      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: closed (PR #492, 2026-03-16)",
       "file": "F118-cli-liveness-watchdog.md"
     },
     {
@@ -753,7 +753,7 @@
     {
       "id": "F123",
       "name": "Bubble Runtime Correctness（消息身份契约 + Reconcile 状态机）",
-      "status": "in-progress | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "status": "done | **Owner**: Maine Coon/Maine Coon | **Priority**: P1 | **Completed**: 2026-03-16",
       "file": "F123-bubble-runtime-correctness.md"
     },
     {
@@ -767,7 +767,13 @@
       "name": "Alpha 验收通道 — main-test 升级为正式 alpha 测试基础设施",
       "status": "done | **Owner**: Maine Coon(gpt52) + Ragdoll(opus) | **Priority**: P1 | **Completed**: 2026-03-16",
       "file": "F125-alpha-test-channel.md"
+    },
+    {
+      "id": "F126",
+      "name": "四肢控制面 — Cat Café Limb Control Plane",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F126-limb-control-plane.md"
     }
   ],
-  "generated_at": "2026-03-16T14:03:44.071Z"
+  "generated_at": "2026-03-17T01:21:25.024Z"
 }

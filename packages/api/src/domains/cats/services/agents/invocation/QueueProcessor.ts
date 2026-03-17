@@ -184,6 +184,38 @@ export class QueueProcessor {
     return this.tryExecuteNextForUser(threadId, userId);
   }
 
+  /**
+   * F122B: Try to auto-execute any queued autoExecute entries whose target cat slot is free.
+   * Called immediately after enqueuing an agent entry.
+   * Scans past busy-slot entries to find the first executable one.
+   */
+  async tryAutoExecute(threadId: string): Promise<void> {
+    const entries = this.deps.queue.listAutoExecute?.(threadId) ?? [];
+
+    for (const entry of entries) {
+      const entryCat = entry.targetCats[0] ?? 'unknown';
+      const sk = QueueProcessor.slotKey(threadId, entryCat);
+      // Skip if slot is busy (mutex or tracker)
+      if (this.processingSlots.has(sk)) continue;
+      if (this.deps.invocationTracker.has(threadId, entryCat)) continue;
+
+      // Mark processing and execute
+      this.deps.queue.markProcessingById(threadId, entry.id);
+      this.processingSlots.add(sk);
+      void this.executeEntry(entry).then(
+        (status) => {
+          this.processingSlots.delete(sk);
+          this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
+        },
+        () => {
+          this.processingSlots.delete(sk);
+          this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
+        },
+      );
+      return; // One per call — chained via onInvocationComplete
+    }
+  }
+
   // ── Internal ──
 
   private async tryExecuteNextAcrossUsers(

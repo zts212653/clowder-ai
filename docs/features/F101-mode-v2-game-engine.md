@@ -182,15 +182,15 @@ team experience（2026-03-11）：
   - 技术：`GameViewBuilder` 新增 `detective` 视角，绑定 seatId 后继承该座位信息域 ✅
   - 前端视觉：紫色侦探主题 + soul-link-pulse + tarot-back — 🔄 PR review 中
 
-### Phase F（核心体验修复 — 投票/透明度/超时）
+### Phase F（核心体验修复 — 投票/透明度/超时）✅
 - [ ] AC-F1: GitHub agent werewolf 调研报告完成，覆盖 ≥3 个项目
-- [ ] AC-F2: God-view 夜晚时间线实时展示每个角色的具体行动目标
-- [ ] AC-F3: 已行动状态从二态改为三态（waiting/acting/acted）
-- [ ] AC-F4: 多狼独立投票 + 多数票结算 + 平票处理
-- [ ] AC-F5: 白天投票可改票 + 全员 commit 提前结束
-- [ ] AC-F6: 超时未行动自动 fallback，游戏不卡住
-- [ ] AC-F7: 慢启动猫猫有 grace period + god-view 展示真实连接状态
-- [ ] AC-F8: team lead在 god-view 能清楚理解"正在发生什么"（不再一脸懵逼）
+- [x] AC-F2: God-view 夜晚时间线实时展示每个角色的具体行动目标
+- [x] AC-F3: 已行动状态从二态改为五态（waiting/acting/acted/timed_out/fallback）
+- [x] AC-F4: 多狼独立投票 + 多数票结算 + 平票处理
+- [x] AC-F5: 白天投票可改票 + 全员 commit 提前结束
+- [x] AC-F6: 超时未行动自动 fallback，游戏不卡住
+- [x] AC-F7: 慢启动猫猫有 grace period + god-view 展示真实连接状态
+- [x] AC-F8: team lead在 god-view 能清楚理解"正在发生什么"（不再一脸懵逼）
 
 ### Phase F: 核心体验修复 — 投票/透明度/超时/行动真实性（2026-03-16）
 

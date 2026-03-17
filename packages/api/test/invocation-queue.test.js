@@ -379,4 +379,45 @@ describe('InvocationQueue', () => {
     assert.equal(remaining.length, 1);
     assert.equal(remaining[0].content, 'fresh-merge');
   });
+
+  // ── F122B: agent source + autoExecute ──
+
+  it('accepts agent source with autoExecute and callerCatId', () => {
+    const result = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'A2A handoff',
+      source: 'agent',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'codex',
+    });
+    assert.equal(result.outcome, 'enqueued');
+    assert.equal(result.entry.source, 'agent');
+    assert.equal(result.entry.autoExecute, true);
+    assert.equal(result.entry.callerCatId, 'codex');
+  });
+
+  it('autoExecute defaults to false when not provided', () => {
+    const result = queue.enqueue(entry());
+    assert.equal(result.entry.autoExecute, false);
+    assert.equal(result.entry.callerCatId, undefined);
+  });
+
+  it('agent entries do not merge with user entries', () => {
+    queue.enqueue(entry({ content: 'user msg' }));
+    const r2 = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'A2A handoff',
+      source: 'agent',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'codex',
+    });
+    // Different userId (system vs u1) → different scope key → never merge
+    assert.equal(r2.outcome, 'enqueued');
+  });
 });

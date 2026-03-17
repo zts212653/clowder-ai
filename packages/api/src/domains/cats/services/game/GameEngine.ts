@@ -5,7 +5,7 @@
  * Game-specific logic (resolution, phase transitions) is handled by subclasses.
  */
 
-import type { EventScope, GameAction, GameEvent, GameRuntime, SeatId } from '@cat-cafe/shared';
+import type { EventScope, GameAction, GameEvent, GameRuntime, PendingAction, SeatId } from '@cat-cafe/shared';
 
 type PartialEvent = Omit<GameEvent, 'eventId' | 'timestamp'>;
 
@@ -72,7 +72,12 @@ export class GameEngine {
       throw new Error(`Action ${action.actionName} not allowed for role ${seat.role}`);
     }
 
-    this.runtime.pendingActions[seatId] = action;
+    const pending: PendingAction = {
+      ...action,
+      status: 'waiting',
+      requestedAt: Date.now(),
+    };
+    this.runtime.pendingActions[seatId] = pending;
     this.runtime.version++;
     this.runtime.updatedAt = Date.now();
   }

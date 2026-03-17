@@ -139,6 +139,8 @@ export function GameOverlay({
             gameStatus={view.status}
             isDetective={isDetective}
             detectiveBoundName={detectiveBoundName}
+            godEvents={isGodView ? view.visibleEvents : undefined}
+            currentRound={view.round}
             onScopeChange={onGodScopeChange}
             onGodAction={onGodAction}
           />

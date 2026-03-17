@@ -5,7 +5,16 @@
  * Handles role/faction visibility and event filtering.
  */
 
-import type { EventScope, GameRuntime, GameView, SeatId, SeatView } from '@cat-cafe/shared';
+import type {
+  ActionStatus,
+  EventScope,
+  GameEvent,
+  GameRuntime,
+  GameView,
+  PendingAction,
+  SeatId,
+  SeatView,
+} from '@cat-cafe/shared';
 import { GameStatsRecorder } from './GameStatsRecorder.js';
 
 export class GameViewBuilder {
@@ -23,10 +32,18 @@ export class GameViewBuilder {
       ? runtime.definition.roles.find((r) => r.name === viewerSeat.role)?.faction
       : undefined;
 
-    // Filter events by visibility
-    const visibleEvents = runtime.eventLog.filter(
-      (e) => isGod || GameViewBuilder.isVisible(e.scope, effectiveSeatId as SeatId, viewerFaction),
-    );
+    // Filter events by visibility + revealPolicy
+    const visibleEvents = runtime.eventLog.filter((e) => {
+      // Scope check
+      if (!isGod && !GameViewBuilder.isVisible(e.scope, effectiveSeatId as SeatId, viewerFaction)) {
+        return false;
+      }
+      // revealPolicy check (god always sees everything)
+      if (!isGod && e.revealPolicy) {
+        if (!GameViewBuilder.isRevealed(e, runtime)) return false;
+      }
+      return true;
+    });
 
     // Build seat views with role masking
     const seats: SeatView[] = runtime.seats.map((seat) => {
@@ -41,14 +58,22 @@ export class GameViewBuilder {
       const isPublicPhase = runtime.currentPhase?.startsWith('day_') ?? false;
       const canSeeActed = isGod || isDetective || seat.seatId === effectiveSeatId || isPublicPhase;
 
+      const pending = runtime.pendingActions[seat.seatId] as PendingAction | undefined;
+
       const sv: SeatView = {
         seatId: seat.seatId,
         actorType: seat.actorType,
         actorId: seat.actorId,
         displayName: seat.actorId,
         alive: seat.alive,
-        hasActed: canSeeActed ? !!runtime.pendingActions[seat.seatId] : undefined,
+        hasActed: canSeeActed ? !!pending : undefined,
       };
+
+      // God view: expose per-seat actionStatus
+      if (isGod && seat.alive) {
+        sv.actionStatus = (pending?.status as ActionStatus) ?? 'waiting';
+      }
+
       if (showRole) {
         sv.role = seat.role;
         if (seatRole?.faction) sv.faction = seatRole.faction;
@@ -76,6 +101,20 @@ export class GameViewBuilder {
     };
     if (runtime.winner) view.winner = runtime.winner;
 
+    // Aggregate action progress (non-god views only — god has per-seat detail)
+    if (!isGod) {
+      const phaseDef = runtime.definition.phases.find((p) => p.name === runtime.currentPhase);
+      if (phaseDef) {
+        const actingRole = phaseDef.actingRole;
+        const expectedSeats =
+          actingRole === '*'
+            ? runtime.seats.filter((s) => s.alive)
+            : runtime.seats.filter((s) => s.alive && s.role === actingRole);
+        view.totalExpected = expectedSeats.length;
+        view.submittedCount = expectedSeats.filter((s) => !!runtime.pendingActions[s.seatId]).length;
+      }
+    }
+
     // Attach detailed stats when game is finished
     if (runtime.status === 'finished') {
       const detailed = GameStatsRecorder.extractDetailedStats(runtime);
@@ -100,6 +139,21 @@ export class GameViewBuilder {
     }
 
     return view;
+  }
+
+  /** Check if event's revealPolicy allows it to be shown */
+  private static isRevealed(event: GameEvent, runtime: GameRuntime): boolean {
+    if (!event.revealPolicy || event.revealPolicy === 'live') return true;
+    if (event.revealPolicy === 'phase_end') {
+      // Events from prior rounds are always revealed (phase names recur across rounds)
+      if (event.round < runtime.round) return true;
+      // Same round: visible only if current phase is different from event's phase
+      return runtime.currentPhase !== event.phase;
+    }
+    if (event.revealPolicy === 'game_end') {
+      return runtime.status === 'finished';
+    }
+    return true;
   }
 
   private static isVisible(scope: EventScope, viewer: SeatId, viewerFaction?: string): boolean {

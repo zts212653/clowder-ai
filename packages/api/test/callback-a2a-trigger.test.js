@@ -983,3 +983,234 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
     assert.equal(routeCalled, 1, 'routeExecution called in fallback path');
   });
 });
+
+// ── F122B: A2A enqueue to InvocationQueue ──
+describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
+  test('enqueues to InvocationQueue with agent source when invocationQueue dep is provided', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    const enqueueCalls = [];
+    const mockInvocationQueue = {
+      enqueue(input) {
+        enqueueCalls.push(input);
+        return { outcome: 'enqueued', entry: { id: 'q-1', ...input, status: 'queued', createdAt: Date.now() } };
+      },
+      countAgentEntriesForThread() {
+        return 0;
+      },
+      hasQueuedAgentForCat() {
+        return false;
+      },
+    };
+    const tryAutoExecuteCalls = [];
+    const mockQueueProcessor = {
+      onInvocationComplete() {},
+      tryAutoExecute(threadId) {
+        tryAutoExecuteCalls.push(threadId);
+        return Promise.resolve();
+      },
+    };
+
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        invocationTracker: {
+          has() {
+            return false;
+          },
+          start() {
+            return new AbortController();
+          },
+          complete() {},
+        },
+        queueProcessor: mockQueueProcessor,
+        invocationQueue: mockInvocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['opus'],
+        content: 'A2A handoff message',
+        userId: 'system',
+        threadId: 't1',
+        triggerMessage: { id: 'msg-trigger', mentions: ['opus'], content: 'test' },
+        callerCatId: 'codex',
+        parentInvocationId: 'inv-parent',
+      },
+    );
+
+    assert.equal(enqueueCalls.length, 1, 'should enqueue to InvocationQueue');
+    assert.equal(enqueueCalls[0].source, 'agent');
+    assert.equal(enqueueCalls[0].autoExecute, true);
+    assert.equal(enqueueCalls[0].callerCatId, 'codex');
+    assert.equal(enqueueCalls[0].targetCats[0], 'opus');
+    assert.equal(tryAutoExecuteCalls.length, 1, 'should trigger tryAutoExecute');
+    assert.deepEqual(result.enqueued, ['opus']);
+    assert.equal(result.fallback, false);
+  });
+
+  test('respects A2A depth limit — rejects when depth exceeded', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    const enqueueCalls = [];
+    const mockInvocationQueue = {
+      enqueue(input) {
+        enqueueCalls.push(input);
+        return { outcome: 'enqueued', entry: { id: 'q-1', ...input } };
+      },
+      // F122B: agent entry count for depth tracking
+      countAgentEntriesForThread(threadId) {
+        return 10; // At depth limit
+      },
+    };
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        invocationTracker: {
+          has() {
+            return false;
+          },
+          start() {
+            return new AbortController();
+          },
+          complete() {},
+        },
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            return Promise.resolve();
+          },
+        },
+        invocationQueue: mockInvocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['opus'],
+        content: 'deep A2A',
+        userId: 'system',
+        threadId: 't1',
+        triggerMessage: { id: 'msg-deep', mentions: ['opus'], content: 'test' },
+        callerCatId: 'codex',
+      },
+    );
+
+    assert.equal(enqueueCalls.length, 0, 'should NOT enqueue when depth limit reached');
+    assert.deepEqual(result.enqueued, []);
+  });
+
+  test('deduplicates — skips targets already queued as agent entries', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    const enqueueCalls = [];
+    const mockInvocationQueue = {
+      enqueue(input) {
+        enqueueCalls.push(input);
+        return { outcome: 'enqueued', entry: { id: 'q-1', ...input } };
+      },
+      countAgentEntriesForThread() {
+        return 0;
+      },
+      // opus already has a queued agent entry
+      hasQueuedAgentForCat(threadId, catId) {
+        return catId === 'opus';
+      },
+    };
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        invocationTracker: {
+          has() {
+            return false;
+          },
+          start() {
+            return new AbortController();
+          },
+          complete() {},
+        },
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            return Promise.resolve();
+          },
+        },
+        invocationQueue: mockInvocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['opus', 'codex'],
+        content: 'A2A handoff',
+        userId: 'system',
+        threadId: 't1',
+        triggerMessage: { id: 'msg-dup', mentions: ['opus', 'codex'], content: 'test' },
+        callerCatId: 'gemini',
+      },
+    );
+
+    // opus should be skipped (already queued), codex should enqueue
+    assert.equal(enqueueCalls.length, 1, 'should only enqueue non-duplicate cat');
+    assert.equal(enqueueCalls[0].targetCats[0], 'codex');
+    assert.deepEqual(result.enqueued, ['codex']);
+  });
+
+  test('depth limit enforced per-target — multi-target stops at limit (cloud P1)', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    let depth = 9; // one slot left
+    const enqueueCalls = [];
+    const mockInvocationQueue = {
+      enqueue(input) {
+        enqueueCalls.push(input);
+        depth++; // simulate entry being added
+        return { outcome: 'enqueued', entry: { id: `q-${depth}`, ...input } };
+      },
+      countAgentEntriesForThread() {
+        return depth;
+      },
+      hasQueuedAgentForCat() {
+        return false;
+      },
+    };
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        invocationTracker: {
+          has() {
+            return false;
+          },
+          start() {
+            return new AbortController();
+          },
+          complete() {},
+        },
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            return Promise.resolve();
+          },
+        },
+        invocationQueue: mockInvocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['opus', 'codex'],
+        content: 'multi-target near limit',
+        userId: 'system',
+        threadId: 't1',
+        triggerMessage: { id: 'msg-overflow', mentions: ['opus', 'codex'], content: 'test' },
+        callerCatId: 'gemini',
+      },
+    );
+
+    // depth starts at 9, first enqueue (opus) brings it to 10, second (codex) should be rejected
+    assert.equal(enqueueCalls.length, 1, 'should enqueue only first target before hitting limit');
+    assert.equal(enqueueCalls[0].targetCats[0], 'opus');
+    assert.deepEqual(result.enqueued, ['opus']);
+  });
+});

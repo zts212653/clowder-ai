@@ -19,11 +19,15 @@ export interface QueueEntry {
   content: string;
   messageId: string | null;
   mergedMessageIds: string[];
-  source: 'user' | 'connector';
+  source: 'user' | 'connector' | 'agent';
   targetCats: string[];
   intent: string;
   status: 'queued' | 'processing';
   createdAt: number;
+  /** F122B: auto-execute without waiting for steer/manual trigger */
+  autoExecute: boolean;
+  /** F122B: which cat initiated this entry (for A2A/multi_mention display) */
+  callerCatId?: string;
 }
 
 export interface EnqueueResult {
@@ -59,7 +63,15 @@ export class InvocationQueue {
    * 预留队列位。容量检查在此完成。
    * 同源同目标的连续消息自动合并。
    */
-  enqueue(input: Omit<QueueEntry, 'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId'>): EnqueueResult {
+  enqueue(
+    input: Omit<
+      QueueEntry,
+      'id' | 'status' | 'createdAt' | 'mergedMessageIds' | 'messageId' | 'autoExecute' | 'callerCatId'
+    > & {
+      autoExecute?: boolean;
+      callerCatId?: string;
+    },
+  ): EnqueueResult {
     const key = this.scopeKey(input.threadId, input.userId);
     const q = this.getOrCreate(key);
 
@@ -96,6 +108,8 @@ export class InvocationQueue {
       intent: input.intent,
       status: 'queued',
       createdAt: Date.now(),
+      autoExecute: input.autoExecute ?? false,
+      callerCatId: input.callerCatId,
     };
     q.push(entry);
     this.originalContents.set(entry.id, input.content);
@@ -346,6 +360,54 @@ export class InvocationQueue {
       users.push(userId);
     }
     return users;
+  }
+
+  /** F122B: List all queued autoExecute entries for a thread (for scanning past busy slots). */
+  listAutoExecute(threadId: string): QueueEntry[] {
+    const result: QueueEntry[] = [];
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      for (const e of q) {
+        if (e.status === 'queued' && e.autoExecute) result.push({ ...e });
+      }
+    }
+    return result;
+  }
+
+  /** F122B: Count queued+processing agent-sourced entries for a thread (depth tracking). */
+  countAgentEntriesForThread(threadId: string): number {
+    let count = 0;
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      for (const e of q) {
+        if (e.source === 'agent') count++;
+      }
+    }
+    return count;
+  }
+
+  /** F122B: Check if a specific cat already has a queued agent entry for this thread. */
+  hasQueuedAgentForCat(threadId: string, catId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      for (const e of q) {
+        if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** F122B: Mark a specific entry as processing by ID (cross-user). */
+  markProcessingById(threadId: string, entryId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      const entry = q.find((e) => e.id === entryId && e.status === 'queued');
+      if (entry) {
+        entry.status = 'processing';
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Whether any user has queued entries for this thread. */
