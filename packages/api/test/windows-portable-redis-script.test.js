@@ -52,11 +52,11 @@ test('Windows installer treats winget Node install failures as retryable instead
 });
 
 test('Windows installer retries plain pnpm install when frozen lockfile mode hits a native command error', () => {
-  const frozenInstallIndex = installScript.indexOf('Invoke-Pnpm -Args @("install", "--frozen-lockfile") 2>$null');
+  const frozenInstallIndex = installScript.indexOf('Invoke-Pnpm -CommandArgs @("install", "--frozen-lockfile") 2>$null');
   const tryIndex = installScript.lastIndexOf('try {', frozenInstallIndex);
   const catchIndex = installScript.indexOf('} catch {}', frozenInstallIndex);
   const retryWarnIndex = installScript.indexOf('Write-Warn "Frozen lockfile failed, retrying..."');
-  const retryInstallIndex = installScript.indexOf('Invoke-Pnpm -Args @("install")', retryWarnIndex);
+  const retryInstallIndex = installScript.indexOf('Invoke-Pnpm -CommandArgs @("install")', retryWarnIndex);
 
   assert.notEqual(frozenInstallIndex, -1, 'expected frozen lockfile install attempt');
   assert.notEqual(tryIndex, -1, 'expected frozen lockfile attempt to be wrapped in try/catch');
@@ -70,6 +70,12 @@ test('Windows installer retries plain pnpm install when frozen lockfile mode hit
 });
 
 test('Windows command forwarding helpers avoid PowerShell automatic $args collisions', () => {
+  assert.match(installScript, /function Invoke-Pnpm/);
+  assert.match(installScript, /param\(\[string\[\]\]\$CommandArgs\)/);
+  assert.match(installScript, /Invoke-ToolCommand -Name "pnpm" -CommandArgs \$CommandArgs/);
+  assert.doesNotMatch(installScript, /param\(\[string\[\]\]\$Args\)/);
+  assert.doesNotMatch(installScript, /Invoke-ToolCommand -Name "pnpm" -Args \$Args/);
+
   assert.match(commandHelpersScript, /function Invoke-ToolCommand/);
   assert.match(commandHelpersScript, /param\(\[string\]\$Name, \[string\[\]\]\$CommandArgs\)/);
   assert.match(commandHelpersScript, /& \$toolCommand @CommandArgs/);
@@ -97,6 +103,17 @@ test('Windows scripts share a generic npm shim resolver for pnpm and agent CLIs'
   assert.match(helpersScript, /\$hasClaude = \$null -ne \(Resolve-ToolCommand -Name "claude"\)/);
   assert.match(helpersScript, /\$hasCodex = \$null -ne \(Resolve-ToolCommand -Name "codex"\)/);
   assert.match(helpersScript, /\$hasGemini = \$null -ne \(Resolve-ToolCommand -Name "gemini"\)/);
+});
+
+test('Windows installer resolves corepack and npm explicitly when bootstrapping pnpm', () => {
+  assert.match(installScript, /\$corepackCommand = Resolve-ToolCommand -Name "corepack"/);
+  assert.match(installScript, /& \$corepackCommand enable 2>\$null/);
+  assert.match(installScript, /& \$corepackCommand install -g pnpm@latest 2>\$null/);
+  assert.doesNotMatch(installScript, /corepack" -Args @\("prepare", "pnpm@latest", "--activate"\)/);
+
+  assert.match(installScript, /\$npmCommand = Resolve-ToolCommand -Name "npm"/);
+  assert.match(installScript, /& \$npmCommand install -g pnpm 2>\$null/);
+  assert.doesNotMatch(installScript, /Invoke-ToolCommand -Name "npm" -Args @\("install", "-g", "pnpm"\)/);
 });
 
 test('Windows installer keeps portable Redis inside the project .cat-cafe directory', () => {
@@ -128,8 +145,8 @@ test('Windows startup resolves portable Redis from the shared helper before glob
 
 test('Windows installer and startup reuse shared tool resolution instead of raw pnpm PATH lookups', () => {
   assert.match(installScript, /Resolve-ToolCommand -Name "pnpm"/);
-  assert.match(installScript, /Invoke-ToolCommand -Name "corepack" -Args @\("enable"\)/);
-  assert.match(installScript, /Invoke-ToolCommand -Name "npm" -Args @\("install", "-g", "pnpm"\)/);
+  assert.match(installScript, /\$corepackCommand = Resolve-ToolCommand -Name "corepack"/);
+  assert.match(installScript, /\$npmCommand = Resolve-ToolCommand -Name "npm"/);
   assert.match(installScript, /Resolve-ToolCommand -Name \$tool\.Cmd/);
   assert.match(startWindowsScript, /\$pnpmCommand = Resolve-ToolCommand -Name "pnpm"/);
   assert.match(startWindowsScript, /& \$pnpmCommand run build/);

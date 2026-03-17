@@ -35,14 +35,8 @@ function Refresh-Path {
                 [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
-function Resolve-PnpmCommand {
-    Resolve-ToolCommand -Name "pnpm"
-}
-
-function Invoke-Pnpm {
-    param([string[]]$Args)
-    Invoke-ToolCommand -Name "pnpm" -Args $Args
-}
+function Resolve-PnpmCommand { Resolve-ToolCommand -Name "pnpm" }
+function Invoke-Pnpm { param([string[]]$CommandArgs) Invoke-ToolCommand -Name "pnpm" -CommandArgs $CommandArgs }
 
 $ScriptPath = if ($PSCommandPath) { $PSCommandPath } elseif ($MyInvocation.MyCommand.Path) { $MyInvocation.MyCommand.Path } else { $null }
 if (-not $ScriptPath) {
@@ -141,21 +135,29 @@ try {
 
 if (-not $pnpmOk) {
     Write-Host "  Installing pnpm..."
-    try {
-        Invoke-ToolCommand -Name "corepack" -Args @("enable") 2>$null
-        Invoke-ToolCommand -Name "corepack" -Args @("prepare", "pnpm@latest", "--activate") 2>$null
-        Refresh-Path
-        $pnpmCommand = Resolve-PnpmCommand
-        if ($pnpmCommand) {
-            $pnpmRaw = & $pnpmCommand --version 2>$null
-            Write-Ok "pnpm $pnpmRaw (via corepack)"
-            $pnpmOk = $true
-        } else {
-            throw "pnpm shim missing after corepack prepare"
-        }
-    } catch {
+    $corepackCommand = Resolve-ToolCommand -Name "corepack"
+    if ($corepackCommand) {
         try {
-            Invoke-ToolCommand -Name "npm" -Args @("install", "-g", "pnpm") 2>$null
+            & $corepackCommand enable 2>$null
+            & $corepackCommand install -g pnpm@latest 2>$null
+            Refresh-Path
+            $pnpmCommand = Resolve-PnpmCommand
+            if ($pnpmCommand) {
+                $pnpmRaw = & $pnpmCommand --version 2>$null
+                Write-Ok "pnpm $pnpmRaw (via corepack)"
+                $pnpmOk = $true
+            } else {
+                throw "pnpm shim missing after corepack install"
+            }
+        } catch {}
+    }
+    if (-not $pnpmOk) {
+        $npmCommand = Resolve-ToolCommand -Name "npm"
+        try {
+            if (-not $npmCommand) {
+                throw "npm command not found"
+            }
+            & $npmCommand install -g pnpm 2>$null
             Refresh-Path
             $pnpmCommand = Resolve-PnpmCommand
             if ($pnpmCommand) {
@@ -185,12 +187,12 @@ Write-Ok "Using project root: $ProjectRoot"
 Write-Host "  Running pnpm install..."
 $frozenInstallOk = $false
 try {
-    Invoke-Pnpm -Args @("install", "--frozen-lockfile") 2>$null
+    Invoke-Pnpm -CommandArgs @("install", "--frozen-lockfile") 2>$null
     $frozenInstallOk = $LASTEXITCODE -eq 0
 } catch {}
 if (-not $frozenInstallOk) {
     Write-Warn "Frozen lockfile failed, retrying..."
-    Invoke-Pnpm -Args @("install")
+    Invoke-Pnpm -CommandArgs @("install")
     if ($LASTEXITCODE -ne 0) { Write-Err "pnpm install failed"; exit 1 }
 }
 Write-Ok "Dependencies installed"
@@ -205,7 +207,7 @@ if (-not $SkipBuild) {
     foreach ($step in $buildSteps) {
         Write-Host "  Building $($step.Name)..."
         Push-Location (Join-Path $ProjectRoot $step.Path)
-        Invoke-Pnpm -Args @("run", "build")
+        Invoke-Pnpm -CommandArgs @("run", "build")
         if ($LASTEXITCODE -ne 0) { Write-Err "Build failed: $($step.Name)"; Pop-Location; exit 1 }
         Pop-Location
         Write-Ok "$($step.Name)"
