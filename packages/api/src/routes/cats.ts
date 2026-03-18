@@ -181,7 +181,12 @@ async function validateProviderBindingOrThrow(params: {
     }
     return;
   }
-  if (!trimmedProfileId) return;
+  if (!trimmedProfileId) {
+    if (params.client === 'dare' || params.client === 'opencode') {
+      throw new Error(`client "${params.client}" requires an api_key provider profile`);
+    }
+    return;
+  }
 
   const profiles = await readProviderProfiles(params.projectRoot);
   const profile = profiles.providers.find((item) => item.id === trimmedProfileId);

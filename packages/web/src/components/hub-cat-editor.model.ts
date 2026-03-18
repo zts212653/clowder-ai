@@ -296,6 +296,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
         : {};
   const name = trimText(form.name);
   const displayName = trimText(form.displayName) || name;
+  const createName = name || displayName;
   const trimmedProviderProfileId = trimText(form.providerProfileId);
   const providerProfilePatch =
     trimmedProviderProfileId.length > 0
@@ -304,7 +305,6 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
         ? { providerProfileId: null as null }
         : {};
   const common = {
-    name: cat ? name || displayName : name,
     displayName,
     nickname: trimText(form.nickname),
     avatar: trimText(form.avatar),
@@ -332,7 +332,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   if (form.client === 'antigravity') {
     return {
       ...common,
-      ...(cat ? {} : { catId: trimText(form.catId) }),
+      ...(cat ? {} : { catId: trimText(form.catId), name: createName }),
       client: 'antigravity' as const,
       ...providerProfilePatch,
       defaultModel: trimText(form.defaultModel),
@@ -342,7 +342,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
 
   return {
     ...common,
-    ...(cat ? {} : { catId: trimText(form.catId) }),
+    ...(cat ? {} : { catId: trimText(form.catId), name: createName }),
     client: form.client,
     ...providerProfilePatch,
     defaultModel: trimText(form.defaultModel),

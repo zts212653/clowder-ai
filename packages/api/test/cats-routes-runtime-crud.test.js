@@ -373,6 +373,41 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(patchBody.error, /mention alias "@opus" is already used by cat "opus"/i);
   });
 
+  it('POST /api/cats requires providerProfileId for dare and opencode clients', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-dare',
+        name: '运行时审计猫',
+        displayName: '运行时审计猫',
+        avatar: '/avatars/dare.png',
+        color: { primary: '#0f172a', secondary: '#cbd5e1' },
+        mentionPatterns: ['@runtime-dare'],
+        roleDescription: '审计',
+        client: 'dare',
+        defaultModel: 'dare-1',
+      }),
+    });
+
+    assert.equal(res.statusCode, 400);
+    const body = JSON.parse(res.body);
+    assert.match(body.error, /requires an api_key provider profile/i);
+  });
+
   it('DELETE /api/cats/:id removes runtime members from subsequent reads', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -399,10 +434,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-temp'],
         roleDescription: '临时成员',
         personality: '临时',
-        client: 'dare',
-        defaultModel: 'dare-1',
+        client: 'openai',
+        defaultModel: 'gpt-5.4-mini',
         mcpSupport: false,
-        cli: { command: 'dare', outputFormat: 'json' },
+        cli: { command: 'codex', outputFormat: 'json' },
       }),
     });
 

@@ -9,7 +9,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 import { HubCatEditor } from '@/components/HubCatEditor';
-import { filterProfiles } from '@/components/hub-cat-editor.model';
+import { buildCatPayload, type HubCatEditorFormState, filterProfiles } from '@/components/hub-cat-editor.model';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -71,6 +71,47 @@ describe('HubCatEditor', () => {
     act(() => root.unmount());
     container.remove();
     vi.clearAllMocks();
+  });
+
+  it('buildCatPayload omits name when editing an existing cat', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'runtime-codex',
+      name: '运行时缅因猫',
+      displayName: '运行时缅因猫',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex',
+      roleDescription: '审查',
+      personality: '严谨',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      client: 'openai',
+      providerProfileId: '',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+    };
+    const existingCat = {
+      id: 'runtime-codex',
+      name: 'runtime-codex',
+      displayName: '运行时缅因猫',
+      provider: 'openai',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: '审查',
+    } as CatData;
+
+    const payload = buildCatPayload(form, existingCat) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(payload, 'name')).toBe(false);
   });
 
   it('renders normal member provider/model fields and saves to /api/cats', async () => {
