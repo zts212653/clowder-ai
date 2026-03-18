@@ -142,7 +142,7 @@ export function HubProviderProfileItem({
             <span className="text-sm font-medium text-gray-800">{profile.displayName}</span>
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{profile.authType}</span>
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{profile.protocol}</span>
-            {profile.builtin && <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">builtin</span>}
+            {profile.builtin && <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">🔒 内置</span>}
             {isActive && <span className="text-[11px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">active</span>}
           </div>
           <p className="text-xs text-gray-500">

@@ -6,10 +6,10 @@
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type CatConfig, type ContextBudget, catRegistry, type CatProvider } from '@cat-cafe/shared';
+import { type CatConfig, catRegistry, type CatProvider, type ContextBudget, type RosterEntry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
+import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
 
 const DEFAULT_TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../cat-template.json');
@@ -38,6 +38,7 @@ const baseCatSchema = z.object({
   catId: z.string().min(1),
   name: z.string().min(1),
   displayName: z.string().min(1),
+  nickname: z.string().optional(),
   avatar: z.string().min(1),
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
@@ -45,6 +46,10 @@ const baseCatSchema = z.object({
   contextBudget: contextBudgetSchema.optional(),
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
+  teamStrengths: z.string().optional(),
+  caution: z.string().nullable().optional(),
+  strengths: z.array(z.string().min(1)).optional(),
+  sessionChain: z.boolean().optional(),
 });
 
 const createNormalCatSchema = baseCatSchema.extend({
@@ -65,6 +70,7 @@ const createCatSchema = z.discriminatedUnion('client', [createNormalCatSchema, c
 const updateCatSchema = z.object({
   name: z.string().min(1).optional(),
   displayName: z.string().min(1).optional(),
+  nickname: z.string().optional(),
   avatar: z.string().min(1).optional(),
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
@@ -72,6 +78,10 @@ const updateCatSchema = z.object({
   contextBudget: contextBudgetSchema.optional(),
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
+  teamStrengths: z.string().optional(),
+  caution: z.string().nullable().optional(),
+  strengths: z.array(z.string().min(1)).optional(),
+  sessionChain: z.boolean().optional(),
   client: clientSchema.optional(),
   defaultModel: z.string().min(1).optional(),
   mcpSupport: z.boolean().optional(),
@@ -93,6 +103,35 @@ function resolveProjectRoot(): string {
   return dirname(templatePath);
 }
 
+type CatSource = 'seed' | 'runtime';
+
+interface CatResponseMetadata {
+  roster: RosterEntry | null;
+  source: CatSource;
+}
+
+function buildCatResponseMetadataResolver() {
+  const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_TEMPLATE_PATH;
+  let seedCatIds = new Set<string>();
+  try {
+    seedCatIds = new Set(Object.keys(toAllCatConfigs(loadCatConfig(templatePath))));
+  } catch {
+    seedCatIds = new Set();
+  }
+
+  let roster: Record<string, RosterEntry> = {};
+  try {
+    roster = getRoster(loadCatConfig());
+  } catch {
+    roster = {};
+  }
+
+  return (catId: string): CatResponseMetadata => ({
+    roster: roster[catId] ?? null,
+    source: seedCatIds.has(catId) ? 'seed' : 'runtime',
+  });
+}
+
 function defaultCliForClient(client: CatProvider) {
   switch (client) {
     case 'anthropic':
@@ -110,7 +149,7 @@ function defaultCliForClient(client: CatProvider) {
   }
 }
 
-function toCatResponse(cat: CatConfig & { contextBudget?: ContextBudget }) {
+function toCatResponse(cat: CatConfig & { contextBudget?: ContextBudget }, metadata: CatResponseMetadata) {
   return {
     id: cat.id,
     name: cat.name,
@@ -126,11 +165,25 @@ function toCatResponse(cat: CatConfig & { contextBudget?: ContextBudget }) {
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,
     personality: cat.personality,
+    teamStrengths: cat.teamStrengths,
+    caution: cat.caution,
+    strengths: cat.strengths,
+    sessionChain: cat.sessionChain,
     commandArgs: cat.commandArgs,
     variantLabel: cat.variantLabel ?? undefined,
     isDefaultVariant: cat.isDefaultVariant ?? undefined,
     breedDisplayName: cat.breedDisplayName ?? undefined,
     mcpSupport: cat.mcpSupport,
+    roster: metadata.roster
+      ? {
+          family: metadata.roster.family,
+          roles: [...metadata.roster.roles],
+          lead: metadata.roster.lead,
+          available: metadata.roster.available,
+          evaluation: metadata.roster.evaluation,
+        }
+      : null,
+    source: metadata.source,
   };
 }
 
@@ -180,8 +233,9 @@ interface CatsRoutesOptions {
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
   // GET /api/cats - 获取所有猫猫配置
   app.get('/api/cats', async () => {
+    const resolveMetadata = buildCatResponseMetadataResolver();
     return {
-      cats: Object.values(getResolvedCats()).map(toCatResponse),
+      cats: Object.values(getResolvedCats()).map((cat) => toCatResponse(cat, resolveMetadata(cat.id))),
     };
   });
 
@@ -206,6 +260,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         catId: body.catId,
         name: body.name,
         displayName: body.displayName,
+        nickname: body.nickname,
         avatar: body.avatar,
         color: body.color,
         mentionPatterns: body.mentionPatterns,
@@ -213,6 +268,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         contextBudget: body.contextBudget,
         roleDescription: body.roleDescription,
         personality: body.personality,
+        teamStrengths: body.teamStrengths,
+        caution: body.caution,
+        strengths: body.strengths,
+        sessionChain: body.sessionChain,
         provider: 'antigravity',
         defaultModel: body.defaultModel,
         mcpSupport: false,
@@ -227,6 +286,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         catId: body.catId,
         name: body.name,
         displayName: body.displayName,
+        nickname: body.nickname,
         avatar: body.avatar,
         color: body.color,
         mentionPatterns: body.mentionPatterns,
@@ -234,6 +294,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         contextBudget: body.contextBudget,
         roleDescription: body.roleDescription,
         personality: body.personality,
+        teamStrengths: body.teamStrengths,
+        caution: body.caution,
+        strengths: body.strengths,
+        sessionChain: body.sessionChain,
         provider: body.client,
         defaultModel: body.defaultModel,
         mcpSupport: body.mcpSupport ?? body.client === 'anthropic',
@@ -243,8 +307,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore, opts.onCatalogChanged);
     const cat = resolved[body.catId];
+    const metadata = buildCatResponseMetadataResolver();
     reply.status(201);
-    return { cat: toCatResponse(cat), updatedBy: operator };
+    return { cat: toCatResponse(cat, metadata(cat.id)), updatedBy: operator };
   });
 
   app.patch<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
@@ -266,6 +331,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     updateRuntimeCat(projectRoot, request.params.id, {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
+      ...(body.nickname !== undefined ? { nickname: body.nickname } : {}),
       ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
       ...(body.color !== undefined ? { color: body.color } : {}),
       ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
@@ -273,6 +339,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
       ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
       ...(body.personality !== undefined ? { personality: body.personality } : {}),
+      ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),
+      ...(body.caution !== undefined ? { caution: body.caution } : {}),
+      ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
+      ...(body.sessionChain !== undefined ? { sessionChain: body.sessionChain } : {}),
       ...(body.client !== undefined ? { provider: body.client } : {}),
       ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),
       ...(body.mcpSupport !== undefined ? { mcpSupport: body.mcpSupport } : {}),
@@ -290,7 +360,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore, opts.onCatalogChanged);
     const cat = resolved[request.params.id];
-    return { cat: toCatResponse(cat), updatedBy: operator };
+    const metadata = buildCatResponseMetadataResolver();
+    return { cat: toCatResponse(cat, metadata(cat.id)), updatedBy: operator };
   });
 
   app.delete<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {

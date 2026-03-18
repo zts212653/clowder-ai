@@ -66,15 +66,15 @@ describe('CatCafeHub quota tab', () => {
     expect(resolveRequestedHubTab('routing', () => undefined)).toBe('routing');
   });
 
-  it('renders 猫粮看板 as a hub tab label', () => {
+  it('renders 配額看板 as a hub tab label', () => {
     const html = renderToStaticMarkup(React.createElement(CatCafeHub));
-    expect(html).toContain('猫粮看板');
+    expect(html).toContain('配额看板');
   });
 
   it('renders quota board + routing as a unified panel', () => {
     const html = renderToStaticMarkup(React.createElement(HubRoutingPolicyTab));
-    expect(html).toContain('猫粮看板');
-    expect(html).toContain('路由策略（猫粮约束子模块）');
-    expect(html).toContain('布偶猫');
+    expect(html).toContain('配额看板');
+    expect(html).toContain('路由策略（配额约束子模块）');
+    expect(html).toContain('@codex');
   });
 });

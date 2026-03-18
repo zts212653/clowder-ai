@@ -57,6 +57,10 @@ export interface CatConfig {
   readonly teamStrengths?: string;
   /** F-Ground-3: Caution note for teammate roster. null = explicitly no warning (overrides breed). */
   readonly caution?: string | null;
+  /** F127 Screen 3: editable strength tags */
+  readonly strengths?: readonly string[];
+  /** F127 Screen 3: whether session chain is enabled for this member */
+  readonly sessionChain?: boolean;
 }
 
 /**

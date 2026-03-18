@@ -114,11 +114,16 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         catId: 'runtime-spark',
         name: '火花猫',
         displayName: '火花猫',
+        nickname: '小火花',
         avatar: '/avatars/spark.png',
         color: { primary: '#f97316', secondary: '#fed7aa' },
         mentionPatterns: ['@runtime-spark', '@火花猫'],
         roleDescription: '快速执行',
         personality: '利落',
+        teamStrengths: '精确点改',
+        caution: '不会自动跑测试',
+        strengths: ['precision', 'speed'],
+        sessionChain: true,
         client: 'openai',
         defaultModel: 'gpt-5.4-mini',
         contextBudget: {
@@ -145,7 +150,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       },
       body: JSON.stringify({
         displayName: '运行时火花猫',
+        nickname: '火花',
         mentionPatterns: ['@runtime-spark', '@运行时火花'],
+        teamStrengths: '精确点改 + 快速修复',
+        caution: '',
+        strengths: ['precision', 'speed', 'surgical-edits'],
+        sessionChain: false,
         contextBudget: {
           maxPromptTokens: 36000,
           maxContextTokens: 22000,
@@ -162,7 +172,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-spark');
     assert.ok(runtimeCat, 'runtime-spark should appear in /api/cats');
     assert.equal(runtimeCat.displayName, '运行时火花猫');
+    assert.equal(runtimeCat.nickname, '火花');
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-spark', '@运行时火花']);
+    assert.equal(runtimeCat.teamStrengths, '精确点改 + 快速修复');
+    assert.equal(runtimeCat.caution, null);
+    assert.deepEqual(runtimeCat.strengths, ['precision', 'speed', 'surgical-edits']);
+    assert.equal(runtimeCat.sessionChain, false);
     assert.deepEqual(runtimeCat.contextBudget, {
       maxPromptTokens: 36000,
       maxContextTokens: 22000,

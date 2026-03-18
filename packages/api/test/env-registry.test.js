@@ -3,7 +3,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
@@ -179,5 +180,85 @@ describe('GET /api/config/env-summary (route)', () => {
     }
 
     await app.close();
+  });
+});
+
+describe('PATCH /api/config/env (route)', () => {
+  afterEach(() => restoreEnv());
+
+  it('writes editable env vars back to the configured .env file', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    const auditEvents = [];
+    writeFileSync(envFilePath, 'API_SERVER_PORT=3003\nOPENAI_API_KEY=sk-old\n', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: {
+          append: async (event) => {
+            auditEvents.push(event);
+          },
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'API_SERVER_PORT', value: '4100' }],
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.ok, true);
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'API_SERVER_PORT=4100\nOPENAI_API_KEY=sk-old\n');
+      assert.equal(process.env.API_SERVER_PORT, '4100');
+      assert.equal(auditEvents.length, 1);
+      assert.equal(auditEvents[0].data.target, '.env');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects sensitive env vars from hub writes', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'OPENAI_API_KEY=sk-old\n', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'OPENAI_API_KEY', value: 'sk-new' }],
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      const body = JSON.parse(res.payload);
+      assert.match(body.error, /not editable/);
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'OPENAI_API_KEY=sk-old\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 });

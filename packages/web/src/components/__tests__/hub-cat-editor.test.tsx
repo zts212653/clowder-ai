@@ -283,6 +283,7 @@ describe('HubCatEditor', () => {
       id: 'codex',
       name: 'codex',
       displayName: '缅因猫',
+      nickname: '砚砚',
       provider: 'openai',
       providerProfileId: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
@@ -291,6 +292,10 @@ describe('HubCatEditor', () => {
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
       personality: 'rigorous',
+      teamStrengths: '代码审查、找 bug',
+      caution: null,
+      strengths: ['security', 'testing'],
+      sessionChain: true,
       contextBudget: {
         maxPromptTokens: 32000,
         maxContextTokens: 24000,
@@ -357,8 +362,43 @@ describe('HubCatEditor', () => {
           }),
         );
       }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(
+          jsonResponse({
+            config: {
+              owner: {
+                name: 'Co-worker',
+                aliases: ['共创伙伴'],
+                mentionPatterns: ['@co-worker', '@owner'],
+              },
+              cats: {},
+              perCatBudgets: {},
+              a2a: { enabled: true, maxDepth: 2 },
+              memory: { enabled: true, maxKeysPerThread: 50 },
+              hindsight: {
+                enabled: true,
+                baseUrl: 'http://localhost:18888',
+                sharedBank: 'cat-cafe-shared',
+              },
+              governance: { degradationEnabled: true, doneTimeoutMs: 300000, heartbeatIntervalMs: 30000 },
+              cli: {
+                codexSandboxMode: 'workspace-write',
+                codexApprovalPolicy: 'on-request',
+              },
+              codexExecution: {
+                model: 'gpt-5.4',
+                authMode: 'oauth',
+                passModelArg: true,
+              },
+            },
+          }),
+        );
+      }
       if (path === '/api/cats/codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'codex' } }));
+      }
+      if (path === '/api/config' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ config: {} }));
       }
       if (path === '/api/config/session-strategy/codex' && init?.method === 'PATCH') {
         return Promise.resolve(
@@ -380,12 +420,27 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('Max Prompt Tokens');
-    expect(container.textContent).toContain('Session Strategy');
+    expect(container.textContent).toContain('Nickname');
+    expect(container.textContent).toContain('Team Strengths');
+    expect(container.textContent).toContain('Caution');
+    expect(container.textContent).toContain('Strengths');
+    expect(container.textContent).toContain('▸ Voice Config (点击展开)');
+    expect(container.textContent).toContain('别名与 @ 路由');
+    expect(container.textContent).toContain('Session Chain');
+    expect(container.textContent).toContain('Codex Sandbox 🏷️');
+    expect(container.textContent).toContain('Codex Approval 🏷️');
+    expect(container.textContent).toContain('Codex Auth Mode 🏷️');
+    expect(container.textContent).toContain('💾 运行时持久化');
+    expect(container.textContent).not.toContain('Display Name');
 
     await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚升级版');
+    await changeField(queryField(container, 'input[aria-label="Team Strengths"]'), '代码审查、找 bug、深度思考');
+    await changeField(queryField(container, 'input[aria-label="Strengths"]'), 'security, testing, debugging');
+    await changeField(queryField(container, 'select[aria-label="Session Chain"]'), 'false', 'change');
     await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
     await changeField(queryField(container, 'input[aria-label="Warn Threshold"]'), '0.55');
+    await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
@@ -397,6 +452,10 @@ describe('HubCatEditor', () => {
     expect(catPatch).toBeTruthy();
     const catPayload = JSON.parse(String(catPatch?.[1]?.body));
     expect(catPayload.contextBudget.maxPromptTokens).toBe(48000);
+    expect(catPayload.nickname).toBe('砚砚升级版');
+    expect(catPayload.teamStrengths).toBe('代码审查、找 bug、深度思考');
+    expect(catPayload.strengths).toEqual(['security', 'testing', 'debugging']);
+    expect(catPayload.sessionChain).toBe(false);
 
     const strategyPatch = mockApiFetch.mock.calls.find(
       ([path, init]) => path === '/api/config/session-strategy/codex' && init?.method === 'PATCH',
@@ -405,5 +464,13 @@ describe('HubCatEditor', () => {
     const strategyPayload = JSON.parse(String(strategyPatch?.[1]?.body));
     expect(strategyPayload.strategy).toBe('handoff');
     expect(strategyPayload.thresholds.warn).toBe(0.55);
+
+    const codexConfigPatch = mockApiFetch.mock.calls.find(
+      ([path, init]) =>
+        path === '/api/config' &&
+        init?.method === 'PATCH' &&
+        String(init.body).includes('cli.codexApprovalPolicy'),
+    );
+    expect(codexConfigPatch).toBeTruthy();
   });
 });

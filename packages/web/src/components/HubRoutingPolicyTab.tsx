@@ -99,9 +99,9 @@ export function HubRoutingPolicyTab() {
     <div className="space-y-4">
       <HubQuotaBoardTab />
 
-      <Section title="路由策略（猫粮约束子模块）">
+      <Section title="路由策略（配额约束子模块）">
         <p className="text-[11px] text-gray-500 mb-3">
-          默认是猫猫自治路由；这里只放你明确要求的硬约束（比如预算/猫粮）。显式 @ 指名永远优先。
+          默认是猫猫自治路由；这里只放你明确要求的硬约束（比如预算/配额）。显式 @ 指名永远优先。
         </p>
 
         {error && <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2 mb-3">{error}</p>}

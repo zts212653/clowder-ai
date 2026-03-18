@@ -4,6 +4,11 @@ export type HindsightEngine = 'codex_oauth' | 'hindsight_native';
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 export interface ConfigSnapshot {
+  owner: {
+    name: string;
+    aliases: string[];
+    mentionPatterns: string[];
+  };
   context: {
     /** @deprecated Use perCatBudgets for actual limits. This is assembleContext default. */
     maxMessages: number;

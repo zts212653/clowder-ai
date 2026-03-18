@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { HubMemberOverviewCard, HubOverviewToolbar, HubOwnerOverviewCard } from './HubMemberOverviewCard';
 import type { ConfigData } from './config-viewer-types';
 
 export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './config-viewer-types';
@@ -23,12 +24,7 @@ function KV({ label, value }: { label: string; value: string | number | boolean 
   );
 }
 
-function formatDeliveryMode(provider: string, mcpSupport: boolean | undefined) {
-  if (provider === 'antigravity') return 'CDP Bridge';
-  return mcpSupport ? '原生 (--mcp-config)' : 'HTTP 回调注入';
-}
-
-/** Unified cat overview — all cats' model & budget in one tab */
+/** Screen 2 summary overview — owner card plus member cards */
 export function CatOverviewTab({
   config,
   cats,
@@ -42,69 +38,18 @@ export function CatOverviewTab({
 }) {
   return (
     <div className="space-y-3">
-      {cats.map((catData) => {
-        const cat = config.cats[catData.id];
-        const budget = config.perCatBudgets[catData.id];
-        const provider = cat?.provider ?? catData.provider;
-        const model = cat?.model ?? catData.defaultModel;
-        const name = catData.variantLabel
-          ? `${catData.breedDisplayName ?? catData.displayName}（${catData.variantLabel}）`
-          : catData.breedDisplayName ?? catData.displayName;
-        return (
-          <Section key={catData.id} title={name}>
-            <div className="space-y-1.5">
-              {onEditMember ? (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => onEditMember(catData)}
-                    className="text-[11px] px-2 py-1 rounded bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-                  >
-                    编辑成员
-                  </button>
-                </div>
-              ) : null}
-              <KV label="Provider" value={provider} />
-              <KV label="Model" value={model} />
-              <KV label="运行方式" value={formatDeliveryMode(provider, cat?.mcpSupport)} />
-              {catData.providerProfileId ? <KV label="账号绑定" value={catData.providerProfileId} /> : null}
-              {catData.commandArgs?.length ? <KV label="CLI Args" value={catData.commandArgs.join(' ')} /> : null}
-              {budget ? (
-                <>
-                  <KV label="Prompt 上限" value={`${(budget.maxPromptTokens / 1000).toFixed(0)}k tokens`} />
-                  <KV label="上下文上限" value={`${(budget.maxContextTokens / 1000).toFixed(0)}k tokens`} />
-                  <KV label="消息数上限" value={budget.maxMessages} />
-                  <KV label="单消息上限" value={`${(budget.maxContentLengthPerMsg / 1000).toFixed(0)}k chars`} />
-                </>
-              ) : null}
-              {catData.mentionPatterns.length > 0 ? (
-                <div className="pt-1">
-                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Aliases</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {catData.mentionPatterns.map((pattern) => (
-                      <span
-                        key={`${catData.id}-${pattern}`}
-                        className="rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-700"
-                      >
-                        {pattern}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </Section>
-        );
-      })}
-      {onAddMember ? (
-        <button
-          type="button"
-          onClick={onAddMember}
-          className="w-full rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors"
-        >
-          + 添加成员
-        </button>
-      ) : null}
+      <HubOverviewToolbar onAddMember={onAddMember} />
+      {config.owner ? <HubOwnerOverviewCard owner={config.owner} /> : null}
+      <div className="space-y-3">
+        {cats.map((catData) => (
+          <HubMemberOverviewCard
+            key={catData.id}
+            cat={catData}
+            configCat={config.cats[catData.id]}
+            onEdit={onEditMember}
+          />
+        ))}
+      </div>
       {cats.length === 0 && <p className="text-sm text-gray-400">未找到成员配置数据</p>}
     </div>
   );

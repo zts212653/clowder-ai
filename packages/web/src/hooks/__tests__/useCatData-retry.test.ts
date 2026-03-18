@@ -40,7 +40,7 @@ import { _resetCatDataCache, useCatData } from '@/hooks/useCatData';
 
 // ── API response cats (distinguishable from fallback via breedId) ──
 
-const API_CATS: CatData[] = [
+const API_CATS = [
   {
     id: 'opus',
     displayName: '布偶猫',
@@ -53,6 +53,14 @@ const API_CATS: CatData[] = [
     avatar: '/avatars/opus.png',
     roleDescription: '主架构师',
     personality: '温柔有主见',
+    source: 'seed',
+    roster: {
+      family: 'ragdoll',
+      roles: ['architect', 'peer-reviewer'],
+      lead: true,
+      available: true,
+      evaluation: 'seed lead',
+    },
   },
   {
     id: 'codex',
@@ -66,6 +74,8 @@ const API_CATS: CatData[] = [
     avatar: '/avatars/codex.png',
     roleDescription: '代码审查',
     personality: '严格',
+    source: 'runtime',
+    roster: null,
   },
 ];
 
@@ -123,6 +133,8 @@ describe('useCatData retry mechanism', () => {
     expect(hookResult.isLoading).toBe(false);
     expect(hookResult.cats[0].id).toBe('opus');
     expect(hookResult.cats[0].breedId).toBeUndefined(); // fallback marker
+    expect((hookResult.cats[0] as CatData & { source?: string }).source).toBe('seed');
+    expect((hookResult.cats[0] as CatData & { roster?: unknown }).roster ?? null).toBeNull();
     expect(mockApiFetch).toHaveBeenCalledTimes(1);
 
     // Advance 10s → retry timer fires → retryCount increments → re-fetch
@@ -134,6 +146,10 @@ describe('useCatData retry mechanism', () => {
     expect(hookResult.cats).toHaveLength(2);
     expect(hookResult.cats[0].breedId).toBe('ragdoll');
     expect(hookResult.cats[1].id).toBe('codex');
+    expect((hookResult.cats[0] as CatData & { source?: string }).source).toBe('seed');
+    expect((hookResult.cats[0] as CatData & { roster?: { lead?: boolean } | null }).roster?.lead).toBe(true);
+    expect((hookResult.cats[1] as CatData & { source?: string }).source).toBe('runtime');
+    expect((hookResult.cats[1] as CatData & { roster?: unknown }).roster ?? null).toBeNull();
     expect(mockApiFetch).toHaveBeenCalledTimes(2);
 
     // Advance another 30s → no further retries (success stops the cycle)

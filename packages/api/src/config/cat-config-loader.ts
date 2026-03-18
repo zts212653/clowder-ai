@@ -345,6 +345,8 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         ...(teamStrengths != null ? { teamStrengths } : {}),
         // R1 fix: preserve null (explicit no-caution) in CatConfig; only omit if undefined
         ...(caution !== undefined ? { caution } : {}),
+        ...(variant.strengths != null ? { strengths: variant.strengths } : {}),
+        ...(breed.features?.sessionChain !== undefined ? { sessionChain: breed.features.sessionChain } : {}),
       };
     }
   }

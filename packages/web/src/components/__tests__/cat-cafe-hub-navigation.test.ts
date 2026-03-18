@@ -39,8 +39,20 @@ describe('F099 Hub navigation', () => {
   });
 
   describe('findGroupForTab', () => {
-    it('finds cats group for "leaderboard"', () => {
-      const group = findGroupForTab('leaderboard');
+    it('finds cats group for "cats"', () => {
+      const group = findGroupForTab('cats');
+      expect(group).toBeDefined();
+      expect(group?.id).toBe('cats');
+    });
+
+    it('finds settings group for "provider-profiles"', () => {
+      const group = findGroupForTab('provider-profiles');
+      expect(group).toBeDefined();
+      expect(group?.id).toBe('settings');
+    });
+
+    it('finds cats group for "capabilities"', () => {
+      const group = findGroupForTab('capabilities');
       expect(group).toBeDefined();
       expect(group?.id).toBe('cats');
     });
@@ -51,8 +63,20 @@ describe('F099 Hub navigation', () => {
       expect(group?.id).toBe('settings');
     });
 
+    it('finds cats group for "leaderboard"', () => {
+      const group = findGroupForTab('leaderboard');
+      expect(group).toBeDefined();
+      expect(group?.id).toBe('cats');
+    });
+
     it('finds monitor group for "commands"', () => {
       const group = findGroupForTab('commands');
+      expect(group).toBeDefined();
+      expect(group?.id).toBe('monitor');
+    });
+
+    it('finds monitor group for "rescue"', () => {
+      const group = findGroupForTab('rescue');
       expect(group).toBeDefined();
       expect(group?.id).toBe('monitor');
     });

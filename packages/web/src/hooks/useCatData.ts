@@ -33,12 +33,26 @@ export interface CatData {
   avatar: string;
   roleDescription: string;
   personality: string;
+  teamStrengths?: string;
+  caution?: string | null;
+  strengths?: string[];
+  sessionChain?: boolean;
   /** F32-b P4: Human-readable variant label (e.g. "4.5", "Sonnet") */
   variantLabel?: string;
   /** F32-b P4: Whether this is the default variant for its breed */
   isDefaultVariant?: boolean;
   /** F32-b P4: Breed-level display name (e.g. "布偶猫"), for group headings */
   breedDisplayName?: string;
+  /** F127: Seed cats come from cat-template.json; runtime cats are added later */
+  source: 'seed' | 'runtime';
+  /** F127: Roster metadata used by Hub ownership/lead markers */
+  roster?: {
+    family: string;
+    roles: string[];
+    lead: boolean;
+    available: boolean;
+    evaluation: string;
+  } | null;
 }
 
 // ── Module-level cache ──────────────────────────────────
@@ -60,6 +74,12 @@ function buildFallbackCats(): CatData[] {
     avatar: c.avatar,
     roleDescription: c.roleDescription,
     personality: c.personality,
+    teamStrengths: c.teamStrengths,
+    caution: c.caution,
+    strengths: c.strengths ? [...c.strengths] : undefined,
+    sessionChain: c.sessionChain,
+    roster: null,
+    source: 'seed',
   }));
 }
 
@@ -73,11 +93,35 @@ async function fetchCats(): Promise<FetchResult> {
     const res = await apiFetch('/api/cats');
     if (!res.ok) return { cats: buildFallbackCats(), fromApi: false };
     const data = await res.json();
-    const cats = Array.isArray(data?.cats) ? (data.cats as CatData[]) : null;
+    const cats = Array.isArray(data?.cats) ? normalizeCats(data.cats) : null;
     return cats ? { cats, fromApi: true } : { cats: buildFallbackCats(), fromApi: false };
   } catch {
     return { cats: buildFallbackCats(), fromApi: false };
   }
+}
+
+function normalizeCats(rawCats: unknown[]): CatData[] {
+  return rawCats.map((raw) => {
+    const cat = raw as Partial<CatData>;
+    return {
+      ...cat,
+      id: cat.id ?? '',
+      displayName: cat.displayName ?? cat.id ?? '',
+      color: cat.color ?? { primary: '#000000', secondary: '#ffffff' },
+      mentionPatterns: Array.isArray(cat.mentionPatterns) ? cat.mentionPatterns : [],
+      provider: cat.provider ?? 'openai',
+      defaultModel: cat.defaultModel ?? '',
+      avatar: cat.avatar ?? '',
+      roleDescription: cat.roleDescription ?? '',
+      personality: cat.personality ?? '',
+      teamStrengths: cat.teamStrengths,
+      caution: cat.caution,
+      strengths: Array.isArray(cat.strengths) ? cat.strengths : undefined,
+      sessionChain: cat.sessionChain,
+      roster: cat.roster ?? null,
+      source: cat.source ?? 'seed',
+    };
+  });
 }
 
 async function refreshCatsNow(): Promise<FetchResult> {

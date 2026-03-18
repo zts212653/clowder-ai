@@ -18,6 +18,10 @@ export interface RuntimeCatInput {
   providerProfileId?: string;
   roleDescription: string;
   personality?: string;
+  teamStrengths?: string;
+  caution?: string | null;
+  strengths?: string[];
+  sessionChain?: boolean;
   provider: CatProvider;
   defaultModel: string;
   mcpSupport: boolean;
@@ -36,6 +40,10 @@ export interface RuntimeCatUpdate {
   providerProfileId?: string;
   roleDescription?: string;
   personality?: string;
+  teamStrengths?: string;
+  caution?: string | null;
+  strengths?: string[];
+  sessionChain?: boolean;
   provider?: CatProvider;
   defaultModel?: string;
   mcpSupport?: boolean;
@@ -130,6 +138,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
     mentionPatterns: normalizeMentionPatterns(input.catId, input.mentionPatterns),
     roleDescription: input.roleDescription,
     defaultVariantId: variantId,
+    ...(input.sessionChain !== undefined ? { features: { sessionChain: input.sessionChain } } : {}),
     variants: [
       {
         id: variantId,
@@ -143,6 +152,13 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
         ...(input.personality != null && input.personality.trim().length > 0 ? { personality: input.personality } : {}),
+        ...(input.teamStrengths != null && input.teamStrengths.trim().length > 0
+          ? { teamStrengths: input.teamStrengths.trim() }
+          : {}),
+        ...(input.caution !== undefined
+          ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
+          : {}),
+        ...(input.strengths ? { strengths: input.strengths } : {}),
       },
     ],
   } as unknown as CatBreed;
@@ -235,6 +251,26 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     } else {
       delete variant.personality;
     }
+  }
+  if (patch.teamStrengths !== undefined) {
+    if (patch.teamStrengths && patch.teamStrengths.trim().length > 0) {
+      variant.teamStrengths = patch.teamStrengths.trim();
+    } else {
+      delete variant.teamStrengths;
+    }
+  }
+  if (patch.caution !== undefined) {
+    variant.caution = patch.caution && patch.caution.trim().length > 0 ? patch.caution.trim() : null;
+  }
+  if (patch.strengths !== undefined) {
+    if (patch.strengths.length > 0) {
+      variant.strengths = patch.strengths;
+    } else {
+      delete variant.strengths;
+    }
+  }
+  if (patch.sessionChain !== undefined) {
+    breed.features = { ...(breed.features ?? {}), sessionChain: patch.sessionChain };
   }
   if (patch.provider !== undefined) variant.provider = patch.provider;
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;

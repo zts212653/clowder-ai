@@ -797,3 +797,11 @@ export function buildEnvSummary(): Array<EnvDefinition & { currentValue: string 
     return { ...def, currentValue };
   });
 }
+
+export function isEditableEnvVar(def: EnvDefinition): boolean {
+  return !def.sensitive && def.maskMode !== 'url';
+}
+
+export function isEditableEnvVarName(name: string): boolean {
+  return ENV_VARS.some((def) => def.name === name && isEditableEnvVar(def));
+}
