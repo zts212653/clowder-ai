@@ -276,6 +276,8 @@ resolve_provider_profiles_dir() {
     # Mirror the runtime validation in provider-profiles-root.ts:
     # Only redirect for validated git worktrees.  For normal repos,
     # submodules, and nested archives, stay at $PROJECT_DIR.
+    # Security: verify gitdir back-reference and commondir to prevent
+    # forged .git files from redirecting secrets to another repo.
     local git_entry="$PROJECT_DIR/.git"
     if [[ ! -e "$git_entry" ]]; then
         printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
@@ -284,7 +286,7 @@ resolve_provider_profiles_dir() {
     if [[ -d "$git_entry" ]]; then
         printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
     fi
-    # .git is a file → potential worktree; validate structure
+    # .git is a file → potential worktree; validate structure + back-refs
     if [[ -f "$git_entry" ]] && command -v git &>/dev/null; then
         local gitdir="" worktrees_dir="" common_git_dir="" candidate=""
         gitdir="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
@@ -293,6 +295,31 @@ resolve_provider_profiles_dir() {
         [[ "$(basename "$worktrees_dir" 2>/dev/null)" == "worktrees" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         common_git_dir="$(dirname "$worktrees_dir" 2>/dev/null)"
         [[ "$(basename "$common_git_dir" 2>/dev/null)" == ".git" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+
+        # Security check 1: gitdir back-reference (TS L81-82)
+        # <gitdir>/gitdir must point back to our .git file
+        local backref_file="$gitdir/gitdir" backref_resolved=""
+        if [[ ! -f "$backref_file" ]]; then
+            printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
+        fi
+        backref_resolved="$(cd "$gitdir" 2>/dev/null && realpath "$(head -1 "$backref_file" 2>/dev/null)" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        local git_entry_resolved=""
+        git_entry_resolved="$(realpath "$git_entry" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        [[ "$backref_resolved" == "$git_entry_resolved" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+
+        # Security check 2: commondir consistency (TS L84-93)
+        # <gitdir>/commondir resolved relative to gitdir must equal common_git_dir
+        local commondir_file="$gitdir/commondir" commondir_value="" commondir_resolved=""
+        if [[ ! -f "$commondir_file" ]]; then
+            printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
+        fi
+        commondir_value="$(head -1 "$commondir_file" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        [[ -n "$commondir_value" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        commondir_resolved="$(cd "$gitdir" 2>/dev/null && realpath "$commondir_value" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        local common_git_dir_resolved=""
+        common_git_dir_resolved="$(realpath "$common_git_dir" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        [[ "$commondir_resolved" == "$common_git_dir_resolved" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+
         candidate="$(cd "$(dirname "$common_git_dir")" 2>/dev/null && pwd)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         printf '%s/.cat-cafe\n' "$candidate"; return
     fi

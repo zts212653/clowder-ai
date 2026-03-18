@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -394,6 +394,55 @@ printf '%s' "$(resolve_provider_profiles_dir)"
     assert.equal(output, join(archiveDir, '.cat-cafe'), 'Must stay local to the archive');
   } finally {
     rmSync(outerRepo, { recursive: true, force: true });
+  }
+});
+
+test('resolve_provider_profiles_dir rejects forged .git file pointing at another repo worktree', () => {
+  const victimRepo = mkdtempSync(join(tmpdir(), 'clowder-install-victim-'));
+  const realWorktreeDir = mkdtempSync(join(tmpdir(), 'clowder-install-realwt-'));
+  const impostorDir = mkdtempSync(join(tmpdir(), 'clowder-install-impostor-'));
+
+  try {
+    // Create a real victim repo with a real worktree
+    writeFileSync(join(victimRepo, 'README.md'), 'victim\n', 'utf8');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: victimRepo, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: victimRepo, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: victimRepo, encoding: 'utf8' });
+    spawnSync('git', ['add', '.'], { cwd: victimRepo, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: victimRepo, encoding: 'utf8' });
+    const wtResult = spawnSync('git', ['worktree', 'add', realWorktreeDir, '-b', 'wt-branch'], {
+      cwd: victimRepo,
+      encoding: 'utf8',
+    });
+    if (wtResult.status !== 0) {
+      // Skip test if git worktree is not supported
+      return;
+    }
+
+    // Find the worktree registration name
+    const wtBasename = basename(realWorktreeDir);
+    const worktreeRegDir = join(victimRepo, '.git', 'worktrees', wtBasename);
+
+    // Impostor: forged .git pointing at the victim's real worktree registration
+    writeFileSync(join(impostorDir, '.git'), `gitdir: ${worktreeRegDir}\n`, 'utf8');
+    writeFileSync(join(impostorDir, 'package.json'), '{"name":"clowder-ai"}\n', 'utf8');
+    mkdirSync(join(impostorDir, 'scripts'), { recursive: true });
+    writeFileSync(join(impostorDir, 'scripts', 'install.sh'), '', 'utf8');
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${impostorDir}"
+printf '%s' "$(resolve_provider_profiles_dir)"
+`);
+
+    const victimCatCafe = join(realpathSync(victimRepo), '.cat-cafe');
+    assert.notEqual(output, victimCatCafe, 'Must NOT write profiles to victim repo (forged .git)');
+    assert.equal(output, join(impostorDir, '.cat-cafe'), 'Must stay local when gitdir back-ref does not match');
+  } finally {
+    // Clean up worktree first, then repos
+    spawnSync('git', ['worktree', 'remove', '--force', realWorktreeDir], { cwd: victimRepo });
+    rmSync(realWorktreeDir, { recursive: true, force: true });
+    rmSync(victimRepo, { recursive: true, force: true });
+    rmSync(impostorDir, { recursive: true, force: true });
   }
 });
 
