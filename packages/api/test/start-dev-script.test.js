@@ -24,6 +24,9 @@ test('source-only exposes helper functions for testing seams', () => {
     `
 declare -F configure_mcp_server_path >/dev/null
 declare -F background_eval_with_null_stdin >/dev/null
+declare -F default_redis_storage_key >/dev/null
+declare -F default_redis_data_dir >/dev/null
+declare -F default_redis_backup_dir >/dev/null
 printf 'ok'
 `,
   );
@@ -170,4 +173,66 @@ wait "$pid"
   );
 
   assert.match(output, /n\/dev\/null/);
+});
+
+test('custom Redis port gets isolated default data and backup dirs', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempHome = mkdtempSync(join(tmpdir(), 'cat-cafe-redis-home-'));
+
+  try {
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+HOME="${tempHome}"
+REDIS_PROFILE=dev
+REDIS_PORT=6389
+printf '%s|%s|%s' \
+  "$(default_redis_storage_key "$REDIS_PROFILE" "$REDIS_PORT")" \
+  "$(default_redis_data_dir "$REDIS_PROFILE" "$REDIS_PORT")" \
+  "$(default_redis_backup_dir "$REDIS_PROFILE" "$REDIS_PORT")"
+`,
+    );
+
+    assert.equal(
+      output,
+      [
+        'dev-6389',
+        `${tempHome}/.cat-cafe/redis-dev-6389`,
+        `${tempHome}/.cat-cafe/redis-backups/dev-6389`,
+      ].join('|'),
+    );
+  } finally {
+    rmSync(tempHome, { recursive: true, force: true });
+  }
+});
+
+test('default Redis port keeps legacy data and backup dir names', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempHome = mkdtempSync(join(tmpdir(), 'cat-cafe-redis-home-'));
+
+  try {
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+HOME="${tempHome}"
+REDIS_PROFILE=dev
+REDIS_PORT=6399
+printf '%s|%s|%s' \
+  "$(default_redis_storage_key "$REDIS_PROFILE" "$REDIS_PORT")" \
+  "$(default_redis_data_dir "$REDIS_PROFILE" "$REDIS_PORT")" \
+  "$(default_redis_backup_dir "$REDIS_PROFILE" "$REDIS_PORT")"
+`,
+    );
+
+    assert.equal(
+      output,
+      [
+        'dev',
+        `${tempHome}/.cat-cafe/redis-dev`,
+        `${tempHome}/.cat-cafe/redis-backups/dev`,
+      ].join('|'),
+    );
+  } finally {
+    rmSync(tempHome, { recursive: true, force: true });
+  }
 });

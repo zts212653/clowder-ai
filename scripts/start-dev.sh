@@ -30,6 +30,8 @@
 #   REDIS_PROFILE=dev
 #   REDIS_DATA_DIR=~/.cat-cafe/redis-dev
 #   REDIS_BACKUP_DIR=~/.cat-cafe/redis-backups/dev
+# Parallel 本地实例若仅改 REDIS_PORT，默认会自动隔离到独立目录:
+#   REDIS_PORT=6389 -> ~/.cat-cafe/redis-dev-6389
 
 set -e
 set -o pipefail
@@ -204,8 +206,32 @@ resolve_config "REDIS_PROFILE"
 : "${SUMMARY_TTL_SECONDS:=0}"
 : "${REDIS_PROFILE:=dev}"
 
-REDIS_DATA_DIR=${REDIS_DATA_DIR:-"$HOME/.cat-cafe/redis-${REDIS_PROFILE}"}
-REDIS_BACKUP_DIR=${REDIS_BACKUP_DIR:-"$HOME/.cat-cafe/redis-backups/${REDIS_PROFILE}"}
+default_redis_storage_key() {
+    local profile="${1:-$REDIS_PROFILE}"
+    local port="${2:-$REDIS_PORT}"
+    local default_port="${3:-6399}"
+    if [ "$port" = "$default_port" ]; then
+        printf '%s' "$profile"
+    else
+        printf '%s-%s' "$profile" "$port"
+    fi
+}
+
+default_redis_data_dir() {
+    local key
+    key=$(default_redis_storage_key "${1:-$REDIS_PROFILE}" "${2:-$REDIS_PORT}")
+    printf '%s/.cat-cafe/redis-%s' "$HOME" "$key"
+}
+
+default_redis_backup_dir() {
+    local key
+    key=$(default_redis_storage_key "${1:-$REDIS_PROFILE}" "${2:-$REDIS_PORT}")
+    printf '%s/.cat-cafe/redis-backups/%s' "$HOME" "$key"
+}
+
+REDIS_STORAGE_KEY=$(default_redis_storage_key "$REDIS_PROFILE" "$REDIS_PORT")
+REDIS_DATA_DIR=${REDIS_DATA_DIR:-"$(default_redis_data_dir "$REDIS_PROFILE" "$REDIS_PORT")"}
+REDIS_BACKUP_DIR=${REDIS_BACKUP_DIR:-"$(default_redis_backup_dir "$REDIS_PROFILE" "$REDIS_PORT")"}
 REDIS_DBFILE=${REDIS_DBFILE:-dump.rdb}
 REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
@@ -352,7 +378,7 @@ prune_redis_backups() {
     local files=()
     while IFS= read -r f; do
         files+=("$f")
-    done < <(ls -1t "$REDIS_BACKUP_DIR"/"${REDIS_PROFILE}"-*.rdb 2>/dev/null || true)
+    done < <(ls -1t "$REDIS_BACKUP_DIR"/"${REDIS_STORAGE_KEY}"-*.rdb 2>/dev/null || true)
 
     if [ "${#files[@]}" -le "$keep" ]; then
         return
@@ -392,7 +418,7 @@ archive_redis_snapshot() {
 
     local stamp
     stamp=$(date '+%Y%m%d-%H%M%S')
-    local target="$REDIS_BACKUP_DIR/${REDIS_PROFILE}-${reason}-${stamp}.rdb"
+    local target="$REDIS_BACKUP_DIR/${REDIS_STORAGE_KEY}-${reason}-${stamp}.rdb"
     cp -p "$source" "$target"
     echo -e "${GREEN}  ✓ Redis 快照归档: $target${NC}"
     prune_redis_backups 20
