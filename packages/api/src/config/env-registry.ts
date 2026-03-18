@@ -47,6 +47,8 @@ export interface EnvDefinition {
   maskMode?: 'url';
   /** If false, keep internal-only and do not surface in Hub env editor */
   hubVisible?: boolean;
+  /** If false, value is bootstrap-only and cannot be edited at runtime from Hub */
+  runtimeEditable?: boolean;
 }
 
 export const ENV_CATEGORIES: Record<EnvCategory, string> = {
@@ -70,13 +72,21 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
 
 export const ENV_VARS: EnvDefinition[] = [
   // --- server ---
-  { name: 'API_SERVER_PORT', defaultValue: '3003', description: 'API 服务端口', category: 'server', sensitive: false },
+  {
+    name: 'API_SERVER_PORT',
+    defaultValue: '3003',
+    description: 'API 服务端口',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
   {
     name: 'PREVIEW_GATEWAY_PORT',
     defaultValue: '4100',
     description: 'Preview Gateway 端口（F120 独立 origin 反向代理）',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'API_SERVER_HOST',
@@ -811,7 +821,7 @@ export function buildEnvSummary(): Array<EnvDefinition & { currentValue: string 
 }
 
 export function isEditableEnvVar(def: EnvDefinition): boolean {
-  return !def.sensitive && def.maskMode !== 'url';
+  return def.runtimeEditable !== false && !def.sensitive && def.maskMode !== 'url';
 }
 
 export function isEditableEnvVarName(name: string): boolean {

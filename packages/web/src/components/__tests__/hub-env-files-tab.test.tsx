@@ -63,7 +63,17 @@ describe('HubEnvFilesTab', () => {
                 description: 'API 服务端口',
                 category: 'server',
                 sensitive: false,
+                runtimeEditable: false,
                 currentValue: '3003',
+              },
+              {
+                name: 'FRONTEND_URL',
+                defaultValue: '(自动检测)',
+                description: '前端 URL（导出长图用）',
+                category: 'server',
+                sensitive: false,
+                runtimeEditable: true,
+                currentValue: 'http://localhost:3004',
               },
               {
                 name: 'REDIS_URL',
@@ -117,12 +127,13 @@ describe('HubEnvFilesTab', () => {
 
     expect(container.textContent).toContain('cat-template.json');
     expect(container.textContent).toContain('.cat-cafe/cat-catalog.json');
-    expect(container.querySelector('input[aria-label="API_SERVER_PORT"]')).toBeTruthy();
+    expect(container.querySelector('input[aria-label="API_SERVER_PORT"]')).toBeNull();
+    expect(container.querySelector('input[aria-label="FRONTEND_URL"]')).toBeTruthy();
     expect(container.querySelector('input[aria-label="OPENAI_API_KEY"]')).toBeNull();
     expect(container.textContent).toContain('***');
 
-    const portInput = container.querySelector('input[aria-label="API_SERVER_PORT"]') as HTMLInputElement;
-    await changeField(portInput, '4100');
+    const frontendUrlInput = container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement;
+    await changeField(frontendUrlInput, 'http://localhost:3200');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存到 .env');
     await act(async () => {
@@ -132,7 +143,8 @@ describe('HubEnvFilesTab', () => {
 
     const patchCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/config/env' && init?.method === 'PATCH');
     expect(patchCall).toBeTruthy();
-    expect(String(patchCall?.[1]?.body)).toContain('API_SERVER_PORT');
-    expect(String(patchCall?.[1]?.body)).toContain('4100');
+    expect(String(patchCall?.[1]?.body)).toContain('FRONTEND_URL');
+    expect(String(patchCall?.[1]?.body)).toContain('http://localhost:3200');
+    expect(String(patchCall?.[1]?.body)).not.toContain('API_SERVER_PORT');
   });
 });

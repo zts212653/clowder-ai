@@ -1015,6 +1015,7 @@ describe('HubCatEditor', () => {
       avatar: '/avatars/antigravity.png',
       roleDescription: '桥接通道',
       personality: '稳定',
+      source: 'runtime',
     };
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string) => {
@@ -1043,6 +1044,42 @@ describe('HubCatEditor', () => {
 
     expect(mockApiFetch).toHaveBeenCalledWith('/api/cats/runtime-antigravity', expect.objectContaining({ method: 'DELETE' }));
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides delete action for seed members', async () => {
+    const existingCat: CatData = {
+      id: 'codex',
+      name: '缅因猫',
+      displayName: '缅因猫',
+      provider: 'openai',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      personality: 'rigorous',
+      source: 'seed',
+    };
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    expect(container.querySelector('button[aria-label="删除成员"]')).toBeNull();
   });
 
   it('loads runtime controls for an existing member and saves strategy separately', async () => {

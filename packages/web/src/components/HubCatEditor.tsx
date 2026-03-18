@@ -277,7 +277,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             <p className="mt-1 text-sm text-[#8A776B]">成员配置：身份、认证、路由、高级参数一站到位</p>
           </div>
           <div className="flex items-center gap-2">
-            {cat ? (
+            {cat && cat.source === 'runtime' ? (
               <button type="button" onClick={handleDelete} disabled={saving} className="rounded-full bg-red-50 p-2 text-red-600 transition hover:bg-red-100 disabled:opacity-50" aria-label="删除成员">
                 <svg viewBox="0 0 16 16" className="h-4 w-4 fill-none stroke-current" aria-hidden="true"><path d="M3.5 4.5h9m-7.5 0V3.25h5V4.5m-5.5 0 .5 8h5l.5-8m-4 2v4m2-4v4" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>
               </button>

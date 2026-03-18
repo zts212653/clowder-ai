@@ -62,6 +62,15 @@ describe('env-registry', () => {
     assert.equal(redis.maskMode, 'url');
   });
 
+  it('marks bootstrap-only server ports as runtime read-only', () => {
+    const apiPort = ENV_VARS.find((v) => v.name === 'API_SERVER_PORT');
+    const previewPort = ENV_VARS.find((v) => v.name === 'PREVIEW_GATEWAY_PORT');
+    assert.ok(apiPort, 'API_SERVER_PORT should be in registry');
+    assert.ok(previewPort, 'PREVIEW_GATEWAY_PORT should be in registry');
+    assert.equal(apiPort.runtimeEditable, false);
+    assert.equal(previewPort.runtimeEditable, false);
+  });
+
   it('HINDSIGHT_URL default points to local isolated instance', () => {
     const hindsightUrl = ENV_VARS.find((v) => v.name === 'HINDSIGHT_URL');
     assert.ok(hindsightUrl, 'HINDSIGHT_URL should be in registry');
@@ -194,12 +203,12 @@ describe('GET /api/config/env-summary (route)', () => {
 describe('PATCH /api/config/env (route)', () => {
   afterEach(() => restoreEnv());
 
-  it('writes editable env vars back to the configured .env file', async () => {
+  it('writes runtime-editable env vars back to the configured .env file', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
     const auditEvents = [];
-    writeFileSync(envFilePath, 'API_SERVER_PORT=3003\nOPENAI_API_KEY=sk-old\n', 'utf8');
+    writeFileSync(envFilePath, 'FRONTEND_URL=http://localhost:3004\nOPENAI_API_KEY=sk-old\n', 'utf8');
 
     const app = Fastify({ logger: false });
     try {
@@ -219,15 +228,15 @@ describe('PATCH /api/config/env (route)', () => {
         url: '/api/config/env',
         headers: { 'x-cat-cafe-user': 'codex' },
         payload: {
-          updates: [{ name: 'API_SERVER_PORT', value: '4100' }],
+          updates: [{ name: 'FRONTEND_URL', value: 'http://localhost:3200' }],
         },
       });
 
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.payload);
       assert.equal(body.ok, true);
-      assert.equal(readFileSync(envFilePath, 'utf8'), 'API_SERVER_PORT=4100\nOPENAI_API_KEY=sk-old\n');
-      assert.equal(process.env.API_SERVER_PORT, '4100');
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'FRONTEND_URL=http://localhost:3200\nOPENAI_API_KEY=sk-old\n');
+      assert.equal(process.env.FRONTEND_URL, 'http://localhost:3200');
       assert.equal(auditEvents.length, 1);
       assert.equal(auditEvents[0].data.target, '.env');
     } finally {
@@ -298,6 +307,50 @@ describe('PATCH /api/config/env (route)', () => {
       const body = JSON.parse(res.payload);
       assert.match(body.error, /not editable/);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'CAT_OPUS_MAX_PROMPT_CHARS=150000\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects bootstrap-only env vars from hub writes', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'API_SERVER_PORT=3003\nPREVIEW_GATEWAY_PORT=4100\n', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const apiPortRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'API_SERVER_PORT', value: '3203' }],
+        },
+      });
+      assert.equal(apiPortRes.statusCode, 400);
+      assert.match(JSON.parse(apiPortRes.payload).error, /not editable/);
+
+      const previewPortRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'PREVIEW_GATEWAY_PORT', value: '4200' }],
+        },
+      });
+      assert.equal(previewPortRes.statusCode, 400);
+      assert.match(JSON.parse(previewPortRes.payload).error, /not editable/);
+
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'API_SERVER_PORT=3003\nPREVIEW_GATEWAY_PORT=4100\n');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

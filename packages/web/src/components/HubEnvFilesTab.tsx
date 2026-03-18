@@ -10,6 +10,7 @@ interface EnvVar {
   category: string;
   sensitive: boolean;
   maskMode?: 'url';
+  runtimeEditable?: boolean;
   currentValue: string | null;
 }
 
@@ -72,7 +73,7 @@ function buildConfigFiles(projectRoot: string) {
 }
 
 function isEditableVariable(variable: EnvVar): boolean {
-  return !variable.sensitive && variable.maskMode !== 'url';
+  return variable.runtimeEditable !== false && !variable.sensitive && variable.maskMode !== 'url';
 }
 
 function buildDataDirs(dataDirs: DataDirs) {
@@ -129,7 +130,7 @@ function EnvVarsSection({
   return (
     <Section title="环境变量">
       <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        Hub 只允许编辑非敏感运行参数；认证凭证和带凭据 URL 保持 masked 只读，保存后会自动回填 `.env`。
+        Hub 只允许编辑非敏感且支持热生效的运行参数；认证凭证、带凭据 URL、启动期变量保持只读，保存后会自动回填 `.env`。
       </div>
       <div className="space-y-3">
         {grouped.map((group) => (
@@ -160,7 +161,7 @@ function EnvVarsSection({
                     />
                   ) : (
                     <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-2 py-1.5 text-[11px] text-gray-500">
-                      认证凭证/带凭据 URL 仅展示 masked 值
+                      只读变量（认证凭证 / 带凭据 URL / 启动期参数）
                     </div>
                   )}
                 </div>
