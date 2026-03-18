@@ -54,7 +54,6 @@ export class EmbeddingService implements IEmbeddingService {
       );
     }
 
-    // @ts-ignore — optional dep, may or may not be installed
     const { pipeline: createPipeline } = await import('@huggingface/transformers');
     const hfModelId = MODEL_IDS[this.config.embedModel];
     if (!hfModelId) throw new Error(`Unknown model: ${this.config.embedModel}`);

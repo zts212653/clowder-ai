@@ -165,7 +165,7 @@ describe('SystemPromptBuilder', () => {
     assert.equal(a, b);
   });
 
-  test('output size is under 2900 chars (raised for F114 magic words)', async () => {
+  test('output size is under 3200 chars (raised for F102-D17 MCP tools section)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -176,7 +176,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 2900, `Prompt is ${prompt.length} chars, expected < 2900`);
+    assert.ok(prompt.length < 3200, `Prompt is ${prompt.length} chars, expected < 3200`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -292,7 +292,7 @@ describe('SystemPromptBuilder', () => {
     const codexId = buildStaticIdentity('codex');
     assert.ok(codexId.includes('工作流'), 'Codex should have workflow triggers');
     assert.ok(codexId.includes('@布偶猫'), 'Codex workflow should mention notifying 布偶猫');
-    assert.ok(codexId.includes('出口检查'), 'Codex workflow should include exit check');
+    assert.ok(codexId.includes('出口一问'), 'Codex workflow should include exit check (出口一问)');
   });
 
   test('buildStaticIdentity is deterministic', async () => {
@@ -428,7 +428,7 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
-  test('buildStaticIdentity roster size with full runtime config is under 3650 (raised for F114 magic words)', async () => {
+  test('buildStaticIdentity roster size with full runtime config is under 4100 (raised for F102-D17 MCP tools section)', async () => {
     const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
 
@@ -449,7 +449,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 3650, `Full runtime prompt is ${prompt.length} chars, expected < 3650`);
+      assert.ok(prompt.length < 4100, `Full runtime prompt is ${prompt.length} chars, expected < 4100`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -691,7 +691,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no non-self participant has activity');
   });
 
-  test('buildSystemPrompt size with activeParticipants stays under 2950 chars (raised for F114 magic words)', async () => {
+  test('buildSystemPrompt size with activeParticipants stays under 3250 chars (raised for F102-D17 MCP tools section)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -706,7 +706,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 2950, `Prompt with activity is ${prompt.length} chars, expected < 2950`);
+    assert.ok(prompt.length < 3250, `Prompt with activity is ${prompt.length} chars, expected < 3250`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -889,7 +889,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('skill'), 'Should not contain skill reference when null');
   });
 
-  test('buildSystemPrompt size stays under 2900 chars with SOP hint (raised for F114 magic words)', async () => {
+  test('buildSystemPrompt size stays under 3300 chars with SOP hint (raised for F102-D17 MCP tools section)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -906,7 +906,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 2900, `Prompt with SOP hint is ${prompt.length} chars, expected < 2900`);
+    assert.ok(prompt.length < 3300, `Prompt with SOP hint is ${prompt.length} chars, expected < 3300`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -935,7 +935,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Voice Mode ON'), 'Should not include voice mode header');
   });
 
-  test('buildSystemPrompt size stays under 3100 chars with voice mode + SOP hint (raised for F114 magic words)', async () => {
+  test('buildSystemPrompt size stays under 3450 chars with voice mode + SOP hint (raised for F102-D17 MCP tools section)', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -953,7 +953,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 3100, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3100`);
+    assert.ok(prompt.length < 3450, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3450`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -1002,5 +1002,29 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
     });
     assert.ok(!ctx.includes('Bootcamp Mode'), 'Should not include bootcamp header');
+  });
+
+  // --- 回归测试：maine-coon prompt 必须包含 A2A 执行纪律 ---
+
+  test('maine-coon prompt contains execution discipline keywords', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+    });
+    assert.ok(prompt.includes('静默执行'), 'maine-coon prompt must include 静默执行');
+    assert.ok(prompt.includes('声明'), 'maine-coon prompt must include 声明 ≠ 执行');
+    assert.ok(prompt.includes('空气传球'), 'maine-coon prompt must include 空气传球 warning');
+    assert.ok(prompt.includes('出口一问'), 'maine-coon prompt must include 出口一问');
+  });
+
+  test('maine-coon workflow contains A2A state transition keywords', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const codexId = buildStaticIdentity('codex');
+    assert.ok(codexId.includes('BLOCKED'), 'codex prompt must include BLOCKED state');
+    assert.ok(codexId.includes('REVIEW READY'), 'codex prompt must include REVIEW READY state');
+    assert.ok(codexId.includes('DONE'), 'codex prompt must include DONE state');
   });
 });

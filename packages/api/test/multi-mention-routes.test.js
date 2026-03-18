@@ -76,15 +76,34 @@ function createMockMessageStore() {
 function createMockInvocationRecordStore() {
   let counter = 0;
   const created = [];
+  const updates = [];
+  const records = new Map();
   return {
     create(input) {
       const id = `inv-mm-${counter++}`;
       created.push({ id, ...input });
+      records.set(id, {
+        id,
+        status: 'queued',
+        ...input,
+      });
       return { outcome: 'created', invocationId: id };
     },
-    update() {},
+    update(id, data) {
+      updates.push({ id, data: { ...data } });
+      const existing = records.get(id) ?? { id };
+      const next = { ...existing, ...data };
+      records.set(id, next);
+      return next;
+    },
     getCreated() {
       return created;
+    },
+    getUpdates() {
+      return updates;
+    },
+    getRecord(id) {
+      return records.get(id);
     },
   };
 }
@@ -635,6 +654,10 @@ describe('Multi-Mention Routes', () => {
     );
     // Thread-level check
     assert.equal(tracker.has('thread-crash'), false, 'Thread must have no active slots after target crash');
+    const failedUpdate = mockInvocationRecordStore
+      .getUpdates()
+      .find((entry) => entry.data.status === 'failed' && entry.data.error === 'dispatch_error');
+    assert.ok(failedUpdate, 'crashed multi-mention target must converge InvocationRecord to failed');
 
     await crashApp.close();
   });

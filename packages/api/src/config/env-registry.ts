@@ -21,7 +21,6 @@ export type EnvCategory =
   | 'cli'
   | 'proxy'
   | 'connector'
-  | 'hindsight'
   | 'codex'
   | 'dare'
   | 'gemini'
@@ -54,7 +53,6 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   cli: 'CLI',
   proxy: 'Anthropic 代理网关',
   connector: '平台接入 (Telegram/飞书)',
-  hindsight: 'Hindsight 长期记忆',
   codex: '缅因猫 (Codex)',
   dare: '狸花猫 (Dare)',
   gemini: '暹罗猫 (Gemini)',
@@ -472,92 +470,6 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '飞书 webhook 验证 token',
     category: 'connector',
     sensitive: true,
-  },
-
-  // --- hindsight ---
-  {
-    name: 'HINDSIGHT_ENABLED',
-    defaultValue: 'true',
-    description: '是否启用 Hindsight 检索/反思/写入',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_URL',
-    defaultValue: 'http://localhost:18888',
-    description: 'Hindsight 服务地址',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_REFLECT_DISPOSITION_MODE',
-    defaultValue: '(默认)',
-    description: 'Reflect 处置模式',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_RECALL_DEFAULT_BUDGET',
-    defaultValue: 'mid',
-    description: 'Recall 默认预算',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_RECALL_DEFAULT_TAGS_MATCH',
-    defaultValue: 'all',
-    description: 'Recall 标签匹配方式',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_RECALL_DEFAULT_LIMIT',
-    defaultValue: '5',
-    description: 'Recall 默认返回条数',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_P0_FAIL_CLOSED_ENABLED',
-    defaultValue: 'true',
-    description: 'freshness stale 时是否 fail-closed',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_P0_FAIL_CLOSED_STATUSES',
-    defaultValue: 'stale',
-    description: '触发 fail-closed 的 freshness 状态列表',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_P0_AUTO_REIMPORT_ENABLED',
-    defaultValue: 'true',
-    description: 'freshness stale 时是否自动触发 P0 re-import',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_P0_AUTO_REIMPORT_COOLDOWN_MS',
-    defaultValue: '600000',
-    description: '自动 re-import 冷却时间（毫秒）',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_P0_AUTO_REIMPORT_COMMAND',
-    defaultValue: 'pnpm --filter @cat-cafe/api hindsight:import:p0 -- --all',
-    description: '自动 re-import 执行命令',
-    category: 'hindsight',
-    sensitive: false,
-  },
-  {
-    name: 'HINDSIGHT_P0_REIMPORT_STATE_PATH',
-    defaultValue: 'data/hindsight/p0-reimport-state.json',
-    description: '自动 re-import 状态文件路径',
-    category: 'hindsight',
-    sensitive: false,
   },
 
   // --- codex ---

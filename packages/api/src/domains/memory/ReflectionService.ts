@@ -16,11 +16,3 @@ export class ReflectionService implements IReflectionService {
     }
   }
 }
-
-/** Factory: create a ReflectionService backed by Hindsight */
-export function createHindsightReflectBackend(
-  hindsightClient: { reflect(bankId: string, query: string): Promise<string> },
-  bankId: string,
-): ReflectBackend {
-  return async (query: string) => hindsightClient.reflect(bankId, query);
-}

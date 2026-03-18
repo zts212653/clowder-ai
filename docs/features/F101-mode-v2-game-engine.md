@@ -183,7 +183,7 @@ team experience（2026-03-11）：
   - 前端视觉：紫色侦探主题 + soul-link-pulse + tarot-back — 🔄 PR review 中
 
 ### Phase F（核心体验修复 — 投票/透明度/超时）✅
-- [ ] AC-F1: GitHub agent werewolf 调研报告完成，覆盖 ≥3 个项目
+- [x] AC-F1: GitHub agent werewolf 调研报告完成，覆盖 ≥3 个项目
 - [x] AC-F2: God-view 夜晚时间线实时展示每个角色的具体行动目标
 - [x] AC-F3: 已行动状态从二态改为五态（waiting/acting/acted/timed_out/fallback）
 - [x] AC-F4: 多狼独立投票 + 多数票结算 + 平票处理
@@ -191,6 +191,17 @@ team experience（2026-03-11）：
 - [x] AC-F6: 超时未行动自动 fallback，游戏不卡住
 - [x] AC-F7: 慢启动猫猫有 grace period + god-view 展示真实连接状态
 - [x] AC-F8: team lead在 god-view 能清楚理解"正在发生什么"（不再一脸懵逼）
+
+### Phase G（AutoPlayer 存活性 — loop 恢复 + 运行时日志）✅
+- [x] AC-G1: API 启动时扫描活跃游戏（Redis status=playing），自动恢复 `startLoop()`
+- [x] AC-G2: `GameAutoPlayer` 有运行时日志（loop started/tick/action submitted/error/exited）
+- [x] AC-G3: team lead开局后 API 重启，游戏自动恢复推进（不卡在"全员等待"）
+
+**根因（2026-03-16 Maine Coon GPT-5.4 + Ragdoll联合定位）**：
+- `GameAutoPlayer.startLoop()` 是纯内存异步循环，只在创建游戏时挂一次
+- API 进程退出/崩溃后，Redis 里游戏状态还在，但驱动循环丢失
+- 前端倒计时是纯本地 `setInterval`，API 死了照样倒到 0，造成"倒计时结束无事发生"假象
+- 当前自动行动是本地随机逻辑（`pickRandom`），不是 CLI/LLM — 所以不是"Gemini 启动慢"
 
 ### Phase F: 核心体验修复 — 投票/透明度/超时/行动真实性（2026-03-16）
 

@@ -80,12 +80,15 @@ Decision about using Hindsight.
     assert.equal(item.kind, 'decision');
   });
 
-  it('rebuild skips files without frontmatter', async () => {
+  it('rebuild indexes files without frontmatter using path-based anchor', async () => {
     writeFileSync(join(docsDir, 'features', 'no-frontmatter.md'), '# Just a title\n\nNo frontmatter here.');
 
     const result = await builder.rebuild();
-    assert.equal(result.docsIndexed, 0);
-    assert.equal(result.docsSkipped, 1);
+    assert.equal(result.docsIndexed, 1);
+
+    const item = await store.getByAnchor('doc:features/no-frontmatter');
+    assert.ok(item, 'should have indexed with path-based anchor (doc: prefix)');
+    assert.equal(item.title, 'Just a title');
   });
 
   it('incrementalUpdate only re-indexes changed paths', async () => {
@@ -492,6 +495,118 @@ doc_kind: spec
   });
 });
 
+// ── Phase D-6: Session digest indexing ─────────────────────────────
+describe('IndexBuilder with session digests (D6)', () => {
+  let tmpDir;
+  let docsDir;
+  let transcriptDir;
+  let store;
+
+  beforeEach(async () => {
+    tmpDir = join(tmpdir(), `f102-d6-test-${randomUUID().slice(0, 8)}`);
+    docsDir = join(tmpDir, 'docs');
+    transcriptDir = join(tmpDir, 'transcripts');
+    mkdirSync(join(docsDir, 'features'), { recursive: true });
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('indexes session digests from transcript directory', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    // Create synthetic digest
+    const sessionId = randomUUID();
+    const threadId = 'thread_test123';
+    const catId = 'opus';
+    const digestDir = join(transcriptDir, 'threads', threadId, catId, 'sessions', sessionId);
+    mkdirSync(digestDir, { recursive: true });
+
+    writeFileSync(
+      join(digestDir, 'digest.extractive.json'),
+      JSON.stringify({
+        v: 1,
+        sessionId,
+        threadId,
+        catId,
+        seq: 3,
+        time: { createdAt: 1700000000000, sealedAt: 1700003600000 },
+        invocations: [{ toolNames: ['Edit', 'Bash', 'Read'] }],
+        filesTouched: [{ path: 'packages/api/src/index.ts', ops: ['edit'] }],
+        errors: [],
+      }),
+    );
+
+    const builder = new IndexBuilder(store, docsDir, undefined, transcriptDir);
+    const result = await builder.rebuild();
+
+    assert.ok(result.docsIndexed >= 1, 'should index at least the session digest');
+
+    // Search for it
+    const items = await store.search('Edit Bash', { scope: 'threads' });
+    assert.ok(items.length >= 1, 'should find session by tool names');
+    assert.equal(items[0].kind, 'session');
+    assert.ok(items[0].anchor.startsWith('session-'));
+  });
+
+  it('skips session digests when transcriptDataDir is not provided', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const builder = new IndexBuilder(store, docsDir); // no transcriptDataDir
+    const result = await builder.rebuild();
+    assert.equal(result.docsIndexed, 0);
+
+    const db = store.getDb();
+    const count = db.prepare("SELECT count(*) as c FROM evidence_docs WHERE kind = 'session'").get();
+    assert.equal(count.c, 0);
+  });
+
+  it('P1 regression: different sessionIds produce unique anchors (no collision)', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const threadId = 'thread_collision_test';
+    const catId = 'opus';
+    // Two sessions with different UUIDs
+    const sessionId1 = 'abcdef12-1111-4000-8000-000000000001';
+    const sessionId2 = 'abcdef12-1112-4000-8000-000000000002';
+
+    for (const [sid, seq] of [
+      [sessionId1, 1],
+      [sessionId2, 2],
+    ]) {
+      const digestDir = join(transcriptDir, 'threads', threadId, catId, 'sessions', sid);
+      mkdirSync(digestDir, { recursive: true });
+      writeFileSync(
+        join(digestDir, 'digest.extractive.json'),
+        JSON.stringify({
+          v: 1,
+          sessionId: sid,
+          threadId,
+          catId,
+          seq,
+          time: { createdAt: 1700000000000, sealedAt: 1700003600000 },
+          invocations: [],
+          filesTouched: [],
+          errors: [],
+        }),
+      );
+    }
+
+    const builder = new IndexBuilder(store, docsDir, undefined, transcriptDir);
+    await builder.rebuild({ force: true });
+
+    const db = store.getDb();
+    const sessionCount = db.prepare("SELECT count(*) as c FROM evidence_docs WHERE kind = 'session'").get();
+    assert.equal(sessionCount.c, 2, 'Both sessions should be indexed (no anchor collision)');
+  });
+});
+
 // ── Phase C: IndexBuilder + embedding integration ─────────────────
 describe('IndexBuilder with embedding', () => {
   let tmpDir;
@@ -703,5 +818,245 @@ Brand new.
     assert.equal(vectorStore.count(), 2, 'new vector added');
     // embed() should only be called once more (for the new doc, not the existing one)
     assert.equal(embedCallCount - firstEmbedCount, 1, 'embed called only for new doc');
+  });
+});
+
+// ── Phase E: Thread summary indexing ──────────────────────────────
+describe('IndexBuilder thread summary (E1/E2)', () => {
+  let tmpDir;
+  let docsDir;
+  let store;
+
+  beforeEach(async () => {
+    tmpDir = join(tmpdir(), `f102-e-test-${randomUUID().slice(0, 8)}`);
+    docsDir = join(tmpDir, 'docs');
+    mkdirSync(join(docsDir, 'features'), { recursive: true });
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('E1: indexes thread summaries from threadListFn', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_abc123',
+        title: 'Redis pitfall discussion',
+        participants: ['opus', 'codex'],
+        threadMemory: { summary: 'Discussed Redis keyPrefix pitfall with ioredis eval commands.' },
+        lastActiveAt: Date.now(),
+        featureIds: ['F113'],
+      },
+    ];
+
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => mockThreads);
+    await builder.rebuild();
+
+    const item = await store.getByAnchor('thread-thread_abc123');
+    assert.ok(item, 'thread should be indexed');
+    assert.equal(item.kind, 'thread');
+    assert.equal(item.title, 'Redis pitfall discussion');
+    assert.ok(item.summary.includes('Redis keyPrefix'));
+  });
+
+  it('E1: threadListFn error does not delete existing thread anchors', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    // First: index a thread successfully
+    const builder1 = new IndexBuilder(store, docsDir, undefined, undefined, () => [
+      {
+        id: 'thread_keep',
+        title: 'Important thread',
+        participants: ['opus'],
+        threadMemory: { summary: 'This should survive errors.' },
+        lastActiveAt: Date.now(),
+      },
+    ]);
+    await builder1.rebuild();
+    assert.ok(await store.getByAnchor('thread-thread_keep'), 'thread should exist after first rebuild');
+
+    // Second: rebuild with a failing threadListFn
+    const builder2 = new IndexBuilder(store, docsDir, undefined, undefined, () => {
+      throw new Error('Redis connection lost');
+    });
+    await builder2.rebuild();
+
+    // Thread should NOT be deleted
+    const after = await store.getByAnchor('thread-thread_keep');
+    assert.ok(after, 'thread should survive threadListFn error (P1 regression)');
+    assert.equal(after.kind, 'thread');
+  });
+
+  it('E2: markThreadDirty + flushDirtyThreads updates index', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    let version = 'v1';
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => [
+      {
+        id: 'thread_dirty',
+        title: 'Dirty thread',
+        participants: ['opus'],
+        threadMemory: { summary: `Content ${version}` },
+        lastActiveAt: Date.now(),
+      },
+    ]);
+
+    await builder.rebuild();
+    const before = await store.getByAnchor('thread-thread_dirty');
+    assert.ok(before.summary.includes('v1'));
+
+    // Simulate update
+    version = 'v2';
+    builder.markThreadDirty('thread_dirty');
+    const flushed = await builder.flushDirtyThreads();
+    assert.equal(flushed, 1, 'should flush 1 dirty thread');
+
+    const after = await store.getByAnchor('thread-thread_dirty');
+    assert.ok(after.summary.includes('v2'), 'summary should be updated to v2');
+  });
+});
+
+// ── Phase E Step 2: Passage indexing + search ──────────────────────
+describe('IndexBuilder passage indexing (E3/E4/E5)', () => {
+  let tmpDir;
+  let docsDir;
+  let store;
+
+  beforeEach(async () => {
+    tmpDir = join(tmpdir(), `f102-e3-test-${randomUUID().slice(0, 8)}`);
+    docsDir = join(tmpDir, 'docs');
+    mkdirSync(join(docsDir, 'features'), { recursive: true });
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('E3+E4: indexes thread messages as passages in evidence_passages', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_pass1',
+        title: 'Redis discussion',
+        participants: ['opus', 'codex'],
+        threadMemory: { summary: 'Discussed Redis keyPrefix behavior.' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    const mockMessages = [
+      {
+        id: 'msg_001',
+        content: 'What happens with keyPrefix in eval?',
+        catId: undefined,
+        threadId: 'thread_pass1',
+        timestamp: Date.now() - 2000,
+      },
+      {
+        id: 'msg_002',
+        content: 'ioredis keyPrefix does not apply inside eval scripts.',
+        catId: 'opus',
+        threadId: 'thread_pass1',
+        timestamp: Date.now() - 1000,
+      },
+      {
+        id: 'msg_003',
+        content: 'Good catch, lets document this as a lesson.',
+        catId: 'codex',
+        threadId: 'thread_pass1',
+        timestamp: Date.now(),
+      },
+    ];
+
+    const messageListFn = (threadId) => {
+      if (threadId === 'thread_pass1') return mockMessages;
+      return [];
+    };
+
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => mockThreads, messageListFn);
+    await builder.rebuild();
+
+    // Verify passages were inserted
+    const db = store.getDb();
+    const passages = db
+      .prepare('SELECT * FROM evidence_passages WHERE doc_anchor = ? ORDER BY position')
+      .all('thread-thread_pass1');
+    assert.equal(passages.length, 3, 'should have 3 passages');
+    assert.equal(passages[0].passage_id, 'msg-msg_001');
+    assert.equal(passages[0].speaker, 'user'); // no catId → 'user'
+    assert.equal(passages[0].position, 0);
+    assert.equal(passages[1].passage_id, 'msg-msg_002');
+    assert.equal(passages[1].speaker, 'opus');
+    assert.equal(passages[2].speaker, 'codex');
+  });
+
+  it('E5: searchPassages finds passages via FTS and search() merges them with depth=raw', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_search1',
+        title: 'Architecture chat',
+        participants: ['opus'],
+        threadMemory: { summary: 'General architecture discussion.' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    const mockMessages = [
+      {
+        id: 'msg_s1',
+        content: 'The SystemPromptBuilder needs refactoring for modularity.',
+        catId: 'opus',
+        threadId: 'thread_search1',
+        timestamp: Date.now() - 1000,
+      },
+      {
+        id: 'msg_s2',
+        content: 'Agreed, the prompt sections should be pluggable.',
+        threadId: 'thread_search1',
+        timestamp: Date.now(),
+      },
+    ];
+
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => mockThreads,
+      (tid) => {
+        if (tid === 'thread_search1') return mockMessages;
+        return [];
+      },
+    );
+    await builder.rebuild();
+
+    // Direct passage search
+    const passages = store.searchPassages('SystemPromptBuilder');
+    assert.ok(passages.length >= 1, 'should find passage by content');
+    assert.equal(passages[0].docAnchor, 'thread-thread_search1');
+    assert.equal(passages[0].speaker, 'opus');
+
+    // Full search with depth=raw should merge passage results
+    const results = await store.search('SystemPromptBuilder', { depth: 'raw', scope: 'all' });
+    assert.ok(results.length >= 1, 'depth=raw search should include passage-matched docs');
+    // The result should reference the thread
+    const threadResult = results.find((r) => r.anchor === 'thread-thread_search1');
+    assert.ok(threadResult, 'should find the thread doc via passage match');
+    assert.ok(threadResult.summary.includes('[passage match]'), 'summary should indicate passage match');
   });
 });

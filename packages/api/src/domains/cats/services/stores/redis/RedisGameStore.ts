@@ -49,11 +49,33 @@ export class RedisGameStore implements IGameStore {
     if (!existing) throw new Error(`Game ${gameId} not found`);
 
     const current = JSON.parse(existing) as GameRuntime;
-    if (current.version !== runtime.version - 1) {
-      throw new Error(`Version conflict for game ${gameId}: expected ${current.version}, got ${runtime.version - 1}`);
+    // OCC: reject if Redis version moved forward since we read (concurrent write).
+    // A single handlePlayerAction/tick may increment version multiple times
+    // (appendEvent × N + submitAction), so we check >= not ===+1.
+    if (runtime.version <= current.version) {
+      throw new Error(
+        `Version conflict for game ${gameId}: runtime version ${runtime.version} must be greater than stored version ${current.version}`,
+      );
     }
 
     await this.redis.set(GameKeys.detail(gameId), JSON.stringify(runtime));
+  }
+
+  async listActiveGames(): Promise<GameRuntime[]> {
+    // IMPORTANT: ioredis keyPrefix does NOT auto-apply to keys()/scan().
+    // Must manually prepend prefix for pattern matching, then strip it for get().
+    const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+    const keys = await this.redis.keys(`${prefix}game:thread:*:active`);
+    const games: GameRuntime[] = [];
+    for (const key of keys) {
+      // Strip prefix before passing to get() (which auto-applies prefix)
+      const bareKey = prefix ? key.slice(prefix.length) : key;
+      const gameId = await this.redis.get(bareKey);
+      if (!gameId) continue;
+      const game = await this.getGame(gameId);
+      if (game) games.push(game);
+    }
+    return games;
   }
 
   async endGame(gameId: string, winner: string): Promise<void> {

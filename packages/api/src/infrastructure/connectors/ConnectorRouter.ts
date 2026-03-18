@@ -139,6 +139,39 @@ export class ConnectorRouter {
           cmdResult.response,
         );
         log.info({ connectorId, command: cmdResult.kind }, '[ConnectorRouter] Command handled');
+
+        // /thread: forward message content to the target thread
+        if (cmdResult.forwardContent && cmdResult.newActiveThreadId) {
+          const fwdThreadId = cmdResult.newActiveThreadId;
+          const fwdText = cmdResult.forwardContent;
+          const def2 = getConnectorDefinition(connectorId);
+          const fwdSource: ConnectorSource = {
+            connector: connectorId,
+            label: def2?.displayName ?? connectorId,
+            icon: def2?.icon ?? '💬',
+          };
+          const mentionPatterns = this.getMentionPatterns();
+          const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.opts.defaultCatId);
+          const fwdStored = await messageStore.append({
+            threadId: fwdThreadId,
+            userId: this.opts.defaultUserId,
+            catId: null,
+            content: fwdText,
+            source: fwdSource,
+            mentions: [targetCatId],
+            timestamp: Date.now(),
+          });
+          socketManager?.broadcastToRoom(`thread:${fwdThreadId}`, 'connector_message', {
+            threadId: fwdThreadId,
+            messageId: fwdStored.id,
+            connectorId,
+            content: fwdText,
+          });
+          invokeTrigger.trigger(fwdThreadId, targetCatId, this.opts.defaultUserId, fwdText, fwdStored.id);
+          log.info({ connectorId, threadId: fwdThreadId }, '[ConnectorRouter] /thread message forwarded');
+          return { kind: 'routed', threadId: fwdThreadId, messageId: fwdStored.id };
+        }
+
         const result: RouteResult = { kind: 'command' };
         if (cmdResult.contextThreadId) (result as { threadId?: string }).threadId = cmdResult.contextThreadId;
         if (stored?.responseId) (result as { messageId?: string }).messageId = stored.responseId;

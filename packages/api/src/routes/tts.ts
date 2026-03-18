@@ -3,6 +3,7 @@
  *
  * POST /api/tts/synthesize — Synthesize text to speech, returns audioUrl
  * POST /api/tts/resynthesize — Re-attempt TTS for a failed voice block (F066 Phase 4)
+ * POST /api/tts/stream    — F111: SSE streaming synthesis (chunked audio)
  * GET  /api/tts/audio/:filename — Download audio file (auth-gated)
  */
 
@@ -10,10 +11,11 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat as fsStat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { TtsSynthesizeRequest } from '@cat-cafe/shared';
+import type { TtsStreamEvent, TtsSynthesizeRequest } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { getCatVoice } from '../config/cat-voices.js';
+import { chunkText } from '../domains/cats/services/tts/TtsChunker.js';
 import type { TtsRegistry } from '../domains/cats/services/tts/TtsRegistry.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -179,6 +181,131 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
       reply.status(502);
       return { error: 'TTS resynthesize failed', detail: err instanceof Error ? err.message : 'unknown' };
     }
+  });
+
+  // ── F111: SSE Streaming synthesis endpoint ─────────────────────
+
+  const streamSchema = z.object({
+    text: z.string().min(1).max(10000),
+    catId: z.string().optional(),
+    voice: z.string().optional(),
+    langCode: z.string().optional(),
+    speed: z.number().min(0.5).max(2.0).optional(),
+  });
+
+  app.post<{ Body: unknown }>('/api/tts/stream', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const parsed = streamSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+
+    const { text, catId, voice: voiceOverride, langCode: langCodeOverride, speed: speedOverride } = parsed.data;
+
+    let provider;
+    try {
+      provider = ttsRegistry.getDefault();
+    } catch {
+      reply.status(503);
+      return { error: 'No TTS provider available' };
+    }
+
+    const catVoice = getCatVoice(catId ?? 'opus');
+    const voice = voiceOverride ?? catVoice.voice;
+    const langCode = langCodeOverride ?? catVoice.langCode;
+    const speed = speedOverride ?? catVoice.speed ?? 1.0;
+    const refAudio = catVoice.refAudio;
+    const refText = catVoice.refText;
+    const instruct = catVoice.instruct;
+    const temperature = catVoice.temperature;
+
+    const chunks = chunkText(text);
+    if (chunks.length === 0) {
+      reply.status(400);
+      return { error: 'No text to synthesize after chunking' };
+    }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const sendEvent = (event: TtsStreamEvent) => {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    const startTime = Date.now();
+
+    for (let i = 0; i < chunks.length; i++) {
+      if (reply.raw.destroyed || reply.raw.writableEnded) {
+        request.log.info({ index: i, total: chunks.length }, '[TTS-STREAM] client disconnected, aborting');
+        return;
+      }
+
+      const chunk = chunks[i];
+      try {
+        const synthRequest: TtsSynthesizeRequest = {
+          text: chunk.text,
+          voice,
+          langCode,
+          speed,
+          format: 'wav',
+          ...(refAudio ? { refAudio } : {}),
+          ...(refText ? { refText } : {}),
+          ...(instruct ? { instruct } : {}),
+          ...(temperature != null ? { temperature } : {}),
+        };
+
+        const chunkStart = Date.now();
+        const result = await provider.synthesize(synthRequest);
+        const chunkMs = Date.now() - chunkStart;
+
+        if (reply.raw.destroyed || reply.raw.writableEnded) {
+          request.log.info({ index: i, total: chunks.length }, '[TTS-STREAM] client disconnected after synthesis');
+          return;
+        }
+
+        const audioBase64 = Buffer.from(result.audio).toString('base64');
+
+        if (i === 0) {
+          request.log.info({ latencyMs: Date.now() - startTime, boost: chunk.isBoost }, '[TTS-STREAM] first chunk');
+        }
+        request.log.info(
+          { index: i, total: chunks.length, chunkMs, boost: chunk.isBoost, textLen: chunk.text.length },
+          '[TTS-STREAM] chunk synthesized',
+        );
+
+        sendEvent({
+          type: 'chunk',
+          index: i,
+          total: chunks.length,
+          audioBase64,
+          text: chunk.text,
+          durationSec: result.durationSec,
+          format: result.format,
+        });
+      } catch (err) {
+        request.log.error({ err, index: i }, '[TTS-STREAM] chunk synthesis failed');
+        sendEvent({
+          type: 'error',
+          error: err instanceof Error ? err.message : 'synthesis failed',
+        });
+        reply.raw.end();
+        return;
+      }
+    }
+
+    request.log.info({ totalMs: Date.now() - startTime, chunks: chunks.length }, '[TTS-STREAM] complete');
+    sendEvent({ type: 'done' });
+    reply.raw.end();
   });
 
   /**

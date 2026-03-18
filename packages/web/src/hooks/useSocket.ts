@@ -20,6 +20,7 @@ import {
   handleBackgroundAgentMessage,
 } from './useSocket-background';
 import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
+import { handleVoiceChunk, handleVoiceStreamEnd, handleVoiceStreamStart } from './useVoiceStream';
 
 interface AgentMessage {
   type: string;
@@ -496,6 +497,11 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         callbacksRef.current.onGameThreadCreated?.(data);
       },
     );
+
+    // F111 Phase B + F112 Phase A: Real-time voice stream events
+    socket.on('voice_stream_start', handleVoiceStreamStart);
+    socket.on('voice_chunk', handleVoiceChunk);
+    socket.on('voice_stream_end', handleVoiceStreamEnd);
 
     socket.on('connect_error', (error: Error & { description?: unknown; context?: unknown }) => {
       console.error('[ws] connect_error', {

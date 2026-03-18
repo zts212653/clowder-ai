@@ -1,6 +1,5 @@
 import type { ContextBudget } from '@cat-cafe/shared';
 
-export type HindsightEngine = 'codex_oauth' | 'hindsight_native';
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 export interface ConfigSnapshot {
@@ -66,42 +65,6 @@ export interface ConfigSnapshot {
   /** Deliberate mode status (4-E) */
   deliberate: {
     status: 'types_only';
-  };
-  /** Hindsight long-term memory integration (Phase 5.0) */
-  hindsight: {
-    enabled: boolean;
-    baseUrl: string;
-    sharedBank: string;
-    recallDefaults: {
-      budget: 'low' | 'mid' | 'high';
-      tagsMatch: 'all_strict' | 'any_strict' | 'all' | 'any';
-      limit: number;
-    };
-    retainPolicy: {
-      narrativeFactRequired: boolean;
-      minUsefulHorizonDays: number;
-    };
-    reflect: {
-      dispositionMode: 'off' | 'template_only';
-    };
-    engine: {
-      reflect: HindsightEngine;
-      retainExtraction: HindsightEngine;
-      allowNativeFallback: boolean;
-    };
-    service: {
-      mode: 'storage_retrieval_only';
-      requireHealthcheck: boolean;
-      writeTimeoutMs: number;
-      recallTimeoutMs: number;
-    };
-    freshnessGuard: {
-      failClosedEnabled: boolean;
-      failClosedStatuses: Array<'fresh' | 'stale' | 'unknown'>;
-      autoReimportEnabled: boolean;
-      autoReimportCooldownMs: number;
-      autoReimportCommand: string;
-    };
   };
   codexExecution: {
     model: string;

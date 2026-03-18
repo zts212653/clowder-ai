@@ -41,14 +41,6 @@ export { WerewolfLobby } from './game/werewolf/WerewolfLobby.js';
 export { buildWerewolfPrompt } from './game/werewolf/werewolf-prompts.js';
 export type { AuditEvent, AuditEventInput } from './orchestration/EventAuditLog.js';
 export { AuditEventTypes, EventAuditLog, getEventAuditLog } from './orchestration/EventAuditLog.js';
-export type {
-  HindsightMemory,
-  IHindsightClient,
-  RecallOptions,
-  RetainItem,
-  RetainOptions,
-} from './orchestration/HindsightClient.js';
-export { createHindsightClient, HindsightClient, HindsightError } from './orchestration/HindsightClient.js';
 export { createAuthorizationAuditStore } from './stores/factories/AuthorizationAuditStoreFactory.js';
 export { createAuthorizationRuleStore } from './stores/factories/AuthorizationRuleStoreFactory.js';
 export { createDraftStore } from './stores/factories/DraftStoreFactory.js';

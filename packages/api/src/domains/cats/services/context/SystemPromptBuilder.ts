@@ -197,11 +197,23 @@ const PROVIDER_LABELS: Record<string, string> = {
  */
 const MCP_TOOLS_SECTION = `
 MCP 工具用于异步汇报等场景（token 有效期有限）：
+
+**记忆工具（先搜后问）：**
+- cat_cafe_search_evidence: **首选入口** — 搜索项目知识库（决策/讨论/教训/phase history）
+- cat_cafe_reflect: 反思性问题 — 从项目知识中合成洞察
+
+**记忆 drill-down 工具（search_evidence 命中后深入）：**
+- cat_cafe_list_session_chain: 列出 thread 的 session 链
+- cat_cafe_read_session_digest: 读 session 摘要（sealed 后可用）
+- cat_cafe_read_session_events: 读 session 事件（支持 raw/chat/handoff 视图）
+- cat_cafe_read_invocation_detail: 读某次 invocation 的所有事件
+
+**协作工具：**
 - cat_cafe_post_message: 异步消息
 - cat_cafe_register_pr_tracking: 注册 PR tracking（review 路由）
 - cat_cafe_get_pending_mentions: 获取 @提及
 - cat_cafe_get_thread_context: 获取对话上下文
-- cat_cafe_search_messages: 检索消息
+- cat_cafe_list_threads: 列出 thread 摘要
 - cat_cafe_update_task: 更新任务状态
 - cat_cafe_create_rich_block: 创建 rich block
 - cat_cafe_get_rich_block_rules: 获取 rich block 规则（fallback）
@@ -251,13 +263,15 @@ const WORKFLOW_TRIGGERS: Record<string, string> = {
     '- Review 布偶猫代码：每个发现必须有明确立场，禁止说"修不修都行"',
     '- 收到 review 意见：独立判断，认为自己对就 push back，不全盘接受',
     '',
-    '### 出口检查（发消息前必问）',
-    '这件事到我这里结束了吗？不是 → 谁需要动？→ 回复末尾另起一行行首写 @句柄。',
+    '### 执行纪律',
+    '- 加载 Skill 后直接执行第一步，不要复述流程',
+    '- 接球后默认静默执行：收到"放行"后沉默做到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
+    '- 声明 ≠ 执行：说"我进 merge gate"必须同 turn 加载 skill 并执行，只发消息不调工具 = 空气传球',
+    '- 禁止中途进展汇报、禁止说"你别回我了"',
+    '- 完成任务后必须 @ 下一棒',
     '',
-    '### @ 自检',
-    '三问短路：Q1"需要对方采取行动？"= 是 → 直接 @（跳过 Q2/Q3）。',
-    '三个都是否 → 不 @，直接写名字。',
-    '❌ @opus 收到，我也在等云端 review → ✅ 收到，布偶猫那边也在等',
+    '### 出口一问（发消息前必问）',
+    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
   ].join('\n'),
   siamese: [
     '## 工作流（主动 @ 触发点）',

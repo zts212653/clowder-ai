@@ -1,7 +1,5 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import type { HindsightMemory } from '../domains/cats/services/orchestration/HindsightClient.js';
-import { HindsightError } from '../domains/cats/services/orchestration/HindsightClient.js';
 
 export type EvidenceSourceType = 'decision' | 'phase' | 'discussion' | 'commit';
 export type EvidenceConfidence = 'high' | 'mid' | 'low';
@@ -36,12 +34,6 @@ export function normalizeTags(input: string | string[] | undefined, defaultOrigi
 }
 
 export function shouldDegradeToDocs(err: unknown): boolean {
-  if (err instanceof HindsightError) {
-    if (err.code === 'CONNECTION_FAILED' || err.code === 'TIMEOUT') return true;
-    if (err.statusCode != null && err.statusCode >= 500) return true;
-    return false;
-  }
-
   if (err instanceof Error) {
     const msg = err.message.toLowerCase();
     return (
@@ -63,34 +55,6 @@ export function classifySource(path: string): EvidenceSourceType {
   if (path.includes('phases')) return 'phase';
   if (path.includes('discussions')) return 'discussion';
   return 'commit';
-}
-
-/** Convert Hindsight memory to EvidenceResult */
-export function memoryToResult(mem: HindsightMemory): EvidenceResult {
-  const anchor = mem.metadata?.anchor ?? '';
-
-  // Extract status from tags if present (e.g. status:draft)
-  let status: EvidenceStatus | undefined;
-  if (mem.tags) {
-    for (const tag of mem.tags) {
-      if (tag.startsWith('status:')) {
-        const value = tag.slice('status:'.length) as EvidenceStatus;
-        if (['draft', 'pending', 'published', 'archived'].includes(value)) {
-          status = value;
-          break;
-        }
-      }
-    }
-  }
-
-  return {
-    title: mem.content.slice(0, 120),
-    anchor,
-    snippet: mem.content.slice(0, 300),
-    confidence: (mem.score ?? 0) > 0.8 ? 'high' : (mem.score ?? 0) > 0.5 ? 'mid' : 'low',
-    sourceType: classifySource(anchor),
-    ...(status ? { status } : {}),
-  };
 }
 
 /** Degraded search: grep docs/ for matching files */

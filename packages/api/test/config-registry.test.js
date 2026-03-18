@@ -199,7 +199,7 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.deliberate.status, 'types_only');
   });
 
-  it('snapshot contains all 12 categories (Phase 5.1)', async () => {
+  it('snapshot contains all 11 categories (Phase 5.1, post-Hindsight)', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
@@ -215,60 +215,12 @@ describe('ConfigRegistry', () => {
       'memory',
       'governance',
       'deliberate',
-      'hindsight',
       'codexExecution',
     ];
     for (const cat of categories) {
       assert.ok(snapshot[cat], `has ${cat}`);
     }
-  });
-
-  it('has hindsight section with correct defaults', async () => {
-    setEnv('HINDSIGHT_URL', undefined);
-
-    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
-    const snapshot = collectConfigSnapshot();
-
-    assert.ok(snapshot.hindsight, 'has hindsight section');
-    assert.equal(snapshot.hindsight.enabled, true);
-    assert.equal(snapshot.hindsight.baseUrl, 'http://localhost:18888');
-    assert.equal(snapshot.hindsight.sharedBank, 'cat-cafe-shared');
-  });
-
-  it('hindsight recallDefaults are correct', async () => {
-    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
-    const snapshot = collectConfigSnapshot();
-
-    const rd = snapshot.hindsight.recallDefaults;
-    assert.equal(rd.budget, 'mid');
-    assert.equal(rd.tagsMatch, 'all_strict');
-    assert.equal(rd.limit, 5);
-  });
-
-  it('hindsight retainPolicy and reflect are correct', async () => {
-    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
-    const snapshot = collectConfigSnapshot();
-
-    assert.equal(snapshot.hindsight.retainPolicy.narrativeFactRequired, true);
-    assert.equal(snapshot.hindsight.retainPolicy.minUsefulHorizonDays, 180);
-    assert.equal(snapshot.hindsight.reflect.dispositionMode, 'template_only');
-  });
-
-  it('hindsight engine and service defaults are codex-first', async () => {
-    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
-    const snapshot = collectConfigSnapshot();
-
-    assert.equal(snapshot.hindsight.engine.reflect, 'codex_oauth');
-    assert.equal(snapshot.hindsight.engine.retainExtraction, 'codex_oauth');
-    assert.equal(snapshot.hindsight.engine.allowNativeFallback, false);
-    assert.equal(snapshot.hindsight.service.mode, 'storage_retrieval_only');
-    assert.equal(snapshot.hindsight.service.requireHealthcheck, true);
-    assert.equal(snapshot.hindsight.service.writeTimeoutMs, 8000);
-    assert.equal(snapshot.hindsight.service.recallTimeoutMs, 8000);
-    assert.equal(snapshot.hindsight.freshnessGuard.failClosedEnabled, true);
-    assert.deepEqual(snapshot.hindsight.freshnessGuard.failClosedStatuses, ['stale']);
-    assert.equal(snapshot.hindsight.freshnessGuard.autoReimportEnabled, true);
-    assert.equal(snapshot.hindsight.freshnessGuard.autoReimportCooldownMs, 600000);
+    assert.equal(snapshot.hindsight, undefined, 'hindsight section should not exist');
   });
 
   it('codexExecution defaults are visible for runtime alignment', async () => {
@@ -280,54 +232,14 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.codexExecution.passModelArg, true);
   });
 
-  it('reads env overrides for hindsight defaults, engine, and codex execution mode', async () => {
-    setEnv('HINDSIGHT_RECALL_DEFAULT_BUDGET', 'high');
-    setEnv('HINDSIGHT_RECALL_DEFAULT_TAGS_MATCH', 'any');
-    setEnv('HINDSIGHT_RECALL_DEFAULT_LIMIT', '8');
-    setEnv('HINDSIGHT_REFLECT_DISPOSITION_MODE', 'off');
-    setEnv('HINDSIGHT_ENGINE_REFLECT', 'hindsight_native');
-    setEnv('HINDSIGHT_ENGINE_RETAIN_EXTRACTION', 'hindsight_native');
-    setEnv('HINDSIGHT_ENGINE_ALLOW_NATIVE_FALLBACK', 'true');
-    setEnv('HINDSIGHT_P0_FAIL_CLOSED_ENABLED', 'false');
-    setEnv('HINDSIGHT_P0_FAIL_CLOSED_STATUSES', 'stale,unknown');
-    setEnv('HINDSIGHT_P0_AUTO_REIMPORT_ENABLED', 'false');
-    setEnv('HINDSIGHT_P0_AUTO_REIMPORT_COOLDOWN_MS', '300000');
+  it('reads env overrides for codex execution mode', async () => {
     setEnv('CODEX_AUTH_MODE', 'api_key');
     setEnv('CAT_CODEX_PASS_MODEL_ARG', 'false');
 
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.equal(snapshot.hindsight.recallDefaults.budget, 'high');
-    assert.equal(snapshot.hindsight.recallDefaults.tagsMatch, 'any');
-    assert.equal(snapshot.hindsight.recallDefaults.limit, 8);
-    assert.equal(snapshot.hindsight.reflect.dispositionMode, 'off');
-    assert.equal(snapshot.hindsight.engine.reflect, 'hindsight_native');
-    assert.equal(snapshot.hindsight.engine.retainExtraction, 'hindsight_native');
-    assert.equal(snapshot.hindsight.engine.allowNativeFallback, true);
-    assert.equal(snapshot.hindsight.freshnessGuard.failClosedEnabled, false);
-    assert.deepEqual(snapshot.hindsight.freshnessGuard.failClosedStatuses, ['stale', 'unknown']);
-    assert.equal(snapshot.hindsight.freshnessGuard.autoReimportEnabled, false);
-    assert.equal(snapshot.hindsight.freshnessGuard.autoReimportCooldownMs, 300000);
     assert.equal(snapshot.codexExecution.authMode, 'api_key');
     assert.equal(snapshot.codexExecution.passModelArg, false);
-  });
-
-  it('reads HINDSIGHT_URL from env', async () => {
-    setEnv('HINDSIGHT_URL', 'http://custom-host:9999');
-
-    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
-    const snapshot = collectConfigSnapshot();
-
-    assert.equal(snapshot.hindsight.baseUrl, 'http://custom-host:9999');
-  });
-
-  it('reads HINDSIGHT_ENABLED from env', async () => {
-    setEnv('HINDSIGHT_ENABLED', 'false');
-
-    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
-    const snapshot = collectConfigSnapshot();
-
-    assert.equal(snapshot.hindsight.enabled, false);
   });
 });

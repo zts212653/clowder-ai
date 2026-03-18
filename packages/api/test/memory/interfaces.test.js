@@ -31,6 +31,15 @@ describe('memory interfaces — type exports', () => {
   it('exports EvidenceKind values', async () => {
     const mod = await import('../../dist/domains/memory/interfaces.js');
 
-    assert.deepEqual(mod.EVIDENCE_KINDS, ['feature', 'decision', 'plan', 'session', 'lesson']);
+    assert.deepEqual(mod.EVIDENCE_KINDS, [
+      'feature',
+      'decision',
+      'plan',
+      'session',
+      'lesson',
+      'thread',
+      'discussion',
+      'research',
+    ]);
   });
 });

@@ -9,6 +9,24 @@ interface EventFlowProps {
 
 const SYSTEM_EVENT_TYPES = new Set(['phase_change', 'death', 'vote_result', 'game_start', 'game_end', 'announce']);
 
+function isSystemEvent(type: string): boolean {
+  return SYSTEM_EVENT_TYPES.has(type) || type.startsWith('action.') || type.startsWith('ballot.');
+}
+
+function formatSystemMessage(event: GameEvent): string {
+  if (event.payload.message) return String(event.payload.message);
+  const seat = event.payload.seatId ?? event.payload.voterSeat;
+  const seatStr = seat ? String(seat) : '';
+  const action = event.payload.actionName ? String(event.payload.actionName) : '';
+  const target = event.payload.target ?? event.payload.choice;
+  if (seatStr && action) {
+    return target ? `${seatStr} ${action} → ${String(target)}` : `${seatStr} ${action}`;
+  }
+  if (seatStr && target) return `${seatStr} → ${String(target)}`;
+  if (seatStr) return seatStr;
+  return event.type;
+}
+
 export function EventFlow({ events }: EventFlowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -23,19 +41,17 @@ export function EventFlow({ events }: EventFlowProps) {
       className="flex-1 overflow-y-auto bg-ww-base px-6 py-4 flex flex-col gap-3"
     >
       {events.map((event) => {
-        const isSystem = SYSTEM_EVENT_TYPES.has(event.type);
-        if (isSystem) {
+        if (isSystemEvent(event.type)) {
           return (
             <div key={event.eventId} data-testid="system-event" className="flex items-center gap-2 w-full">
               <span className="text-ww-info text-sm">🔔</span>
-              <span className="text-ww-muted text-sm">{String(event.payload.message ?? event.type)}</span>
+              <span className="text-ww-muted text-sm">{formatSystemMessage(event)}</span>
             </div>
           );
         }
 
-        // Chat bubble (speech events)
         const sender = String(event.payload.senderName ?? event.payload.seatId ?? '');
-        const content = String(event.payload.content ?? event.payload.message ?? '');
+        const content = String(event.payload.content ?? event.payload.message ?? event.payload.text ?? '');
 
         return (
           <div

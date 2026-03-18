@@ -69,4 +69,44 @@ describe('GameOverlayConnector', () => {
     );
     expect(html).toBe('');
   });
+
+  it('renders nothing when gameView.threadId does not match currentThreadId (thread isolation)', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GameOverlayConnector, {
+        gameView: mockView,
+        isGameActive: true,
+        currentThreadId: 'thread-different',
+        isNight: false,
+        selectedTarget: null,
+        godScopeFilter: 'all',
+        onClose: () => {},
+        onSelectTarget: () => {},
+        onGodScopeChange: () => {},
+        onVote: () => {},
+        onSpeak: () => {},
+        onConfirmAction: () => {},
+      }),
+    );
+    expect(html).toBe('');
+  });
+
+  it('renders overlay when gameView.threadId matches currentThreadId', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GameOverlayConnector, {
+        gameView: mockView,
+        isGameActive: true,
+        currentThreadId: 't1',
+        isNight: false,
+        selectedTarget: null,
+        godScopeFilter: 'all',
+        onClose: () => {},
+        onSelectTarget: () => {},
+        onGodScopeChange: () => {},
+        onVote: () => {},
+        onSpeak: () => {},
+        onConfirmAction: () => {},
+      }),
+    );
+    expect(html).toContain('data-testid="game-shell"');
+  });
 });

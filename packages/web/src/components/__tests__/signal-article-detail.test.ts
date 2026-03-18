@@ -64,9 +64,11 @@ describe('SignalArticleDetail', () => {
     expect(originalLink).not.toBeNull();
     expect(originalLink?.textContent ?? '').toContain('打开原文');
 
-    const discussLink = container.querySelector('a[href^="/thread/default?signal="]');
-    expect(discussLink).not.toBeNull();
-    expect(discussLink?.textContent ?? '').toContain('在对话中讨论');
+    // "在对话中讨论" is now a button that POST /discuss to create a study thread
+    const discussButton = Array.from(container.querySelectorAll('button')).find((btn) =>
+      btn.textContent?.includes('在对话中讨论'),
+    );
+    expect(discussButton).not.toBeNull();
 
     const strongText = container.querySelector('strong');
     expect(strongText?.textContent).toContain('重点内容');

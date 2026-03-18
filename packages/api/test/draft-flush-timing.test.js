@@ -53,6 +53,7 @@ function createMockDeps(services) {
     },
     messageStore: {
       append: async () => ({ id: `msg-${counter}`, userId: '', catId: null, content: '', mentions: [], timestamp: 0 }),
+      getById: () => null,
       getRecent: () => [],
       getMentionsFor: () => [],
       getBefore: () => [],

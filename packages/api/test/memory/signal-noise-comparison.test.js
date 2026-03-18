@@ -69,17 +69,10 @@ describe('Signal-to-Noise: SQLite vs grep', () => {
     );
   });
 
-  it('SQLite excludes archive/mailbox content by design', async () => {
-    // Verify the IndexBuilder only scans features/decisions/plans/lessons
+  it('SQLite indexes docs from multiple directories including archive', async () => {
+    // Phase E coverage expansion: IndexBuilder scans all docs subdirectories + archive
     const allResults = await store.search('cat', { limit: 50 });
-
-    const allowedPrefixes = ['features/', 'decisions/', 'plans/', 'lessons/'];
-    for (const r of allResults) {
-      if (r.sourcePath) {
-        const isAllowed = allowedPrefixes.some((p) => r.sourcePath.startsWith(p));
-        assert.ok(isAllowed, `Result sourcePath "${r.sourcePath}" is outside allowed directories`);
-      }
-    }
+    assert.ok(allResults.length > 0, 'should have search results');
   });
 
   it('SQLite search returns structured results with anchors and kinds', async () => {

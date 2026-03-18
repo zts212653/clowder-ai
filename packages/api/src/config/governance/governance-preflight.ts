@@ -1,9 +1,10 @@
 /**
  * F070: Governance Preflight Gate
  *
- * Fail-closed check before dispatching to external projects.
- * Verifies governance pack has been bootstrapped, confirmed,
- * AND actual governance files exist on disk for the target provider.
+ * Checks if an external project is ready for cat dispatch.
+ * Returns actionable state (needsBootstrap / needsConfirmation)
+ * so the caller can surface instructions instead of silently blocking.
+ * Fixes: clowder-ai#123 (preflight blocks new projects without guidance)
  */
 import { lstat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -15,42 +16,34 @@ import { GovernanceRegistry } from './governance-registry.js';
 export interface PreflightResult {
   ready: boolean;
   reason?: string;
+  needsBootstrap?: boolean;
+  needsConfirmation?: boolean;
+  bootstrapCommand?: string;
 }
 
-/** Map CatProvider (shared type) to governance Provider */
 const CAT_PROVIDER_MAP: Record<string, Provider> = {
   anthropic: 'claude',
   openai: 'codex',
   google: 'gemini',
 };
 
-/** Provider → config file name */
 const PROVIDER_CONFIG_FILE: Record<Provider, string> = {
   claude: 'CLAUDE.md',
   codex: 'AGENTS.md',
   gemini: 'GEMINI.md',
 };
 
-/** Provider → skills directory */
 const PROVIDER_SKILLS_DIR: Record<Provider, string> = {
   claude: '.claude/skills',
   codex: '.codex/skills',
   gemini: '.gemini/skills',
 };
 
-/**
- * Check if an external project is ready for cat dispatch.
- *
- * @param catProvider - The CatProvider of the cat being dispatched (e.g. 'anthropic').
- *   When provided, checks the specific provider's config file + skills dir.
- *   When omitted, checks CLAUDE.md + any one skills symlink (backward compat).
- */
 export async function checkGovernancePreflight(
   projectPath: string,
   catCafeRoot: string,
   catProvider?: string,
 ): Promise<PreflightResult> {
-  // Not an external project — always pass
   if (isSameProject(projectPath, catCafeRoot)) {
     return { ready: true };
   }
@@ -61,41 +54,46 @@ export async function checkGovernancePreflight(
   if (!entry) {
     return {
       ready: false,
+      needsBootstrap: true,
       reason: `Governance not bootstrapped for ${projectPath}. Use POST /api/governance/confirm to bootstrap.`,
+      bootstrapCommand: `POST /api/governance/confirm { "projectPath": "${projectPath}" }`,
     };
   }
 
   if (!entry.confirmedByUser) {
     return {
       ready: false,
+      needsConfirmation: true,
       reason: `Governance bootstrap pending confirmation for ${projectPath}.`,
+      bootstrapCommand: `POST /api/governance/confirm { "projectPath": "${projectPath}" }`,
     };
   }
 
-  // Resolve provider-specific files to check
   const govProvider = catProvider ? CAT_PROVIDER_MAP[catProvider] : undefined;
   const configFile = govProvider ? PROVIDER_CONFIG_FILE[govProvider] : 'CLAUDE.md';
   const skillsDirs = govProvider
     ? [PROVIDER_SKILLS_DIR[govProvider]]
     : ['.claude/skills', '.codex/skills', '.gemini/skills'];
 
-  // Filesystem: verify provider config file has managed block
   try {
     const content = await readFile(join(projectPath, configFile), 'utf-8');
     if (!content.includes(MANAGED_BLOCK_START)) {
       return {
         ready: false,
+        needsBootstrap: true,
         reason: `${configFile} missing governance managed block in ${projectPath}.`,
+        bootstrapCommand: `POST /api/governance/confirm { "projectPath": "${projectPath}" }`,
       };
     }
   } catch {
     return {
       ready: false,
+      needsBootstrap: true,
       reason: `${configFile} not found in ${projectPath}. Governance bootstrap may have failed.`,
+      bootstrapCommand: `POST /api/governance/confirm { "projectPath": "${projectPath}" }`,
     };
   }
 
-  // Filesystem: skills symlink for the target provider (or any if no provider specified)
   let hasSkillsLink = false;
   for (const dir of skillsDirs) {
     try {
@@ -112,7 +110,9 @@ export async function checkGovernancePreflight(
     const dirLabel = govProvider ? PROVIDER_SKILLS_DIR[govProvider] : 'skills';
     return {
       ready: false,
+      needsBootstrap: true,
       reason: `No ${dirLabel} symlink in ${projectPath}. Governance bootstrap may have failed.`,
+      bootstrapCommand: `POST /api/governance/confirm { "projectPath": "${projectPath}" }`,
     };
   }
 

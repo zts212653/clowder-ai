@@ -96,6 +96,14 @@ load_dare_env_from_local() {
 
 load_dare_env_from_local
 
+default_redis_port() {
+    if [ "$PROD_WEB" = true ]; then
+        echo "6399"
+    else
+        echo "6398"
+    fi
+}
+
 # Profile 默认值（env 变量优先，profile 作 fallback）
 apply_profile_defaults() {
     local profile="$1"
@@ -173,7 +181,7 @@ print_config_summary() {
 # 默认端口 (not profile-dependent)
 API_PORT=${API_SERVER_PORT:-3003}
 WEB_PORT=${FRONTEND_PORT:-3004}
-REDIS_PORT=${REDIS_PORT:-6399}
+REDIS_PORT=${REDIS_PORT:-$(default_redis_port)}
 
 # Profile-aware config resolution
 resolve_config "ANTHROPIC_PROXY_ENABLED"
@@ -538,9 +546,32 @@ guard_main_branch_start() {
     fi
 }
 
+guard_runtime_redis_sanctuary() {
+    if [ "$USE_REDIS" = false ]; then
+        return
+    fi
+
+    if [ "$PROD_WEB" = true ]; then
+        return
+    fi
+
+    if [ "$REDIS_PORT" = "6399" ]; then
+        echo ""
+        echo -e "${RED}✗ 检测到非 runtime 启动命中 Redis production Redis (sacred)，已阻止。${NC}"
+        echo "  6399 只给 runtime/prod-web 使用。普通开发实例默认应走 6398。"
+        echo ""
+        echo "  正确路径："
+        echo "    - runtime: pnpm runtime:start"
+        echo "    - worktree/dev: REDIS_PORT=6398 pnpm start:direct"
+        echo ""
+        exit 1
+    fi
+}
+
 # 主函数
 main() {
     guard_main_branch_start
+    guard_runtime_redis_sanctuary
 
     # 1. 杀掉残余进程
     echo ""

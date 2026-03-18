@@ -1001,6 +1001,8 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       hasQueuedAgentForCat() {
         return false;
       },
+      backfillMessageId() {},
+      appendMergedMessageId() {},
     };
     const tryAutoExecuteCalls = [];
     const mockQueueProcessor = {
@@ -1114,9 +1116,11 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         return 0;
       },
       // opus already has a queued agent entry
-      hasQueuedAgentForCat(threadId, catId) {
+      hasQueuedAgentForCat(_threadId, catId) {
         return catId === 'opus';
       },
+      backfillMessageId() {},
+      appendMergedMessageId() {},
     };
     const result = await enqueueA2ATargets(
       {
@@ -1174,6 +1178,8 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       hasQueuedAgentForCat() {
         return false;
       },
+      backfillMessageId() {},
+      appendMergedMessageId() {},
     };
     const result = await enqueueA2ATargets(
       {
@@ -1212,5 +1218,62 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.equal(enqueueCalls.length, 1, 'should enqueue only first target before hitting limit');
     assert.equal(enqueueCalls[0].targetCats[0], 'opus');
     assert.deepEqual(result.enqueued, ['opus']);
+  });
+
+  test('backfills triggerMessage.id onto queue entry after enqueue (AC-B6-P1)', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    const backfillCalls = [];
+    const mockInvocationQueue = {
+      enqueue(input) {
+        return { outcome: 'enqueued', entry: { id: 'q-1', ...input, status: 'queued', createdAt: Date.now() } };
+      },
+      countAgentEntriesForThread() {
+        return 0;
+      },
+      hasQueuedAgentForCat() {
+        return false;
+      },
+      backfillMessageId(threadId, userId, entryId, messageId) {
+        backfillCalls.push({ threadId, userId, entryId, messageId });
+      },
+      appendMergedMessageId() {},
+    };
+    await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        invocationTracker: {
+          has() {
+            return false;
+          },
+          start() {
+            return new AbortController();
+          },
+          complete() {},
+        },
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            return Promise.resolve();
+          },
+        },
+        invocationQueue: mockInvocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['opus'],
+        content: 'A2A handoff',
+        userId: 'system',
+        threadId: 't1',
+        triggerMessage: { id: 'msg-trigger-123', mentions: ['opus'], content: 'test' },
+        callerCatId: 'codex',
+      },
+    );
+
+    assert.equal(backfillCalls.length, 1, 'should backfill messageId onto queue entry');
+    assert.equal(backfillCalls[0].entryId, 'q-1');
+    assert.equal(backfillCalls[0].messageId, 'msg-trigger-123');
   });
 });

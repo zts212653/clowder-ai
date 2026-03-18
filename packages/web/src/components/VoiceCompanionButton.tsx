@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
+import { useVoiceStream } from '@/hooks/useVoiceStream';
+import { type PlaybackState, useVoiceSessionStore } from '@/stores/voiceSessionStore';
 
 /**
  * F092 P0: Voice Companion toggle — icon-only header button.
@@ -105,12 +106,51 @@ interface VoiceCompanionButtonProps {
   defaultCatId: string;
 }
 
+function VoicePlaybackControls({ playbackState }: { playbackState: PlaybackState }) {
+  const { pause, resume, skip } = useVoiceStream();
+  const isPaused = playbackState === 'paused';
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={isPaused ? resume : pause}
+        className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+        aria-label={isPaused ? '继续播放' : '暂停'}
+        title={isPaused ? '继续播放' : '暂停'}
+      >
+        {isPaused ? (
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        ) : (
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+          </svg>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={skip}
+        className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+        aria-label="跳过当前"
+        title="跳过当前"
+      >
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+        </svg>
+      </button>
+    </>
+  );
+}
+
 export function VoiceCompanionButton({ threadId, defaultCatId }: VoiceCompanionButtonProps) {
   const session = useVoiceSessionStore((s) => s.session);
   const start = useVoiceSessionStore((s) => s.start);
   const stop = useVoiceSessionStore((s) => s.stop);
 
   const isActive = session?.voiceMode && session.boundThreadId === threadId;
+  const playbackState = session?.playbackState ?? 'idle';
 
   const handleClick = useCallback(() => {
     if (isActive) {
@@ -122,30 +162,35 @@ export function VoiceCompanionButton({ threadId, defaultCatId }: VoiceCompanionB
   }, [isActive, threadId, defaultCatId, start, stop]);
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className={`
-        p-1 rounded-lg transition-colors
-        ${
-          isActive
-            ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'
-            : 'text-gray-500 hover:bg-owner-light'
-        }
-      `}
-      aria-label={isActive ? '停止语音陪伴' : '语音陪伴'}
-      title={isActive ? '停止语音陪伴' : '语音陪伴'}
-    >
-      <svg
-        className={`w-5 h-5${isActive ? ' animate-pulse' : ''}`}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
+    <div className="flex items-center gap-0.5">
+      {isActive && (playbackState === 'playing' || playbackState === 'paused') && (
+        <VoicePlaybackControls playbackState={playbackState} />
+      )}
+      <button
+        type="button"
+        onClick={handleClick}
+        className={`
+          p-1 rounded-lg transition-colors
+          ${
+            isActive
+              ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'
+              : 'text-gray-500 hover:bg-owner-light'
+          }
+        `}
+        aria-label={isActive ? '停止语音陪伴' : '语音陪伴'}
+        title={isActive ? '停止语音陪伴' : '语音陪伴'}
       >
-        <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
-        <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
-      </svg>
-    </button>
+        <svg
+          className={`w-5 h-5${isActive ? ' animate-pulse' : ''}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+          <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+        </svg>
+      </button>
+    </div>
   );
 }

@@ -7,4 +7,4 @@ export type {
   FetchResult,
   RawArticle,
 } from './types.js';
-export { WebpageFetcher } from './webpage-fetcher.js';
+export { extractArticleBody, WebpageFetcher } from './webpage-fetcher.js';

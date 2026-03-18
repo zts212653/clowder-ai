@@ -116,7 +116,8 @@
           "cli": {
             "command": "claude",
             "outputFormat": "stream-json",
-            "defaultArgs": ["--output-format", "stream-json"]
+            "defaultArgs": ["--output-format", "stream-json"],
+            "effort": "max"
           },
           "personality": "温柔但有主见，喜欢深入分析问题，写代码快但注重质量",
           "strengths": ["architecture", "backend", "mcp"],
@@ -153,7 +154,8 @@
           "cli": {
             "command": "claude",
             "outputFormat": "stream-json",
-            "defaultArgs": ["--output-format", "stream-json", "--model", "claude-sonnet-4-6"]
+            "defaultArgs": ["--output-format", "stream-json", "--model", "claude-sonnet-4-6"],
+            "effort": "max"
           },
           "personality": "快速灵活，适合日常对话和轻量任务",
           "strengths": ["chat", "quick-tasks"],
@@ -192,7 +194,8 @@
           "cli": {
             "command": "claude",
             "outputFormat": "stream-json",
-            "defaultArgs": ["--output-format", "stream-json"]
+            "defaultArgs": ["--output-format", "stream-json"],
+            "effort": "max"
           },
           "personality": "宪宪的前辈版本，沉稳内敛，推理能力深厚",
           "strengths": ["deep-reasoning", "analysis", "architecture"],
@@ -245,7 +248,8 @@
           "cli": {
             "command": "codex",
             "outputFormat": "json",
-            "defaultArgs": ["exec", "--json"]
+            "defaultArgs": ["exec", "--json"],
+            "effort": "xhigh"
           },
           "personality": "严谨认真，注重细节，会直言不讳地指出问题",
           "strengths": ["code-review", "security", "testing"],
@@ -293,7 +297,8 @@
           "cli": {
             "command": "codex",
             "outputFormat": "json",
-            "defaultArgs": ["exec", "--json"]
+            "defaultArgs": ["exec", "--json"],
+            "effort": "xhigh"
           },
           "personality": "砚砚的升级版本，推理更强更快，审查细致",
           "strengths": ["reasoning", "code-review", "analysis", "debugging"],
@@ -332,7 +337,8 @@
           "cli": {
             "command": "codex",
             "outputFormat": "json",
-            "defaultArgs": ["exec", "--json", "-m", "gpt-5.3-codex-spark"]
+            "defaultArgs": ["exec", "--json", "-m", "gpt-5.3-codex-spark"],
+            "effort": "xhigh"
           },
           "personality": "反射弧短到像没长过，爪子一抬就能把代码挠完一轮迭代 ⚡️",
           "strengths": ["fast-coding", "quick-edits", "low-latency"],

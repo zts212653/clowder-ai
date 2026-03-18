@@ -58,6 +58,22 @@ export function ChatInput({
   const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
   const whisperOptions = useMemo(() => buildWhisperOptions(cats), [cats]);
 
+  // F122B AC-B10: track which cats are actively executing (for whisper disable)
+  const activeInvocations = useChatStore((s) => s.activeInvocations);
+  const storeTargetCats = useChatStore((s) => s.targetCats);
+  const activeCatIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const inv of Object.values(activeInvocations ?? {})) {
+      ids.add(inv.catId);
+    }
+    // Defensive fallback: legacy paths set hasActiveInvocation=true without
+    // populating activeInvocations slots. Use targetCats as degraded source.
+    if (ids.size === 0 && hasActiveInvocation && storeTargetCats?.length) {
+      for (const catId of storeTargetCats) ids.add(catId);
+    }
+    return ids;
+  }, [activeInvocations, hasActiveInvocation, storeTargetCats]);
+
   const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
   const [showMentions, setShowMentions] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(false);
@@ -439,15 +455,15 @@ export function ChatInput({
     setSelectedIdx((i) => Math.min(i, Math.max(0, filteredCatOptions.length - 1)));
   }, [filteredCatOptions, showMentions]);
 
-  // Reconcile whisperTargets when whisperOptions change (e.g. after API fetch replaces fallback)
+  // Reconcile whisperTargets: remove invalid ids + remove newly-active cats (B10)
   useEffect(() => {
     if (!whisperMode) return;
     const validIds = new Set(whisperOptions.map((c) => c.id));
     setWhisperTargets((prev) => {
-      const filtered = new Set([...prev].filter((id) => validIds.has(id)));
+      const filtered = new Set([...prev].filter((id) => validIds.has(id) && !activeCatIds.has(id)));
       return filtered.size === prev.size ? prev : filtered;
     });
-  }, [whisperOptions, whisperMode]);
+  }, [whisperOptions, whisperMode, activeCatIds]);
 
   const handleGameClick = useCallback(() => {
     setShowMentions(false);
@@ -460,12 +476,12 @@ export function ChatInput({
   const handleWhisperToggle = useCallback(() => {
     setWhisperMode((prev) => {
       if (!prev) {
-        // Entering whisper mode — auto-select all cats (including those without mentionPatterns)
-        setWhisperTargets(new Set(whisperOptions.map((c) => c.id)));
+        // Entering whisper mode — auto-select idle cats only (B10: executing cats excluded)
+        setWhisperTargets(new Set(whisperOptions.filter((c) => !activeCatIds.has(c.id)).map((c) => c.id)));
       }
       return !prev;
     });
-  }, [whisperOptions]);
+  }, [whisperOptions, activeCatIds]);
 
   // Sync input text to module-level draft map (covers all sources: typing, voice, mentions)
   useEffect(() => {
@@ -572,20 +588,29 @@ export function ChatInput({
       {whisperMode && (
         <div className="px-4 pt-2 flex items-center gap-2 flex-wrap">
           <span className="text-xs text-amber-600 font-medium">悄悄话发给:</span>
-          {whisperOptions.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => toggleWhisperTarget(cat.id)}
-              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                whisperTargets.has(cat.id)
-                  ? 'border-current bg-amber-50 font-medium'
-                  : 'text-gray-400 border-gray-200 hover:border-gray-400'
-              }`}
-              style={whisperTargets.has(cat.id) ? { color: cat.color } : undefined}
-            >
-              {cat.label.replace('@', '')}
-            </button>
-          ))}
+          {whisperOptions.map((cat) => {
+            const isActive = activeCatIds.has(cat.id);
+            const isSelected = whisperTargets.has(cat.id);
+            return (
+              <button
+                key={cat.id}
+                onClick={() => !isActive && toggleWhisperTarget(cat.id)}
+                disabled={isActive}
+                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                  isActive
+                    ? 'text-gray-300 border-gray-200 bg-gray-50 cursor-not-allowed'
+                    : isSelected
+                      ? 'border-current bg-amber-50 font-medium'
+                      : 'text-gray-400 border-gray-200 hover:border-gray-400'
+                }`}
+                style={!isActive && isSelected ? { color: cat.color } : undefined}
+                title={isActive ? `${cat.label.replace('@', '')} 执行中，不可选` : undefined}
+              >
+                {cat.label.replace('@', '')}
+                {isActive && ' ⏳'}
+              </button>
+            );
+          })}
           {whisperTargets.size === 0 && <span className="text-xs text-red-400">请至少选一只猫猫</span>}
         </div>
       )}

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 import {
-  DEFAULT_EXCLUDED_PORTS,
   collectRuntimePorts,
+  DEFAULT_EXCLUDED_PORTS,
   validatePort,
 } from '../../../dist/domains/preview/port-validator.js';
 

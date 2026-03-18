@@ -48,6 +48,7 @@ function createMockDeps(services, appendCalls) {
         if (appendCalls) appendCalls.push(msg);
         return { id: `msg-${counter}`, userId: '', catId: null, content: '', mentions: [], timestamp: 0 };
       },
+      getById: () => null,
       getRecent: () => [],
       getMentionsFor: () => [],
       getBefore: () => [],

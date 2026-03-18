@@ -115,3 +115,11 @@ private/
 
 # Playwright MCP cache
 .playwright-mcp/
+
+# SQLite runtime databases (Hindsight evidence store)
+evidence.sqlite
+evidence.sqlite-shm
+evidence.sqlite-wal
+
+# Temporary data files (browser automation artifacts)
+forzadata-*.txt

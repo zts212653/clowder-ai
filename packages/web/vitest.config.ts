@@ -14,6 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
+      '@ricky0123/vad-web': path.resolve(__dirname, 'src/__mocks__/vad-web.ts'),
     },
   },
 });

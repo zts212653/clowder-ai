@@ -21,4 +21,7 @@ export interface IGameStore {
 
   /** End a game and record the winner */
   endGame(gameId: string, winner: string): Promise<void>;
+
+  /** List all active games across all threads (for recovery on startup) */
+  listActiveGames(): Promise<GameRuntime[]>;
 }

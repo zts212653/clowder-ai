@@ -19,6 +19,7 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
+import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
@@ -210,6 +211,8 @@ export class CodexAgentService implements AgentService {
     const sandboxMode = getCodexSandboxMode();
     const approvalPolicy = getCodexApprovalPolicy();
     const modelArgs = ['--model', this.model];
+    const effortLevel = getCatEffort(this.catId as string);
+    const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
 
@@ -226,6 +229,7 @@ export class CodexAgentService implements AgentService {
           options.sessionId,
           '--json',
           ...modelArgs,
+          ...reasoningArgs,
           ...approvalArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
@@ -235,6 +239,7 @@ export class CodexAgentService implements AgentService {
           'exec',
           '--json',
           ...modelArgs,
+          ...reasoningArgs,
           '--sandbox',
           sandboxMode,
           '--add-dir',

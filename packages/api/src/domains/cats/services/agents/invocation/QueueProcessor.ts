@@ -58,15 +58,38 @@ export interface QueueProcessorDeps {
   log: LoggerLike;
 }
 
+/** F122B B6: Completion hook — called when a queue entry finishes execution. */
+export type EntryCompleteHook = (
+  entryId: string,
+  status: 'succeeded' | 'failed' | 'canceled',
+  responseText: string,
+) => void;
+
 export class QueueProcessor {
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair */
   private processingSlots = new Set<string>();
   /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
   private pausedSlots = new Map<string, 'canceled' | 'failed'>();
+  /** F122B B6: Per-entry completion hooks (for multi-mention response aggregation). */
+  private entryCompleteHooks = new Map<string, EntryCompleteHook>();
 
   constructor(deps: QueueProcessorDeps) {
     this.deps = deps;
+  }
+
+  /**
+   * F122B B6: Register a completion hook for a specific queue entry.
+   * Called by multi-mention dispatch to capture response text for aggregation.
+   * Hook is auto-removed after invocation (one-shot).
+   */
+  registerEntryCompleteHook(entryId: string, hook: EntryCompleteHook): void {
+    this.entryCompleteHooks.set(entryId, hook);
+  }
+
+  /** F122B B6: Remove a completion hook (e.g. on abort before execution). */
+  unregisterEntryCompleteHook(entryId: string): void {
+    this.entryCompleteHooks.delete(entryId);
   }
 
   private static slotKey(threadId: string, catId: string): string {
@@ -298,13 +321,15 @@ export class QueueProcessor {
    * Creates InvocationRecord → tracker.start → route execution → complete → cleanup.
    * Returns final status for chain auto-dequeue (called by tryExecuteNext*).
    */
-  private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed'> {
+  private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed' | 'canceled'> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
     const { threadId, userId, content, targetCats, intent, messageId } = entry;
     const primaryCat = targetCats[0] ?? 'unknown';
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
+    let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
+    let responseText = '';
 
     try {
       // 1. Create InvocationRecord
@@ -318,6 +343,7 @@ export class QueueProcessor {
 
       if (createResult.outcome === 'duplicate') {
         log.warn({ threadId, entryId: entry.id }, '[QueueProcessor] Duplicate invocation, skipping');
+        finalStatus = 'succeeded';
         return 'succeeded';
       }
       invocationId = createResult.invocationId;
@@ -417,6 +443,9 @@ export class QueueProcessor {
         }
       }
 
+      // F122B B6: Collect response text for completion hook (multi-mention aggregation).
+      const hook = this.entryCompleteHooks.get(entry.id);
+
       for await (const msg of router.routeExecution(
         userId,
         content,
@@ -432,15 +461,27 @@ export class QueueProcessor {
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
         },
       )) {
+        if (hook && msg.catId === primaryCat && msg.type === 'text' && (msg as { content?: string }).content) {
+          responseText += (msg as { content?: string }).content;
+        }
         socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
       }
 
-      // 8. Ack cursors + mark succeeded
+      // 8. Check abort before marking succeeded (F122B B6 P1: abort→succeeded bug fix)
+      if (controller.signal.aborted) {
+        log.info({ threadId, entryId: entry.id }, '[QueueProcessor] Entry aborted during execution');
+        await invocationRecordStore.update(invocationId, { status: 'canceled' });
+        finalStatus = 'canceled';
+        return 'canceled';
+      }
+
+      // 9. Ack cursors + mark succeeded
       await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
       await invocationRecordStore.update(invocationId, {
         status: 'succeeded',
       });
 
+      finalStatus = 'succeeded';
       return 'succeeded';
     } catch (err) {
       log.error({ threadId, entryId: entry.id, err }, '[QueueProcessor] executeEntry failed');
@@ -472,6 +513,16 @@ export class QueueProcessor {
       // Always cleanup tracker + queue
       invocationTracker.complete(threadId, primaryCat, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
+      // F122B B6: Fire completion hook (one-shot) and clean up
+      const completeHook = this.entryCompleteHooks.get(entry.id);
+      if (completeHook) {
+        this.entryCompleteHooks.delete(entry.id);
+        try {
+          completeHook(entry.id, finalStatus, responseText);
+        } catch {
+          /* best-effort: hook errors must not break queue chain */
+        }
+      }
       // Chain auto-dequeue is handled by tryExecuteNext* (calls onInvocationComplete
       // AFTER releasing processingThreads mutex to avoid self-blocking).
     }

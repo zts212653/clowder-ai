@@ -8,7 +8,7 @@ created: 2026-03-16
 
 # F126: 四肢控制面 — Cat Café Limb Control Plane
 
-> **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -192,28 +192,28 @@ Cat Café（大脑 / 灵魂议会）
 
 ## Acceptance Criteria
 
-### Phase A（四肢抽象 + Capability Registry + Basic Presence）
-- [ ] AC-A1: 定义 `ILimbNode` 统一接口（register/invoke/healthCheck/deregister），不改动现有猫 Provider
-- [ ] AC-A2: Capability Registry 从 `capabilities.json` 演化，静态配置 vs 动态 live registry 职责分离
-- [ ] AC-A3: Registry schema 从一开始包含 `catId × nodeId × capability` 三维结构
-- [ ] AC-A4: 新增四肢类型只需实现 `ILimbNode` 接口 + 注册能力
-- [ ] AC-A5: `capabilities.json` schema 升级向后兼容（现有 `type: mcp | skill` 不受影响）
-- [ ] AC-A6: Basic Presence — 节点状态追踪（online/busy/offline/degraded），离线自动移除能力
-- [ ] AC-A7: F118 Watchdog 整合到 Presence Manager
-- [ ] AC-A8: MCP tool `limb_list_available` + `limb_invoke` 可用
-- [ ] AC-A9: F126 只消费 session contract，不拥有 session truth 实现
+### Phase A（四肢抽象 + Capability Registry + Basic Presence）✅
+- [x] AC-A1: 定义 `ILimbNode` 统一接口（register/invoke/healthCheck/deregister），不改动现有猫 Provider
+- [x] AC-A2: Capability Registry 从 `capabilities.json` 演化，静态配置 vs 动态 live registry 职责分离
+- [x] AC-A3: Registry schema 从一开始包含 `catId × nodeId × capability` 三维结构
+- [x] AC-A4: 新增四肢类型只需实现 `ILimbNode` 接口 + 注册能力
+- [x] AC-A5: `capabilities.json` schema 升级向后兼容（现有 `type: mcp | skill` 不受影响）
+- [x] AC-A6: Basic Presence — 节点状态追踪（online/busy/offline/degraded），离线自动移除能力
+- [x] AC-A7: F118 Watchdog 状态映射函数（`mapProbeStateToLimbStatus`）预埋到 Presence Manager（完整整合含事件接线在 Phase B）
+- [x] AC-A8: MCP tool `limb_list_available` + `limb_invoke` 定义 + callback route 端到端可用
+- [x] AC-A9: F126 只消费 session contract，不拥有 session truth 实现
 
-### Phase B（调度层 — Lease/Scheduler + Access Policy + Action Log）
-- [ ] AC-B1: Lease 机制可防止多猫争用独占资源
-- [ ] AC-B2: Lease 过期自动释放（猫 crash/超时不永久锁四肢）
-- [ ] AC-B3: Limb Access Policy 实现三级授权（free/leased/gated）
-- [ ] AC-B4: Action Log 记录最小 provenance 字段集（requestId/invocationId/leaseId/catId/nodeId/capability/artifactUri/status/startedAt/endedAt/idempotencyKey）
-- [ ] AC-B5: runtime 活状态（heartbeat/lease/online）只进 Redis，不进 F102/evidence index
+### Phase B（调度层 — Lease/Scheduler + Access Policy + Action Log）✅
+- [x] AC-B1: Lease 机制可防止多猫争用独占资源
+- [x] AC-B2: Lease 过期自动释放（猫 crash/超时不永久锁四肢）
+- [x] AC-B3: Limb Access Policy 实现三级授权（free/leased/gated）
+- [x] AC-B4: Action Log 记录最小 provenance 字段集（requestId/invocationId/leaseId/catId/nodeId/capability/artifactUri/status/startedAt/endedAt/idempotencyKey）
+- [x] AC-B5: runtime 活状态（heartbeat/lease/online）只进内存，不进 F102/evidence index（Redis 适配是 follow-up）
 
-### Phase C（跨平台 Node 管理）
-- [ ] AC-C1: 远程节点可通过 MCP over HTTP 注册到控制面
-- [ ] AC-C2: Node Pairing 审批流程可用（新节点连接 → team lead审批 → 建立信任）
-- [ ] AC-C3: 断线恢复 + 重连机制
+### Phase C（跨平台 Node 管理）✅
+- [x] AC-C1: 远程节点可通过 MCP over HTTP 注册到控制面
+- [x] AC-C2: Node Pairing 审批流程可用（新节点连接 → team lead审批 → 建立信任）
+- [x] AC-C3: 断线恢复 + 重连机制
 
 ### Phase D（F124 Apple 生态落地）
 - [ ] AC-D1: iPhone 作为 Limb Node 接入，暴露 camera/voice/location 能力

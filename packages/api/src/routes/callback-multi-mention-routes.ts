@@ -8,6 +8,7 @@
 import { type CatId, catRegistry, createCatId, DEFAULT_TIMEOUT_MINUTES } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import {
@@ -59,6 +60,17 @@ export interface MultiMentionRouteDeps {
   router: AgentRouter;
   invocationRecordStore: IInvocationRecordStore;
   invocationTracker?: InvocationTracker | undefined;
+  /** F122B B6: InvocationQueue for unified dispatch */
+  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat'>;
+  /** F122B B6: QueueProcessor for execution + response hook */
+  queueProcessor?: {
+    tryAutoExecute?(threadId: string): Promise<void>;
+    registerEntryCompleteHook?(
+      entryId: string,
+      hook: (entryId: string, status: 'succeeded' | 'failed' | 'canceled', responseText: string) => void,
+    ): void;
+    unregisterEntryCompleteHook?(entryId: string): void;
+  };
 }
 
 // ── Timeout tracking ────────────────────────────────────────────────
@@ -85,7 +97,73 @@ function cancelTimeout(requestId: string): void {
   }
 }
 
-// ── Dispatch ─────────────────────────────────────────────────────────
+// ── Dispatch via InvocationQueue (F122B B6) ─────────────────────────
+function dispatchViaQueue(
+  deps: MultiMentionRouteDeps,
+  requestId: string,
+  targetCatIds: CatId[],
+  question: string,
+  context: string | undefined,
+  threadId: string,
+  userId: string,
+  initiator: CatId,
+  log: FastifyBaseLogger,
+): void {
+  const { invocationQueue, queueProcessor } = deps;
+  if (!invocationQueue || !queueProcessor) return;
+
+  const orch = getMultiMentionOrchestrator();
+
+  const messageContent = [`[Multi-Mention from ${initiator}]`, question, ...(context ? ['---', context] : [])].join(
+    '\n\n',
+  );
+
+  for (const catId of targetCatIds) {
+    const MAX_MM_DEPTH = 10;
+    if (invocationQueue.countAgentEntriesForThread(threadId) >= MAX_MM_DEPTH) {
+      log.warn({ threadId, requestId, catId }, '[F122B B6] multi-mention: depth limit reached');
+      break;
+    }
+    if (invocationQueue.hasQueuedAgentForCat(threadId, catId)) {
+      log.info({ threadId, requestId, catId }, '[F122B B6] multi-mention: skipping duplicate agent entry');
+      continue;
+    }
+
+    const result = invocationQueue.enqueue({
+      threadId,
+      userId,
+      content: messageContent,
+      source: 'agent',
+      targetCats: [catId],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: initiator,
+    });
+
+    if ((result.outcome === 'enqueued' || result.outcome === 'merged') && result.entry) {
+      queueProcessor.registerEntryCompleteHook?.(result.entry.id, (_entryId, status, responseText) => {
+        if (status === 'canceled') {
+          log.info({ requestId, catId }, '[F122B B6] multi-mention queue entry canceled, skipping recordResponse');
+          return;
+        }
+        const finalResponse = responseText || (status === 'failed' ? '[dispatch error]' : '');
+        const newStatus = orch.recordResponse(requestId, catId, finalResponse);
+        log.info(
+          { requestId, catId, newStatus, responseLength: finalResponse.length },
+          '[F122B B6] multi-mention queue response recorded',
+        );
+        if (newStatus === 'done') {
+          cancelTimeout(requestId);
+          void flushResult(deps, requestId, threadId, userId, log);
+        }
+      });
+    }
+  }
+
+  void queueProcessor.tryAutoExecute?.(threadId);
+}
+
+// ── Legacy dispatch (direct routeExecution, fallback) ────────────────
 async function dispatchToTarget(
   deps: MultiMentionRouteDeps,
   requestId: string,
@@ -112,6 +190,7 @@ async function dispatchToTarget(
   // Collect response text from the routing execution
   let responseText = '';
   const toolsUsed: string[] = [];
+  let invocationId: string | undefined;
 
   // F122 AC-A9: Occupy tracker slot BEFORE create to close TOCTOU window.
   // Entire create/execute lifecycle wrapped in outer try/finally for guaranteed release.
@@ -137,7 +216,9 @@ async function dispatchToTarget(
       return; // finally will release slot (AC-A12)
     }
 
-    await invocationRecordStore.update(createResult.invocationId, {
+    invocationId = createResult.invocationId;
+
+    await invocationRecordStore.update(invocationId, {
       status: 'running',
     });
 
@@ -155,10 +236,10 @@ async function dispatchToTarget(
         userId,
         messageContent,
         threadId,
-        createResult.invocationId,
+        invocationId,
         [targetCatId],
         intent,
-        { signal: controller.signal, parentInvocationId: createResult.invocationId },
+        { signal: controller.signal, parentInvocationId: invocationId },
       )) {
         if (controller.signal.aborted) break;
 
@@ -171,10 +252,10 @@ async function dispatchToTarget(
           }
         }
 
-        socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
+        socketManager.broadcastAgentMessage({ ...msg, invocationId }, threadId);
       }
 
-      await invocationRecordStore.update(createResult.invocationId, {
+      await invocationRecordStore.update(invocationId, {
         status: controller.signal.aborted ? 'canceled' : 'succeeded',
       });
     } finally {
@@ -210,6 +291,24 @@ async function dispatchToTarget(
       { requestId, targetCatId, err: err instanceof Error ? err.message : String(err) },
       '[F086] Multi-mention dispatch failed for target',
     );
+    if (invocationId) {
+      try {
+        await invocationRecordStore.update(invocationId, {
+          status: controller.signal.aborted ? 'canceled' : 'failed',
+          error: controller.signal.aborted ? undefined : 'dispatch_error',
+        });
+      } catch (updateErr) {
+        log.warn(
+          {
+            requestId,
+            targetCatId,
+            invocationId,
+            err: updateErr instanceof Error ? updateErr.message : String(updateErr),
+          },
+          '[F086] Failed to converge InvocationRecord after dispatch error',
+        );
+      }
+    }
     // Record failure response in orchestrator
     orch.recordResponse(
       requestId,
@@ -364,11 +463,12 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
     scheduleTimeout(mmRequest.id, mmRequest.timeoutMinutes, request.log);
 
     // Dispatch to all targets in parallel (fire and forget)
-    for (const targetCatId of targetCatIds) {
-      void dispatchToTarget(
+    // F122B B6: Use InvocationQueue when available, legacy direct dispatch as fallback
+    if (deps.invocationQueue && deps.queueProcessor) {
+      dispatchViaQueue(
         deps,
         mmRequest.id,
-        targetCatId,
+        targetCatIds,
         body.question,
         body.context,
         record.threadId,
@@ -376,6 +476,20 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         callerCatId,
         request.log,
       );
+    } else {
+      for (const targetCatId of targetCatIds) {
+        void dispatchToTarget(
+          deps,
+          mmRequest.id,
+          targetCatId,
+          body.question,
+          body.context,
+          record.threadId,
+          record.userId,
+          callerCatId,
+          request.log,
+        );
+      }
     }
 
     request.log.info(

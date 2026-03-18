@@ -166,6 +166,21 @@ describe('ConnectorCommandLayer', () => {
     assert.ok(result.response.includes('/use'));
   });
 
+  it('/threads shows full thread IDs (not truncated)', async () => {
+    const threadStore = stubThreadStore([
+      { id: 'thread_mmj4lhqgcy0najsb', title: '飞书Bug' },
+      { id: 'thread_mmvjdaq22cdzohww', title: '新功能讨论' },
+    ]);
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/threads');
+    assert.ok(result.response.includes('thread_mmj4lhqgcy0najsb'), 'Should show full ID, not truncated');
+    assert.ok(result.response.includes('thread_mmvjdaq22cdzohww'), 'Should show full ID, not truncated');
+  });
+
   it('/threads returns contextThreadId when binding exists (Phase C P1 fix)', async () => {
     const binding = {
       connectorId: 'feishu',
@@ -558,6 +573,136 @@ describe('ConnectorCommandLayer', () => {
     assert.equal(result.kind, 'use');
     assert.equal(result.newActiveThreadId, 'thread-multi');
     assert.ok(result.response.includes('多feat讨论'));
+  });
+
+  // --- /thread: cross-thread message routing ---
+
+  it('/thread switches to target thread and returns forwardContent', async () => {
+    const bindings = new Map();
+    const store = {
+      ...stubStore(),
+      bind: async (cId, eCId, tId, uId) => {
+        const b = { connectorId: cId, externalChatId: eCId, threadId: tId, userId: uId, createdAt: Date.now() };
+        bindings.set(`${cId}:${eCId}`, b);
+        return b;
+      },
+    };
+    const threadStore = stubThreadStore([
+      { id: 'thread_mmvjdaq22cdzohww', title: 'F088讨论' },
+      { id: 'thread-other', title: '其他' },
+    ]);
+    const layer = new ConnectorCommandLayer({
+      bindingStore: store,
+      threadStore,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread thread_mmvjdaq22cdzohww hi');
+    assert.equal(result.kind, 'thread');
+    assert.equal(result.newActiveThreadId, 'thread_mmvjdaq22cdzohww');
+    assert.equal(result.forwardContent, 'hi');
+    assert.ok(result.response.includes('F088讨论'));
+  });
+
+  it('/thread matches by ID prefix', async () => {
+    const store = {
+      ...stubStore(),
+      bind: async (cId, eCId, tId, uId) => ({
+        connectorId: cId,
+        externalChatId: eCId,
+        threadId: tId,
+        userId: uId,
+        createdAt: Date.now(),
+      }),
+    };
+    const threadStore = stubThreadStore([{ id: 'thread_mmvjdaq22cdzohww', title: '目标Thread' }]);
+    const layer = new ConnectorCommandLayer({
+      bindingStore: store,
+      threadStore,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread thread_mmvj 你好呀');
+    assert.equal(result.kind, 'thread');
+    assert.equal(result.newActiveThreadId, 'thread_mmvjdaq22cdzohww');
+    assert.equal(result.forwardContent, '你好呀');
+  });
+
+  it('/thread with multi-word message preserves full content', async () => {
+    const store = {
+      ...stubStore(),
+      bind: async (cId, eCId, tId, uId) => ({
+        connectorId: cId,
+        externalChatId: eCId,
+        threadId: tId,
+        userId: uId,
+        createdAt: Date.now(),
+      }),
+    };
+    const threadStore = stubThreadStore([{ id: 'thread-abc', title: '测试' }]);
+    const layer = new ConnectorCommandLayer({
+      bindingStore: store,
+      threadStore,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread thread-abc hello world 你好');
+    assert.equal(result.forwardContent, 'hello world 你好');
+  });
+
+  it('/thread rejects thread not owned by user (P1 security fix)', async () => {
+    // stubThreadStore.list() returns threads for 'user1', but get() returns any thread
+    // The handler must ONLY match within list(userId), not via raw get()
+    const foreignThread = { id: 'thread-foreign-secret', title: '别人的Thread' };
+    const myThread = { id: 'thread-mine', title: '我的Thread' };
+    const threadStore = {
+      ...stubThreadStore([myThread]),
+      // get() can find any thread (no userId filter)
+      get: async (id) => (id === foreignThread.id ? foreignThread : id === myThread.id ? myThread : null),
+      // list() only returns user's own threads
+      list: async () => [myThread],
+    };
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    // Try to /thread to a foreign thread by exact ID
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread thread-foreign-secret hi');
+    assert.equal(result.kind, 'thread');
+    assert.ok(result.response.includes('找不到'), 'Should reject foreign thread');
+    assert.equal(result.forwardContent, undefined, 'Should NOT forward to foreign thread');
+  });
+
+  it('/thread with unknown thread returns error', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread nonexistent hi');
+    assert.equal(result.kind, 'thread');
+    assert.ok(result.response.includes('找不到'));
+    assert.equal(result.forwardContent, undefined);
+  });
+
+  it('/thread with no args returns usage hint', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread');
+    assert.equal(result.kind, 'thread');
+    assert.ok(result.response.includes('用法'));
+  });
+
+  it('/thread with only thread ID but no message returns usage hint', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore([{ id: 'thread-abc', title: '测试' }]),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread thread-abc');
+    assert.equal(result.kind, 'thread');
+    assert.ok(result.response.includes('用法'));
   });
 
   it('/threads shows all feat badges for multi-feat thread (P1 fix)', async () => {

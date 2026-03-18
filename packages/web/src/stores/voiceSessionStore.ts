@@ -12,7 +12,7 @@ import { apiFetch } from '@/utils/api-client';
  * P0 scope: one thread, one cat, auto-play, PTT.
  */
 
-export type PlaybackState = 'idle' | 'playing';
+export type PlaybackState = 'idle' | 'playing' | 'paused';
 
 export interface VoiceSession {
   sessionId: string;
@@ -24,6 +24,10 @@ export interface VoiceSession {
   playbackState: PlaybackState;
   /** Track which audio block IDs have been auto-played (avoid replays on re-render) */
   playedBlockIds: Set<string>;
+  /** True when a live voice stream is active (suppresses fallback auto-play) */
+  liveStreamActive: boolean;
+  /** Invocation IDs that had live streaming (their audio blocks skip fallback) */
+  liveStreamedInvocationIds: Set<string>;
 }
 
 /** Fire-and-forget: notify backend about voice mode toggle for prompt injection. */
@@ -39,20 +43,26 @@ function syncVoiceModeToBackend(threadId: string, voiceMode: boolean): void {
 
 interface VoiceSessionActions {
   session: VoiceSession | null;
-  /** Start voice companion — binds to current thread + cat */
   start: (threadId: string, catId: string, autoplayUnlocked: boolean) => void;
-  /** Stop voice companion */
   stop: () => void;
   setPlaybackState: (state: PlaybackState) => void;
-  /** Confirm autoplay is unlocked (called on first successful play) */
   confirmAutoplayUnlocked: () => void;
-  /** Mark an audio block as auto-played */
   markPlayed: (blockId: string) => void;
-  /** Check if a block has been auto-played */
   hasPlayed: (blockId: string) => boolean;
+  setLiveStreamActive: (active: boolean, invocationId?: string) => void;
+  isLiveStreamedInvocation: (invocationId: string) => boolean;
+  /**
+   * F112-C: Register a stop callback so VAD can interrupt any active playback path.
+   * Both PlaybackManager (live stream) and useVoiceAutoPlay (fallback) register here.
+   * Returns an unregister function.
+   */
+  registerStopCallback: (id: string, fn: () => void) => () => void;
+  /** F112-C: Invoke all registered stop callbacks (called by VAD on speech detection). */
+  stopAllAudio: () => void;
 }
 
 let sessionCounter = 0;
+const stopCallbacks = new Map<string, () => void>();
 
 export const useVoiceSessionStore = create<VoiceSessionActions>((set, get) => ({
   session: null,
@@ -68,6 +78,8 @@ export const useVoiceSessionStore = create<VoiceSessionActions>((set, get) => ({
         autoplayUnlocked,
         playbackState: 'idle',
         playedBlockIds: new Set(),
+        liveStreamActive: false,
+        liveStreamedInvocationIds: new Set(),
       },
     });
     syncVoiceModeToBackend(threadId, true);
@@ -104,5 +116,33 @@ export const useVoiceSessionStore = create<VoiceSessionActions>((set, get) => ({
   hasPlayed: (blockId) => {
     const { session } = get();
     return session?.playedBlockIds.has(blockId) ?? false;
+  },
+
+  setLiveStreamActive: (active, invocationId) => {
+    const { session } = get();
+    if (!session) return;
+    const nextIds = new Set(session.liveStreamedInvocationIds);
+    if (active && invocationId) {
+      nextIds.add(invocationId);
+    }
+    set({ session: { ...session, liveStreamActive: active, liveStreamedInvocationIds: nextIds } });
+  },
+
+  isLiveStreamedInvocation: (invocationId) => {
+    const { session } = get();
+    return session?.liveStreamedInvocationIds.has(invocationId) ?? false;
+  },
+
+  registerStopCallback: (id, fn) => {
+    stopCallbacks.set(id, fn);
+    return () => {
+      stopCallbacks.delete(id);
+    };
+  },
+
+  stopAllAudio: () => {
+    for (const fn of stopCallbacks.values()) {
+      fn();
+    }
   },
 }));

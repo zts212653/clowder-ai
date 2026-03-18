@@ -38,6 +38,7 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     targetCats: [],
     catStatuses: {},
     catInvocations: {},
+    activeInvocations: {},
     currentGame: null,
     unreadCount: 0,
     hasUserMention: false,
@@ -90,10 +91,12 @@ describe('useChatHistory pagination cursor (#80 cloud R8 P2)', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    // Mock apiFetch: tasks fetch returns empty, history fetch returns empty
+    // Mock apiFetch: tasks fetch returns empty, history fetch returns empty.
+    // hasMore must stay true so F123 force-refresh (triggered by draft-prefixed
+    // messages in cached snapshot) does not clobber the pre-populated hasMore.
     apiFetchMock.mockResolvedValue({
       ok: true,
-      json: async () => ({ messages: [], tasks: [], hasMore: false }),
+      json: async () => ({ messages: [], tasks: [], hasMore: true }),
     } as Response);
   });
 

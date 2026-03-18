@@ -11,11 +11,10 @@ import { DEFAULT_CLI_TIMEOUT_MS, readCliTimeoutMsFromEnv } from '../utils/cli-ti
 import { getAllCatBudgets } from './cat-budgets.js';
 import { getCatModel } from './cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from './codex-cli.js';
-import type { CodexAuthMode, ConfigSnapshot, HindsightEngine } from './config-snapshot.js';
-import { parseHindsightRuntimeConfig } from './hindsight-runtime-config.js';
-import { parseBoolean, parseEnum, parseIntInRange } from './parse-utils.js';
+import type { CodexAuthMode, ConfigSnapshot } from './config-snapshot.js';
+import { parseBoolean, parseEnum } from './parse-utils.js';
 
-export type { CodexAuthMode, ConfigSnapshot, HindsightEngine } from './config-snapshot.js';
+export type { CodexAuthMode, ConfigSnapshot } from './config-snapshot.js';
 
 function formatTtl(raw: string | undefined, defaultSeconds: number): string {
   if (!raw) {
@@ -90,7 +89,6 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   const codexExecutionModel = env.CAT_CODEX_EXEC_MODEL?.trim() || defaultCodexModel;
   const codexExecutionAuthMode = parseEnum<CodexAuthMode>(env.CODEX_AUTH_MODE, ['oauth', 'api_key', 'auto'], 'oauth');
   const codexExecutionPassModelArg = parseBoolean(env.CAT_CODEX_PASS_MODEL_ARG, true);
-  const hindsightRuntime = parseHindsightRuntimeConfig(env);
 
   return {
     context: {
@@ -114,37 +112,6 @@ export function collectConfigSnapshot(): ConfigSnapshot {
       heartbeatIntervalMs: 30_000,
     },
     deliberate: { status: 'types_only' },
-    hindsight: {
-      enabled: parseBoolean(env.HINDSIGHT_ENABLED, true),
-      baseUrl: env.HINDSIGHT_URL ?? 'http://localhost:18888',
-      sharedBank: 'cat-cafe-shared',
-      recallDefaults: hindsightRuntime.recallDefaults,
-      retainPolicy: {
-        narrativeFactRequired: true,
-        minUsefulHorizonDays: 180,
-      },
-      reflect: hindsightRuntime.reflect,
-      freshnessGuard: hindsightRuntime.freshnessGuard,
-      engine: {
-        reflect: parseEnum<HindsightEngine>(
-          env.HINDSIGHT_ENGINE_REFLECT,
-          ['codex_oauth', 'hindsight_native'],
-          'codex_oauth',
-        ),
-        retainExtraction: parseEnum<HindsightEngine>(
-          env.HINDSIGHT_ENGINE_RETAIN_EXTRACTION,
-          ['codex_oauth', 'hindsight_native'],
-          'codex_oauth',
-        ),
-        allowNativeFallback: parseBoolean(env.HINDSIGHT_ENGINE_ALLOW_NATIVE_FALLBACK, false),
-      },
-      service: {
-        mode: 'storage_retrieval_only',
-        requireHealthcheck: parseBoolean(env.HINDSIGHT_SERVICE_REQUIRE_HEALTHCHECK, true),
-        writeTimeoutMs: parseIntInRange(env.HINDSIGHT_SERVICE_WRITE_TIMEOUT_MS, 8000, 1000, 30000),
-        recallTimeoutMs: parseIntInRange(env.HINDSIGHT_SERVICE_RECALL_TIMEOUT_MS, 8000, 1000, 30000),
-      },
-    },
     codexExecution: {
       model: codexExecutionModel,
       authMode: codexExecutionAuthMode,

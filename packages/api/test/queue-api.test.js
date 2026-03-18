@@ -543,4 +543,39 @@ describe('Queue Management API', () => {
     });
     assert.equal(res.statusCode, 404);
   });
+
+  // ── F122B AC-B9: Per-cat cancel ──
+
+  it('POST /cancel/:catId cancels active cat and broadcasts done (AC-B9)', async () => {
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus'] }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/t1/cancel/opus',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.cancelled, true);
+
+    // Should broadcast done for opus
+    const doneCalls = deps.socketManager.broadcastAgentMessage.mock.calls.filter((c) => c.arguments[0].type === 'done');
+    assert.equal(doneCalls.length, 1);
+    assert.equal(doneCalls[0].arguments[0].catId, 'opus');
+  });
+
+  it('POST /cancel/:catId returns 404 when cat is not active (AC-B9)', async () => {
+    deps.invocationTracker.has = mock.fn(() => false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/t1/cancel/codex',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(res.statusCode, 404);
+    const body = JSON.parse(res.body);
+    assert.equal(body.code, 'CAT_NOT_ACTIVE');
+  });
 });

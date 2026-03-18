@@ -285,7 +285,7 @@
     {
       "id": "F048",
       "name": "Restart Recovery — 重启自愈（Invocation/Queue 恢复）",
-      "status": "Phase A done / Phase B idea | **Owner**: Ragdoll",
+      "status": "Phase A done / Phase A+ done / Phase B idea | **Owner**: Ragdoll → 金渐层（Phase A+）",
       "file": "F048-restart-recovery.md"
     },
     {
@@ -561,13 +561,13 @@
     {
       "id": "F091",
       "name": "Signal Study Mode — 信号学习伴侣",
-      "status": "in-progress (Phase 9 signal nav + notes viewable done) | **Owner**: Ragdoll",
+      "status": "in-progress | **Owner**: Ragdoll",
       "file": "F091-signal-study-mode.md"
     },
     {
       "id": "F092",
       "name": "— Cats & U 语音陪伴体验",
-      "status": "in-progress (P0 complete) | **Owner**: Ragdoll (Opus 4.6)",
+      "status": "done | **Completed**: 2026-03-18 | **Owner**: Ragdoll (Opus 4.6)",
       "file": "F092-voice-companion-experience.md"
     },
     {
@@ -681,13 +681,13 @@
     {
       "id": "F111",
       "name": "Streaming TTS Chunker — 流式分句合成管线",
-      "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P1",
+      "status": "done | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1",
       "file": "F111-streaming-tts-chunker.md"
     },
     {
       "id": "F112",
-      "name": "Voice Playback Queue — 语音播放队列 + Intent 调度",
-      "status": "spec | **Owner**: Ragdoll (Opus 4.6) | **Priority**: P2",
+      "name": "Voice Playback Queue — 语音播放队列 + 播放器统一",
+      "status": "in-progress | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1",
       "file": "F112-voice-playback-queue.md"
     },
     {
@@ -741,7 +741,7 @@
     {
       "id": "F121",
       "name": "Community Frontend UX Triage — 社区前端交互体验侦查与分诊",
-      "status": "in-progress (community fixes merged + follow-up hotfix in review, pending outbound sync) | **Owner**: Ragdoll | **Priority**: P2",
+      "status": "done | **Owner**: 三猫 | **Priority**: P2 | **Completed**: 2026-03-16",
       "file": "F121-community-frontend-ux-triage.md"
     },
     {
@@ -771,9 +771,15 @@
     {
       "id": "F126",
       "name": "四肢控制面 — Cat Café Limb Control Plane",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F126-limb-control-plane.md"
+    },
+    {
+      "id": "F127",
+      "name": "猫猫管理重构 — 账户配置与猫猫实例分离，支持动态创建猫 + 自定义别名 @ 路由",
+      "status": "spec | **Owner**: 待定 | **Priority**: P1",
+      "file": "F127-cat-instance-management.md"
     }
   ],
-  "generated_at": "2026-03-17T01:21:25.024Z"
+  "generated_at": "2026-03-18T07:32:09.806Z"
 }

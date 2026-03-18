@@ -21,6 +21,8 @@ triggers:
 
 **Context:** This should be run in a dedicated worktree (created by `worktree` skill).
 
+**开工前 Recall（F102 记忆系统）🔴**：写计划前先搜相关历史——`search_evidence("{feature}")` 找相关 spec/ADR/讨论，避免重复造轮子。
+
 **Save plans to:** *(internal reference removed)*
 
 ## Straight-Line Check (A→B, No Detour)

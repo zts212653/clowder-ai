@@ -57,19 +57,8 @@ export async function handleCallbackRetainMemory(input: {
 }
 
 export const callbackMemoryTools = [
-  {
-    name: 'cat_cafe_search_evidence_callback',
-    description:
-      'Search project evidence (invocation-scoped callback auth). Uses Cat Cafe callback endpoint and Hindsight recall behind the API.',
-    inputSchema: callbackEvidenceSearchInputSchema,
-    handler: handleCallbackSearchEvidence,
-  },
-  {
-    name: 'cat_cafe_reflect_callback',
-    description: 'Ask a reflection question (invocation-scoped callback auth).',
-    inputSchema: callbackReflectInputSchema,
-    handler: handleCallbackReflect,
-  },
+  // D16: search_evidence_callback and reflect_callback removed — merged into
+  // the public search_evidence / reflect tools (route supports both auth modes).
   {
     name: 'cat_cafe_retain_memory_callback',
     description: 'Retain a durable memory item through Cat Cafe callback endpoint.',

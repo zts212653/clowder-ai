@@ -61,16 +61,9 @@ describe('env-registry', () => {
     assert.equal(redis.maskMode, 'url');
   });
 
-  it('HINDSIGHT_URL default points to local isolated instance', () => {
-    const hindsightUrl = ENV_VARS.find((v) => v.name === 'HINDSIGHT_URL');
-    assert.ok(hindsightUrl, 'HINDSIGHT_URL should be in registry');
-    assert.equal(hindsightUrl.defaultValue, 'http://localhost:18888');
-  });
-
-  it('includes HINDSIGHT_ENABLED toggle', () => {
-    const hindsightEnabled = ENV_VARS.find((v) => v.name === 'HINDSIGHT_ENABLED');
-    assert.ok(hindsightEnabled, 'HINDSIGHT_ENABLED should be in registry');
-    assert.equal(hindsightEnabled.defaultValue, 'true');
+  it('no HINDSIGHT_* vars remain after D-1 cleanup', () => {
+    const hindsightVars = ENV_VARS.filter((v) => v.name.startsWith('HINDSIGHT_'));
+    assert.equal(hindsightVars.length, 0, 'All HINDSIGHT_* vars should be removed');
   });
 });
 

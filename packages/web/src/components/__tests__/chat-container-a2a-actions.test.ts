@@ -25,6 +25,7 @@ vi.mock('@/stores/chatStore', () => {
     targetCats: [],
     catStatuses: {},
     catInvocations: {},
+    activeInvocations: {},
     addMessage: vi.fn(),
     removeMessage: vi.fn(),
     setIntentMode: vi.fn(),

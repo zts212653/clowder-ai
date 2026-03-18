@@ -38,7 +38,10 @@ export interface A2ATriggerDeps {
   deliveryCursorStore?: DeliveryCursorStore;
   queueProcessor?: QueueProcessorLike;
   /** F122B: InvocationQueue for agent-sourced entries */
-  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat'>;
+  invocationQueue?: Pick<
+    InvocationQueue,
+    'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'backfillMessageId' | 'appendMergedMessageId'
+  >;
   log: FastifyBaseLogger;
 }
 
@@ -101,6 +104,16 @@ export async function enqueueA2ATargets(
       });
       if (result.outcome === 'enqueued' || result.outcome === 'merged') {
         enqueued.push(catId);
+        // AC-B6-P1: Link triggerMessage.id so QueueProcessor.executeEntry can markDelivered.
+        // Use backfillMessageId for new entries, appendMergedMessageId for merged entries
+        // to avoid overwriting the first entry's messageId (cloud P1).
+        if (result.entry) {
+          if (result.outcome === 'enqueued') {
+            deps.invocationQueue.backfillMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);
+          } else {
+            deps.invocationQueue.appendMergedMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);
+          }
+        }
       }
     }
     // Best-effort auto-ack mentions (same as worklist path)

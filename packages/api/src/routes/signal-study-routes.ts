@@ -4,6 +4,7 @@ import type { ArtifactJobState, ArtifactKind } from '@cat-cafe/shared';
 import { SignalArticleStatusSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveSignalPaths } from '../domains/signals/config/sources-loader.js';
 import { SignalArticleQueryService } from '../domains/signals/services/article-query-service.js';
 import { readInboxRecords } from '../domains/signals/services/inbox-records.js';
@@ -35,7 +36,11 @@ const batchArticleBodySchema = z.object({
     .optional(),
 });
 
-export const signalStudyRoutes: FastifyPluginAsync = async (app) => {
+export interface StudyRouteOptions {
+  threadStore: IThreadStore;
+}
+
+export const signalStudyRoutes: FastifyPluginAsync<StudyRouteOptions> = async (app, opts) => {
   const paths = resolveSignalPaths();
   const articleQuery = new SignalArticleQueryService({ paths });
   const studyMeta = new StudyMetaService();
@@ -135,6 +140,43 @@ export const signalStudyRoutes: FastifyPluginAsync = async (app) => {
     });
 
     return { meta };
+  });
+
+  // Phase 10: resolve or create a study thread for discussion
+  app.post('/api/signals/articles/:id/discuss', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const params = request.params as { id?: string };
+    if (!params.id) {
+      reply.status(400);
+      return { error: 'Article id is required' };
+    }
+
+    const article = await articleQuery.getArticleById(params.id);
+    if (!article) {
+      reply.status(404);
+      return { error: `Article not found: ${params.id}` };
+    }
+
+    const meta = await studyMeta.readMeta(params.id, article.filePath);
+    const existingThread = meta.threads.find((t) => !t.stale);
+    if (existingThread) {
+      return { threadId: existingThread.threadId };
+    }
+
+    // No study thread — create one + link (same pattern as resolveStudyThread in podcast routes)
+    const thread = await opts.threadStore.create(userId, `Study: ${article.title}`);
+    await opts.threadStore.addParticipants(thread.id, ['opus' as never]);
+    await studyMeta.linkThread(params.id, article.filePath, {
+      threadId: thread.id,
+      linkedBy: userId,
+    });
+
+    return { threadId: thread.id };
   });
 
   app.delete('/api/signals/articles/:id/threads/:threadId', async (request, reply) => {

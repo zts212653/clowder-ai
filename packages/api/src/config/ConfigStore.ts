@@ -41,48 +41,6 @@ const CONFIG_KEY_DEFINITIONS: Record<string, ConfigKeyDefinition> = {
     validate: (value) => Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 10,
     riskLevel: 'standard',
   },
-  'hindsight.recallDefaults.budget': {
-    envKey: 'HINDSIGHT_RECALL_DEFAULT_BUDGET',
-    snapshotPath: ['hindsight', 'recallDefaults', 'budget'],
-    validate: (value) => ['low', 'mid', 'high'].includes(value),
-    riskLevel: 'standard',
-  },
-  'hindsight.recallDefaults.tagsMatch': {
-    envKey: 'HINDSIGHT_RECALL_DEFAULT_TAGS_MATCH',
-    snapshotPath: ['hindsight', 'recallDefaults', 'tagsMatch'],
-    validate: (value) => ['all_strict', 'any_strict', 'all', 'any'].includes(value),
-    riskLevel: 'standard',
-  },
-  'hindsight.recallDefaults.limit': {
-    envKey: 'HINDSIGHT_RECALL_DEFAULT_LIMIT',
-    snapshotPath: ['hindsight', 'recallDefaults', 'limit'],
-    validate: (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 20,
-    riskLevel: 'standard',
-  },
-  'hindsight.reflect.dispositionMode': {
-    envKey: 'HINDSIGHT_REFLECT_DISPOSITION_MODE',
-    snapshotPath: ['hindsight', 'reflect', 'dispositionMode'],
-    validate: (value) => ['off', 'template_only'].includes(value),
-    riskLevel: 'standard',
-  },
-  'hindsight.engine.reflect': {
-    envKey: 'HINDSIGHT_ENGINE_REFLECT',
-    snapshotPath: ['hindsight', 'engine', 'reflect'],
-    validate: (value) => ['codex_oauth', 'hindsight_native'].includes(value),
-    riskLevel: 'high',
-  },
-  'hindsight.engine.retainExtraction': {
-    envKey: 'HINDSIGHT_ENGINE_RETAIN_EXTRACTION',
-    snapshotPath: ['hindsight', 'engine', 'retainExtraction'],
-    validate: (value) => ['codex_oauth', 'hindsight_native'].includes(value),
-    riskLevel: 'high',
-  },
-  'hindsight.engine.allowNativeFallback': {
-    envKey: 'HINDSIGHT_ENGINE_ALLOW_NATIVE_FALLBACK',
-    snapshotPath: ['hindsight', 'engine', 'allowNativeFallback'],
-    validate: (value) => ['true', 'false'].includes(value),
-    riskLevel: 'high',
-  },
   'codex.execution.model': {
     envKey: 'CAT_CODEX_EXEC_MODEL',
     snapshotPath: ['codexExecution', 'model'],
