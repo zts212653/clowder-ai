@@ -160,9 +160,21 @@ function Get-InstallerExternalRedisUrl {
     return $rawUrl
 }
 
+function Get-InstallerAnyRedisUrl {
+    param([string]$ProjectRoot)
+    $rawUrl = if ($env:REDIS_URL) {
+        $env:REDIS_URL.Trim()
+    } else {
+        Get-InstallerEnvValueFromFile -EnvFile (Join-Path $ProjectRoot ".env") -Key "REDIS_URL"
+    }
+    if (-not $rawUrl) { return "" }
+    return $rawUrl
+}
+
 function Resolve-InstallerRedisPlan {
     param([string]$ProjectRoot)
     $defaultRedisUrl = Get-InstallerExternalRedisUrl -ProjectRoot $ProjectRoot
+    $anyRedisUrl = Get-InstallerAnyRedisUrl -ProjectRoot $ProjectRoot
     $mode = if (Test-InstallerConsoleUi) {
         $redisOptions = @()
         if ($defaultRedisUrl) {
@@ -173,10 +185,13 @@ function Resolve-InstallerRedisPlan {
             @{ Label = "&Use external Redis URL"; Help = "Use an existing external Redis instance"; Value = "external" }
         )
         Select-InstallerChoice -Title "Redis setup" -Prompt "Choose how this workspace should store runtime data" -Options $redisOptions
-    } elseif ($defaultRedisUrl) { "keep_external" } else { "portable" }
+    } elseif ($defaultRedisUrl) { "keep_external" } elseif ($anyRedisUrl) { "keep_local" } else { "portable" }
 
     if ($mode -eq "keep_external") {
         return [pscustomobject]@{ Mode = "external"; RedisUrl = $defaultRedisUrl }
+    }
+    if ($mode -eq "keep_local") {
+        return [pscustomobject]@{ Mode = "keep_local"; RedisUrl = $anyRedisUrl }
     }
     $redisUrl = if ($mode -eq "external") {
         if (Test-InstallerConsoleUi) { Read-Host "  External Redis URL" } else { $defaultRedisUrl }
@@ -190,10 +205,14 @@ function Resolve-InstallerRedisPlan {
 
 function Apply-InstallerRedisPlan {
     param($State, [string]$ProjectRoot, $Plan)
-    if ($Plan.Mode -eq "external") {
+    if ($Plan.Mode -eq "external" -or $Plan.Mode -eq "keep_local") {
         Set-InstallerEnvValue $State "REDIS_URL" $Plan.RedisUrl
         Add-InstallerEnvDelete $State "MEMORY_STORE"
-        Write-Ok "Using external Redis: $($Plan.RedisUrl)"
+        if ($Plan.Mode -eq "keep_local") {
+            Write-Ok "Preserving local Redis URL: $($Plan.RedisUrl)"
+        } else {
+            Write-Ok "Using external Redis: $($Plan.RedisUrl)"
+        }
         return $true
     }
 

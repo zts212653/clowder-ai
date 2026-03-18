@@ -226,10 +226,33 @@ test('Windows CLI installs use the explicit npm command path and Redis mode only
 test('Windows installer headless Redis planning respects existing external Redis defaults', () => {
   assert.match(uiHelpersScript, /function Get-InstallerExternalRedisUrl/);
   assert.match(uiHelpersScript, /Get-InstallerEnvValueFromFile -EnvFile \(Join-Path \$ProjectRoot "\.env"\) -Key "REDIS_URL"/);
-  assert.match(uiHelpersScript, /\} elseif \(\$defaultRedisUrl\) \{ "keep_external" \} else \{ "portable" \}/);
+  assert.match(uiHelpersScript, /\} elseif \(\$defaultRedisUrl\) \{ "keep_external" \} elseif \(\$anyRedisUrl\) \{ "keep_local" \} else \{ "portable" \}/);
   assert.match(uiHelpersScript, /if \(\$mode -eq "keep_external"\) \{/);
   assert.match(uiHelpersScript, /Mode = "external"; RedisUrl = \$defaultRedisUrl/);
   assert.match(uiHelpersScript, /if \(Test-InstallerConsoleUi\) \{ Read-Host "  External Redis URL" \} else \{ \$defaultRedisUrl \}/);
+});
+
+test('Windows installer headless rerun preserves local authenticated Redis URL via keep_local mode', () => {
+  assert.match(uiHelpersScript, /function Get-InstallerAnyRedisUrl/);
+  assert.match(uiHelpersScript, /\$anyRedisUrl = Get-InstallerAnyRedisUrl -ProjectRoot \$ProjectRoot/);
+  assert.match(uiHelpersScript, /Mode = "keep_local"; RedisUrl = \$anyRedisUrl/);
+  assert.match(uiHelpersScript, /if \(\$Plan\.Mode -eq "external" -or \$Plan\.Mode -eq "keep_local"\) \{/);
+  assert.match(uiHelpersScript, /if \(\$Plan\.Mode -eq "keep_local"\) \{/);
+  assert.match(uiHelpersScript, /Preserving local Redis URL/);
+});
+
+test('Windows service job failure sets exit code 1 instead of falling through with success', () => {
+  assert.match(startWindowsScript, /\$serviceFailure = \$false/);
+  assert.match(startWindowsScript, /\$serviceFailure = \$true/);
+  assert.match(startWindowsScript, /if \(\$serviceFailure\) \{\s+exit 1\s+\}/s);
+});
+
+test('Windows Get-RedisAuthArgs supports Redis 6 ACL username:password URLs', () => {
+  assert.match(helpersScript, /function Get-RedisAuthArgs/);
+  assert.match(helpersScript, /\$parts = \$userInfo -split ":", 2/);
+  assert.match(helpersScript, /if \(\$parts\[0\]\) \{ \$authArgs \+= @\("--user", \$parts\[0\]\) \}/);
+  assert.match(helpersScript, /if \(\$parts\[1\]\) \{ \$authArgs \+= @\("-a", \$parts\[1\]\) \}/);
+  assert.match(helpersScript, /elseif \(\$parts\[0\]\) \{\s+\$authArgs \+= @\("-a", \$parts\[0\]\)\s+\}/s);
 });
 
 test('Windows installer exits immediately when native installs are cancelled by the user', () => {

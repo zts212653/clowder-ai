@@ -386,6 +386,7 @@ try {
     Write-Host ""
 
     # -- Wait ----------------------------------------------------
+    $serviceFailure = $false
     while ($true) {
         # Print any job output
         foreach ($job in $jobs) {
@@ -402,6 +403,7 @@ try {
             foreach ($job in $stoppedJobs) {
                 Write-Warn "Service job '$($job.Name)' stopped ($($job.State))"
             }
+            $serviceFailure = $true
             break
         }
 
@@ -427,4 +429,8 @@ try {
     }
 
     Write-Host "Goodbye!" -ForegroundColor Cyan
+}
+
+if ($serviceFailure) {
+    exit 1
 }

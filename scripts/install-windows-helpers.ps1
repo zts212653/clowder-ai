@@ -122,11 +122,14 @@ function Get-RedisAuthArgs {
         $userInfo = $uri.UserInfo
         if (-not $userInfo) { return @() }
         $parts = $userInfo -split ":", 2
-        if ($parts.Count -eq 2 -and $parts[1]) {
-            return @("-a", $parts[1])
+        $authArgs = @()
+        if ($parts.Count -eq 2) {
+            if ($parts[0]) { $authArgs += @("--user", $parts[0]) }
+            if ($parts[1]) { $authArgs += @("-a", $parts[1]) }
         } elseif ($parts[0]) {
-            return @("-a", $parts[0])
+            $authArgs += @("-a", $parts[0])
         }
+        return $authArgs
     } catch {}
     return @()
 }
