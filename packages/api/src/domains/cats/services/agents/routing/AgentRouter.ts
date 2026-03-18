@@ -563,7 +563,7 @@ export class AgentRouter {
 
   /** Build shared strategy dependencies (public for ModeOrchestrator) */
   getStrategyDeps(): RouteStrategyDeps {
-    const apiPort = process.env.API_SERVER_PORT ?? '3002';
+    const apiPort = process.env.API_SERVER_PORT ?? '3003';
     return {
       services: this.services,
       invocationDeps: {
