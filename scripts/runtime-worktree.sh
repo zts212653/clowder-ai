@@ -72,7 +72,9 @@ require_git_repo() {
 }
 
 is_git_repo() {
-  git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1
+  # Check for .git in the project itself — not a parent repo that happens
+  # to contain this directory (archive unpacked inside another checkout).
+  [ -e "$PROJECT_DIR/.git" ]
 }
 
 worktree_exists() {

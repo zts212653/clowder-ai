@@ -18,9 +18,9 @@ done
 # Apply registry if specified (helps in China / behind proxy)
 use_registry() {
     local reg="$1"
+    # Only export env vars — never write to user-level ~/.npmrc.
+    # npm/pnpm respect these env vars for all operations in this session.
     export npm_config_registry="$reg" NPM_CONFIG_REGISTRY="$reg" PNPM_CONFIG_REGISTRY="$reg"
-    npm config set registry "$reg" 2>/dev/null || true
-    command -v pnpm &>/dev/null && pnpm config set registry "$reg" 2>/dev/null || true
 }
 [[ -n "$NPM_REGISTRY" ]] && use_registry "$NPM_REGISTRY"
 npm_global_install() {
@@ -438,7 +438,6 @@ if ! command -v pnpm &>/dev/null; then
         npm_global_install pnpm || { warn "npm failed — trying npmmirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
     fi
     [[ "$USED_FNM" == true ]] && persist_user_bin pnpm
-    [[ -n "$NPM_REGISTRY" ]] && pnpm config set registry "$NPM_REGISTRY" 2>/dev/null || true
     ok "pnpm $(pnpm -v) installed"
 else ok "pnpm $(pnpm -v) already installed"
 fi
@@ -448,28 +447,14 @@ install_redis_local() {
     $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
     $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; ok "Redis installed and started"
 }
-REDIS_EXTERNAL=false
 if [[ "$MEMORY_MODE" == true ]]; then warn "Memory mode (--memory) — skipping Redis"
 elif command -v redis-server &>/dev/null; then ok "Redis already installed"
     redis-cli ping &>/dev/null 2>&1 || {
         warn "Redis not running — starting..."
         $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; }
 else
-    warn "Redis not found"
-    if [[ "$HAS_TTY" == true ]]; then
-        REDIS_SEL=""
-        tty_select REDIS_SEL "  Redis setup / Redis 配置：" \
-            "Install Redis locally (recommended / 推荐)" \
-            "Use external Redis URL / 使用外部 Redis"
-        if [[ "$REDIS_SEL" == "1" ]]; then
-            tty_read "    Redis URL (e.g. redis://user:pass@host:6379): " REDIS_EXT_URL
-            if [[ -n "$REDIS_EXT_URL" ]]; then
-                ok "External Redis URL saved — will write to .env in step 8"; REDIS_EXTERNAL=true
-            else warn "No URL — falling back to local install"; fi
-        fi
-        [[ "$REDIS_EXTERNAL" == false ]] && install_redis_local
-    else install_redis_local
-    fi
+    warn "Redis not found — installing locally"
+    install_redis_local
 fi
 
 # ── [5/9] Build checked-out project ────────────────────────
@@ -638,11 +623,7 @@ elif [[ -f .env.example ]]; then
     cp .env.example .env; ENV_CREATED=true; ok ".env generated from .env.example"
 else fail ".env.example not found in $PROJECT_DIR"; exit 1
 fi
-# Write deferred Redis URL + collected auth config + Docker detection
-if [[ "$REDIS_EXTERNAL" == true && -n "${REDIS_EXT_URL:-}" ]]; then
-    write_env_key "REDIS_URL" "$REDIS_EXT_URL"
-    ok "External Redis URL written to .env"
-fi
+# Write collected auth config + Docker detection
 for key in "${ENV_DELETE_KEYS[@]}"; do delete_env_key "$key"; done
 for i in "${!ENV_KEYS[@]}"; do write_env_key "${ENV_KEYS[$i]}" "${ENV_VALUES[$i]}"; done
 [[ ${#ENV_KEYS[@]} -gt 0 ]] && ok "Auth config written to .env"

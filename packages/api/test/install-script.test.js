@@ -208,6 +208,24 @@ cat .env
   }
 });
 
+test('use_registry sets only env vars without writing to user npmrc', () => {
+  const tmpHome = mkdtempSync(join(tmpdir(), 'clowder-install-registry-'));
+  try {
+    const output = runSourceOnlySnippet(`
+export HOME="${tmpHome}"
+use_registry "https://mirror.example.test"
+printf 'npm=%s|pnpm=%s' "\$npm_config_registry" "\$PNPM_CONFIG_REGISTRY"
+# Check that no .npmrc was created in the temp home
+[[ -f "${tmpHome}/.npmrc" ]] && printf '|LEAKED' || printf '|CLEAN'
+`);
+    assert.match(output, /npm=https:\/\/mirror\.example\.test/);
+    assert.match(output, /pnpm=https:\/\/mirror\.example\.test/);
+    assert.match(output, /\|CLEAN$/, 'use_registry must not write to ~/.npmrc');
+  } finally {
+    rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
 // ── TTY input compatibility tests ─────────────────────────────────────────
 
 test('tty_read returns empty string when /dev/tty is unavailable (no blocking)', () => {
