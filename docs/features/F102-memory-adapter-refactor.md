@@ -412,7 +412,9 @@ search_evidence(query, {
 - 新增 `kind='thread'`（区别于 `session` = sealed session digest）
 - `anchor = thread-{threadId}`
 - `title = thread.title`
-- `summary = threadMemory.summary`（现成的滚动摘要，不需要 LLM）
+- `summary` = **从 messageStore 读消息内容拼接 turn-by-turn 文本**（KD-32/33：不靠 threadMemory.summary，不导出 markdown）
+  - `[speaker] content` 格式，截取合理长度
+  - 340 个 thread 全部入库（不再跳过无 summary 的）
 - `keywords = [参与者 catId, backlogItemId, feature_ids]`
 - **dirty-thread + 30s debounce flush** 基础设施
   - `messageStore.append()` 后标记 threadId dirty
@@ -603,6 +605,9 @@ search_evidence(query, {
 | KD-29 | **edges 只从显式锚点提取**（frontmatter），不从语义相似度推断——推断关系不可信 | Maine Coon红线：错边会把猫带去错误历史 | 2026-03-16 |
 | KD-30 | **Memory invalidation 翻译自 GitNexus detect_changes**——不做 code impact，做 knowledge invalidation | 三猫共识：对 F102 更有价值的是"改了 ADR → 标依赖文档 needs_review" | 2026-03-16 |
 | KD-31 | **不做代码图谱**——图数据库/Tree-sitter/Leiden/Cypher 是代码智能方案，不是记忆方案 | 三猫+team lead共识："太重了"，解的是错层问题 | 2026-03-16 |
+| KD-32 | **Thread 索引不导出 markdown**——直接从 messageStore 读消息内容编译索引，不转中间层 md 文件 | team lead明确否决 + Maine Coon方案共识：真相源在 Redis（TTL=0 永久），索引是编译产物，导出 md = 重复真相源 | 2026-03-18 |
+| KD-33 | **Thread 索引不靠 threadMemory.summary**——340 thread 中 326 个 summary 为空，必须从消息内容本身提取可搜文本 | team lead指出"threadMemory.summary 不靠谱"，回溯 QMD proposal 确认：正确做法是 turn-by-turn 消息拼接 | 2026-03-18 |
+| KD-34 | **Thread 索引增量更新必须覆盖所有 messageStore.append 调用点（36 个）**——不能只 hook 2 条 HTTP 路由，必须在 messageStore 内部加 post-append callback | team lead问"好几天不重启怎么办"，代价分析：IO/CPU 可忽略（<5ms/thread），真实代价只是"确保覆盖所有写入路径" | 2026-03-18 |
 
 ## Review Gate
 

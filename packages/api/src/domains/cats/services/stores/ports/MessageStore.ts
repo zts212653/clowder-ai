@@ -104,6 +104,8 @@ export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId'> & {
  * Methods that may hit Redis are async; in-memory returns immediately.
  */
 export interface IMessageStore {
+  /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
+  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void;
   append(msg: AppendMessageInput): StoredMessage | Promise<StoredMessage>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
@@ -188,9 +190,15 @@ export class MessageStore {
   private messages: StoredMessage[] = [];
   private readonly maxMessages: number;
   private readonly idempotencyIndex = new Map<string, string>();
+  /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
+  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void;
 
-  constructor(options?: { maxMessages?: number }) {
+  constructor(options?: {
+    maxMessages?: number;
+    onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void;
+  }) {
     this.maxMessages = options?.maxMessages ?? MAX_MESSAGES;
+    this.onAppend = options?.onAppend;
   }
 
   private buildIdempotencyIndexKey(userId: string, threadId: string, idempotencyKey?: string): string | null {
@@ -242,6 +250,16 @@ export class MessageStore {
       const removed = this.messages.slice(0, this.messages.length - this.maxMessages);
       this.messages = this.messages.slice(-this.maxMessages);
       this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
+    }
+
+    // F102 KD-34: fire-and-forget append listener for thread index updates
+    // P2 fix: try-catch handles sync throws; Promise.resolve handles async rejections
+    if (this.onAppend) {
+      try {
+        void Promise.resolve(this.onAppend(stored)).catch(() => {});
+      } catch {
+        /* best-effort */
+      }
     }
 
     return stored;

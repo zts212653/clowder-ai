@@ -33,9 +33,15 @@ export class RedisMessageStore {
   private readonly redis: RedisClient;
   /** null means no expiration/pruning (persistent retention). */
   private readonly ttlSeconds: number | null;
+  /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
+  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void;
 
-  constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
+  constructor(
+    redis: RedisClient,
+    options?: { ttlSeconds?: number; onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void },
+  ) {
     this.redis = redis;
+    this.onAppend = options?.onAppend;
     const ttl = options?.ttlSeconds;
     if (ttl === undefined) {
       this.ttlSeconds = DEFAULT_TTL_SECONDS;
@@ -163,6 +169,17 @@ export class RedisMessageStore {
       }
       throw error;
     }
+
+    // F102 KD-34: fire-and-forget append listener for thread index updates
+    // P2 fix: wrap in try-catch to handle sync throws (Promise.resolve only catches async rejections)
+    if (this.onAppend) {
+      try {
+        void Promise.resolve(this.onAppend(stored)).catch(() => {});
+      } catch {
+        /* best-effort */
+      }
+    }
+
     return stored;
   }
 

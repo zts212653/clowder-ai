@@ -8,7 +8,7 @@ created: 2026-03-12
 
 # F111: Streaming TTS Chunker — 流式分句合成管线
 
-> **Status**: done | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1
+> **Status**: done | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1 | **Completed**: 2026-03-17
 
 ## Why
 

@@ -610,6 +610,21 @@ created: 2026-02-26
 
 - 关联：LL-029 交付物验证 | LL-031 Quality gate 逐字段对账 | LL-006 没有新鲜验证证据不得宣称完成
 
+### LL-033: 云端 review 不能只看 review body state——必须检查 inline code comments
+
+- 状态：validated
+- 更新时间：2026-03-18
+- 坑：PR #543 云端 Codex review 的 review body 显示 `COMMENTED`（通常意味着"no major issues"），但实际在 inline code comment 里提了一个 P1（flushDirtyThreads 用了空的 threadMemory.summary 会 30 秒后删除 rebuild 刚建好的 thread 索引）。Ragdoll只看了 review body 就 merge 了，漏掉了 P1。
+- 根因：`gh pr view` 的 `--json reviews` 只返回 review body，不返回 inline code comments。必须额外调 `gh api repos/.../pulls/N/comments` 才能看到 inline comments。
+- 触发条件：云端 review 给了 `COMMENTED` state + 有 inline P1 code comment。
+- 防护：
+  - merge-gate 流程加一步：**必须检查 inline comments**（`gh api repos/{owner}/{repo}/pulls/{N}/comments`），不能只看 review body
+  - 看到 `COMMENTED` 不等于通过——要看完整 comments 再判断
+- 来源锚点：
+  - PR #543: fix(F102-E): thread indexing reads message content
+  - 铲屎官原话："等会！这个 codex 云端他给你提了 p1 的你怎么就合入了？"
+- 关联：merge-gate skill、云端 review 流程
+
 ---
 
 ## 8) 维护约定

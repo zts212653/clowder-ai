@@ -250,9 +250,9 @@ cat > "$ENV_FILE" <<ENVEOF
 # 由 setup.sh 自动生成
 
 # ── Core 核心 ────────────────────────────────────────────────
-FRONTEND_PORT=3003
-API_SERVER_PORT=3004
-NEXT_PUBLIC_API_URL=http://localhost:3004
+FRONTEND_PORT=3004
+API_SERVER_PORT=3003
+NEXT_PUBLIC_API_URL=http://localhost:3003
 REDIS_PORT=6379
 REDIS_URL=redis://localhost:6379
 
@@ -416,8 +416,8 @@ else
     echo "       启动（无 Redis）: pnpm start --memory"
 fi
 echo ""
-echo "    3. Open http://localhost:3003"
-echo "       打开 http://localhost:3003"
+echo "    3. Open http://localhost:3004"
+echo "       打开 http://localhost:3004"
 echo ""
 
 if [ "$ENABLE_ASR" = true ] || [ "$ENABLE_TTS" = true ] || [ "$ENABLE_LLM_PP" = true ]; then

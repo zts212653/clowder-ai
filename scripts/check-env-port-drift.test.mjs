@@ -154,6 +154,51 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
       `frontend-origin DEFAULT_FRONTEND_BASE_URL should use ${expectedFrontendPort}, got ${fallback}`,
     );
   });
+
+  it(`setup.sh API_SERVER_PORT is ${expectedApiPort}`, () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
+    assert.ok(
+      content.includes(`API_SERVER_PORT=${expectedApiPort}`),
+      `setup.sh should set API_SERVER_PORT=${expectedApiPort}`,
+    );
+  });
+
+  it(`setup.sh FRONTEND_PORT is ${expectedFrontendPort}`, () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
+    assert.ok(
+      content.includes(`FRONTEND_PORT=${expectedFrontendPort}`),
+      `setup.sh should set FRONTEND_PORT=${expectedFrontendPort}`,
+    );
+  });
+
+  it(`setup.sh NEXT_PUBLIC_API_URL uses port ${expectedApiPort}`, () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
+    assert.ok(
+      content.includes(`NEXT_PUBLIC_API_URL=http://localhost:${expectedApiPort}`),
+      `setup.sh should set NEXT_PUBLIC_API_URL to localhost:${expectedApiPort}`,
+    );
+  });
+
+  it(`runtime-worktree.sh API port fallback is ${expectedApiPort}`, () => {
+    const fallback = readTsFallback('scripts/runtime-worktree.sh', /API_SERVER_PORT:-(\d+)/);
+    assert.equal(
+      fallback,
+      expectedApiPort,
+      `runtime-worktree.sh API port fallback should be ${expectedApiPort}, got ${fallback}`,
+    );
+  });
+
+  it(`AgentRouter.ts API port fallback is ${expectedApiPort}`, () => {
+    const fallback = readTsFallback(
+      'packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts',
+      /API_SERVER_PORT\s*\?\?\s*'(\d+)'/,
+    );
+    assert.equal(
+      fallback,
+      expectedApiPort,
+      `AgentRouter.ts API fallback should be ${expectedApiPort}, got ${fallback}`,
+    );
+  });
 });
 
 describe(
@@ -189,6 +234,38 @@ describe(
       assert.ok(
         content.includes("'s/WEB_PORT=${FRONTEND_PORT:-3001}/WEB_PORT=${FRONTEND_PORT:-3004}/g'"),
         'sync script should transform start-dev.sh Frontend fallback 3001→3004',
+      );
+    });
+
+    it('sync-to-opensource.sh transforms setup.sh API port to 3003', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(
+        content.includes("'s/API_SERVER_PORT=3002/API_SERVER_PORT=3003/g'"),
+        'sync script should transform setup.sh API_SERVER_PORT 3002→3003',
+      );
+    });
+
+    it('sync-to-opensource.sh transforms setup.sh Frontend port to 3004', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(
+        content.includes("'s/FRONTEND_PORT=3001/FRONTEND_PORT=3004/g'"),
+        'sync script should transform setup.sh FRONTEND_PORT 3001→3004',
+      );
+    });
+
+    it('sync-to-opensource.sh transforms runtime-worktree.sh API port to 3003', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(
+        content.includes("'s/API_SERVER_PORT:-3002/API_SERVER_PORT:-3003/g'"),
+        'sync script should transform runtime-worktree.sh API port 3002→3003',
+      );
+    });
+
+    it('sync-to-opensource.sh transforms AgentRouter.ts API port to 3003', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(
+        content.includes("process.env.API_SERVER_PORT ?? '3003'"),
+        'sync script should transform AgentRouter.ts API port 3002→3003',
       );
     });
   },

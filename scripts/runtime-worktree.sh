@@ -85,7 +85,7 @@ ensure_remote_exists() {
 }
 
 is_api_running() {
-  local port="${API_SERVER_PORT:-3002}"
+  local port="${API_SERVER_PORT:-3003}"
   lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
 }
 
