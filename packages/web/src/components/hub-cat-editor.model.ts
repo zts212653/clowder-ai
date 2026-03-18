@@ -334,6 +334,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
       ...common,
       ...(cat ? {} : { catId: trimText(form.catId) }),
       client: 'antigravity' as const,
+      ...providerProfilePatch,
       defaultModel: trimText(form.defaultModel),
       commandArgs: splitCommandArgs(form.commandArgs),
     };

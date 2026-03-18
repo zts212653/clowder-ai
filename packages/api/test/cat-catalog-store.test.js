@@ -164,6 +164,39 @@ describe('cat-catalog-store', () => {
     assert.equal(afterRaw, beforeRaw, 'failed update must not corrupt persisted runtime catalog');
   });
 
+  it('rejects runtime members that reuse an alias from another cat', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const catalogPath = resolveCatCatalogPath(projectRoot);
+    const beforeRaw = readFileSync(catalogPath, 'utf-8');
+
+    assert.throws(
+      () => {
+        createRuntimeCat(projectRoot, {
+          catId: 'spark-lite',
+          breedId: 'spark-lite',
+          name: '火花猫',
+          displayName: '火花猫',
+          avatar: '/avatars/spark.png',
+          color: { primary: '#f97316', secondary: '#fed7aa' },
+          mentionPatterns: ['@opus', '@spark-lite'],
+          roleDescription: '快速执行',
+          provider: 'openai',
+          defaultModel: 'gpt-5.4',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'json' },
+        });
+      },
+      /mention alias "@opus" is already used by cat "opus"/i,
+    );
+
+    const afterRaw = readFileSync(catalogPath, 'utf-8');
+    assert.equal(afterRaw, beforeRaw, 'failed create must not mutate runtime catalog');
+  });
+
   it('deletes a runtime-created member without touching the rest of the catalog', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');

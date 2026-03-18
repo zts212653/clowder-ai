@@ -10,6 +10,7 @@ import { type CatConfig, catRegistry, type CatProvider, type ContextBudget, type
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
+import { readProviderProfiles } from '../config/provider-profiles.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
 
 const DEFAULT_TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../cat-template.json');
@@ -149,6 +150,57 @@ function defaultCliForClient(client: CatProvider) {
   }
 }
 
+function protocolForClient(client: CatProvider): 'anthropic' | 'openai' | 'google' | null {
+  switch (client) {
+    case 'anthropic':
+      return 'anthropic';
+    case 'openai':
+      return 'openai';
+    case 'google':
+      return 'google';
+    case 'dare':
+      return 'openai';
+    case 'opencode':
+      return 'anthropic';
+    case 'antigravity':
+      return null;
+  }
+}
+
+async function validateProviderBindingOrThrow(params: {
+  projectRoot: string;
+  client: CatProvider;
+  defaultModel: string;
+  providerProfileId?: string;
+}) {
+  const trimmedProfileId = params.providerProfileId?.trim();
+  const protocol = protocolForClient(params.client);
+  if (protocol == null) {
+    if (trimmedProfileId) {
+      throw new Error('antigravity client does not support providerProfileId');
+    }
+    return;
+  }
+  if (!trimmedProfileId) return;
+
+  const profiles = await readProviderProfiles(params.projectRoot);
+  const profile = profiles.providers.find((item) => item.id === trimmedProfileId);
+  if (!profile) {
+    throw new Error(`provider profile "${trimmedProfileId}" not found`);
+  }
+  if (profile.protocol !== protocol) {
+    throw new Error(
+      `provider profile "${trimmedProfileId}" protocol "${profile.protocol}" is incompatible with client "${params.client}"`,
+    );
+  }
+  if ((params.client === 'dare' || params.client === 'opencode') && profile.authType !== 'api_key') {
+    throw new Error(`client "${params.client}" requires an api_key provider profile`);
+  }
+  if (profile.models.length > 0 && !profile.models.includes(params.defaultModel)) {
+    throw new Error(`model "${params.defaultModel}" is not available in provider profile "${trimmedProfileId}"`);
+  }
+}
+
 function toCatResponse(cat: CatConfig & { contextBudget?: ContextBudget }, metadata: CatResponseMetadata) {
   return {
     id: cat.id,
@@ -255,54 +307,66 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const projectRoot = resolveProjectRoot();
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     const body = parsed.data;
-    if (body.client === 'antigravity') {
-      createRuntimeCat(projectRoot, {
-        catId: body.catId,
-        name: body.name,
-        displayName: body.displayName,
-        nickname: body.nickname,
-        avatar: body.avatar,
-        color: body.color,
-        mentionPatterns: body.mentionPatterns,
-        providerProfileId: body.providerProfileId,
-        contextBudget: body.contextBudget,
-        roleDescription: body.roleDescription,
-        personality: body.personality,
-        teamStrengths: body.teamStrengths,
-        caution: body.caution,
-        strengths: body.strengths,
-        sessionChain: body.sessionChain,
-        provider: 'antigravity',
+    try {
+      await validateProviderBindingOrThrow({
+        projectRoot,
+        client: body.client,
         defaultModel: body.defaultModel,
-        mcpSupport: false,
-        cli: {
-          ...defaultCliForClient('antigravity'),
-          ...(body.commandArgs ? { defaultArgs: body.commandArgs } : {}),
-        },
-        commandArgs: body.commandArgs,
-      });
-    } else {
-      createRuntimeCat(projectRoot, {
-        catId: body.catId,
-        name: body.name,
-        displayName: body.displayName,
-        nickname: body.nickname,
-        avatar: body.avatar,
-        color: body.color,
-        mentionPatterns: body.mentionPatterns,
         providerProfileId: body.providerProfileId,
-        contextBudget: body.contextBudget,
-        roleDescription: body.roleDescription,
-        personality: body.personality,
-        teamStrengths: body.teamStrengths,
-        caution: body.caution,
-        strengths: body.strengths,
-        sessionChain: body.sessionChain,
-        provider: body.client,
-        defaultModel: body.defaultModel,
-        mcpSupport: body.mcpSupport ?? body.client === 'anthropic',
-        cli: body.cli ?? defaultCliForClient(body.client),
       });
+      if (body.client === 'antigravity') {
+        createRuntimeCat(projectRoot, {
+          catId: body.catId,
+          name: body.name,
+          displayName: body.displayName,
+          nickname: body.nickname,
+          avatar: body.avatar,
+          color: body.color,
+          mentionPatterns: body.mentionPatterns,
+          providerProfileId: body.providerProfileId,
+          contextBudget: body.contextBudget,
+          roleDescription: body.roleDescription,
+          personality: body.personality,
+          teamStrengths: body.teamStrengths,
+          caution: body.caution,
+          strengths: body.strengths,
+          sessionChain: body.sessionChain,
+          provider: 'antigravity',
+          defaultModel: body.defaultModel,
+          mcpSupport: false,
+          cli: {
+            ...defaultCliForClient('antigravity'),
+            ...(body.commandArgs ? { defaultArgs: body.commandArgs } : {}),
+          },
+          commandArgs: body.commandArgs,
+        });
+      } else {
+        createRuntimeCat(projectRoot, {
+          catId: body.catId,
+          name: body.name,
+          displayName: body.displayName,
+          nickname: body.nickname,
+          avatar: body.avatar,
+          color: body.color,
+          mentionPatterns: body.mentionPatterns,
+          providerProfileId: body.providerProfileId,
+          contextBudget: body.contextBudget,
+          roleDescription: body.roleDescription,
+          personality: body.personality,
+          teamStrengths: body.teamStrengths,
+          caution: body.caution,
+          strengths: body.strengths,
+          sessionChain: body.sessionChain,
+          provider: body.client,
+          defaultModel: body.defaultModel,
+          mcpSupport: body.mcpSupport ?? body.client === 'anthropic',
+          cli: body.cli ?? defaultCliForClient(body.client),
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      reply.status(400);
+      return { error: message };
     }
 
     const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore, opts.onCatalogChanged);
@@ -327,6 +391,29 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const body = parsed.data;
     const projectRoot = resolveProjectRoot();
+    const currentCat = getResolvedCats()[request.params.id] ?? catRegistry.tryGet(request.params.id)?.config;
+    if (!currentCat) {
+      reply.status(404);
+      return { error: `Cat "${request.params.id}" not found` };
+    }
+    const effectiveClient = body.client ?? currentCat.provider;
+    const effectiveDefaultModel = body.defaultModel ?? currentCat.defaultModel;
+    const effectiveProviderProfileId =
+      body.providerProfileId !== undefined ? (body.providerProfileId ?? undefined) : currentCat.providerProfileId;
+
+    try {
+      await validateProviderBindingOrThrow({
+        projectRoot,
+        client: effectiveClient,
+        defaultModel: effectiveDefaultModel,
+        providerProfileId: effectiveProviderProfileId,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      reply.status(400);
+      return { error: message };
+    }
+
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     updateRuntimeCat(projectRoot, request.params.id, {
       ...(body.name !== undefined ? { name: body.name } : {}),

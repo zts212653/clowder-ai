@@ -113,11 +113,29 @@ function validatePersistedCatalog(projectRoot: string): CatCafeConfig {
   return loadCatConfig(join(projectRoot, '.cat-cafe', 'cat-catalog.json'));
 }
 
+function assertUniqueMentionAliases(catalog: CatCafeConfig): void {
+  const aliasOwners = new Map<string, string>();
+  for (const [catId, config] of Object.entries(toAllCatConfigs(catalog))) {
+    for (const mentionPattern of config.mentionPatterns) {
+      const trimmed = mentionPattern.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      const owner = aliasOwners.get(key);
+      if (owner && owner !== catId) {
+        throw new Error(`mention alias "${trimmed}" is already used by cat "${owner}"`);
+      }
+      aliasOwners.set(key, catId);
+    }
+  }
+}
+
 function writeAndValidateCatalog(projectRoot: string, catalog: unknown): CatCafeConfig {
+  const candidate = catalog as CatCafeConfig;
+  assertUniqueMentionAliases(candidate);
   const catalogPath = resolveCatCatalogPath(projectRoot);
   const tempPath = `${catalogPath}.tmp-${process.pid}-${Date.now()}`;
   mkdirSync(dirname(catalogPath), { recursive: true });
-  writeFileSync(tempPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8');
+  writeFileSync(tempPath, `${JSON.stringify(candidate, null, 2)}\n`, 'utf-8');
   try {
     loadCatConfig(tempPath);
     renameSync(tempPath, catalogPath);

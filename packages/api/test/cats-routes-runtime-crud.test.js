@@ -125,7 +125,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         strengths: ['precision', 'speed'],
         sessionChain: true,
         client: 'openai',
-        defaultModel: 'gpt-5.4-mini',
+        defaultModel: 'gpt-5.4',
         contextBudget: {
           maxPromptTokens: 24000,
           maxContextTokens: 16000,
@@ -193,7 +193,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        providerProfileId: 'codex-sponsor',
+        providerProfileId: 'codex-oauth',
       }),
     });
     assert.equal(bindProviderRes.statusCode, 200);
@@ -277,6 +277,53 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(statusRes.statusCode, 200);
     const statusBody = JSON.parse(statusRes.body);
     assert.equal(statusBody.id, 'runtime-antigravity');
+  });
+
+  it('PATCH /api/cats/:id rejects provider bindings incompatible with client protocol', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-codex',
+        name: '运行时缅因猫',
+        displayName: '运行时缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-codex'],
+        roleDescription: '审查',
+        client: 'openai',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        providerProfileId: 'claude-oauth',
+      }),
+    });
+    assert.equal(patchRes.statusCode, 400);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.match(patchBody.error, /incompatible with client "openai"/i);
   });
 
   it('DELETE /api/cats/:id removes runtime members from subsequent reads', async () => {
