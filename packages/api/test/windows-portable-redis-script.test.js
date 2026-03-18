@@ -320,6 +320,7 @@ test('Windows stop script only stops Clowder-owned API and frontend listeners', 
   assert.match(stopWindowsScript, /\$isClowderOwned = \$isManagedPid -or \(Test-ClowderOwnedProcess -ProcessId \$conn\.OwningProcess -ClowderProjectRoot \$ProjectRoot\)/);
   assert.match(stopWindowsScript, /Write-Warn "Skipping non-Clowder \$Name listener on port \$Port/);
   assert.match(stopWindowsScript, /Write-Warn "\$Name \(port \$Port\) - no Clowder-owned listener found"/);
+  assert.match(stopWindowsScript, /\$normalizedRoot = \$ClowderProjectRoot\.TrimEnd\('\\', '\/'\) \+ '\\'/);
 });
 
 test('Windows startup preserves runtime Redis overrides, validates artifacts, and exits when service jobs stop', () => {
@@ -349,6 +350,15 @@ test('Windows Redis URL handling preserves external backends and treats localhos
   assert.match(stopWindowsScript, /\$configuredRedisUrl = if \(\$env:REDIS_URL\) \{ \$env:REDIS_URL\.Trim\(\) \} else \{ Get-InstallerEnvValueFromFile -EnvFile \$envFile -Key "REDIS_URL" \}/);
   assert.match(stopWindowsScript, /if \(\$configuredRedisUrl -and -not \(Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort\)\) \{/);
   assert.match(stopWindowsScript, /Write-Warn "Skipping local Redis shutdown because REDIS_URL points to an external host"/);
+});
+
+test('Windows startup preserves configured REDIS_URL with DB suffix and credentials when local Redis is already running', () => {
+  assert.match(startWindowsScript, /if \(\$configuredRedisUrl\) \{\s+\$env:REDIS_URL = \$configuredRedisUrl\s+\} else \{\s+\$env:REDIS_URL = "redis:\/\/localhost:\$RedisPort"\s+\}/s);
+});
+
+test('Windows installer filters local Redis URLs from external default to avoid misleading keep_external option', () => {
+  assert.match(uiHelpersScript, /Test-LocalRedisUrl -RedisUrl \$rawUrl -RedisPort \$redisPort/);
+  assert.match(uiHelpersScript, /if \(Test-LocalRedisUrl -RedisUrl \$rawUrl -RedisPort \$redisPort\) \{ return "" \}/);
 });
 
 test('Windows startup only stops Clowder-owned listeners and records managed service PIDs', () => {

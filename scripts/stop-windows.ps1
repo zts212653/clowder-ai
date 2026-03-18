@@ -84,7 +84,8 @@ function Stop-PortProcess {
         if (-not $commandLine) {
             return $false
         }
-        return $commandLine -like "*$ClowderProjectRoot*"
+        $normalizedRoot = $ClowderProjectRoot.TrimEnd('\', '/') + '\'
+        return ($commandLine -like "*$normalizedRoot*") -or ($commandLine -like "*$ClowderProjectRoot`"*") -or ($commandLine -like "*$ClowderProjectRoot'*")
     }
 
     $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue

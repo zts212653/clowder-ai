@@ -148,10 +148,16 @@ function Get-InstallerEnvValueFromFile {
 
 function Get-InstallerExternalRedisUrl {
     param([string]$ProjectRoot)
-    if ($env:REDIS_URL) {
-        return $env:REDIS_URL.Trim()
+    $rawUrl = if ($env:REDIS_URL) {
+        $env:REDIS_URL.Trim()
+    } else {
+        Get-InstallerEnvValueFromFile -EnvFile (Join-Path $ProjectRoot ".env") -Key "REDIS_URL"
     }
-    return (Get-InstallerEnvValueFromFile -EnvFile (Join-Path $ProjectRoot ".env") -Key "REDIS_URL")
+    if (-not $rawUrl) { return "" }
+    $redisPort = Get-InstallerEnvValueFromFile -EnvFile (Join-Path $ProjectRoot ".env") -Key "REDIS_PORT"
+    if (-not $redisPort) { $redisPort = "6379" }
+    if (Test-LocalRedisUrl -RedisUrl $rawUrl -RedisPort $redisPort) { return "" }
+    return $rawUrl
 }
 
 function Resolve-InstallerRedisPlan {
