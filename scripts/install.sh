@@ -289,9 +289,64 @@ project_allowed_roots() {
         default_project_allowed_roots
     fi
 }
+normalize_path_lexically() {
+    local path="$1" segment="" absolute=""
+    local -a segments=() normalized=()
+    [[ -n "$path" ]] || return 1
+
+    if [[ "$path" == /* ]]; then
+        absolute="$path"
+    else
+        absolute="$PWD/$path"
+    fi
+    while [[ "$absolute" == *'//'*
+    ]]; do
+        absolute="${absolute//\/\//\/}"
+    done
+
+    IFS='/' read -r -a segments <<< "$absolute"
+    for segment in "${segments[@]}"; do
+        case "$segment" in
+            ''|'.') ;;
+            '..')
+                if ((${#normalized[@]} > 0)); then
+                    unset "normalized[$((${#normalized[@]} - 1))]"
+                fi
+                ;;
+            *) normalized+=("$segment") ;;
+        esac
+    done
+
+    if ((${#normalized[@]} == 0)); then
+        printf '/\n'
+        return 0
+    fi
+
+    local output=""
+    for segment in "${normalized[@]}"; do
+        output+="/$segment"
+    done
+    printf '%s\n' "$output"
+}
+normalize_path_for_compare() {
+    local path="$1" resolved=""
+    [[ -n "$path" ]] || return 1
+
+    if command -v realpath &>/dev/null && [[ -e "$path" ]]; then
+        resolved="$(realpath "$path" 2>/dev/null || true)"
+        [[ -n "$resolved" ]] && {
+            printf '%s\n' "$resolved"
+            return 0
+        }
+    fi
+
+    normalize_path_lexically "$path"
+}
 path_is_under_root() {
     local root="$1" candidate="$2"
     [[ -n "$root" && -n "$candidate" ]] || return 1
+    root="$(normalize_path_for_compare "$root")" || return 1
+    candidate="$(normalize_path_for_compare "$candidate")" || return 1
     if [[ "$root" == "/" ]]; then
         [[ "$candidate" == /* ]]; return
     fi
@@ -355,7 +410,8 @@ resolve_provider_profiles_dir() {
         common_git_dir_resolved="$(realpath "$common_git_dir" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         [[ "$commondir_resolved" == "$common_git_dir_resolved" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
 
-        candidate="$(cd "$(dirname "$common_git_dir")" 2>/dev/null && pwd)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        candidate="$(dirname "$common_git_dir_resolved")"
+        candidate="$(normalize_path_for_compare "$candidate" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         candidate_root_is_allowed "$candidate" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         printf '%s/.cat-cafe\n' "$candidate"; return
     fi
