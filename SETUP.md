@@ -36,7 +36,7 @@ pnpm start
 This starts the stable runtime environment. Use these entrypoints:
 
 - `pnpm start` — stable runtime environment (runtime worktree)
-- `pnpm start:direct` — stable start from the current directory/worktree
+- `pnpm start:direct` — stable start from the current directory/worktree (`next start` + non-watch API)
 - `pnpm dev:direct` — hot-reload development start from the current directory/worktree
 
 `--quick` only means "reuse existing build outputs and skip rebuilding". It does not switch dev/prod mode.
@@ -234,7 +234,7 @@ pnpm hindsight:stop     # Shut down
 pnpm start                     # Stable runtime environment (runtime worktree)
 pnpm start --quick             # Reuse existing runtime build outputs
 pnpm start --memory            # Runtime environment without Redis
-pnpm start:direct              # Stable start from current directory/worktree
+pnpm start:direct              # Stable start from current directory/worktree (non-watch API)
 pnpm start:direct --quick      # Reuse current-directory build outputs
 pnpm dev:direct                # Hot-reload development start from current directory/worktree
 
@@ -295,7 +295,7 @@ pnpm start
 这会启动稳定的 runtime 环境。按场景使用下面这些入口：
 
 - `pnpm start` — 稳定的 runtime 环境（runtime worktree）
-- `pnpm start:direct` — 从当前目录/worktree 稳定启动
+- `pnpm start:direct` — 从当前目录/worktree 稳定启动（`next start` + 非 watch API）
 - `pnpm dev:direct` — 从当前目录/worktree 以热重载开发模式启动
 
 `--quick` 只表示“复用已有构建产物，跳过重复构建”，不负责切换 dev/prod 模式。
@@ -493,7 +493,7 @@ pnpm hindsight:stop     # 关闭
 pnpm start                     # 稳定的 runtime 环境（runtime worktree）
 pnpm start --quick             # 复用已有 runtime 构建产物
 pnpm start --memory            # 无 Redis 的 runtime 环境
-pnpm start:direct              # 从当前目录/worktree 稳定启动
+pnpm start:direct              # 从当前目录/worktree 稳定启动（非 watch API）
 pnpm start:direct --quick      # 复用当前目录的构建产物
 pnpm dev:direct                # 从当前目录/worktree 以热重载开发模式启动
 

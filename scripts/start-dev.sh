@@ -3,8 +3,8 @@
 # Cat Cafe 启动脚本（底层实现）
 # 用户入口:
 #   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
-#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web）
-#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载)
+#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + 非 watch API + 优先当前 .env 端口）
+#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，优先当前 .env 端口)
 #
 # 直接调用脚本:
 #   ./scripts/start-dev.sh            — 开发模式 (next dev + Redis 持久化)
@@ -81,10 +81,12 @@ CLI_REDIS_PORT_OVERRIDE="${REDIS_PORT-}"
 CLI_REDIS_DATA_DIR_OVERRIDE="${REDIS_DATA_DIR-}"
 CLI_REDIS_BACKUP_DIR_OVERRIDE="${REDIS_BACKUP_DIR-}"
 CLI_NEXT_PUBLIC_API_URL_OVERRIDE="${NEXT_PUBLIC_API_URL-}"
+CLI_PREVIEW_GATEWAY_PORT_OVERRIDE="${PREVIEW_GATEWAY_PORT-}"
 CLI_ANTHROPIC_PROXY_PORT_OVERRIDE="${ANTHROPIC_PROXY_PORT-}"
 CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
 CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
 CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
+PREFER_DOTENV_PORTS="${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}"
 
 if [ -f .env ]; then
     set -a
@@ -99,16 +101,19 @@ restore_cli_override() {
     export "$name=$value"
 }
 
-restore_cli_override "FRONTEND_PORT" "$CLI_FRONTEND_PORT_OVERRIDE"
-restore_cli_override "API_SERVER_PORT" "$CLI_API_SERVER_PORT_OVERRIDE"
-restore_cli_override "REDIS_PORT" "$CLI_REDIS_PORT_OVERRIDE"
-restore_cli_override "REDIS_DATA_DIR" "$CLI_REDIS_DATA_DIR_OVERRIDE"
-restore_cli_override "REDIS_BACKUP_DIR" "$CLI_REDIS_BACKUP_DIR_OVERRIDE"
-restore_cli_override "NEXT_PUBLIC_API_URL" "$CLI_NEXT_PUBLIC_API_URL_OVERRIDE"
-restore_cli_override "ANTHROPIC_PROXY_PORT" "$CLI_ANTHROPIC_PROXY_PORT_OVERRIDE"
-restore_cli_override "WHISPER_PORT" "$CLI_WHISPER_PORT_OVERRIDE"
-restore_cli_override "TTS_PORT" "$CLI_TTS_PORT_OVERRIDE"
-restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
+if [ "$PREFER_DOTENV_PORTS" != "1" ]; then
+    restore_cli_override "FRONTEND_PORT" "$CLI_FRONTEND_PORT_OVERRIDE"
+    restore_cli_override "API_SERVER_PORT" "$CLI_API_SERVER_PORT_OVERRIDE"
+    restore_cli_override "REDIS_PORT" "$CLI_REDIS_PORT_OVERRIDE"
+    restore_cli_override "REDIS_DATA_DIR" "$CLI_REDIS_DATA_DIR_OVERRIDE"
+    restore_cli_override "REDIS_BACKUP_DIR" "$CLI_REDIS_BACKUP_DIR_OVERRIDE"
+    restore_cli_override "NEXT_PUBLIC_API_URL" "$CLI_NEXT_PUBLIC_API_URL_OVERRIDE"
+    restore_cli_override "PREVIEW_GATEWAY_PORT" "$CLI_PREVIEW_GATEWAY_PORT_OVERRIDE"
+    restore_cli_override "ANTHROPIC_PROXY_PORT" "$CLI_ANTHROPIC_PROXY_PORT_OVERRIDE"
+    restore_cli_override "WHISPER_PORT" "$CLI_WHISPER_PORT_OVERRIDE"
+    restore_cli_override "TTS_PORT" "$CLI_TTS_PORT_OVERRIDE"
+    restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
+fi
 
 load_dare_env_from_local() {
     local env_file=".env.local"
@@ -303,6 +308,11 @@ kill_port() {
             echo "$pids" | xargs kill -9 2>/dev/null || true
             sleep 1
         fi
+        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            echo -e "${RED}  ✗ 端口 $port 仍被占用，无法继续启动 $name${NC}"
+            return 1
+        fi
         echo -e "${GREEN}  ✓ 端口 $port 已释放${NC}"
     fi
 }
@@ -492,8 +502,12 @@ archive_redis_snapshot() {
     local stamp
     stamp=$(date '+%Y%m%d-%H%M%S')
     local target="$REDIS_BACKUP_DIR/${REDIS_STORAGE_KEY}-${reason}-${stamp}.rdb"
-    cp -p "$source" "$target"
-    echo -e "${GREEN}  ✓ Redis 快照归档: $target${NC}"
+    if cp -p "$source" "$target" 2>/dev/null || cp "$source" "$target" 2>/dev/null; then
+        echo -e "${GREEN}  ✓ Redis 快照归档: $target${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ Redis 快照归档失败，继续启动: $target${NC}"
+        return 0
+    fi
     prune_redis_backups 20
 }
 

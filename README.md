@@ -161,7 +161,7 @@ Options:
 Then run one of the repo start commands:
 
 - `pnpm start` — stable runtime environment (runtime worktree)
-- `pnpm start:direct` — stable start from the current directory/worktree
+- `pnpm start:direct` — stable start from the current directory/worktree (`next start` + non-watch API)
 - `pnpm dev:direct` — hot-reload development start from the current directory/worktree
 
 `--quick` only means "reuse existing build outputs and skip rebuilding". It does not switch dev/prod mode.
@@ -530,7 +530,7 @@ bash scripts/install.sh
 然后按场景选择启动命令：
 
 - `pnpm start` — 稳定的 runtime 环境（runtime worktree）
-- `pnpm start:direct` — 从当前目录/worktree 稳定启动
+- `pnpm start:direct` — 从当前目录/worktree 稳定启动（`next start` + 非 watch API）
 - `pnpm dev:direct` — 从当前目录/worktree 以热重载开发模式启动
 
 `--quick` 只表示“复用已有构建产物，跳过重复构建”，不负责切换 dev/prod 模式。

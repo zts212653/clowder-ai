@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -160,6 +160,45 @@ test('explicit NEXT_PUBLIC_API_URL override survives project .env during direct 
   assert.equal(result.stdout.trim(), 'http://localhost:3035');
 });
 
+test('explicit PREVIEW_GATEWAY_PORT override survives project .env during direct startup', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const result = spawnSync(
+    'bash',
+    ['-lc', `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$PREVIEW_GATEWAY_PORT"`],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PREVIEW_GATEWAY_PORT: '5120',
+      },
+    },
+  );
+
+  assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  assert.equal(result.stdout.trim(), '5120');
+});
+
+test('direct command mode can prefer current .env ports over ambient shell ports', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const result = spawnSync(
+    'bash',
+    ['-lc', `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s|%s' "$FRONTEND_PORT" "$API_SERVER_PORT" "$NEXT_PUBLIC_API_URL"`],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
+        FRONTEND_PORT: '3004',
+        API_SERVER_PORT: '3003',
+        NEXT_PUBLIC_API_URL: 'http://localhost:3003',
+      },
+    },
+  );
+
+  assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  assert.equal(result.stdout.trim(), '3013|3014|http://localhost:3014');
+});
+
 test('redis port override also recomputes isolated redis dirs', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const tempHome = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-override-'));
@@ -185,6 +224,33 @@ test('redis port override also recomputes isolated redis dirs', () => {
     );
   } finally {
     rmSync(tempHome, { recursive: true, force: true });
+  }
+});
+
+test('redis snapshot archive failure warns and does not abort startup flow', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-archive-warn-'));
+  const dataDir = join(tempRoot, 'data');
+  const backupDir = join(tempRoot, 'backup');
+
+  try {
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(backupDir, { recursive: true });
+    writeFileSync(join(dataDir, 'dump.rdb'), 'stub');
+    chmodSync(backupDir, 0o500);
+
+    const result = spawnSync(
+      'bash',
+      ['-lc', `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nREDIS_PORT=65432\nREDIS_STORAGE_KEY=test-65432\nREDIS_DATA_DIR="${dataDir}"\nREDIS_BACKUP_DIR="${backupDir}"\nREDIS_DBFILE=dump.rdb\narchive_redis_snapshot manual\nprintf 'ok'`],
+      { encoding: 'utf8' },
+    );
+
+    assert.equal(result.status, 0, `snapshot failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.match(result.stdout, /Redis 快照归档失败/);
+    assert.match(result.stdout, /ok$/);
+  } finally {
+    chmodSync(backupDir, 0o700);
+    rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
