@@ -1089,6 +1089,116 @@ describe('HubCatEditor', () => {
     expect(codexConfigPatch).toBeTruthy();
   });
 
+  it('does not write session-strategy override when strategy fields are unchanged', async () => {
+    const existingCat = {
+      id: 'codex',
+      name: 'codex',
+      displayName: '缅因猫',
+      provider: 'openai',
+      providerProfileId: 'codex-sponsor',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@codex', '@缅因猫'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      sessionChain: true,
+      contextBudget: {
+        maxPromptTokens: 32000,
+        maxContextTokens: 24000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 8000,
+      },
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                models: ['gpt-5.4'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(
+          jsonResponse({
+            cats: [
+              {
+                catId: 'codex',
+                displayName: '缅因猫',
+                provider: 'openai',
+                effective: {
+                  strategy: 'compress',
+                  thresholds: { warn: 0.6, action: 0.8 },
+                },
+                source: 'breed',
+                hasOverride: false,
+                hybridCapable: false,
+                sessionChainEnabled: true,
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(
+          jsonResponse({
+            config: {
+              cli: { codexSandboxMode: 'workspace-write', codexApprovalPolicy: 'on-request' },
+              codexExecution: { authMode: 'oauth' },
+            },
+          }),
+        );
+      }
+      if (path === '/api/cats/codex' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'codex' } }));
+      }
+      if (path === '/api/config' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ config: {} }));
+      }
+      if (path === '/api/config/session-strategy/codex' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存修改');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const catPatch = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats/codex' && init?.method === 'PATCH');
+    expect(catPatch).toBeTruthy();
+    const strategyPatch = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/config/session-strategy/codex' && init?.method === 'PATCH',
+    );
+    expect(strategyPatch).toBeFalsy();
+  });
+
   it('shows Codex-only runtime controls for any Client=Codex and lets alias chips be removed', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {

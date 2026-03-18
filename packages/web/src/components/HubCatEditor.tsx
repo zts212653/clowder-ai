@@ -44,6 +44,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<HubCatEditorFormState>(() => initialState(cat, draft));
   const [strategyForm, setStrategyForm] = useState<StrategyFormState | null>(null);
+  const [strategyBaseline, setStrategyBaseline] = useState<StrategyFormState | null>(null);
   const [codexSettings, setCodexSettings] = useState<CodexRuntimeSettings | null>(null);
   const [codexBaseline, setCodexBaseline] = useState<CodexRuntimeSettings | null>(null);
 
@@ -89,10 +90,13 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   useEffect(() => {
     if (!open || !cat) {
       setStrategyForm(null);
+      setStrategyBaseline(null);
       setLoadingStrategy(false);
       return;
     }
     let cancelled = false;
+    setStrategyForm(null);
+    setStrategyBaseline(null);
     setLoadingStrategy(true);
     apiFetch('/api/config/session-strategy')
       .then(async (res) => {
@@ -102,7 +106,9 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       .then((body) => {
         if (cancelled) return;
         const entry = body.cats?.find((item) => item.catId === cat.id) ?? null;
-        setStrategyForm(entry ? toStrategyForm(entry) : null);
+        const nextStrategyForm = entry ? toStrategyForm(entry) : null;
+        setStrategyForm(nextStrategyForm);
+        setStrategyBaseline(nextStrategyForm);
       })
       .catch((err) => {
         if (!cancelled) setStrategyError(err instanceof Error ? err.message : 'Session 策略加载失败');
@@ -218,15 +224,19 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       }
 
       if (cat && strategyForm) {
-        const strategyRes = await apiFetch(`/api/config/session-strategy/${cat.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildStrategyPayload(strategyForm)),
-        });
-        if (!strategyRes.ok) {
-          const payload = (await strategyRes.json().catch(() => ({}))) as Record<string, unknown>;
-          setError((payload.error as string) ?? `Session 策略保存失败 (${strategyRes.status})`);
-          return;
+        const nextStrategyPayload = buildStrategyPayload(strategyForm);
+        const baselineStrategyPayload = strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
+        if (JSON.stringify(nextStrategyPayload) !== JSON.stringify(baselineStrategyPayload)) {
+          const strategyRes = await apiFetch(`/api/config/session-strategy/${cat.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nextStrategyPayload),
+          });
+          if (!strategyRes.ok) {
+            const payload = (await strategyRes.json().catch(() => ({}))) as Record<string, unknown>;
+            setError((payload.error as string) ?? `Session 策略保存失败 (${strategyRes.status})`);
+            return;
+          }
         }
       }
 

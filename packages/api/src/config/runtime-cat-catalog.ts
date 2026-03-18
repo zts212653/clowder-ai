@@ -1,10 +1,11 @@
-import { join, resolve } from 'node:path';
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import type { CatBreed, CatCafeConfig, CatColor, CatProvider, CatVariant, CliConfig, ContextBudget } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
 import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { clearVoiceCache } from './cat-voices.js';
-import { bootstrapCatCatalog, readCatCatalog, writeCatCatalog } from './cat-catalog-store.js';
+import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 
 export interface RuntimeCatInput {
   catId: string;
@@ -113,7 +114,21 @@ function validatePersistedCatalog(projectRoot: string): CatCafeConfig {
 }
 
 function writeAndValidateCatalog(projectRoot: string, catalog: unknown): CatCafeConfig {
-  writeCatCatalog(projectRoot, catalog as CatCafeConfig);
+  const catalogPath = resolveCatCatalogPath(projectRoot);
+  const tempPath = `${catalogPath}.tmp-${process.pid}-${Date.now()}`;
+  mkdirSync(dirname(catalogPath), { recursive: true });
+  writeFileSync(tempPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8');
+  try {
+    loadCatConfig(tempPath);
+    renameSync(tempPath, catalogPath);
+  } catch (err) {
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // best-effort cleanup
+    }
+    throw err;
+  }
   return validatePersistedCatalog(projectRoot);
 }
 

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, mock, test } from 'node:test';
-import { AntigravityAgentService } from '../dist/domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
+import {
+  AntigravityAgentService,
+  resolveAntigravityCdpPort,
+} from '../dist/domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
 
 async function collect(iterable) {
   const messages = [];
@@ -33,6 +36,13 @@ function createMockCdpClient({ response = { text: 'Meow!' }, connectError = null
 }
 
 describe('AntigravityAgentService', () => {
+  test('resolves CDP port from antigravity command args', () => {
+    assert.equal(resolveAntigravityCdpPort(['.', '--remote-debugging-port=9010']), 9010);
+    assert.equal(resolveAntigravityCdpPort(['.', '--remote-debugging-port', '9020']), 9020);
+    assert.equal(resolveAntigravityCdpPort(['.', '--remote-debugging-port', 'invalid']), undefined);
+    assert.equal(resolveAntigravityCdpPort(['.', '--remote-debugging-port=99999']), undefined);
+  });
+
   test('yields text + done from successful response', async () => {
     const cdpClient = createMockCdpClient({ response: { text: 'Hello from Antigravity!' } });
     const service = new AntigravityAgentService({

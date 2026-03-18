@@ -37,10 +37,32 @@ function resolveModelLabel(modelId: string): string | undefined {
   return MODEL_LABEL_MAP[modelId];
 }
 
+export function resolveAntigravityCdpPort(commandArgs?: readonly string[]): number | undefined {
+  if (!commandArgs || commandArgs.length === 0) return undefined;
+  for (let index = 0; index < commandArgs.length; index += 1) {
+    const token = commandArgs[index]?.trim();
+    if (!token) continue;
+
+    const inline = token.match(/^--remote-debugging-port=(\d{1,5})$/);
+    if (inline) {
+      const port = Number.parseInt(inline[1], 10);
+      if (port >= 1 && port <= 65_535) return port;
+      continue;
+    }
+
+    if (token !== '--remote-debugging-port') continue;
+    const value = commandArgs[index + 1]?.trim();
+    const port = Number.parseInt(value ?? '', 10);
+    if (port >= 1 && port <= 65_535) return port;
+  }
+  return undefined;
+}
+
 export interface AntigravityAgentServiceOptions {
   catId?: CatId;
   model?: string;
   cdpPort?: number;
+  commandArgs?: readonly string[];
   /** Substring to match in CDP target title (e.g. project name) */
   titleHint?: string;
   /** Inject mock CDP client for testing */
@@ -59,10 +81,11 @@ export class AntigravityAgentService implements AgentService {
         : options.catId
       : createCatId('antigravity');
     this.model = options?.model ?? getCatModel(this.catId as string);
+    const resolvedCdpPort = options?.cdpPort ?? resolveAntigravityCdpPort(options?.commandArgs);
     this.cdpClient =
       options?.cdpClient ??
       new AntigravityCdpClient({
-        ...(options?.cdpPort ? { port: options.cdpPort } : {}),
+        ...(resolvedCdpPort ? { port: resolvedCdpPort } : {}),
         ...(options?.titleHint ? { titleHint: options.titleHint } : {}),
       });
   }

@@ -144,6 +144,26 @@ describe('cat-catalog-store', () => {
     assert.equal(catalog.owner?.mentionPatterns[0], '@co-worker');
   });
 
+  it('does not overwrite runtime catalog when validation fails', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const catalogPath = resolveCatCatalogPath(projectRoot);
+    const beforeRaw = readFileSync(catalogPath, 'utf-8');
+
+    assert.throws(
+      () => {
+        updateRuntimeCat(projectRoot, 'opus', { defaultModel: '' });
+      },
+      /Invalid cat config/i,
+    );
+
+    const afterRaw = readFileSync(catalogPath, 'utf-8');
+    assert.equal(afterRaw, beforeRaw, 'failed update must not corrupt persisted runtime catalog');
+  });
+
   it('deletes a runtime-created member without touching the rest of the catalog', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');
