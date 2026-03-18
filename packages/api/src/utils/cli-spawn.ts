@@ -21,6 +21,9 @@ function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined 
 /** Grace period between SIGTERM and SIGKILL */
 export const KILL_GRACE_MS = 3_000;
 
+/** Grace period after semantic completion before force-killing a lingering process */
+export const SEMANTIC_COMPLETION_GRACE_MS = 5_000;
+
 /**
  * Options for spawnCli (dependency injection for testing)
  */
@@ -236,12 +239,23 @@ export async function* spawnCli(
     // Check for spawn error that arrived during/after iteration
     if (spawnError) throw spawnError;
 
-    // Wait for child to fully exit after stdout closes
-    await exitPromise;
+    // Issue #116: If provider signaled semantic completion, give a short grace period
+    // instead of blocking on full exit. Process gets SEMANTIC_COMPLETION_GRACE_MS to
+    // exit naturally; if it doesn't, killChild() in finally will clean up.
+    const semanticDone = options.semanticCompletionSignal?.aborted === true;
 
-    // Yield error on abnormal exit (only if WE didn't kill it)
+    if (!semanticDone) {
+      // Wait for child to fully exit after stdout closes
+      await exitPromise;
+    } else if (!childExited) {
+      // Grace period: give the process time to exit naturally before force-killing.
+      // If it exits within grace, great; if not, killChild() in finally will clean up.
+      await Promise.race([exitPromise, new Promise<void>((r) => setTimeout(r, SEMANTIC_COMPLETION_GRACE_MS).unref())]);
+    }
+
+    // Yield error on abnormal exit (only if WE didn't kill it AND no semantic completion)
     // Covers both non-zero exitCode AND external signal kills
-    if (!killed && (exitCode !== 0 || exitSignal !== null)) {
+    if (!semanticDone && !killed && (exitCode !== 0 || exitSignal !== null)) {
       const reasonCode = classifyKnownCliStderr(stderrBuffer);
       // Log stderr for debugging (never expose to users — may contain thinking/traces)
       if (stderrBuffer.trim()) {

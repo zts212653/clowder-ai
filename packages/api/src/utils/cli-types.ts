@@ -36,6 +36,11 @@ export interface CliSpawnOptions {
   };
   /** F118 Phase B: Provider-scoped raw archive path for diagnostic enrichment */
   rawArchivePath?: string;
+  /**
+   * Issue #116: Provider signals CLI semantic completion (e.g. turn.completed).
+   * When aborted, spawnCli skips `await exitPromise` — decouples done from process exit.
+   */
+  semanticCompletionSignal?: AbortSignal;
 }
 
 /**
