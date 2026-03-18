@@ -4,6 +4,7 @@
  */
 
 import type { CatId, SessionId } from './ids.js';
+import type { ContextBudget } from './cat-breed.js';
 import { createCatId } from './ids.js';
 
 /**
@@ -41,6 +42,7 @@ export interface CatConfig {
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
   readonly commandArgs?: readonly string[];
+  readonly contextBudget?: ContextBudget;
   readonly roleDescription: string;
   readonly personality: string;
   /** F32-b: Which breed this cat belongs to (for frontend grouping) */

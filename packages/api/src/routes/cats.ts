@@ -6,7 +6,7 @@
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type CatConfig, catRegistry, type CatProvider } from '@cat-cafe/shared';
+import { type CatConfig, type ContextBudget, catRegistry, type CatProvider } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
@@ -17,6 +17,13 @@ const DEFAULT_TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '
 const colorSchema = z.object({
   primary: z.string().min(1),
   secondary: z.string().min(1),
+});
+
+const contextBudgetSchema = z.object({
+  maxPromptTokens: z.number().int().positive(),
+  maxContextTokens: z.number().int().positive(),
+  maxMessages: z.number().int().positive(),
+  maxContentLengthPerMsg: z.number().int().positive(),
 });
 
 const cliSchema = z.object({
@@ -35,6 +42,7 @@ const baseCatSchema = z.object({
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
   providerProfileId: z.string().min(1).optional(),
+  contextBudget: contextBudgetSchema.optional(),
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
 });
@@ -61,6 +69,7 @@ const updateCatSchema = z.object({
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
   providerProfileId: z.string().min(1).optional(),
+  contextBudget: contextBudgetSchema.optional(),
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
   client: clientSchema.optional(),
@@ -101,7 +110,7 @@ function defaultCliForClient(client: CatProvider) {
   }
 }
 
-function toCatResponse(cat: CatConfig) {
+function toCatResponse(cat: CatConfig & { contextBudget?: ContextBudget }) {
   return {
     id: cat.id,
     name: cat.name,
@@ -113,6 +122,7 @@ function toCatResponse(cat: CatConfig) {
     providerProfileId: cat.providerProfileId,
     provider: cat.provider,
     defaultModel: cat.defaultModel,
+    contextBudget: cat.contextBudget,
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,
     personality: cat.personality,
@@ -200,6 +210,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         color: body.color,
         mentionPatterns: body.mentionPatterns,
         providerProfileId: body.providerProfileId,
+        contextBudget: body.contextBudget,
         roleDescription: body.roleDescription,
         personality: body.personality,
         provider: 'antigravity',
@@ -220,6 +231,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         color: body.color,
         mentionPatterns: body.mentionPatterns,
         providerProfileId: body.providerProfileId,
+        contextBudget: body.contextBudget,
         roleDescription: body.roleDescription,
         personality: body.personality,
         provider: body.client,
@@ -258,6 +270,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       ...(body.color !== undefined ? { color: body.color } : {}),
       ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
       ...(body.providerProfileId !== undefined ? { providerProfileId: body.providerProfileId } : {}),
+      ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
       ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
       ...(body.personality !== undefined ? { personality: body.personality } : {}),
       ...(body.client !== undefined ? { provider: body.client } : {}),

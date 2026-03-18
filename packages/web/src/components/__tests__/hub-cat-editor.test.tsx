@@ -193,6 +193,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/provider-profiles') {
         return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
       }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
       if (path === '/api/cats/runtime-antigravity') {
         return Promise.resolve(jsonResponse({ deleted: true }));
       }
@@ -212,5 +215,134 @@ describe('HubCatEditor', () => {
 
     expect(mockApiFetch).toHaveBeenCalledWith('/api/cats/runtime-antigravity', expect.objectContaining({ method: 'DELETE' }));
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads runtime controls for an existing member and saves strategy separately', async () => {
+    const existingCat = {
+      id: 'codex',
+      name: 'codex',
+      displayName: '缅因猫',
+      provider: 'openai',
+      providerProfileId: 'codex-sponsor',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@codex', '@缅因猫'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      personality: 'rigorous',
+      contextBudget: {
+        maxPromptTokens: 32000,
+        maxContextTokens: 24000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 8000,
+      },
+    } as CatData & {
+      contextBudget: {
+        maxPromptTokens: number;
+        maxContextTokens: number;
+        maxMessages: number;
+        maxContentLengthPerMsg: number;
+      };
+    };
+
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                models: ['gpt-5.4'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(
+          jsonResponse({
+            cats: [
+              {
+                catId: 'codex',
+                displayName: '缅因猫',
+                provider: 'openai',
+                effective: {
+                  strategy: 'compress',
+                  thresholds: { warn: 0.6, action: 0.8 },
+                },
+                source: 'runtime_override',
+                hasOverride: true,
+                override: {
+                  strategy: 'compress',
+                  thresholds: { warn: 0.6, action: 0.8 },
+                },
+                hybridCapable: false,
+                sessionChainEnabled: true,
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats/codex' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'codex' } }));
+      }
+      if (path === '/api/config/session-strategy/codex' && init?.method === 'PATCH') {
+        return Promise.resolve(
+          jsonResponse({
+            catId: 'codex',
+            effective: {
+              strategy: 'handoff',
+              thresholds: { warn: 0.55, action: 0.8 },
+            },
+            source: 'runtime_override',
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('Max Prompt Tokens');
+    expect(container.textContent).toContain('Session Strategy');
+
+    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
+    await changeField(queryField(container, 'input[aria-label="Warn Threshold"]'), '0.55');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const catPatch = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats/codex' && init?.method === 'PATCH');
+    expect(catPatch).toBeTruthy();
+    const catPayload = JSON.parse(String(catPatch?.[1]?.body));
+    expect(catPayload.contextBudget.maxPromptTokens).toBe(48000);
+
+    const strategyPatch = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/config/session-strategy/codex' && init?.method === 'PATCH',
+    );
+    expect(strategyPatch).toBeTruthy();
+    const strategyPayload = JSON.parse(String(strategyPatch?.[1]?.body));
+    expect(strategyPayload.strategy).toBe('handoff');
+    expect(strategyPayload.thresholds.warn).toBe(0.55);
   });
 });

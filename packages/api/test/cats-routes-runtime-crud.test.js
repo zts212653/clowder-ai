@@ -121,6 +121,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         personality: '利落',
         client: 'openai',
         defaultModel: 'gpt-5.4-mini',
+        contextBudget: {
+          maxPromptTokens: 24000,
+          maxContextTokens: 16000,
+          maxMessages: 24,
+          maxContentLengthPerMsg: 6000,
+        },
         mcpSupport: false,
         cli: { command: 'codex', outputFormat: 'json' },
       }),
@@ -140,6 +146,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       body: JSON.stringify({
         displayName: '运行时火花猫',
         mentionPatterns: ['@runtime-spark', '@运行时火花'],
+        contextBudget: {
+          maxPromptTokens: 36000,
+          maxContextTokens: 22000,
+          maxMessages: 36,
+          maxContentLengthPerMsg: 9000,
+        },
       }),
     });
     assert.equal(patchRes.statusCode, 200);
@@ -151,6 +163,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.ok(runtimeCat, 'runtime-spark should appear in /api/cats');
     assert.equal(runtimeCat.displayName, '运行时火花猫');
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-spark', '@运行时火花']);
+    assert.deepEqual(runtimeCat.contextBudget, {
+      maxPromptTokens: 36000,
+      maxContextTokens: 22000,
+      maxMessages: 36,
+      maxContentLengthPerMsg: 9000,
+    });
 
     const mentions = parseA2AMentions('@运行时火花 请跟进这个分支', createCatId('opus'));
     assert.ok(mentions.includes('runtime-spark'), 'new alias should route immediately');

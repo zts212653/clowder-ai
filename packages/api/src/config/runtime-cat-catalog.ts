@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path';
-import type { CatBreed, CatCafeConfig, CatColor, CatProvider, CatVariant, CliConfig } from '@cat-cafe/shared';
+import type { CatBreed, CatCafeConfig, CatColor, CatProvider, CatVariant, CliConfig, ContextBudget } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
 import { _resetCachedConfig, loadCatConfig } from './cat-config-loader.js';
@@ -23,6 +23,7 @@ export interface RuntimeCatInput {
   mcpSupport: boolean;
   cli: CliConfig;
   commandArgs?: string[];
+  contextBudget?: ContextBudget;
 }
 
 export interface RuntimeCatUpdate {
@@ -40,6 +41,7 @@ export interface RuntimeCatUpdate {
   mcpSupport?: boolean;
   cli?: CliConfig;
   commandArgs?: string[];
+  contextBudget?: ContextBudget;
 }
 
 interface BreedVariantLocation {
@@ -139,6 +141,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { providerProfileId: input.providerProfileId.trim() }
           : {}),
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
+        ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
         ...(input.personality != null && input.personality.trim().length > 0 ? { personality: input.personality } : {}),
       },
     ],
@@ -237,6 +240,7 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
   if (patch.cli !== undefined) variant.cli = patch.cli;
+  if (patch.contextBudget !== undefined) variant.contextBudget = patch.contextBudget;
   if (patch.commandArgs !== undefined) {
     if (patch.commandArgs.length > 0) {
       variant.commandArgs = patch.commandArgs;

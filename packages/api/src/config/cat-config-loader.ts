@@ -14,6 +14,7 @@ import type {
   CatFeatures,
   CatId,
   CatVariant,
+  ContextBudget,
   MissionHubSelfClaimScope,
   OwnerConfig,
   ReviewPolicy,
@@ -289,7 +290,12 @@ export function getDefaultVariant(breed: CatBreed): CatVariant {
  * @throws Error on duplicate catId (fail-fast at startup)
  */
 export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig> {
-  const result: Record<string, CatConfig> = {};
+  const result: Record<
+    string,
+    CatConfig & {
+      contextBudget?: ContextBudget;
+    }
+  > = {};
   for (const breed of config.breeds) {
     // F32-b P4c: resolve default variant personality for non-default fallback
     const defaultVariant = breed.variants.find((v) => v.id === breed.defaultVariantId);
@@ -329,6 +335,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
         ...(variant.commandArgs != null ? { commandArgs: variant.commandArgs } : {}),
+        ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
         roleDescription: breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
         breedId: breed.id,

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import type { ProfileItem, ProviderProfilesResponse } from './hub-provider-profiles.types';
+import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
 type ClientValue = 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode' | 'antigravity';
 
@@ -74,19 +75,93 @@ function initialState(cat?: CatData | null) {
     providerProfileId: cat?.providerProfileId ?? '',
     defaultModel: cat?.defaultModel ?? '',
     commandArgs: cat?.commandArgs?.join(' ') ?? '',
+    maxPromptTokens: cat?.contextBudget ? String(cat.contextBudget.maxPromptTokens) : '',
+    maxContextTokens: cat?.contextBudget ? String(cat.contextBudget.maxContextTokens) : '',
+    maxMessages: cat?.contextBudget ? String(cat.contextBudget.maxMessages) : '',
+    maxContentLengthPerMsg: cat?.contextBudget ? String(cat.contextBudget.maxContentLengthPerMsg) : '',
   };
+}
+
+function buildContextBudget(form: ReturnType<typeof initialState>) {
+  const values = [
+    form.maxPromptTokens,
+    form.maxContextTokens,
+    form.maxMessages,
+    form.maxContentLengthPerMsg,
+  ].map((value) => value.trim());
+  if (values.every((value) => value.length === 0)) return undefined;
+
+  const parsed = values.map((value) => Number.parseInt(value, 10));
+  if (parsed.some((value) => !Number.isFinite(value) || value <= 0)) {
+    throw new Error('上下文预算必须是正整数');
+  }
+
+  return {
+    maxPromptTokens: parsed[0]!,
+    maxContextTokens: parsed[1]!,
+    maxMessages: parsed[2]!,
+    maxContentLengthPerMsg: parsed[3]!,
+  };
+}
+
+interface StrategyFormState {
+  strategy: StrategyType;
+  warnThreshold: string;
+  actionThreshold: string;
+  maxCompressions: string;
+  hybridCapable: boolean;
+  sessionChainEnabled: boolean;
+}
+
+function toStrategyForm(entry: CatStrategyEntry): StrategyFormState {
+  return {
+    strategy: entry.effective.strategy,
+    warnThreshold: String(entry.effective.thresholds.warn),
+    actionThreshold: String(entry.effective.thresholds.action),
+    maxCompressions: String(entry.effective.hybrid?.maxCompressions ?? 2),
+    hybridCapable: entry.hybridCapable,
+    sessionChainEnabled: entry.sessionChainEnabled,
+  };
+}
+
+function buildStrategyPayload(strategy: StrategyFormState) {
+  const warn = Number.parseFloat(strategy.warnThreshold);
+  const action = Number.parseFloat(strategy.actionThreshold);
+  if (!Number.isFinite(warn) || !Number.isFinite(action)) {
+    throw new Error('Session 阈值必须是数字');
+  }
+  if (warn >= action) {
+    throw new Error('Warn Threshold 必须小于 Action Threshold');
+  }
+
+  const payload: Record<string, unknown> = {
+    strategy: strategy.strategy,
+    thresholds: { warn, action },
+  };
+  if (strategy.strategy === 'hybrid') {
+    const maxCompressions = Number.parseInt(strategy.maxCompressions, 10);
+    if (!Number.isFinite(maxCompressions) || maxCompressions <= 0) {
+      throw new Error('Max Compressions 必须是正整数');
+    }
+    payload.hybrid = { maxCompressions };
+  }
+  return payload;
 }
 
 export function HubCatEditor({ cat, open, onClose, onSaved }: HubCatEditorProps) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [loadingStrategy, setLoadingStrategy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => initialState(cat));
+  const [strategyForm, setStrategyForm] = useState<StrategyFormState | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setForm(initialState(cat));
+    setStrategyError(null);
   }, [open, cat]);
 
   useEffect(() => {
@@ -112,6 +187,38 @@ export function HubCatEditor({ cat, open, onClose, onSaved }: HubCatEditorProps)
       cancelled = true;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !cat) {
+      setStrategyForm(null);
+      setLoadingStrategy(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingStrategy(true);
+    setStrategyError(null);
+    apiFetch('/api/config/session-strategy')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Session 策略加载失败 (${res.status})`);
+        return (await res.json()) as { cats?: CatStrategyEntry[] };
+      })
+      .then((body) => {
+        if (cancelled) return;
+        const entry = body.cats?.find((item) => item.catId === cat.id) ?? null;
+        setStrategyForm(entry ? toStrategyForm(entry) : null);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setStrategyError(err instanceof Error ? err.message : 'Session 策略加载失败');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingStrategy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, cat]);
 
   const availableProfiles = useMemo(() => filterProfiles(form.client, profiles), [form.client, profiles]);
   const selectedProfile = useMemo(
@@ -143,19 +250,21 @@ export function HubCatEditor({ cat, open, onClose, onSaved }: HubCatEditorProps)
   const handleSave = async () => {
     setSaving(true);
     setError(null);
-    const common = {
-      name: form.name.trim(),
-      displayName: form.displayName.trim(),
-      avatar: form.avatar.trim(),
-      color: {
-        primary: form.colorPrimary.trim(),
-        secondary: form.colorSecondary.trim(),
-      },
-      mentionPatterns: splitMentionPatterns(form.mentionPatterns),
-      roleDescription: form.roleDescription.trim(),
-      personality: form.personality.trim(),
-    };
     try {
+      const contextBudget = buildContextBudget(form);
+      const common = {
+        name: form.name.trim(),
+        displayName: form.displayName.trim(),
+        avatar: form.avatar.trim(),
+        color: {
+          primary: form.colorPrimary.trim(),
+          secondary: form.colorSecondary.trim(),
+        },
+        mentionPatterns: splitMentionPatterns(form.mentionPatterns),
+        roleDescription: form.roleDescription.trim(),
+        personality: form.personality.trim(),
+        ...(contextBudget ? { contextBudget } : {}),
+      };
       const body =
         form.client === 'antigravity'
           ? {
@@ -181,6 +290,18 @@ export function HubCatEditor({ cat, open, onClose, onSaved }: HubCatEditorProps)
         const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         setError((payload.error as string) ?? `保存失败 (${res.status})`);
         return;
+      }
+      if (cat && strategyForm?.sessionChainEnabled) {
+        const strategyRes = await apiFetch(`/api/config/session-strategy/${cat.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildStrategyPayload(strategyForm)),
+        });
+        if (!strategyRes.ok) {
+          const payload = (await strategyRes.json().catch(() => ({}))) as Record<string, unknown>;
+          setError((payload.error as string) ?? `Session 策略保存失败 (${strategyRes.status})`);
+          return;
+        }
       }
       await onSaved();
       onClose();
@@ -402,11 +523,140 @@ export function HubCatEditor({ cat, open, onClose, onSaved }: HubCatEditorProps)
             )}
           </div>
 
+          <section className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 space-y-3">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900">Runtime Budget</h4>
+              <p className="text-xs text-gray-500 mt-1">上下文预算会随成员配置一起持久化到运行时 catalog。</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="text-sm text-gray-700 space-y-1">
+                <span className="font-medium">Max Prompt Tokens</span>
+                <input
+                  aria-label="Max Prompt Tokens"
+                  value={form.maxPromptTokens}
+                  onChange={(event) => setForm((prev) => ({ ...prev, maxPromptTokens: event.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  inputMode="numeric"
+                />
+              </label>
+              <label className="text-sm text-gray-700 space-y-1">
+                <span className="font-medium">Max Context Tokens</span>
+                <input
+                  aria-label="Max Context Tokens"
+                  value={form.maxContextTokens}
+                  onChange={(event) => setForm((prev) => ({ ...prev, maxContextTokens: event.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  inputMode="numeric"
+                />
+              </label>
+              <label className="text-sm text-gray-700 space-y-1">
+                <span className="font-medium">Max Messages</span>
+                <input
+                  aria-label="Max Messages"
+                  value={form.maxMessages}
+                  onChange={(event) => setForm((prev) => ({ ...prev, maxMessages: event.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  inputMode="numeric"
+                />
+              </label>
+              <label className="text-sm text-gray-700 space-y-1">
+                <span className="font-medium">Max Content Length</span>
+                <input
+                  aria-label="Max Content Length"
+                  value={form.maxContentLengthPerMsg}
+                  onChange={(event) => setForm((prev) => ({ ...prev, maxContentLengthPerMsg: event.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  inputMode="numeric"
+                />
+              </label>
+            </div>
+          </section>
+
+          {cat ? (
+            <section className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 space-y-3">
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900">Session Strategy</h4>
+                <p className="text-xs text-gray-500 mt-1">沿用现有运行时策略覆盖接口，成员详情页直接编辑。</p>
+              </div>
+
+              {loadingStrategy ? <p className="text-sm text-gray-400">Session 策略加载中...</p> : null}
+              {strategyError ? <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{strategyError}</p> : null}
+
+              {!loadingStrategy && strategyForm ? (
+                strategyForm.sessionChainEnabled ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="text-sm text-gray-700 space-y-1">
+                      <span className="font-medium">Session Strategy</span>
+                      <select
+                        aria-label="Session Strategy"
+                        value={strategyForm.strategy}
+                        onChange={(event) =>
+                          setStrategyForm((prev) =>
+                            prev ? { ...prev, strategy: event.target.value as StrategyType } : prev,
+                          )
+                        }
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      >
+                        <option value="handoff">handoff</option>
+                        <option value="compress">compress</option>
+                        {strategyForm.hybridCapable ? <option value="hybrid">hybrid</option> : null}
+                      </select>
+                    </label>
+                    <label className="text-sm text-gray-700 space-y-1">
+                      <span className="font-medium">Warn Threshold</span>
+                      <input
+                        aria-label="Warn Threshold"
+                        value={strategyForm.warnThreshold}
+                        onChange={(event) =>
+                          setStrategyForm((prev) => (prev ? { ...prev, warnThreshold: event.target.value } : prev))
+                        }
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        inputMode="decimal"
+                      />
+                    </label>
+                    <label className="text-sm text-gray-700 space-y-1">
+                      <span className="font-medium">Action Threshold</span>
+                      <input
+                        aria-label="Action Threshold"
+                        value={strategyForm.actionThreshold}
+                        onChange={(event) =>
+                          setStrategyForm((prev) => (prev ? { ...prev, actionThreshold: event.target.value } : prev))
+                        }
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        inputMode="decimal"
+                      />
+                    </label>
+                    {strategyForm.strategy === 'hybrid' ? (
+                      <label className="text-sm text-gray-700 space-y-1">
+                        <span className="font-medium">Max Compressions</span>
+                        <input
+                          aria-label="Max Compressions"
+                          value={strategyForm.maxCompressions}
+                          onChange={(event) =>
+                            setStrategyForm((prev) => (prev ? { ...prev, maxCompressions: event.target.value } : prev))
+                          }
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                          inputMode="numeric"
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">当前成员未启用 session chain，策略编辑不可用。</p>
+                )
+              ) : null}
+            </section>
+          ) : null}
+
           {error ? <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p> : null}
         </div>
 
         <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100 bg-gray-50">
-          <div>{loadingProfiles ? <span className="text-xs text-gray-500">账号配置加载中…</span> : null}</div>
+          <div className="text-xs text-gray-500">
+            {loadingProfiles ? <span>账号配置加载中…</span> : null}
+            {loadingProfiles && loadingStrategy ? <span className="mx-1">·</span> : null}
+            {loadingStrategy ? <span>Session 策略加载中…</span> : null}
+          </div>
           <div className="flex gap-2">
             {cat ? (
               <button

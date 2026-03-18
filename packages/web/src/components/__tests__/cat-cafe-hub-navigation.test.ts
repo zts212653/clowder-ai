@@ -60,6 +60,10 @@ describe('F099 Hub navigation', () => {
     it('returns undefined for unknown tab', () => {
       expect(findGroupForTab('nonexistent')).toBeUndefined();
     });
+
+    it('does not expose a standalone strategy tab after member editor unification', () => {
+      expect(findGroupForTab('strategy')).toBeUndefined();
+    });
   });
 
   describe('resolveRequestedHubTab', () => {

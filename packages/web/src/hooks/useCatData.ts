@@ -24,6 +24,12 @@ export interface CatData {
   provider: string;
   defaultModel: string;
   commandArgs?: string[];
+  contextBudget?: {
+    maxPromptTokens: number;
+    maxContextTokens: number;
+    maxMessages: number;
+    maxContentLengthPerMsg: number;
+  };
   avatar: string;
   roleDescription: string;
   personality: string;

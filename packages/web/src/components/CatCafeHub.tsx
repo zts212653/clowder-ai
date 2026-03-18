@@ -14,7 +14,6 @@ import { HubGovernanceTab } from './HubGovernanceTab';
 import { HubLeaderboardTab } from './HubLeaderboardTab';
 import { HubProviderProfilesTab } from './HubProviderProfilesTab';
 import { HubRoutingPolicyTab } from './HubRoutingPolicyTab';
-import { HubStrategyTab } from './HubStrategyTab';
 import { PushSettingsPanel } from './PushSettingsPanel';
 import { VoiceSettingsPanel } from './VoiceSettingsPanel';
 
@@ -117,14 +116,13 @@ const HUB_GROUPS: HubGroup[] = [
     label: '系统配置',
     icon: 'settings',
     color: '#E29578',
-    preview: '账号 · 语音 · 通知 · Session',
+    preview: '账号 · 语音 · 通知',
     tabs: [
       { id: 'system', label: '系统配置', icon: 'settings' },
       { id: 'env', label: '环境 & 文件', icon: 'folder' },
       { id: 'provider-profiles', label: '账号配置', icon: 'user-cog' },
       { id: 'voice', label: '语音设置', icon: 'mic' },
       { id: 'notify', label: '通知', icon: 'bell' },
-      { id: 'strategy', label: 'Session 策略', icon: 'timer' },
     ],
   },
   {
@@ -150,6 +148,7 @@ export function findGroupForTab(tabId: string): HubGroup | undefined {
 
 export function resolveRequestedHubTab(requestedTab: string, getCatById: (catId: string) => unknown): HubTabId {
   if (requestedTab === 'quota') return 'routing';
+  if (requestedTab === 'strategy') return 'cats';
   if (getCatById(requestedTab)) return 'cats';
   return requestedTab;
 }
@@ -378,7 +377,6 @@ export function CatCafeHub() {
             {tab === 'provider-profiles' && <HubProviderProfilesTab />}
             {tab === 'voice' && <VoiceSettingsPanel />}
             {tab === 'notify' && <PushSettingsPanel />}
-            {tab === 'strategy' && <HubStrategyTab />}
             {tab === 'governance' && <HubGovernanceTab />}
             {tab === 'health' && <BrakeSettingsPanel />}
             {tab === 'leaderboard' && <HubLeaderboardTab />}
