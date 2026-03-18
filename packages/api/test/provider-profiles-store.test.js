@@ -14,6 +14,7 @@ const {
   resolveAnthropicRuntimeProfile,
   resolveRuntimeProviderProfile,
 } = await import('../dist/config/provider-profiles.js');
+const { createRuntimeCat } = await import('../dist/config/runtime-cat-catalog.js');
 
 /** @param {string} prefix */
 async function makeTmpDir(prefix) {
@@ -106,6 +107,42 @@ describe('provider profile store', () => {
     const runtime = await resolveAnthropicRuntimeProfile(projectRoot);
     assert.equal(runtime.mode, 'subscription');
     assert.equal(runtime.apiKey, undefined);
+  });
+
+  it('rejects deleting a profile that is still bound to a runtime cat', async () => {
+    const templateRaw = await readFile(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8');
+    await writeFile(join(projectRoot, 'cat-template.json'), templateRaw, 'utf-8');
+
+    const sponsor = await createProviderProfile(projectRoot, {
+      provider: 'anthropic',
+      name: 'bound-sponsor',
+      mode: 'api_key',
+      baseUrl: 'https://api.bound.dev',
+      apiKey: 'sk-bound',
+      setActive: false,
+    });
+
+    await createRuntimeCat(projectRoot, {
+      catId: 'bound-runtime-cat',
+      breedId: 'bound-runtime-cat',
+      name: '绑定猫',
+      displayName: '绑定猫',
+      avatar: '/avatars/bound.png',
+      color: { primary: '#64748b', secondary: '#cbd5e1' },
+      mentionPatterns: ['@bound-runtime-cat'],
+      providerProfileId: sponsor.id,
+      roleDescription: '依赖专属账号',
+      personality: '稳定',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      mcpSupport: false,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+
+    await assert.rejects(
+      deleteProviderProfile(projectRoot, 'anthropic', sponsor.id),
+      /still referenced by runtime cats: bound-runtime-cat/i,
+    );
   });
 
   it('keeps anthropic active profile when activating non-anthropic profiles', async () => {

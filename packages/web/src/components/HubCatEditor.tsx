@@ -156,6 +156,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     }
     setForm((prev) => {
       if (availableProfiles.length === 0) return prev;
+      if (prev.providerProfileId === '') return prev;
       const nextProfile =
         availableProfiles.find((profile) => profile.id === prev.providerProfileId) ?? availableProfiles[0] ?? null;
       if (!nextProfile) return prev;

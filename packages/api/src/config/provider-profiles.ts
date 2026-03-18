@@ -18,6 +18,7 @@ import type {
   RuntimeProviderProfile,
   UpdateProviderProfileInput,
 } from './provider-profiles.types.js';
+import { readCatCatalog } from './cat-catalog-store.js';
 import { resolveProviderProfilesRoot } from './provider-profiles-root.js';
 
 export type {
@@ -131,6 +132,21 @@ function modeToAuthType(mode: ProviderProfileMode | undefined): ProviderProfileA
 function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   const trimmed = baseUrl?.trim();
   return trimmed ? trimmed.replace(/\/+$/, '') : undefined;
+}
+
+function findRuntimeCatsBoundToProfile(projectRoot: string, profileId: string): string[] {
+  const catalog = readCatCatalog(projectRoot);
+  if (!catalog) return [];
+
+  const boundCatIds = new Set<string>();
+  for (const breed of catalog.breeds) {
+    for (const variant of breed.variants) {
+      if (variant.providerProfileId === profileId) {
+        boundCatIds.add(variant.catId ?? breed.catId);
+      }
+    }
+  }
+  return Array.from(boundCatIds);
 }
 
 function normalizeModels(models: string[] | undefined, modelOverride?: string): string[] {
@@ -639,6 +655,10 @@ export async function deleteProviderProfile(
   assertProviderSelector(profile, provider);
   if (profile.builtin) {
     throw new Error('builtin provider cannot be deleted');
+  }
+  const boundCatIds = findRuntimeCatsBoundToProfile(projectRoot, profileId);
+  if (boundCatIds.length > 0) {
+    throw new Error(`provider profile "${profileId}" is still referenced by runtime cats: ${boundCatIds.join(', ')}`);
   }
 
   meta.profiles = meta.profiles.filter((item) => item.id !== profileId);

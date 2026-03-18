@@ -150,7 +150,11 @@ export function filterProfiles(client: ClientValue, profiles: ProfileItem[]): Pr
   if (client === 'antigravity') return [];
   const protocol = protocolForClient(client);
   if (!protocol) return [];
-  return profiles.filter((profile) => profile.protocol === protocol);
+  const scoped = profiles.filter((profile) => profile.protocol === protocol);
+  if (client === 'dare' || client === 'opencode') {
+    return scoped.filter((profile) => profile.authType === 'api_key');
+  }
+  return scoped;
 }
 
 export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | null): HubCatEditorFormState {
