@@ -1236,6 +1236,10 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('Codex Sandbox 🏷️');
     expect(container.textContent).toContain('Codex Approval 🏷️');
     expect(container.textContent).toContain('Codex Auth Mode 🏷️');
+    expect(container.textContent).toContain('这 3 项是全局运行参数（非成员级）');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').disabled).toBe(true);
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(true);
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(true);
     expect(container.textContent).toContain('💾 运行时持久化');
     expect(container.textContent).toContain('保存修改');
     expect(container.textContent).not.toContain('删除成员');
@@ -1251,7 +1255,6 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="Session Chain"]'), 'false', 'change');
     await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
     await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55', 'change');
-    await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存修改');
     await act(async () => {

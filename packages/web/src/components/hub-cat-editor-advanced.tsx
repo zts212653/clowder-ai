@@ -140,6 +140,9 @@ export function AdvancedRuntimeSection({
             <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{codexSettingsError}</p>
           ) : null}
           <p className="text-center text-xs font-semibold text-[#B59A88]">── Codex 专属 (仅 Client=Codex 时显示) ──</p>
+          <p className="rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-xs text-[#7F7168]">
+            这 3 项是全局运行参数（非成员级），此处仅展示当前值；如需修改请在全局配置入口调整。
+          </p>
           <div className="grid gap-4 md:grid-cols-3">
             <SelectField
               label="Codex Sandbox 🏷️"
@@ -147,6 +150,7 @@ export function AdvancedRuntimeSection({
               value={effectiveCodexSettings.sandboxMode}
               options={CODEX_SANDBOX_OPTIONS}
               onChange={(value) => onCodexChange({ sandboxMode: value as CodexRuntimeSettings['sandboxMode'] })}
+              disabled
             />
             <SelectField
               label="Codex Approval 🏷️"
@@ -154,6 +158,7 @@ export function AdvancedRuntimeSection({
               value={effectiveCodexSettings.approvalPolicy}
               options={CODEX_APPROVAL_OPTIONS}
               onChange={(value) => onCodexChange({ approvalPolicy: value as CodexRuntimeSettings['approvalPolicy'] })}
+              disabled
             />
             <SelectField
               label="Codex Auth Mode 🏷️"
@@ -161,6 +166,7 @@ export function AdvancedRuntimeSection({
               value={effectiveCodexSettings.authMode}
               options={CODEX_AUTH_MODE_OPTIONS}
               onChange={(value) => onCodexChange({ authMode: value as CodexRuntimeSettings['authMode'] })}
+              disabled
             />
           </div>
         </div>

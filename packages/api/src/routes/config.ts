@@ -68,7 +68,12 @@ function resolveOperator(raw: unknown): string | null {
 }
 
 function formatEnvFileValue(value: string): string {
-  return /^[A-Za-z0-9_./:@-]+$/.test(value) ? value : `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value;
+  return `"${value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/`/g, '\\`')}"`;
 }
 
 function applyEnvUpdatesToFile(contents: string, updates: Map<string, string | null>): string {

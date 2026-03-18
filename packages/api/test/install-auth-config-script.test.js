@@ -145,6 +145,9 @@ test('claude-profile create and remove keeps installer-managed profile in sync',
     const installerManaged = profiles.profiles.find((profile) => profile.id === 'installer-managed');
 
     assert.equal(profiles.activeProfileId, 'installer-managed');
+    assert.equal(profiles.activeProfileIds?.anthropic, 'installer-managed');
+    assert.equal(profiles.activeProfileIds?.openai, 'codex-oauth');
+    assert.equal(profiles.activeProfileIds?.google, 'gemini-oauth');
     assert.equal(installerManaged?.baseUrl, 'https://claude.example');
     assert.equal(installerManaged?.modelOverride, 'claude-model');
     assert.equal(installerManaged?.protocol, 'anthropic');
@@ -158,6 +161,9 @@ test('claude-profile create and remove keeps installer-managed profile in sync',
 
     assert.equal(profilesAfterRemove.profiles.some((profile) => profile.id === 'installer-managed'), false);
     assert.equal(profilesAfterRemove.activeProfileId, 'claude-oauth');
+    assert.equal(profilesAfterRemove.activeProfileIds?.anthropic, 'claude-oauth');
+    assert.equal(profilesAfterRemove.activeProfileIds?.openai, 'codex-oauth');
+    assert.equal(profilesAfterRemove.activeProfileIds?.google, 'gemini-oauth');
     assert.equal('installer-managed' in (secretsAfterRemove.profiles ?? {}), false);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });

@@ -96,6 +96,11 @@ function createDefaultProfiles() {
   return {
     version: 2,
     activeProfileId: 'claude-oauth',
+    activeProfileIds: {
+      anthropic: 'claude-oauth',
+      openai: 'codex-oauth',
+      google: 'gemini-oauth',
+    },
     profiles: [
       {
         id: 'claude-oauth',
@@ -134,6 +139,27 @@ function createDefaultProfiles() {
   };
 }
 
+function resolveProtocolFallbackProfileId(profiles, protocol, preferred) {
+  const preferredMatch = profiles.find((profile) => profile.id === preferred && profile.protocol === protocol);
+  if (preferredMatch) return preferred;
+  return profiles.find((profile) => profile.protocol === protocol)?.id ?? preferred;
+}
+
+function normalizeActiveProfileIds(profilesFile) {
+  const defaults = createDefaultProfiles().activeProfileIds;
+  const raw = profilesFile.activeProfileIds ?? {};
+  const next = {
+    anthropic: raw.anthropic ?? defaults.anthropic,
+    openai: raw.openai ?? defaults.openai,
+    google: raw.google ?? defaults.google,
+  };
+  next.anthropic = resolveProtocolFallbackProfileId(profilesFile.profiles, 'anthropic', next.anthropic);
+  next.openai = resolveProtocolFallbackProfileId(profilesFile.profiles, 'openai', next.openai);
+  next.google = resolveProtocolFallbackProfileId(profilesFile.profiles, 'google', next.google);
+  profilesFile.activeProfileIds = next;
+  profilesFile.activeProfileId = next.anthropic;
+}
+
 function createDefaultSecrets() {
   return { version: 2, profiles: {} };
 }
@@ -147,9 +173,7 @@ function normalizeProfilesFile(raw) {
         next.profiles.unshift(builtin);
       }
     }
-    if (!next.activeProfileId || !next.profiles.some((profile) => profile.id === next.activeProfileId)) {
-      next.activeProfileId = 'claude-oauth';
-    }
+    normalizeActiveProfileIds(next);
     return next;
   }
 
@@ -214,6 +238,8 @@ function writeClaudeProfile(projectDir, apiKey, baseUrl, model) {
     ...(model ? { modelOverride: model } : {}),
   });
   profiles.profiles = nextProfiles;
+  normalizeActiveProfileIds(profiles);
+  profiles.activeProfileIds.anthropic = profileId;
   profiles.activeProfileId = profileId;
   secrets.profiles[profileId] = { apiKey };
   writeFileSync(profileFile, `${JSON.stringify(profiles, null, 2)}\n`);
@@ -232,8 +258,10 @@ function removeClaudeProfile(projectDir) {
     return;
   }
   profiles.profiles = profiles.profiles.filter((profile) => profile.id !== profileId);
-  if (profiles.activeProfileId === profileId) {
-    profiles.activeProfileId = 'claude-oauth';
+  normalizeActiveProfileIds(profiles);
+  if (profiles.activeProfileId === profileId || profiles.activeProfileIds.anthropic === profileId) {
+    profiles.activeProfileIds.anthropic = resolveProtocolFallbackProfileId(profiles.profiles, 'anthropic', 'claude-oauth');
+    profiles.activeProfileId = profiles.activeProfileIds.anthropic;
   }
   delete secrets.profiles[profileId];
   writeFileSync(profileFile, `${JSON.stringify(profiles, null, 2)}\n`);

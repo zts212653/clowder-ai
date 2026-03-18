@@ -3,6 +3,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -239,6 +240,45 @@ describe('PATCH /api/config/env (route)', () => {
       assert.equal(process.env.FRONTEND_URL, 'http://localhost:3200');
       assert.equal(auditEvents.length, 1);
       assert.equal(auditEvents[0].data.target, '.env');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('escapes shell substitution characters when persisting .env values', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    const literal = 'https://proxy.example/$HOME/$(whoami)/`whoami`';
+    writeFileSync(envFilePath, '', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'FRONTEND_URL', value: literal }],
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const persisted = readFileSync(envFilePath, 'utf8');
+      assert.match(persisted, /^FRONTEND_URL="https:\/\/proxy\.example\/\\\$HOME\/\\\$\(whoami\)\/\\`whoami\\`"$/m);
+
+      const sourced = execFileSync('sh', ['-lc', `set -a; . "${envFilePath}"; printf '%s' "$FRONTEND_URL"`], {
+        encoding: 'utf8',
+      }).trim();
+      assert.equal(sourced, literal);
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });
