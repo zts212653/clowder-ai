@@ -264,6 +264,44 @@ printf '%s' "$(resolve_provider_profiles_dir)"
   }
 });
 
+test('resolve_provider_profiles_dir accepts non-canonical allowlist roots that resolve to the repo root', () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'clowder-install-profiles-normalized-root-'));
+  const worktreeRoot = join(tmpdir(), `clowder-install-profiles-normalized-worktree-${Date.now()}`);
+
+  try {
+    const canonicalRepoRoot = realpathSync(repoRoot);
+    const nonCanonicalAllowedRoot = `${canonicalRepoRoot}/../${basename(canonicalRepoRoot)}`;
+    writeFileSync(join(repoRoot, 'README.md'), 'seed\n', 'utf8');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['add', 'README.md'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, encoding: 'utf8' });
+    const addResult = spawnSync('git', ['worktree', 'add', worktreeRoot, '-b', 'feature/profiles-normalized-root'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+
+    assert.equal(
+      addResult.status,
+      0,
+      [`exit=${addResult.status}`, `stdout:\n${addResult.stdout}`, `stderr:\n${addResult.stderr}`].join('\n'),
+    );
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${worktreeRoot}"
+PROJECT_ALLOWED_ROOTS="${nonCanonicalAllowedRoot}"
+unset PROJECT_ALLOWED_ROOTS_APPEND
+printf '%s' "$(resolve_provider_profiles_dir)"
+`);
+
+    assert.equal(output, join(canonicalRepoRoot, '.cat-cafe'));
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+    rmSync(worktreeRoot, { recursive: true, force: true });
+  }
+});
+
 test('docker reruns add API_SERVER_HOST when missing from existing .env', () => {
   const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-env-docker-missing-'));
 
