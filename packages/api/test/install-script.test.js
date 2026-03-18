@@ -196,6 +196,7 @@ test('resolve_provider_profiles_dir uses the canonical repo root for git worktre
   const worktreeRoot = join(tmpdir(), `clowder-install-profiles-worktree-${Date.now()}`);
 
   try {
+    const canonicalRepoRoot = realpathSync(repoRoot);
     writeFileSync(join(repoRoot, 'README.md'), 'seed\n', 'utf8');
     spawnSync('git', ['init', '-b', 'main'], { cwd: repoRoot, encoding: 'utf8' });
     spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot, encoding: 'utf8' });
@@ -215,10 +216,48 @@ test('resolve_provider_profiles_dir uses the canonical repo root for git worktre
 
     const output = runSourceOnlySnippet(`
 PROJECT_DIR="${worktreeRoot}"
+PROJECT_ALLOWED_ROOTS="${canonicalRepoRoot}"
+unset PROJECT_ALLOWED_ROOTS_APPEND
 printf '%s' "$(resolve_provider_profiles_dir)"
 `);
 
-    assert.equal(output, join(realpathSync(repoRoot), '.cat-cafe'));
+    assert.equal(output, join(canonicalRepoRoot, '.cat-cafe'));
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+    rmSync(worktreeRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolve_provider_profiles_dir stays local when the canonical repo root is outside PROJECT_ALLOWED_ROOTS', () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'clowder-install-profiles-allowlist-root-'));
+  const worktreeRoot = join(tmpdir(), `clowder-install-profiles-allowlist-worktree-${Date.now()}`);
+
+  try {
+    writeFileSync(join(repoRoot, 'README.md'), 'seed\n', 'utf8');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['add', 'README.md'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, encoding: 'utf8' });
+    const addResult = spawnSync('git', ['worktree', 'add', worktreeRoot, '-b', 'feature/profiles-allowlist'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+
+    assert.equal(
+      addResult.status,
+      0,
+      [`exit=${addResult.status}`, `stdout:\n${addResult.stdout}`, `stderr:\n${addResult.stderr}`].join('\n'),
+    );
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${worktreeRoot}"
+PROJECT_ALLOWED_ROOTS="/opt/allowed-only"
+unset PROJECT_ALLOWED_ROOTS_APPEND
+printf '%s' "$(resolve_provider_profiles_dir)"
+`);
+
+    assert.equal(output, join(worktreeRoot, '.cat-cafe'));
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
     rmSync(worktreeRoot, { recursive: true, force: true });
@@ -288,6 +327,18 @@ printf 'npm=%s|pnpm=%s' "$npm_config_registry" "$PNPM_CONFIG_REGISTRY"
   } finally {
     rmSync(tmpHome, { recursive: true, force: true });
   }
+});
+
+test('tty_select and tty_multiselect have read timeout to prevent indefinite blocking', () => {
+  const output = runSourceOnlySnippet(`
+type tty_select
+echo '---SEPARATOR---'
+type tty_multiselect
+`);
+
+  const [selectSrc, multiselectSrc] = output.split('---SEPARATOR---');
+  assert.match(selectSrc, /read\s+-rsn1\s+-t\s+\d+/, 'tty_select must have -t timeout on primary read');
+  assert.match(multiselectSrc, /read\s+-rsn1\s+-t\s+\d+/, 'tty_multiselect must have -t timeout on primary read');
 });
 
 // ── TTY input compatibility tests ─────────────────────────────────────────

@@ -115,9 +115,8 @@ tty_select() {
     trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT; exit 130" INT TERM
     trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT" EXIT
     while true; do
-        # Read a single byte
         local key
-        IFS= read -rsn1 key </dev/tty 2>/dev/null || break
+        IFS= read -rsn1 -t 120 key </dev/tty 2>/dev/null || break
         local need_redraw=false
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
@@ -187,7 +186,7 @@ tty_multiselect() {
     trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT" EXIT
     while true; do
         local key
-        IFS= read -rsn1 key </dev/tty 2>/dev/null || break
+        IFS= read -rsn1 -t 120 key </dev/tty 2>/dev/null || break
         local need_redraw=false
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
@@ -272,6 +271,42 @@ resolve_project_dir() {
         warn "No .git directory — git-dependent features (diff view, worktree management) will be unavailable"
     fi
 }
+default_project_allowed_roots() {
+    printf '%s\n' "$HOME" '/tmp' '/private/tmp'
+    [[ "$(uname -s)" == "Darwin" ]] && printf '%s\n' '/Volumes'
+}
+project_allowed_roots() {
+    local custom="${PROJECT_ALLOWED_ROOTS:-}"
+    if [[ -n "$custom" ]]; then
+        [[ "${PROJECT_ALLOWED_ROOTS_APPEND:-}" == "true" ]] && default_project_allowed_roots
+        local IFS=':' root
+        local -a roots=()
+        read -r -a roots <<< "$custom"
+        for root in "${roots[@]}"; do
+            [[ -n "$root" ]] && printf '%s\n' "$root"
+        done
+    else
+        default_project_allowed_roots
+    fi
+}
+path_is_under_root() {
+    local root="$1" candidate="$2"
+    [[ -n "$root" && -n "$candidate" ]] || return 1
+    if [[ "$root" == "/" ]]; then
+        [[ "$candidate" == /* ]]; return
+    fi
+    root="${root%/}"
+    candidate="${candidate%/}"
+    [[ "$candidate" == "$root" || "$candidate" == "$root/"* ]]
+}
+candidate_root_is_allowed() {
+    local candidate="$1" root=""
+    while IFS= read -r root; do
+        [[ -n "$root" ]] || continue
+        path_is_under_root "$root" "$candidate" && return 0
+    done < <(project_allowed_roots)
+    return 1
+}
 resolve_provider_profiles_dir() {
     # Mirror the runtime validation in provider-profiles-root.ts:
     # Only redirect for validated git worktrees.  For normal repos,
@@ -321,6 +356,7 @@ resolve_provider_profiles_dir() {
         [[ "$commondir_resolved" == "$common_git_dir_resolved" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
 
         candidate="$(cd "$(dirname "$common_git_dir")" 2>/dev/null && pwd)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        candidate_root_is_allowed "$candidate" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         printf '%s/.cat-cafe\n' "$candidate"; return
     fi
     printf '%s/.cat-cafe\n' "$PROJECT_DIR"
