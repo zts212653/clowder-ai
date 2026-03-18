@@ -50,6 +50,10 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const availableProfiles = useMemo(() => filterProfiles(form.client, profiles), [form.client, profiles]);
   const selectedProfile = useMemo(() => availableProfiles.find((profile) => profile.id === form.providerProfileId) ?? null, [availableProfiles, form.providerProfileId]);
   const showCodexSettings = form.client === 'openai';
+  const requiresApiKeyBinding = form.client === 'dare' || form.client === 'opencode';
+  const saveBlockedByProfileBinding =
+    requiresApiKeyBinding &&
+    (loadingProfiles || form.providerProfileId.trim().length === 0 || selectedProfile?.authType !== 'api_key');
 
   useEffect(() => {
     if (!open) return;
@@ -195,6 +199,10 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   };
 
   const handleSave = async () => {
+    if (saveBlockedByProfileBinding) {
+      setError(loadingProfiles ? 'Provider 列表加载中，请稍后保存' : 'Dare/OpenCode 需要绑定 API Key Provider 后才能保存');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -335,7 +343,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || saveBlockedByProfileBinding}
               className="rounded-xl bg-[#D49266] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
             >
               {saving ? '保存中…' : cat ? '保存修改' : '保存'}

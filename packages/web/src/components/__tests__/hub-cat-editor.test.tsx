@@ -535,6 +535,98 @@ describe('HubCatEditor', () => {
     expect(payload.providerProfileId).toBe('claude-sponsor');
   });
 
+  it('blocks saving opencode members until provider profiles finish loading', async () => {
+    const existingCat = {
+      id: 'runtime-opencode',
+      name: 'runtime-opencode',
+      displayName: '运行时 OpenCode',
+      provider: 'opencode',
+      defaultModel: 'claude-opus-4-6',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@runtime-opencode'],
+      avatar: '/avatars/opencode.png',
+      roleDescription: 'review',
+      source: 'runtime',
+    } as CatData;
+
+    let resolveProfiles!: (value: Response) => void;
+    const profilesPromise = new Promise<Response>((resolve) => {
+      resolveProfiles = resolve;
+    });
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles') {
+        return profilesPromise;
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cats/runtime-opencode' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-opencode' } }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存修改');
+    expect(saveButton).toBeTruthy();
+    expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+    expect(
+      mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats/runtime-opencode' && init?.method === 'PATCH'),
+    ).toBeFalsy();
+
+    resolveProfiles(
+      jsonResponse({
+        projectPath: '/tmp/project',
+        activeProfileId: 'claude-oauth',
+        providers: [
+          {
+            id: 'claude-oauth',
+            provider: 'claude-oauth',
+            displayName: 'Claude (OAuth)',
+            name: 'Claude (OAuth)',
+            authType: 'oauth',
+            protocol: 'anthropic',
+            builtin: true,
+            mode: 'subscription',
+            models: ['claude-opus-4-6'],
+            hasApiKey: false,
+            createdAt: '2026-03-18T00:00:00.000Z',
+            updatedAt: '2026-03-18T00:00:00.000Z',
+          },
+          {
+            id: 'claude-sponsor',
+            provider: 'claude-sponsor',
+            displayName: 'Claude Sponsor',
+            name: 'Claude Sponsor',
+            authType: 'api_key',
+            protocol: 'anthropic',
+            builtin: false,
+            mode: 'api_key',
+            models: ['claude-opus-4-6'],
+            hasApiKey: true,
+            createdAt: '2026-03-18T00:00:00.000Z',
+            updatedAt: '2026-03-18T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+    await flushEffects();
+    await flushEffects();
+
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('claude-sponsor');
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('sends providerProfileId=null when clearing an existing provider binding', async () => {
     const existingCat = {
       id: 'runtime-codex',
