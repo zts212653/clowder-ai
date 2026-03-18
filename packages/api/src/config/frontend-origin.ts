@@ -75,7 +75,7 @@ export function resolveFrontendBaseUrl(env: NodeJS.ProcessEnv, logger?: WarnLogg
   if (rawFrontendPort?.trim()) {
     logger?.warn(
       { frontendPort: rawFrontendPort },
-      '[thread-export] Invalid FRONTEND_PORT, fallback to localhost:3004',
+      '[thread-export] Invalid FRONTEND_PORT, fallback to localhost:3003',
     );
   }
 
