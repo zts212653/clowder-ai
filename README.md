@@ -139,7 +139,7 @@ Clowder isn't just a coding platform. Your AI team can:
 
 You don't need to be a developer. You need to know what you want — and who you want to build it with.
 
-## Quick Start
+## Quick Start (Linux)
 
 > CVO Bootcamp coming soon — a guided onboarding where your AI team walks you through a complete feature lifecycle.
 
@@ -152,6 +152,7 @@ bash scripts/install.sh
 The script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools (Claude / Codex / Gemini), and authentication — with interactive prompts to guide you through each step.
 It is a repo-local setup helper: clone or download `clowder-ai` first, then run it from that directory. It is not a bare-metal `curl | bash` bootstrapper.
 Downloaded archives (without `.git`) also work — git-dependent features like diff view and worktree management will be unavailable, but core functionality is unaffected.
+On macOS or Windows, use the manual setup path in `SETUP.md` instead — `scripts/install.sh` exits on non-Linux kernels.
 
 Options:
 - `--start` — auto-start services after install
@@ -500,7 +501,7 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 
 你不需要会写代码。你需要知道自己想要什么 — 以及想和谁一起去实现它。
 
-## 快速开始
+## 快速开始（Linux）
 
 > CVO 训练营即将推出 — AI 团队亲自带你走完一个完整的 feature 生命周期。
 
@@ -513,6 +514,7 @@ bash scripts/install.sh
 安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具（Claude / Codex / Gemini）和认证配置 — 全程交互式引导。
 这是一个 repo 内安装助手：先 clone 或下载 `clowder-ai`，再在目录里运行。它不是 bare-metal 的 `curl | bash` 引导脚本。
 下载的压缩包（没有 `.git`）同样可用 — diff 视图和 worktree 管理等 git 相关功能不可用，但核心功能不受影响。
+macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/install.sh` 只支持 Linux 内核。
 
 可选参数：
 - `--start` — 安装完成后自动启动服务

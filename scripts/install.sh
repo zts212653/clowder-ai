@@ -24,8 +24,11 @@ use_registry() {
 }
 [[ -n "$NPM_REGISTRY" ]] && use_registry "$NPM_REGISTRY"
 npm_global_install() {
-    [[ -n "$NPM_REGISTRY" ]] && $SUDO env npm_config_registry="$NPM_REGISTRY" NPM_CONFIG_REGISTRY="$NPM_REGISTRY" npm install -g "$@"
-    [[ -z "$NPM_REGISTRY" ]] && $SUDO npm install -g "$@"
+    if [[ -n "$NPM_REGISTRY" ]]; then
+        $SUDO env npm_config_registry="$NPM_REGISTRY" NPM_CONFIG_REGISTRY="$NPM_REGISTRY" npm install -g "$@"
+    else
+        $SUDO npm install -g "$@"
+    fi
 }
 
 info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
@@ -39,9 +42,192 @@ persist_user_bin() {
 }
 
 # TTY-safe read + pnpm install with registry fallback
-HAS_TTY=false; [[ -r /dev/tty ]] && tty -s </dev/tty 2>/dev/null && HAS_TTY=true
-tty_read() { local prompt="$1" var="$2"; read -rp "$prompt" "$var" </dev/tty 2>/dev/null || printf -v "$var" ''; }
-tty_read_secret() { local prompt="$1" var="$2"; read -rsp "$prompt" "$var" </dev/tty 2>/dev/null || printf -v "$var" ''; echo </dev/tty; }
+# Verify /dev/tty is both readable AND writable (prompts write to it too).
+# Use a real fd-based probe so HAS_TTY is never true on a broken terminal.
+HAS_TTY=false
+if [[ -r /dev/tty && -w /dev/tty ]] && tty -s </dev/tty 2>/dev/null; then
+    # Open a test fd to /dev/tty and close it — catches containers where the
+    # device node exists but open() fails with ENXIO.
+    if (exec 9</dev/tty) 2>/dev/null; then HAS_TTY=true; fi
+fi
+# tty_read:  Print prompt explicitly to /dev/tty (not via read -p which goes
+#            to stderr and was swallowed by 2>/dev/null).  Read from /dev/tty
+#            with a 120 s timeout to avoid infinite blocking.
+#            Guard the /dev/tty redirect with the fd-open probe we already ran
+#            for HAS_TTY — callers should check HAS_TTY before calling, but we
+#            also defend internally against "Device not configured" on macOS
+#            and ENXIO on Linux containers.
+tty_read() {
+    local prompt="$1" var="$2"
+    if [[ "$HAS_TTY" == true ]]; then
+        printf '%s' "$prompt" >/dev/tty 2>/dev/null || true
+        read -r -t 120 "$var" </dev/tty 2>/dev/null || printf -v "$var" '%s' ''
+    else
+        printf -v "$var" '%s' ''
+    fi
+}
+tty_read_secret() {
+    local prompt="$1" var="$2"
+    if [[ "$HAS_TTY" == true ]]; then
+        printf '%s' "$prompt" >/dev/tty 2>/dev/null || true
+        read -rs -t 120 "$var" </dev/tty 2>/dev/null || printf -v "$var" '%s' ''
+        printf '\n' >/dev/tty 2>/dev/null || true
+    else
+        printf -v "$var" '%s' ''
+    fi
+}
+
+# ── Interactive arrow-key selectors (single-select & multi-select) ────────
+# These provide a TUI-style menu: ↑↓ to move, space to toggle, enter to confirm.
+# Falls back to plain tty_read when HAS_TTY is false.
+
+# tty_select: Single-select with arrow keys.
+#   Usage: tty_select RESULT_VAR "prompt" "option1" "option2" ...
+#   Sets RESULT_VAR to the 0-based index of the chosen option (default 0).
+tty_select() {
+    local result_var="$1" prompt="$2"; shift 2
+    local -a options=("$@")
+    local count=${#options[@]} cur=0
+
+    if [[ "$HAS_TTY" != true || $count -eq 0 ]]; then
+        printf -v "$result_var" '%s' '0'; return
+    fi
+
+    # Save terminal state and switch to raw mode
+    local saved_tty; saved_tty="$(stty -g </dev/tty 2>/dev/null)"
+    printf '\n%s\n' "$prompt" >/dev/tty
+    printf '  Use ↑↓ arrows to move, Enter to select\n\n' >/dev/tty
+
+    # Draw initial menu
+    local i
+    for ((i=0; i<count; i++)); do
+        if ((i == cur)); then
+            printf '  \033[36m❯ %s\033[0m\n' "${options[$i]}" >/dev/tty
+        else
+            printf '    %s\n' "${options[$i]}" >/dev/tty
+        fi
+    done
+
+    stty -echo -icanon </dev/tty 2>/dev/null
+    # Restore terminal on signal (Ctrl-C, etc.) so it doesn't stay in raw mode.
+    # Use saved_tty captured at define-time (double-quoted trap) because local
+    # variables are not visible to signal handlers running in top-level scope.
+    trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT; exit 130" INT TERM
+    trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT" EXIT
+    while true; do
+        # Read a single byte
+        local key
+        IFS= read -rsn1 key </dev/tty 2>/dev/null || break
+        local need_redraw=false
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
+            case "$key" in
+                '[A') ((cur > 0)) && ((cur--)) || true; need_redraw=true ;;   # up
+                '[B') ((cur < count-1)) && ((cur++)) || true; need_redraw=true ;;  # down
+            esac
+        elif [[ "$key" == '' ]]; then
+            break  # Enter
+        fi
+        # Only redraw when state actually changed — ignore unrecognized keys
+        [[ "$need_redraw" == true ]] || continue
+        printf '\033[%dA' "$count" >/dev/tty
+        for ((i=0; i<count; i++)); do
+            printf '\r\033[K' >/dev/tty
+            if ((i == cur)); then
+                printf '  \033[36m❯ %s\033[0m\n' "${options[$i]}" >/dev/tty
+            else
+                printf '    %s\n' "${options[$i]}" >/dev/tty
+            fi
+        done
+    done
+    stty "$saved_tty" </dev/tty 2>/dev/null || true
+    trap - INT TERM EXIT
+    printf -v "$result_var" '%s' "$cur"
+}
+
+# tty_multiselect: Multi-select with arrow keys + space to toggle.
+#   Usage: tty_multiselect RESULT_VAR "prompt" "option1" "option2" ...
+#   Sets RESULT_VAR to comma-separated 0-based indices of selected options.
+#   All options are pre-selected by default.
+tty_multiselect() {
+    local result_var="$1" prompt="$2"; shift 2
+    local -a options=("$@")
+    local count=${#options[@]} cur=0
+
+    if [[ "$HAS_TTY" != true || $count -eq 0 ]]; then
+        # Default: all selected
+        local all_indices=""
+        for ((i=0; i<count; i++)); do
+            [[ -n "$all_indices" ]] && all_indices+=","
+            all_indices+="$i"
+        done
+        printf -v "$result_var" '%s' "$all_indices"; return
+    fi
+
+    # All selected by default
+    local -a selected=()
+    for ((i=0; i<count; i++)); do selected+=("1"); done
+
+    local saved_tty; saved_tty="$(stty -g </dev/tty 2>/dev/null)"
+    printf '\n%s\n' "$prompt" >/dev/tty
+    printf '  Use ↑↓ to move, Space to toggle, Enter to confirm\n\n' >/dev/tty
+
+    local i
+    for ((i=0; i<count; i++)); do
+        local marker="◉"; [[ "${selected[$i]}" != "1" ]] && marker="○"
+        if ((i == cur)); then
+            printf '  \033[36m❯ %s %s\033[0m\n' "$marker" "${options[$i]}" >/dev/tty
+        else
+            printf '    %s %s\n' "$marker" "${options[$i]}" >/dev/tty
+        fi
+    done
+
+    stty -echo -icanon </dev/tty 2>/dev/null
+    trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT; exit 130" INT TERM
+    trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT" EXIT
+    while true; do
+        local key
+        IFS= read -rsn1 key </dev/tty 2>/dev/null || break
+        local need_redraw=false
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
+            case "$key" in
+                '[A') ((cur > 0)) && ((cur--)) || true; need_redraw=true ;;
+                '[B') ((cur < count-1)) && ((cur++)) || true; need_redraw=true ;;
+            esac
+        elif [[ "$key" == ' ' ]]; then
+            # Toggle selection
+            if [[ "${selected[$cur]}" == "1" ]]; then selected[$cur]="0"; else selected[$cur]="1"; fi
+            need_redraw=true
+        elif [[ "$key" == '' ]]; then
+            break  # Enter
+        fi
+        # Only redraw when state changed — ignore unrecognized keys
+        [[ "$need_redraw" == true ]] || continue
+        printf '\033[%dA' "$count" >/dev/tty
+        for ((i=0; i<count; i++)); do
+            local marker="◉"; [[ "${selected[$i]}" != "1" ]] && marker="○"
+            printf '\r\033[K' >/dev/tty
+            if ((i == cur)); then
+                printf '  \033[36m❯ %s %s\033[0m\n' "$marker" "${options[$i]}" >/dev/tty
+            else
+                printf '    %s %s\n' "$marker" "${options[$i]}" >/dev/tty
+            fi
+        done
+    done
+    stty "$saved_tty" </dev/tty 2>/dev/null || true
+    trap - INT TERM EXIT
+
+    # Build result: comma-separated 0-based indices
+    local result=""
+    for ((i=0; i<count; i++)); do
+        if [[ "${selected[$i]}" == "1" ]]; then
+            [[ -n "$result" ]] && result+=","
+            result+="$i"
+        fi
+    done
+    printf -v "$result_var" '%s' "$result"
+}
 env_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"; }
 write_env_key() {
     local key="$1" val="$2" tmp; tmp="$(mktemp)"
@@ -54,6 +240,7 @@ delete_env_key() {
     grep -v "^${key}=" .env > "$tmp" 2>/dev/null || true
     mv "$tmp" .env
 }
+env_has_key() { grep -q "^${1}=" .env 2>/dev/null; }
 pnpm_install_with_fallback() {
     pnpm install --frozen-lockfile && return 0; [[ -n "$NPM_REGISTRY" ]] && return 1
     warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
@@ -83,6 +270,31 @@ resolve_project_dir() {
     [[ -e "$PROJECT_DIR/.git" ]] && PROJECT_HAS_GIT_METADATA=true
     if [[ "$PROJECT_HAS_GIT_METADATA" != true ]]; then
         warn "No .git directory — git-dependent features (diff view, worktree management) will be unavailable"
+    fi
+}
+resolve_provider_profiles_dir() {
+    local common_git_dir="" profiles_root="$PROJECT_DIR"
+    if command -v git &>/dev/null; then
+        common_git_dir="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+        if [[ -n "$common_git_dir" ]]; then
+            profiles_root="$(cd "$(dirname "$common_git_dir")" 2>/dev/null && pwd || printf '%s' "$PROJECT_DIR")"
+        fi
+    fi
+    printf '%s/.cat-cafe\n' "$profiles_root"
+}
+docker_detected() {
+    [[ -f /.dockerenv ]] || grep -qsw docker /proc/1/cgroup 2>/dev/null
+}
+ENV_CREATED=false
+maybe_write_docker_api_host() {
+    docker_detected || return 0
+    if [[ "$ENV_CREATED" == true ]]; then
+        write_env_key "API_SERVER_HOST" "0.0.0.0"
+        ok "Docker detected — API_SERVER_HOST=0.0.0.0"
+    elif env_has_key "API_SERVER_HOST"; then
+        ok "Docker detected — preserving existing API_SERVER_HOST"
+    else
+        warn "Docker detected — existing .env left unchanged. Set API_SERVER_HOST=0.0.0.0 manually if host access is needed"
     fi
 }
 
@@ -245,9 +457,11 @@ elif command -v redis-server &>/dev/null; then ok "Redis already installed"
 else
     warn "Redis not found"
     if [[ "$HAS_TTY" == true ]]; then
-        echo "    1) Install Redis locally (recommended / 推荐)"; echo "    2) Use external Redis URL / 使用外部 Redis"
-        tty_read "    Choose [1/2] (default: 1): " REDIS_CHOICE
-        if [[ "${REDIS_CHOICE:-1}" == "2" ]]; then
+        REDIS_SEL=""
+        tty_select REDIS_SEL "  Redis setup / Redis 配置：" \
+            "Install Redis locally (recommended / 推荐)" \
+            "Use external Redis URL / 使用外部 Redis"
+        if [[ "$REDIS_SEL" == "1" ]]; then
             tty_read "    Redis URL (e.g. redis://user:pass@host:6379): " REDIS_EXT_URL
             if [[ -n "$REDIS_EXT_URL" ]]; then
                 ok "External Redis URL saved — will write to .env in step 8"; REDIS_EXTERNAL=true
@@ -288,7 +502,14 @@ install_npm_cli() {
     command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }; ok "$name installed"
 }
 install_claude_cli() {
-    info "  Installing Claude Code..."; curl -fsSL https://claude.ai/install.sh | bash 2>&1
+    info "  Installing Claude Code..."
+    # Download the installer to a temp file first, then run it.
+    # Running `curl ... | bash </dev/null` breaks the pipe (bash's stdin IS
+    # the pipe from curl).  A temp file avoids the stdin conflict entirely.
+    local tmp_installer; tmp_installer="$(mktemp)"
+    curl -fsSL https://claude.ai/install.sh -o "$tmp_installer" 2>&1
+    bash "$tmp_installer" </dev/null 2>&1
+    rm -f "$tmp_installer"
     export PATH="$HOME/.local/bin:$HOME/.claude/bin:$PATH"; hash -r 2>/dev/null || true
     command -v claude &>/dev/null || { fail "Claude install failed. Try: curl -fsSL https://claude.ai/install.sh | bash"; exit 1; }; ok "Claude Code installed"
 }
@@ -301,23 +522,19 @@ command -v gemini &>/dev/null && ok "Gemini CLI already installed" || MISSING_AG
 if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
     INSTALL_AGENTS=("${MISSING_AGENTS[@]}")  # default: install all missing
     if [[ "$HAS_TTY" == true ]]; then
-        info "  Missing agents / 缺少的 Agent CLI:"
-        for i in "${!MISSING_AGENTS[@]}"; do echo "    $((i+1))) ${MISSING_AGENTS[$i]}"; done
-        tty_read "    Install which? (e.g. 1,2,3 / Enter=all / 0=none): " AGENT_SEL
-        AGENT_SEL="${AGENT_SEL:-}"  # protect against nounset
-        if [[ "$AGENT_SEL" == "0" ]]; then INSTALL_AGENTS=()
-        elif [[ -n "$AGENT_SEL" ]]; then
+        AGENT_SEL_INDICES=""
+        tty_multiselect AGENT_SEL_INDICES \
+            "  Select agents to install / 选择要安装的 Agent CLI：" \
+            "${MISSING_AGENTS[@]}"
+        if [[ -z "$AGENT_SEL_INDICES" ]]; then
             INSTALL_AGENTS=()
-            IFS=',' read -ra SEL_IDX <<< "$AGENT_SEL"
+            warn "No agents selected — skipping CLI install"
+        else
+            INSTALL_AGENTS=()
+            IFS=',' read -ra SEL_IDX <<< "$AGENT_SEL_INDICES"
             for idx in "${SEL_IDX[@]}"; do
-                [[ "$idx" =~ ^[0-9]+$ ]] || { warn "Ignored non-numeric input: $idx"; continue; }
-                idx=$((idx - 1))
-                [[ $idx -ge 0 && $idx -lt ${#MISSING_AGENTS[@]} ]] && INSTALL_AGENTS+=("${MISSING_AGENTS[$idx]}")
+                INSTALL_AGENTS+=("${MISSING_AGENTS[$idx]}")
             done
-            if [[ ${#INSTALL_AGENTS[@]} -eq 0 ]]; then
-                warn "No valid selection — installing all missing agents"
-                INSTALL_AGENTS=("${MISSING_AGENTS[@]}")
-            fi
         fi
     fi
     for agent in "${INSTALL_AGENTS[@]}"; do
@@ -332,7 +549,8 @@ fi
 # ── [7/9] Authentication setup / 认证配置 ─────────────────
 step "[7/9] Authentication setup / 认证配置..."
 write_claude_profile() {
-    local key="$1" base_url="$2" model="$3" pdir="$PROJECT_DIR/.cat-cafe"; mkdir -p "$pdir"
+    local key="$1" base_url="$2" model="$3" pdir=""
+    pdir="$(resolve_provider_profiles_dir)"; mkdir -p "$pdir"
     node - "$pdir" "$key" "${base_url:-https://api.anthropic.com}" "$model" <<'EONODE'
 const fs = require('fs'), path = require('path');
 const [dir, key, baseUrl, model] = process.argv.slice(2), id = 'installer-managed', now = new Date().toISOString();
@@ -347,7 +565,8 @@ fs.writeFileSync(pf, JSON.stringify(profiles)); fs.writeFileSync(sf, JSON.string
 EONODE
 }
 remove_claude_installer_profile() {
-    local pdir="$PROJECT_DIR/.cat-cafe"; [[ -d "$pdir" ]] || return 0
+    local pdir=""
+    pdir="$(resolve_provider_profiles_dir)"; [[ -d "$pdir" ]] || return 0
     node - "$pdir" <<'EONODE'
 const fs = require('fs'), path = require('path');
 const [dir] = process.argv.slice(2), id = 'installer-managed';
@@ -363,10 +582,11 @@ EONODE
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
-    echo ""; echo -e "  ${BOLD}$name ($cmd):${NC}"
-    echo "    1) OAuth / Subscription (recommended / 推荐)"; echo "    2) API Key"
-    local choice; tty_read "    Choose [1/2] (default: 1): " choice
-    if [[ "${choice:-1}" != "2" ]]; then
+    local auth_sel
+    tty_select auth_sel "  $name ($cmd) — auth mode:" \
+        "OAuth / Subscription (recommended / 推荐)" \
+        "API Key"
+    if [[ "$auth_sel" != "1" ]]; then
         [[ "$cmd" == "claude" ]] && remove_claude_installer_profile
         [[ "$cmd" == "codex" ]] && set_codex_oauth_mode
         [[ "$cmd" == "gemini" ]] && set_gemini_oauth_mode
@@ -415,7 +635,7 @@ step "[8/9] Generating config / 生成配置..."
 if [[ -f .env ]]; then
     warn ".env already exists — not overwriting. To regenerate: cp .env.example .env"
 elif [[ -f .env.example ]]; then
-    cp .env.example .env; ok ".env generated from .env.example"
+    cp .env.example .env; ENV_CREATED=true; ok ".env generated from .env.example"
 else fail ".env.example not found in $PROJECT_DIR"; exit 1
 fi
 # Write deferred Redis URL + collected auth config + Docker detection
@@ -426,11 +646,8 @@ fi
 for key in "${ENV_DELETE_KEYS[@]}"; do delete_env_key "$key"; done
 for i in "${!ENV_KEYS[@]}"; do write_env_key "${ENV_KEYS[$i]}" "${ENV_VALUES[$i]}"; done
 [[ ${#ENV_KEYS[@]} -gt 0 ]] && ok "Auth config written to .env"
-# Auto-detect Docker: bind API to 0.0.0.0 so port mapping works from host
-if [[ -f /.dockerenv ]] || grep -qsw docker /proc/1/cgroup 2>/dev/null; then
-    write_env_key "API_SERVER_HOST" "0.0.0.0"
-    ok "Docker detected — API_SERVER_HOST=0.0.0.0"
-fi
+# Auto-detect Docker: only set host default on a freshly generated .env.
+maybe_write_docker_api_host
 chmod 600 .env 2>/dev/null || true
 
 # ── [9/9] Done ──────────────────────────────────────────────
