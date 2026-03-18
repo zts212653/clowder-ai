@@ -705,12 +705,7 @@ export const callbackTools = [
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
   },
-  {
-    name: 'cat_cafe_search_messages',
-    description: "Search thread messages by speaker (catId/'user') and keyword. Supports cross-thread via threadId.",
-    inputSchema: getThreadContextInputSchema,
-    handler: handleGetThreadContext,
-  },
+  // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
   {
     name: 'cat_cafe_list_threads',
     description: 'List thread summaries for discovery. Supports limit and activeSince filters.',

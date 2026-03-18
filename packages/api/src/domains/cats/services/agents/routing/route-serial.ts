@@ -14,6 +14,7 @@ import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import { getCatVoice } from '../../../../../config/cat-voices.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
@@ -27,6 +28,7 @@ import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAudi
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import { hydrateReplyPreview, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
@@ -82,6 +84,9 @@ export async function* routeSerial(
   const worklistEntry = registerWorklist(threadId, worklist, maxDepth, options.parentInvocationId);
 
   let index = 0;
+  // done-guarantee: Track whether we yielded a done(isFinal=true) so the finally block can
+  // synthesize one if the loop exits early (e.g. signal.aborted break at top of while).
+  let yieldedFinalDone = false;
   // F27: Track how many worklist entries have had a2a_handoff emitted
   let handoffEmitted = targetCats.length; // Original targets don't get handoff events
   // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
@@ -313,6 +318,8 @@ export async function* routeSerial(
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
       let ownInvocationId: string | undefined;
+      // F111 Phase B: Streaming TTS chunker for real-time voice (voiceMode only)
+      let voiceChunker: StreamingTtsChunker | undefined;
 
       // #80: Draft flush state — periodic persistence for F5 recovery
       let lastFlushTime = Date.now();
@@ -355,6 +362,21 @@ export async function* routeSerial(
             const parsed = JSON.parse(msg.content);
             if (parsed.type === 'invocation_created') {
               ownInvocationId = parsed.invocationId;
+              // F111 Phase B: Start streaming TTS when we have an invocationId
+              if (voiceMode && deps.socketManager) {
+                const ttsRegistry = getStreamingTtsRegistry();
+                if (ttsRegistry) {
+                  voiceChunker = new StreamingTtsChunker({
+                    catId: catId as string,
+                    invocationId: ownInvocationId!,
+                    threadId,
+                    voiceConfig: getCatVoice(catId as string),
+                    broadcaster: deps.socketManager,
+                    ttsRegistry,
+                    signal,
+                  });
+                }
+              }
               // Issue #83: Start keepalive timer once we have an invocationId.
               // This ensures draft TTL is renewed even during long silent tool calls.
               if (deps.draftStore && !keepaliveTimer) {
@@ -370,6 +392,7 @@ export async function* routeSerial(
         }
         if (msg.type === 'text' && msg.content) {
           textContent += msg.content;
+          voiceChunker?.feed(msg.content);
         }
         // F045: Accumulate thinking blocks for persistence (F5 recovery)
         if (msg.type === 'system_info' && msg.content) {
@@ -478,6 +501,27 @@ export async function* routeSerial(
         keepaliveTimer = undefined;
       }
 
+      // F111 Phase B: Flush remaining buffered text and send voice_stream_end
+      let voiceTotalChunks = 0;
+      if (voiceChunker) {
+        try {
+          voiceTotalChunks = await voiceChunker.flush();
+        } catch (err) {
+          console.error(`[routeSerial] Voice chunker flush failed:`, err);
+        }
+        if (deps.socketManager && voiceChunker.hasStarted()) {
+          const aborted = signal?.aborted ?? false;
+          deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'voice_stream_end', {
+            type: 'voice_stream_end',
+            catId: catId as string,
+            invocationId: ownInvocationId ?? '',
+            threadId,
+            totalChunks: aborted ? -1 : voiceTotalChunks,
+          });
+        }
+        voiceChunker = undefined;
+      }
+
       let a2aMentions: CatId[] = [];
 
       // F22: Consume MCP-buffered rich blocks BEFORE the text/empty branch —
@@ -497,12 +541,17 @@ export async function* routeSerial(
 
         // F34-b: Resolve voice blocks (audio with text, no url) — Route B path.
         // Route A blocks were already resolved in the callback handler.
-        const voiceSynth = getVoiceBlockSynthesizer();
-        if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
-          try {
-            allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, catId as string);
-          } catch (err) {
-            console.error(`[routeSerial] Voice block synthesis failed for ${catId as string}:`, err);
+        // F111: When voiceMode is active, skip full synthesis so audio blocks
+        // arrive at the frontend with text but no url — the frontend will use
+        // /api/tts/stream for chunked streaming playback (<2s first-audio).
+        if (!voiceMode) {
+          const voiceSynth = getVoiceBlockSynthesizer();
+          if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
+            try {
+              allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, catId as string);
+            } catch (err) {
+              console.error(`[routeSerial] Voice block synthesis failed for ${catId as string}:`, err);
+            }
           }
         }
 
@@ -874,7 +923,9 @@ export async function* routeSerial(
       // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)
       // MUST always reach here regardless of append success (缅因猫 review P1-2)
       if (doneMsg) {
-        yield { ...doneMsg, ...(mentionsUser ? { mentionsUser } : {}), isFinal: index === worklist.length - 1 };
+        const isFinal = index === worklist.length - 1;
+        yield { ...doneMsg, ...(mentionsUser ? { mentionsUser } : {}), isFinal };
+        if (isFinal) yieldedFinalDone = true;
       }
 
       // F27: Advance executedIndex so pushToWorklist knows which cats are done
@@ -885,5 +936,18 @@ export async function* routeSerial(
     // F27: Always unregister worklist, even on error/abort.
     // Pass owner ref so preempting new invocation's worklist is not deleted (缅因猫 R1 P1-1)
     unregisterWorklist(threadId, worklistEntry, options.parentInvocationId);
+
+    // done-guarantee safety net: If loop exited without yielding a final done
+    // (e.g. signal.aborted break at top of while, or provider threw before done),
+    // synthesize one so the frontend always receives isFinal=true and clears its timer.
+    if (!yieldedFinalDone && worklist.length > 0) {
+      const lastCatId = worklist[Math.min(index, worklist.length - 1)]!;
+      yield {
+        type: 'done' as AgentMessageType,
+        catId: lastCatId,
+        isFinal: true,
+        timestamp: Date.now(),
+      } as AgentMessage;
+    }
   }
 }

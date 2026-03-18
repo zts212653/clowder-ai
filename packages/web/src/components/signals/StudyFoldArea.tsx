@@ -7,6 +7,8 @@ interface StudyFoldAreaProps {
   readonly articleId: string;
   readonly studyMeta: StudyMeta | null;
   readonly onStartStudy: () => void;
+  readonly onDiscuss?: () => void;
+  readonly discussLoading?: boolean;
   readonly onLinkThread?: (threadId: string) => Promise<void>;
   readonly onUnlinkThread?: (threadId: string) => Promise<void>;
   readonly collections?: readonly { id: string; name: string }[] | undefined;
@@ -46,6 +48,8 @@ export function StudyFoldArea({
   articleId,
   studyMeta,
   onStartStudy,
+  onDiscuss,
+  discussLoading,
   onLinkThread,
   onUnlinkThread,
   collections,
@@ -135,12 +139,14 @@ export function StudyFoldArea({
             >
               开始学习
             </button>
-            <a
-              href={discussLink}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100"
+            <button
+              type="button"
+              onClick={onDiscuss}
+              disabled={discussLoading}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50"
             >
-              在对话中讨论
-            </a>
+              {discussLoading ? '正在创建讨论...' : '在对话中讨论'}
+            </button>
             {/* AC-6: 多猫研究派发 — signal param binds article context via activeSignals */}
             <a
               href={`${discussLink}&research=multi`}

@@ -35,6 +35,7 @@ const cliConfigSchema = z.object({
   command: z.string().min(1),
   outputFormat: z.string().min(1),
   defaultArgs: z.array(z.string()).optional(),
+  effort: z.enum(['low', 'medium', 'high', 'max', 'xhigh']).optional(),
 });
 
 const contextBudgetSchema = z.object({
@@ -55,7 +56,7 @@ const catVariantSchema = z.object({
   displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
-  provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode']),
+  provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a']),
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
   cli: cliConfigSchema,
@@ -506,12 +507,59 @@ export function getDefaultCatId(): CatId {
   return createCatId('opus');
 }
 
+// ── Variant CLI effort accessor ──────────────────────────────────────
+
+/** catId → variant index (lazy, rebuilt on config change) */
+let _catIdToVariant: Map<string, CatVariant> | null = null;
+let _catIdToVariantSource: CatCafeConfig | null = null;
+
+function buildCatIdToVariantIndex(config: CatCafeConfig): Map<string, CatVariant> {
+  const index = new Map<string, CatVariant>();
+  for (const breed of config.breeds) {
+    for (const variant of breed.variants) {
+      const catId = variant.catId ?? breed.catId;
+      index.set(catId, variant);
+    }
+  }
+  return index;
+}
+
+/** Effort level union across all CLI providers */
+export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+
+/**
+ * Get CLI effort level for a cat from cat-config.json.
+ * Default when not configured:
+ *   claude (anthropic): 'max'
+ *   codex (openai):     'xhigh'
+ *   others:             'high'
+ */
+export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLevel {
+  const cfg = config ?? getCachedConfig();
+  if (!cfg) return 'max';
+
+  if (!_catIdToVariant || _catIdToVariantSource !== cfg) {
+    _catIdToVariant = buildCatIdToVariantIndex(cfg);
+    _catIdToVariantSource = cfg;
+  }
+
+  const variant = _catIdToVariant.get(catId);
+  if (variant?.cli.effort) return variant.cli.effort;
+
+  // Provider-aware defaults
+  if (variant?.provider === 'openai') return 'xhigh';
+  if (variant?.provider === 'anthropic') return 'max';
+  return 'high';
+}
+
 /** Reset cached config (for testing) */
 export function _resetCachedConfig(): void {
   _cachedConfig = null;
   _configLoadFailed = false;
   _catIdToBreed = null;
   _catIdToBreedSource = null;
+  _catIdToVariant = null;
+  _catIdToVariantSource = null;
   _defaultCatId = null;
   _cachedRoster = null;
   _cachedReviewPolicy = null;

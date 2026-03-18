@@ -1,4 +1,4 @@
-import { describe, it, assert } from 'vitest';
+import { assert, describe, it } from 'vitest';
 
 describe('Phase F types', () => {
   describe('ActionStatus', () => {

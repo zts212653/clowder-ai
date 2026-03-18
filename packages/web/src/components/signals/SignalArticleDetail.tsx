@@ -1,6 +1,7 @@
 import type { SignalArticleStatus, StudyMeta } from '@cat-cafe/shared';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { apiFetch } from '@/utils/api-client';
 import type { SignalArticleDetail } from '@/utils/signals-api';
 import { fetchStudyMeta, linkSignalThread, unlinkSignalThread } from '@/utils/signals-api';
 import { SignalTierBadge } from './SignalTierBadge';
@@ -138,20 +139,23 @@ export function SignalArticleDetail({
     [onCreateCollection, refreshStudyMeta, onCollectionChanged],
   );
 
-  // Resolve the best thread for discussion: use linked study thread if available
-  const discussedLink = useMemo(() => {
-    if (!article) {
-      return '/thread/default';
+  // Resolve or create a study thread, then navigate
+  const [discussLoading, setDiscussLoading] = useState(false);
+  const navigateToDiscuss = useCallback(async () => {
+    if (!article || discussLoading) return;
+    setDiscussLoading(true);
+    try {
+      const res = await apiFetch(`/api/signals/articles/${encodeURIComponent(article.id)}/discuss`, {
+        method: 'POST',
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { threadId: string };
+      const query = new URLSearchParams({ signal: article.id, source: article.source });
+      window.location.href = `/thread/${encodeURIComponent(data.threadId)}?${query.toString()}`;
+    } finally {
+      setDiscussLoading(false);
     }
-    const threads = studyMeta?.threads ?? [];
-    const activeThread = threads.find((t) => !t.stale);
-    const threadId = activeThread ? activeThread.threadId : 'default';
-    const query = new URLSearchParams({
-      signal: article.id,
-      source: article.source,
-    });
-    return `/thread/${encodeURIComponent(threadId)}?${query.toString()}`;
-  }, [article, studyMeta]);
+  }, [article, discussLoading]);
 
   const addPendingTag = useCallback(async () => {
     if (!article) {
@@ -209,12 +213,14 @@ export function SignalArticleDetail({
         >
           打开原文 ↗
         </a>
-        <a
-          href={discussedLink}
-          className="rounded-md border border-opus-light px-3 py-1.5 text-xs text-opus-dark hover:bg-opus-bg"
+        <button
+          type="button"
+          onClick={() => void navigateToDiscuss()}
+          disabled={discussLoading}
+          className="rounded-md border border-opus-light px-3 py-1.5 text-xs text-opus-dark hover:bg-opus-bg disabled:opacity-50"
         >
-          在对话中讨论
-        </a>
+          {discussLoading ? '正在创建讨论...' : '在对话中讨论'}
+        </button>
       </div>
       {article.summary && (
         <section className="mt-4 rounded-lg border border-owner-light bg-owner-bg p-3">
@@ -225,9 +231,9 @@ export function SignalArticleDetail({
       <StudyFoldArea
         articleId={article.id}
         studyMeta={studyMeta}
-        onStartStudy={() => {
-          window.location.href = discussedLink;
-        }}
+        onStartStudy={() => void navigateToDiscuss()}
+        onDiscuss={() => void navigateToDiscuss()}
+        discussLoading={discussLoading}
         onLinkThread={handleLinkThread}
         onUnlinkThread={handleUnlinkThread}
         collections={collections}

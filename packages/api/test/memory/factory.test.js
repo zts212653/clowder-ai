@@ -22,37 +22,6 @@ describe('createMemoryServices', () => {
     assert.equal(await services.evidenceStore.health(), true);
   });
 
-  it('creates hindsight services', async () => {
-    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
-
-    const mockClient = {
-      recall: async () => [],
-      retain: async () => {},
-      reflect: async () => '',
-      ensureBank: async () => {},
-      isHealthy: async () => true,
-    };
-
-    const services = await createMemoryServices({
-      type: 'hindsight',
-      hindsightClient: mockClient,
-      hindsightBank: 'test-bank',
-    });
-
-    assert.ok(services.evidenceStore);
-    assert.ok(services.markerQueue);
-    assert.ok(services.reflectionService);
-    assert.ok(services.knowledgeResolver);
-    // indexBuilder and materializationService not available for hindsight
-    assert.equal(services.indexBuilder, undefined);
-  });
-
-  it('throws when hindsight type but no client', async () => {
-    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
-
-    await assert.rejects(() => createMemoryServices({ type: 'hindsight' }), { message: /hindsightClient required/i });
-  });
-
   // ── Phase C: embed config integration ───────────────────────────
 
   it('embedMode=off creates no embedding service', async () => {

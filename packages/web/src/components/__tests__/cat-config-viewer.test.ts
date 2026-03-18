@@ -15,7 +15,6 @@ const CONFIG: ConfigData = {
   },
   a2a: { enabled: true, maxDepth: 2 },
   memory: { enabled: true, maxKeysPerThread: 50 },
-  hindsight: { enabled: true, baseUrl: 'http://localhost:8888', sharedBank: 'cat-cafe-shared' },
   governance: { degradationEnabled: true, doneTimeoutMs: 300000, heartbeatIntervalMs: 30000 },
 };
 
@@ -73,13 +72,6 @@ describe('SystemTab', () => {
     expect(html).toContain('50');
   });
 
-  it('renders Hindsight config', () => {
-    const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
-    expect(html).toContain('Hindsight');
-    expect(html).toContain('localhost:8888');
-    expect(html).toContain('cat-cafe-shared');
-  });
-
   it('renders governance config', () => {
     const html = renderToStaticMarkup(React.createElement(SystemTab, { config: CONFIG }));
     expect(html).toContain('治理');
@@ -87,23 +79,9 @@ describe('SystemTab', () => {
     expect(html).toContain('30s');
   });
 
-  it('renders codex-first memory engine routing and runtime controls', () => {
+  it('renders codex execution config', () => {
     const nextConfig = {
       ...CONFIG,
-      hindsight: {
-        ...CONFIG.hindsight,
-        engine: {
-          reflect: 'codex_oauth',
-          retainExtraction: 'codex_oauth',
-          allowNativeFallback: false,
-        },
-        service: {
-          mode: 'storage_retrieval_only',
-          requireHealthcheck: true,
-          writeTimeoutMs: 8000,
-          recallTimeoutMs: 8000,
-        },
-      },
       codexExecution: {
         model: 'gpt-5.3-codex',
         authMode: 'oauth',
@@ -112,10 +90,6 @@ describe('SystemTab', () => {
     } as unknown as ConfigData;
 
     const html = renderToStaticMarkup(React.createElement(SystemTab, { config: nextConfig }));
-    expect(html).toContain('引擎路由');
-    expect(html).toContain('codex_oauth');
-    expect(html).toContain('allowNativeFallback');
-    expect(html).toContain('storage_retrieval_only');
     expect(html).toContain('gpt-5.3-codex');
     expect(html).toContain('oauth');
   });

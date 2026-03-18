@@ -16,12 +16,26 @@ describe('governance-pack', () => {
     assert.ok(block.includes(MANAGED_BLOCK_END));
   });
 
-  it('managed block includes hard constraints', () => {
+  it('contains internal port 3001 (transformed by sync pipeline for open-source)', () => {
     const block = getGovernanceManagedBlock('claude');
-    assert.ok(block.includes('3001'));
-    assert.ok(block.includes('6399'));
-    assert.ok(block.includes('self-review'));
-    assert.ok(block.includes('Identity is constant'));
+    assert.ok(block.includes('3001'), 'Source should use internal port 3001');
+  });
+
+  it('contains internal port 6399 (transformed by sync pipeline for open-source)', () => {
+    const block = getGovernanceManagedBlock('claude');
+    assert.ok(block.includes('6399'), 'Source should use internal port 6399');
+  });
+
+  it('port reservation concept is present', () => {
+    const block = getGovernanceManagedBlock('claude');
+    assert.ok(block.includes('reserved'), 'Port reservation concept should be present');
+    assert.ok(block.includes('production Redis'), 'Redis port guidance should be present');
+  });
+
+  it('managed block includes governance rules from shared-rules', () => {
+    const block = getGovernanceManagedBlock('claude');
+    assert.ok(block.includes('self-review'), 'Should include no-self-review rule');
+    assert.ok(block.includes('Identity'), 'Should include identity constraint');
   });
 
   it('managed block includes methodology intro', () => {
@@ -63,7 +77,7 @@ describe('governance-pack', () => {
     assert.ok(block.includes('cat-cafe-skills'));
   });
 
-  it('pack version is 1.2.0', () => {
-    assert.equal(GOVERNANCE_PACK_VERSION, '1.2.0');
+  it('pack version is 1.3.0', () => {
+    assert.equal(GOVERNANCE_PACK_VERSION, '1.3.0');
   });
 });

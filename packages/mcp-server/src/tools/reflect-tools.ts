@@ -1,8 +1,8 @@
 /**
  * Reflect Tool
- * MCP 工具: LLM 反思 (Hindsight Reflect)
+ * MCP 工具: 项目知识反思 (SQLite-backed)
  *
- * Phase 5.0: 猫猫可通过 MCP 调用 /reflect 获取项目知识反思。
+ * F102: 猫猫可通过 MCP 调用 /reflect 获取项目知识反思。
  */
 
 import { z } from 'zod';
@@ -38,7 +38,7 @@ export async function handleReflect(input: { query: string }): Promise<ToolResul
 
     if (data.degraded) {
       return successResult(
-        `[DEGRADED] Hindsight unavailable (${data.degradeReason ?? 'unknown'}). Cannot generate reflection.`,
+        `[DEGRADED] Reflection service unavailable (${data.degradeReason ?? 'unknown'}). Use search_evidence instead.`,
       );
     }
 
@@ -53,7 +53,8 @@ export const reflectTools = [
   {
     name: 'cat_cafe_reflect',
     description:
-      'Ask a reflective question about the project. Uses Hindsight LLM reflection to synthesize insights from stored project knowledge.',
+      'Ask a reflective question about the project. Synthesizes insights from stored project knowledge (SQLite-backed). ' +
+      'Note: currently returns degradation message — use search_evidence for project knowledge recall.',
     inputSchema: reflectInputSchema,
     handler: handleReflect,
   },

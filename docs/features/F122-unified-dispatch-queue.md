@@ -164,13 +164,37 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 - [x] AC-B4: steer 可以管控 agent-sourced queue entries（promote + immediate 均验证通过）
 - [x] AC-B5: `invocationQueue` dep 注入到 callback routes → 生产环境激活 F122B 路径
 
-**Deferred（Phase B.1 follow-up）：**
-- [ ] AC-B6: multi_mention dispatch 改走 InvocationQueue（MultiMentionOrchestrator 的 response 聚合需要 QueueProcessor 回调机制，复杂度高，单独 PR）
-- [ ] AC-B6-P1: **A2A 消息上下文可见性修复**（P1 前置，team lead 2026-03-16 提出）— 详见下方「已知问题」
-- [ ] AC-B7: QueuePanel 前端渲染 agent-sourced entries（显示"猫A → 猫B handoff"格式）— 设计稿已完成 `designs/F122-queue-panel-agent-entries.pen`
-- [ ] AC-B8: Thread 执行状态指示（per-cat 活跃状态 + 头像 indicator）— 复用 F108 设计稿 Scene 3
-- [ ] AC-B9: Per-cat Stop 按钮 — 复用 F108 设计稿 Scene 4
-- [ ] AC-B10: 双模发送 UX（锁头悄悄话 + 广播排队）— 复用 F108 设计稿 Scene 1/2/5
+**Phase B.1 follow-up（全部完成）：**
+- [x] AC-B6: multi_mention dispatch 改走 InvocationQueue（MultiMentionOrchestrator 的 response 聚合需要 QueueProcessor 回调机制，PR #536 merged `646d6aa4`）
+- [x] AC-B6-P1: **A2A 消息上下文可见性修复**（PR #502 merged）— 详见下方「已知问题」
+- [x] AC-B7: QueuePanel 前端渲染 agent-sourced entries（PR #504 merged）— 设计稿 `designs/F122-queue-panel-agent-entries.pen`
+- [x] AC-B8: Thread 执行状态指示（PR #508 merged）— ThreadExecutionBar per-cat 活跃状态 + 经过时间
+  - ✅ 打磨完成：猫名使用 `useCatData()`+`formatCatName()` 动态中文显示，颜色从 cat-config 动态读取（`feat/f122-remaining` branch）
+- [x] AC-B9: Per-cat Stop 按钮（PR #510 merged）— cancel API + ThreadExecutionBar × 按钮
+  - ✅ 同上打磨：猫名 + 颜色随 B8 一起修完
+- [x] AC-B10: 双模发送 UX — whisper 模式下执行中猫 chip 禁用（灰色+⏳），auto-select 跳过活跃猫，reconcile 移除新活跃 targets（`feat/f122-remaining` branch）
+
+#### 观察到的现象：A2A agent entry 卡在队列（runtime 环境，待验证）
+
+> team lead 2026-03-17 00:00 报告（runtime 环境，非最新 main）：
+> "小金 at 了缅因，消息进入队列。小金早干完了，但队列里的消息永远到不了。"
+
+**现象**：opencode @ codex 的 A2A agent entry 在 QueuePanel 里排队，"猫猫正在回复中" 持续显示，但实际上 opencode 已完成执行。entry 不会被自动出队。
+
+**可能根因**（待新 session 用 debugging skill 验证）：
+1. `tryAutoExecute` 在 enqueue 时调了一次，目标猫 slot 忙 → 跳过。之后没有重试机制
+2. `onInvocationComplete` 的链式调度（`tryExecuteNextAcrossUsers`）可能没有覆盖 agent entry
+3. `activeInvocations` 前端残留（和 PR #470 修的 steer stuck loading 同类）
+
+**注意**：此现象在 runtime 环境观察到，runtime 可能未同步最新 main（含 PR #499/#502 等 F122B 改动）。需要先确认 runtime 代码版本再定位。
+
+#### 观察到的现象：Steer agent entry 后气泡显示为team lead发的（runtime 环境）
+
+> team lead 2026-03-17 00:05 报告：Steer 推送 agent entry 后，小金的消息气泡显示成team lead发的。F5 刷新后纠正。
+
+**可能根因**：agent entry 的 `userId` 继承了触发用户的 userId。Steer 推送后 QueueProcessor 用 entry 的 userId 广播 → 前端用 userId 判断气泡方向 → 误显示为team lead。刷新后从 messageStore 读的是正确的 catId 所以纠正。
+
+**同上注意**：runtime 环境观察到，待确认代码版本。
 
 #### 已知问题：A2A 消息上下文提前可见（P1，AC-B6 前置修复）
 
@@ -273,3 +297,5 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 - Phase A: 跨家族 review（Maine Coon优先，codex 或 gpt52）✅
 - Phase A.1: 跨家族 review（codex 或 gpt52）✅
 - Phase B: 跨家族 review（codex R5→R6 放行）✅
+- Phase B.1 (B6): 跨家族 review（codex R3→R4→R5 放行）✅
+- Phase B.1 (B8/B9/B10): 跨家族 review（codex R1→R2 放行）✅

@@ -18,6 +18,7 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
+import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -142,6 +143,8 @@ export class ClaudeAgentService implements AgentService {
       '--verbose',
       '--model',
       effectiveModel,
+      '--effort',
+      getCatEffort(this.catId as string),
       '--permission-mode',
       PERMISSION_MODE,
       // Skip global user settings to prevent config pollution across sessions

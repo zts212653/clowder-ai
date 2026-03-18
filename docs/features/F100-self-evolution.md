@@ -1,10 +1,10 @@
 ---
 feature_ids: [F100]
-related_features: [F042, F086, F038]
+related_features: [F042, F086, F038, F102]
 topics: [skills, sop, governance, self-improvement, knowledge-management, mode-c, knowledge-evolution]
 doc_kind: spec
 created: 2026-03-11
-updated: 2026-03-12
+updated: 2026-03-16
 ---
 
 # F100: Self-Evolution — 猫猫自我进化机制
@@ -12,7 +12,7 @@ updated: 2026-03-12
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 > Phase 1 完成：行为层 skill（A/B/C 三模式触发规则）
 > Phase 2 完成：三模式知识对象化（A 守护记录 + B 流程提案闭环 + C 知识蒸馏验证 + 五级阶梯 + 元认知）
-> Phase 3 待建：可观测层（事件 envelope + Knowledge Dashboard）
+> Phase 3 待建：可观测层 — **blocked on F102 close**，需基于 F102 终态重新定义
 
 ## Why
 
@@ -192,7 +192,7 @@ F100 的终态 = 行为层 + 知识对象化 + 验证闭环，面向终态设计
 |-------|------|------|
 | **Phase 1: 行为层** | self-evolution skill 三模式（A/B/C 触发规则） | done |
 | **Phase 2: 知识对象化** | A: Scope Guard Log + 发散识别 / B: Proposal Log + 落地闭环 + 效果验证 / C: Episode Card + Dual Distillation + Eval Ledger / 共享: 五级阶梯 + 元认知 + knowledge contract + shared knowledge 分离 | done |
-| **Phase 3: 可观测** | 事件 envelope + OpenTelemetry 埋点 + Knowledge Dashboard（4 屏） | planned |
+| **Phase 3: 可观测** | 事件 envelope + Knowledge Dashboard — **blocked on F102 close，需重新定义**（见下方 Phase 3 说明） | blocked |
 
 ### 关键认知更新
 
@@ -202,3 +202,58 @@ F100 的终态 = 行为层 + 知识对象化 + 验证闭环，面向终态设计
 - **现在**：三模式统一 = "先记录（Episode），再蒸馏（Method/Skill），再验证（Eval Ledger），用五级阶梯治理成熟度"
 
 > "Mode C 不是把经历记下来，而是把 episode 抽成方法，再用 replay 证明它真有增益。先把三张卡片跑起来，别急着给三只猫装 PPO 发动机。" — GPT Pro
+
+---
+
+## Phase 3: 可观测层 — 待 F102 close 后重新定义（2026-03-16）
+
+### 原设计回顾
+
+Phase 3 原设计（立项于 2026-03-12，F102 之前）：
+- **Event Envelope**：OpenTelemetry 兼容事件（7 种：skill_discovered / skill_loaded / memory_injected / memory_promoted / evolution_proposed / evolution_approved / evolution_reverted）
+- **Knowledge Dashboard**（4 屏）：Capability Catalog / Memory Radar / Evolution Changelog / Graph View
+
+### 为什么需要重新定义
+
+F102（记忆组件 Adapter 化重构）在 F100 Phase 3 原设计之后立项并大幅推进，已建成：
+- `evidence.sqlite` + FTS5 + sqlite-vec 向量增强 — 项目知识的存储/检索基座
+- `search_evidence` 统一检索入口（scope/mode/depth 三维参数）
+- 自动 edges 提取（frontmatter 交叉引用）+ memory invalidation 机制
+- `docs_count / last_rebuild_at / backend` 可观测指标
+- MCP 工具两层收敛方案（统一入口 + drill-down）
+
+F100 Phase 3 原设计中的多个组件与 F102 存在重叠或依赖：
+
+| F100 Phase 3 原组件 | F102 覆盖情况 |
+|---|---|
+| Capability Catalog（能力目录搜索） | `search_evidence` + `evidence_docs` 已可检索 |
+| Memory Radar（热点/冲突/重复） | `edges` + `needs_review` invalidation 部分覆盖 |
+| Event Envelope（7 种 OTel 事件） | 当前 3 猫规模下 ROI 存疑 |
+
+### 计划
+
+1. **Blocked on F102 close** — 等 F102 Phase D 剩余 AC 全部闭合（D6/D11/D12/D15~D17/D19）
+2. **重新评估** — 基于 F102 终态能力，重新定义 Phase 3 交付物：
+   - 哪些原设计组件已被 F102 覆盖（可删）？
+   - 哪些需要在 F102 基座上增量构建（Dashboard UI / 事件流）？
+   - 跑一段时间真实使用后，"可观测"到底缺什么？
+3. **可能的瘦身方向** — Phase 3 大概率不需要 4 屏 Dashboard + OTel，更可能是：
+   - 一个 CLI 命令输出知识库概览（knowledge status）
+   - F100 知识对象（Episode/Method/Eval）在 `evidence.sqlite` 中的索引集成
+   - 简单的 hit_count / last_used 统计（Phase 2 设计中提到的"动态状态走事件流"）
+
+### F100 × F102 关系
+
+```
+F100 Self-Evolution（生产线上游）
+  ├─ Phase 1: 行为层 — 什么时候触发 ✅
+  ├─ Phase 2: 知识对象化 — 产出什么、怎么验证 ✅
+  └─ Phase 3: 可观测层 — 看得见、查得到 ← blocked on F102
+
+F102 Memory Adapter（存储/检索基座）
+  ├─ Phase A~C: SQLite + FTS5 + 向量 ✅
+  └─ Phase D: 激活 — 清理 + 数据源 + 协议 + 提示词 ← in-progress
+
+关系：F102 是 F100 Phase 3 的基础设施层。
+F100 Phase 2 产出的知识对象（Episode/Method/Eval）需要被 F102 索引才能"可观测"。
+```

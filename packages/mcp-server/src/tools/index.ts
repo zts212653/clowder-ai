@@ -45,7 +45,13 @@ export {
   handleSearchEvidence,
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
-
+export {
+  handleLimbInvoke,
+  handleLimbListAvailable,
+  limbInvokeInputSchema,
+  limbListAvailableInputSchema,
+  limbTools,
+} from './limb-tools.js';
 export {
   handleReflect,
   reflectInputSchema,
@@ -69,7 +75,6 @@ export {
   sessionChainTools,
   sessionSearchInputSchema,
 } from './session-chain-tools.js';
-
 export { signalStudyTools } from './signal-study-tools.js';
 export {
   handleSignalGetArticle,

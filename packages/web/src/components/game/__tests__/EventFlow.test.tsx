@@ -58,4 +58,110 @@ describe('EventFlow', () => {
     expect(html).toContain('data-testid="event-flow"');
     expect(html).not.toContain('data-testid="chat-bubble"');
   });
+
+  // --- Hotfix 1: action.* events should render as system events, not chat bubbles ---
+
+  it('renders action.requested as system event (not chat bubble)', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-ar',
+        type: 'action.requested',
+        scope: 'god',
+        payload: { seatId: 'P1', actionName: 'kill' },
+      }),
+    ];
+    const html = render(events);
+    expect(html).toContain('data-testid="system-event"');
+    expect(html).not.toContain('data-testid="chat-bubble"');
+    // Should display meaningful info, not empty
+    expect(html).toContain('P1');
+  });
+
+  it('renders action.submitted as system event (not chat bubble)', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-as',
+        type: 'action.submitted',
+        scope: 'god',
+        payload: { seatId: 'P2', actionName: 'vote', target: 'P4' },
+      }),
+    ];
+    const html = render(events);
+    expect(html).toContain('data-testid="system-event"');
+    expect(html).not.toContain('data-testid="chat-bubble"');
+    expect(html).toContain('P2');
+  });
+
+  it('renders action.timeout as system event', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-at',
+        type: 'action.timeout',
+        scope: 'god',
+        payload: { seatId: 'P3', message: 'P3 行动超时' },
+      }),
+    ];
+    const html = render(events);
+    expect(html).toContain('data-testid="system-event"');
+    expect(html).not.toContain('data-testid="chat-bubble"');
+  });
+
+  it('renders action.fallback as system event', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-af',
+        type: 'action.fallback',
+        scope: 'god',
+        payload: { seatId: 'P5', message: 'P5 自动执行' },
+      }),
+    ];
+    const html = render(events);
+    expect(html).toContain('data-testid="system-event"');
+    expect(html).not.toContain('data-testid="chat-bubble"');
+  });
+
+  // --- Hotfix 1b: speech/last_words use payload.text, EventFlow should fall back to it ---
+
+  it('renders speech with payload.text (not just content/message)', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-sp',
+        type: 'speech',
+        payload: { seatId: 'P2', text: '我是预言家，P4查杀' },
+      }),
+    ];
+    const html = render(events);
+    expect(html).toContain('data-testid="chat-bubble"');
+    expect(html).toContain('我是预言家，P4查杀');
+  });
+
+  it('renders last_words with payload.text', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-lw',
+        type: 'last_words',
+        payload: { seatId: 'P4', text: '请帮我报仇' },
+      }),
+    ];
+    const html = render(events);
+    expect(html).toContain('data-testid="chat-bubble"');
+    expect(html).toContain('请帮我报仇');
+  });
+
+  // --- Hotfix: ballot.updated should render as system event ---
+
+  it('renders ballot.updated as system event', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-bu',
+        type: 'ballot.updated',
+        scope: 'public',
+        payload: { voterSeat: 'P1', choice: 'P3', revision: 1 },
+      }),
+    ];
+    const html = render(events);
+    expect(html).toContain('data-testid="system-event"');
+    expect(html).not.toContain('data-testid="chat-bubble"');
+    expect(html).toContain('P1');
+  });
 });

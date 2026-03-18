@@ -25,7 +25,16 @@ export const MARKER_STATUSES = [
 
 export type MarkerStatus = (typeof MARKER_STATUSES)[number];
 
-export const EVIDENCE_KINDS = ['feature', 'decision', 'plan', 'session', 'lesson'] as const;
+export const EVIDENCE_KINDS = [
+  'feature',
+  'decision',
+  'plan',
+  'session',
+  'lesson',
+  'thread',
+  'discussion',
+  'research',
+] as const;
 
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
@@ -67,7 +76,12 @@ export interface SearchOptions {
   status?: EvidenceStatus;
   keywords?: string[];
   limit?: number;
-  scope?: 'global' | 'project' | 'workspace';
+  /** Phase D: collection scope — which data layer to search */
+  scope?: 'docs' | 'memory' | 'threads' | 'sessions' | 'all';
+  /** Phase D: retrieval mode */
+  mode?: 'lexical' | 'semantic' | 'hybrid';
+  /** Phase D: result depth — summary (default) or raw detail */
+  depth?: 'summary' | 'raw';
 }
 
 export interface MarkerFilter {

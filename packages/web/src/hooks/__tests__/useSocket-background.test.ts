@@ -1572,7 +1572,7 @@ describe('background thread socket handling', () => {
       });
       const ts = useChatStore.getState().getThreadState('thread-bg');
       expect(ts.hasActiveInvocation).toBe(true);
-      expect(ts.activeInvocations['inv-1']).toEqual({ catId: 'opus', mode: 'execute' });
+      expect(ts.activeInvocations['inv-1']).toEqual(expect.objectContaining({ catId: 'opus', mode: 'execute' }));
     });
 
     it('markThreadInvocationComplete removes specific invocationId, preserves others', () => {
@@ -1610,7 +1610,7 @@ describe('background thread socket handling', () => {
 
       ts = useChatStore.getState().getThreadState('thread-bg');
       expect(ts.activeInvocations['inv-1']).toBeUndefined();
-      expect(ts.activeInvocations['inv-2']).toEqual({ catId: 'codex', mode: 'execute' });
+      expect(ts.activeInvocations['inv-2']).toEqual(expect.objectContaining({ catId: 'codex', mode: 'execute' }));
       expect(ts.hasActiveInvocation).toBe(true);
 
       // Complete inv-2 → all clear
@@ -1648,7 +1648,7 @@ describe('background thread socket handling', () => {
 
       // codex slot must survive
       ts = useChatStore.getState().getThreadState('thread-bg');
-      expect(ts.activeInvocations['inv-codex']).toEqual({ catId: 'codex', mode: 'execute' });
+      expect(ts.activeInvocations['inv-codex']).toEqual(expect.objectContaining({ catId: 'codex', mode: 'execute' }));
       expect(ts.activeInvocations['inv-opus']).toBeUndefined();
       expect(ts.hasActiveInvocation).toBe(true); // codex still active
     });

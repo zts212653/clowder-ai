@@ -29,13 +29,14 @@ describe('governance-preflight', () => {
     assert.equal(result.reason, undefined);
   });
 
-  it('fails for unbootstrapped external project', async () => {
+  it('returns needsBootstrap for unbootstrapped external project', async () => {
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
     assert.equal(result.ready, false);
+    assert.equal(result.needsBootstrap, true, 'Should signal bootstrap is needed');
     assert.ok(result.reason?.includes('not bootstrapped'));
   });
 
-  it('fails for unconfirmed project', async () => {
+  it('returns needsConfirmation for unconfirmed project', async () => {
     const registry = new GovernanceRegistry(catCafeRoot);
     await registry.register(externalProject, {
       packVersion: GOVERNANCE_PACK_VERSION,
@@ -46,6 +47,7 @@ describe('governance-preflight', () => {
 
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
     assert.equal(result.ready, false);
+    assert.equal(result.needsConfirmation, true, 'Should signal confirmation is needed');
     assert.ok(result.reason?.includes('confirmation'));
   });
 
@@ -58,7 +60,6 @@ describe('governance-preflight', () => {
   });
 
   it('fails when registry confirmed but CLAUDE.md deleted', async () => {
-    // Bootstrap fully, then delete CLAUDE.md
     const service = new GovernanceBootstrapService(catCafeRoot);
     await service.bootstrap(externalProject, { dryRun: false });
     await rm(join(externalProject, 'CLAUDE.md'));
@@ -69,7 +70,6 @@ describe('governance-preflight', () => {
   });
 
   it('fails when registry confirmed but skills symlinks removed', async () => {
-    // Bootstrap fully, then remove all skills symlinks
     const service = new GovernanceBootstrapService(catCafeRoot);
     await service.bootstrap(externalProject, { dryRun: false });
     for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills']) {
@@ -79,5 +79,11 @@ describe('governance-preflight', () => {
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
     assert.equal(result.ready, false);
     assert.ok(result.reason?.includes('symlink'));
+  });
+
+  it('provides actionable bootstrapCommand for new projects', async () => {
+    const result = await checkGovernancePreflight(externalProject, catCafeRoot);
+    assert.equal(result.ready, false);
+    assert.ok(result.bootstrapCommand, 'Should include a bootstrap command hint');
   });
 });

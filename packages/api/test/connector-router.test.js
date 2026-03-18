@@ -330,6 +330,72 @@ describe('ConnectorRouter', () => {
       assert.equal(ctxSocket.broadcasts[1].data.connectorId, 'system-command');
     });
 
+    it('/thread command forwards message to target thread and triggers invocation', async () => {
+      const fwdTrigger = mockTrigger();
+      const fwdSocket = mockSocketManager();
+      const fwdStore = mockMessageStore();
+      const fwdRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore: fwdStore,
+        threadStore,
+        invokeTrigger: fwdTrigger,
+        socketManager: fwdSocket,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/thread': {
+            kind: 'thread',
+            response: '📨 已路由到 目标Thread',
+            newActiveThreadId: 'thread-target-1',
+            contextThreadId: 'thread-target-1',
+            forwardContent: 'hi there',
+          },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+      const result = await fwdRouter.route('feishu', 'chat-123', '/thread thread-target-1 hi there', 'ext-fwd-1');
+      assert.equal(result.kind, 'routed');
+      assert.equal(result.threadId, 'thread-target-1');
+      // Forward content should be stored (not the /thread command)
+      const fwdMsg = fwdStore.messages.find((m) => m.content === 'hi there');
+      assert.ok(fwdMsg, 'forwarded message should be stored');
+      assert.equal(fwdMsg.threadId, 'thread-target-1');
+      // Cat invocation should be triggered for the target thread
+      assert.equal(fwdTrigger.calls.length, 1);
+      assert.equal(fwdTrigger.calls[0].threadId, 'thread-target-1');
+      assert.equal(fwdTrigger.calls[0].message, 'hi there');
+    });
+
+    it('/thread command sends confirmation response to adapter', async () => {
+      const fwdRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: mockTrigger(),
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/thread': {
+            kind: 'thread',
+            response: '📨 已路由',
+            newActiveThreadId: 'thread-t1',
+            contextThreadId: 'thread-t1',
+            forwardContent: 'hello',
+          },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+      await fwdRouter.route('feishu', 'chat-123', '/thread thread-t1 hello', 'ext-fwd-2');
+      // Adapter should receive confirmation
+      assert.equal(adapterSendCalls.length, 1);
+      assert.ok(adapterSendCalls[0].content.includes('已路由'));
+    });
+
     it('skips messageStore when contextThreadId absent (Phase C)', async () => {
       // /where without binding → no contextThreadId → no messages stored
       const ctxRouter = new ConnectorRouter({

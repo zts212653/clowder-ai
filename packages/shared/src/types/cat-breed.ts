@@ -33,6 +33,13 @@ export interface CliConfig {
   readonly command: string; // 'claude' | 'codex' | 'gemini'
   readonly outputFormat: string; // 'stream-json' | 'json'
   readonly defaultArgs?: readonly string[];
+  /**
+   * Reasoning effort level — each CLI maps to its own flag:
+   *   claude: --effort low|medium|high|max
+   *   codex:  --config model_reasoning_effort="low|medium|high|xhigh"
+   * Default: 'max' (claude) / 'xhigh' (codex)
+   */
+  readonly effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 }
 
 /**

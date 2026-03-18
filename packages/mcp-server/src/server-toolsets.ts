@@ -3,6 +3,7 @@ import {
   callbackMemoryTools,
   callbackTools,
   evidenceTools,
+  limbTools,
   reflectTools,
   richBlockRulesTools,
   sessionChainTools,
@@ -51,8 +52,15 @@ export function registerSignalToolset(server: McpServer): void {
   registerTools(server, signalTools);
 }
 
+const limbNodeTools: readonly ToolDef[] = [...limbTools];
+
+export function registerLimbToolset(server: McpServer): void {
+  registerTools(server, limbNodeTools);
+}
+
 export function registerFullToolset(server: McpServer): void {
   registerCollabToolset(server);
   registerMemoryToolset(server);
   registerSignalToolset(server);
+  registerLimbToolset(server);
 }

@@ -46,12 +46,14 @@ export class GameAutoPlayer {
   startLoop(gameId: string): void {
     if (this.activeLoops.has(gameId)) return;
     this.activeLoops.add(gameId);
+    console.log(`[GameAutoPlayer] Loop started for ${gameId}`);
     this.runLoop(gameId)
       .catch((err) => {
         console.error(`[GameAutoPlayer] Loop error for ${gameId}:`, err);
       })
       .finally(() => {
         this.activeLoops.delete(gameId);
+        console.log(`[GameAutoPlayer] Loop exited for ${gameId}`);
       });
   }
 
@@ -60,35 +62,70 @@ export class GameAutoPlayer {
     this.activeLoops.delete(gameId);
   }
 
-  private async runLoop(gameId: string): Promise<void> {
-    const TICK_MS = 800;
-    const MAX_TICKS = 500; // Safety: ~6.5 minutes max
+  /** Check if a loop is active for a game */
+  isLoopActive(gameId: string): boolean {
+    return this.activeLoops.has(gameId);
+  }
 
-    for (let tick = 0; tick < MAX_TICKS; tick++) {
+  /** Recover auto-play loops for all active games in store (AC-G1).
+   *  Call at API startup to resume games after process restart. */
+  async recoverActiveGames(): Promise<number> {
+    const activeGames = await this.store.listActiveGames();
+    let recovered = 0;
+    for (const game of activeGames) {
+      if (game.status === 'playing') {
+        console.log(
+          `[GameAutoPlayer] Recovering loop for ${game.gameId} (phase=${game.currentPhase}, round=${game.round})`,
+        );
+        this.startLoop(game.gameId);
+        recovered++;
+      }
+    }
+    if (recovered > 0) {
+      console.log(`[GameAutoPlayer] Recovered ${recovered} active game(s)`);
+    }
+    return recovered;
+  }
+
+  static readonly TICK_MS = 800;
+  static readonly MAX_WALL_CLOCK_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+  private async runLoop(gameId: string): Promise<void> {
+    const loopStart = Date.now();
+
+    for (;;) {
       if (!this.activeLoops.has(gameId)) return;
+      if (Date.now() - loopStart > GameAutoPlayer.MAX_WALL_CLOCK_MS) {
+        console.warn(
+          `[GameAutoPlayer] ${gameId} wall-clock safety limit reached (${GameAutoPlayer.MAX_WALL_CLOCK_MS}ms), exiting loop`,
+        );
+        return;
+      }
 
       const runtime = await this.store.getGame(gameId);
       if (!runtime || runtime.status === 'finished') return;
 
-      // Paused: wait without acting, loop continues for when game resumes
       if (runtime.status === 'paused') {
-        await sleep(TICK_MS * 2);
+        await sleep(GameAutoPlayer.TICK_MS * 2);
         continue;
       }
 
       if (runtime.status !== 'playing') return;
 
-      // For resolve/announce phases, use tick() to auto-advance
       if (SKIP_PHASES.has(runtime.currentPhase)) {
         await this.orchestrator.tick(gameId);
-        await sleep(TICK_MS / 2);
+        await sleep(GameAutoPlayer.TICK_MS / 2);
         continue;
       }
 
       const acted = await this.actForPhase(runtime);
+      if (acted) {
+        console.log(
+          `[GameAutoPlayer] ${gameId} phase=${runtime.currentPhase} round=${runtime.round} — actions submitted`,
+        );
+      }
 
-      // Small delay between ticks — let phase transitions settle
-      await sleep(acted ? TICK_MS : TICK_MS * 2);
+      await sleep(acted ? GameAutoPlayer.TICK_MS : GameAutoPlayer.TICK_MS * 2);
     }
   }
 

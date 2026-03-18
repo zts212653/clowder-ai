@@ -62,9 +62,26 @@ WHEN 收到 review 反馈:
 1. READ  — 完整读完，不要边读边反应
 2. CLASSIFY — 区分愿景级 vs 代码级；按 P1/P2/P3 分优先级
 3. CLARIFY — 有不清晰的问题先全部问清，再动手
-4. FIX — Red→Green 逐个修复（见下方）
-5. CONFIRM — 修完回给 reviewer 确认，不能自判"改对了"
+4. VERIFY — reviewer 说的问题真的存在吗？（见下方三道门）
+5. FIX — 通过验证的问题 Red→Green 逐个修复
+6. CONFIRM — 修完回给 reviewer 确认，不能自判"改对了"
 ```
+
+### VERIFY 三道门（少一道不准照改）
+
+对每条 review 意见，改代码之前必须过三道门：
+
+1. **Spec Gate** — 这条意见和现有 AC/需求冲突吗？
+   - 冲突 → pushback，附 AC 原文
+   - 不冲突 → 进下一道
+2. **Mechanism Gate** — reviewer 说"这不行"的证据是什么？
+   - 有失败用例 / 真实平台限制 → 进下一道
+   - 只是"不优雅"/"理论上不安全"但拿不出失败路径 → 当假设处理，pushback 要求证据
+3. **Feature Gate** — 按建议改完后，核心用户路径还活着吗？
+   - 改完跑一遍最关键的用户路径（不是只跑测试）
+   - 功能死了 → 回滚，review 建议作废，不管它理论上多优雅
+
+**特别注意**：云端 reviewer（Codex cloud）没有运行环境，判断基于静态分析和理论推理。你有本地环境 → **你的实测证据 > 他的理论推理**。
 
 **修复顺序**：P1（blocking）→ P2（必须修）→ P3（讨论后当场修或放下，不记 BACKLOG）
 

@@ -1,16 +1,18 @@
 ---
 feature_ids: [F092]
-related_features: [F066, F086]
+related_features: [F066, F086, F124]
 topics: [voice, companion, hands-free, TTS, STT, AirPods, typeless, Qwen3, MLX, local-LLM]
 doc_kind: spec
 created: 2026-03-10
+completed: 2026-03-18
 ---
 
 # F092 — Cats & U 语音陪伴体验
 
-> **Status**: in-progress (P0 complete) | **Owner**: Ragdoll (Opus 4.6)
+> **Status**: done | **Completed**: 2026-03-18 | **Owner**: Ragdoll (Opus 4.6)
 > **Evolved from**: F066 (Voice Pipeline Upgrade) + F086 (Cat Orchestration)
-> **Related**: F066, F086
+> **Evolved to**: F124 (Apple Ecosystem × Cat Café 语音交互系统)
+> **Related**: F066, F086, F124
 
 ## Why
 
@@ -79,10 +81,10 @@ team lead提到了 **typeless** 作为参考方向。
 
 - [x] AC-A1: voice mode 开关可用，开启后猫猫每条回复自动附带 audio block
 - [x] AC-A2: voice mode 下前端自动播放语音消息，AirPods 场景无需手动操作
-- [ ] AC-A3: 支持语音指令或快捷操作切换 thread
-- [ ] AC-A4: 语音输入错误率显著降低（主观体验 + 可量化指标）
-- [ ] AC-A5: 完整的 hands-free 循环：语音输入 → 猫猫语音回复 → 自动播放 → 继续对话
-- [ ] AC-A6: 硬件验证通过（DJI Mic Mini + AirPods + Flic/Watch 联合工作）
+- [→F124] ~~AC-A3: 支持语音指令或快捷操作切换 thread~~ → 演化到 F124 Phase C (AC-C2)
+- [→F124] ~~AC-A4: 语音输入错误率显著降低~~ → 演化到 F124 KD-9/KD-12 (Watch ASR + 后端 Qwen3-ASR)
+- [→F124] ~~AC-A5: 完整的 hands-free 循环~~ → 演化到 F124 Phase C/D (原生 App 全流程)
+- [→F124] ~~AC-A6: 硬件验证通过~~ → 演化到 F124 Phase E (端到端演示 + 硬件联调)
 
 ## 需求点 Checklist
 

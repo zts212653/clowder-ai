@@ -3,6 +3,17 @@
  * 导出所有类型定义
  */
 
+// A2A Protocol types (F050 Phase 3)
+export type {
+  A2AAgentCard,
+  A2AAgentConfig,
+  A2AArtifact,
+  A2AJsonRpcResponse,
+  A2AMessage,
+  A2APart,
+  A2ATask,
+  A2ATaskStatus,
+} from './a2a.js';
 // Authorization types (猫猫授权系统)
 export type {
   AuthorizationAuditEntry,
@@ -143,8 +154,8 @@ export type {
   GameConfig,
   GameDefinition,
   GameEvent,
-  GameRuntime,
   GameResultStats,
+  GameRuntime,
   GameView,
   PendingAction,
   PhaseDefinition,
@@ -212,6 +223,18 @@ export type {
   StreakCat,
   WorkStats,
 } from './leaderboard.js';
+// Limb types (F126 四肢控制面)
+export type {
+  ILimbNode,
+  LimbAccessEntry,
+  LimbActionLogEntry,
+  LimbAuthLevel,
+  LimbCapability,
+  LimbInvokeResult,
+  LimbLease,
+  LimbNodeRecord,
+  LimbNodeStatus,
+} from './limb.js';
 // Memory types (F3-lite 显式记忆)
 export type {
   MemoryEntry,
@@ -340,9 +363,15 @@ export type {
 // TTS types (F34 TTS Provider)
 export type {
   ITtsProvider,
+  TtsStreamEvent,
+  TtsStreamRequest,
   TtsSynthesizeRequest,
   TtsSynthesizeResult,
+  VoiceChunkEvent,
   VoiceConfig,
+  VoiceStreamEndEvent,
+  VoiceStreamEvent,
+  VoiceStreamStartEvent,
 } from './tts.js';
 // Workflow SOP types (F073 告示牌)
 export type {

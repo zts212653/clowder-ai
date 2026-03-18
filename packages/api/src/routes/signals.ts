@@ -3,6 +3,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { loadSignalSources, resolveSignalPaths, saveSignalSources } from '../domains/signals/config/sources-loader.js';
 import { SignalArticleQueryService } from '../domains/signals/services/article-query-service.js';
+import { backfillSourceContent } from '../domains/signals/services/backfill-content.js';
 import { runSignalFetchScheduler } from '../domains/signals/services/fetch-scheduler.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -308,5 +309,20 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return articleQuery.getStats();
+  });
+
+  app.post('/api/signals/backfill', async (request, reply) => {
+    if (!requireIdentity(request, reply)) {
+      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+    }
+
+    const body = z.object({ source: z.string().min(1) }).safeParse(request.body);
+    if (!body.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: body.error.issues };
+    }
+
+    const result = await backfillSourceContent(body.data.source, { paths });
+    return { result };
   });
 };

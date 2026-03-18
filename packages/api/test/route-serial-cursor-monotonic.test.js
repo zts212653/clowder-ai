@@ -28,6 +28,7 @@ function createMockDeps(services) {
         mentions: [],
         timestamp: 0,
       }),
+      getById: () => null,
       getRecent: () => [],
       getMentionsFor: () => [],
       getBefore: () => [],

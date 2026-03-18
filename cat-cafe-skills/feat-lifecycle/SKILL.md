@@ -33,11 +33,22 @@ argument-hint: "[阶段: kickoff|discussion|completion] [F0xx 或主题]"
 
 **触发**：铲屎官说"新功能"/"立项"、讨论收敛确认要做。**不触发**：还在探索 → `collaborative-thinking` Mode A；小修补 → TD。
 
+### 开工前 Recall（F102 记忆系统）🔴
+
+**加载本 skill 后、动手前**，先用记忆系统搜一下相关上下文：
+
+```
+search_evidence("{feature关键词}")        # 找相关 feature / ADR
+search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
+```
+
+**为什么**：防止重复造轮子、重蹈覆辙。记忆系统索引了 400+ docs + 所有 thread 摘要。
+
 ### Step 0: 关联检测（内部 + 社区 issue 都必须做）🔴
 
 **分配 F 编号前，先跑关联检测**，防止重复立项或把子任务误立为独立 feature：
 
-1. **扫描 BACKLOG + features/**：`grep -i "{关键词}" docs/ROADMAP.md docs/features/*.md`
+1. **扫描 BACKLOG + features/**：`grep -i "{关键词}" docs/ROADMAP.md docs/features/*.md`（或用 `search_evidence` 替代 grep）
 2. **判定**：
 
 | 判定结果 | 处置 |

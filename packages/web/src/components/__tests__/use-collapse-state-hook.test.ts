@@ -2,8 +2,8 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { useCollapseState } from '../ThreadSidebar/use-collapse-state';
 import type { ThreadGroup } from '../ThreadSidebar/thread-utils';
+import { useCollapseState } from '../ThreadSidebar/use-collapse-state';
 
 type HookResult = ReturnType<typeof useCollapseState>;
 

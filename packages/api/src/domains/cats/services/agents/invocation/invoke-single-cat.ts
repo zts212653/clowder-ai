@@ -532,26 +532,28 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     // F070: Governance gate for external project dispatch
-    //   1. Auto-sync governance for confirmed projects (idempotent)
-    //   2. Preflight check — fail-closed if governance files missing
     if (workingDirectory && !isSameProject(workingDirectory, findMonorepoRoot(process.cwd()))) {
       const catCafeRoot = findMonorepoRoot(process.cwd());
-      // Auto-sync: re-bootstrap confirmed projects (handles stale versions)
       const { tryGovernanceBootstrap } = await import('../../../../../config/capabilities/capability-orchestrator.js');
       await tryGovernanceBootstrap(workingDirectory, catCafeRoot);
-      // Preflight: verify files actually exist after sync attempt (per-provider)
       const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
       const catEntry = catRegistry.tryGet(catId as string);
       const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.provider);
       if (!preflight.ready) {
+        const actionHint = preflight.bootstrapCommand ? `\nTo fix: ${preflight.bootstrapCommand}` : '';
+        const label = preflight.needsBootstrap
+          ? 'needs governance bootstrap'
+          : preflight.needsConfirmation
+            ? 'awaiting governance confirmation'
+            : 'governance files missing';
         yield {
           type: 'system_info',
           catId,
-          content: `[F070] Governance not ready: ${preflight.reason}`,
+          content: `[F070] Project ${label}: ${preflight.reason}${actionHint}`,
           timestamp: Date.now(),
         };
         yield { type: 'done', catId, isFinal: params.isLastCat, timestamp: Date.now() };
-        didComplete = true; // F118 AC-C5: Normal early exit (governance preflight), not force-return
+        didComplete = true;
         return;
       }
     }

@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 // Phase C: embedding metadata (model/dim version anchor)
 export const SCHEMA_V2 = `
@@ -75,6 +75,38 @@ CREATE TABLE IF NOT EXISTS embedding_meta (
   value TEXT NOT NULL
 );
 `;
+
+// Phase E: evidence_passages table (per-message granularity)
+export const SCHEMA_V3_TABLE = `
+CREATE TABLE IF NOT EXISTS evidence_passages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  doc_anchor TEXT NOT NULL,
+  passage_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  speaker TEXT,
+  position INTEGER,
+  created_at TEXT NOT NULL,
+  UNIQUE(doc_anchor, passage_id)
+);
+`;
+
+// Phase E: passage_fts virtual table — executed separately (tokenchars needs careful quoting)
+export const SCHEMA_V3_FTS =
+  'CREATE VIRTUAL TABLE IF NOT EXISTS passage_fts USING fts5(content, content=evidence_passages, content_rowid=rowid, tokenize="unicode61 tokenchars \'_-\'")';
+
+// FTS5 external-content sync triggers for passage_fts — executed one statement at a time
+export const PASSAGE_FTS_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS evidence_passages_ai AFTER INSERT ON evidence_passages BEGIN
+  INSERT INTO passage_fts(rowid, content) VALUES (new.rowid, new.content);
+END`,
+  `CREATE TRIGGER IF NOT EXISTS evidence_passages_ad AFTER DELETE ON evidence_passages BEGIN
+  INSERT INTO passage_fts(passage_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+END`,
+  `CREATE TRIGGER IF NOT EXISTS evidence_passages_au AFTER UPDATE ON evidence_passages BEGIN
+  INSERT INTO passage_fts(passage_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+  INSERT INTO passage_fts(rowid, content) VALUES (new.rowid, new.content);
+END`,
+];
 
 /**
  * Apply all schema migrations up to CURRENT_SCHEMA_VERSION.
@@ -100,6 +132,13 @@ export function applyMigrations(db: Database.Database): void {
   if (currentVersion < 2) {
     db.exec(SCHEMA_V2);
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(2, new Date().toISOString());
+  }
+
+  if (currentVersion < 3) {
+    db.exec(SCHEMA_V3_TABLE);
+    db.exec(SCHEMA_V3_FTS);
+    for (const stmt of PASSAGE_FTS_TRIGGER_STATEMENTS) db.exec(stmt);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(3, new Date().toISOString());
   }
 }
 

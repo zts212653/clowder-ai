@@ -7,6 +7,7 @@
  * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（立即执行/提到队首）
  * PATCH  /api/threads/:threadId/queue/:entryId/move → 重排序（上移/下移）
  * DELETE /api/threads/:threadId/queue               → 清空队列
+ * POST   /api/threads/:threadId/cancel/:catId       → F122B AC-B9: Per-cat cancel
  */
 
 import type { CatId } from '@cat-cafe/shared';
@@ -128,6 +129,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const messageIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
 
       const removed = invocationQueue.remove(threadId, guard.userId, entryId);
+      // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
+      queueProcessor.unregisterEntryCompleteHook?.(entryId);
       socketManager.emitToUser(guard.userId, 'queue_updated', {
         threadId,
         queue: invocationQueue.list(threadId, guard.userId),
@@ -291,6 +294,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const allMessageIds: string[] = [];
     for (const e of entriesBeforeClear) {
       if (e.status === 'processing') continue;
+      queueProcessor.unregisterEntryCompleteHook?.(e.id);
       if (e.messageId) allMessageIds.push(e.messageId);
       if (e.mergedMessageIds) allMessageIds.push(...e.mergedMessageIds);
     }
@@ -316,4 +320,31 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
     return { cleared };
   });
+
+  // POST /api/threads/:threadId/cancel/:catId — F122B AC-B9: Per-cat cancel
+  app.post<{ Params: { threadId: string; catId: string } }>(
+    '/api/threads/:threadId/cancel/:catId',
+    async (request, reply) => {
+      const { threadId, catId } = request.params;
+      const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+      if (!guard) return;
+
+      if (!invocationTracker.has(threadId, catId)) {
+        reply.status(404);
+        return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
+      }
+
+      const cancelResult = invocationTracker.cancel(threadId, catId, guard.userId, 'user_stop');
+      if (cancelResult.cancelled) {
+        const scopedResult = { ...cancelResult, catIds: [catId] };
+        for (const m of buildCancelMessages(scopedResult)) {
+          socketManager.broadcastAgentMessage(m, threadId);
+        }
+        queueProcessor.clearPause(threadId, catId);
+        queueProcessor.releaseSlot(threadId, catId);
+      }
+
+      return { ok: true, cancelled: cancelResult.cancelled };
+    },
+  );
 };

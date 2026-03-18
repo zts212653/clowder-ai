@@ -36,7 +36,7 @@ describe('chatStore multi-slot activeInvocations (F108)', () => {
     useChatStore.getState().addActiveInvocation('inv-1', 'opus', 'execute');
     expect(useChatStore.getState().hasActiveInvocation).toBe(true);
     expect(useChatStore.getState().activeInvocations).toEqual({
-      'inv-1': { catId: 'opus', mode: 'execute' },
+      'inv-1': expect.objectContaining({ catId: 'opus', mode: 'execute' }),
     });
   });
 
@@ -77,7 +77,7 @@ describe('chatStore multi-slot activeInvocations (F108)', () => {
     useChatStore.getState().setCurrentThread('thread-a');
     expect(useChatStore.getState().hasActiveInvocation).toBe(true);
     expect(useChatStore.getState().activeInvocations).toEqual({
-      'inv-1': { catId: 'opus', mode: 'execute' },
+      'inv-1': expect.objectContaining({ catId: 'opus', mode: 'execute' }),
     });
   });
 
@@ -94,7 +94,7 @@ describe('chatStore multi-slot activeInvocations (F108)', () => {
     const bgState = useChatStore.getState().threadStates['thread-b'];
     expect(bgState?.hasActiveInvocation).toBe(true);
     expect(bgState?.activeInvocations).toEqual({
-      'inv-bg': { catId: 'codex', mode: 'execute' },
+      'inv-bg': expect.objectContaining({ catId: 'codex', mode: 'execute' }),
     });
   });
 });

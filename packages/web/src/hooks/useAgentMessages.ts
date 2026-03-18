@@ -269,6 +269,40 @@ export function useAgentMessages() {
     return null;
   }, []);
 
+  const findInvocationlessStreamPlaceholder = useCallback((catId: string): { id: string } | null => {
+    const currentMessages = useChatStore.getState().messages;
+    const activeId = activeRefs.current.get(catId)?.id;
+
+    if (activeId) {
+      const activeMessage = currentMessages.find(
+        (msg) =>
+          msg.id === activeId &&
+          msg.type === 'assistant' &&
+          msg.catId === catId &&
+          msg.origin === 'stream' &&
+          !msg.extra?.stream?.invocationId,
+      );
+      if (activeMessage) {
+        return { id: activeMessage.id };
+      }
+    }
+
+    for (let i = currentMessages.length - 1; i >= 0; i -= 1) {
+      const msg = currentMessages[i];
+      if (
+        msg?.type === 'assistant' &&
+        msg.catId === catId &&
+        msg.origin === 'stream' &&
+        msg.isStreaming &&
+        !msg.extra?.stream?.invocationId
+      ) {
+        return { id: msg.id };
+      }
+    }
+
+    return null;
+  }, []);
+
   const getOrRecoverActiveAssistantMessageId = useCallback(
     (catId: string, metadata?: AgentMsg['metadata'], options?: { ensureStreaming?: boolean }): string | null => {
       const currentMessages = useChatStore.getState().messages;
@@ -377,7 +411,9 @@ export function useAgentMessages() {
 
         if (msg.origin === 'callback') {
           const invocationId = msg.invocationId ?? getCurrentInvocationIdForCat(msg.catId);
-          const replacementTarget = invocationId ? findCallbackReplacementTarget(msg.catId, invocationId) : null;
+          const replacementTarget = invocationId
+            ? findCallbackReplacementTarget(msg.catId, invocationId)
+            : findInvocationlessStreamPlaceholder(msg.catId);
 
           if (replacementTarget) {
             const finalId = msg.messageId ?? replacementTarget.id;
@@ -913,6 +949,7 @@ export function useAgentMessages() {
       resetTimeout,
       clearDoneTimeout,
       findCallbackReplacementTarget,
+      findInvocationlessStreamPlaceholder,
       getCurrentInvocationIdForCat,
       getCurrentInvocationStateForCat,
       getOrRecoverActiveAssistantMessageId,

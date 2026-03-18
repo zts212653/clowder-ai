@@ -26,17 +26,20 @@ export const WEREWOLF_PRESETS: Record<number, WerewolfPreset> = {
 /** Standard phase sequence — some may be skipped if role not present */
 function buildPhases(): PhaseDefinition[] {
   return [
-    { name: 'night_guard', type: 'night_action', actingRole: 'guard', timeoutMs: 30000, autoAdvance: true },
-    { name: 'night_wolf', type: 'night_action', actingRole: 'wolf', timeoutMs: 30000, autoAdvance: true },
-    { name: 'night_seer', type: 'night_action', actingRole: 'seer', timeoutMs: 30000, autoAdvance: true },
-    { name: 'night_witch', type: 'night_action', actingRole: 'witch', timeoutMs: 30000, autoAdvance: true },
+    // Night: single-actor phases — 60s each (LLM-ready headroom)
+    { name: 'night_guard', type: 'night_action', actingRole: 'guard', timeoutMs: 60000, autoAdvance: true },
+    { name: 'night_wolf', type: 'night_action', actingRole: 'wolf', timeoutMs: 60000, autoAdvance: true },
+    { name: 'night_seer', type: 'night_action', actingRole: 'seer', timeoutMs: 60000, autoAdvance: true },
+    { name: 'night_witch', type: 'night_action', actingRole: 'witch', timeoutMs: 60000, autoAdvance: true },
+    // Resolve / announce: system-driven, keep short
     { name: 'night_resolve', type: 'resolve', timeoutMs: 5000, autoAdvance: true },
-    { name: 'day_announce', type: 'announce', timeoutMs: 10000, autoAdvance: true },
-    { name: 'day_last_words', type: 'announce', timeoutMs: 30000, autoAdvance: true },
-    { name: 'day_hunter', type: 'night_action', actingRole: 'hunter', timeoutMs: 20000, autoAdvance: true },
-    { name: 'day_discuss', type: 'day_discuss', actingRole: '*', timeoutMs: 120000, autoAdvance: true },
-    { name: 'day_vote', type: 'day_vote', actingRole: '*', timeoutMs: 60000, autoAdvance: true },
-    { name: 'day_pk', type: 'day_discuss', actingRole: '*', timeoutMs: 60000, autoAdvance: true },
+    { name: 'day_announce', type: 'announce', timeoutMs: 15000, autoAdvance: true },
+    { name: 'day_last_words', type: 'announce', timeoutMs: 60000, autoAdvance: true },
+    { name: 'day_hunter', type: 'night_action', actingRole: 'hunter', timeoutMs: 45000, autoAdvance: true },
+    // Multi-actor phases: 铲屎官要求至少 3 分钟，7 人串行 LLM 可能需要更多
+    { name: 'day_discuss', type: 'day_discuss', actingRole: '*', timeoutMs: 180000, autoAdvance: true },
+    { name: 'day_vote', type: 'day_vote', actingRole: '*', timeoutMs: 120000, autoAdvance: true },
+    { name: 'day_pk', type: 'day_discuss', actingRole: '*', timeoutMs: 120000, autoAdvance: true },
     { name: 'day_exile', type: 'resolve', timeoutMs: 5000, autoAdvance: true },
   ];
 }

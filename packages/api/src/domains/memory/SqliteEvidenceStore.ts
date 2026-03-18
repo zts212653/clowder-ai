@@ -1,10 +1,25 @@
 // F102: SQLite implementation of IEvidenceStore
 
 import Database from 'better-sqlite3';
-import type { Edge, EvidenceItem, IEmbeddingService, IEvidenceStore, SearchOptions } from './interfaces.js';
+import type {
+  Edge,
+  EvidenceItem,
+  EvidenceKind,
+  IEmbeddingService,
+  IEvidenceStore,
+  SearchOptions,
+} from './interfaces.js';
 import { SemanticReranker } from './SemanticReranker.js';
 import { applyMigrations } from './schema.js';
 import type { VectorStore } from './VectorStore.js';
+
+export interface PassageResult {
+  docAnchor: string;
+  passageId: string;
+  content: string;
+  speaker?: string;
+  position?: number;
+}
 
 export interface EmbedDeps {
   embedding: IEmbeddingService;
@@ -42,6 +57,14 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
+    // Phase D: resolve scope → kind filter
+    // scope='threads'/'sessions' → only search kind='session'
+    // scope='docs'/'memory' → exclude sessions (feature/decision/plan/lesson + future memory entries)
+    // scope='all' → no filter
+    const effectiveKind =
+      options?.kind ??
+      (options?.scope === 'threads' || options?.scope === 'sessions' ? ('session' as EvidenceKind) : undefined);
+    const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
     // ── Exact-anchor bypass ──────────────────────────────────────────
     // FTS5 unicode61 tokenizer splits "F042" → "F"+"042" and "ADR-005" → "ADR"+"005".
     // For anchor-shaped queries, do a direct lookup so precision isn't lost.
@@ -50,9 +73,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
     let anchorSql = 'SELECT * FROM evidence_docs WHERE anchor = ? COLLATE NOCASE';
     const anchorParams: unknown[] = [trimmed];
-    if (options?.kind) {
+    if (effectiveKind) {
       anchorSql += ' AND kind = ?';
-      anchorParams.push(options.kind);
+      anchorParams.push(effectiveKind);
+    }
+    if (excludeSession) {
+      anchorSql += " AND kind != 'session'";
     }
     if (options?.status) {
       anchorSql += ' AND status = ?';
@@ -85,9 +111,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 			`;
         const params: unknown[] = [ftsQuery];
 
-        if (options?.kind) {
+        if (effectiveKind) {
           sql += ' AND d.kind = ?';
-          params.push(options.kind);
+          params.push(effectiveKind);
+        }
+        if (excludeSession) {
+          sql += " AND d.kind != 'session'";
         }
         if (options?.status) {
           sql += ' AND d.status = ?';
@@ -98,8 +127,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           params.push(...options.keywords.map((kw) => `%"${kw}"%`));
         }
 
-        // Superseded items sort last (KD-16)
-        sql += ' ORDER BY (d.superseded_by IS NOT NULL), rank';
+        // Superseded items sort last (KD-16), archive results deprioritized (P2 fix)
+        sql += " ORDER BY (d.superseded_by IS NOT NULL), (d.source_path LIKE 'archive/%'), rank";
         sql += ' LIMIT ?';
         params.push(limit);
 
@@ -112,6 +141,64 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
       } catch {
         // FTS5 syntax error (malformed query) — degrade to anchor-only results
+      }
+    }
+
+    // ── Keyword fallback: search keywords/topics JSON when FTS5 misses ──
+    if (results.length <= 1) {
+      const words = trimmed.split(/\s+/).filter(Boolean);
+      if (words.length > 0) {
+        const kwConditions = words.map(() => 'keywords LIKE ?');
+        let kwSql = `SELECT * FROM evidence_docs WHERE (${kwConditions.join(' OR ')})`;
+        const kwParams: unknown[] = words.map((w) => `%${w.toLowerCase()}%`);
+        if (effectiveKind) {
+          kwSql += ' AND kind = ?';
+          kwParams.push(effectiveKind);
+        }
+        if (excludeSession) {
+          kwSql += " AND kind != 'session'";
+        }
+        if (options?.status) {
+          kwSql += ' AND status = ?';
+          kwParams.push(options.status);
+        }
+        if (options?.keywords?.length) {
+          kwSql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
+          kwParams.push(...options.keywords.map((kw) => `%"${kw}"%`));
+        }
+        kwSql += " ORDER BY (superseded_by IS NOT NULL), (source_path LIKE 'archive/%'), updated_at DESC LIMIT ?";
+        kwParams.push(limit);
+        try {
+          const kwRows = this.db?.prepare(kwSql).all(...kwParams) as RowShape[];
+          for (const row of kwRows) {
+            if (!seenAnchors.has(row.anchor)) {
+              results.push(rowToItem(row));
+              seenAnchors.add(row.anchor);
+            }
+          }
+        } catch {
+          // keyword search failed — continue with existing results
+        }
+      }
+    }
+
+    // Phase E: passage search when depth=raw and scope includes threads
+    if (options?.depth === 'raw' && (!options?.scope || options.scope === 'all' || options.scope === 'threads')) {
+      const passages = this.searchPassages(trimmed, limit);
+      for (const p of passages) {
+        if (!seenAnchors.has(p.docAnchor)) {
+          // Synthesize an EvidenceItem from the passage's parent doc anchor
+          const parentDoc = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ?').get(p.docAnchor) as
+            | RowShape
+            | undefined;
+          if (parentDoc) {
+            const item = rowToItem(parentDoc);
+            // Enrich summary with passage match context
+            item.summary = `[passage match] ${p.speaker ? `${p.speaker}: ` : ''}${p.content.slice(0, 200)}`;
+            results.push(item);
+            seenAnchors.add(p.docAnchor);
+          }
+        }
       }
     }
 
@@ -229,6 +316,55 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.db
       ?.prepare('DELETE FROM edges WHERE from_anchor = ? AND to_anchor = ? AND relation = ?')
       .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+  }
+
+  // ── Passage operations ─────────────────────────────────────────────
+
+  /** Search passage_fts and return matching passages with doc context. */
+  searchPassages(query: string, limit = 10): PassageResult[] {
+    this.ensureOpen();
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+
+    const ftsQuery = trimmed
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => `"${w.replace(/"/g, '""')}"`)
+      .join(' ');
+
+    if (!ftsQuery) return [];
+
+    try {
+      const rows = this.db
+        ?.prepare(
+          `SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position,
+                  bm25(passage_fts) AS rank
+           FROM passage_fts f
+           JOIN evidence_passages p ON p.rowid = f.rowid
+           WHERE passage_fts MATCH ?
+           ORDER BY rank
+           LIMIT ?`,
+        )
+        .all(ftsQuery, limit) as Array<{
+        doc_anchor: string;
+        passage_id: string;
+        content: string;
+        speaker: string | null;
+        position: number | null;
+        rank: number;
+      }>;
+
+      return (rows ?? []).map((r) => ({
+        docAnchor: r.doc_anchor,
+        passageId: r.passage_id,
+        content: r.content,
+        speaker: r.speaker ?? undefined,
+        position: r.position ?? undefined,
+      }));
+    } catch {
+      // FTS5 syntax error — degrade gracefully
+      return [];
+    }
   }
 
   close(): void {

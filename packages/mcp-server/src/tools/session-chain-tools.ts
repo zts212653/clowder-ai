@@ -324,15 +324,9 @@ export const sessionChainTools = [
   {
     name: 'cat_cafe_read_invocation_detail',
     description:
-      'Read all events for a specific invocation within a sealed session. Use after session_search returns an invocationId to inspect what happened in that invocation.',
+      'Read all events for a specific invocation within a sealed session. Use after search_evidence or read_session_events returns an invocationId to inspect what happened.',
     inputSchema: readInvocationDetailInputSchema,
     handler: handleReadInvocationDetail,
   },
-  {
-    name: 'cat_cafe_session_search',
-    description:
-      'Search across session transcripts and digests. Returns invocationId pointers — use read_invocation_detail to drill into specific invocations.',
-    inputSchema: sessionSearchInputSchema,
-    handler: handleSessionSearch,
-  },
+  // D15: cat_cafe_session_search removed — superseded by search_evidence unified entry point
 ] as const;

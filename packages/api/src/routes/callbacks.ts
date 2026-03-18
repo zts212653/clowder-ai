@@ -13,9 +13,7 @@ import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/R
 import { parseA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { buildVoteNotification } from '../domains/cats/services/agents/routing/vote-intercept.js';
-import type { P0Freshness } from '../domains/cats/services/hindsight-import/p0-watermark.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
-import type { IHindsightClient } from '../domains/cats/services/orchestration/HindsightClient.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -32,6 +30,7 @@ import { enqueueA2ATargets } from './callback-a2a-trigger.js';
 import { callbackAuthSchema } from './callback-auth-schema.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
@@ -48,14 +47,6 @@ export interface CallbackRoutesOptions {
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context */
   threadStore?: IThreadStore;
-  hindsightClient?: IHindsightClient;
-  sharedBank?: string;
-  freshnessProvider?: () => Promise<P0Freshness>;
-  reimportTriggerProvider?: (freshness: P0Freshness) => Promise<{
-    status: 'triggered' | 'cooldown' | 'skipped' | 'disabled' | 'failed';
-    reason?: string;
-    nextAllowedAt?: string;
-  }>;
   /** For post_message @mention → invocation triggering */
   router?: AgentRouter;
   invocationRecordStore?: IInvocationRecordStore;
@@ -68,17 +59,26 @@ export interface CallbackRoutesOptions {
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
   workflowSopStore?: import('../domains/cats/services/stores/ports/WorkflowSopStore.js').IWorkflowSopStore;
-  /** F102: DI memory services — when provided, routes use SQLite path instead of Hindsight */
-  evidenceStore?: IEvidenceStore;
-  markerQueue?: IMarkerQueue;
-  reflectionService?: IReflectionService;
+  /** F102: DI memory services — SQLite-backed evidence store */
+  evidenceStore: IEvidenceStore;
+  markerQueue: IMarkerQueue;
+  reflectionService: IReflectionService;
   /** Queue auto-dequeue on A2A invocation completion */
   queueProcessor?: {
     onInvocationComplete(threadId: string, catId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
-    tryAutoExecute?(threadId: string): Promise<void>;
+    tryAutoExecute(threadId: string): Promise<void>;
+    registerEntryCompleteHook(
+      entryId: string,
+      hook: (entryId: string, status: 'succeeded' | 'failed' | 'canceled', responseText: string) => void,
+    ): void;
+    unregisterEntryCompleteHook(entryId: string): void;
   };
   /** F122B: InvocationQueue for agent-sourced A2A entries */
   invocationQueue?: import('../domains/cats/services/agents/invocation/InvocationQueue.js').InvocationQueue;
+  /** F126: Limb node registry for device/hardware capability management */
+  limbRegistry?: import('../domains/limb/LimbRegistry.js').LimbRegistry;
+  /** F126 Phase C: Limb pairing store for remote device approval */
+  limbPairingStore?: import('../domains/limb/LimbPairingStore.js').LimbPairingStore;
 }
 
 const postMessageSchema = callbackAuthSchema.extend({
@@ -405,6 +405,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     // Store the message (scoped to the effective thread)
+    // AC-B6-P1: When A2A mentions will be enqueued (invocationQueue available),
+    // store with deliveryStatus:'queued' so ContextAssembler excludes this message
+    // from other invocations' context until QueueProcessor.executeEntry marks it delivered.
+    const hasA2AMentions = mentions.length > 0 && router && invocationRecordStore && effectiveThreadId;
+    const willEnqueueToQueue = hasA2AMentions && opts.invocationQueue;
     const storedMsg = await messageStore.append({
       userId: record.userId,
       catId: record.catId,
@@ -416,6 +421,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       threadId: effectiveThreadId,
       ...(extra ? { extra } : {}),
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+      ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
     });
 
     // F121: Hydrate reply preview for broadcast
@@ -463,7 +469,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F27: Enqueue @mentioned cats into parent worklist (unified A2A path)
     if (mentions.length > 0 && router && invocationRecordStore && effectiveThreadId) {
-      await enqueueA2ATargets(
+      const a2aResult = await enqueueA2ATargets(
         {
           router,
           invocationRecordStore,
@@ -484,6 +490,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           parentInvocationId: record.parentInvocationId,
         },
       );
+
+      // AC-B6-P1: If message was stored as 'queued' but no targets were actually enqueued
+      // (depth/dedup/full rejected all), recover by marking delivered to prevent ghost message.
+      if (willEnqueueToQueue && a2aResult.enqueued.length === 0) {
+        try {
+          await messageStore.markDelivered?.(storedMsg.id, Date.now());
+        } catch (err) {
+          app.log.warn(
+            { messageId: storedMsg.id, threadId: effectiveThreadId, err },
+            '[AC-B6-P1] Failed to recover ghost message — markDelivered rejected (best-effort)',
+          );
+        }
+      }
     }
 
     return {
@@ -1095,28 +1114,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackBootcampRoutes(app, { registry, threadStore: opts.threadStore });
   }
 
-  const memoryDeps: {
-    registry: InvocationRegistry;
-    hindsightClient?: IHindsightClient;
-    sharedBank?: string;
-    freshnessProvider?: () => Promise<P0Freshness>;
-    reimportTriggerProvider?: (freshness: P0Freshness) => Promise<{
-      status: 'triggered' | 'cooldown' | 'skipped' | 'disabled' | 'failed';
-      reason?: string;
-      nextAllowedAt?: string;
-    }>;
-    evidenceStore?: IEvidenceStore;
-    markerQueue?: IMarkerQueue;
-    reflectionService?: IReflectionService;
-  } = { registry };
-  if (opts.hindsightClient) memoryDeps.hindsightClient = opts.hindsightClient;
-  if (opts.sharedBank) memoryDeps.sharedBank = opts.sharedBank;
-  if (opts.freshnessProvider) memoryDeps.freshnessProvider = opts.freshnessProvider;
-  if (opts.reimportTriggerProvider) memoryDeps.reimportTriggerProvider = opts.reimportTriggerProvider;
-  if (opts.evidenceStore) memoryDeps.evidenceStore = opts.evidenceStore;
-  if (opts.markerQueue) memoryDeps.markerQueue = opts.markerQueue;
-  if (opts.reflectionService) memoryDeps.reflectionService = opts.reflectionService;
-  await registerCallbackMemoryRoutes(app, memoryDeps);
+  await registerCallbackMemoryRoutes(app, {
+    registry,
+    evidenceStore: opts.evidenceStore,
+    markerQueue: opts.markerQueue,
+    reflectionService: opts.reflectionService,
+  });
+
+  // F126: Limb node callback routes
+  if (opts.limbRegistry) {
+    registerCallbackLimbRoutes(app, {
+      limbRegistry: opts.limbRegistry,
+      invocationRegistry: registry,
+      pairingStore: opts.limbPairingStore,
+    });
+  }
 
   // F086: Multi-mention orchestration routes
   if (router && invocationRecordStore) {
@@ -1127,6 +1139,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       router,
       invocationRecordStore,
       ...(invocationTracker ? { invocationTracker } : {}),
+      ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+      ...(queueProcessor ? { queueProcessor } : {}),
     });
     // Wire orchestrator into SocketManager for cancel propagation (P1-1 fix)
     if (typeof socketManager.setMultiMentionOrchestrator === 'function') {

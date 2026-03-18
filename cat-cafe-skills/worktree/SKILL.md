@@ -16,6 +16,17 @@ renamed-from: using-git-worktrees
 
 开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。
 
+## 开工前 Recall（F102 记忆系统）🔴
+
+**拉 worktree 前**，先用记忆系统搜一下相关上下文（见 CLAUDE.md 记忆系统段落）：
+
+```
+search_evidence("{feature关键词}")
+search_evidence("{topic}", scope="all")
+```
+
+不搜就开工 = 从零开始，可能重蹈覆辙。
+
 ## 目录位置（铁律）
 
 **Cat Cafe 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**

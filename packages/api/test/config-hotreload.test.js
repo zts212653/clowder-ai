@@ -82,48 +82,6 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     assert.equal(body.config.cli.codexApprovalPolicy, 'never');
   });
 
-  it('supports hot-updating hindsight engine routing keys', async () => {
-    const app = await setup();
-
-    const patchReflect = await patchConfig({ key: 'hindsight.engine.reflect', value: 'hindsight_native' });
-    assert.equal(patchReflect.statusCode, 200);
-
-    const patchRetain = await patchConfig({ key: 'hindsight.engine.retainExtraction', value: 'hindsight_native' });
-    assert.equal(patchRetain.statusCode, 200);
-
-    const patchFallback = await patchConfig({ key: 'hindsight.engine.allowNativeFallback', value: true });
-    assert.equal(patchFallback.statusCode, 200);
-
-    const res = await app.inject({ method: 'GET', url: '/api/config' });
-    const body = res.json();
-    assert.equal(body.config.hindsight.engine.reflect, 'hindsight_native');
-    assert.equal(body.config.hindsight.engine.retainExtraction, 'hindsight_native');
-    assert.equal(body.config.hindsight.engine.allowNativeFallback, true);
-  });
-
-  it('supports hot-updating hindsight recall defaults and reflect disposition', async () => {
-    const app = await setup();
-
-    const patchBudget = await patchConfig({ key: 'hindsight.recallDefaults.budget', value: 'high' });
-    assert.equal(patchBudget.statusCode, 200);
-
-    const patchTagsMatch = await patchConfig({ key: 'hindsight.recallDefaults.tagsMatch', value: 'any' });
-    assert.equal(patchTagsMatch.statusCode, 200);
-
-    const patchLimit = await patchConfig({ key: 'hindsight.recallDefaults.limit', value: 9 });
-    assert.equal(patchLimit.statusCode, 200);
-
-    const patchDisposition = await patchConfig({ key: 'hindsight.reflect.dispositionMode', value: 'off' });
-    assert.equal(patchDisposition.statusCode, 200);
-
-    const res = await app.inject({ method: 'GET', url: '/api/config' });
-    const body = res.json();
-    assert.equal(body.config.hindsight.recallDefaults.budget, 'high');
-    assert.equal(body.config.hindsight.recallDefaults.tagsMatch, 'any');
-    assert.equal(body.config.hindsight.recallDefaults.limit, 9);
-    assert.equal(body.config.hindsight.reflect.dispositionMode, 'off');
-  });
-
   it('supports hot-updating codex execution model alignment keys', async () => {
     const app = await setup();
 
@@ -141,48 +99,6 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     assert.equal(body.config.codexExecution.model, 'gpt-5.3-codex');
     assert.equal(body.config.codexExecution.passModelArg, false);
     assert.equal(body.config.codexExecution.authMode, 'oauth');
-  });
-
-  it('rejects invalid hindsight engine values with 400', async () => {
-    const _app = await setup();
-
-    const res = await patchConfig({ key: 'hindsight.engine.reflect', value: 'bad_engine' });
-    assert.equal(res.statusCode, 400);
-    const body = res.json();
-    assert.ok(String(body.error).includes('invalid value'));
-  });
-
-  it('exposes runtime-status endpoint for hindsight engine routing', async () => {
-    const app = await setup();
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/config/runtime-status?category=hindsight',
-    });
-    assert.equal(res.statusCode, 200);
-
-    const body = res.json();
-    assert.ok(body.runtimeStatus);
-    assert.equal(body.runtimeStatus.category, 'hindsight');
-    assert.equal(body.runtimeStatus.engine.reflect.configured, 'codex_oauth');
-  });
-
-  it('runtime-status includes config source metadata for routing fields', async () => {
-    const app = await setup();
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/config/runtime-status?category=hindsight',
-    });
-    assert.equal(res.statusCode, 200);
-
-    const body = res.json();
-    assert.ok(['default', 'env', 'overlay'].includes(body.runtimeStatus.engine.reflect.source));
-    assert.ok(['default', 'env', 'overlay'].includes(body.runtimeStatus.engine.retainExtraction.source));
-    assert.ok(['default', 'env', 'overlay'].includes(body.runtimeStatus.recallDefaults.budget.source));
-    assert.ok(['default', 'env', 'overlay'].includes(body.runtimeStatus.recallDefaults.tagsMatch.source));
-    assert.ok(['default', 'env', 'overlay'].includes(body.runtimeStatus.recallDefaults.limit.source));
-    assert.ok(['default', 'env', 'overlay'].includes(body.runtimeStatus.reflect.dispositionMode.source));
   });
 
   it('writes config patch audit event with old/new/operator', async () => {
@@ -232,11 +148,11 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     const warnSink = [];
     const _app = await setup({}, { warnSink });
 
-    const res = await patchConfig({ key: 'hindsight.engine.reflect', value: 'hindsight_native' });
+    const res = await patchConfig({ key: 'codex.execution.model', value: 'gpt-5.3-codex' });
     assert.equal(res.statusCode, 200);
     assert.equal(warnSink.length > 0, true);
     const [firstWarnArg] = warnSink[0];
-    assert.equal(firstWarnArg.key, 'hindsight.engine.reflect');
+    assert.equal(firstWarnArg.key, 'codex.execution.model');
   });
 
   it('rejects non-updatable key with 400', async () => {

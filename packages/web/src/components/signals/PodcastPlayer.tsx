@@ -1,5 +1,6 @@
 import type { StudyArtifact } from '@cat-cafe/shared';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getPlaybackManager } from '@/hooks/useVoiceStream';
 import { apiFetch } from '@/utils/api-client';
 import { fetchPodcastScript, generatePodcast, type PodcastScript, type PodcastSegment } from '@/utils/signals-api';
 
@@ -39,58 +40,113 @@ async function downloadSegmentAudio(audioUrl: string, speaker: string, index: nu
   URL.revokeObjectURL(url);
 }
 
-/** Play all segments sequentially. */
-function usePlayAll(segments: readonly PodcastSegment[], audioRef: React.MutableRefObject<HTMLAudioElement | null>) {
-  const [playing, setPlaying] = React.useState(false);
-  const [currentIdx, setCurrentIdx] = React.useState(-1);
-  const cancelRef = React.useRef(false);
+function usePodcastPlayback(segments: readonly PodcastSegment[]) {
+  const [playing, setPlaying] = useState(false);
+  const [currentIdx, setCurrentIdx] = useState(-1);
+  const unsubsRef = useRef<Array<() => void>>([]);
+  const runIdRef = useRef(0);
 
-  const playAll = React.useCallback(async () => {
+  const cleanup = useCallback(() => {
+    for (const unsub of unsubsRef.current) unsub();
+    unsubsRef.current = [];
+  }, []);
+
+  useEffect(() => cleanup, [cleanup]);
+
+  const playAll = useCallback(async () => {
+    const manager = getPlaybackManager();
     if (playing) {
-      cancelRef.current = true;
-      audioRef.current?.pause();
+      manager.interrupt();
+      cleanup();
       setPlaying(false);
       setCurrentIdx(-1);
       return;
     }
-    cancelRef.current = false;
-    setPlaying(true);
 
-    for (let i = 0; i < segments.length; i++) {
-      if (cancelRef.current) break;
-      const seg = segments[i];
-      if (!seg.audioUrl) continue;
-      setCurrentIdx(i);
-      try {
-        const res = await apiFetch(seg.audioUrl);
-        if (!res.ok || cancelRef.current) break;
-        const blob = await res.blob();
-        if (cancelRef.current) break;
-        const blobUrl = URL.createObjectURL(blob);
-        const audio = new Audio(blobUrl);
-        audioRef.current = audio;
-        await new Promise<void>((resolve, reject) => {
-          const cleanup = () => {
-            URL.revokeObjectURL(blobUrl);
-            resolve();
-          };
-          audio.addEventListener('ended', cleanup);
-          audio.addEventListener('pause', cleanup);
-          audio.addEventListener('error', () => {
-            URL.revokeObjectURL(blobUrl);
-            reject();
-          });
-          void audio.play().catch(reject);
-        });
-      } catch {
-        break;
+    const urls = segments.map((s) => s.audioUrl).filter((u): u is string => Boolean(u));
+    if (urls.length === 0) return;
+
+    const thisRunId = ++runIdRef.current;
+    cleanup();
+    setPlaying(true);
+    setCurrentIdx(0);
+
+    unsubsRef.current.push(
+      manager.onItemEnd((index) => {
+        setCurrentIdx(index + 1 < segments.length ? index + 1 : -1);
+      }),
+    );
+    unsubsRef.current.push(
+      manager.onStateIdle(() => {
+        cleanup();
+        setPlaying(false);
+        setCurrentIdx(-1);
+      }),
+    );
+
+    try {
+      await manager.startBatch(urls, apiFetch);
+    } catch {
+      if (runIdRef.current === thisRunId) manager.interrupt();
+    } finally {
+      if (runIdRef.current === thisRunId && manager.getState() === 'idle') {
+        cleanup();
+        setPlaying(false);
+        setCurrentIdx(-1);
       }
     }
-    setPlaying(false);
-    setCurrentIdx(-1);
-  }, [segments, playing, audioRef]);
+  }, [segments, playing, cleanup]);
 
-  return { playAll, playingAll: playing, currentPlayIdx: currentIdx };
+  const playSingle = useCallback(
+    (seg: PodcastSegment, index: number) => {
+      if (!seg.audioUrl) return;
+      const manager = getPlaybackManager();
+
+      if (currentIdx === index && playing) {
+        manager.interrupt();
+        cleanup();
+        setPlaying(false);
+        setCurrentIdx(-1);
+        return;
+      }
+
+      const thisRunId = ++runIdRef.current;
+      manager.interrupt();
+      cleanup();
+      setPlaying(true);
+      setCurrentIdx(index);
+
+      unsubsRef.current.push(
+        manager.onStateIdle(() => {
+          cleanup();
+          setPlaying(false);
+          setCurrentIdx(-1);
+        }),
+      );
+
+      void manager
+        .enqueueUrl(seg.audioUrl, apiFetch)
+        .then(() => {
+          if (runIdRef.current !== thisRunId) return;
+          manager.markDone();
+          if (manager.getState() === 'idle') {
+            cleanup();
+            setPlaying(false);
+            setCurrentIdx(-1);
+          }
+        })
+        .catch(() => {
+          if (runIdRef.current !== thisRunId) return;
+          manager.interrupt();
+          cleanup();
+          setPlaying(false);
+          setCurrentIdx(-1);
+        });
+    },
+    [currentIdx, playing, cleanup],
+  );
+
+  return { playAll, playSingle, playingAll: playing, currentPlayIdx: currentIdx };
 }
 
 export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: PodcastPlayerProps) {
@@ -100,8 +156,6 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [activeSegment, setActiveSegment] = useState(-1);
-  const [playingSegment, setPlayingSegment] = useState(-1);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const readyPodcasts = podcasts.filter((p) => p.state === 'ready');
   const pendingPodcasts = podcasts.filter((p) => p.state === 'queued' || p.state === 'running');
@@ -141,48 +195,13 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
     [articleId, onArtifactCreated],
   );
 
-  const playSegment = useCallback(
-    (seg: PodcastSegment, index: number) => {
-      if (!seg.audioUrl) return;
-      if (playingSegment === index) {
-        audioRef.current?.pause();
-        setPlayingSegment(-1);
-        return;
-      }
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      setPlayingSegment(index);
-      setActiveSegment(index);
-      // Fetch audio via apiFetch (carries auth, resolves API base URL)
-      void apiFetch(seg.audioUrl)
-        .then((res) => {
-          if (!res.ok) throw new Error(`Audio fetch ${res.status}`);
-          return res.blob();
-        })
-        .then((blob) => {
-          const blobUrl = URL.createObjectURL(blob);
-          const audio = new Audio(blobUrl);
-          audioRef.current = audio;
-          audio.addEventListener('ended', () => {
-            setPlayingSegment(-1);
-            URL.revokeObjectURL(blobUrl);
-          });
-          return audio.play();
-        })
-        .catch(() => setPlayingSegment(-1));
-    },
-    [playingSegment],
-  );
-
   // Reset state when articleId changes
   useEffect(() => {
-    audioRef.current?.pause();
+    getPlaybackManager().interrupt();
     setSelectedId(null);
     setScript(null);
     setError(null);
     setActiveSegment(-1);
-    setPlayingSegment(-1);
   }, []);
 
   // Auto-load first ready podcast
@@ -193,7 +212,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
   }, [selectedId, readyPodcasts, loadScript]);
 
   const hasAudio = script?.segments.some((s) => s.audioUrl);
-  const { playAll, playingAll, currentPlayIdx } = usePlayAll(script?.segments ?? [], audioRef);
+  const { playAll, playSingle, playingAll, currentPlayIdx } = usePodcastPlayback(script?.segments ?? []);
 
   return (
     <div className="mt-3">
@@ -277,17 +296,17 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
                   <div className="mt-0.5 flex shrink-0 gap-1">
                     <button
                       type="button"
-                      onClick={() => playSegment(seg, i)}
+                      onClick={() => playSingle(seg, i)}
                       className={`text-[10px] hover:text-opus-primary ${
-                        playingSegment === i || currentPlayIdx === i ? 'text-opus-primary' : 'text-opus-dark'
+                        currentPlayIdx === i ? 'text-opus-primary' : 'text-opus-dark'
                       }`}
-                      title={playingSegment === i ? '暂停' : '播放'}
+                      title={currentPlayIdx === i ? '暂停' : '播放'}
                     >
-                      {playingSegment === i || currentPlayIdx === i ? '⏸' : '▶'}
+                      {currentPlayIdx === i ? '⏸' : '▶'}
                     </button>
                     <button
                       type="button"
-                      onClick={() => void downloadSegmentAudio(seg.audioUrl!, seg.speaker, i)}
+                      onClick={() => seg.audioUrl && void downloadSegmentAudio(seg.audioUrl, seg.speaker, i)}
                       className="text-[10px] text-gray-400 hover:text-gray-600"
                       title="下载音频"
                     >

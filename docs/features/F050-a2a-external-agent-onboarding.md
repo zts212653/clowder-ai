@@ -349,8 +349,8 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 - [x] AC-P4-5: F050 §H 配置地图与实际同步脚本一致
 - [ ] AC-P4-6: 愿景守护 — 改了 governance-l0 后跑 `--check` 能发现 Codex/Gemini 未同步（merge 后由守护猫验证）
 
-### Phase 3: A2A L2（future）
-- [ ] `A2AAgentService` 设计稿 + 接口定义完成
+### Phase 3: A2A L2 Protocol Adapter
+- [x] `A2AAgentService` 设计稿 + 接口定义完成（PR #519）
 - [ ] opencode CLI 兼容性测试清单完成
 - [ ] 至少 1 个 A2A agent 通过 L2 验收
 

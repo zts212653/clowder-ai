@@ -107,6 +107,7 @@ git branch -d {branch-name} && git worktree prune
 | P1/P2 有复现证据 | 在 feature branch 修 → push → **re-trigger review** → 等通过 |
 | P1/P2 无复现证据 | 降级 P3，留 comment，视为通过 |
 | 误报 | 留 comment 解释，视为通过 |
+| 架构/改法建议（非 P1/P2） | **过 VERIFY 三道门再决定改不改**（见 receive-review VERIFY）。云端没有运行环境，理论推理 < 本地实测。改坏能跑的功能 = P0 |
 
 ### Phase 文档同步（Step 7.5）🔴
 

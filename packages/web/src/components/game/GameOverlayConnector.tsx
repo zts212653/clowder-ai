@@ -7,6 +7,7 @@ import { GameOverlay } from './GameOverlay';
 interface GameOverlayConnectorProps {
   gameView: GameView | null;
   isGameActive: boolean;
+  currentThreadId?: string;
   isNight: boolean;
   selectedTarget: SeatId | null;
   godScopeFilter: string;
@@ -36,6 +37,7 @@ interface GameOverlayConnectorProps {
 export function GameOverlayConnector({
   gameView,
   isGameActive,
+  currentThreadId,
   isNight,
   selectedTarget,
   godScopeFilter,
@@ -60,6 +62,7 @@ export function GameOverlayConnector({
   onConfirmAltAction,
 }: GameOverlayConnectorProps) {
   if (!isGameActive || !gameView) return null;
+  if (currentThreadId && gameView.threadId !== currentThreadId) return null;
 
   return (
     <GameOverlay

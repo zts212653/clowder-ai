@@ -27,9 +27,9 @@ describe('Callback Routes', () => {
   let registry;
   let messageStore;
   let socketManager;
-  let hindsightClient;
-  let freshnessProvider;
-  let reimportTriggerProvider;
+  let evidenceStore;
+  let reflectionService;
+  let markerQueue;
   let threadStore;
   let taskStore;
   let backlogStore;
@@ -50,13 +50,22 @@ describe('Callback Routes', () => {
     taskStore = new TaskStore();
     backlogStore = new BacklogStore();
     socketManager = createMockSocketManager();
-    hindsightClient = {
-      recall: async () => [],
-      reflect: async () => '',
-      retain: async () => undefined,
+    evidenceStore = {
+      search: async () => [],
+      health: async () => true,
+      initialize: async () => {},
+      upsert: async () => {},
+      deleteByAnchor: async () => {},
+      getByAnchor: async () => null,
     };
-    freshnessProvider = undefined;
-    reimportTriggerProvider = undefined;
+    reflectionService = {
+      reflect: async () => '',
+    };
+    markerQueue = {
+      submit: async (marker) => ({ id: 'mk-1', createdAt: new Date().toISOString(), ...marker }),
+      list: async () => [],
+      transition: async () => {},
+    };
     featIndexProvider = undefined;
   });
 
@@ -68,22 +77,15 @@ describe('Callback Routes', () => {
       messageStore,
       socketManager,
       threadStore,
-      sharedBank: 'cat-cafe-shared',
+      evidenceStore,
+      reflectionService,
+      markerQueue,
     };
     if (backlogStore !== undefined) {
       options.backlogStore = backlogStore;
     }
     if (taskStore !== undefined) {
       options.taskStore = taskStore;
-    }
-    if (hindsightClient !== undefined) {
-      options.hindsightClient = hindsightClient;
-    }
-    if (freshnessProvider) {
-      options.freshnessProvider = freshnessProvider;
-    }
-    if (reimportTriggerProvider) {
-      options.reimportTriggerProvider = reimportTriggerProvider;
     }
     if (featIndexProvider) {
       options.featIndexProvider = featIndexProvider;
@@ -1258,14 +1260,60 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 400);
   });
 
-  // ---- Hindsight memory loop callbacks ----
+  // ---- SQLite memory service callbacks (F102 Phase D1) ----
 
-  test('GET search-evidence defaults to project:cat-cafe + origin:git tags', async () => {
+  test('GET search-evidence returns results from evidence store', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const recallCalls = [];
-    hindsightClient.recall = async (bankId, query, options) => {
-      recallCalls.push({ bankId, query, options });
+    evidenceStore.search = async () => [
+      {
+        anchor: 'docs/decisions/005-hindsight-integration-decisions.md',
+        kind: 'decision',
+        status: 'active',
+        title: 'ADR-005',
+        summary: 'ADR-005 decided single shared bank',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=single%20bank&limit=1`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(Array.isArray(body.results), true);
+    assert.equal(body.results.length, 1);
+    assert.equal(body.results[0].anchor, 'docs/decisions/005-hindsight-integration-decisions.md');
+    assert.equal(body.results[0].sourceType, 'decision');
+    assert.equal(body.degraded, false);
+  });
+
+  test('GET search-evidence passes query and limit to evidence store', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    let capturedArgs;
+    evidenceStore.search = async (query, opts) => {
+      capturedArgs = { query, opts };
+      return [];
+    };
+
+    await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy&limit=3`,
+    });
+
+    assert.equal(capturedArgs.query, 'bank-policy');
+    assert.equal(capturedArgs.opts.limit, 3);
+  });
+
+  test('GET search-evidence defaults limit to 5', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
+    let capturedOpts;
+    evidenceStore.search = async (_q, opts) => {
+      capturedOpts = opts;
       return [];
     };
 
@@ -1274,105 +1322,14 @@ describe('Callback Routes', () => {
       url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=test`,
     });
 
-    assert.equal(recallCalls.length, 1);
-    assert.deepEqual(recallCalls[0].options.tags, ['project:cat-cafe', 'origin:git']);
-    assert.equal(recallCalls[0].options.tagsMatch, 'all_strict');
-    assert.deepEqual(recallCalls[0].options.types, ['world', 'experience']);
+    assert.equal(capturedOpts.limit, 5);
   });
 
-  test('GET search-evidence ensures project:cat-cafe when user provides custom tags', async () => {
+  test('GET search-evidence degrades when evidence store throws', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const recallCalls = [];
-    hindsightClient.recall = async (bankId, query, options) => {
-      recallCalls.push({ bankId, query, options });
-      return [];
-    };
-
-    await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=test&tags=kind:decision`,
-    });
-
-    assert.equal(recallCalls.length, 1);
-    assert.ok(recallCalls[0].options.tags.includes('project:cat-cafe'), 'project:cat-cafe must always be present');
-    assert.ok(recallCalls[0].options.tags.includes('kind:decision'));
-  });
-
-  test('GET search-evidence returns recall results for invocation thread', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const recallCalls = [];
-    hindsightClient.recall = async (bankId, query, options) => {
-      recallCalls.push({ bankId, query, options });
-      return [
-        {
-          content: 'ADR-005 decided single shared bank',
-          metadata: { anchor: 'docs/decisions/005-hindsight-integration-decisions.md#L46' },
-          score: 0.92,
-        },
-      ];
-    };
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=single%20bank&limit=1&budget=high&tags=project:cat-cafe,kind:decision`,
-    });
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(Array.isArray(body.results), true);
-    assert.equal(body.results.length, 1);
-    assert.equal(body.results[0].anchor, 'docs/decisions/005-hindsight-integration-decisions.md#L46');
-    assert.equal(recallCalls.length, 1);
-    assert.equal(recallCalls[0].bankId, 'cat-cafe-shared');
-    assert.equal(recallCalls[0].query, 'single bank');
-    assert.equal(recallCalls[0].options.limit, 1);
-    assert.equal(recallCalls[0].options.budget, 'high');
-    assert.deepEqual(recallCalls[0].options.tags, ['project:cat-cafe', 'kind:decision']);
-  });
-
-  test('GET search-evidence uses runtime-configured recall defaults when params omitted', async () => {
-    const prevBudget = process.env.HINDSIGHT_RECALL_DEFAULT_BUDGET;
-    const prevTagsMatch = process.env.HINDSIGHT_RECALL_DEFAULT_TAGS_MATCH;
-    const prevLimit = process.env.HINDSIGHT_RECALL_DEFAULT_LIMIT;
-    process.env.HINDSIGHT_RECALL_DEFAULT_BUDGET = 'low';
-    process.env.HINDSIGHT_RECALL_DEFAULT_TAGS_MATCH = 'any';
-    process.env.HINDSIGHT_RECALL_DEFAULT_LIMIT = '9';
-
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const recallCalls = [];
-    hindsightClient.recall = async (bankId, query, options) => {
-      recallCalls.push({ bankId, query, options });
-      return [];
-    };
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy`,
-    });
-
-    if (prevBudget === undefined) delete process.env.HINDSIGHT_RECALL_DEFAULT_BUDGET;
-    else process.env.HINDSIGHT_RECALL_DEFAULT_BUDGET = prevBudget;
-    if (prevTagsMatch === undefined) delete process.env.HINDSIGHT_RECALL_DEFAULT_TAGS_MATCH;
-    else process.env.HINDSIGHT_RECALL_DEFAULT_TAGS_MATCH = prevTagsMatch;
-    if (prevLimit === undefined) delete process.env.HINDSIGHT_RECALL_DEFAULT_LIMIT;
-    else process.env.HINDSIGHT_RECALL_DEFAULT_LIMIT = prevLimit;
-
-    assert.equal(response.statusCode, 200);
-    assert.equal(recallCalls.length, 1);
-    assert.equal(recallCalls[0].options.budget, 'low');
-    assert.equal(recallCalls[0].options.tagsMatch, 'any');
-    assert.equal(recallCalls[0].options.limit, 9);
-  });
-
-  test('GET search-evidence degrades on CONNECTION_FAILED', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const { HindsightError } = await import('../dist/domains/cats/services/orchestration/HindsightClient.js');
-    hindsightClient.recall = async () => {
-      throw new HindsightError('CONNECTION_FAILED', 'cannot connect');
+    evidenceStore.search = async () => {
+      throw new Error('SQLite error');
     };
 
     const response = await app.inject({
@@ -1383,134 +1340,28 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.degraded, true);
+    assert.equal(body.degradeReason, 'evidence_store_error');
     assert.deepEqual(body.results, []);
   });
 
-  test('GET search-evidence returns disabled degradation when HINDSIGHT_ENABLED=false', async () => {
-    const previous = process.env.HINDSIGHT_ENABLED;
-    process.env.HINDSIGHT_ENABLED = 'false';
-
+  test('GET search-evidence returns 401 for invalid credentials', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    let recallCalls = 0;
-    hindsightClient.recall = async () => {
-      recallCalls += 1;
-      return [{ content: 'unexpected recall' }];
-    };
+    const { invocationId } = registry.create('user-1', 'codex');
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy`,
+      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=wrong&q=test`,
     });
 
-    if (previous === undefined) delete process.env.HINDSIGHT_ENABLED;
-    else process.env.HINDSIGHT_ENABLED = previous;
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.degraded, true);
-    assert.equal(body.degradeReason, 'hindsight_disabled');
-    assert.deepEqual(body.results, []);
-    assert.equal(recallCalls, 0);
-  });
-
-  test('GET search-evidence degrades on 429 rate limit', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const { HindsightError } = await import('../dist/domains/cats/services/orchestration/HindsightClient.js');
-    hindsightClient.recall = async () => {
-      throw new HindsightError('API_ERROR', 'rate limited', 429);
-    };
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy`,
-    });
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.degraded, true);
-    assert.deepEqual(body.results, []);
-  });
-
-  test('GET search-evidence fail-closes on stale freshness before recall', async () => {
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    let recallCalls = 0;
-    hindsightClient.recall = async () => {
-      recallCalls += 1;
-      return [
-        {
-          content: 'stale recall',
-          metadata: { anchor: 'docs/decisions/005-hindsight-integration-decisions.md' },
-          score: 0.99,
-        },
-      ];
-    };
-    freshnessProvider = async () => ({
-      status: 'stale',
-      checkedAt: '2026-02-14T12:34:56.000Z',
-      headCommit: 'head1234',
-      watermarkCommit: 'old9999',
-      reason: 'commit_mismatch',
-    });
-    reimportTriggerProvider = async () => ({
-      status: 'triggered',
-      reason: 'stale_detected',
-    });
-
-    const staleApp = await createApp();
-    const response = await staleApp.inject({
-      method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy`,
-    });
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.degraded, true);
-    assert.equal(body.degradeReason, 'freshness_stale_fail_closed');
-    assert.equal(body.freshness?.status, 'stale');
-    assert.equal(body.reimportTrigger?.status, 'triggered');
-    assert.deepEqual(body.results, []);
-    assert.equal(recallCalls, 0);
-  });
-
-  test('GET search-evidence returns 501 when hindsight client not configured', async () => {
-    hindsightClient = undefined;
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy`,
-    });
-
-    assert.equal(response.statusCode, 501);
-  });
-
-  test('POST reflect returns 501 when hindsight client not configured', async () => {
-    hindsightClient = undefined;
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/reflect',
-      payload: {
-        invocationId,
-        callbackToken,
-        query: 'any reflection prompt',
-      },
-    });
-
-    assert.equal(response.statusCode, 501);
+    assert.equal(response.statusCode, 401);
   });
 
   test('POST reflect returns reflection text', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const reflectCalls = [];
-    hindsightClient.reflect = async (bankId, query) => {
-      reflectCalls.push({ bankId, query });
+    let capturedQuery;
+    reflectionService.reflect = async (query) => {
+      capturedQuery = query;
       return 'Phase 5 focused on evidence-first governance.';
     };
 
@@ -1527,43 +1378,15 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.reflection, 'Phase 5 focused on evidence-first governance.');
-    assert.equal(reflectCalls.length, 1);
-    assert.equal(reflectCalls[0].bankId, 'cat-cafe-shared');
-    assert.equal(reflectCalls[0].query, 'What changed in phase 5?');
-  });
-
-  test('POST reflect returns 502 on non-degradable errors', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    hindsightClient.reflect = async () => {
-      throw new Error('invalid reflection template');
-    };
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/reflect',
-      payload: {
-        invocationId,
-        callbackToken,
-        query: 'What changed in phase 5?',
-      },
-    });
-
-    assert.equal(response.statusCode, 502);
-    const body = JSON.parse(response.body);
     assert.equal(body.degraded, false);
+    assert.equal(capturedQuery, 'What changed in phase 5?');
   });
 
-  test('POST reflect returns disabled degradation when HINDSIGHT_ENABLED=false', async () => {
-    const previous = process.env.HINDSIGHT_ENABLED;
-    process.env.HINDSIGHT_ENABLED = 'false';
-
+  test('POST reflect degrades when reflection service throws', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    let reflectCalls = 0;
-    hindsightClient.reflect = async () => {
-      reflectCalls += 1;
-      return 'unexpected reflection';
+    reflectionService.reflect = async () => {
+      throw new Error('reflection failure');
     };
 
     const response = await app.inject({
@@ -1575,24 +1398,38 @@ describe('Callback Routes', () => {
         query: 'What changed in phase 5?',
       },
     });
-
-    if (previous === undefined) delete process.env.HINDSIGHT_ENABLED;
-    else process.env.HINDSIGHT_ENABLED = previous;
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.degraded, true);
-    assert.equal(body.degradeReason, 'hindsight_disabled');
+    assert.equal(body.degradeReason, 'reflection_service_error');
     assert.equal(body.reflection, '');
-    assert.equal(reflectCalls, 0);
   });
 
-  test('POST retain-memory writes invocation-scoped memory item', async () => {
+  test('POST reflect returns 401 for invalid credentials', async () => {
+    const app = await createApp();
+    const { invocationId } = registry.create('user-1', 'codex');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/reflect',
+      payload: {
+        invocationId,
+        callbackToken: 'wrong',
+        query: 'test',
+      },
+    });
+
+    assert.equal(response.statusCode, 401);
+  });
+
+  test('POST retain-memory submits to marker queue', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const retainCalls = [];
-    hindsightClient.retain = async (bankId, items, options) => {
-      retainCalls.push({ bankId, items, options });
+    const submitCalls = [];
+    markerQueue.submit = async (marker) => {
+      submitCalls.push(marker);
+      return { id: 'mk-1', createdAt: new Date().toISOString(), ...marker };
     };
 
     const response = await app.inject({
@@ -1602,28 +1439,17 @@ describe('Callback Routes', () => {
         invocationId,
         callbackToken,
         content: 'When storage is unavailable, fail-closed and surface explicit errors.',
-        tags: ['kind:decision', 'source:codex'],
-        metadata: {
-          anchor: 'docs/decisions/008-conversation-mutability-and-invocation-lifecycle.md#L1',
-          confidence: 'high',
-        },
       },
     });
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.status, 'ok');
-    assert.equal(retainCalls.length, 1);
-    assert.equal(retainCalls[0].bankId, 'cat-cafe-shared');
-    assert.equal(retainCalls[0].items.length, 1);
-    assert.equal(
-      retainCalls[0].items[0].content,
-      'When storage is unavailable, fail-closed and surface explicit errors.',
-    );
-    assert.deepEqual(retainCalls[0].items[0].tags, ['project:cat-cafe', 'kind:decision', 'source:codex']);
-    assert.equal(retainCalls[0].items[0].metadata.source, 'callback');
-    assert.equal(retainCalls[0].items[0].metadata.catId, 'codex');
-    assert.equal(retainCalls[0].items[0].metadata.invocationId, invocationId);
+    assert.equal(submitCalls.length, 1);
+    assert.equal(submitCalls[0].content, 'When storage is unavailable, fail-closed and surface explicit errors.');
+    assert.equal(submitCalls[0].status, 'captured');
+    assert.ok(submitCalls[0].source.includes('codex'));
+    assert.ok(submitCalls[0].source.includes(invocationId));
   });
 
   test('POST retain-memory returns 401 for invalid callback token', async () => {
@@ -1643,59 +1469,11 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST retain-memory without tags defaults to origin:callback, not origin:git (P1 regression)', async () => {
+  test('POST retain-memory degrades when marker queue throws', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    const retainCalls = [];
-    hindsightClient.retain = async (bankId, items) => {
-      retainCalls.push({ bankId, items });
-    };
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      payload: {
-        invocationId,
-        callbackToken,
-        content: 'A callback memory without explicit tags',
-      },
-    });
-
-    assert.equal(response.statusCode, 200);
-    assert.equal(retainCalls.length, 1);
-    const tags = retainCalls[0].items[0].tags;
-    assert.ok(tags.includes('project:cat-cafe'), 'must include project:cat-cafe');
-    assert.ok(tags.includes('origin:callback'), 'must include origin:callback for callback memories');
-    assert.ok(!tags.includes('origin:git'), 'must NOT include origin:git for callback memories');
-  });
-
-  test('POST retain-memory returns 501 when hindsight client not configured', async () => {
-    hindsightClient = undefined;
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/retain-memory',
-      payload: {
-        invocationId,
-        callbackToken,
-        content: 'memory item',
-      },
-    });
-
-    assert.equal(response.statusCode, 501);
-  });
-
-  test('POST retain-memory skips write when HINDSIGHT_ENABLED=false', async () => {
-    const previous = process.env.HINDSIGHT_ENABLED;
-    process.env.HINDSIGHT_ENABLED = 'false';
-
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex');
-    let retainCalls = 0;
-    hindsightClient.retain = async () => {
-      retainCalls += 1;
+    markerQueue.submit = async () => {
+      throw new Error('queue error');
     };
 
     const response = await app.inject({
@@ -1707,15 +1485,11 @@ describe('Callback Routes', () => {
         content: 'memory item',
       },
     });
-
-    if (previous === undefined) delete process.env.HINDSIGHT_ENABLED;
-    else process.env.HINDSIGHT_ENABLED = previous;
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
-    assert.equal(body.status, 'skipped');
-    assert.equal(body.degradeReason, 'hindsight_disabled');
-    assert.equal(retainCalls, 0);
+    assert.equal(body.status, 'degraded');
+    assert.equal(body.degradeReason, 'marker_queue_error');
   });
 
   // --- Stale callback freshness guard (cloud Codex P1 + 缅因猫 R3) ---

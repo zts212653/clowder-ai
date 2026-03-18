@@ -5,6 +5,7 @@ import { type QueueEntry, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { type SteerMode, SteerQueuedEntryModal } from './SteerQueuedEntryModal';
+
 interface QueuePanelProps {
   threadId: string;
 }
@@ -246,11 +247,18 @@ function QueueEntryRow({
   onMove: (id: string, direction: 'up' | 'down') => void;
   onSteer: (id: string) => void;
 }) {
+  const isAgent = entry.source === 'agent';
+  const sourceLabel = isAgent
+    ? `${entry.callerCatId ?? '猫猫'} → ${entry.targetCats[0] ?? '猫猫'}`
+    : entry.source === 'connector'
+      ? 'Connector'
+      : '铲屎官';
+
   return (
     <div
       className={`flex items-center gap-2 px-3 py-2 border-b last:border-b-0 ${
         isPaused ? 'border-amber-100' : 'border-[#9B7EBD]/10'
-      }`}
+      } ${isAgent ? 'bg-[#F3EEFA]' : ''}`}
     >
       {/* Number */}
       <span className="text-xs text-gray-400 w-5 text-center shrink-0">{index + 1}</span>
@@ -259,8 +267,17 @@ function QueueEntryRow({
       <div className="flex-1 min-w-0">
         <p className="text-sm text-gray-700 truncate">{entry.content}</p>
         <div className="flex items-center gap-1 mt-0.5">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
-          <span className="text-xs text-gray-400">{entry.source === 'connector' ? 'Connector' : '铲屎官'}</span>
+          {isAgent ? (
+            <svg className="w-2.5 h-2.5 text-[#9B7EBD]" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M4.5 11.5c-.28 0-.5-.22-.5-.5 0-1.93.76-3.74 2.13-5.1C7.5 4.52 9.31 3.76 11.24 3.76c.28 0 .5.22.5.5s-.22.5-.5.5c-1.66 0-3.22.65-4.4 1.82A6.18 6.18 0 005.02 11c0 .28-.22.5-.5.5zM8.02 20.25a1.25 1.25 0 01-1.18-1.63l1.12-3.36A4.01 4.01 0 014.1 11.5c0-2.2 1.79-3.99 3.99-3.99h7.82c2.2 0 3.99 1.79 3.99 3.99a4.01 4.01 0 01-3.86 3.76l1.12 3.36a1.25 1.25 0 01-1.18 1.63H8.02z" />
+            </svg>
+          ) : (
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
+          )}
+          <span className={`text-xs ${isAgent ? 'text-[#9B7EBD] font-medium' : 'text-gray-400'}`}>{sourceLabel}</span>
+          {isAgent && entry.autoExecute && (
+            <span className="text-[9px] px-1 py-px rounded bg-[#9B7EBD]/15 text-[#9B7EBD] font-medium">自动</span>
+          )}
           {imageCount > 0 && (
             <span className="flex items-center gap-0.5 text-xs text-gray-400 ml-1">
               <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">

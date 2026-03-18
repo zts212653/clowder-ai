@@ -1,11 +1,13 @@
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 
 export interface CommandResult {
-  readonly kind: 'new' | 'threads' | 'use' | 'where' | 'not-command';
+  readonly kind: 'new' | 'threads' | 'use' | 'where' | 'thread' | 'not-command';
   readonly response?: string;
   readonly newActiveThreadId?: string;
   /** Thread context for storing command exchange in messageStore */
   readonly contextThreadId?: string;
+  /** Message content to forward to target thread after switching (used by /thread) */
+  readonly forwardContent?: string;
 }
 
 interface ThreadEntry {
@@ -56,6 +58,8 @@ export class ConnectorCommandLayer {
         return this.handleThreads(connectorId, externalChatId, userId);
       case '/use':
         return this.handleUse(connectorId, externalChatId, userId, args.join(' '));
+      case '/thread':
+        return this.handleThread(connectorId, externalChatId, userId, args);
       default:
         return { kind: 'not-command' };
     }
@@ -71,12 +75,11 @@ export class ConnectorCommandLayer {
     }
     const thread = await this.deps.threadStore.get(binding.threadId);
     const title = thread?.title ?? '(无标题)';
-    const shortId = binding.threadId.slice(0, 8);
     const deepLink = `${this.deps.frontendBaseUrl}/threads/${binding.threadId}`;
     return {
       kind: 'where',
       contextThreadId: binding.threadId,
-      response: `📍 当前 thread: ${title}\nID: ${shortId}\n🔗 ${deepLink}`,
+      response: `📍 当前 thread: ${title}\nID: ${binding.threadId}\n🔗 ${deepLink}`,
     };
   }
 
@@ -89,14 +92,13 @@ export class ConnectorCommandLayer {
     const effectiveTitle = title?.trim() ? title.trim() : undefined;
     const thread = await this.deps.threadStore.create(userId, effectiveTitle);
     await this.deps.bindingStore.bind(connectorId, externalChatId, thread.id, userId);
-    const shortId = thread.id.slice(0, 8);
     const deepLink = `${this.deps.frontendBaseUrl}/threads/${thread.id}`;
     const titleDisplay = effectiveTitle ? ` "${effectiveTitle}"` : '';
     return {
       kind: 'new',
       newActiveThreadId: thread.id,
       contextThreadId: thread.id,
-      response: `✨ 新 thread${titleDisplay} 已创建\nID: ${shortId}\n🔗 ${deepLink}\n\n现在的消息会发到这个 thread。`,
+      response: `✨ 新 thread${titleDisplay} 已创建\nID: ${thread.id}\n🔗 ${deepLink}\n\n现在的消息会发到这个 thread。`,
     };
   }
 
@@ -113,9 +115,8 @@ export class ConnectorCommandLayer {
     const featBadges = await this.resolveFeatBadges(threads, userId);
     const lines = threads.map((t, i) => {
       const title = t.title ?? '(无标题)';
-      const shortId = t.id.slice(0, 8);
       const badge = featBadges.get(t.id);
-      return badge ? `${i + 1}. ${title} [${badge}] [${shortId}]` : `${i + 1}. ${title} [${shortId}]`;
+      return badge ? `${i + 1}. ${title} [${badge}] [${t.id}]` : `${i + 1}. ${title} [${t.id}]`;
     });
     const result: CommandResult = {
       kind: 'threads',
@@ -158,7 +159,41 @@ export class ConnectorCommandLayer {
       kind: 'use',
       newActiveThreadId: match.id,
       contextThreadId: match.id,
-      response: `🔄 已切换到: ${title}\nID: ${match.id.slice(0, 8)}\n🔗 ${deepLink}`,
+      response: `🔄 已切换到: ${title}\nID: ${match.id}\n🔗 ${deepLink}`,
+    };
+  }
+
+  private async handleThread(
+    connectorId: string,
+    externalChatId: string,
+    userId: string,
+    args: string[],
+  ): Promise<CommandResult> {
+    if (args.length < 2) {
+      return {
+        kind: 'thread',
+        response: '❌ 用法: /thread <thread_id> <message>\n切换到指定 thread 并发送消息。',
+      };
+    }
+    const [threadIdOrPrefix, ...msgParts] = args;
+    const message = msgParts.join(' ');
+
+    // Match only within user's own threads (exact ID → prefix)
+    const allThreads = await this.deps.threadStore.list(userId);
+    const match =
+      allThreads.find((t) => t.id === threadIdOrPrefix) ?? allThreads.find((t) => t.id.startsWith(threadIdOrPrefix!));
+
+    if (!match) {
+      return { kind: 'thread', response: `❌ 找不到 thread "${threadIdOrPrefix}"。用 /threads 查看可用列表。` };
+    }
+    await this.deps.bindingStore.bind(connectorId, externalChatId, match.id, userId);
+    const title = match.title ?? '(无标题)';
+    return {
+      kind: 'thread',
+      newActiveThreadId: match.id,
+      contextThreadId: match.id,
+      forwardContent: message,
+      response: `📨 → ${title} [${match.id}]`,
     };
   }
 

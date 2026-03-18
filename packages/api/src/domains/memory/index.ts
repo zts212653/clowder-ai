@@ -5,7 +5,7 @@ export { EmbeddingService } from './EmbeddingService.js';
 export type { MemoryConfig, MemoryServices } from './factory.js';
 // Factory
 export { createMemoryServices } from './factory.js';
-export { HindsightAdapter } from './HindsightAdapter.js';
+export type { MessageListFn, StoredMessageSnapshot } from './IndexBuilder.js';
 export { IndexBuilder } from './IndexBuilder.js';
 // Interfaces + types
 export type {
@@ -47,9 +47,10 @@ export {
 export { KnowledgeResolver } from './KnowledgeResolver.js';
 export { MarkerQueue } from './MarkerQueue.js';
 export { MaterializationService } from './MaterializationService.js';
-export { createHindsightReflectBackend, ReflectionService } from './ReflectionService.js';
+export { ReflectionService } from './ReflectionService.js';
 export { SemanticReranker } from './SemanticReranker.js';
 // Implementations
+export type { PassageResult } from './SqliteEvidenceStore.js';
 export { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 export { ensureVectorTable } from './schema.js';
 export { VectorStore } from './VectorStore.js';

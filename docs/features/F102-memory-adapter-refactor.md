@@ -389,6 +389,52 @@ search_evidence(query, {
 - **feat-lifecycle 集成**：立项/状态变更/关闭时自动 `incrementalUpdate`
 - **SOP 更新**：在 `docs/SOP.md` 中加入"开工前先 recall"的步骤
 
+### Phase E: Thread 内容索引 — 从"空壳"到"300 thread 可搜"
+
+> **触发**：Phase D runtime 测试暴露核心 gap——thread 对话内容不可搜。
+> **Maine Coon(GPT-5.4) 愿景守护结论**：Phase D AC 文档闭合度 90%，runtime 验收完成度 60%。
+> **team lead核心需求**："把我们的整个 thread 检索归一到记忆组件"
+> **三层真相源设计**（两猫共识）：threadMemory.summary + sealed transcript events.jsonl + live MessageStore
+
+**当前 Gap（Phase D 测试 thread 暴露）**
+
+| 优先级 | Gap | 根因 |
+|--------|-----|------|
+| P1 | scope=threads/sessions 返回 0 结果 | session digest 路径解析问题（类似 docsRoot CWD bug，PR #524 修了 docs 但 transcriptDataDir 可能仍有问题） |
+| P1 | 300 个 thread 对话内容不可搜 | thread 消息在 Redis（TTL=0 永久），但从未被索引到 evidence.sqlite |
+| P2 | reflect 返回空 | ReflectionService 仍是空壳 `async () => ''` |
+| P2 | lesson/pitfall 召回偏 | redis pitfall 命中无关 F048 |
+
+**E-1. Thread Summary Layer（Step 1）**
+
+目标：让 thread 在统一入口里"有摘要层可命中"。不是"thread 内容可搜已完成"。
+
+- 新增 `kind='thread'`（区别于 `session` = sealed session digest）
+- `anchor = thread-{threadId}`
+- `title = thread.title`
+- `summary = threadMemory.summary`（现成的滚动摘要，不需要 LLM）
+- `keywords = [参与者 catId, backlogItemId, feature_ids]`
+- **dirty-thread + 30s debounce flush** 基础设施
+  - `messageStore.append()` 后标记 threadId dirty
+  - 每 30 秒批量刷新 dirty threads 到 SQLite
+  - 启动时全量 catch-up
+
+**E-2. Thread Raw Passage Layer（Step 2）**
+
+目标：让"Redis 坑在第 47 条消息"也能命中。这才是真正兑现"thread 内容可搜"。
+
+- 启用 `evidence_passages` 表（Schema V3）
+- 数据源：sealed transcript `events.jsonl` chat 文本 + live `MessageStore` 未封存增量
+- 切 passage 策略：按 turn/消息，每条消息一个 passage
+- `depth=raw` 时搜 passages，聚合回 `thread-{threadId}`
+- FTS5 索引扩展到 passages 表
+
+**E-3. 辅修**
+
+- reflect 返回显式降级消息（不再返回空字符串）
+- lesson/pitfall 召回质量改进（keywords 补充 + FTS5 索引调优）
+- session digest 路径修复（确认 transcriptDataDir 解析正确）
+
 ## Phase D 完成后的预期效果
 
 > team lead指示：做完后要讲清楚"team lead日常使用感受到什么优化"和"猫猫自己感受到什么优化"。跑一段时间才知道做得好不好。
@@ -468,28 +514,38 @@ search_evidence(query, {
 - [x] AC-C6: `embedding_meta` 版本锚——模型/维度变更触发全量 re-embed（禁止静默混跑）
 - [x] AC-C7: shadow 期 A/B（`dim=128/256`），复用 `memory_eval_corpus.yaml` 对比 Recall@k
 - [x] AC-C8: 语义 rerank 对 FTS5 候选集重排序（不替代 lexical 召回）
-- [ ] AC-C9: `evidence_passages` 表按需启用（passage 级检索粒度，1000+ docs 后评估）— **deferred per spec**
+- [x] AC-C9: `evidence_passages` 表按需启用（passage 级检索粒度，1000+ docs 后评估）— **Phase E PR #531 实现（thread passages）**
 
 ### Phase D（激活 — Hindsight 清理 + 数据源扩大 + 检索协议 + 提示词集成）
-- [ ] AC-D1: 运行链路中无 Hindsight 调用分支，factory 只有 `sqlite` 路径
-- [ ] AC-D2: 12 个 `HINDSIGHT_*` 环境变量、ConfigSnapshot hindsight 段、前端 config-viewer hindsight tab 全部移除
-- [ ] AC-D3: Hindsight legacy 资产归档（docker-compose、scripts、P0 import、~26 tests）
-- [ ] AC-D4: 启动 60 秒内 `evidence.sqlite` 存在且 `evidence_docs > 0`（自动 rebuild）
-- [ ] AC-D5: `search_evidence` MCP 工具默认走 SQLite FTS5，至少 3 条 canary query 稳定返回预期 anchor
-- [ ] AC-D6: Session digest 索引为 `kind='session'`，默认检索权重低于 feature/decision
-- [ ] AC-D7: 检索接口支持 `mode`（lexical/semantic/hybrid）和 `scope`（docs/memory/threads/all）参数
-- [ ] AC-D8: Memory status 可观测（docs_count / last_rebuild_at / backend）
-- [ ] AC-D9: **CLAUDE.md / AGENTS.md 提示词更新**——告知猫猫记忆组件存在、检索策略、使用方式
-- [ ] AC-D10: **Recall Skill 或等效 SOP 集成**——猫猫开工前自动/主动检索相关上下文
-- [ ] AC-D11: feat-lifecycle 集成——立项/状态变更/关闭时自动 `incrementalUpdate`
-- [ ] AC-D12: 修改 feature 文档后 30 秒内可检索到新标题/摘要（增量 freshness）
-- [ ] AC-D13: Embedding load 失败时检索成功率不下降（fail-open lexical 保底）
-- [ ] AC-D14: `search_evidence` 成为统一检索入口，支持 `scope`/`mode`/`depth` 参数
-- [ ] AC-D15: `search_messages` 和 `session_search` 降级为内部实现，不再作为独立 MCP 工具暴露
-- [ ] AC-D16: callback auth 版本合并到主版本（`search_evidence_callback` → `search_evidence`，`reflect_callback` → `reflect`）
-- [ ] AC-D17: SystemPromptBuilder 更新——`search_evidence` 排在记忆工具第一位，drill-down 工具排在后面
-- [ ] AC-D18: `IIndexBuilder.rebuild()` 自动从 frontmatter 交叉引用（`related_features`/`feature_ids`/`decision_id`）提取 edges（零手工维护）
-- [ ] AC-D19: `incrementalUpdate()` 变更检测 → edges 反向查询 → 依赖文档标 `needs_review`（memory invalidation）
+- [x] AC-D1: 运行链路中无 Hindsight 调用分支，factory 只有 `sqlite` 路径 — **PR #501 merged**
+- [x] AC-D2: 12 个 `HINDSIGHT_*` 环境变量、ConfigSnapshot hindsight 段、前端 config-viewer hindsight tab 全部移除 — **PR #503 merged**
+- [x] AC-D3: Hindsight legacy 资产归档（docker-compose、scripts、P0 import、~26 tests） — **PR #503 merged**
+- [x] AC-D4: 启动 60 秒内 `evidence.sqlite` 存在且 `evidence_docs > 0`（自动 rebuild） — **PR #503 merged**
+- [x] AC-D5: `search_evidence` MCP 工具默认走 SQLite FTS5，至少 3 条 canary query 稳定返回预期 anchor — **PR #509 merged**
+- [x] AC-D6: Session digest 索引为 `kind='session'`，默认检索权重低于 feature/decision — **PR #518 merged**
+- [x] AC-D7: 检索接口支持 `mode`（lexical/semantic/hybrid）和 `scope`（docs/memory/threads/all）参数 — **PR #513 merged**
+- [x] AC-D8: Memory status 可观测（docs_count / last_rebuild_at / backend） — **PR #511 merged**
+- [x] AC-D9: **CLAUDE.md / AGENTS.md 提示词更新**——告知猫猫记忆组件存在、检索策略、使用方式 — **PR #509 merged**
+- [x] AC-D10: **Recall Skill 或等效 SOP 集成**——猫猫开工前自动/主动检索相关上下文 — **PR #509 merged（等效 SOP：CLAUDE.md/AGENTS.md 策略表）**
+- [x] AC-D11: feat-lifecycle 集成——立项/状态变更/关闭时自动 `incrementalUpdate` — **PR #521 merged（POST /api/evidence/reindex）**
+- [x] AC-D12: 修改 feature 文档后 30 秒内可检索到新标题/摘要（增量 freshness） — **PR #521 merged**
+- [x] AC-D13: Embedding load 失败时检索成功率不下降（fail-open lexical 保底） — **Phase C AC-C4 已实现，PR #511 验证**
+- [x] AC-D14: `search_evidence` 成为统一检索入口，支持 `scope`/`mode`/`depth` 参数 — **PR #513 merged**
+- [x] AC-D15: `search_messages` 和 `session_search` 降级为内部实现，不再作为独立 MCP 工具暴露 — **PR #523 merged**
+- [x] AC-D16: callback auth 版本合并到主版本（`search_evidence_callback` → `search_evidence`，`reflect_callback` → `reflect`） — **PR #523 merged**
+- [x] AC-D17: SystemPromptBuilder 更新——`search_evidence` 排在记忆工具第一位，drill-down 工具排在后面 — **PR #523 merged**
+- [x] AC-D18: `IIndexBuilder.rebuild()` 自动从 frontmatter 交叉引用（`related_features`/`feature_ids`/`decision_id`）提取 edges（零手工维护） — **PR #509 merged**
+- [x] AC-D19: `incrementalUpdate()` 变更检测 → edges 反向查询 → 依赖文档标 `needs_review`（memory invalidation） — **PR #521 merged**
+
+### Phase E（Thread 内容索引 — 从"空壳"到"300 thread 可搜"）
+- [x] AC-E1: Thread summary 索引为 `kind='thread'`（`anchor=thread-{threadId}`，`summary=threadMemory.summary`） — **PR #526 merged**
+- [x] AC-E2: dirty-thread + 30s debounce flush 基础设施（messageStore.append → dirty → 30s batch flush） — **PR #526 merged**
+- [x] AC-E3: `evidence_passages` 表启用（Schema V3）+ sealed transcript chat 文本切 passage — **PR #531 merged**
+- [x] AC-E4: live MessageStore 未封存增量切 passage 入库 — **PR #531 merged**
+- [x] AC-E5: `scope=threads` + `depth=raw` 搜 passages 并聚合回 thread — **PR #531 merged**
+- [x] AC-E6: reflect 返回显式降级消息（不再返回空字符串） — **PR #526 merged**
+- [x] AC-E7: session digest 路径修复（transcriptDataDir 解析确认正确） — **PR #537 merged**
+- [x] AC-E8: lesson/pitfall 召回质量改进 — **PR #537 merged（splitLessonsLearned 32 个独立条目）**
 
 ## Dependencies
 

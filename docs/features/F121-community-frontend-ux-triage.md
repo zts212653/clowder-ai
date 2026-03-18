@@ -8,7 +8,7 @@ created: 2026-03-14
 
 # F121: Community Frontend UX Triage — 社区前端交互体验侦查与分诊
 
-> **Status**: in-progress (community fixes merged + follow-up hotfix in review, pending outbound sync) | **Owner**: Ragdoll | **Priority**: P2
+> **Status**: done | **Owner**: 三猫 | **Priority**: P2 | **Completed**: 2026-03-16
 
 ## Why
 

@@ -281,6 +281,7 @@ export async function* routeParallel(
   // F22 R2 P1-1: Capture own invocationId per cat from stream
   const catInvocationId = new Map<string, string>();
   let completedCount = 0;
+  let yieldedFinalDone = false;
 
   // #80: Per-cat draft flush state
   const catFlushTime = new Map<string, number>();
@@ -445,12 +446,15 @@ export async function* routeParallel(
         const { cleanText: storedContent, blocks: textBlocks } = extractRichFromText(sanitized);
         let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
         // F34-b: synthesize text-only audio blocks (voice messages)
-        const voiceSynth = getVoiceBlockSynthesizer();
-        if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
-          try {
-            allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, msg.catId as string);
-          } catch (err) {
-            console.error(`[routeParallel] Voice block synthesis failed for ${msg.catId as string}:`, err);
+        // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
+        if (!voiceMode) {
+          const voiceSynth = getVoiceBlockSynthesizer();
+          if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
+            try {
+              allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, msg.catId as string);
+            } catch (err) {
+              console.error(`[routeParallel] Voice block synthesis failed for ${msg.catId as string}:`, err);
+            }
           }
         }
         const catTools = catToolEvents.get(msg.catId);
@@ -747,9 +751,20 @@ export async function* routeParallel(
       }
 
       yield { ...msg, isFinal };
+      if (isFinal) yieldedFinalDone = true;
     } else {
       yield msg;
     }
+  }
+
+  // done-guarantee safety net: synthesize final done if loop exited without one
+  if (!yieldedFinalDone && targetCats.length > 0) {
+    yield {
+      type: 'done' as AgentMessageType,
+      catId: targetCats[targetCats.length - 1]!,
+      isFinal: true,
+      timestamp: Date.now(),
+    } as AgentMessage;
   }
 
   // Issue #83: Stop keepalive timer — streaming loop has exited.

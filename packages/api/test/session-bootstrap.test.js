@@ -145,7 +145,7 @@ describe('SessionBootstrap', () => {
       );
 
       assert.ok(result);
-      assert.ok(result.text.includes('cat_cafe_session_search'));
+      assert.ok(result.text.includes('cat_cafe_search_evidence'));
       assert.ok(result.text.includes('cat_cafe_read_session_digest'));
       assert.ok(result.text.includes('cat_cafe_read_session_events'));
       assert.ok(result.text.includes('Do NOT guess'));
@@ -171,7 +171,7 @@ describe('SessionBootstrap', () => {
       assert.ok(result);
       assert.equal(result.hasDigest, false);
       assert.ok(result.text.includes('Session #2')); // seq=1 → display #2
-      assert.ok(result.text.includes('cat_cafe_session_search')); // tools still present
+      assert.ok(result.text.includes('cat_cafe_search_evidence')); // tools still present
     });
 
     it('correctly counts sealed sessions for Session #3+ (seq=2)', async () => {

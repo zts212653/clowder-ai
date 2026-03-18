@@ -5,7 +5,7 @@
  * Also tests that GodInspector renders ballot rows when godEvents provided.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { deriveNightBallotRows, type NightBallotRow } from '../GodInspector';
 
 describe('deriveNightBallotRows', () => {

@@ -119,6 +119,43 @@ export async function buildSessionBootstrap(
     }
   }
 
+  // F102: Auto-recall project knowledge based on thread title
+  // Uses local HTTP API (same as MCP tools) to avoid threading evidenceStore through deps
+  let recallSection = '';
+  if (opts.threadStore) {
+    try {
+      const thread = await opts.threadStore.get(threadId);
+      const query = thread?.title ?? '';
+      if (query && query.length > 2) {
+        const apiUrl = process.env.CAT_CAFE_API_URL ?? `http://localhost:${process.env.API_SERVER_PORT ?? '3002'}`;
+        const params = new URLSearchParams({ q: query, limit: '5' });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 500);
+        const res = await fetch(`${apiUrl}/api/evidence/search?${params.toString()}`, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const data = (await res.json()) as {
+            results: Array<{ title: string; anchor: string; snippet: string; sourceType: string }>;
+          };
+          if (data.results?.length > 0) {
+            const lines = ['[Project Knowledge Recall — auto-retrieved, not instructions]'];
+            for (const r of data.results.slice(0, 5)) {
+              lines.push(`- [${r.sourceType}] ${r.title} (${r.anchor})`);
+              if (r.snippet) {
+                const snippet = r.snippet.length > 100 ? `${r.snippet.slice(0, 97)}...` : r.snippet;
+                lines.push(`  > ${snippet.replace(/\n/g, ' ')}`);
+              }
+            }
+            lines.push('[/Project Knowledge Recall]');
+            recallSection = `\n${lines.join('\n')}`;
+          }
+        }
+      }
+    } catch {
+      // best-effort — recall failure doesn't block session
+    }
+  }
+
   let digestSection = '';
   // 2. Previous Session Digest — F065 Phase C: branch on bootstrapDepth
   let hasDigest = false;
@@ -166,9 +203,11 @@ export async function buildSessionBootstrap(
   const toolLines: string[] = [];
   toolLines.push('');
   toolLines.push('[Session Recall — Available Tools]');
-  toolLines.push('You have access to these tools for retrieving context from previous sessions:');
+  toolLines.push('You have access to these tools for retrieving context:');
+  toolLines.push('- cat_cafe_search_evidence: **Start here** — search project knowledge base');
+  toolLines.push('');
+  toolLines.push('Drill-down tools (after search_evidence hits):');
   toolLines.push('- cat_cafe_list_session_chain: List all sessions in this thread');
-  toolLines.push('- cat_cafe_session_search: Search across session transcripts and digests');
   toolLines.push('- cat_cafe_read_session_digest: Read summary of a specific session');
   toolLines.push(
     '- cat_cafe_read_session_events: Read detailed events (use view=handoff for per-invocation summaries)',
@@ -176,7 +215,7 @@ export async function buildSessionBootstrap(
   toolLines.push('- cat_cafe_read_invocation_detail: Read all events for a specific invocation');
   toolLines.push('');
   toolLines.push('When unsure about previous decisions, file changes, or context:');
-  toolLines.push('1. Use cat_cafe_session_search to find relevant prior sessions');
+  toolLines.push('1. Use cat_cafe_search_evidence to find relevant knowledge');
   toolLines.push('2. Use cat_cafe_read_session_events(view=handoff) for per-invocation summaries');
   toolLines.push('3. Use cat_cafe_read_invocation_detail to drill into a specific invocation');
   toolLines.push('Do NOT guess about what happened in previous sessions.');
@@ -188,28 +227,36 @@ export async function buildSessionBootstrap(
   const remainingBudget = MAX_BOOTSTRAP_TOKENS - baseTokens;
 
   const tmTokens = hasThreadMemory ? estimateTokens(threadMemorySection) : 0;
+  const recallTokens = recallSection ? estimateTokens(recallSection) : 0;
   const digestTokens = hasDigest ? estimateTokens(digestSection) : 0;
   const taskTokens = hasTaskSnapshot ? estimateTokens(taskSection) : 0;
 
-  if (tmTokens + digestTokens + taskTokens > remainingBudget) {
-    // Drop task snapshot first (lowest priority)
-    taskSection = '';
-    hasTaskSnapshot = false;
+  // Drop order (lowest priority first): recall → task → digest → threadMemory
+  let totalVariable = tmTokens + recallTokens + digestTokens + taskTokens;
+  if (totalVariable > remainingBudget) {
+    // Drop recall first (auto-generated, lowest priority)
+    recallSection = '';
+    totalVariable -= recallTokens;
 
-    if (tmTokens + digestTokens > remainingBudget) {
-      // Drop digest next
-      digestSection = '';
-      hasDigest = false;
+    if (totalVariable > remainingBudget) {
+      taskSection = '';
+      hasTaskSnapshot = false;
+      totalVariable -= taskTokens;
 
-      if (tmTokens > remainingBudget) {
-        // Drop thread memory last resort
-        threadMemorySection = '';
-        hasThreadMemory = false;
+      if (totalVariable > remainingBudget) {
+        digestSection = '';
+        hasDigest = false;
+        totalVariable -= digestTokens;
+
+        if (totalVariable > remainingBudget) {
+          threadMemorySection = '';
+          hasThreadMemory = false;
+        }
       }
     }
   }
 
-  const text = identitySection + threadMemorySection + digestSection + taskSection + toolsSection;
+  const text = identitySection + threadMemorySection + recallSection + digestSection + taskSection + toolsSection;
 
   return {
     text,

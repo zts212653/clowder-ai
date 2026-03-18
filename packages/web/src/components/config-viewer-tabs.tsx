@@ -69,51 +69,6 @@ export function SystemTab({ config }: { config: ConfigData }) {
           <KV label="每线程最大 key 数" value={config.memory.maxKeysPerThread} />
         </div>
       </Section>
-      <Section title="Hindsight 长期记忆">
-        <div className="space-y-1.5">
-          <KV label="启用" value={config.hindsight.enabled} />
-          <KV label="Base URL" value={config.hindsight.baseUrl} />
-          <KV label="共享 Bank" value={config.hindsight.sharedBank} />
-          {config.hindsight.recallDefaults ? (
-            <>
-              <KV label="Recall Budget" value={config.hindsight.recallDefaults.budget} />
-              <KV label="Recall TagsMatch" value={config.hindsight.recallDefaults.tagsMatch} />
-              <KV label="Recall Limit" value={config.hindsight.recallDefaults.limit} />
-            </>
-          ) : null}
-          {config.hindsight.retainPolicy ? (
-            <>
-              <KV label="Narrative Fact Required" value={config.hindsight.retainPolicy.narrativeFactRequired} />
-              <KV label="Min Useful Horizon Days" value={config.hindsight.retainPolicy.minUsefulHorizonDays} />
-              {typeof config.hindsight.retainPolicy.anchorRequired === 'boolean' ? (
-                <KV label="Anchor Required" value={config.hindsight.retainPolicy.anchorRequired} />
-              ) : null}
-            </>
-          ) : null}
-          {config.hindsight.reflect ? (
-            <KV label="Reflect Disposition" value={config.hindsight.reflect.dispositionMode} />
-          ) : null}
-        </div>
-      </Section>
-      {config.hindsight.engine ? (
-        <Section title="引擎路由">
-          <div className="space-y-1.5">
-            <KV label="Reflect Engine" value={config.hindsight.engine.reflect} />
-            <KV label="Retain Extraction Engine" value={config.hindsight.engine.retainExtraction} />
-            <KV label="allowNativeFallback" value={config.hindsight.engine.allowNativeFallback} />
-          </div>
-        </Section>
-      ) : null}
-      {config.hindsight.service ? (
-        <Section title="Hindsight 独立服务">
-          <div className="space-y-1.5">
-            <KV label="服务模式" value={config.hindsight.service.mode} />
-            <KV label="requireHealthcheck" value={config.hindsight.service.requireHealthcheck} />
-            <KV label="写入超时(ms)" value={config.hindsight.service.writeTimeoutMs} />
-            <KV label="检索超时(ms)" value={config.hindsight.service.recallTimeoutMs} />
-          </div>
-        </Section>
-      ) : null}
       {config.codexExecution ? (
         <Section title="Codex 推理执行">
           <div className="space-y-1.5">

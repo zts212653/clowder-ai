@@ -440,6 +440,84 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
     expect(mockAppendRichBlock).toHaveBeenCalledTimes(1);
   });
 
+  it('replaces an invocationless rich-block placeholder when callback text arrives later', () => {
+    mockAddMessage.mockImplementation((message) => {
+      storeState.messages.push(message);
+    });
+    mockAppendRichBlock.mockImplementation((id: string, block: { id: string }) => {
+      storeState.messages = storeState.messages.map((message) => {
+        if (message.id !== id) return message;
+        const rich = message.extra?.rich ?? { v: 1 as const, blocks: [] };
+        if (rich.blocks.some((candidate) => candidate.id === block.id)) return message;
+        return {
+          ...message,
+          extra: {
+            ...message.extra,
+            rich: {
+              ...rich,
+              blocks: [...rich.blocks, block],
+            },
+          },
+        };
+      });
+    });
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    const testBlock = { id: 'block-orphan', kind: 'card', v: 1, title: 'CLI Output' };
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({ type: 'rich_block', block: testBlock }),
+      });
+    });
+
+    expect(storeState.messages).toEqual([
+      expect.objectContaining({
+        catId: 'codex',
+        origin: 'stream',
+        isStreaming: true,
+        content: '',
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [expect.objectContaining({ id: 'block-orphan' })],
+          },
+        },
+      }),
+    ]);
+    expect(storeState.messages[0]?.extra?.stream?.invocationId).toBeUndefined();
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'codex',
+        content: 'command finished',
+        origin: 'callback',
+        messageId: 'msg-callback-codex',
+      });
+    });
+
+    expect(storeState.messages).toEqual([
+      expect.objectContaining({
+        id: 'msg-callback-codex',
+        catId: 'codex',
+        content: 'command finished',
+        origin: 'callback',
+        isStreaming: false,
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [expect.objectContaining({ id: 'block-orphan' })],
+          },
+        },
+      }),
+    ]);
+  });
+
   it('skips stale callback when active streaming message exists (cloud P1 fix)', () => {
     act(() => {
       root.render(React.createElement(Harness));

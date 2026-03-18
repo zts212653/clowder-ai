@@ -398,11 +398,15 @@ export interface QueueEntry {
   content: string;
   messageId: string | null;
   mergedMessageIds: string[];
-  source: 'user' | 'connector';
+  source: 'user' | 'connector' | 'agent';
   targetCats: string[];
   intent: string;
   status: 'queued' | 'processing';
   createdAt: number;
+  /** F122B: auto-execute without waiting for steer */
+  autoExecute?: boolean;
+  /** F122B: which cat initiated this entry (for A2A handoff display) */
+  callerCatId?: string;
 }
 
 /** F39: Message delivery mode — undefined = smart default, 'queue' = enqueue, 'force' = cancel + execute */
@@ -426,7 +430,7 @@ export interface ThreadState {
   /** Whether the thread has an active invocation (broader than isLoading — stays true during A2A chains) */
   hasActiveInvocation: boolean;
   /** F108: Per-invocation slot tracking — key=invocationId, value=slot info */
-  activeInvocations: Record<string, { catId: string; mode: string }>;
+  activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
   intentMode: 'execute' | 'ideate' | null;
   targetCats: string[];
   catStatuses: Record<string, CatStatusType>;

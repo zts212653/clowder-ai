@@ -69,9 +69,14 @@ export class GameViewBuilder {
         hasActed: canSeeActed ? !!pending : undefined,
       };
 
-      // God view: expose per-seat actionStatus
+      // God view: expose per-seat actionStatus only for seats expected to act
       if (isGod && seat.alive) {
-        sv.actionStatus = (pending?.status as ActionStatus) ?? 'waiting';
+        const phaseDef = runtime.definition.phases.find((p) => p.name === runtime.currentPhase);
+        const actingRole = phaseDef?.actingRole;
+        const shouldAct = actingRole === '*' || (actingRole != null && seat.role === actingRole);
+        if (shouldAct) {
+          sv.actionStatus = (pending?.status as ActionStatus) ?? 'waiting';
+        }
       }
 
       if (showRole) {

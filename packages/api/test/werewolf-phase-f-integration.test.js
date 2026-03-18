@@ -44,15 +44,20 @@ describe('Phase F Integration — Multi-wolf + Fallback + Transparency', () => {
     const result = engine.resolveNight();
     assert.ok(result.deaths.includes(target), 'target should die');
 
-    // God view shows action details
+    // God view: actionStatus scoped to current phase's acting role.
+    // Since currentPhase is still night_guard (initial phase), only guard gets actionStatus.
+    // Wolves submitted ballots but that doesn't affect actionStatus scoping.
     const godView = GameViewBuilder.buildView(runtime, 'god');
-    assert.ok(
-      godView.seats.every((s) => {
-        // All seats should have some actionStatus in god view
-        return !s.alive || s.actionStatus !== undefined;
-      }),
-      'god view should have actionStatus per seat',
+    const guardSeat = godView.seats.find(
+      (s) => s.alive && runtime.seats.find((rs) => rs.seatId === s.seatId)?.role === 'guard',
     );
+    if (guardSeat) {
+      assert.ok(guardSeat.actionStatus !== undefined, 'guard should have actionStatus in night_guard phase');
+    }
+    const wolfSeats = godView.seats.filter((s) => wolves.some((w) => w.seatId === s.seatId));
+    for (const ws of wolfSeats) {
+      assert.equal(ws.actionStatus, undefined, `${ws.seatId} (wolf) should NOT have actionStatus in night_guard phase`);
+    }
 
     // Player view shows aggregate (no seat-level detail at night)
     const playerView = GameViewBuilder.buildView(runtime, nonWolves[1].seatId);

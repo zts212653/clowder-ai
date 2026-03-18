@@ -11,6 +11,7 @@ const mockStoreState = () => ({
   targetCats: [],
   catStatuses: {},
   catInvocations: {},
+  activeInvocations: {},
   addMessage: vi.fn(),
   removeMessage: vi.fn(),
   setLoading: vi.fn(),

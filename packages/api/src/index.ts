@@ -36,7 +36,6 @@ import {
   ClaudeAgentService,
   CodexAgentService,
   createDraftStore,
-  createHindsightClient,
   createInvocationRecordStore,
   createSessionChainStore,
   DareAgentService,
@@ -65,6 +64,7 @@ import { createTaskStore } from './domains/cats/services/stores/factories/TaskSt
 import { createThreadStore } from './domains/cats/services/stores/factories/ThreadStoreFactory.js';
 import { createWorkflowSopStore } from './domains/cats/services/stores/factories/WorkflowSopStoreFactory.js';
 import { MlxAudioTtsProvider } from './domains/cats/services/tts/MlxAudioTtsProvider.js';
+import { initStreamingTtsRegistry } from './domains/cats/services/tts/StreamingTtsChunker.js';
 import { TtsRegistry } from './domains/cats/services/tts/TtsRegistry.js';
 import { startTtsCacheCleaner } from './domains/cats/services/tts/tts-cache-cleaner.js';
 import { initVoiceBlockSynthesizer } from './domains/cats/services/tts/VoiceBlockSynthesizer.js';
@@ -152,10 +152,11 @@ import { prTrackingRoutes } from './routes/pr-tracking.js';
 import { previewRoutes } from './routes/preview.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
+import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
 
-const PORT = parseInt(process.env.API_SERVER_PORT ?? '3002', 10);
+const PORT = parseInt(process.env.API_SERVER_PORT ?? '3003', 10);
 const HOST = process.env.API_SERVER_HOST ?? '127.0.0.1';
 
 let socketManager: SocketManager | null = null;
@@ -278,7 +279,8 @@ async function main(): Promise<void> {
 
   const sessionChainStore = createSessionChainStore(redis);
   // F24: Transcript Writer/Reader for session chain
-  const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? './data/transcripts';
+  // E7 fix: resolve relative to monorepo root, not CWD (same fix as docsRoot in PR #524)
+  const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/transcripts`;
   const transcriptWriter = new TranscriptWriter({ dataDir: transcriptDataDir });
   const transcriptReader = new TranscriptReader({ dataDir: transcriptDataDir });
   // F065 Phase C: HandoffConfig for LLM-generated digest on seal
@@ -309,20 +311,103 @@ async function main(): Promise<void> {
     handoffConfig,
   );
 
-  const sharedHindsightBank = 'cat-cafe-shared';
-  const hindsightClient = createHindsightClient();
+  // F102: Memory services — SQLite-only
+  // P1 fix: resolve paths relative to repo root, not CWD (which may be packages/api)
+  const { existsSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const repoRoot = existsSync(resolve(process.cwd(), 'docs', 'features'))
+    ? process.cwd()
+    : existsSync(resolve(process.cwd(), '..', '..', 'docs', 'features'))
+      ? resolve(process.cwd(), '..', '..')
+      : process.cwd();
 
-  // F102: Memory services — SQLite-backed when configured, otherwise routes fall through to Hindsight
-  const evidenceStoreType = process.env.EVIDENCE_STORE_TYPE ?? (hindsightClient ? 'hindsight' : 'sqlite');
-  let memoryServices: import('./domains/memory/factory.js').MemoryServices | undefined;
-  if (evidenceStoreType === 'sqlite') {
-    const { createMemoryServices } = await import('./domains/memory/factory.js');
-    memoryServices = await createMemoryServices({
-      type: 'sqlite',
-      sqlitePath: process.env.EVIDENCE_DB ?? 'evidence.sqlite',
-      docsRoot: process.env.DOCS_ROOT ?? 'docs',
-    });
-    app.log.info('[api] F102: SQLite memory services initialized');
+  const { createMemoryServices } = await import('./domains/memory/factory.js');
+  const memoryServices = await createMemoryServices({
+    type: 'sqlite',
+    sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
+    docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
+    transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
+    // Phase E-2: message passage indexing — provide a callback that reads thread messages
+    messageListFn: async (threadId: string, limit?: number) => {
+      const messages = await messageStore.getByThread(threadId, limit ?? 2000, 'default-user');
+      return messages.map(
+        (m: { id: string; content: string; catId?: string | null; threadId: string; timestamp: number }) => ({
+          id: m.id,
+          content: m.content,
+          catId: m.catId ?? undefined,
+          threadId: m.threadId,
+          timestamp: m.timestamp,
+        }),
+      );
+    },
+    // Phase E-1: thread summary indexing — provide a callback that lists all threads
+    threadListFn: async () => {
+      const threads = await threadStore.list('default-user');
+      return threads.map((t) => ({
+        id: t.id,
+        title: t.title,
+        participants: t.participants as string[],
+        threadMemory: t.threadMemory ? { summary: t.threadMemory.summary } : null,
+        lastActiveAt: t.lastActiveAt,
+        featureIds: t.backlogItemId ? [t.backlogItemId] : undefined,
+      }));
+    },
+  });
+  app.log.info('[api] F102: SQLite memory services initialized');
+
+  // F102 D-2: Auto-rebuild evidence index on startup (AC-D4)
+  if (memoryServices.indexBuilder) {
+    const startMs = Date.now();
+    try {
+      const result = await memoryServices.indexBuilder.rebuild();
+      app.log.info(
+        `[api] F102: evidence index rebuilt — ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${Date.now() - startMs}ms)`,
+      );
+    } catch (err) {
+      app.log.warn(`[api] F102: evidence index rebuild failed (non-fatal): ${err}`);
+    }
+  }
+
+  // Phase E-2: Dirty-thread debounce — flush modified thread summaries every 30s
+  const DIRTY_THREAD_FLUSH_INTERVAL_MS = 30_000;
+  if (memoryServices.indexBuilder) {
+    const { IndexBuilder } = await import('./domains/memory/IndexBuilder.js');
+    const ib = memoryServices.indexBuilder;
+    if (ib instanceof IndexBuilder) {
+      // Hook: mark thread dirty on POST /api/messages (message creation)
+      app.addHook('onResponse', (request, _reply, done) => {
+        if (request.method === 'POST' && request.url.startsWith('/api/messages')) {
+          const body = request.body as { threadId?: string } | undefined;
+          if (body?.threadId) {
+            ib.markThreadDirty(body.threadId);
+          }
+        }
+        done();
+      });
+
+      // Hook: also mark dirty on POST /api/callbacks/post-message (cat messages)
+      app.addHook('onResponse', (request, _reply, done) => {
+        if (request.method === 'POST' && request.url.includes('/post-message')) {
+          const body = request.body as { threadId?: string } | undefined;
+          if (body?.threadId) {
+            ib.markThreadDirty(body.threadId);
+          }
+        }
+        done();
+      });
+
+      const dirtyFlushTimer = setInterval(async () => {
+        try {
+          const flushed = await ib.flushDirtyThreads();
+          if (flushed > 0) {
+            app.log.info(`[api] F102 E-2: flushed ${flushed} dirty thread(s) to evidence index`);
+          }
+        } catch {
+          // best-effort
+        }
+      }, DIRTY_THREAD_FLUSH_INTERVAL_MS);
+      dirtyFlushTimer.unref();
+    }
   }
 
   // ── F32-b: Populate CatRegistry from cat-config.json (all variants) ──
@@ -373,6 +458,17 @@ async function main(): Promise<void> {
       case 'opencode':
         service = new OpenCodeAgentService({ catId });
         break;
+      case 'a2a': {
+        const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
+        const envKey = `CAT_${(id as string).toUpperCase()}_A2A_URL`;
+        const a2aUrl = process.env[envKey] ?? '';
+        if (!a2aUrl) {
+          app.log.warn(`[api] A2A cat "${id as string}" missing ${envKey} env var. It will not be routable.`);
+          continue;
+        }
+        service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+        break;
+      }
       default:
         app.log.warn(`[api] Unknown provider "${provider}" for cat "${id as string}". It will not be routable.`);
         continue;
@@ -513,6 +609,24 @@ async function main(): Promise<void> {
   // TD091: Create prTrackingStore early so callbacks can use it for MCP registration
   const prTrackingStore = new MemoryPrTrackingStore();
 
+  // F126: Create LimbRegistry + Phase B deps for device/hardware capability management
+  const { LimbRegistry } = await import('./domains/limb/LimbRegistry.js');
+  const { LimbAccessPolicy } = await import('./domains/limb/LimbAccessPolicy.js');
+  const { LimbLeaseManager } = await import('./domains/limb/LimbLeaseManager.js');
+  const { LimbActionLog } = await import('./domains/limb/LimbActionLog.js');
+  const limbRegistry = new LimbRegistry();
+  limbRegistry.setDeps({
+    accessPolicy: new LimbAccessPolicy(),
+    leaseManager: new LimbLeaseManager(),
+    actionLog: new LimbActionLog(),
+  });
+
+  // F126 Phase C: Pairing store + limb node routes for remote devices
+  const { LimbPairingStore } = await import('./domains/limb/LimbPairingStore.js');
+  const { registerLimbNodeRoutes } = await import('./routes/limb-node-routes.js');
+  const limbPairingStore = new LimbPairingStore();
+  registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
+
   await app.register(callbacksRoutes, {
     registry,
     messageStore,
@@ -520,8 +634,6 @@ async function main(): Promise<void> {
     taskStore,
     backlogStore,
     threadStore,
-    hindsightClient,
-    sharedBank: sharedHindsightBank,
     router,
     invocationRecordStore,
     invocationTracker,
@@ -530,13 +642,11 @@ async function main(): Promise<void> {
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,
-    ...(memoryServices
-      ? {
-          evidenceStore: memoryServices.evidenceStore,
-          markerQueue: memoryServices.markerQueue,
-          reflectionService: memoryServices.reflectionService,
-        }
-      : {}),
+    evidenceStore: memoryServices.evidenceStore,
+    markerQueue: memoryServices.markerQueue,
+    reflectionService: memoryServices.reflectionService,
+    limbRegistry,
+    limbPairingStore,
   });
 
   // Authorization system — 猫猫动态权限 (Redis-backed when available)
@@ -661,18 +771,15 @@ async function main(): Promise<void> {
   const { voteRoutes } = await import('./routes/votes.js');
   await app.register(voteRoutes, { threadStore, socketManager, messageStore });
 
-  // Evidence search (Hindsight Recall + docs fallback)
+  // Evidence search (SQLite) + reindex endpoint (D-11)
   await app.register(evidenceRoutes, {
-    hindsightClient,
-    sharedBank: sharedHindsightBank,
-    ...(memoryServices ? { evidenceStore: memoryServices.evidenceStore } : {}),
+    evidenceStore: memoryServices.evidenceStore,
+    indexBuilder: memoryServices.indexBuilder,
   });
 
-  // Reflect (Hindsight LLM reflection)
+  // Reflect (SQLite-backed reflection)
   await app.register(reflectRoutes, {
-    hindsightClient,
-    sharedBank: sharedHindsightBank,
-    ...(memoryServices ? { reflectionService: memoryServices.reflectionService } : {}),
+    reflectionService: memoryServices.reflectionService,
   });
 
   // Memory governance (publish workflow)
@@ -689,7 +796,7 @@ async function main(): Promise<void> {
     threadStore,
   });
   await app.register(signalsRoutes);
-  await app.register(signalStudyRoutes);
+  await app.register(signalStudyRoutes, { threadStore });
   await app.register(signalCollectionRoutes);
   await app.register(signalPodcastRoutes, {
     messageStore,
@@ -714,6 +821,7 @@ async function main(): Promise<void> {
   const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
   await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
+  initStreamingTtsRegistry(ttsRegistry);
   startTtsCacheCleaner(ttsCacheDir);
 
   // C1+C2: Web Push Notifications (optional — requires VAPID keys)
@@ -758,15 +866,67 @@ async function main(): Promise<void> {
   const connectorWebhookHandlers = new Map<string, import('./routes/connector-webhooks.js').ConnectorWebhookHandler>();
   await app.register(connectorWebhookRoutes, { handlers: connectorWebhookHandlers });
 
+  let apiInstanceLease: ApiInstanceLease | undefined;
+  let shutdownForLeaseLoss: ((signal: string) => Promise<void>) | null = null;
+  let forcedLeaseLossExitTimer: ReturnType<typeof setTimeout> | null = null;
+  const handleLeaseInvalidation = (event: ApiInstanceLeaseInvalidation): void => {
+    const errorDetail = event.error ? ` error=${String(event.error)}` : '';
+    app.log.error(
+      `[api] API namespace lease invalidated (${event.reason}) for ${event.holder.instanceId} pid=${event.holder.pid} host=${event.holder.hostname} port=${event.holder.apiPort}; shutting down to preserve Redis singleton.${errorDetail}`,
+    );
+    if (!forcedLeaseLossExitTimer) {
+      forcedLeaseLossExitTimer = setTimeout(() => {
+        app.log.error('[api] Lease-loss shutdown timed out; forcing process exit');
+        process.exit(1);
+      }, 5_000);
+      forcedLeaseLossExitTimer.unref?.();
+    }
+    if (shutdownForLeaseLoss) {
+      void shutdownForLeaseLoss(`API_INSTANCE_LEASE_${event.reason.toUpperCase()}`);
+      return;
+    }
+    process.exitCode = 1;
+    setImmediate(() => process.exit(1));
+  };
+  if (redis) {
+    apiInstanceLease = new ApiInstanceLease(redis, {
+      apiPort: PORT,
+      cwd: process.cwd(),
+      startedAt: PROCESS_START_AT,
+      onLeaseInvalidated: handleLeaseInvalidation,
+    });
+    const leaseResult = await apiInstanceLease.acquire();
+    if (!leaseResult.acquired) {
+      await apiInstanceLease.release().catch(() => {});
+      await redis.quit().catch(() => {});
+      const holder = leaseResult.holder;
+      const holderHint = holder
+        ? ` holder=${holder.instanceId} pid=${holder.pid} host=${holder.hostname} port=${holder.apiPort}`
+        : '';
+      throw new Error(`[api] Redis namespace already has a live API instance; refusing to start.${holderHint}`);
+    }
+    app.log.info(
+      `[api] API namespace lease acquired (${leaseResult.holder?.instanceId ?? 'unknown'}) on redis=${redisUrl ?? 'memory'}`,
+    );
+  }
+
   // Start listening
-  const address = await app.listen({ port: PORT, host: HOST });
+  let address: string;
+  try {
+    address = await app.listen({ port: PORT, host: HOST });
+  } catch (err) {
+    await apiInstanceLease?.release().catch(() => {});
+    throw err;
+  }
   app.log.info(`[api] Server running on ${address}`);
   app.log.info(`[ws] WebSocket server ready`);
 
   // F048 Phase A: Sweep orphaned invocations from previous process crash.
-  // Runs AFTER app.listen succeeds — a process that fails to bind the port
-  // (EADDRINUSE) will never reach this point, preventing accidental sweep
-  // of a live instance's running invocations.
+  // Runs only after the API has both:
+  // 1) acquired the Redis namespace lease, and
+  // 2) successfully bound its HTTP port.
+  // This prevents a second worktree/runtime instance from sweeping another
+  // live process that happens to share the same Redis namespace.
   if (redis) {
     const { StartupReconciler } = await import('./domains/cats/services/agents/invocation/StartupReconciler.js');
     const reconciler = new StartupReconciler({
@@ -774,6 +934,8 @@ async function main(): Promise<void> {
       taskProgressStore,
       log: app.log,
       processStartAt: PROCESS_START_AT,
+      messageStore,
+      socketManager: socketManager ?? undefined,
     });
     try {
       await reconciler.reconcileOrphans();
@@ -832,6 +994,23 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     app.log.warn(`[api] CLI config regeneration failed (best-effort): ${String(err)}`);
+  }
+
+  // F101 Phase G: Recover auto-play loops for active games after restart.
+  // Without this, games in Redis with status=playing have no driving loop.
+  if (f101GameStore && socketManager) {
+    const { GameAutoPlayer } = await import('./domains/cats/services/game/GameAutoPlayer.js');
+    const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
+    const recoveryOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager });
+    const recoveryPlayer = new GameAutoPlayer({ gameStore: f101GameStore, orchestrator: recoveryOrchestrator });
+    try {
+      const recovered = await recoveryPlayer.recoverActiveGames();
+      if (recovered > 0) {
+        app.log.info(`[api] F101 auto-play recovery: restored ${recovered} active game loop(s)`);
+      }
+    } catch (err) {
+      app.log.warn(`[api] F101 auto-play recovery failed (best-effort): ${String(err)}`);
+    }
   }
 
   // Phase 3b: connector invoke trigger (auto-invoke cat after review email routing)
@@ -960,14 +1139,27 @@ async function main(): Promise<void> {
 
       // Close Fastify server
       await app.close();
+
+      try {
+        await apiInstanceLease?.release();
+      } catch (err) {
+        exitCode = 1;
+        app.log.error(`[api] API namespace lease release failed: ${String(err)}`);
+      }
+
       app.log.info('[api] Shutdown complete');
     } catch (err) {
       exitCode = 1;
       app.log.error(`[api] Shutdown failed: ${String(err)}`);
     } finally {
+      if (forcedLeaseLossExitTimer) {
+        clearTimeout(forcedLeaseLossExitTimer);
+        forcedLeaseLossExitTimer = null;
+      }
       process.exit(exitCode);
     }
   };
+  shutdownForLeaseLoss = shutdown;
 
   process.once('SIGTERM', () => {
     void shutdown('SIGTERM');
