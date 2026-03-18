@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -298,6 +298,47 @@ printf '%s' "$(resolve_provider_profiles_dir)"
     assert.equal(output, join(canonicalRepoRoot, '.cat-cafe'));
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
+    rmSync(worktreeRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolve_provider_profiles_dir rejects symlink-only allowlist aliases that runtime would not match', () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'clowder-install-profiles-symlink-root-'));
+  const aliasBase = mkdtempSync(join(tmpdir(), 'clowder-install-profiles-symlink-alias-'));
+  const aliasRoot = join(aliasBase, 'repo-alias');
+  const worktreeRoot = join(tmpdir(), `clowder-install-profiles-symlink-worktree-${Date.now()}`);
+
+  try {
+    const canonicalRepoRoot = realpathSync(repoRoot);
+    symlinkSync(canonicalRepoRoot, aliasRoot);
+    writeFileSync(join(repoRoot, 'README.md'), 'seed\n', 'utf8');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['add', 'README.md'], { cwd: repoRoot, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, encoding: 'utf8' });
+    const addResult = spawnSync('git', ['worktree', 'add', worktreeRoot, '-b', 'feature/profiles-symlink-root'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+
+    assert.equal(
+      addResult.status,
+      0,
+      [`exit=${addResult.status}`, `stdout:\n${addResult.stdout}`, `stderr:\n${addResult.stderr}`].join('\n'),
+    );
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${worktreeRoot}"
+PROJECT_ALLOWED_ROOTS="${aliasRoot}"
+unset PROJECT_ALLOWED_ROOTS_APPEND
+printf '%s' "$(resolve_provider_profiles_dir)"
+`);
+
+    assert.equal(output, join(worktreeRoot, '.cat-cafe'));
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+    rmSync(aliasBase, { recursive: true, force: true });
     rmSync(worktreeRoot, { recursive: true, force: true });
   }
 });

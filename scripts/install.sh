@@ -157,7 +157,7 @@ tty_multiselect() {
         # Default: all selected
         local all_indices=""
         for ((i=0; i<count; i++)); do
-            [[ -n "$all_indices" ]] && all_indices+=","
+            [[ -n "$all_indices" ]] && all_indices+="," 
             all_indices+="$i"
         done
         printf -v "$result_var" '%s' "$all_indices"; return
@@ -221,7 +221,7 @@ tty_multiselect() {
     local result=""
     for ((i=0; i<count; i++)); do
         if [[ "${selected[$i]}" == "1" ]]; then
-            [[ -n "$result" ]] && result+=","
+            [[ -n "$result" ]] && result+="," 
             result+="$i"
         fi
     done
@@ -299,8 +299,7 @@ normalize_path_lexically() {
     else
         absolute="$PWD/$path"
     fi
-    while [[ "$absolute" == *'//'*
-    ]]; do
+    while [[ "$absolute" == *'//'* ]]; do
         absolute="${absolute//\/\//\/}"
     done
 
@@ -329,17 +328,8 @@ normalize_path_lexically() {
     printf '%s\n' "$output"
 }
 normalize_path_for_compare() {
-    local path="$1" resolved=""
+    local path="$1"
     [[ -n "$path" ]] || return 1
-
-    if command -v realpath &>/dev/null && [[ -e "$path" ]]; then
-        resolved="$(realpath "$path" 2>/dev/null || true)"
-        [[ -n "$resolved" ]] && {
-            printf '%s\n' "$resolved"
-            return 0
-        }
-    fi
-
     normalize_path_lexically "$path"
 }
 path_is_under_root() {
