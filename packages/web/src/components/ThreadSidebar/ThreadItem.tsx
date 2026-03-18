@@ -88,12 +88,21 @@ export function ThreadItem({
     }
   }, [onRename, draftTitle, title, id]);
 
+  // Build hover tooltip: full title + participants + time (clowder-ai#29)
+  const displayTitle = title ?? (id === 'default' ? '大厅' : '未命名对话');
+  const participantNames = participants.map((catId) => getCatById(catId)?.displayName ?? catId).join(', ');
+  const tooltipLines = [displayTitle];
+  if (participantNames) tooltipLines.push(`参与: ${participantNames}`);
+  tooltipLines.push(formatRelativeTime(lastActiveAt, false));
+  const tooltip = tooltipLines.join('\n');
+
   return (
     <div
       className={`group relative ${indented ? 'pl-7 pr-3' : 'px-3'} py-2.5 border-b border-gray-50 transition-colors cursor-pointer ${
         isActive ? 'bg-owner-bg' : 'hover:bg-gray-50'
       }`}
       onClick={() => onSelect(id)}
+      title={tooltip}
     >
       {/* Title row */}
       <div className="flex items-start justify-between gap-1 mb-1">
