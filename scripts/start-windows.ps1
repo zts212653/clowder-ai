@@ -157,6 +157,7 @@ if ($useExternalRedis) {
             }
         } catch {
             Write-Warn "Redis start failed - using memory storage"
+            Write-InstallerExceptionDetails -Context "Redis start" -ErrorRecord $_
             $useRedis = $false
         }
     }

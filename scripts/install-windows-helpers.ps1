@@ -91,6 +91,47 @@ function Resolve-GlobalRedisBinaries {
     }
 }
 
+function Get-InstallerExceptionDetails {
+    param($ErrorRecord)
+
+    if (-not $ErrorRecord) {
+        return @()
+    }
+
+    $details = @()
+    $exception = $ErrorRecord.Exception
+    $level = 0
+    while ($exception) {
+        $message = $exception.Message
+        $typeName = $exception.GetType().FullName
+        if ($message) {
+            $details += "[$level] $typeName: $message"
+        } elseif ($typeName) {
+            $details += "[$level] $typeName"
+        }
+        $exception = $exception.InnerException
+        $level++
+    }
+
+    if ($details.Count -eq 0 -and $ErrorRecord.ToString()) {
+        $details += $ErrorRecord.ToString()
+    }
+
+    return $details
+}
+
+function Write-InstallerExceptionDetails {
+    param([string]$Context, $ErrorRecord)
+
+    foreach ($detail in (Get-InstallerExceptionDetails -ErrorRecord $ErrorRecord)) {
+        if ($Context) {
+            Write-Warn "$Context detail: $detail"
+        } else {
+            Write-Warn "Failure detail: $detail"
+        }
+    }
+}
+
 function Ensure-WindowsRedis {
     param([string]$ProjectRoot, [switch]$Memory)
     if ($Memory) {
@@ -152,6 +193,7 @@ function Ensure-WindowsRedis {
         return $true
     } catch {
         Write-Warn "Redis auto-install failed - install Redis manually or rerun with an external Redis URL"
+        Write-InstallerExceptionDetails -Context "Redis auto-install" -ErrorRecord $_
         Write-Warn "Manual Redis install: https://github.com/redis-windows/redis-windows/releases"
         return $false
     }
