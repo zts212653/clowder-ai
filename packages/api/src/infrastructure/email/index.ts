@@ -36,6 +36,17 @@ export {
   type PrTrackingInput,
 } from './PrTrackingStore.js';
 export {
+  extractSeverityFindings,
+  GhCliReviewContentFetcher,
+  getMaxSeverity,
+  type IReviewContentFetcher,
+  type ReviewContent,
+  type Severity,
+  type SeverityFinding,
+  type TextFragment,
+} from './ReviewContentFetcher.js';
+export {
+  buildReviewMessageContent,
   ReviewRouter,
   type ReviewRouterOptions,
   type RouteResult,

@@ -51,6 +51,20 @@ function readTsFallback(relPath, pattern) {
   return m ? m[1] : null;
 }
 
+function readSyncScript() {
+  return readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+}
+
+function readFunctionBody(content, functionName) {
+  const start = content.indexOf(`${functionName}() {`);
+  assert.notEqual(start, -1, `expected to find function ${functionName} in sync-to-opensource.sh`);
+
+  const end = content.indexOf('\n}\n', start);
+  assert.notEqual(end, -1, `expected to find the end of function ${functionName} in sync-to-opensource.sh`);
+
+  return content.slice(start, end);
+}
+
 describe(
   '.env.example.opensource port consistency',
   { skip: !hasEnvExampleOpensource && '.env.example.opensource not present (open-source repo uses .env.example)' },
@@ -223,18 +237,14 @@ describe(
 
     it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3003', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(
-        content.includes("'s/API_PORT=${API_SERVER_PORT:-3002}/API_PORT=${API_SERVER_PORT:-3003}/g'"),
-        'sync script should transform start-dev.sh API fallback 3002→3003',
-      );
+      const expected = "'s/API_PORT=$" + '{API_SERVER_PORT:-3002}/API_PORT=$' + "{API_SERVER_PORT:-3003}/g'";
+      assert.ok(content.includes(expected), 'sync script should transform start-dev.sh API fallback 3002→3003');
     });
 
     it('sync-to-opensource.sh transforms start-dev.sh Frontend fallback to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(
-        content.includes("'s/WEB_PORT=${FRONTEND_PORT:-3001}/WEB_PORT=${FRONTEND_PORT:-3004}/g'"),
-        'sync script should transform start-dev.sh Frontend fallback 3001→3004',
-      );
+      const expected = "'s/WEB_PORT=$" + '{FRONTEND_PORT:-3001}/WEB_PORT=$' + "{FRONTEND_PORT:-3004}/g'";
+      assert.ok(content.includes(expected), 'sync script should transform start-dev.sh Frontend fallback 3001→3004');
     });
 
     it('sync-to-opensource.sh transforms setup.sh API port to 3003', () => {
@@ -266,6 +276,47 @@ describe(
       assert.ok(
         content.includes("process.env.API_SERVER_PORT ?? '3003'"),
         'sync script should transform AgentRouter.ts API port 3002→3003',
+      );
+    });
+  },
+);
+
+describe(
+  'Sync validation enforces static quality gates',
+  { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
+  () => {
+    it('validate mode stays aligned with post-sync static gates', () => {
+      const content = readSyncScript();
+      const staticGateFn = readFunctionBody(content, 'run_static_quality_gates');
+      const validateBlock = content.match(
+        /echo -e "\$\{GREEN\}\[Step 5\/6\] Validate \(install \+ static gates \+ build \+ port check\)\.\.\.\$\{NC\}"[\s\S]*?echo -e " {2}\$\{GREEN\}✓ Validate passed\$\{NC\}"/,
+      )?.[0];
+
+      assert.match(
+        staticGateFn,
+        /pnpm check:fix[\s\S]*pnpm check 2>&1[\s\S]*pnpm lint 2>&1/,
+        'run_static_quality_gates should run pnpm check:fix → pnpm check → pnpm lint in order',
+      );
+      assert.ok(validateBlock, 'expected to find the validate block in sync-to-opensource.sh');
+      assert.ok(
+        validateBlock.includes('run_static_quality_gates false'),
+        'validate mode should invoke the same non-mutating static gates as the post-sync path',
+      );
+    });
+
+    it('post-sync fast/full validation keeps static gates before startup acceptance split', () => {
+      const content = readSyncScript();
+      const step6Block = content.match(/# 6b: Install \+ build[\s\S]*?if \[ "\$FAST_VALIDATE" = true \]; then/)?.[0];
+
+      assert.ok(step6Block, 'expected to find the Step 6 validation block in sync-to-opensource.sh');
+      assert.ok(
+        step6Block.includes('run_static_quality_gates false'),
+        'Step 6 should invoke run_static_quality_gates with autofix disabled',
+      );
+      assert.ok(
+        step6Block.indexOf('run_static_quality_gates false') <
+          step6Block.indexOf('if [ "$FAST_VALIDATE" = true ]; then'),
+        '--fast-validate should only skip startup acceptance, not static gates',
       );
     });
   },

@@ -27,10 +27,10 @@ export interface SignalInAppNotificationServiceOptions {
 
 function toDigestContent(input: PublishDailyDigestInput): string {
   if (input.articles.length === 0) {
-    return `🐱 Cat Café 信号日报（${input.date}）\n\n今日无新增信号，咱们继续观察。`;
+    return `🐱 Clowder AI 信号日报（${input.date}）\n\n今日无新增信号，咱们继续观察。`;
   }
 
-  const lines = [`🐱 Cat Café 信号日报（${input.date}）`, '', `新增 ${input.articles.length} 条信号：`, ''];
+  const lines = [`🐱 Clowder AI 信号日报（${input.date}）`, '', `新增 ${input.articles.length} 条信号：`, ''];
 
   const sorted = [...input.articles].sort((a, b) => {
     if (a.tier === b.tier) {

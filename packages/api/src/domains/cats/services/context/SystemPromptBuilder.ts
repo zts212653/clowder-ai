@@ -361,7 +361,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
       lines.push(`同名队友并存时，请优先使用唯一句柄（例如 \`${example}\`）避免歧义。`);
     }
     lines.push('格式：另起一行行首写 @猫名（行中无效，多猫各占一行），上文或下文写请求均可。');
-    lines.push(`✅ ${exampleTarget}\\n请帮忙  ✅ 内容...\\n${exampleTarget}  ❌ 行中 ${exampleTarget}`);
+    lines.push(`[正确] ${exampleTarget}\\n请帮忙  [正确] 内容...\\n${exampleTarget}  [错误] 行中 ${exampleTarget}`);
     lines.push('');
   }
 
@@ -462,7 +462,7 @@ export function buildInvocationContext(context: InvocationContext): string {
   if (context.mentionRoutingFeedback && context.mentionRoutingFeedback.items?.length > 0) {
     const items = context.mentionRoutingFeedback.items.slice(0, 2).map((it) => `@${it.targetCatId}`);
     lines.push(
-      `⚠️ 路由反馈：上次你提到了 ${items.join('、')} 但没有用行首 @ 路由。如果需要对方行动，请在行首独立一行写 @句柄。`,
+      `[路由提醒] 上次你提到了 ${items.join('、')} 但没有用行首 @ 路由。如果需要对方行动，请在行首独立一行写 @句柄。`,
       '',
     );
   }
@@ -529,7 +529,7 @@ export function buildInvocationContext(context: InvocationContext): string {
   // F092: Voice companion mode — instruct cats to prioritize audio output
   if (context.voiceMode) {
     lines.push(
-      '🎙️ Voice Mode ON: 铲屎官正在语音陪伴模式（AirPods，双手不空）。',
+      'Voice Mode ON: 铲屎官正在语音陪伴模式（AirPods，双手不空）。',
       '- 每条回复用 audio rich block 发语音（call get_rich_block_rules if unsure）',
       '- 文字是给日志看的，语音才是给铲屎官耳朵的输出',
       '- 代码/表格/长内容仍用文字，但加一段语音摘要',
@@ -542,7 +542,7 @@ export function buildInvocationContext(context: InvocationContext): string {
     const { phase, leadCat, selectedTaskId } = context.bootcampState;
     const threadPart = context.threadId ? ` thread=${context.threadId}` : '';
     lines.push(
-      `🎓 Bootcamp Mode:${threadPart} phase=${phase}${leadCat ? ` leadCat=${leadCat}` : ''}${selectedTaskId ? ` task=${selectedTaskId}` : ''}`,
+      `Bootcamp Mode:${threadPart} phase=${phase}${leadCat ? ` leadCat=${leadCat}` : ''}${selectedTaskId ? ` task=${selectedTaskId}` : ''}`,
       '→ Load bootcamp-guide skill and act per current phase.',
       '',
     );
@@ -639,7 +639,7 @@ export function buildReviewerSection(catId: CatId): string | null {
     } else if (sameFamily.length > 0) {
       // Cloud Codex R5 P2 fix: No cross-family, but same-family available as fallback
       available = sameFamily;
-      fallbackNote = '⚠️ 没有跨家族 reviewer 可用，以下同家族猫可作为 fallback：';
+      fallbackNote = '[注意] 没有跨家族 reviewer 可用，以下同家族猫可作为 fallback：';
     } else {
       available = [];
     }
@@ -662,7 +662,7 @@ export function buildReviewerSection(catId: CatId): string | null {
     lines.push('');
   }
   if (unavailable.length > 0) {
-    lines.push('⚠️ 以下猫当前不可用：');
+    lines.push('[注意] 以下猫当前不可用：');
     lines.push(...unavailable);
     lines.push('');
   }

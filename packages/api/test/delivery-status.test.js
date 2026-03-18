@@ -65,6 +65,45 @@ describe('F117: deliveryStatus + isDelivered', () => {
     assert.equal(result?.deliveredAt, now);
     assert.equal(result?.deliveryStatus, 'delivered');
   });
+
+  test('markDelivered is no-op for legacy messages (deliveryStatus=undefined)', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const msg = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'immediate msg',
+      mentions: [],
+      timestamp: Date.now() - 60_000,
+      // no deliveryStatus → undefined (legacy/immediate path)
+    });
+    assert.equal(msg.deliveryStatus, undefined, 'precondition: no deliveryStatus');
+
+    const result = store.markDelivered(msg.id, Date.now());
+    // undefined is not queued — no-op, prevents timeline re-scoring
+    assert.equal(result?.deliveryStatus, undefined, 'must not overwrite undefined to delivered');
+    assert.equal(result?.deliveredAt, undefined, 'must not set deliveredAt');
+  });
+
+  test('markDelivered is no-op for already-delivered messages', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const msg = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'already delivered',
+      mentions: [],
+      timestamp: Date.now(),
+      deliveryStatus: 'queued',
+    });
+    const firstDeliveredAt = Date.now() - 1000;
+    store.markDelivered(msg.id, firstDeliveredAt);
+    assert.equal(msg.deliveryStatus, 'delivered');
+
+    // Second call should be no-op
+    const result = store.markDelivered(msg.id, Date.now());
+    assert.equal(result?.deliveredAt, firstDeliveredAt, 'must not overwrite deliveredAt');
+  });
 });
 
 // AC-A3: History API filters by deliveryStatus

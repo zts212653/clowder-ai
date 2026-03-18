@@ -107,12 +107,25 @@ git branch -d {branch-name} && git worktree prune
 `gh pr view` 的 `--json reviews` 只返回 review body（可能显示"no major issues"），
 但 inline code comment 里可能有 P1。
 
-**merge 前必须执行**：
+#### 层级 A：通知已包含 severity（自动）
+
+ReviewRouter 现在会在投递通知时**主动拉取** review body + inline comments，
+提取 P0/P1/P2 findings 并写入通知消息。如果通知里已有 severity header
+（`Review 检测到 P1`），说明**有 actionable findings，必须处理**。
+
+#### 层级 B：merge 前软守护（手动确认）
+
+即使通知层漏报（GitHub API 暂时不可用、新 commit 后内容变化），
+merge 前仍需执行以下检查作为兜底：
+
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
-  --jq '.[] | select(.body | test("P[012]")) | {body: .body[:200], path: .path}'
+gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
+  --jq '.[] | select(.body | test("\\bP[012]\\b"; "i")) | {body: .body[:200], path: .path}'
 ```
-有 P1/P2 输出 → **BLOCKED，不能 merge**。无输出 → 可以继续。
+
+- 有 P1/P2 输出 → **WARNING**，确认是否已处理后再决定是否继续
+- 无输出 → 通过，继续 Step 7
+- 命令执行失败 → **不默认通过**，排查原因或手动检查 PR 页面
 
 | 结果 | 处理 |
 |------|------|

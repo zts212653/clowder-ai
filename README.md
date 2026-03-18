@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- TODO: replace with actual logo once synced from assets/icons/cat-cafe-logo-v2-clean.svg -->
+<!-- TODO: replace with actual logo once synced from assets/icons/clowder-ai-logo-v2-clean.svg -->
 # Clowder AI
 
 **Hard Rails. Soft Power. Shared Mission.**

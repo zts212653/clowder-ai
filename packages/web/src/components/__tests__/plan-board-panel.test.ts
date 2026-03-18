@@ -160,6 +160,48 @@ describe('F055: PlanBoardPanel (猫猫祟祟)', () => {
     expect(container.textContent).toContain('Step 3');
   });
 
+  it('uses SVG status markers instead of emoji glyphs', async () => {
+    await renderPanel('thread-1', {
+      opus: makeInvocation({
+        taskProgress: {
+          tasks: makeTasks([
+            { status: 'completed', subject: 'Step 1' },
+            { status: 'in_progress', subject: 'Step 2' },
+            { status: 'pending', subject: 'Step 3' },
+          ]),
+          lastUpdate: Date.now(),
+          snapshotStatus: 'running',
+        },
+      }),
+    });
+
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('✅');
+    expect(text).not.toContain('🔄');
+    expect(text).not.toContain('⬚');
+  });
+
+  it('exposes per-task status in accessible labels for screen readers', async () => {
+    await renderPanel('thread-1', {
+      opus: makeInvocation({
+        taskProgress: {
+          tasks: makeTasks([
+            { status: 'completed', subject: 'Step 1' },
+            { status: 'in_progress', subject: 'Step 2' },
+            { status: 'pending', subject: 'Step 3' },
+          ]),
+          lastUpdate: Date.now(),
+          snapshotStatus: 'running',
+        },
+      }),
+    });
+
+    const labels = Array.from(container.querySelectorAll('div[aria-label]')).map((el) => el.getAttribute('aria-label'));
+    expect(labels).toContain('已完成 Step 1');
+    expect(labels).toContain('进行中 Step 2中...');
+    expect(labels).toContain('待处理 Step 3');
+  });
+
   it('AC-4: running cats appear first, completed fold to bottom', async () => {
     await renderPanel('thread-1', {
       opus: makeInvocation({

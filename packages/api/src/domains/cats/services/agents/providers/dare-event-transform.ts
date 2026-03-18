@@ -1,6 +1,6 @@
 /**
  * DARE Event Transformer
- * DARE headless envelope → Cat Café AgentMessage 映射
+ * DARE headless envelope → Clowder AI AgentMessage 映射
  *
  * DARE headless envelope (client-headless-event-envelope.v1):
  *   { schema_version, ts, session_id, run_id, seq, event, data }

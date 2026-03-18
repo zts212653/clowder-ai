@@ -43,7 +43,7 @@ export interface FeishuMediaPayload {
   type: 'image' | 'file' | 'audio';
   imageKey?: string;
   fileKey?: string;
-  /** Fallback URL when platform key is not available (outbound from Cat Café) */
+  /** Fallback URL when platform key is not available (outbound from Clowder AI) */
   url?: string;
   /** Absolute filesystem path for upload (from mediaPathResolver) */
   absPath?: string;

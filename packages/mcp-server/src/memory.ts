@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Cat Café MCP Server — Memory Surface
+ * Clowder AI MCP Server — Memory Surface
  * 只暴露记忆与回溯工具（evidence/reflect/session chain）。
  */
 

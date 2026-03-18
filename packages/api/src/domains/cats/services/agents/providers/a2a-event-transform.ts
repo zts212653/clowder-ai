@@ -1,6 +1,6 @@
 /**
  * A2A Event Transformer
- * A2A Task/Artifact → Cat Café AgentMessage 映射
+ * A2A Task/Artifact → Clowder AI AgentMessage 映射
  *
  * Mapping:
  *   Task completed + text artifacts → text messages

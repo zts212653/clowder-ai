@@ -82,6 +82,7 @@ import {
 } from './infrastructure/connectors/connector-gateway-bootstrap.js';
 import {
   ConnectorInvokeTrigger,
+  GhCliReviewContentFetcher,
   MemoryProcessedEmailStore,
   MemoryPrTrackingStore,
   ReviewRouter,
@@ -853,6 +854,7 @@ async function main(): Promise<void> {
     socketManager,
     log: app.log,
     defaultUserId: 'default-user',
+    reviewContentFetcher: new GhCliReviewContentFetcher(app.log),
   });
   await app.register(prTrackingRoutes, { prTrackingStore });
 

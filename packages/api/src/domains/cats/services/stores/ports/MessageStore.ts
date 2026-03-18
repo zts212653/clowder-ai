@@ -524,6 +524,7 @@ export class MessageStore {
   markDelivered(id: string, deliveredAt: number): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
+    if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
     return msg;

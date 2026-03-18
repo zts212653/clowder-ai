@@ -523,7 +523,7 @@ describe('SystemPromptBuilder', () => {
         items: [{ targetCatId: 'opus', reason: 'no_action' }],
       },
     });
-    assert.ok(ctx.includes('⚠️ 路由反馈'), 'Should include routing feedback banner');
+    assert.ok(ctx.includes('[路由提醒]'), 'Should include routing feedback banner');
     assert.ok(ctx.includes('@opus'), 'Should mention the target cat');
   });
 

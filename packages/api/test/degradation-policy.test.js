@@ -81,6 +81,7 @@ describe('formatDegradationMessage', () => {
       strategy: 'truncated',
       reason: '消息数超出预算',
     });
+    assert.ok(result.startsWith('[警告]'));
     assert.ok(result.includes('上下文已截断'));
     assert.ok(result.includes('消息数超出预算'));
   });
@@ -91,6 +92,7 @@ describe('formatDegradationMessage', () => {
       strategy: 'pattern_only',
       reason: '历史过长',
     });
+    assert.ok(result.startsWith('[警告]'));
     assert.ok(result.includes('简化模式'));
     assert.ok(result.includes('历史过长'));
   });
@@ -101,6 +103,7 @@ describe('formatDegradationMessage', () => {
       strategy: 'abort',
       reason: '无法处理',
     });
+    assert.ok(result.startsWith('[错误]'));
     assert.ok(result.includes('无法处理'));
   });
 });

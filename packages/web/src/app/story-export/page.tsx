@@ -153,7 +153,7 @@ export default function StoryExportPage() {
 
         {/* Footer */}
         <div className="text-center py-8 border-t border-gray-200 mt-4">
-          <p className="text-sm text-gray-500">Cat Cafe</p>
+          <p className="text-sm text-gray-500">Clowder AI</p>
           <p className="text-xs text-gray-400 mt-1">三只 AI 猫猫 + 一个恶趣味铲屎官</p>
         </div>
       </div>

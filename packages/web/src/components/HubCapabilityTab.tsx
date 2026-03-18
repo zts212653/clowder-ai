@@ -129,7 +129,7 @@ export function HubCapabilityTab() {
     [filtered],
   );
 
-  // Group Cat Cafe Skills by category (from BOOTSTRAP.md)
+  // Group Clowder AI Skills by category (from BOOTSTRAP.md)
   const catCafeSkillGroups = useMemo(() => {
     const catCafe = filtered.filter((i) => i.type === 'skill' && i.source === 'cat-cafe');
     const groups: { category: string; items: CapabilityBoardItem[] }[] = [];
@@ -170,7 +170,7 @@ export function HubCapabilityTab() {
           value={filterSource}
           options={[
             { value: 'all', label: '全部' },
-            { value: 'cat-cafe', label: 'Cat Cafe' },
+            { value: 'cat-cafe', label: 'Clowder AI' },
             { value: 'external', label: '外部' },
           ]}
           onChange={(v) => setFilterSource(v as FilterSource)}
@@ -191,13 +191,13 @@ export function HubCapabilityTab() {
         onToggle={handleToggle}
       />
 
-      {/* Cat Cafe Skills by Category */}
+      {/* Clowder AI Skills by Category */}
       {catCafeSkillGroups.map((group) => (
         <CapabilitySection
           key={group.category}
           icon={<SectionIconSkill />}
           title={group.category}
-          subtitle="Cat Cafe Skills"
+          subtitle="Clowder AI Skills"
           items={group.items}
           catFamilies={catFamilies}
           toggling={toggling}

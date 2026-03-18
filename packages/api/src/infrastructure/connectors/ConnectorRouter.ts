@@ -1,6 +1,6 @@
 /**
  * Connector Router
- * Routes inbound messages from external platforms to Cat Café threads.
+ * Routes inbound messages from external platforms to Clowder AI threads.
  *
  * Flow:
  *   1. Dedup check (skip webhook retries)
@@ -148,7 +148,7 @@ export class ConnectorRouter {
           const fwdSource: ConnectorSource = {
             connector: connectorId,
             label: def2?.displayName ?? connectorId,
-            icon: def2?.icon ?? '💬',
+            icon: def2?.icon ?? 'message',
           };
           const mentionPatterns = this.getMentionPatterns();
           const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.opts.defaultCatId);
@@ -206,7 +206,7 @@ export class ConnectorRouter {
     const source: ConnectorSource = {
       connector: connectorId,
       label: def?.displayName ?? connectorId,
-      icon: def?.icon ?? '💬',
+      icon: def?.icon ?? 'message',
     };
 
     // Parse @-mentions to determine target cat
@@ -314,7 +314,7 @@ export class ConnectorRouter {
       userId: this.opts.defaultUserId,
       catId: null,
       content: commandText,
-      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: def?.icon ?? '💬' },
+      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: def?.icon ?? 'message' },
       mentions: [],
       timestamp: now,
     });
@@ -325,7 +325,7 @@ export class ConnectorRouter {
       userId: this.opts.defaultUserId,
       catId: null,
       content: responseText,
-      source: { connector: 'system-command', label: '⚙️ Cat Café', icon: '⚙️' },
+      source: { connector: 'system-command', label: 'Clowder AI', icon: 'settings' },
       mentions: [],
       timestamp: now + 1,
     });

@@ -1,5 +1,5 @@
 /**
- * Unified API client for Cat Cafe frontend.
+ * Unified API client for Clowder AI frontend.
  *
  * - Auto-prepends NEXT_PUBLIC_API_URL
  * - Auto-injects X-Cat-Cafe-User identity header on every request
