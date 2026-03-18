@@ -91,6 +91,105 @@ function readJson(file, fallback) {
   }
 }
 
+function createDefaultProfiles() {
+  const now = new Date().toISOString();
+  return {
+    version: 2,
+    activeProfileId: 'claude-oauth',
+    profiles: [
+      {
+        id: 'claude-oauth',
+        provider: 'claude-oauth',
+        displayName: 'Claude (OAuth)',
+        authType: 'oauth',
+        protocol: 'anthropic',
+        builtin: true,
+        models: ['claude-opus-4-6', 'claude-sonnet-4'],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'codex-oauth',
+        provider: 'codex-oauth',
+        displayName: 'Codex (OAuth)',
+        authType: 'oauth',
+        protocol: 'openai',
+        builtin: true,
+        models: ['gpt-5.4', 'gpt-5.3-codex'],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'gemini-oauth',
+        provider: 'gemini-oauth',
+        displayName: 'Gemini (OAuth)',
+        authType: 'oauth',
+        protocol: 'google',
+        builtin: true,
+        models: ['gemini-3.1-pro', 'gemini-2.5-pro'],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  };
+}
+
+function createDefaultSecrets() {
+  return { version: 2, profiles: {} };
+}
+
+function normalizeProfilesFile(raw) {
+  if (raw?.version === 2 && Array.isArray(raw.profiles)) {
+    const next = raw;
+    const required = createDefaultProfiles().profiles;
+    for (const builtin of required) {
+      if (!next.profiles.some((profile) => profile.id === builtin.id)) {
+        next.profiles.unshift(builtin);
+      }
+    }
+    if (!next.activeProfileId || !next.profiles.some((profile) => profile.id === next.activeProfileId)) {
+      next.activeProfileId = 'claude-oauth';
+    }
+    return next;
+  }
+
+  if (raw?.version === 1 && raw.providers?.anthropic) {
+    const next = createDefaultProfiles();
+    for (const legacyProfile of raw.providers.anthropic.profiles ?? []) {
+      if (legacyProfile.id === 'anthropic-subscription-default') continue;
+      next.profiles.push({
+        id: legacyProfile.id,
+        provider: legacyProfile.id,
+        displayName: legacyProfile.name,
+        authType: legacyProfile.mode === 'api_key' ? 'api_key' : 'oauth',
+        protocol: 'anthropic',
+        builtin: false,
+        ...(legacyProfile.baseUrl ? { baseUrl: legacyProfile.baseUrl } : {}),
+        models: legacyProfile.modelOverride ? [legacyProfile.modelOverride] : [],
+        ...(legacyProfile.modelOverride ? { modelOverride: legacyProfile.modelOverride } : {}),
+        createdAt: legacyProfile.createdAt,
+        updatedAt: legacyProfile.updatedAt,
+      });
+    }
+    if (raw.providers.anthropic.activeProfileId && raw.providers.anthropic.activeProfileId !== 'anthropic-subscription-default') {
+      next.activeProfileId = raw.providers.anthropic.activeProfileId;
+    }
+    return next;
+  }
+
+  return createDefaultProfiles();
+}
+
+function normalizeSecretsFile(raw) {
+  if (raw?.version === 2 && raw.profiles) {
+    return raw;
+  }
+  if (raw?.version === 1 && raw.providers?.anthropic) {
+    return { version: 2, profiles: { ...raw.providers.anthropic } };
+  }
+  return createDefaultSecrets();
+}
+
 function writeClaudeProfile(projectDir, apiKey, baseUrl, model) {
   const profileDir = path.join(projectDir, '.cat-cafe');
   mkdirSync(profileDir, { recursive: true });
@@ -98,31 +197,27 @@ function writeClaudeProfile(projectDir, apiKey, baseUrl, model) {
   const secretsFile = path.join(profileDir, 'provider-profiles.secrets.local.json');
   const profileId = 'installer-managed';
   const now = new Date().toISOString();
-  const profiles = readJson(profileFile, { version: 1, providers: {} });
-  const secrets = readJson(secretsFile, { version: 1, providers: {} });
-  const anthropicProfiles = profiles.providers.anthropic ?? { profiles: [] };
-  const nextProfiles = (anthropicProfiles.profiles ?? []).filter((profile) => profile.id !== profileId);
+  const profiles = normalizeProfilesFile(readJson(profileFile, null));
+  const secrets = normalizeSecretsFile(readJson(secretsFile, null));
+  const nextProfiles = profiles.profiles.filter((profile) => profile.id !== profileId);
   nextProfiles.push({
     id: profileId,
-    provider: 'anthropic',
-    name: 'Installer API Key',
-    mode: 'api_key',
+    provider: profileId,
+    displayName: 'Installer API Key',
+    authType: 'api_key',
+    protocol: 'anthropic',
+    builtin: false,
     baseUrl: baseUrl || 'https://api.anthropic.com',
+    models: model ? [model] : [],
     createdAt: now,
     updatedAt: now,
     ...(model ? { modelOverride: model } : {}),
   });
-  profiles.providers.anthropic = {
-    ...anthropicProfiles,
-    activeProfileId: profileId,
-    profiles: nextProfiles,
-  };
-  secrets.providers.anthropic = {
-    ...(secrets.providers.anthropic ?? {}),
-    [profileId]: { apiKey },
-  };
-  writeFileSync(profileFile, JSON.stringify(profiles));
-  writeFileSync(secretsFile, JSON.stringify(secrets));
+  profiles.profiles = nextProfiles;
+  profiles.activeProfileId = profileId;
+  secrets.profiles[profileId] = { apiKey };
+  writeFileSync(profileFile, `${JSON.stringify(profiles, null, 2)}\n`);
+  writeFileSync(secretsFile, `${JSON.stringify(secrets, null, 2)}\n`);
   chmodSync(secretsFile, 0o600);
 }
 
@@ -131,24 +226,19 @@ function removeClaudeProfile(projectDir) {
   const profileFile = path.join(profileDir, 'provider-profiles.json');
   const secretsFile = path.join(profileDir, 'provider-profiles.secrets.local.json');
   const profileId = 'installer-managed';
-  const profiles = readJson(profileFile, null);
-  const secrets = readJson(secretsFile, null);
-  if (!profiles?.providers?.anthropic) {
+  const profiles = normalizeProfilesFile(readJson(profileFile, null));
+  const secrets = normalizeSecretsFile(readJson(secretsFile, null));
+  if (!profiles?.profiles) {
     return;
   }
-  const anthropicProfiles = profiles.providers.anthropic;
-  const nextProfiles = (anthropicProfiles.profiles ?? []).filter((profile) => profile.id !== profileId);
-  profiles.providers.anthropic = {
-    ...anthropicProfiles,
-    profiles: nextProfiles,
-    ...(anthropicProfiles.activeProfileId === profileId ? { activeProfileId: nextProfiles[0]?.id ?? '' } : {}),
-  };
-  if (secrets?.providers?.anthropic?.[profileId]) {
-    delete secrets.providers.anthropic[profileId];
+  profiles.profiles = profiles.profiles.filter((profile) => profile.id !== profileId);
+  if (profiles.activeProfileId === profileId) {
+    profiles.activeProfileId = 'claude-oauth';
   }
-  writeFileSync(profileFile, JSON.stringify(profiles));
+  delete secrets.profiles[profileId];
+  writeFileSync(profileFile, `${JSON.stringify(profiles, null, 2)}\n`);
   if (secrets) {
-    writeFileSync(secretsFile, JSON.stringify(secrets));
+    writeFileSync(secretsFile, `${JSON.stringify(secrets, null, 2)}\n`);
   }
 }
 
