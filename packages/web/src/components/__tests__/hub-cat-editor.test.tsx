@@ -174,6 +174,67 @@ describe('HubCatEditor', () => {
     expect(container.querySelector('select[aria-label="Provider"]')).toBeNull();
   });
 
+  it('requires all runtime budget fields when any budget value is provided', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/provider-profiles') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('4 项要么全部留空，要么全部填写');
+
+    await changeField(queryField(container, 'input[aria-label="Cat ID"]'), 'runtime-spark');
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Display Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
+    await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
+    await flushEffects();
+    await changeField(queryField(container, 'select[aria-label="Provider"]'), 'codex-sponsor', 'change');
+    await changeField(queryField(container, 'select[aria-label="Model"]'), 'gpt-5.4-mini', 'change');
+    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('上下文预算要么全部留空，要么 4 项都填写');
+    expect(mockApiFetch).not.toHaveBeenCalledWith('/api/cats', expect.objectContaining({ method: 'POST' }));
+  });
+
   it('deletes an existing member through the delete action', async () => {
     const existingCat: CatData = {
       id: 'runtime-antigravity',

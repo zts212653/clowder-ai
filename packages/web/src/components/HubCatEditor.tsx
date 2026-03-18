@@ -89,7 +89,11 @@ function buildContextBudget(form: ReturnType<typeof initialState>) {
     form.maxMessages,
     form.maxContentLengthPerMsg,
   ].map((value) => value.trim());
-  if (values.every((value) => value.length === 0)) return undefined;
+  const filledCount = values.filter((value) => value.length > 0).length;
+  if (filledCount === 0) return undefined;
+  if (filledCount !== values.length) {
+    throw new Error('上下文预算要么全部留空，要么 4 项都填写');
+  }
 
   const parsed = values.map((value) => Number.parseInt(value, 10));
   if (parsed.some((value) => !Number.isFinite(value) || value <= 0)) {
@@ -526,7 +530,9 @@ export function HubCatEditor({ cat, open, onClose, onSaved }: HubCatEditorProps)
           <section className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 space-y-3">
             <div>
               <h4 className="text-sm font-semibold text-gray-900">Runtime Budget</h4>
-              <p className="text-xs text-gray-500 mt-1">上下文预算会随成员配置一起持久化到运行时 catalog。</p>
+              <p className="text-xs text-gray-500 mt-1">
+                上下文预算会随成员配置一起持久化到运行时 catalog。4 项要么全部留空，要么全部填写。
+              </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <label className="text-sm text-gray-700 space-y-1">
