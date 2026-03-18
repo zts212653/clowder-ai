@@ -240,9 +240,11 @@ test('Windows installer headless rerun preserves local authenticated Redis URL v
   assert.match(uiHelpersScript, /if \(\$Plan\.Mode -eq "keep_local"\) \{/);
   assert.match(uiHelpersScript, /Preserving local Redis URL/);
   assert.match(uiHelpersScript, /\} elseif \(\$anyRedisUrl\) \{/);
-  assert.match(uiHelpersScript, /Keep current Redis \(\$anyRedisUrl\)/);
-  assert.match(uiHelpersScript, /Keep the current local Redis URL with its credentials/);
+  assert.match(uiHelpersScript, /Keep current Redis \(\$safeLabel\)/);
+  assert.match(uiHelpersScript, /Keep the current local Redis configuration/);
   assert.match(uiHelpersScript, /Value = "keep_local"/);
+  assert.match(uiHelpersScript, /function Get-InstallerRedactedRedisUrl/);
+  assert.match(uiHelpersScript, /\$safeLabel = Get-InstallerRedactedRedisUrl -RedisUrl \$anyRedisUrl/);
 });
 
 test('Windows service job failure sets exit code 1 instead of falling through with success', () => {

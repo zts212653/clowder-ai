@@ -171,6 +171,19 @@ function Get-InstallerAnyRedisUrl {
     return $rawUrl
 }
 
+function Get-InstallerRedactedRedisUrl {
+    param([string]$RedisUrl)
+    if (-not $RedisUrl) { return "" }
+    try {
+        $uri = [System.Uri]::new($RedisUrl)
+        if (-not $uri.UserInfo) { return $RedisUrl }
+        $authority = if ($uri.Port -gt 0) { "$($uri.Host):$($uri.Port)" } else { $uri.Host }
+        return "$($uri.Scheme)://$authority$($uri.AbsolutePath)"
+    } catch {
+        return $RedisUrl -replace '://[^@]+@', '://'
+    }
+}
+
 function Resolve-InstallerRedisPlan {
     param([string]$ProjectRoot)
     $defaultRedisUrl = Get-InstallerExternalRedisUrl -ProjectRoot $ProjectRoot
@@ -178,9 +191,11 @@ function Resolve-InstallerRedisPlan {
     $mode = if (Test-InstallerConsoleUi) {
         $redisOptions = @()
         if ($defaultRedisUrl) {
-            $redisOptions += @{ Label = "&Keep external ($defaultRedisUrl)"; Help = "Keep the current external Redis URL"; Value = "keep_external" }
+            $safeLabel = Get-InstallerRedactedRedisUrl -RedisUrl $defaultRedisUrl
+            $redisOptions += @{ Label = "&Keep external ($safeLabel)"; Help = "Keep the current external Redis URL"; Value = "keep_external" }
         } elseif ($anyRedisUrl) {
-            $redisOptions += @{ Label = "&Keep current Redis ($anyRedisUrl)"; Help = "Keep the current local Redis URL with its credentials"; Value = "keep_local" }
+            $safeLabel = Get-InstallerRedactedRedisUrl -RedisUrl $anyRedisUrl
+            $redisOptions += @{ Label = "&Keep current Redis ($safeLabel)"; Help = "Keep the current local Redis configuration"; Value = "keep_local" }
         }
         $redisOptions += @(
             @{ Label = if ($defaultRedisUrl -or $anyRedisUrl) { "&Install Redis locally" } else { "&Install Redis locally (recommended)" }; Help = "Download or reuse the project-local portable Redis bundle"; Value = "portable" },
