@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -129,6 +129,50 @@ cat .env
   }
 });
 
+test('Claude empty API key removes stale installer-managed profile', () => {
+  const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-empty-'));
+  const catCafeDir = join(envRoot, '.cat-cafe');
+
+  try {
+    mkdirSync(catCafeDir, { recursive: true });
+    writeFileSync(
+      join(catCafeDir, 'provider-profiles.json'),
+      JSON.stringify({
+        version: 1,
+        providers: {
+          anthropic: {
+            activeProfileId: 'installer-managed',
+            profiles: [{ id: 'installer-managed', provider: 'anthropic', name: 'Installer API Key', mode: 'api_key' }],
+          },
+        },
+      }),
+    );
+    writeFileSync(
+      join(catCafeDir, 'provider-profiles.secrets.local.json'),
+      JSON.stringify({
+        version: 1,
+        providers: { anthropic: { 'installer-managed': { apiKey: 'sk-old-stale-key' } } },
+      }),
+    );
+
+    runSourceOnlySnippet(`
+PROJECT_DIR="${envRoot}"
+remove_claude_installer_profile
+`);
+
+    const profiles = JSON.parse(readFileSync(join(catCafeDir, 'provider-profiles.json'), 'utf8'));
+    const secrets = JSON.parse(readFileSync(join(catCafeDir, 'provider-profiles.secrets.local.json'), 'utf8'));
+    const anthropic = profiles.providers?.anthropic;
+    assert.ok(anthropic, 'anthropic provider entry should still exist');
+    const installerProfile = (anthropic.profiles ?? []).find((p) => p.id === 'installer-managed');
+    assert.equal(installerProfile, undefined, 'installer-managed profile must be removed');
+    assert.notEqual(anthropic.activeProfileId, 'installer-managed', 'active profile must not be stale');
+    assert.equal(secrets.providers?.anthropic?.['installer-managed'], undefined, 'secret must be removed');
+  } finally {
+    rmSync(envRoot, { recursive: true, force: true });
+  }
+});
+
 test('npm_global_install succeeds when a custom registry is configured', () => {
   const output = runSourceOnlySnippet(`
 SUDO=""
@@ -178,6 +222,27 @@ printf '%s' "$(resolve_provider_profiles_dir)"
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
     rmSync(worktreeRoot, { recursive: true, force: true });
+  }
+});
+
+test('docker reruns add API_SERVER_HOST when missing from existing .env', () => {
+  const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-env-docker-missing-'));
+
+  try {
+    writeFileSync(join(envRoot, '.env'), "OTHER_KEY='keep-me'\n", 'utf8');
+
+    const output = runSourceOnlySnippet(`
+cd "${envRoot}"
+ENV_CREATED=false
+docker_detected() { return 0; }
+maybe_write_docker_api_host
+cat .env
+`);
+
+    assert.match(output, /API_SERVER_HOST='0\.0\.0\.0'/, 'Must auto-write API_SERVER_HOST when missing');
+    assert.match(output, /OTHER_KEY='keep-me'/, 'Must preserve other keys');
+  } finally {
+    rmSync(envRoot, { recursive: true, force: true });
   }
 });
 

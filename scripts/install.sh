@@ -337,7 +337,8 @@ maybe_write_docker_api_host() {
     elif env_has_key "API_SERVER_HOST"; then
         ok "Docker detected — preserving existing API_SERVER_HOST"
     else
-        warn "Docker detected — existing .env left unchanged. Set API_SERVER_HOST=0.0.0.0 manually if host access is needed"
+        write_env_key "API_SERVER_HOST" "0.0.0.0"
+        ok "Docker detected — added API_SERVER_HOST=0.0.0.0 (was missing from existing .env)"
     fi
 }
 
@@ -362,6 +363,37 @@ set_gemini_api_key_mode() {
     local key="$1" model="$2"
     collect_env "GEMINI_API_KEY" "$key"
     [[ -n "$model" ]] && collect_env "CAT_GEMINI_MODEL" "$model" || clear_env "CAT_GEMINI_MODEL"
+}
+write_claude_profile() {
+    local key="$1" base_url="$2" model="$3" pdir=""
+    pdir="$(resolve_provider_profiles_dir)"; mkdir -p "$pdir"
+    node - "$pdir" "$key" "${base_url:-https://api.anthropic.com}" "$model" <<'EONODE'
+const fs = require('fs'), path = require('path');
+const [dir, key, baseUrl, model] = process.argv.slice(2), id = 'installer-managed', now = new Date().toISOString();
+const pf = path.join(dir, 'provider-profiles.json'), sf = path.join(dir, 'provider-profiles.secrets.local.json');
+const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return { version: 1, providers: {} }; } };
+const profiles = read(pf), secrets = read(sf), anth = profiles.providers.anthropic ?? { profiles: [] };
+const keep = (anth.profiles ?? []).filter((p) => p.id !== id);
+keep.push({ id, provider: 'anthropic', name: 'Installer API Key', mode: 'api_key', baseUrl, createdAt: now, updatedAt: now, ...(model ? { modelOverride: model } : {}) });
+profiles.providers.anthropic = { ...anth, activeProfileId: id, profiles: keep };
+secrets.providers.anthropic = { ...(secrets.providers.anthropic ?? {}), [id]: { apiKey: key } };
+fs.writeFileSync(pf, JSON.stringify(profiles)); fs.writeFileSync(sf, JSON.stringify(secrets)); fs.chmodSync(sf, 0o600);
+EONODE
+}
+remove_claude_installer_profile() {
+    local pdir=""
+    pdir="$(resolve_provider_profiles_dir)"; [[ -d "$pdir" ]] || return 0
+    node - "$pdir" <<'EONODE'
+const fs = require('fs'), path = require('path');
+const [dir] = process.argv.slice(2), id = 'installer-managed';
+const pf = path.join(dir, 'provider-profiles.json'), sf = path.join(dir, 'provider-profiles.secrets.local.json');
+const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const profiles = read(pf), secrets = read(sf); if (!profiles?.providers?.anthropic) process.exit(0);
+const anth = profiles.providers.anthropic, nextProfiles = (anth.profiles ?? []).filter((p) => p.id !== id);
+profiles.providers.anthropic = { ...anth, profiles: nextProfiles, ...(anth.activeProfileId === id ? { activeProfileId: nextProfiles[0]?.id ?? '' } : {}) };
+if (secrets?.providers?.anthropic?.[id]) delete secrets.providers.anthropic[id];
+fs.writeFileSync(pf, JSON.stringify(profiles)); if (secrets) fs.writeFileSync(sf, JSON.stringify(secrets));
+EONODE
 }
 
 if [[ "$SOURCE_ONLY" == true ]]; then
@@ -576,37 +608,6 @@ fi
 
 # ── [7/9] Authentication setup / 认证配置 ─────────────────
 step "[7/9] Authentication setup / 认证配置..."
-write_claude_profile() {
-    local key="$1" base_url="$2" model="$3" pdir=""
-    pdir="$(resolve_provider_profiles_dir)"; mkdir -p "$pdir"
-    node - "$pdir" "$key" "${base_url:-https://api.anthropic.com}" "$model" <<'EONODE'
-const fs = require('fs'), path = require('path');
-const [dir, key, baseUrl, model] = process.argv.slice(2), id = 'installer-managed', now = new Date().toISOString();
-const pf = path.join(dir, 'provider-profiles.json'), sf = path.join(dir, 'provider-profiles.secrets.local.json');
-const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return { version: 1, providers: {} }; } };
-const profiles = read(pf), secrets = read(sf), anth = profiles.providers.anthropic ?? { profiles: [] };
-const keep = (anth.profiles ?? []).filter((p) => p.id !== id);
-keep.push({ id, provider: 'anthropic', name: 'Installer API Key', mode: 'api_key', baseUrl, createdAt: now, updatedAt: now, ...(model ? { modelOverride: model } : {}) });
-profiles.providers.anthropic = { ...anth, activeProfileId: id, profiles: keep };
-secrets.providers.anthropic = { ...(secrets.providers.anthropic ?? {}), [id]: { apiKey: key } };
-fs.writeFileSync(pf, JSON.stringify(profiles)); fs.writeFileSync(sf, JSON.stringify(secrets)); fs.chmodSync(sf, 0o600);
-EONODE
-}
-remove_claude_installer_profile() {
-    local pdir=""
-    pdir="$(resolve_provider_profiles_dir)"; [[ -d "$pdir" ]] || return 0
-    node - "$pdir" <<'EONODE'
-const fs = require('fs'), path = require('path');
-const [dir] = process.argv.slice(2), id = 'installer-managed';
-const pf = path.join(dir, 'provider-profiles.json'), sf = path.join(dir, 'provider-profiles.secrets.local.json');
-const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-const profiles = read(pf), secrets = read(sf); if (!profiles?.providers?.anthropic) process.exit(0);
-const anth = profiles.providers.anthropic, nextProfiles = (anth.profiles ?? []).filter((p) => p.id !== id);
-profiles.providers.anthropic = { ...anth, profiles: nextProfiles, ...(anth.activeProfileId === id ? { activeProfileId: nextProfiles[0]?.id ?? '' } : {}) };
-if (secrets?.providers?.anthropic?.[id]) delete secrets.providers.anthropic[id];
-fs.writeFileSync(pf, JSON.stringify(profiles)); if (secrets) fs.writeFileSync(sf, JSON.stringify(secrets));
-EONODE
-}
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
@@ -630,7 +631,10 @@ configure_agent_auth() {
             if [[ -n "$key" ]]; then
                 write_claude_profile "$key" "$base_url" "$model"
                 ok "$name: API key profile created in .cat-cafe/"
-            else warn "$name: no key provided, skipping"; fi
+            else
+                remove_claude_installer_profile
+                warn "$name: no key provided, removed stale installer profile if any"
+            fi
             ;;
         codex)
             tty_read "    Base URL (Enter = default): " base_url
