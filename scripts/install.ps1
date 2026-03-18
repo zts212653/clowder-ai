@@ -127,6 +127,11 @@ Write-Ok "Git: $(git --version)"
 $ProjectRoot = Resolve-ProjectRoot
 $authState = New-InstallerAuthState -ProjectRoot $ProjectRoot
 
+if ($env:CAT_CAFE_NPM_REGISTRY) {
+    $env:NPM_CONFIG_REGISTRY = $env:CAT_CAFE_NPM_REGISTRY.Trim()
+    Write-Ok "npm registry override: $($env:NPM_CONFIG_REGISTRY)"
+}
+
 Write-Step "Step 2/9 - Node.js and pnpm"
 
 $nodeOk = $false

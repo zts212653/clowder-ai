@@ -155,22 +155,16 @@ function Ensure-WindowsRedis {
     try {
         $layout = Resolve-PortableRedisLayout -ProjectRoot $ProjectRoot
         $headers = @{ "User-Agent" = "ClowderAI-Installer" }
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/redis-windows/redis-windows/releases/latest" -Headers $headers
-        $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-msys2\.zip$" } | Select-Object -First 1
-        if (-not $asset) {
-            $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-cygwin\.zip$" } | Select-Object -First 1
+        $redisReleaseApi = if ($env:CAT_CAFE_WINDOWS_REDIS_RELEASE_API) {
+            $env:CAT_CAFE_WINDOWS_REDIS_RELEASE_API.Trim()
+        } else {
+            "https://api.github.com/repos/redis-windows/redis-windows/releases/latest"
         }
-        if (-not $asset) {
-            $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-msys2-with-Service\.zip$" } | Select-Object -First 1
+        $redisDownloadUrl = if ($env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL) {
+            $env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL.Trim()
+        } else {
+            $null
         }
-        if (-not $asset) {
-            $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-cygwin-with-Service\.zip$" } | Select-Object -First 1
-        }
-        if (-not $asset) {
-            throw "No Windows Redis zip asset found in latest release"
-        }
-
-        $archivePath = Join-Path $layout.ArchiveDir $asset.name
 
         New-Item -Path $layout.ArchiveDir -ItemType Directory -Force | Out-Null
         New-Item -Path $layout.Root -ItemType Directory -Force | Out-Null
@@ -178,8 +172,39 @@ function Ensure-WindowsRedis {
             Remove-Item -Path $layout.Current -Recurse -Force
         }
 
-        Write-Host "  Downloading $($asset.name)..."
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath -Headers $headers -UseBasicParsing
+        if ($redisDownloadUrl) {
+            $archiveName = [System.IO.Path]::GetFileName(([System.Uri]$redisDownloadUrl).AbsolutePath)
+            if (-not $archiveName) {
+                $archiveName = "redis-windows.zip"
+            }
+            $archivePath = Join-Path $layout.ArchiveDir $archiveName
+            $releaseTag = "manual-override"
+            Write-Host "  Redis archive source: explicit CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL"
+            Write-Host "  Downloading $archiveName..."
+            Invoke-WebRequest -Uri $redisDownloadUrl -OutFile $archivePath -Headers $headers -UseBasicParsing
+        } else {
+            Write-Host "  Redis release metadata source: $redisReleaseApi"
+            $release = Invoke-RestMethod -Uri $redisReleaseApi -Headers $headers
+            $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-msys2\.zip$" } | Select-Object -First 1
+            if (-not $asset) {
+                $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-cygwin\.zip$" } | Select-Object -First 1
+            }
+            if (-not $asset) {
+                $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-msys2-with-Service\.zip$" } | Select-Object -First 1
+            }
+            if (-not $asset) {
+                $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-cygwin-with-Service\.zip$" } | Select-Object -First 1
+            }
+            if (-not $asset) {
+                throw "No Windows Redis zip asset found in release metadata"
+            }
+
+            $archivePath = Join-Path $layout.ArchiveDir $asset.name
+            $releaseTag = $release.tag_name
+            Write-Host "  Downloading $($asset.name)..."
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath -Headers $headers -UseBasicParsing
+        }
+
         Expand-Archive -Path $archivePath -DestinationPath $layout.Current -Force
 
         $portableRedis = Resolve-PortableRedisBinaries -ProjectRoot $ProjectRoot
@@ -187,7 +212,7 @@ function Ensure-WindowsRedis {
             throw "Redis executables were not found after extraction"
         }
 
-        Set-Content -Path $layout.VersionFile -Value $release.tag_name -Encoding ascii
+        Set-Content -Path $layout.VersionFile -Value $releaseTag -Encoding ascii
         Write-Ok "Redis installed: $($portableRedis.BinDir)"
         Write-Warn "Portable Redis will be reused from .cat-cafe/redis/windows on later starts."
         return $true
