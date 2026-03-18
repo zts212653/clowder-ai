@@ -273,14 +273,30 @@ resolve_project_dir() {
     fi
 }
 resolve_provider_profiles_dir() {
-    local common_git_dir="" profiles_root="$PROJECT_DIR"
-    if command -v git &>/dev/null; then
-        common_git_dir="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-        if [[ -n "$common_git_dir" ]]; then
-            profiles_root="$(cd "$(dirname "$common_git_dir")" 2>/dev/null && pwd || printf '%s' "$PROJECT_DIR")"
-        fi
+    # Mirror the runtime validation in provider-profiles-root.ts:
+    # Only redirect for validated git worktrees.  For normal repos,
+    # submodules, and nested archives, stay at $PROJECT_DIR.
+    local git_entry="$PROJECT_DIR/.git"
+    if [[ ! -e "$git_entry" ]]; then
+        printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
     fi
-    printf '%s/.cat-cafe\n' "$profiles_root"
+    # .git is a directory → normal repo or submodule → stay local
+    if [[ -d "$git_entry" ]]; then
+        printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
+    fi
+    # .git is a file → potential worktree; validate structure
+    if [[ -f "$git_entry" ]] && command -v git &>/dev/null; then
+        local gitdir="" worktrees_dir="" common_git_dir="" candidate=""
+        gitdir="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
+        [[ -n "$gitdir" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        worktrees_dir="$(dirname "$gitdir" 2>/dev/null)"
+        [[ "$(basename "$worktrees_dir" 2>/dev/null)" == "worktrees" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        common_git_dir="$(dirname "$worktrees_dir" 2>/dev/null)"
+        [[ "$(basename "$common_git_dir" 2>/dev/null)" == ".git" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        candidate="$(cd "$(dirname "$common_git_dir")" 2>/dev/null && pwd)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        printf '%s/.cat-cafe\n' "$candidate"; return
+    fi
+    printf '%s/.cat-cafe\n' "$PROJECT_DIR"
 }
 docker_detected() {
     [[ -f /.dockerenv ]] || grep -qsw docker /proc/1/cgroup 2>/dev/null

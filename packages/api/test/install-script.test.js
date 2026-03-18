@@ -158,11 +158,10 @@ test('resolve_provider_profiles_dir uses the canonical repo root for git worktre
     spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: repoRoot, encoding: 'utf8' });
     spawnSync('git', ['add', 'README.md'], { cwd: repoRoot, encoding: 'utf8' });
     spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, encoding: 'utf8' });
-    const addResult = spawnSync(
-      'git',
-      ['worktree', 'add', worktreeRoot, '-b', 'feature/profiles-root'],
-      { cwd: repoRoot, encoding: 'utf8' },
-    );
+    const addResult = spawnSync('git', ['worktree', 'add', worktreeRoot, '-b', 'feature/profiles-root'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
 
     assert.equal(
       addResult.status,
@@ -214,7 +213,7 @@ test('use_registry sets only env vars without writing to user npmrc', () => {
     const output = runSourceOnlySnippet(`
 export HOME="${tmpHome}"
 use_registry "https://mirror.example.test"
-printf 'npm=%s|pnpm=%s' "\$npm_config_registry" "\$PNPM_CONFIG_REGISTRY"
+printf 'npm=%s|pnpm=%s' "$npm_config_registry" "$PNPM_CONFIG_REGISTRY"
 # Check that no .npmrc was created in the temp home
 [[ -f "${tmpHome}/.npmrc" ]] && printf '|LEAKED' || printf '|CLEAN'
 `);
@@ -240,7 +239,7 @@ source "${installScript}" --source-only >/dev/null 2>&1
 # Force no-TTY mode (simulates container / pipe environment)
 HAS_TTY=false
 tty_read "prompt: " MY_VAR
-printf '%s' "\$MY_VAR"`,
+printf '%s' "$MY_VAR"`,
     ],
     {
       encoding: 'utf8',
@@ -316,6 +315,86 @@ type tty_read`,
   );
   // Should contain explicit printf to /dev/tty
   assert.match(result.stdout, /printf.*\/dev\/tty/, 'tty_read should printf prompt to /dev/tty');
+});
+
+test('resolve_provider_profiles_dir stays local for submodules (not the parent repo)', () => {
+  const parentRepo = mkdtempSync(join(tmpdir(), 'clowder-install-parent-'));
+  const childDir = join(parentRepo, 'vendor', 'child');
+
+  try {
+    // Create parent repo
+    writeFileSync(join(parentRepo, 'README.md'), 'parent\n', 'utf8');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: parentRepo, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: parentRepo, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: parentRepo, encoding: 'utf8' });
+    spawnSync('git', ['add', '.'], { cwd: parentRepo, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: parentRepo, encoding: 'utf8' });
+
+    // Create child repo that will become a submodule
+    mkdirSync(childDir, { recursive: true });
+    writeFileSync(join(childDir, 'README.md'), 'child\n', 'utf8');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: childDir, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: childDir, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: childDir, encoding: 'utf8' });
+    spawnSync('git', ['add', '.'], { cwd: childDir, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: childDir, encoding: 'utf8' });
+
+    // Add as submodule
+    const submodResult = spawnSync('git', ['submodule', 'add', childDir, 'vendor/child'], {
+      cwd: parentRepo,
+      encoding: 'utf8',
+    });
+    if (submodResult.status !== 0) {
+      // Fallback: simulate submodule structure manually
+      // .git file in child pointing to parent's .git/modules/...
+      const modulesDir = join(parentRepo, '.git', 'modules', 'vendor', 'child');
+      mkdirSync(modulesDir, { recursive: true });
+      rmSync(join(childDir, '.git'), { recursive: true, force: true });
+      writeFileSync(join(childDir, '.git'), `gitdir: ${modulesDir}\n`, 'utf8');
+      writeFileSync(join(modulesDir, 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
+    }
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${childDir}"
+printf '%s' "$(resolve_provider_profiles_dir)"
+`);
+
+    const parentCatCafe = join(realpathSync(parentRepo), '.cat-cafe');
+    assert.notEqual(output, parentCatCafe, 'Must NOT write profiles to parent repo');
+    assert.equal(output, join(childDir, '.cat-cafe'), 'Must stay local to the child project');
+  } finally {
+    rmSync(parentRepo, { recursive: true, force: true });
+  }
+});
+
+test('resolve_provider_profiles_dir stays local for nested archive inside another checkout', () => {
+  const outerRepo = mkdtempSync(join(tmpdir(), 'clowder-install-outer-'));
+  const archiveDir = join(outerRepo, 'unpacked', 'clowder-ai');
+
+  try {
+    // Create outer repo
+    writeFileSync(join(outerRepo, 'README.md'), 'outer\n', 'utf8');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: outerRepo, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: outerRepo, encoding: 'utf8' });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: outerRepo, encoding: 'utf8' });
+    spawnSync('git', ['add', '.'], { cwd: outerRepo, encoding: 'utf8' });
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: outerRepo, encoding: 'utf8' });
+
+    // Create archive dir (no .git) inside outer repo
+    mkdirSync(archiveDir, { recursive: true });
+    writeFileSync(join(archiveDir, 'package.json'), '{"name":"clowder-ai"}\n', 'utf8');
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${archiveDir}"
+printf '%s' "$(resolve_provider_profiles_dir)"
+`);
+
+    const outerCatCafe = join(realpathSync(outerRepo), '.cat-cafe');
+    assert.notEqual(output, outerCatCafe, 'Must NOT write profiles to outer repo');
+    assert.equal(output, join(archiveDir, '.cat-cafe'), 'Must stay local to the archive');
+  } finally {
+    rmSync(outerRepo, { recursive: true, force: true });
+  }
 });
 
 test('HAS_TTY detection checks both -r and -w on /dev/tty', () => {
