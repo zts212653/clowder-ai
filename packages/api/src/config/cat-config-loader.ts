@@ -58,7 +58,8 @@ const catVariantSchema = z.object({
   displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
-  providerProfileId: z.string().min(1).optional(), // F127: concrete provider account binding
+  accountRef: z.string().min(1).optional(), // F127: concrete account binding
+  providerProfileId: z.string().min(1).optional(), // Legacy migration path
   provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a']),
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
@@ -85,6 +86,10 @@ const catVariantSchema = z.object({
   teamStrengths: z.string().optional(), // F-Ground-3: human-readable strengths
   caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
 });
+
+type LegacyAwareCatVariant = CatVariant & {
+  providerProfileId?: string;
+};
 
 /** F33 Phase 2: session strategy config (matches SessionStrategyConfig from shared).
  *  Exported for reuse by Phase 3 API route validation. */
@@ -332,6 +337,8 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
           ? variant.cli.defaultArgs
           : undefined);
 
+      const legacyVariant = variant as LegacyAwareCatVariant;
+
       result[catId] = {
         id: createCatId(catId),
         name: catId,
@@ -340,7 +347,11 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
-        ...(variant.providerProfileId != null ? { providerProfileId: variant.providerProfileId } : {}),
+        ...(variant.accountRef != null
+          ? { accountRef: variant.accountRef }
+          : legacyVariant.providerProfileId != null
+            ? { accountRef: legacyVariant.providerProfileId }
+            : {}),
         provider: variant.provider,
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,

@@ -10,9 +10,10 @@ import { type CatConfig, type CatProvider, type ContextBudget, catRegistry, type
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
-import { readProviderProfiles } from '../config/provider-profiles.js';
+import { validateRuntimeProviderBinding } from '../config/provider-binding-compat.js';
+import { resolveRuntimeProviderProfileById } from '../config/provider-profiles.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
-import { deleteRuntimeOverride } from '../config/session-strategy-overrides.js';
+import { deleteRuntimeOverride, getRuntimeOverride, setRuntimeOverride } from '../config/session-strategy-overrides.js';
 
 const DEFAULT_TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../cat-template.json');
 
@@ -44,6 +45,7 @@ const baseCatSchema = z.object({
   avatar: z.string().min(1),
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
+  accountRef: z.string().min(1).optional(),
   providerProfileId: z.string().min(1).optional(),
   contextBudget: contextBudgetSchema.optional(),
   roleDescription: z.string().min(1),
@@ -76,6 +78,7 @@ const updateCatSchema = z.object({
   avatar: z.string().min(1).optional(),
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
+  accountRef: z.string().min(1).nullable().optional(),
   providerProfileId: z.string().min(1).nullable().optional(),
   contextBudget: contextBudgetSchema.nullable().optional(),
   roleDescription: z.string().min(1).optional(),
@@ -89,7 +92,7 @@ const updateCatSchema = z.object({
   defaultModel: z.string().min(1).optional(),
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
-  commandArgs: z.array(z.string().min(1)).min(1).optional(),
+  commandArgs: z.array(z.string().min(1)).optional(),
 });
 
 function resolveOperator(raw: unknown): string | null {
@@ -156,61 +159,36 @@ function defaultCliForClient(client: CatProvider): { command: string; outputForm
   }
 }
 
-function protocolForClient(client: CatProvider): 'anthropic' | 'openai' | 'google' | null {
-  switch (client) {
-    case 'anthropic':
-      return 'anthropic';
-    case 'openai':
-      return 'openai';
-    case 'google':
-      return 'google';
-    case 'dare':
-      return 'openai';
-    case 'opencode':
-      return 'anthropic';
-    case 'antigravity':
-    case 'a2a':
-    default:
-      return null;
-  }
+function resolveAccountRef(body: {
+  accountRef?: string | null;
+  providerProfileId?: string | null;
+}): string | undefined | null {
+  if (body.providerProfileId !== undefined) return body.providerProfileId;
+  if (body.accountRef !== undefined) return body.accountRef;
+  return undefined;
 }
 
-async function validateProviderBindingOrThrow(params: {
-  projectRoot: string;
-  client: CatProvider;
-  defaultModel: string;
-  providerProfileId?: string;
-}) {
-  const trimmedProfileId = params.providerProfileId?.trim();
-  const protocol = protocolForClient(params.client);
-  if (protocol == null) {
-    if (trimmedProfileId) {
-      throw new Error('antigravity client does not support providerProfileId');
-    }
-    return;
+async function validateAccountBindingOrThrow(
+  projectRoot: string,
+  client: CatProvider,
+  accountRef?: string | null,
+  defaultModel?: string | null,
+): Promise<void> {
+  const trimmedAccountRef = accountRef?.trim();
+  if (client === 'antigravity' && trimmedAccountRef) {
+    throw new Error('antigravity client does not support accountRef');
   }
-  if (!trimmedProfileId) {
-    if (params.client === 'dare' || params.client === 'opencode') {
-      throw new Error(`client "${params.client}" requires a provider profile`);
-    }
-    return;
+  if (client !== 'antigravity' && !trimmedAccountRef) {
+    throw new Error(`client "${client}" requires a provider binding`);
   }
-
-  const profiles = await readProviderProfiles(params.projectRoot);
-  const profile = profiles.providers.find((item) => item.id === trimmedProfileId);
-  if (!profile) {
-    throw new Error(`provider profile "${trimmedProfileId}" not found`);
+  if (!trimmedAccountRef) return;
+  const runtimeProfile = await resolveRuntimeProviderProfileById(projectRoot, trimmedAccountRef);
+  if (!runtimeProfile) {
+    throw new Error(`provider "${trimmedAccountRef}" not found`);
   }
-  const protocolCompatible = profile.protocol === protocol;
-  const clientAllowsAnyApiKey = params.client === 'anthropic' || params.client === 'openai' || params.client === 'google';
-  const bindingAllowed = protocolCompatible || (clientAllowsAnyApiKey && profile.authType === 'api_key');
-  if (!bindingAllowed) {
-    throw new Error(
-      `provider profile "${trimmedProfileId}" protocol "${profile.protocol}" is incompatible with client "${params.client}"`,
-    );
-  }
-  if (profile.models.length > 0 && !profile.models.includes(params.defaultModel)) {
-    throw new Error(`model "${params.defaultModel}" is not available in provider profile "${trimmedProfileId}"`);
+  const compatibilityError = validateRuntimeProviderBinding(client, runtimeProfile, defaultModel);
+  if (compatibilityError) {
+    throw new Error(compatibilityError);
   }
 }
 
@@ -223,7 +201,7 @@ function toCatResponse(cat: CatConfig & { contextBudget?: ContextBudget }, metad
     color: cat.color,
     mentionPatterns: cat.mentionPatterns,
     breedId: cat.breedId,
-    providerProfileId: cat.providerProfileId,
+    accountRef: cat.accountRef,
     provider: cat.provider,
     defaultModel: cat.defaultModel,
     contextBudget: cat.contextBudget,
@@ -320,13 +298,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const projectRoot = resolveProjectRoot();
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     const body = parsed.data;
+    const accountRef = resolveAccountRef(body);
     try {
-      await validateProviderBindingOrThrow({
-        projectRoot,
-        client: body.client,
-        defaultModel: body.defaultModel,
-        providerProfileId: body.providerProfileId,
-      });
+      await validateAccountBindingOrThrow(projectRoot, body.client, accountRef, body.defaultModel);
       if (body.client === 'antigravity') {
         createRuntimeCat(projectRoot, {
           catId: body.catId,
@@ -336,7 +310,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           avatar: body.avatar,
           color: body.color,
           mentionPatterns: body.mentionPatterns,
-          providerProfileId: body.providerProfileId,
+          ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
           contextBudget: body.contextBudget,
           roleDescription: body.roleDescription,
           personality: body.personality,
@@ -362,7 +336,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           avatar: body.avatar,
           color: body.color,
           mentionPatterns: body.mentionPatterns,
-          providerProfileId: body.providerProfileId,
+          ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
           contextBudget: body.contextBudget,
           roleDescription: body.roleDescription,
           personality: body.personality,
@@ -415,25 +389,35 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       return { error: `Cat "${request.params.id}" not found` };
     }
     const effectiveClient = body.client ?? currentCat.provider;
-    const effectiveDefaultModel = body.defaultModel ?? currentCat.defaultModel;
-    const effectiveProviderProfileId =
-      body.providerProfileId !== undefined ? (body.providerProfileId ?? undefined) : currentCat.providerProfileId;
+    const nextAccountRef = resolveAccountRef(body);
+    const effectiveAccountRef = nextAccountRef !== undefined ? (nextAccountRef ?? undefined) : currentCat.accountRef;
+    const effectiveDefaultModel = body.defaultModel !== undefined ? body.defaultModel : currentCat.defaultModel;
+    const providerConfigTouched =
+      body.client !== undefined || body.defaultModel !== undefined || nextAccountRef !== undefined;
 
-    try {
-      await validateProviderBindingOrThrow({
-        projectRoot,
-        client: effectiveClient,
-        defaultModel: effectiveDefaultModel,
-        providerProfileId: effectiveProviderProfileId,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      reply.status(400);
-      return { error: message };
+    if (providerConfigTouched) {
+      try {
+        await validateAccountBindingOrThrow(projectRoot, effectiveClient, effectiveAccountRef, effectiveDefaultModel);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        reply.status(400);
+        return { error: message };
+      }
     }
 
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     try {
+      const hasCommandArgsPatch = body.commandArgs !== undefined;
+      const nextCommandArgs = body.commandArgs ?? [];
+      const antigravityCliPatch =
+        body.client === 'antigravity' || (currentCat.provider === 'antigravity' && hasCommandArgsPatch)
+          ? {
+              cli: {
+                ...defaultCliForClient('antigravity'),
+                ...(hasCommandArgsPatch && nextCommandArgs.length > 0 ? { defaultArgs: nextCommandArgs } : {}),
+              },
+            }
+          : {};
       updateRuntimeCat(projectRoot, request.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
@@ -441,7 +425,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
-        ...(body.providerProfileId !== undefined ? { providerProfileId: body.providerProfileId } : {}),
+        ...(nextAccountRef !== undefined ? { accountRef: nextAccountRef } : {}),
         ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
         ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
         ...(body.personality !== undefined ? { personality: body.personality } : {}),
@@ -452,15 +436,13 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.client !== undefined ? { provider: body.client } : {}),
         ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),
         ...(body.mcpSupport !== undefined ? { mcpSupport: body.mcpSupport } : {}),
-        ...(body.commandArgs !== undefined
+        ...(hasCommandArgsPatch
           ? {
-              cli: {
-                ...defaultCliForClient('antigravity'),
-                defaultArgs: body.commandArgs,
-              },
+              ...antigravityCliPatch,
               commandArgs: body.commandArgs,
             }
           : {}),
+        ...(!hasCommandArgsPatch ? antigravityCliPatch : {}),
         ...(body.cli !== undefined ? { cli: body.cli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
       });
@@ -488,10 +470,28 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     }
 
     const projectRoot = resolveProjectRoot();
+    const currentCat = getResolvedCats()[request.params.id] ?? catRegistry.tryGet(request.params.id)?.config;
+    if (!currentCat) {
+      reply.status(404);
+      return { error: `Cat "${request.params.id}" not found` };
+    }
+    const metadata = buildCatResponseMetadataResolver();
+    if (metadata(request.params.id).source === 'seed') {
+      reply.status(409);
+      return { error: 'cannot delete seed cat' };
+    }
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
+    const overrideBackup = getRuntimeOverride(request.params.id);
     try {
-      deleteRuntimeCat(projectRoot, request.params.id);
       await deleteRuntimeOverride(request.params.id);
+      try {
+        deleteRuntimeCat(projectRoot, request.params.id);
+      } catch (err) {
+        if (overrideBackup) {
+          await setRuntimeOverride(request.params.id, overrideBackup);
+        }
+        throw err;
+      }
       await reconcileCatRegistry(projectRoot, managedIdsBefore, opts.onCatalogChanged);
       return { deleted: true, id: request.params.id, updatedBy: operator };
     } catch (err) {

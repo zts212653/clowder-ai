@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 import type {
-  ActiveProviderProfileIds,
   AnthropicRuntimeProfile,
+  BootstrapBinding,
+  BootstrapBindings,
+  BuiltinAccountClient,
   CreateProviderProfileInput,
   NormalizedState,
   ProviderProfileAuthType,
@@ -18,12 +21,13 @@ import type {
   RuntimeProviderProfile,
   UpdateProviderProfileInput,
 } from './provider-profiles.types.js';
-import { readCatCatalog } from './cat-catalog-store.js';
-import { resolveProviderProfilesRoot } from './provider-profiles-root.js';
+import { resolveProviderProfilesRoot, resolveProviderProfilesRootSync } from './provider-profiles-root.js';
 
 export type {
-  ActiveProviderProfileIds,
   AnthropicRuntimeProfile,
+  BootstrapBinding,
+  BootstrapBindings,
+  BuiltinAccountClient,
   CreateProviderProfileInput,
   ProviderProfileAuthType,
   ProviderProfileMeta,
@@ -39,72 +43,111 @@ export type {
 const CAT_CAFE_DIR = '.cat-cafe';
 const META_FILENAME = 'provider-profiles.json';
 const SECRETS_FILENAME = 'provider-profiles.secrets.local.json';
-const DEFAULT_CLAUDE_OAUTH_PROVIDER_ID = 'claude-oauth';
-const DEFAULT_CODEX_OAUTH_PROVIDER_ID = 'codex-oauth';
-const DEFAULT_GEMINI_OAUTH_PROVIDER_ID = 'gemini-oauth';
 
-type LegacyProviderProfilesMetaFile = {
+const BUILTIN_ACCOUNT_SPECS = [
+  {
+    id: 'claude',
+    displayName: 'Claude (OAuth)',
+    client: 'anthropic',
+    models: ['claude-opus-4-6[1m]', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'],
+  },
+  {
+    id: 'codex',
+    displayName: 'Codex (OAuth)',
+    client: 'openai',
+    models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'],
+  },
+  {
+    id: 'gemini',
+    displayName: 'Gemini (OAuth)',
+    client: 'google',
+    models: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'],
+  },
+  { id: 'dare', displayName: 'Dare (client-auth)', client: 'dare', models: ['z-ai/glm-4.7'] },
+  {
+    id: 'opencode',
+    displayName: 'OpenCode (client-auth)',
+    client: 'opencode',
+    models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
+  },
+] as const satisfies ReadonlyArray<{
+  id: string;
+  displayName: string;
+  client: BuiltinAccountClient;
+  models: string[];
+}>;
+
+const BUILTIN_CLIENT_IDS = Object.fromEntries(BUILTIN_ACCOUNT_SPECS.map((spec) => [spec.client, spec.id])) as Record<
+  BuiltinAccountClient,
+  string
+>;
+
+const LEGACY_BUILTIN_ID_MAP: Record<string, BuiltinAccountClient> = {
+  'claude-oauth': 'anthropic',
+  'codex-oauth': 'openai',
+  'gemini-oauth': 'google',
+};
+
+const CLIENT_PROTOCOL_MAP: Partial<Record<BuiltinAccountClient, ProviderProfileProtocol>> = {
+  anthropic: 'anthropic',
+  openai: 'openai',
+  google: 'google',
+  dare: 'openai',
+  opencode: 'anthropic',
+};
+
+const DEFAULT_BOOTSTRAP_CLIENTS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google'];
+const ALL_BUILTIN_CLIENTS = BUILTIN_ACCOUNT_SPECS.map((spec) => spec.client) as BuiltinAccountClient[];
+
+type LegacyProviderProfilesMetaFileV1 = {
   version: 1;
   providers?: {
     anthropic?: {
       activeProfileId: string | null;
       profiles: Array<{
         id: string;
-        provider: 'anthropic';
-        name: string;
-        mode: ProviderProfileMode;
+        provider?: string;
+        name?: string;
+        displayName?: string;
+        mode?: ProviderProfileMode;
+        authType?: ProviderProfileAuthType;
         baseUrl?: string;
-        modelOverride?: string;
-        createdAt: string;
-        updatedAt: string;
+        createdAt?: string;
+        updatedAt?: string;
       }>;
     };
   };
 };
 
-type LegacyProviderProfilesSecretsFile = {
+type LegacyProviderProfilesMetaFileV2 = {
+  version: 2;
+  activeProfileId?: string | null;
+  activeProfileIds?: Partial<Record<'anthropic' | 'openai' | 'google', string | null>>;
+  profiles?: Array<{
+    id: string;
+    provider?: string;
+    displayName?: string;
+    name?: string;
+    authType?: ProviderProfileAuthType;
+    mode?: ProviderProfileMode;
+    protocol?: 'anthropic' | 'openai' | 'google';
+    builtin?: boolean;
+    baseUrl?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  }>;
+};
+
+type LegacyProviderProfilesSecretsFileV1 = {
   version: 1;
   providers?: {
     anthropic?: Record<string, { apiKey?: string }>;
   };
 };
 
-const BUILTIN_PROVIDER_SPECS = [
-  {
-    id: DEFAULT_CLAUDE_OAUTH_PROVIDER_ID,
-    provider: DEFAULT_CLAUDE_OAUTH_PROVIDER_ID,
-    displayName: 'Claude (OAuth)',
-    authType: 'oauth' as const,
-    protocol: 'anthropic' as const,
-    builtin: true,
-    models: ['claude-opus-4-6', 'claude-sonnet-4'],
-  },
-  {
-    id: DEFAULT_CODEX_OAUTH_PROVIDER_ID,
-    provider: DEFAULT_CODEX_OAUTH_PROVIDER_ID,
-    displayName: 'Codex (OAuth)',
-    authType: 'oauth' as const,
-    protocol: 'openai' as const,
-    builtin: true,
-    models: ['gpt-5.4', 'gpt-5.3-codex'],
-  },
-  {
-    id: DEFAULT_GEMINI_OAUTH_PROVIDER_ID,
-    provider: DEFAULT_GEMINI_OAUTH_PROVIDER_ID,
-    displayName: 'Gemini (OAuth)',
-    authType: 'oauth' as const,
-    protocol: 'google' as const,
-    builtin: true,
-    models: ['gemini-3.1-pro', 'gemini-2.5-pro'],
-  },
-] satisfies Array<
-  Pick<ProviderProfileMeta, 'id' | 'provider' | 'displayName' | 'authType' | 'protocol' | 'builtin' | 'models'>
->;
-
-const PROTOCOL_DEFAULT_PROFILE_IDS: Record<ProviderProfileProtocol, string> = {
-  anthropic: DEFAULT_CLAUDE_OAUTH_PROVIDER_ID,
-  openai: DEFAULT_CODEX_OAUTH_PROVIDER_ID,
-  google: DEFAULT_GEMINI_OAUTH_PROVIDER_ID,
+type LegacyProviderProfilesSecretsFileV2 = {
+  version: 2;
+  profiles?: Record<string, { apiKey?: string }>;
 };
 
 function safePath(projectRoot: string, ...segments: string[]): string {
@@ -117,8 +160,28 @@ function safePath(projectRoot: string, ...segments: string[]): string {
   return normalized;
 }
 
-function isKnownProtocol(value: string | undefined | null): value is ProviderProfileProtocol {
-  return value === 'anthropic' || value === 'openai' || value === 'google';
+function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
+  const trimmed = baseUrl?.trim();
+  return trimmed ? trimmed.replace(/\/+$/, '') : undefined;
+}
+
+function normalizeProtocol(protocol: string | undefined): ProviderProfileProtocol | undefined {
+  const trimmed = protocol?.trim();
+  if (trimmed === 'anthropic' || trimmed === 'openai' || trimmed === 'google') {
+    return trimmed;
+  }
+  return undefined;
+}
+
+function normalizeModels(models: string[] | undefined): string[] | undefined {
+  if (!Array.isArray(models)) return undefined;
+  return Array.from(new Set(models.map((value) => value.trim()).filter((value) => value.length > 0)));
+}
+
+function normalizeBuiltinModels(models: string[] | undefined, builtinModels: string[]): string[] {
+  const normalized = normalizeModels(models);
+  if (!normalized) return [...builtinModels];
+  return Array.from(new Set([...normalized, ...builtinModels]));
 }
 
 function authTypeToMode(authType: ProviderProfileAuthType): ProviderProfileMode {
@@ -129,77 +192,17 @@ function modeToAuthType(mode: ProviderProfileMode | undefined): ProviderProfileA
   return mode === 'api_key' ? 'api_key' : 'oauth';
 }
 
-function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
-  const trimmed = baseUrl?.trim();
-  return trimmed ? trimmed.replace(/\/+$/, '') : undefined;
-}
-
-interface BoundRuntimeCatReference {
-  catId: string;
-  defaultModel: string;
-}
-
-function collectRuntimeCatsBoundToProfile(projectRoot: string, profileId: string): BoundRuntimeCatReference[] {
-  const catalog = readCatCatalog(projectRoot);
-  if (!catalog) return [];
-
-  const references: BoundRuntimeCatReference[] = [];
-  for (const breed of catalog.breeds) {
-    for (const variant of breed.variants) {
-      if (variant.providerProfileId === profileId) {
-        references.push({
-          catId: variant.catId ?? breed.catId,
-          defaultModel: variant.defaultModel,
-        });
-      }
-    }
-  }
-  return references;
-}
-
-function findRuntimeCatsBoundToProfile(projectRoot: string, profileId: string): string[] {
-  const boundCatIds = new Set(collectRuntimeCatsBoundToProfile(projectRoot, profileId).map((binding) => binding.catId));
-  return Array.from(boundCatIds);
-}
-
-function assertBoundRuntimeCatModelsCompatible(projectRoot: string, profileId: string, models: string[]): void {
-  if (models.length === 0) return;
-  const incompatibleBindings = collectRuntimeCatsBoundToProfile(projectRoot, profileId).filter(
-    (binding) => !models.includes(binding.defaultModel),
-  );
-  if (incompatibleBindings.length === 0) return;
-  const bindings = Array.from(new Set(incompatibleBindings.map((binding) => `${binding.catId} (${binding.defaultModel})`)));
-  throw new Error(
-    `provider profile "${profileId}" models must include bound runtime cat defaults: ${bindings.join(', ')}`,
-  );
-}
-
-function normalizeModels(models: string[] | undefined, modelOverride?: string): string[] {
-  const seen = new Set<string>();
-  const next: string[] = [];
-  for (const model of models ?? []) {
-    const trimmed = model.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    next.push(trimmed);
-  }
-  const trimmedOverride = modelOverride?.trim();
-  if (trimmedOverride && !seen.has(trimmedOverride)) {
-    next.push(trimmedOverride);
-  }
-  return next;
-}
-
 function slugify(value: string): string {
   const slug = value
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return slug || `provider-${randomUUID().slice(0, 8)}`;
+  return slug || `account-${randomUUID().slice(0, 8)}`;
 }
 
-function createUniqueProviderId(existingProfiles: ProviderProfileMeta[], seed: string): string {
+function createUniqueAccountId(existingProfiles: ProviderProfileMeta[], displayName: string): string {
+  const seed = slugify(displayName);
   const existingIds = new Set(existingProfiles.map((profile) => profile.id));
   if (!existingIds.has(seed)) return seed;
   let counter = 2;
@@ -207,71 +210,319 @@ function createUniqueProviderId(existingProfiles: ProviderProfileMeta[], seed: s
   return `${seed}-${counter}`;
 }
 
-function inferProtocol(input: CreateProviderProfileInput | UpdateProviderProfileInput, fallback: ProviderProfileProtocol) {
-  const candidate = 'protocol' in input ? input.protocol : undefined;
-  if (isKnownProtocol(candidate)) return candidate;
-  const legacyProvider = 'provider' in input ? input.provider : undefined;
-  if (isKnownProtocol(legacyProvider)) return legacyProvider;
-  return fallback;
-}
-
 function createBuiltinProfiles(now = new Date().toISOString()): ProviderProfileMeta[] {
-  return BUILTIN_PROVIDER_SPECS.map((builtin) => ({
-    ...builtin,
-    models: [...builtin.models],
+  return BUILTIN_ACCOUNT_SPECS.map((spec) => ({
+    id: spec.id,
+    displayName: spec.displayName,
+    kind: 'builtin',
+    authType: 'oauth',
+    builtin: true,
+    client: spec.client,
+    ...(CLIENT_PROTOCOL_MAP[spec.client] ? { protocol: CLIENT_PROTOCOL_MAP[spec.client] } : {}),
+    models: [...spec.models],
     createdAt: now,
     updatedAt: now,
   }));
 }
 
-function createDefaultActiveProfileIds(): ActiveProviderProfileIds {
-  return {
-    anthropic: DEFAULT_CLAUDE_OAUTH_PROVIDER_ID,
-    openai: DEFAULT_CODEX_OAUTH_PROVIDER_ID,
-    google: DEFAULT_GEMINI_OAUTH_PROVIDER_ID,
-  };
-}
-
-function ensureActiveProfileIds(meta: ProviderProfilesMetaFile): ActiveProviderProfileIds {
-  if (meta.activeProfileIds) return meta.activeProfileIds;
-  const next = createDefaultActiveProfileIds();
-  meta.activeProfileIds = next;
+function createDefaultBootstrapBindings(): BootstrapBindings {
+  const next: BootstrapBindings = {};
+  for (const client of ALL_BUILTIN_CLIENTS) {
+    if (DEFAULT_BOOTSTRAP_CLIENTS.includes(client)) {
+      next[client] = {
+        enabled: true,
+        mode: 'oauth',
+        accountRef: BUILTIN_CLIENT_IDS[client],
+      };
+    } else {
+      next[client] = {
+        enabled: false,
+        mode: 'skip',
+      };
+    }
+  }
   return next;
-}
-
-function syncLegacyActiveProfileId(meta: ProviderProfilesMetaFile): void {
-  const activeIds = ensureActiveProfileIds(meta);
-  meta.activeProfileId = activeIds.anthropic ?? DEFAULT_CLAUDE_OAUTH_PROVIDER_ID;
-}
-
-function findProtocolFallbackProfileId(meta: ProviderProfilesMetaFile, protocol: ProviderProfileProtocol): string | null {
-  const preferred = PROTOCOL_DEFAULT_PROFILE_IDS[protocol];
-  const builtin = meta.profiles.find((profile) => profile.id === preferred && profile.protocol === protocol);
-  if (builtin) return builtin.id;
-  const firstSameProtocol = meta.profiles.find((profile) => profile.protocol === protocol);
-  return firstSameProtocol?.id ?? null;
-}
-
-function setActiveProfile(meta: ProviderProfilesMetaFile, protocol: ProviderProfileProtocol, profileId: string | null): void {
-  const activeIds = ensureActiveProfileIds(meta);
-  activeIds[protocol] = profileId;
-  syncLegacyActiveProfileId(meta);
 }
 
 function createDefaultMeta(): ProviderProfilesMetaFile {
   return {
-    version: 2,
-    activeProfileId: DEFAULT_CLAUDE_OAUTH_PROVIDER_ID,
-    activeProfileIds: createDefaultActiveProfileIds(),
-    profiles: createBuiltinProfiles(),
+    version: 3,
+    activeProfileId: null,
+    providers: createBuiltinProfiles(),
+    bootstrapBindings: createDefaultBootstrapBindings(),
   };
 }
 
 function createDefaultSecrets(): ProviderProfilesSecretsFile {
   return {
-    version: 2,
+    version: 3,
     profiles: {},
   };
+}
+
+function isBuiltinClient(value: string | undefined | null): value is BuiltinAccountClient {
+  return value === 'anthropic' || value === 'openai' || value === 'google' || value === 'dare' || value === 'opencode';
+}
+
+function normalizeProfile(profile: ProviderProfileMeta): ProviderProfileMeta {
+  if (profile.kind === 'builtin' || profile.builtin) {
+    const client = isBuiltinClient(profile.client) ? profile.client : LEGACY_BUILTIN_ID_MAP[profile.id];
+    if (!client) {
+      throw new Error(`Unknown builtin client for account ${profile.id}`);
+    }
+    const builtin = BUILTIN_ACCOUNT_SPECS.find((spec) => spec.client === client)!;
+    return {
+      id: builtin.id,
+      displayName: profile.displayName?.trim() || builtin.displayName,
+      kind: 'builtin',
+      authType: 'oauth',
+      builtin: true,
+      client,
+      ...(CLIENT_PROTOCOL_MAP[client] ? { protocol: CLIENT_PROTOCOL_MAP[client] } : {}),
+      // Builtin baselines may grow across releases; preserve user-added models
+      // while automatically backfilling newly supported defaults.
+      models: normalizeBuiltinModels(profile.models, builtin.models),
+      createdAt: profile.createdAt || new Date().toISOString(),
+      updatedAt: profile.updatedAt || profile.createdAt || new Date().toISOString(),
+    };
+  }
+
+  return {
+    id: profile.id,
+    displayName: profile.displayName?.trim() || profile.id,
+    kind: 'api_key',
+    authType: 'api_key',
+    builtin: false,
+    ...(normalizeProtocol(profile.protocol) ? { protocol: normalizeProtocol(profile.protocol) } : {}),
+    ...(normalizeBaseUrl(profile.baseUrl) ? { baseUrl: normalizeBaseUrl(profile.baseUrl) } : {}),
+    ...(normalizeModels(profile.models) !== undefined ? { models: normalizeModels(profile.models) } : {}),
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt,
+  };
+}
+
+function migrateLegacyMetaV1(meta: LegacyProviderProfilesMetaFileV1 | null): ProviderProfilesMetaFile {
+  const next = createDefaultMeta();
+  if (!meta?.providers?.anthropic?.profiles) return next;
+
+  const now = new Date().toISOString();
+  const migrated: ProviderProfileMeta[] = [];
+  for (const legacyProfile of meta.providers.anthropic.profiles) {
+    const legacyId = legacyProfile.id;
+    if (legacyId === 'anthropic-subscription-default' || LEGACY_BUILTIN_ID_MAP[legacyId]) {
+      continue;
+    }
+    migrated.push({
+      id: legacyId,
+      displayName: legacyProfile.displayName?.trim() || legacyProfile.name?.trim() || legacyId,
+      kind: 'api_key',
+      authType: 'api_key',
+      builtin: false,
+      ...(normalizeBaseUrl(legacyProfile.baseUrl) ? { baseUrl: normalizeBaseUrl(legacyProfile.baseUrl) } : {}),
+      createdAt: legacyProfile.createdAt || now,
+      updatedAt: legacyProfile.updatedAt || legacyProfile.createdAt || now,
+    });
+  }
+  next.providers.push(...migrated);
+
+  const activeId = meta.providers.anthropic.activeProfileId;
+  if (activeId && !LEGACY_BUILTIN_ID_MAP[activeId] && migrated.some((profile) => profile.id === activeId)) {
+    next.bootstrapBindings.anthropic = {
+      enabled: true,
+      mode: 'api_key',
+      accountRef: activeId,
+    };
+  }
+  return next;
+}
+
+function migrateLegacyMetaV2(meta: LegacyProviderProfilesMetaFileV2 | null): ProviderProfilesMetaFile {
+  const next = createDefaultMeta();
+  if (!meta?.profiles) return next;
+
+  const now = new Date().toISOString();
+  const migrated: ProviderProfileMeta[] = [];
+  for (const legacyProfile of meta.profiles) {
+    const legacyId = legacyProfile.id;
+    const builtinClient = LEGACY_BUILTIN_ID_MAP[legacyId];
+    if (builtinClient) {
+      continue;
+    }
+    if (legacyProfile.builtin) {
+      continue;
+    }
+    migrated.push({
+      id: legacyId,
+      displayName: legacyProfile.displayName?.trim() || legacyProfile.name?.trim() || legacyId,
+      kind: 'api_key',
+      authType: 'api_key',
+      builtin: false,
+      ...(normalizeBaseUrl(legacyProfile.baseUrl) ? { baseUrl: normalizeBaseUrl(legacyProfile.baseUrl) } : {}),
+      createdAt: legacyProfile.createdAt || now,
+      updatedAt: legacyProfile.updatedAt || legacyProfile.createdAt || now,
+    });
+  }
+  next.providers.push(...migrated);
+
+  const selected = meta.activeProfileIds ?? {};
+  const legacyAnthropic = selected.anthropic ?? meta.activeProfileId ?? null;
+  const legacyOpenAI = selected.openai ?? null;
+  const legacyGoogle = selected.google ?? null;
+  const picks: Array<[BuiltinAccountClient, string | null]> = [
+    ['anthropic', legacyAnthropic],
+    ['openai', legacyOpenAI],
+    ['google', legacyGoogle],
+  ];
+  for (const [client, activeId] of picks) {
+    if (!activeId || LEGACY_BUILTIN_ID_MAP[activeId]) continue;
+    if (!migrated.some((profile) => profile.id === activeId)) continue;
+    next.bootstrapBindings[client] = {
+      enabled: true,
+      mode: 'api_key',
+      accountRef: activeId,
+    };
+  }
+  return next;
+}
+
+function normalizeBootstrapBindings(
+  raw: BootstrapBindings | undefined,
+  profiles: ProviderProfileMeta[],
+): BootstrapBindings {
+  const defaults = createDefaultBootstrapBindings();
+  const byId = new Map(profiles.map((profile) => [profile.id, profile] as const));
+  const next: BootstrapBindings = {};
+
+  for (const client of ALL_BUILTIN_CLIENTS) {
+    const candidate = raw?.[client];
+    if (!candidate || candidate.mode === 'oauth') {
+      next[client] = {
+        enabled: defaults[client]?.enabled ?? false,
+        mode: 'oauth',
+        accountRef: BUILTIN_CLIENT_IDS[client],
+      };
+      if (!DEFAULT_BOOTSTRAP_CLIENTS.includes(client)) {
+        next[client] = defaults[client];
+      }
+      continue;
+    }
+
+    if (candidate.mode === 'skip' || candidate.enabled === false) {
+      next[client] = { enabled: false, mode: 'skip' };
+      continue;
+    }
+
+    const accountRef = candidate.accountRef?.trim();
+    const profile = accountRef ? byId.get(accountRef) : undefined;
+    if (candidate.mode === 'api_key' && profile?.kind === 'api_key') {
+      next[client] = { enabled: true, mode: 'api_key', accountRef: profile.id };
+      continue;
+    }
+
+    next[client] = defaults[client];
+  }
+
+  return next;
+}
+
+function sortProfiles(profiles: ProviderProfileMeta[]): ProviderProfileMeta[] {
+  const builtinOrder = new Map<string, number>(BUILTIN_ACCOUNT_SPECS.map((spec, index) => [spec.id, index]));
+  return [...profiles].sort((a, b) => {
+    const aBuiltin = builtinOrder.get(a.id);
+    const bBuiltin = builtinOrder.get(b.id);
+    if (aBuiltin != null && bBuiltin != null) return aBuiltin - bBuiltin;
+    if (aBuiltin != null) return -1;
+    if (bBuiltin != null) return 1;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+}
+
+function normalizeMeta(
+  meta: ProviderProfilesMetaFile | LegacyProviderProfilesMetaFileV1 | LegacyProviderProfilesMetaFileV2 | null,
+): NormalizedState<ProviderProfilesMetaFile> {
+  if (!meta) {
+    return { value: createDefaultMeta(), dirty: true };
+  }
+
+  let next: ProviderProfilesMetaFile;
+  let dirty = false;
+
+  if (meta.version === 1) {
+    next = migrateLegacyMetaV1(meta);
+    dirty = true;
+  } else if (meta.version === 2) {
+    next = migrateLegacyMetaV2(meta);
+    dirty = true;
+  } else {
+    next = structuredClone(meta);
+  }
+
+  const normalizedProfiles = new Map<string, ProviderProfileMeta>();
+  for (const builtin of createBuiltinProfiles()) {
+    normalizedProfiles.set(builtin.id, builtin);
+  }
+  for (const rawProfile of next.providers ?? []) {
+    const profile = normalizeProfile(rawProfile);
+    normalizedProfiles.set(profile.id, profile);
+  }
+
+  const providers = sortProfiles(Array.from(normalizedProfiles.values()));
+  const bootstrapBindings = normalizeBootstrapBindings(next.bootstrapBindings, providers);
+  if (
+    JSON.stringify(providers) !== JSON.stringify(next.providers ?? []) ||
+    JSON.stringify(bootstrapBindings) !== JSON.stringify(next.bootstrapBindings ?? {})
+  ) {
+    dirty = true;
+  }
+
+  return {
+    value: {
+      version: 3,
+      activeProfileId: null,
+      providers,
+      bootstrapBindings,
+    },
+    dirty,
+  };
+}
+
+function migrateLegacySecrets(
+  secrets:
+    | ProviderProfilesSecretsFile
+    | LegacyProviderProfilesSecretsFileV1
+    | LegacyProviderProfilesSecretsFileV2
+    | null,
+): ProviderProfilesSecretsFile {
+  if (!secrets) return createDefaultSecrets();
+  if (secrets.version === 1) {
+    return {
+      version: 3,
+      profiles: { ...(secrets.providers?.anthropic ?? {}) },
+    };
+  }
+  if (secrets.version === 2) {
+    return {
+      version: 3,
+      profiles: { ...(secrets.profiles ?? {}) },
+    };
+  }
+  return secrets;
+}
+
+function normalizeSecrets(
+  secrets:
+    | ProviderProfilesSecretsFile
+    | LegacyProviderProfilesSecretsFileV1
+    | LegacyProviderProfilesSecretsFileV2
+    | null,
+): NormalizedState<ProviderProfilesSecretsFile> {
+  if (!secrets) {
+    return { value: createDefaultSecrets(), dirty: true };
+  }
+  if (secrets.version !== 3) {
+    return { value: migrateLegacySecrets(secrets), dirty: true };
+  }
+  return { value: secrets, dirty: false };
 }
 
 async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
@@ -287,197 +538,6 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
 }
 
-function normalizeProfile(profile: ProviderProfileMeta): ProviderProfileMeta {
-  return {
-    ...profile,
-    provider: profile.provider || profile.id,
-    displayName: profile.displayName?.trim() || profile.provider || profile.id,
-    authType: profile.authType === 'api_key' ? 'api_key' : 'oauth',
-    protocol: isKnownProtocol(profile.protocol) ? profile.protocol : 'anthropic',
-    builtin: Boolean(profile.builtin),
-    ...(normalizeBaseUrl(profile.baseUrl) ? { baseUrl: normalizeBaseUrl(profile.baseUrl) } : {}),
-    models: normalizeModels(profile.models, profile.modelOverride),
-    ...(profile.modelOverride?.trim() ? { modelOverride: profile.modelOverride.trim() } : {}),
-    createdAt: profile.createdAt,
-    updatedAt: profile.updatedAt,
-  };
-}
-
-function migrateLegacyMeta(meta: LegacyProviderProfilesMetaFile): ProviderProfilesMetaFile {
-  const next = createDefaultMeta();
-  const legacyAnthropic = meta.providers?.anthropic;
-  if (!legacyAnthropic?.profiles) {
-    return next;
-  }
-
-  for (const profile of legacyAnthropic.profiles) {
-    if (profile.id === 'anthropic-subscription-default') {
-      const builtin = next.profiles.find((item) => item.id === DEFAULT_CLAUDE_OAUTH_PROVIDER_ID);
-      if (builtin && profile.modelOverride?.trim()) {
-        builtin.modelOverride = profile.modelOverride.trim();
-        builtin.models = normalizeModels(builtin.models, builtin.modelOverride);
-        builtin.updatedAt = profile.updatedAt;
-      }
-      continue;
-    }
-
-    next.profiles.push({
-      id: profile.id,
-      provider: profile.id,
-      displayName: profile.name,
-      authType: modeToAuthType(profile.mode),
-      protocol: 'anthropic',
-      builtin: false,
-      ...(normalizeBaseUrl(profile.baseUrl) ? { baseUrl: normalizeBaseUrl(profile.baseUrl) } : {}),
-      models: normalizeModels(undefined, profile.modelOverride),
-      ...(profile.modelOverride?.trim() ? { modelOverride: profile.modelOverride.trim() } : {}),
-      createdAt: profile.createdAt,
-      updatedAt: profile.updatedAt,
-    });
-  }
-
-  next.activeProfileId =
-    legacyAnthropic.activeProfileId === 'anthropic-subscription-default' || !legacyAnthropic.activeProfileId
-      ? DEFAULT_CLAUDE_OAUTH_PROVIDER_ID
-      : legacyAnthropic.activeProfileId;
-  setActiveProfile(next, 'anthropic', next.activeProfileId);
-  return next;
-}
-
-function normalizeMeta(
-  meta: ProviderProfilesMetaFile | LegacyProviderProfilesMetaFile | null,
-): NormalizedState<ProviderProfilesMetaFile> {
-  if (!meta) {
-    return { value: createDefaultMeta(), dirty: true };
-  }
-
-  const next = meta.version === 1 ? migrateLegacyMeta(meta) : structuredClone(meta);
-  let dirty = meta.version !== 2;
-
-  if (next.version !== 2 || !Array.isArray(next.profiles)) {
-    return { value: createDefaultMeta(), dirty: true };
-  }
-
-  const normalizedProfiles: ProviderProfileMeta[] = [];
-  const seenIds = new Set<string>();
-  for (const rawProfile of next.profiles) {
-    if (!rawProfile?.id || seenIds.has(rawProfile.id)) {
-      dirty = true;
-      continue;
-    }
-    seenIds.add(rawProfile.id);
-    normalizedProfiles.push(normalizeProfile(rawProfile));
-  }
-
-  const byId = new Map(normalizedProfiles.map((profile) => [profile.id, profile] as const));
-  for (const builtinSpec of createBuiltinProfiles()) {
-    const existing = byId.get(builtinSpec.id);
-    if (!existing) {
-      normalizedProfiles.push(builtinSpec);
-      byId.set(builtinSpec.id, builtinSpec);
-      dirty = true;
-      continue;
-    }
-
-    const normalizedBuiltin: ProviderProfileMeta = {
-      ...existing,
-      provider: builtinSpec.provider,
-      displayName: existing.displayName || builtinSpec.displayName,
-      authType: 'oauth',
-      protocol: builtinSpec.protocol,
-      builtin: true,
-      models: existing.models.length > 0 ? normalizeModels(existing.models, existing.modelOverride) : [...builtinSpec.models],
-      createdAt: existing.createdAt || builtinSpec.createdAt,
-      updatedAt: existing.updatedAt || existing.createdAt || builtinSpec.updatedAt,
-      ...(existing.modelOverride ? { modelOverride: existing.modelOverride } : {}),
-    };
-    const idx = normalizedProfiles.findIndex((profile) => profile.id === builtinSpec.id);
-    normalizedProfiles[idx] = normalizedBuiltin;
-    byId.set(builtinSpec.id, normalizedBuiltin);
-    if (
-      existing.provider !== normalizedBuiltin.provider ||
-      existing.authType !== 'oauth' ||
-      existing.protocol !== normalizedBuiltin.protocol ||
-      existing.builtin !== true
-    ) {
-      dirty = true;
-    }
-  }
-
-  const builtinOrder = new Map(BUILTIN_PROVIDER_SPECS.map((profile, index) => [profile.id, index] as const));
-  normalizedProfiles.sort((a, b) => {
-    const aBuiltinOrder = builtinOrder.get(a.id);
-    const bBuiltinOrder = builtinOrder.get(b.id);
-    if (aBuiltinOrder != null && bBuiltinOrder != null) return aBuiltinOrder - bBuiltinOrder;
-    if (aBuiltinOrder != null) return -1;
-    if (bBuiltinOrder != null) return 1;
-    return a.createdAt.localeCompare(b.createdAt);
-  });
-
-  next.profiles = normalizedProfiles;
-  const rawActiveProfileIds = (next as Partial<ProviderProfilesMetaFile>).activeProfileIds;
-  const normalizedActiveProfileIds = createDefaultActiveProfileIds();
-  if (rawActiveProfileIds && typeof rawActiveProfileIds === 'object') {
-    for (const protocol of Object.keys(PROTOCOL_DEFAULT_PROFILE_IDS) as ProviderProfileProtocol[]) {
-      const selectedId = rawActiveProfileIds[protocol];
-      if (selectedId == null) {
-        normalizedActiveProfileIds[protocol] = null;
-        continue;
-      }
-      const matched = byId.get(selectedId);
-      if (matched?.protocol === protocol) {
-        normalizedActiveProfileIds[protocol] = matched.id;
-      } else {
-        dirty = true;
-      }
-    }
-  } else {
-    dirty = true;
-  }
-
-  if (next.activeProfileId && byId.has(next.activeProfileId)) {
-    const legacyActive = byId.get(next.activeProfileId)!;
-    if (normalizedActiveProfileIds[legacyActive.protocol] !== legacyActive.id) {
-      normalizedActiveProfileIds[legacyActive.protocol] = legacyActive.id;
-      if (!rawActiveProfileIds) dirty = true;
-    }
-  }
-
-  for (const protocol of Object.keys(PROTOCOL_DEFAULT_PROFILE_IDS) as ProviderProfileProtocol[]) {
-    const selectedId = normalizedActiveProfileIds[protocol];
-    const selected = selectedId ? byId.get(selectedId) : undefined;
-    if (selectedId && selected?.protocol === protocol) continue;
-    normalizedActiveProfileIds[protocol] = findProtocolFallbackProfileId(next, protocol);
-    dirty = true;
-  }
-
-  next.activeProfileIds = normalizedActiveProfileIds;
-  syncLegacyActiveProfileId(next);
-  return { value: next, dirty };
-}
-
-function migrateLegacySecrets(secrets: LegacyProviderProfilesSecretsFile): ProviderProfilesSecretsFile {
-  return {
-    version: 2,
-    profiles: { ...(secrets.providers?.anthropic ?? {}) },
-  };
-}
-
-function normalizeSecrets(
-  secrets: ProviderProfilesSecretsFile | LegacyProviderProfilesSecretsFile | null,
-): NormalizedState<ProviderProfilesSecretsFile> {
-  if (!secrets) {
-    return { value: createDefaultSecrets(), dirty: true };
-  }
-  if (secrets.version === 1) {
-    return { value: migrateLegacySecrets(secrets), dirty: true };
-  }
-  if (secrets.version === 2 && secrets.profiles) {
-    return { value: secrets, dirty: false };
-  }
-  return { value: createDefaultSecrets(), dirty: true };
-}
-
 async function readRaw(projectRoot: string): Promise<{
   meta: ProviderProfilesMetaFile;
   secrets: ProviderProfilesSecretsFile;
@@ -491,10 +551,14 @@ async function readRaw(projectRoot: string): Promise<{
   const secretsPath = safePath(storageRoot, CAT_CAFE_DIR, SECRETS_FILENAME);
   await mkdir(dir, { recursive: true });
   const normalizedMeta = normalizeMeta(
-    await readJsonOrNull<ProviderProfilesMetaFile | LegacyProviderProfilesMetaFile>(metaPath),
+    await readJsonOrNull<
+      ProviderProfilesMetaFile | LegacyProviderProfilesMetaFileV1 | LegacyProviderProfilesMetaFileV2
+    >(metaPath),
   );
   const normalizedSecrets = normalizeSecrets(
-    await readJsonOrNull<ProviderProfilesSecretsFile | LegacyProviderProfilesSecretsFile>(secretsPath),
+    await readJsonOrNull<
+      ProviderProfilesSecretsFile | LegacyProviderProfilesSecretsFileV1 | LegacyProviderProfilesSecretsFileV2
+    >(secretsPath),
   );
   return {
     meta: normalizedMeta.value,
@@ -517,6 +581,7 @@ async function writeRaw(
 function toViewProfile(profile: ProviderProfileMeta, secrets: ProviderProfilesSecretsFile): ProviderProfileView {
   return {
     ...profile,
+    provider: profile.id,
     name: profile.displayName,
     mode: authTypeToMode(profile.authType),
     hasApiKey: Boolean(secrets.profiles[profile.id]?.apiKey),
@@ -524,32 +589,133 @@ function toViewProfile(profile: ProviderProfileMeta, secrets: ProviderProfilesSe
 }
 
 function toView(meta: ProviderProfilesMetaFile, secrets: ProviderProfilesSecretsFile): ProviderProfilesView {
-  const activeProfileIds = ensureActiveProfileIds(meta);
   return {
-    activeProfileId: meta.activeProfileId,
-    activeProfileIds: { ...activeProfileIds },
-    providers: meta.profiles.map((profile) => toViewProfile(profile, secrets)),
+    activeProfileId: null,
+    providers: meta.providers.map((profile) => toViewProfile(profile, secrets)),
+    bootstrapBindings: meta.bootstrapBindings,
   };
 }
 
 function requireDisplayName(input: CreateProviderProfileInput | UpdateProviderProfileInput): string {
   const displayName = input.displayName ?? input.name;
   const trimmed = displayName?.trim();
-  if (!trimmed) throw new Error('name is required');
+  if (!trimmed) throw new Error('displayName or name is required');
   return trimmed;
 }
 
 function findProfile(meta: ProviderProfilesMetaFile, profileId: string): ProviderProfileMeta | undefined {
-  return meta.profiles.find((profile) => profile.id === profileId);
+  return meta.providers.find((profile) => profile.id === profileId);
+}
+
+function resolveClientFromSelector(
+  selector: ProviderProfileProvider | undefined,
+  profile?: ProviderProfileMeta,
+): BuiltinAccountClient | null {
+  const trimmed = selector?.trim();
+  if (trimmed && isBuiltinClient(trimmed)) return trimmed;
+  if (profile?.client) return profile.client;
+  if (trimmed) {
+    const legacyClient = LEGACY_BUILTIN_ID_MAP[trimmed];
+    if (legacyClient) return legacyClient;
+  }
+  return null;
 }
 
 function assertProviderSelector(profile: ProviderProfileMeta, selector: ProviderProfileProvider): void {
-  if (isKnownProtocol(selector) && profile.protocol !== selector) {
-    throw new Error(`unsupported provider: ${selector}`);
-  }
-  if (!isKnownProtocol(selector) && selector !== profile.id && selector !== profile.provider) {
+  const trimmed = selector?.trim();
+  if (!trimmed) return;
+  if (trimmed === profile.id) return;
+  if (profile.kind === 'api_key') {
+    if (isBuiltinClient(trimmed)) return;
+    if (LEGACY_BUILTIN_ID_MAP[trimmed]) return;
     throw new Error('profile not found');
   }
+  if (profile.client && trimmed === profile.client) return;
+  if (LEGACY_BUILTIN_ID_MAP[trimmed] && profile.client === LEGACY_BUILTIN_ID_MAP[trimmed]) return;
+  throw new Error('profile not found');
+}
+
+function readRuntimeCatalog(projectRoot: string): any | null {
+  const filePath = resolve(projectRoot, '.cat-cafe', 'cat-catalog.json');
+  if (!existsSync(filePath)) return null;
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function collectRuntimeCatsBoundToProfile(projectRoot: string, profileId: string): string[] {
+  const catalog = readRuntimeCatalog(projectRoot);
+  if (!catalog?.breeds || !Array.isArray(catalog.breeds)) return [];
+  const result = new Set<string>();
+  for (const breed of catalog.breeds) {
+    for (const variant of breed.variants ?? []) {
+      const accountRef = typeof variant.accountRef === 'string' ? variant.accountRef : variant.providerProfileId;
+      if (accountRef !== profileId) continue;
+      result.add(variant.catId ?? breed.catId);
+    }
+  }
+  return Array.from(result);
+}
+
+function isReferencedByBootstrapBindings(meta: ProviderProfilesMetaFile, profileId: string): boolean {
+  return Object.values(meta.bootstrapBindings).some((binding) => binding?.accountRef === profileId);
+}
+
+export function builtinAccountIdForClient(client: BuiltinAccountClient): string {
+  return BUILTIN_CLIENT_IDS[client];
+}
+
+export async function readBootstrapBindings(projectRoot: string): Promise<BootstrapBindings> {
+  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
+  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+  return meta.bootstrapBindings;
+}
+
+export function readBootstrapBindingsSync(projectRoot: string): BootstrapBindings {
+  const storageRoot = resolveProviderProfilesRootSync(projectRoot);
+  const metaPath = safePath(storageRoot, CAT_CAFE_DIR, META_FILENAME);
+  const raw = existsSync(metaPath)
+    ? (JSON.parse(readFileSync(metaPath, 'utf-8')) as
+        | ProviderProfilesMetaFile
+        | LegacyProviderProfilesMetaFileV1
+        | LegacyProviderProfilesMetaFileV2)
+    : null;
+  return normalizeMeta(raw).value.bootstrapBindings;
+}
+
+export async function setBootstrapBinding(
+  projectRoot: string,
+  client: BuiltinAccountClient,
+  binding: BootstrapBinding,
+): Promise<BootstrapBindings> {
+  const { meta, secrets, metaPath, secretsPath } = await readRaw(projectRoot);
+  if (!isBuiltinClient(client)) {
+    throw new Error(`unsupported client "${client}"`);
+  }
+  if (binding.mode === 'skip' || !binding.enabled) {
+    meta.bootstrapBindings[client] = { enabled: false, mode: 'skip' };
+  } else if (binding.mode === 'api_key') {
+    const accountRef = binding.accountRef?.trim();
+    const profile = accountRef ? findProfile(meta, accountRef) : undefined;
+    if (!profile || profile.kind !== 'api_key') {
+      throw new Error(`bootstrap api_key binding for "${client}" requires an existing api_key account`);
+    }
+    meta.bootstrapBindings[client] = {
+      enabled: true,
+      mode: 'api_key',
+      accountRef: profile.id,
+    };
+  } else {
+    meta.bootstrapBindings[client] = {
+      enabled: true,
+      mode: 'oauth',
+      accountRef: builtinAccountIdForClient(client),
+    };
+  }
+  await writeRaw(metaPath, secretsPath, meta, secrets);
+  return meta.bootstrapBindings;
 }
 
 export async function readProviderProfiles(projectRoot: string): Promise<ProviderProfilesView> {
@@ -565,34 +731,37 @@ export async function createProviderProfile(
   const { meta, secrets, metaPath, secretsPath } = await readRaw(projectRoot);
   const displayName = requireDisplayName(input);
   const authType = input.authType ?? modeToAuthType(input.mode);
-  const protocol = inferProtocol(input, 'anthropic');
-  const providerSeed = isKnownProtocol(input.provider) ? slugify(displayName) : slugify(input.provider || displayName);
-  const providerId = createUniqueProviderId(meta.profiles, providerSeed);
-  const now = new Date().toISOString();
-  const modelOverride = input.modelOverride?.trim();
+  if (authType !== 'api_key') {
+    throw new Error('only api_key accounts can be created');
+  }
+  const apiKey = input.apiKey?.trim();
+  if (!apiKey) throw new Error('apiKey is required for api_key mode');
+
   const profile: ProviderProfileMeta = {
-    id: providerId,
-    provider: providerId,
+    id: createUniqueAccountId(meta.providers, displayName),
     displayName,
-    authType,
-    protocol,
+    kind: 'api_key',
+    authType: 'api_key',
     builtin: false,
+    ...(normalizeProtocol(input.protocol) ? { protocol: normalizeProtocol(input.protocol) } : {}),
     ...(normalizeBaseUrl(input.baseUrl) ? { baseUrl: normalizeBaseUrl(input.baseUrl) } : {}),
-    models: normalizeModels(input.models, modelOverride),
-    ...(modelOverride ? { modelOverride } : {}),
-    createdAt: now,
-    updatedAt: now,
+    ...(normalizeModels(input.models) !== undefined ? { models: normalizeModels(input.models) } : {}),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
-  if (profile.authType === 'api_key') {
-    if (!input.apiKey?.trim()) throw new Error('apiKey is required for api_key mode');
-    if (!profile.baseUrl) throw new Error('baseUrl is required for api_key mode');
-    secrets.profiles[profile.id] = { apiKey: input.apiKey.trim() };
-  }
-
-  meta.profiles.push(profile);
+  meta.providers.push(profile);
+  secrets.profiles[profile.id] = { apiKey };
   if (input.setActive) {
-    setActiveProfile(meta, profile.protocol, profile.id);
+    const client = resolveClientFromSelector(input.provider ?? input.protocol, profile);
+    if (!client) {
+      throw new Error('client selector is required to bind an api_key account');
+    }
+    meta.bootstrapBindings[client] = {
+      enabled: true,
+      mode: 'api_key',
+      accountRef: profile.id,
+    };
   }
   await writeRaw(metaPath, secretsPath, meta, secrets);
   return toViewProfile(profile, secrets);
@@ -608,52 +777,51 @@ export async function updateProviderProfile(
   const profile = findProfile(meta, profileId);
   if (!profile) throw new Error('profile not found');
   assertProviderSelector(profile, provider);
+  if (profile.kind === 'builtin') {
+    const hasNonModelUpdates =
+      input.name !== undefined ||
+      input.displayName !== undefined ||
+      input.mode !== undefined ||
+      input.authType !== undefined ||
+      input.protocol !== undefined ||
+      input.baseUrl !== undefined ||
+      input.apiKey !== undefined ||
+      input.modelOverride !== undefined;
+    if (hasNonModelUpdates) {
+      throw new Error('builtin accounts only support model updates');
+    }
+    if (input.models !== undefined) {
+      profile.models = normalizeModels(input.models);
+    }
+    profile.updatedAt = new Date().toISOString();
+    await writeRaw(metaPath, secretsPath, meta, secrets);
+    return toViewProfile(profile, secrets);
+  }
 
   if (typeof input.name === 'string' || typeof input.displayName === 'string') {
     profile.displayName = requireDisplayName(input);
   }
-
   const nextAuthType = input.authType ?? (input.mode ? modeToAuthType(input.mode) : profile.authType);
-  if (profile.builtin && nextAuthType !== profile.authType) {
-    throw new Error('builtin provider auth type is immutable');
+  if (nextAuthType !== 'api_key') {
+    throw new Error('api key accounts cannot be converted to oauth');
   }
-  profile.authType = nextAuthType;
-
   if (typeof input.baseUrl === 'string') {
     const normalizedBaseUrl = normalizeBaseUrl(input.baseUrl);
     if (normalizedBaseUrl) profile.baseUrl = normalizedBaseUrl;
     else delete profile.baseUrl;
   }
-
-  if (input.modelOverride === null || input.modelOverride === '') {
-    delete profile.modelOverride;
-  } else if (typeof input.modelOverride === 'string') {
-    const trimmedOverride = input.modelOverride.trim();
-    if (trimmedOverride) profile.modelOverride = trimmedOverride;
-    else delete profile.modelOverride;
+  if (input.protocol !== undefined) {
+    const normalizedProtocol = normalizeProtocol(input.protocol);
+    if (normalizedProtocol) profile.protocol = normalizedProtocol;
+    else delete profile.protocol;
   }
-
-  if (input.models) {
-    profile.models = normalizeModels(input.models, profile.modelOverride);
-  } else if (profile.modelOverride) {
-    profile.models = normalizeModels(profile.models, profile.modelOverride);
+  if (input.models !== undefined) {
+    profile.models = normalizeModels(input.models);
   }
-
+  if (typeof input.apiKey === 'string' && input.apiKey.trim()) {
+    secrets.profiles[profile.id] = { apiKey: input.apiKey.trim() };
+  }
   profile.updatedAt = new Date().toISOString();
-
-  if (profile.authType === 'api_key') {
-    if (typeof input.apiKey === 'string' && input.apiKey.trim()) {
-      secrets.profiles[profile.id] = { apiKey: input.apiKey.trim() };
-    }
-    if (!profile.baseUrl) throw new Error('baseUrl is required for api_key mode');
-    if (!secrets.profiles[profile.id]?.apiKey) throw new Error('apiKey is required for api_key mode');
-  } else {
-    delete secrets.profiles[profile.id];
-    delete profile.baseUrl;
-  }
-
-  assertBoundRuntimeCatModelsCompatible(projectRoot, profile.id, profile.models);
-
   await writeRaw(metaPath, secretsPath, meta, secrets);
   return toViewProfile(profile, secrets);
 }
@@ -667,7 +835,23 @@ export async function activateProviderProfile(
   const profile = findProfile(meta, profileId);
   if (!profile) throw new Error('profile not found');
   assertProviderSelector(profile, provider);
-  setActiveProfile(meta, profile.protocol, profileId);
+  const client = resolveClientFromSelector(provider, profile);
+  if (!client) {
+    throw new Error('client selector is required to bind an api_key account');
+  }
+  if (profile.kind === 'builtin') {
+    meta.bootstrapBindings[client] = {
+      enabled: true,
+      mode: 'oauth',
+      accountRef: builtinAccountIdForClient(client),
+    };
+  } else {
+    meta.bootstrapBindings[client] = {
+      enabled: true,
+      mode: 'api_key',
+      accountRef: profile.id,
+    };
+  }
   await writeRaw(metaPath, secretsPath, meta, secrets);
 }
 
@@ -680,22 +864,18 @@ export async function deleteProviderProfile(
   const profile = findProfile(meta, profileId);
   if (!profile) throw new Error('profile not found');
   assertProviderSelector(profile, provider);
-  if (profile.builtin) {
+  if (profile.kind === 'builtin') {
     throw new Error('builtin provider cannot be deleted');
   }
-  const boundCatIds = findRuntimeCatsBoundToProfile(projectRoot, profileId);
+  const boundCatIds = collectRuntimeCatsBoundToProfile(projectRoot, profileId);
   if (boundCatIds.length > 0) {
     throw new Error(`provider profile "${profileId}" is still referenced by runtime cats: ${boundCatIds.join(', ')}`);
   }
-
-  meta.profiles = meta.profiles.filter((item) => item.id !== profileId);
-  delete secrets.profiles[profileId];
-  const activeProfileIds = ensureActiveProfileIds(meta);
-  if (activeProfileIds[profile.protocol] === profileId) {
-    setActiveProfile(meta, profile.protocol, findProtocolFallbackProfileId(meta, profile.protocol));
-  } else {
-    syncLegacyActiveProfileId(meta);
+  if (isReferencedByBootstrapBindings(meta, profileId)) {
+    throw new Error(`provider profile "${profileId}" is still referenced by bootstrap bindings`);
   }
+  meta.providers = meta.providers.filter((item) => item.id !== profileId);
+  delete secrets.profiles[profileId];
   await writeRaw(metaPath, secretsPath, meta, secrets);
 }
 
@@ -716,57 +896,110 @@ function toRuntimeProviderProfile(
   profile: ProviderProfileMeta,
   secrets: ProviderProfilesSecretsFile,
 ): RuntimeProviderProfile | null {
-  if (profile.authType === 'api_key') {
+  if (profile.kind === 'api_key') {
     const apiKey = secrets.profiles[profile.id]?.apiKey;
-    if (!apiKey || !profile.baseUrl) return null;
+    if (!apiKey) return null;
     return {
       id: profile.id,
-      protocol: profile.protocol,
-      mode: 'api_key',
-      baseUrl: profile.baseUrl,
+      kind: 'api_key',
+      authType: 'api_key',
+      ...(profile.protocol ? { protocol: profile.protocol } : {}),
+      ...(profile.baseUrl ? { baseUrl: profile.baseUrl } : {}),
+      ...(profile.models ? { models: profile.models } : {}),
       apiKey,
-      ...(profile.modelOverride ? { modelOverride: profile.modelOverride } : {}),
     };
   }
 
   return {
     id: profile.id,
-    protocol: profile.protocol,
-    mode: 'subscription',
-    ...(profile.modelOverride ? { modelOverride: profile.modelOverride } : {}),
+    kind: 'builtin',
+    authType: 'oauth',
+    client: profile.client,
+    ...(profile.protocol ? { protocol: profile.protocol } : {}),
+    ...(profile.models ? { models: profile.models } : {}),
   };
 }
 
-function resolveRuntimeProviderCandidate(
-  meta: ProviderProfilesMetaFile,
-  secrets: ProviderProfilesSecretsFile,
-  protocol: ProviderProfileProtocol,
-  preferredProfileId?: string,
-): RuntimeProviderProfile | null {
-  const activeProfileIds = ensureActiveProfileIds(meta);
-  const candidates = [preferredProfileId, activeProfileIds[protocol], findProtocolFallbackProfileId(meta, protocol)].filter(
-    (id): id is string => Boolean(id),
-  );
-  const seen = new Set<string>();
-  for (const id of candidates) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const profile = findProfile(meta, id);
-    if (!profile || profile.protocol !== protocol) continue;
-    const runtime = toRuntimeProviderProfile(profile, secrets);
-    if (runtime) return runtime;
+function resolveBuiltinFromProtocol(protocol: 'anthropic' | 'openai' | 'google'): ProviderProfileMeta {
+  const client: BuiltinAccountClient =
+    protocol === 'anthropic' ? 'anthropic' : protocol === 'openai' ? 'openai' : 'google';
+  return resolveBuiltinFromClient(client);
+}
+
+function resolveBuiltinFromClient(client: BuiltinAccountClient): ProviderProfileMeta {
+  const id = builtinAccountIdForClient(client);
+  const spec = BUILTIN_ACCOUNT_SPECS.find((item) => item.id === id);
+  if (!spec) {
+    throw new Error(`builtin account "${id}" is not registered`);
   }
-  return null;
+  return {
+    id,
+    displayName: spec.displayName,
+    kind: 'builtin',
+    authType: 'oauth',
+    builtin: true,
+    client,
+    ...(CLIENT_PROTOCOL_MAP[client] ? { protocol: CLIENT_PROTOCOL_MAP[client] } : {}),
+    models: [...spec.models],
+    createdAt: '',
+    updatedAt: '',
+  };
 }
 
 export async function resolveRuntimeProviderProfile(
   projectRoot: string,
-  protocol: ProviderProfileProtocol,
+  protocol: 'anthropic' | 'openai' | 'google',
   preferredProfileId?: string,
 ): Promise<RuntimeProviderProfile | null> {
   const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
   if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
-  return resolveRuntimeProviderCandidate(meta, secrets, protocol, preferredProfileId);
+
+  const preferred = preferredProfileId ? findProfile(meta, preferredProfileId) : null;
+  if (preferred) {
+    return toRuntimeProviderProfile(preferred, secrets);
+  }
+
+  const bootstrapBinding = meta.bootstrapBindings[protocol];
+  if (bootstrapBinding?.mode === 'api_key') {
+    const boundProfile = bootstrapBinding.accountRef ? findProfile(meta, bootstrapBinding.accountRef) : undefined;
+    const runtime = boundProfile ? toRuntimeProviderProfile(boundProfile, secrets) : null;
+    if (runtime) return runtime;
+  }
+
+  const builtin = findProfile(meta, builtinAccountIdForClient(protocol));
+  if (builtin) {
+    return toRuntimeProviderProfile(builtin, secrets);
+  }
+
+  return toRuntimeProviderProfile(resolveBuiltinFromProtocol(protocol), secrets);
+}
+
+export async function resolveRuntimeProviderProfileForClient(
+  projectRoot: string,
+  client: BuiltinAccountClient,
+  preferredProfileId?: string,
+): Promise<RuntimeProviderProfile | null> {
+  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
+  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+
+  const preferred = preferredProfileId ? findProfile(meta, preferredProfileId) : null;
+  if (preferred) {
+    return toRuntimeProviderProfile(preferred, secrets);
+  }
+
+  const bootstrapBinding = meta.bootstrapBindings[client];
+  if (bootstrapBinding?.mode === 'api_key') {
+    const boundProfile = bootstrapBinding.accountRef ? findProfile(meta, bootstrapBinding.accountRef) : undefined;
+    const runtime = boundProfile ? toRuntimeProviderProfile(boundProfile, secrets) : null;
+    if (runtime) return runtime;
+  }
+
+  const builtin = findProfile(meta, builtinAccountIdForClient(client));
+  if (builtin) {
+    return toRuntimeProviderProfile(builtin, secrets);
+  }
+
+  return toRuntimeProviderProfile(resolveBuiltinFromClient(client), secrets);
 }
 
 export async function resolveRuntimeProviderProfileById(
@@ -784,17 +1017,17 @@ export async function resolveAnthropicRuntimeProfile(projectRoot: string): Promi
   const runtime =
     (await resolveRuntimeProviderProfile(projectRoot, 'anthropic')) ??
     ({
-      id: DEFAULT_CLAUDE_OAUTH_PROVIDER_ID,
-      protocol: 'anthropic',
-      mode: 'subscription',
+      id: builtinAccountIdForClient('anthropic'),
+      kind: 'builtin',
+      authType: 'oauth',
+      client: 'anthropic',
     } satisfies RuntimeProviderProfile);
 
   return {
     id: runtime.id,
-    mode: runtime.mode,
+    mode: authTypeToMode(runtime.authType),
     ...(runtime.baseUrl ? { baseUrl: runtime.baseUrl } : {}),
     ...(runtime.apiKey ? { apiKey: runtime.apiKey } : {}),
-    ...(runtime.modelOverride ? { modelOverride: runtime.modelOverride } : {}),
   };
 }
 
@@ -803,12 +1036,11 @@ export async function resolveAnthropicRuntimeProfileById(
   profileId: string,
 ): Promise<AnthropicRuntimeProfile | null> {
   const runtime = await resolveRuntimeProviderProfileById(projectRoot, profileId);
-  if (!runtime || runtime.protocol !== 'anthropic') return null;
+  if (!runtime) return null;
   return {
     id: runtime.id,
-    mode: runtime.mode,
+    mode: authTypeToMode(runtime.authType),
     ...(runtime.baseUrl ? { baseUrl: runtime.baseUrl } : {}),
     ...(runtime.apiKey ? { apiKey: runtime.apiKey } : {}),
-    ...(runtime.modelOverride ? { modelOverride: runtime.modelOverride } : {}),
   };
 }

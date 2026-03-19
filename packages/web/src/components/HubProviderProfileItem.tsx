@@ -1,16 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { TagEditor } from './hub-tag-editor';
-import { formatProtocolLabel } from './hub-provider-profiles.sections';
+import { accountTone, builtinClientLabel } from './hub-provider-profiles.view';
 import type { ProfileItem, ProfileTestResult } from './hub-provider-profiles.types';
 
 export interface ProfileEditPayload {
   displayName: string;
   baseUrl?: string;
   apiKey?: string;
-  modelOverride?: string | null;
   models?: string[];
+  modelOverride?: string | null;
 }
 
 interface HubProviderProfileItemProps {
@@ -23,24 +23,20 @@ interface HubProviderProfileItemProps {
 }
 
 function summaryText(profile: ProfileItem): string {
-  if (profile.oauthLikeClient === 'opencode') {
-    return 'OpenCode · client-auth · API Key 在 OpenCode 客户端本地配置，Clowder 不保存';
+  if (profile.builtin) {
+    const authLabel =
+      profile.client === 'dare' || profile.client === 'opencode' ? '内置 client-auth 账号' : '内置 OAuth 账号';
+    return `${builtinClientLabel(profile.client)} · ${authLabel} · 成员可直接绑定`;
   }
-  if (profile.oauthLikeClient === 'dare') {
-    return 'Dare · client-auth · API Key 在 Dare 客户端本地配置，Clowder 不保存';
-  }
-  if (profile.authType === 'api_key') {
-    const host = profile.baseUrl?.replace(/^https?:\/\//, '') ?? '(未设置)';
-    return `${formatProtocolLabel(profile.protocol)} · ${host} · apiKey: ${profile.hasApiKey ? '已配置' : '未配置'}`;
-  }
-  const runtimeName = profile.protocol === 'anthropic' ? 'Claude' : profile.protocol === 'google' ? 'Gemini' : 'Codex';
-  return `${runtimeName} · subscription · 走本机 ${runtimeName} 订阅登录态`;
+  const host = profile.baseUrl?.replace(/^https?:\/\//, '') ?? '(未设置)';
+  return `独立 API Key 账号 · ${host} · apiKey: ${profile.hasApiKey ? '已配置' : '未配置'}`;
 }
 
-function modelTone(profile: ProfileItem): 'purple' | 'green' | 'orange' {
-  if (profile.oauthLikeClient) return 'orange';
-  if (profile.protocol === 'google') return 'green';
-  return 'purple';
+function bindingBadgeClass(profile: ProfileItem): string {
+  const tone = accountTone(profile);
+  if (tone === 'orange') return 'bg-[#FFF4EC] text-[#C8946B]';
+  if (tone === 'green') return 'bg-[#E8F5E9] text-[#2E7D32]';
+  return 'bg-[#F3E8FF] text-[#9D7BC7]';
 }
 
 function verificationBadge(testResult?: ProfileTestResult) {
@@ -74,42 +70,23 @@ export function HubProviderProfileItem({
   const [editDisplayName, setEditDisplayName] = useState(profile.displayName);
   const [editBaseUrl, setEditBaseUrl] = useState(profile.baseUrl ?? '');
   const [editApiKey, setEditApiKey] = useState('');
-  const [editModels, setEditModels] = useState(profile.models);
-  const [inlineModels, setInlineModels] = useState(profile.models);
 
   const startEdit = useCallback(() => {
     setEditDisplayName(profile.displayName);
     setEditBaseUrl(profile.baseUrl ?? '');
     setEditApiKey('');
-    setEditModels(profile.models);
     setEditing(true);
-  }, [profile]);
-
-  useEffect(() => {
-    setInlineModels(profile.models);
-  }, [profile.models]);
+  }, [profile.baseUrl, profile.displayName]);
 
   const saveEdit = useCallback(async () => {
     await onSave(profile.id, {
       displayName: editDisplayName.trim(),
       ...(profile.authType === 'api_key' && editBaseUrl.trim() ? { baseUrl: editBaseUrl.trim() } : {}),
       ...(editApiKey.trim() ? { apiKey: editApiKey.trim() } : {}),
-      models: editModels,
+      ...(profile.models ? { models: profile.models } : {}),
     });
     setEditing(false);
-  }, [editApiKey, editBaseUrl, editDisplayName, editModels, onSave, profile.authType, profile.id]);
-
-  const saveInlineModels = useCallback(
-    async (nextModels: string[]) => {
-      setInlineModels(nextModels);
-      await onSave(profile.id, {
-        displayName: profile.displayName,
-        ...(profile.authType === 'api_key' && profile.baseUrl ? { baseUrl: profile.baseUrl } : {}),
-        models: nextModels,
-      });
-    },
-    [onSave, profile.authType, profile.baseUrl, profile.displayName, profile.id],
-  );
+  }, [editApiKey, editBaseUrl, editDisplayName, onSave, profile.authType, profile.id, profile.models]);
 
   const showTestButton = profile.authType === 'api_key';
   const statusBadge = verificationBadge(testResult);
@@ -125,7 +102,7 @@ export function HubProviderProfileItem({
             className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
           />
           <div className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm text-[#8A776B]">
-            {formatProtocolLabel(profile.protocol)} · {profile.authType}
+            {profile.builtin ? builtinClientLabel(profile.client) : '独立 API Key 账号'} · {profile.authType}
             {profile.builtin ? ' · 🔒 内置' : ''}
           </div>
           {profile.authType === 'api_key' ? (
@@ -144,16 +121,6 @@ export function HubProviderProfileItem({
               />
             </>
           ) : null}
-        </div>
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-[#5C4B42]">可用模型</p>
-          <TagEditor
-            tags={editModels}
-            onChange={setEditModels}
-            addLabel="+ 添加"
-            placeholder="输入模型名"
-            emptyLabel="(暂无模型)"
-          />
         </div>
         <div className="flex gap-2">
           <button
@@ -187,25 +154,36 @@ export function HubProviderProfileItem({
             {!profile.builtin ? (
               <span className="rounded-full bg-[#F3E8FF] px-2.5 py-1 text-[11px] font-semibold text-[#9D7BC7]">api_key</span>
             ) : null}
-            {statusBadge ? (
-              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusBadge.className}`}>
-                {statusBadge.label}
-              </span>
-            ) : null}
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusBadge.className}`}>
+              {statusBadge.label}
+            </span>
           </div>
           <p className="text-sm text-[#8A776B]">{summaryText(profile)}</p>
           <div className="space-y-2">
-            <p className="text-xs font-semibold text-[#8A776B]">可用模型</p>
+            <p className="text-xs font-semibold text-[#8A776B]">绑定范围</p>
             <div className="flex flex-wrap gap-2">
-              <TagEditor
-                tags={inlineModels}
-                onChange={saveInlineModels}
-                addLabel="+ 添加"
-                placeholder="输入模型名"
-                emptyLabel="(暂无模型)"
-                tone={modelTone(profile)}
-              />
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${bindingBadgeClass(profile)}`}>
+                {profile.builtin ? `固定内置账号：${builtinClientLabel(profile.client)}` : '可被任意 client 成员绑定'}
+              </span>
             </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-[#8A776B]">可用模型</p>
+            <TagEditor
+              tags={profile.models ?? []}
+              tone={profile.builtin ? 'orange' : 'purple'}
+              addLabel="+ 添加"
+              placeholder="输入模型名"
+              emptyLabel="(暂无模型)"
+              onChange={(nextModels) => {
+                if (busy) return;
+                void onSave(profile.id, {
+                  displayName: profile.displayName,
+                  ...(profile.authType === 'api_key' && profile.baseUrl ? { baseUrl: profile.baseUrl } : {}),
+                  models: nextModels,
+                });
+              }}
+            />
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-1.5">

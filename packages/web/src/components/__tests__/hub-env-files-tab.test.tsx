@@ -20,6 +20,7 @@ const MOCK_ENV_SUMMARY = {
       description: 'API 服务端口',
       category: 'server',
       sensitive: false,
+      runtimeEditable: false,
       currentValue: '3003',
     },
     {
@@ -28,6 +29,7 @@ const MOCK_ENV_SUMMARY = {
       description: 'Preview Gateway 端口',
       category: 'server',
       sensitive: false,
+      runtimeEditable: false,
       currentValue: '4100',
     },
     {
@@ -142,19 +144,16 @@ describe('HubEnvFilesTab', () => {
     expect(container.textContent).toContain('变量值可直接编辑，保存后自动回填 .env');
     expect(container.textContent).toContain('写回 .env 后需重启相关服务生效');
     expect(container.textContent).toContain('当前值已做凭证脱敏；修改时请填写完整连接串');
-    expect(container.querySelector('input[aria-label="API_SERVER_PORT"]')).toBeTruthy();
-    expect(container.querySelector('input[aria-label="PREVIEW_GATEWAY_PORT"]')).toBeTruthy();
+    expect(container.querySelector('input[aria-label="API_SERVER_PORT"]')).toBeNull();
+    expect(container.querySelector('input[aria-label="PREVIEW_GATEWAY_PORT"]')).toBeNull();
     expect(container.querySelector('input[aria-label="FRONTEND_URL"]')).toBeTruthy();
     expect(container.querySelector('input[aria-label="REDIS_URL"]')).toBeTruthy();
     expect(container.querySelector('input[aria-label="OPENAI_API_KEY"]')).toBeNull();
     expect(container.textContent).toContain('***');
 
-    const apiPortInput = container.querySelector('input[aria-label="API_SERVER_PORT"]') as HTMLInputElement;
-    const previewPortInput = container.querySelector('input[aria-label="PREVIEW_GATEWAY_PORT"]') as HTMLInputElement;
     const frontendUrlInput = container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement;
     const redisUrlInput = container.querySelector('input[aria-label="REDIS_URL"]') as HTMLInputElement;
-    await changeField(apiPortInput, '3014');
-    await changeField(previewPortInput, '5110');
+    expect(redisUrlInput.value).toBe('');
     await changeField(frontendUrlInput, 'http://localhost:3200');
     await changeField(redisUrlInput, 'redis://cache-user:secret@localhost:6380/16');
 
@@ -166,10 +165,8 @@ describe('HubEnvFilesTab', () => {
 
     const patchCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/config/env' && init?.method === 'PATCH');
     expect(patchCall).toBeTruthy();
-    expect(String(patchCall?.[1]?.body)).toContain('API_SERVER_PORT');
-    expect(String(patchCall?.[1]?.body)).toContain('3014');
-    expect(String(patchCall?.[1]?.body)).toContain('PREVIEW_GATEWAY_PORT');
-    expect(String(patchCall?.[1]?.body)).toContain('5110');
+    expect(String(patchCall?.[1]?.body)).not.toContain('API_SERVER_PORT');
+    expect(String(patchCall?.[1]?.body)).not.toContain('PREVIEW_GATEWAY_PORT');
     expect(String(patchCall?.[1]?.body)).toContain('FRONTEND_URL');
     expect(String(patchCall?.[1]?.body)).toContain('http://localhost:3200');
     expect(String(patchCall?.[1]?.body)).toContain('REDIS_URL');
@@ -191,7 +188,7 @@ describe('HubEnvFilesTab', () => {
     });
     await flushEffects();
 
-    await changeField(container.querySelector('input[aria-label="API_SERVER_PORT"]') as HTMLInputElement, '3014');
+    await changeField(container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement, 'http://localhost:3200');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存到 .env');
     await act(async () => {
@@ -220,7 +217,7 @@ describe('HubEnvFilesTab', () => {
     });
     await flushEffects();
 
-    await changeField(container.querySelector('input[aria-label="API_SERVER_PORT"]') as HTMLInputElement, '3014');
+    await changeField(container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement, 'http://localhost:3200');
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存到 .env');
 
     await act(async () => {

@@ -70,13 +70,17 @@ describe('provider profiles routes', () => {
       assert.equal(listRes.statusCode, 200);
       const list = listRes.json();
       assert.ok(Array.isArray(list.providers));
-      assert.equal(list.activeProfileId, created.profile.id);
-      assert.equal(list.activeProfileIds.anthropic, created.profile.id);
-      assert.equal(list.activeProfileIds.openai, 'codex-oauth');
-      assert.equal(list.activeProfileIds.google, 'gemini-oauth');
+      assert.equal(list.activeProfileId, null);
+      assert.deepEqual(list.bootstrapBindings, {
+        anthropic: { enabled: true, mode: 'api_key', accountRef: created.profile.id },
+        openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
+        google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
+        dare: { enabled: false, mode: 'skip' },
+        opencode: { enabled: false, mode: 'skip' },
+      });
       assert.deepEqual(
         list.providers.slice(0, 3).map((profile) => profile.id),
-        ['claude-oauth', 'codex-oauth', 'gemini-oauth'],
+        ['claude', 'codex', 'gemini'],
       );
       const listed = list.providers.find((p) => p.id === created.profile.id);
       assert.ok(listed);
@@ -333,6 +337,58 @@ describe('provider profiles routes', () => {
     }
   });
 
+  it('POST /api/provider-profiles/:id/test probes Gemini-style /v1beta/models endpoints', async () => {
+    const Fastify = (await import('fastify')).default;
+    const calls = [];
+    const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
+    const app = Fastify();
+    await app.register(providerProfilesRoutes, {
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), headers: init?.headers });
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith('/v1beta/models')) return new Response('{}', { status: 200 });
+        return new Response('not found', { status: 404 });
+      },
+    });
+    await app.ready();
+
+    const projectDir = await makeTmpDir('test-google');
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/provider-profiles',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          displayName: 'gemini-sponsor',
+          authType: 'api_key',
+          protocol: 'google',
+          baseUrl: 'https://generativelanguage.googleapis.com',
+          apiKey: 'gsk-google',
+          models: ['gemini-2.5-pro'],
+          setActive: false,
+        }),
+      });
+      assert.equal(createRes.statusCode, 200);
+      const profileId = createRes.json().profile.id;
+
+      const testRes = await app.inject({
+        method: 'POST',
+        url: `/api/provider-profiles/${profileId}/test`,
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+        }),
+      });
+      assert.equal(testRes.statusCode, 200);
+      assert.equal(testRes.json().ok, true);
+      assert.equal(new URL(calls[0].url).pathname, '/v1beta/models');
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
   it('accepts workspace projectPath even when validateProjectPath allowlist excludes it', async () => {
     const Fastify = (await import('fastify')).default;
     const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
@@ -360,6 +416,34 @@ describe('provider profiles routes', () => {
       if (previousAppend === undefined) delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
       else process.env.PROJECT_ALLOWED_ROOTS_APPEND = previousAppend;
       await rm(workspaceDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it('defaults projectPath to CAT_TEMPLATE_PATH directory when query omits projectPath', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
+    const app = Fastify();
+    await app.register(providerProfilesRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('default-root');
+    const templatePath = join(projectDir, 'cat-template.json');
+    const prevTemplate = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/provider-profiles',
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json().projectPath, await realpath(projectDir));
+    } finally {
+      if (prevTemplate === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = prevTemplate;
+      await rm(projectDir, { recursive: true, force: true });
       await app.close();
     }
   });

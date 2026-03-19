@@ -4,29 +4,32 @@ import type { CatConfig, OwnerConfig } from './config-viewer-types';
 function humanizeProvider(provider: string) {
   if (provider === 'openai') return 'OpenAI';
   if (provider === 'anthropic') return 'Anthropic';
+  if (provider === 'google') return 'Gemini';
+  if (provider === 'dare') return 'Dare';
+  if (provider === 'opencode') return 'OpenCode';
   if (provider === 'antigravity') return 'Antigravity';
   return provider;
 }
 
 function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
-  const profileId = cat.providerProfileId?.toLowerCase() ?? '';
-  if (profileId.includes('claude')) return 'Claude';
-  if (profileId.includes('codex')) return 'Codex';
-  if (profileId.includes('gemini')) return 'Gemini';
-  if (profileId.includes('opencode')) return 'OpenCode';
-  if (profileId.includes('dare')) return 'Dare';
+  const accountRef = (cat.accountRef ?? cat.providerProfileId ?? '').toLowerCase();
+  if (accountRef.includes('claude')) return 'Claude';
+  if (accountRef.includes('codex')) return 'Codex';
+  if (accountRef.includes('gemini')) return 'Gemini';
+  if (accountRef.includes('opencode')) return 'OpenCode';
+  if (accountRef.includes('dare')) return 'Dare';
   if (cat.provider === 'antigravity') return 'Antigravity';
   if (cat.source === 'runtime' && cat.provider === 'openai') return 'OpenAI-Compatible';
   return humanizeProvider(configCat?.provider ?? cat.provider);
 }
 
 function accountSummary(cat: CatData) {
-  const profileId = cat.providerProfileId?.trim() ?? '';
-  if (!profileId) return humanizeProvider(cat.provider);
-  if (/\(oauth\)/i.test(profileId) || /-oauth$/i.test(profileId)) return 'OAuth 订阅';
-  if (/\(api key\)/i.test(profileId)) return profileId;
-  if (/-client-auth$/i.test(profileId)) return 'client-auth';
-  return 'API Key';
+  const accountRef = cat.accountRef?.trim() ?? cat.providerProfileId?.trim() ?? '';
+  if (!accountRef) return humanizeProvider(cat.provider);
+  if (accountRef === 'claude' || accountRef === 'codex' || accountRef === 'gemini' || accountRef === 'dare' || accountRef === 'opencode') {
+    return '内置 OAuth 账号';
+  }
+  return `API Key · ${accountRef}`;
 }
 
 function getMetaSummary(cat: CatData, configCat?: CatConfig) {

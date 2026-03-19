@@ -132,5 +132,6 @@ describe('HubProviderProfileItem', () => {
     });
 
     expect(container.textContent).not.toContain('测试');
+    expect(container.textContent).toContain('+ 添加');
   });
 });

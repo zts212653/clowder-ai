@@ -199,17 +199,20 @@ export class AgentRouter {
     | undefined;
   private speechMentionRe: RegExp;
 
-  constructor(options: AgentRouterOptions) {
-    // Build services map from AgentRegistry (dynamic, not hardcoded)
+  private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
     this.services = {};
-    for (const [catId, service] of options.agentRegistry.getAllEntries()) {
+    for (const [catId, service] of agentRegistry.getAllEntries()) {
       this.services[catId] = service;
     }
-
-    // Build mention aliases at constructor time (catRegistry is populated by now)
     const allConfigs = catRegistry.getAllConfigs();
     const { speechMentionRe } = buildMentionData(allConfigs);
     this.speechMentionRe = speechMentionRe;
+  }
+
+  constructor(options: AgentRouterOptions) {
+    this.services = {};
+    this.speechMentionRe = /$^/;
+    this.rebuildRuntimeCaches(options.agentRegistry);
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
@@ -229,6 +232,10 @@ export class AgentRouter {
     this.tmuxGateway = options.tmuxGateway;
     this.agentPaneRegistry = options.agentPaneRegistry;
     this.signalArticleLookup = options.signalArticleLookup;
+  }
+
+  refreshFromRegistry(agentRegistry: AgentRegistry): void {
+    this.rebuildRuntimeCaches(agentRegistry);
   }
 
   /** Pick a deterministic fallback cat when policy filters out all candidates. */

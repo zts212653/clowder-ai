@@ -8,12 +8,8 @@ import {
   CreateApiKeyProfileSection,
   ProviderProfilesSummaryCard,
 } from './hub-provider-profiles.sections';
-import { expandProviderProfiles, resolveProfileActionId } from './hub-provider-profiles.view';
-import type {
-  ProfileProtocol,
-  ProfileTestResult,
-  ProviderProfilesResponse,
-} from './hub-provider-profiles.types';
+import { resolveAccountActionId } from './hub-provider-profiles.view';
+import type { ProfileTestResult, ProviderProfilesResponse } from './hub-provider-profiles.types';
 import { getProjectPaths, projectDisplayName } from './ThreadSidebar/thread-utils';
 
 export function HubProviderProfilesTab() {
@@ -27,10 +23,8 @@ export function HubProviderProfilesTab() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [testResultById, setTestResultById] = useState<Record<string, ProfileTestResult>>({});
   const [createDisplayName, setCreateDisplayName] = useState('');
-  const [createProtocol, setCreateProtocol] = useState<ProfileProtocol>('openai');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
-  const [createModels, setCreateModels] = useState<string[]>([]);
 
   const fetchProfiles = useCallback(async (forProject?: string) => {
     setError(null);
@@ -102,18 +96,13 @@ export function HubProviderProfilesTab() {
           projectPath: projectPath ?? undefined,
           displayName: createDisplayName.trim(),
           authType: 'api_key',
-          protocol: createProtocol,
           baseUrl: createBaseUrl.trim(),
           apiKey: createApiKey.trim(),
-          ...(createModels.length > 0 ? { models: createModels } : {}),
-          setActive: true,
         }),
       });
       setCreateDisplayName('');
-      setCreateProtocol('openai');
       setCreateBaseUrl('');
       setCreateApiKey('');
-      setCreateModels([]);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -125,8 +114,6 @@ export function HubProviderProfilesTab() {
     createApiKey,
     createBaseUrl,
     createDisplayName,
-    createModels,
-    createProtocol,
     projectPath,
     refresh,
   ]);
@@ -202,7 +189,7 @@ export function HubProviderProfilesTab() {
     return [...paths].map((path) => ({ path, label: projectDisplayName(path) }));
   }, [data?.projectPath, knownProjects]);
 
-  const displayProfiles = useMemo(() => expandProviderProfiles(data?.providers ?? []), [data?.providers]);
+  const displayProfiles = useMemo(() => data?.providers ?? [], [data?.providers]);
   const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
   const customProfiles = useMemo(() => displayProfiles.filter((profile) => !profile.builtin), [displayProfiles]);
   const displayCards = useMemo(() => [...builtinProfiles, ...customProfiles], [builtinProfiles, customProfiles]);
@@ -226,27 +213,23 @@ export function HubProviderProfilesTab() {
           <HubProviderProfileItem
             key={profile.id}
             profile={profile}
-            busy={busyId === resolveProfileActionId(profile)}
-            testResult={testResultById[resolveProfileActionId(profile)]}
-            onSave={(_profileId, payload) => saveProfile(resolveProfileActionId(profile), payload)}
-            onTest={() => testProfile(resolveProfileActionId(profile))}
-            onDelete={() => deleteProfile(resolveProfileActionId(profile))}
+            busy={busyId === resolveAccountActionId(profile)}
+            testResult={testResultById[resolveAccountActionId(profile)]}
+            onSave={(_profileId, payload) => saveProfile(resolveAccountActionId(profile), payload)}
+            onTest={() => testProfile(resolveAccountActionId(profile))}
+            onDelete={() => deleteProfile(resolveAccountActionId(profile))}
           />
         ))}
       </div>
 
       <CreateApiKeyProfileSection
         displayName={createDisplayName}
-        protocol={createProtocol}
         baseUrl={createBaseUrl}
         apiKey={createApiKey}
-        models={createModels}
         busy={busyId === 'create'}
         onDisplayNameChange={setCreateDisplayName}
-        onProtocolChange={setCreateProtocol}
         onBaseUrlChange={setCreateBaseUrl}
         onApiKeyChange={setCreateApiKey}
-        onModelsChange={setCreateModels}
         onCreate={createProfile}
       />
       <p className="text-xs leading-5 text-[#B59A88]">

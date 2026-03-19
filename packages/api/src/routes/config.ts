@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
@@ -16,18 +16,7 @@ import type { ConfigSnapshot } from '../config/config-snapshot.js';
 import { updateRuntimeOwner } from '../config/runtime-cat-catalog.js';
 import { buildEnvSummary, ENV_CATEGORIES, isEditableEnvVarName } from '../config/env-registry.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
-
-/** Walk up from CWD to find pnpm-workspace.yaml — the monorepo root. */
-function findMonorepoRoot(): string {
-  let dir = process.cwd();
-  while (dir !== dirname(dir)) {
-    if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) return dir;
-    dir = dirname(dir);
-  }
-  return process.cwd();
-}
-
-const MONOREPO_ROOT = findMonorepoRoot();
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 
 const patchSchema = z.object({
   key: z.string().min(1),
@@ -123,7 +112,7 @@ function applyEnvUpdatesToFile(contents: string, updates: Map<string, string | n
 
 export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptions = {}): Promise<void> {
   const auditLog = opts.auditLog ?? getEventAuditLog();
-  const projectRoot = opts.projectRoot ?? MONOREPO_ROOT;
+  const projectRoot = opts.projectRoot ?? resolveActiveProjectRoot();
   const envFilePath = opts.envFilePath ?? resolve(projectRoot, '.env');
 
   app.get('/api/config', async () => ({

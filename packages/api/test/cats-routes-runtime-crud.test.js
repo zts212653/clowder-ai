@@ -130,6 +130,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         strengths: ['precision', 'speed'],
         sessionChain: true,
         client: 'openai',
+        accountRef: 'codex',
         defaultModel: 'gpt-5.4',
         contextBudget: {
           maxPromptTokens: 24000,
@@ -198,7 +199,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        providerProfileId: 'codex-oauth',
+        providerProfileId: 'codex',
       }),
     });
     assert.equal(bindProviderRes.statusCode, 200);
@@ -214,7 +215,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         providerProfileId: null,
       }),
     });
-    assert.equal(clearProviderRes.statusCode, 200);
+    assert.equal(clearProviderRes.statusCode, 400);
+    assert.match(JSON.parse(clearProviderRes.body).error, /requires a provider binding/i);
 
     const clearBudgetRes = await app.inject({
       method: 'PATCH',
@@ -235,7 +237,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const runtimeCatAfterClear = listAfterClearBody.cats.find((cat) => cat.id === 'runtime-spark');
     assert.ok(runtimeCatAfterClear, 'runtime-spark should still exist');
     assert.equal(runtimeCatAfterClear.contextBudget, undefined);
-    assert.equal(runtimeCatAfterClear.providerProfileId, undefined);
+    assert.equal(runtimeCatAfterClear.accountRef, 'codex');
 
     const mentions = parseA2AMentions('@运行时火花 请跟进这个分支', createCatId('opus'));
     assert.ok(mentions.includes('runtime-spark'), 'new alias should route immediately');
@@ -284,6 +286,55 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(statusBody.id, 'runtime-antigravity');
   });
 
+  it('PATCH /api/cats/:id allows clearing antigravity commandArgs with an empty array', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-antigravity-clear',
+        name: '运行时桥接猫',
+        displayName: '运行时桥接猫',
+        avatar: '/avatars/antigravity.png',
+        color: { primary: '#0f766e', secondary: '#99f6e4' },
+        mentionPatterns: ['@runtime-antigravity-clear'],
+        roleDescription: '桥接通道',
+        personality: '稳定',
+        client: 'antigravity',
+        defaultModel: 'gemini-bridge',
+        commandArgs: ['chat', '--mode', 'agent'],
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-antigravity-clear',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        commandArgs: [],
+      }),
+    });
+    assert.equal(patchRes.statusCode, 200);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.equal(patchBody.cat.commandArgs, undefined);
+  });
+
   it('POST /api/cats defaults mcpSupport=true for Codex/Gemini clients when omitted', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -295,8 +346,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     await app.register(catsRoutes);
 
     for (const spec of [
-      { catId: 'runtime-openai', client: 'openai', model: 'gpt-5.4-mini' },
-      { catId: 'runtime-gemini', client: 'google', model: 'gemini-2.5-pro' },
+      { catId: 'runtime-openai', client: 'openai', accountRef: 'codex', model: 'gpt-5.4' },
+      { catId: 'runtime-gemini', client: 'google', accountRef: 'gemini', model: 'gemini-2.5-pro' },
     ]) {
       const res = await app.inject({
         method: 'POST',
@@ -314,6 +365,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           mentionPatterns: [`@${spec.catId}`],
           roleDescription: 'runtime',
           client: spec.client,
+          accountRef: spec.accountRef,
           defaultModel: spec.model,
         }),
       });
@@ -325,7 +377,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
-  it('PATCH /api/cats/:id rejects provider bindings incompatible with client protocol', async () => {
+  it('PATCH /api/cats/:id rejects provider bindings that do not resolve to an existing account', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -351,6 +403,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-codex'],
         roleDescription: '审查',
         client: 'openai',
+        accountRef: 'codex',
         defaultModel: 'gpt-5.4',
       }),
     });
@@ -369,7 +422,138 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(patchRes.statusCode, 400);
     const patchBody = JSON.parse(patchRes.body);
-    assert.match(patchBody.error, /incompatible with client "openai"/i);
+    assert.match(patchBody.error, /provider "claude-oauth" not found/i);
+  });
+
+  it('POST /api/cats rejects provider bindings whose protocol is incompatible with the selected client', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const mismatchedProfile = await createProviderProfile(projectRoot, {
+      displayName: 'OpenAI Key Profile',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.bound.example',
+      apiKey: 'sk-bound-openai',
+      models: ['gpt-5.4'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-opencode-mismatch',
+        name: '运行时金渐层',
+        displayName: '运行时金渐层',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@runtime-opencode-mismatch'],
+        roleDescription: '审查',
+        client: 'opencode',
+        providerProfileId: mismatchedProfile.id,
+        defaultModel: 'claude-sonnet-4-6',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400);
+    const createBody = JSON.parse(createRes.body);
+    assert.match(createBody.error, /incompatible with client "opencode"/i);
+  });
+
+  it('PATCH /api/cats/:id rejects models that are not available on the bound provider profile', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const boundProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Scoped OpenAI Profile',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.scoped.example',
+      apiKey: 'sk-scoped-openai',
+      models: ['gpt-5.4-mini'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-codex-scoped-profile',
+        name: '运行时缅因猫',
+        displayName: '运行时缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-codex-scoped-profile'],
+        roleDescription: '审查',
+        client: 'openai',
+        providerProfileId: boundProfile.id,
+        defaultModel: 'gpt-5.4-mini',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-scoped-profile',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(patchRes.statusCode, 400);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.match(patchBody.error, /model "gpt-5\.4" is not available on provider "scoped-openai-profile"/i);
+  });
+
+  it('PATCH /api/cats/:id allows non-provider edits for unbound opencode seed member', async () => {
+    if (savedTemplatePath === undefined) {
+      delete process.env.CAT_TEMPLATE_PATH;
+    } else {
+      process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
+    }
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opencode',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        nickname: '金渐层审计版',
+      }),
+    });
+    assert.equal(res.statusCode, 200);
   });
 
   it('PATCH /api/cats/:id returns 400 when runtime catalog validation rejects the update', async () => {
@@ -398,6 +582,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-review-bot'],
         roleDescription: '审查',
         client: 'openai',
+        accountRef: 'codex',
         defaultModel: 'gpt-5.4',
       }),
     });
@@ -451,7 +636,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     assert.equal(res.statusCode, 400);
     const body = JSON.parse(res.body);
-    assert.match(body.error, /requires a provider profile/i);
+    assert.match(body.error, /requires a provider binding/i);
   });
 
   it('PATCH /api/cats/:id persists roster availability toggles for existing members', async () => {
@@ -523,7 +708,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-strategy-cat'],
         roleDescription: '策略验证',
         client: 'openai',
-        defaultModel: 'gpt-5.4-mini',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
       }),
     });
     assert.equal(createRes.statusCode, 201);
@@ -553,7 +739,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const app = Fastify();
     await app.register(catsRoutes);
 
-    await app.inject({
+    const createRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
       headers: {
@@ -570,11 +756,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         roleDescription: '临时成员',
         personality: '临时',
         client: 'openai',
-        defaultModel: 'gpt-5.4-mini',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
         mcpSupport: false,
         cli: { command: 'codex', outputFormat: 'json' },
       }),
     });
+    assert.equal(createRes.statusCode, 201);
 
     const deleteRes = await app.inject({
       method: 'DELETE',
@@ -587,7 +775,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     const listBody = JSON.parse(listRes.body);
-    assert.equal(listBody.cats.some((cat) => cat.id === 'runtime-temp'), false);
+    assert.equal(
+      listBody.cats.some((cat) => cat.id === 'runtime-temp'),
+      false,
+    );
   });
 
   it('DELETE /api/cats/:id blocks deletion for seed members', async () => {
@@ -614,6 +805,9 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(listRes.statusCode, 200);
     const listBody = JSON.parse(listRes.body);
-    assert.equal(listBody.cats.some((cat) => cat.id === 'opus'), true);
+    assert.equal(
+      listBody.cats.some((cat) => cat.id === 'opus'),
+      true,
+    );
   });
 });

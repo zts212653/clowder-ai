@@ -84,9 +84,17 @@ const API_CATS = [
 let container: HTMLDivElement;
 let root: Root;
 let hookResult: ReturnType<typeof useCatData>;
+let hookResultA: ReturnType<typeof useCatData>;
+let hookResultB: ReturnType<typeof useCatData>;
 
 function TestComponent() {
   hookResult = useCatData();
+  return null;
+}
+
+function MultiHookComponent() {
+  hookResultA = useCatData();
+  hookResultB = useCatData();
   return null;
 }
 
@@ -184,4 +192,65 @@ describe('useCatData retry mechanism', () => {
     });
     expect(mockApiFetch).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
   });
+
+  it('refresh updates all mounted hook consumers, not only the caller', async () => {
+    const initialCats = [
+      {
+        id: 'opus',
+        displayName: '布偶猫',
+        mentionPatterns: ['@opus'],
+        provider: 'anthropic',
+        defaultModel: 'claude-opus-4',
+        avatar: '/a.png',
+        roleDescription: 'dev',
+        personality: 'kind',
+        color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+        source: 'seed',
+      },
+    ];
+    const refreshedCats = [
+      ...initialCats,
+      {
+        id: 'codex',
+        displayName: '缅因猫',
+        mentionPatterns: ['@codex'],
+        provider: 'openai',
+        defaultModel: 'gpt-5.4',
+        avatar: '/b.png',
+        roleDescription: 'review',
+        personality: 'rigorous',
+        color: { primary: '#4A90E2', secondary: '#E6F2FF' },
+        source: 'runtime',
+      },
+    ];
+    mockApiFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ cats: initialCats }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ cats: refreshedCats }),
+      } as unknown as Response);
+
+    await act(async () => {
+      root.render(React.createElement(MultiHookComponent));
+    });
+    await flushPromises();
+    expect(hookResultA.cats).toHaveLength(1);
+    expect(hookResultB.cats).toHaveLength(1);
+
+    await act(async () => {
+      await hookResultA.refresh();
+    });
+
+    expect(hookResultA.cats).toHaveLength(2);
+    expect(hookResultB.cats).toHaveLength(2);
+  });
 });
+
+async function flushPromises() {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}

@@ -1,6 +1,6 @@
-import type { FastifyPluginAsync } from 'fastify';
 import { realpath, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
+import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   activateProviderProfile,
@@ -9,18 +9,18 @@ import {
   getProviderProfile,
   type ProviderProfileAuthType,
   type ProviderProfileMode,
-  type ProviderProfileProtocol,
   type ProviderProfileProvider,
   readProviderProfiles,
   resolveRuntimeProviderProfileById,
   updateProviderProfile,
 } from '../config/provider-profiles.js';
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { buildProbeHeaders, isInvalidModelProbeError, readProbeError } from './provider-profiles-probe.js';
 
-const PROJECT_ROOT = findMonorepoRoot();
+const MONOREPO_ROOT = findMonorepoRoot();
 
 const protocolEnum = z.enum(['anthropic', 'openai', 'google']);
 const authTypeEnum = z.enum(['oauth', 'api_key']);
@@ -62,6 +62,7 @@ const updateBodySchema = z.object({
   displayName: z.string().trim().min(1).optional(),
   mode: modeEnum.optional(),
   authType: authTypeEnum.optional(),
+  protocol: protocolEnum.optional(),
   baseUrl: z.string().optional(),
   apiKey: z.string().optional(),
   modelOverride: z.string().nullable().optional(),
@@ -76,18 +77,22 @@ const activateBodySchema = z.object({
 const testBodySchema = z.object({
   projectPath: z.string().optional(),
   provider: z.string().trim().min(1).optional(),
+  protocol: protocolEnum.optional(),
 });
 
 async function resolveProjectRoot(projectPath?: string): Promise<string | null> {
-  if (!projectPath) return PROJECT_ROOT;
+  if (!projectPath) return resolveActiveProjectRoot();
   const validated = await validateProjectPath(projectPath);
   if (validated) return validated;
 
   // Workspace project switcher can provide sibling repo paths (outside homedir/tmp allowlist).
   // Allow paths under current workspace root while keeping realpath boundary checks.
-  const workspaceRoot = resolve(PROJECT_ROOT, '..');
+  const workspaceRoot = resolve(MONOREPO_ROOT, '..');
   try {
-    const [resolvedTarget, resolvedWorkspaceRoot] = await Promise.all([realpath(resolve(projectPath)), realpath(workspaceRoot)]);
+    const [resolvedTarget, resolvedWorkspaceRoot] = await Promise.all([
+      realpath(resolve(projectPath)),
+      realpath(workspaceRoot),
+    ]);
     const rel = relative(resolvedWorkspaceRoot, resolvedTarget);
     if (rel.startsWith('..') || rel.startsWith('/')) return null;
     const info = await stat(resolvedTarget);
@@ -101,8 +106,39 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
+function probeUrl(baseUrl: string, path: string): string {
+  return `${normalizeBaseUrl(baseUrl)}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 function resolveProviderSelector(selector: string | undefined, fallback: string): ProviderProfileProvider {
   return (selector?.trim() || fallback) as ProviderProfileProvider;
+}
+
+function inferProbeProtocol(
+  baseUrl: string | undefined,
+  selector: string | undefined,
+): 'anthropic' | 'openai' | 'google' {
+  const normalizedSelector = selector?.trim().toLowerCase();
+  if (normalizedSelector === 'anthropic' || normalizedSelector === 'claude' || normalizedSelector === 'opencode') {
+    return 'anthropic';
+  }
+  if (normalizedSelector === 'google' || normalizedSelector === 'gemini') {
+    return 'google';
+  }
+  if (normalizedSelector === 'openai' || normalizedSelector === 'codex' || normalizedSelector === 'dare') {
+    return 'openai';
+  }
+
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl ?? '').toLowerCase();
+  if (normalizedBaseUrl.includes('anthropic')) return 'anthropic';
+  if (
+    normalizedBaseUrl.includes('googleapis.com') ||
+    normalizedBaseUrl.includes('generativelanguage') ||
+    normalizedBaseUrl.includes('gemini')
+  ) {
+    return 'google';
+  }
+  return 'openai';
 }
 
 export interface ProviderProfilesRoutesOptions {
@@ -158,16 +194,15 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     const body = parsed.data;
     try {
       const profile = await createProviderProfile(projectRoot, {
-        provider: resolveProviderSelector(body.provider ?? body.protocol, 'anthropic'),
+        ...(body.provider != null ? { provider: body.provider } : {}),
         ...(body.name != null ? { name: body.name } : {}),
         ...(body.displayName != null ? { displayName: body.displayName } : {}),
         ...(body.mode != null ? { mode: body.mode as ProviderProfileMode } : {}),
         ...(body.authType != null ? { authType: body.authType as ProviderProfileAuthType } : {}),
-        ...(body.protocol != null ? { protocol: body.protocol as ProviderProfileProtocol } : {}),
+        ...(body.protocol != null ? { protocol: body.protocol } : {}),
         ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
         ...(body.apiKey ? { apiKey: body.apiKey } : {}),
-        ...(body.modelOverride ? { modelOverride: body.modelOverride } : {}),
-        ...(body.models ? { models: body.models } : {}),
+        ...(body.models != null ? { models: body.models } : {}),
         ...(body.setActive != null ? { setActive: body.setActive } : {}),
       });
       return {
@@ -209,9 +244,9 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
           ...(parsed.data.displayName != null ? { displayName: parsed.data.displayName } : {}),
           ...(parsed.data.mode != null ? { mode: parsed.data.mode as ProviderProfileMode } : {}),
           ...(parsed.data.authType != null ? { authType: parsed.data.authType as ProviderProfileAuthType } : {}),
+          ...(parsed.data.protocol != null ? { protocol: parsed.data.protocol } : {}),
           ...(parsed.data.baseUrl != null ? { baseUrl: parsed.data.baseUrl } : {}),
           ...(parsed.data.apiKey != null ? { apiKey: parsed.data.apiKey } : {}),
-          ...(parsed.data.modelOverride !== undefined ? { modelOverride: parsed.data.modelOverride } : {}),
           ...(parsed.data.models != null ? { models: parsed.data.models } : {}),
         },
       );
@@ -242,7 +277,11 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     const params = request.params as { profileId: string };
 
     try {
-      await deleteProviderProfile(projectRoot, resolveProviderSelector(parsed.data.provider, params.profileId), params.profileId);
+      await deleteProviderProfile(
+        projectRoot,
+        resolveProviderSelector(parsed.data.provider, params.profileId),
+        params.profileId,
+      );
       return { ok: true };
     } catch (err) {
       reply.status(400);
@@ -270,7 +309,11 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     const params = request.params as { profileId: string };
 
     try {
-      await activateProviderProfile(projectRoot, resolveProviderSelector(parsed.data.provider, params.profileId), params.profileId);
+      await activateProviderProfile(
+        projectRoot,
+        resolveProviderSelector(parsed.data.provider, params.profileId),
+        params.profileId,
+      );
       return { ok: true, profileId: params.profileId };
     } catch (err) {
       reply.status(400);
@@ -319,32 +362,48 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     }
 
     const runtime = await resolveRuntimeProviderProfileById(projectRoot, params.profileId);
-    if (!runtime || runtime.mode !== 'api_key' || !runtime.baseUrl || !runtime.apiKey) {
+    if (!runtime || runtime.authType !== 'api_key' || !runtime.baseUrl || !runtime.apiKey) {
       reply.status(400);
       return { error: 'Only api_key providers can be tested' };
     }
 
     const baseUrl = normalizeBaseUrl(runtime.baseUrl);
-    const modelsUrl = `${baseUrl}/v1/models`;
+    const probeProtocol =
+      runtime.protocol ?? inferProbeProtocol(runtime.baseUrl, parsed.data.protocol ?? parsed.data.provider);
+    const modelProbePaths = probeProtocol === 'google' ? ['/v1beta/models', '/models', '/v1/models'] : ['/v1/models'];
+    let modelsRes: Response | null = null;
+    let modelsError: string | null = null;
     try {
-      const modelsRes = await fetchImpl(modelsUrl, {
-        method: 'GET',
-        headers: buildProbeHeaders(profile.protocol, runtime.apiKey),
-      });
+      for (const path of modelProbePaths) {
+        const next = await fetchImpl(probeUrl(baseUrl, path), {
+          method: 'GET',
+          headers: buildProbeHeaders(probeProtocol, runtime.apiKey),
+        });
+        modelsRes = next;
+        if (next.ok) {
+          return {
+            ok: true,
+            mode: 'api_key',
+            status: next.status,
+          };
+        }
+        modelsError = await readProbeError(next);
+        if (next.status !== 404) break;
+      }
 
-      if (modelsRes.ok) {
+      if (!modelsRes) {
         return {
-          ok: true,
+          ok: false,
           mode: 'api_key',
-          status: modelsRes.status,
+          error: 'Provider test did not execute',
         };
       }
 
-      if (profile.protocol === 'anthropic' && modelsRes.status === 404) {
-        const messagesRes = await fetchImpl(`${baseUrl}/v1/messages`, {
+      if (probeProtocol === 'anthropic' && modelsRes.status === 404) {
+        const messagesRes = await fetchImpl(probeUrl(baseUrl, '/v1/messages'), {
           method: 'POST',
           headers: {
-            ...buildProbeHeaders(profile.protocol, runtime.apiKey),
+            ...buildProbeHeaders(probeProtocol, runtime.apiKey),
             'content-type': 'application/json',
           },
           body: JSON.stringify({
@@ -381,7 +440,7 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
         ok: false,
         mode: 'api_key',
         status: modelsRes.status,
-        error: await readProbeError(modelsRes),
+        error: modelsError ?? (await readProbeError(modelsRes)),
       };
     } catch (err) {
       reply.status(500);

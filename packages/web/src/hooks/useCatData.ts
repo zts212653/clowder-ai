@@ -20,6 +20,8 @@ export interface CatData {
   color: { primary: string; secondary: string };
   mentionPatterns: string[];
   breedId?: string;
+  accountRef?: string;
+  /** Legacy compatibility while older runtime data is migrated. */
   providerProfileId?: string;
   provider: string;
   defaultModel: string;
@@ -58,8 +60,15 @@ export interface CatData {
 // ── Module-level cache ──────────────────────────────────
 let _cached: CatData[] | null = null;
 let _fetchPromise: Promise<FetchResult> | null = null;
+const _listeners = new Set<(cats: CatData[]) => void>();
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 10_000;
+
+function notifyListeners(cats: CatData[]): void {
+  for (const listener of _listeners) {
+    listener(cats);
+  }
+}
 
 function buildFallbackCats(): CatData[] {
   return Object.values(CAT_CONFIGS).map((c) => ({
@@ -109,6 +118,7 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       displayName: cat.displayName ?? cat.id ?? '',
       color: cat.color ?? { primary: '#000000', secondary: '#ffffff' },
       mentionPatterns: Array.isArray(cat.mentionPatterns) ? cat.mentionPatterns : [],
+      accountRef: cat.accountRef ?? cat.providerProfileId,
       provider: cat.provider ?? 'openai',
       defaultModel: cat.defaultModel ?? '',
       avatar: cat.avatar ?? '',
@@ -135,6 +145,7 @@ async function refreshCatsNow(): Promise<FetchResult> {
   }
   refreshMentionData(result.cats);
   refreshSpeechAliases(result.cats);
+  notifyListeners(result.cats);
   return result;
 }
 
@@ -144,6 +155,17 @@ export function useCatData() {
   const [cats, setCats] = useState<CatData[]>(() => _cached ?? buildFallbackCats());
   const [isLoading, setIsLoading] = useState(!_cached);
   const [retryCount, setRetryCount] = useState(0);
+
+  useEffect(() => {
+    const listener = (nextCats: CatData[]) => {
+      setCats(nextCats);
+      setIsLoading(false);
+    };
+    _listeners.add(listener);
+    return () => {
+      _listeners.delete(listener);
+    };
+  }, []);
 
   useEffect(() => {
     if (_cached) {
@@ -170,6 +192,7 @@ export function useCatData() {
       }
       refreshMentionData(result);
       refreshSpeechAliases(result);
+      notifyListeners(result);
       if (!cancelled) {
         setCats(result);
         setIsLoading(false);
@@ -227,4 +250,5 @@ export function getCachedCats(): CatData[] {
 export function _resetCatDataCache(): void {
   _cached = null;
   _fetchPromise = null;
+  _listeners.clear();
 }

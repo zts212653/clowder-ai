@@ -2480,4 +2480,31 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     const { targetCats } = await router.resolveTargetsAndIntent('just a normal message', 't1');
     assert.equal(targetCats.length, 1, 'without #ideate, should still route to single cat');
   });
+
+  test('refreshFromRegistry updates routable service set after runtime catalog changes', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+    const { catRegistry } = await import('@cat-cafe/shared');
+
+    const threadStore = createMockThreadStore();
+    const agentRegistry = new AgentRegistry();
+    agentRegistry.register('opus', createMockAgentService('opus'));
+    const router = new AgentRouter({
+      agentRegistry,
+      registry: createMockRegistry(),
+      messageStore: createMockMessageStore(),
+      threadStore,
+    });
+
+    const before = await router.resolveTargetsAndIntent('@codex review this', 't1');
+    assert.notDeepEqual(before.targetCats, ['codex'], 'codex should not be routable before refresh');
+
+    const codexConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(codexConfig, 'codex config should exist');
+    agentRegistry.register('codex', createMockAgentService('codex'));
+    router.refreshFromRegistry(agentRegistry);
+
+    const after = await router.resolveTargetsAndIntent('@codex review this', 't1');
+    assert.deepEqual(after.targetCats, ['codex'], 'codex should be routable after refresh');
+  });
 });

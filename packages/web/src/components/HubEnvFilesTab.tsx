@@ -100,6 +100,15 @@ function isEditableVariable(variable: EnvVar): boolean {
   return variable.runtimeEditable !== false && !variable.sensitive;
 }
 
+function isMaskedUrlVariable(variable: EnvVar): boolean {
+  return variable.maskMode === 'url' && typeof variable.currentValue === 'string' && variable.currentValue.includes('***');
+}
+
+function initialDraftValue(variable: EnvVar): string {
+  if (isMaskedUrlVariable(variable)) return '';
+  return variable.currentValue ?? '';
+}
+
 function buildDataDirs(dataDirs: DataDirs) {
   return [
     { name: '审计日志', path: dataDirs.auditLogs, desc: 'EventAuditLog 输出' },
@@ -154,7 +163,7 @@ function EnvVarsSection({
   return (
     <Section title="环境变量">
       <div className="mb-3 rounded-[12px] border border-[#D7E9D7] bg-[#F6FBF6] px-3 py-2 text-xs leading-5 text-[#5B7A5C]">
-        变量值可直接编辑，保存后自动回填 `.env`。启动期变量需重启相关服务生效；URL 型连接串当前值已脱敏，修改时请填写完整值。
+        变量值可直接编辑，保存后自动回填 `.env`。写回 .env 后需重启相关服务生效；URL 型连接串当前值已脱敏，修改时请填写完整值。
       </div>
       <div className="space-y-3">
         {grouped.map((group) => (
@@ -184,7 +193,7 @@ function EnvVarsSection({
                         aria-label={v.name}
                         value={drafts[v.name] ?? ''}
                         onChange={(e) => onDraftChange(v.name, e.target.value)}
-                        placeholder={v.defaultValue}
+                        placeholder={isMaskedUrlVariable(v) ? '保持当前值（已脱敏）' : v.defaultValue}
                         className="rounded-[10px] border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 font-mono text-xs text-[#6A5A50]"
                       />
                       {buildVariableHint(v) ? (
@@ -273,7 +282,7 @@ export function HubEnvFilesTab() {
           setData(body);
           setDrafts(
             Object.fromEntries(
-              body.variables.filter(isEditableVariable).map((variable) => [variable.name, variable.currentValue ?? '']),
+              body.variables.filter(isEditableVariable).map((variable) => [variable.name, initialDraftValue(variable)]),
             ),
           );
         } else {
@@ -291,9 +300,11 @@ export function HubEnvFilesTab() {
     .map((variable) => ({
       name: variable.name,
       value: drafts[variable.name] ?? '',
-      currentValue: variable.currentValue ?? '',
+      baselineValue: initialDraftValue(variable),
+      maskedUrl: isMaskedUrlVariable(variable),
     }))
-    .filter((variable) => variable.value !== variable.currentValue)
+    .filter((variable) => variable.value !== variable.baselineValue)
+    .filter((variable) => !variable.maskedUrl || variable.value.trim().length > 0)
     .map(({ name, value }) => ({ name, value }));
 
   const isDirty = changedUpdates.length > 0;
@@ -332,7 +343,7 @@ export function HubEnvFilesTab() {
       setData({ ...data, variables: nextVariables });
       setDrafts(
         Object.fromEntries(
-          nextVariables.filter(isEditableVariable).map((variable) => [variable.name, variable.currentValue ?? '']),
+          nextVariables.filter(isEditableVariable).map((variable) => [variable.name, initialDraftValue(variable)]),
         ),
       );
       setSaveState({ saving: false, error: null, success: '已写回 .env 并刷新摘要；部分变量需重启相关服务生效' });

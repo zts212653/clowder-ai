@@ -9,8 +9,10 @@ import {
   buildCatPayload,
   buildCodexConfigPatches,
   buildStrategyPayload,
+  builtinAccountIdForClient,
+  DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   type CodexRuntimeSettings,
-  filterProfiles,
+  filterAccounts,
   type HubCatEditorDraft,
   type HubCatEditorFormState,
   initialState,
@@ -48,15 +50,21 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [codexSettings, setCodexSettings] = useState<CodexRuntimeSettings | null>(null);
   const [codexSettingsBaseline, setCodexSettingsBaseline] = useState<CodexRuntimeSettings | null>(null);
 
-  const availableProfiles = useMemo(() => filterProfiles(form.client, profiles), [form.client, profiles]);
+  const availableProfiles = useMemo(() => filterAccounts(form.client, profiles), [form.client, profiles]);
   const selectedProfile = useMemo(
-    () => availableProfiles.find((profile) => profile.id === form.providerProfileId) ?? null,
-    [availableProfiles, form.providerProfileId],
+    () => availableProfiles.find((profile) => profile.id === form.accountRef) ?? null,
+    [availableProfiles, form.accountRef],
   );
+  const modelOptions = useMemo(() => {
+    if (form.client === 'antigravity') return [];
+    const currentModel = form.defaultModel.trim();
+    const profileModels = selectedProfile?.models ?? [];
+    if (currentModel && !profileModels.includes(currentModel)) {
+      return [currentModel, ...profileModels];
+    }
+    return profileModels;
+  }, [form.client, form.defaultModel, selectedProfile]);
   const showCodexSettings = form.client === 'openai';
-  const requiresProviderBinding = form.client === 'dare' || form.client === 'opencode';
-  const saveBlockedByProfileBinding =
-    requiresProviderBinding && (loadingProfiles || form.providerProfileId.trim().length === 0);
 
   useEffect(() => {
     if (!open) return;
@@ -163,30 +171,48 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
 
   useEffect(() => {
     if (form.client === 'antigravity') {
-      setForm((prev) => (prev.providerProfileId === '' ? prev : { ...prev, providerProfileId: '' }));
+      setForm((prev) => (prev.accountRef === '' ? prev : { ...prev, accountRef: '' }));
       return;
     }
     setForm((prev) => {
-      if (availableProfiles.length === 0) return prev;
-      if (prev.providerProfileId === '' && form.client !== 'dare' && form.client !== 'opencode') return prev;
-      const nextProfile =
-        availableProfiles.find((profile) => profile.id === prev.providerProfileId) ?? availableProfiles[0] ?? null;
-      if (!nextProfile) return prev;
-      const sameProfile = prev.providerProfileId === nextProfile.id;
-      const hasDefaultModel = prev.defaultModel.trim().length > 0;
-      const modelSupported = hasDefaultModel && nextProfile.models.includes(prev.defaultModel);
-      let nextModel = prev.defaultModel;
-      if (!hasDefaultModel) {
-        nextModel = nextProfile.models[0] ?? '';
-      } else if (!modelSupported && !sameProfile) {
-        nextModel = nextProfile.models[0] ?? prev.defaultModel;
+      if (prev.accountRef.trim().length === 0 && (cat || !draft)) {
+        return prev;
       }
-      if (prev.providerProfileId === nextProfile.id && prev.defaultModel === nextModel) return prev;
-      return { ...prev, providerProfileId: nextProfile.id, defaultModel: nextModel };
+      if (availableProfiles.length === 0) return prev;
+      const preferredBuiltin = builtinAccountIdForClient(prev.client);
+      const nextProfile =
+        availableProfiles.find((profile) => profile.id === prev.accountRef) ??
+        (preferredBuiltin ? availableProfiles.find((profile) => profile.id === preferredBuiltin) : null) ??
+        availableProfiles[0] ??
+        null;
+      if (!nextProfile) return prev;
+      if (prev.accountRef === nextProfile.id) return prev;
+      return { ...prev, accountRef: nextProfile.id };
     });
-  }, [availableProfiles, form.client, form.providerProfileId, form.defaultModel]);
+  }, [availableProfiles, cat, draft, form.client]);
+
+  useEffect(() => {
+    if (form.client === 'antigravity' || modelOptions.length === 0) return;
+    if (form.defaultModel.trim().length > 0) return;
+    setForm((prev) => {
+      if (prev.client === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
+      return { ...prev, defaultModel: modelOptions[0] ?? '' };
+    });
+  }, [form.client, form.defaultModel, modelOptions]);
+
+  useEffect(() => {
+    if (form.client !== 'antigravity') return;
+    if (form.commandArgs.trim().length > 0) return;
+    setForm((prev) => {
+      if (prev.client !== 'antigravity') return prev;
+      if (prev.commandArgs.trim().length > 0) return prev;
+      return { ...prev, commandArgs: DEFAULT_ANTIGRAVITY_COMMAND_ARGS };
+    });
+  }, [form.client, form.commandArgs]);
 
   if (!open) return null;
+
+  const saveBlockedByProfileBinding = false;
 
   const patchForm = (patch: Partial<HubCatEditorFormState>) => setForm((prev) => ({ ...prev, ...patch }));
   const patchStrategy = (patch: Partial<StrategyFormState>) =>
@@ -210,39 +236,47 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   };
 
   const handleSave = async () => {
-    if (saveBlockedByProfileBinding) {
-      setError(loadingProfiles ? 'Provider 列表加载中，请稍后保存' : 'Dare/OpenCode 需要绑定同协议账号后才能保存');
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
+      const catPayload = buildCatPayload(form, cat);
+      const nextStrategyPayload = cat && strategyForm ? buildStrategyPayload(strategyForm) : null;
+      const baselineStrategyPayload = cat && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
+      const strategyChanged =
+        cat && nextStrategyPayload
+          ? JSON.stringify(nextStrategyPayload) !== JSON.stringify(baselineStrategyPayload)
+          : false;
+
+      if (cat && strategyChanged && nextStrategyPayload) {
+        const strategyRes = await apiFetch(`/api/config/session-strategy/${cat.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(nextStrategyPayload),
+        });
+        if (!strategyRes.ok) {
+          const payload = (await strategyRes.json().catch(() => ({}))) as Record<string, unknown>;
+          setError((payload.error as string) ?? `Session 策略保存失败 (${strategyRes.status})`);
+          return;
+        }
+      }
+
       const res = await apiFetch(cat ? `/api/cats/${cat.id}` : '/api/cats', {
         method: cat ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildCatPayload(form, cat)),
+        body: JSON.stringify(catPayload),
       });
       if (!res.ok) {
+        if (cat && strategyChanged && baselineStrategyPayload) {
+          // Best-effort rollback: keep strategy unchanged when cat persistence fails.
+          await apiFetch(`/api/config/session-strategy/${cat.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(baselineStrategyPayload),
+          }).catch(() => {});
+        }
         const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         setError((payload.error as string) ?? `保存失败 (${res.status})`);
         return;
-      }
-
-      if (cat && strategyForm) {
-        const nextStrategyPayload = buildStrategyPayload(strategyForm);
-        const baselineStrategyPayload = strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
-        if (JSON.stringify(nextStrategyPayload) !== JSON.stringify(baselineStrategyPayload)) {
-          const strategyRes = await apiFetch(`/api/config/session-strategy/${cat.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(nextStrategyPayload),
-          });
-          if (!strategyRes.ok) {
-            const payload = (await strategyRes.json().catch(() => ({}))) as Record<string, unknown>;
-            setError((payload.error as string) ?? `Session 策略保存失败 (${strategyRes.status})`);
-            return;
-          }
-        }
       }
 
       if (showCodexSettings && codexSettings) {
@@ -340,6 +374,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
           />
           <AccountSection
             form={form}
+            modelOptions={modelOptions}
             availableProfiles={availableProfiles}
             selectedProfile={selectedProfile}
             loadingProfiles={loadingProfiles}

@@ -1,7 +1,7 @@
 import type { CatData } from '@/hooks/useCatData';
-import type { ProfileItem } from './hub-provider-profiles.types';
+import type { BuiltinAccountClient, ProfileItem } from './hub-provider-profiles.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
-import { defaultMcpSupportForClient, protocolForClient } from './hub-cat-editor.protocols';
+import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 
 export type ClientValue = 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode' | 'antigravity';
 export type SessionChainValue = 'true' | 'false';
@@ -24,7 +24,7 @@ export interface HubCatEditorFormState {
   caution: string;
   strengths: string;
   client: ClientValue;
-  providerProfileId: string;
+  accountRef: string;
   defaultModel: string;
   commandArgs: string;
   sessionChain: SessionChainValue;
@@ -36,6 +36,7 @@ export interface HubCatEditorFormState {
 
 export interface HubCatEditorDraft {
   client: ClientValue;
+  accountRef?: string;
   providerProfileId?: string;
   defaultModel: string;
   commandArgs?: string;
@@ -95,6 +96,8 @@ export const CODEX_AUTH_MODE_OPTIONS: Array<{ value: CodexAuthMode; label: strin
   { value: 'auto', label: 'auto' },
 ];
 
+export const DEFAULT_ANTIGRAVITY_COMMAND_ARGS = '. --remote-debugging-port=9000';
+
 export function splitMentionPatterns(raw: string): string[] {
   return raw
     .split(/[\n,]+/)
@@ -117,10 +120,50 @@ export function joinTags(tags: string[]): string {
 }
 
 export function splitCommandArgs(raw: string): string[] {
-  return raw
-    .split(/\s+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const input = raw.trim();
+  if (!input) return [];
+  const args: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let escaping = false;
+
+  const pushCurrent = () => {
+    if (current.length === 0) return;
+    args.push(current);
+    current = '';
+  };
+
+  for (const char of input) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      pushCurrent();
+      continue;
+    }
+    current += char;
+  }
+  if (escaping) current += '\\';
+  pushCurrent();
+  return args;
 }
 
 export function splitStrengthTags(raw: string): string[] {
@@ -130,15 +173,51 @@ export function splitStrengthTags(raw: string): string[] {
     .filter(Boolean);
 }
 
-export function filterProfiles(client: ClientValue, profiles: ProfileItem[]): ProfileItem[] {
-  if (client === 'antigravity') return [];
-  const protocol = protocolForClient(client);
-  if (!protocol) return [];
-  if (client === 'dare' || client === 'opencode') {
-    return profiles.filter((profile) => profile.protocol === protocol);
-  }
-  return profiles.filter((profile) => profile.protocol === protocol || profile.authType === 'api_key');
+function isBuiltinClient(client: ClientValue): client is BuiltinAccountClient {
+  return client === 'anthropic' || client === 'openai' || client === 'google' || client === 'dare' || client === 'opencode';
 }
+
+function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undefined {
+  if (profile.client) return profile.client;
+  if (profile.oauthLikeClient === 'dare' || profile.oauthLikeClient === 'opencode') return profile.oauthLikeClient;
+  switch (profile.protocol) {
+    case 'anthropic':
+      return 'anthropic';
+    case 'openai':
+      return 'openai';
+    case 'google':
+      return 'google';
+    default:
+      return undefined;
+  }
+}
+
+export function builtinAccountIdForClient(client: ClientValue): string | null {
+  if (!isBuiltinClient(client)) return null;
+  switch (client) {
+    case 'anthropic':
+      return 'claude';
+    case 'openai':
+      return 'codex';
+    case 'google':
+      return 'gemini';
+    case 'dare':
+      return 'dare';
+    case 'opencode':
+      return 'opencode';
+  }
+}
+
+export function filterAccounts(client: ClientValue, profiles: ProfileItem[]): ProfileItem[] {
+  if (!isBuiltinClient(client)) return [];
+  const builtinProfiles = profiles.filter(
+    (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === client,
+  );
+  const apiKeyProfiles = profiles.filter((profile) => profile.authType === 'api_key');
+  return [...builtinProfiles, ...apiKeyProfiles.filter((profile) => !builtinProfiles.includes(profile))];
+}
+
+export const filterProfiles = filterAccounts;
 
 export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | null): HubCatEditorFormState {
   const createDraft = !cat ? draft : null;
@@ -159,7 +238,12 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
     client: (cat?.provider as ClientValue | undefined) ?? createDraft?.client ?? 'anthropic',
-    providerProfileId: cat?.providerProfileId ?? createDraft?.providerProfileId ?? '',
+    accountRef:
+      cat?.accountRef ??
+      cat?.providerProfileId ??
+      createDraft?.accountRef ??
+      createDraft?.providerProfileId ??
+      '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     sessionChain: String(cat?.sessionChain ?? true) as SessionChainValue,
@@ -264,8 +348,12 @@ export function buildCodexConfigPatches(
   return patches;
 }
 
-function trimText(value: string): string {
-  return value.trim();
+function trimText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveFormAccountRef(form: HubCatEditorFormState): string {
+  return trimText(form.accountRef ?? (form as HubCatEditorFormState & { providerProfileId?: string }).providerProfileId);
 }
 
 export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | null) {
@@ -280,12 +368,13 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   const name = trimText(form.name);
   const displayName = trimText(form.displayName) || name;
   const createName = name || displayName;
-  const trimmedProviderProfileId = trimText(form.providerProfileId);
-  const providerProfilePatch =
-    trimmedProviderProfileId.length > 0
-      ? { providerProfileId: trimmedProviderProfileId }
-      : cat?.providerProfileId
-        ? { providerProfileId: null as null }
+  const updateName = name || displayName || cat?.name || cat?.displayName || '';
+  const trimmedAccountRef = resolveFormAccountRef(form);
+  const accountRefPatch =
+    trimmedAccountRef.length > 0
+      ? { accountRef: trimmedAccountRef }
+      : cat?.accountRef || cat?.providerProfileId
+        ? { accountRef: null as null }
         : {};
   const mcpSupportPatch =
     cat && form.client !== cat.provider ? { mcpSupport: defaultMcpSupportForClient(form.client) } : {};
@@ -317,9 +406,9 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   if (form.client === 'antigravity') {
     return {
       ...common,
-      ...(cat ? {} : { catId: trimText(form.catId), name: createName }),
+      ...(cat ? { name: updateName } : { catId: trimText(form.catId), name: createName }),
       client: 'antigravity' as const,
-      ...providerProfilePatch,
+      ...accountRefPatch,
       ...mcpSupportPatch,
       defaultModel: trimText(form.defaultModel),
       commandArgs: splitCommandArgs(form.commandArgs),
@@ -328,9 +417,9 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
 
   return {
     ...common,
-    ...(cat ? {} : { catId: trimText(form.catId), name: createName }),
+    ...(cat ? { name: updateName } : { catId: trimText(form.catId), name: createName }),
     client: form.client,
-    ...providerProfilePatch,
+    ...accountRefPatch,
     ...mcpSupportPatch,
     defaultModel: trimText(form.defaultModel),
   };

@@ -9,7 +9,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 import { HubCatEditor } from '@/components/HubCatEditor';
-import { buildCatPayload, type HubCatEditorFormState, filterProfiles } from '@/components/hub-cat-editor.model';
+import { buildCatPayload, filterProfiles, type HubCatEditorFormState, splitCommandArgs } from '@/components/hub-cat-editor.model';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -73,7 +73,7 @@ describe('HubCatEditor', () => {
     vi.clearAllMocks();
   });
 
-  it('buildCatPayload omits name when editing an existing cat', () => {
+  it('buildCatPayload keeps name in PATCH payload when editing an existing cat', () => {
     const form: HubCatEditorFormState = {
       catId: 'runtime-codex',
       name: '运行时缅因猫',
@@ -111,7 +111,7 @@ describe('HubCatEditor', () => {
     } as CatData;
 
     const payload = buildCatPayload(form, existingCat) as Record<string, unknown>;
-    expect(Object.prototype.hasOwnProperty.call(payload, 'name')).toBe(false);
+    expect(payload.name).toBe('运行时缅因猫');
   });
 
   it('buildCatPayload recomputes mcpSupport when client changes on existing cat', () => {
@@ -153,6 +153,16 @@ describe('HubCatEditor', () => {
 
     const payload = buildCatPayload(baseForm, existingCat) as Record<string, unknown>;
     expect(payload.mcpSupport).toBe(true);
+  });
+
+  it('splitCommandArgs preserves quoted segments', () => {
+    expect(splitCommandArgs('chat --mode \"agent bridge\" --path \"/tmp/work tree\"')).toEqual([
+      'chat',
+      '--mode',
+      'agent bridge',
+      '--path',
+      '/tmp/work tree',
+    ]);
   });
 
   it('renders normal member provider/model fields and saves to /api/cats', async () => {
@@ -233,7 +243,7 @@ describe('HubCatEditor', () => {
     const payload = JSON.parse(String(postCall?.[1]?.body));
     expect(payload.client).toBe('openai');
     expect(payload.catId).toBe('runtime-spark');
-    expect(payload.providerProfileId).toBe('codex-sponsor');
+    expect(payload.accountRef).toBe('codex-sponsor');
     expect(payload.defaultModel).toBe('gpt-5.4-mini');
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
@@ -257,7 +267,7 @@ describe('HubCatEditor', () => {
     expect(container.querySelector('select[aria-label="Provider"]')).toBeNull();
   });
 
-  it('filters provider options by selected client protocol', async () => {
+  it('shows the selected client builtin provider plus all API key providers', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/provider-profiles') {
         return Promise.resolve(
@@ -310,10 +320,10 @@ describe('HubCatEditor', () => {
     const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
     expect(optionLabels).toContain('Codex (OAuth)');
-    expect(optionLabels).toContain('Claude Sponsor');
+    expect(optionLabels).toContain('Claude Sponsor（API Key）');
   });
 
-  it('filters Dare/OpenCode profiles to same-protocol accounts regardless of auth type', () => {
+  it('keeps api-key providers client-agnostic while retaining the selected client builtin provider', () => {
     const profiles = [
       {
         id: 'claude-oauth',
@@ -374,8 +384,8 @@ describe('HubCatEditor', () => {
     ];
 
     expect(filterProfiles('openai', profiles).map((profile) => profile.id)).toEqual([
-      'claude-sponsor',
       'codex-oauth',
+      'claude-sponsor',
       'codex-sponsor',
     ]);
     expect(filterProfiles('anthropic', profiles).map((profile) => profile.id)).toEqual([
@@ -383,10 +393,10 @@ describe('HubCatEditor', () => {
       'claude-sponsor',
       'codex-sponsor',
     ]);
-    expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual(['codex-oauth', 'codex-sponsor']);
+    expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual(['claude-sponsor', 'codex-sponsor']);
     expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual([
-      'claude-oauth',
       'claude-sponsor',
+      'codex-sponsor',
     ]);
   });
 
@@ -544,10 +554,10 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.providerProfileId).toBeUndefined();
+    expect(payload.accountRef).toBeUndefined();
   });
 
-  it('auto-binds opencode members to the first available same-protocol provider', async () => {
+  it('keeps unbound opencode members unbound until a provider is chosen', async () => {
     const existingCat = {
       id: 'runtime-opencode',
       name: 'runtime-opencode',
@@ -614,7 +624,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('claude-oauth');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存修改');
     await act(async () => {
@@ -627,10 +637,10 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.providerProfileId).toBe('claude-oauth');
+    expect(payload.accountRef).toBeUndefined();
   });
 
-  it('blocks saving opencode members until provider profiles finish loading', async () => {
+  it('allows saving existing opencode members while provider profiles are still loading', async () => {
     const existingCat = {
       id: 'runtime-opencode',
       name: 'runtime-opencode',
@@ -669,7 +679,7 @@ describe('HubCatEditor', () => {
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存修改');
     expect(saveButton).toBeTruthy();
-    expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
 
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -677,7 +687,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
     expect(
       mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats/runtime-opencode' && init?.method === 'PATCH'),
-    ).toBeFalsy();
+    ).toBeTruthy();
 
     resolveProfiles(
       jsonResponse({
@@ -718,11 +728,11 @@ describe('HubCatEditor', () => {
     await flushEffects();
     await flushEffects();
 
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('claude-oauth');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('');
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('sends providerProfileId=null when clearing an existing provider binding', async () => {
+  it('sends accountRef=null when clearing an existing provider binding', async () => {
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
@@ -792,10 +802,10 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.providerProfileId).toBeNull();
+    expect(payload.accountRef).toBeNull();
   });
 
-  it('sends providerProfileId=null when switching a bound member to antigravity', async () => {
+  it('sends accountRef=null when switching a bound member to antigravity', async () => {
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
@@ -868,7 +878,7 @@ describe('HubCatEditor', () => {
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
     expect(payload.client).toBe('antigravity');
-    expect(payload.providerProfileId).toBeNull();
+    expect(payload.accountRef).toBeNull();
     expect(payload.mcpSupport).toBe(false);
   });
 

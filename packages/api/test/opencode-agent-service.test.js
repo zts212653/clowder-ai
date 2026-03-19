@@ -159,6 +159,33 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(opts.env.ANTHROPIC_API_KEY, 'sk-test-secret');
   });
 
+  test('subscription mode clears inherited anthropic credentials', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+      apiKey: 'sk-should-not-leak',
+      baseUrl: 'https://proxy.example/v1',
+    });
+    const promise = collect(
+      service.invoke('Test', {
+        callbackEnv: {
+          CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription',
+          ANTHROPIC_API_KEY: 'sk-inherited',
+          ANTHROPIC_BASE_URL: 'https://inherited.example/v1',
+        },
+      }),
+    );
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const opts = spawnFn.mock.calls[0].arguments[2];
+    assert.strictEqual(opts.env.ANTHROPIC_API_KEY, null);
+    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, null);
+  });
+
   test('baseUrl passed via ANTHROPIC_BASE_URL env', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);

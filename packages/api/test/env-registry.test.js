@@ -63,13 +63,13 @@ describe('env-registry', () => {
     assert.equal(redis.maskMode, 'url');
   });
 
-  it('keeps server ports editable for F127 hub env editor', () => {
+  it('marks bootstrap server ports as runtime-editable in hub env editor under F127 semantics', () => {
     const apiPort = ENV_VARS.find((v) => v.name === 'API_SERVER_PORT');
     const previewPort = ENV_VARS.find((v) => v.name === 'PREVIEW_GATEWAY_PORT');
     assert.ok(apiPort, 'API_SERVER_PORT should be in registry');
     assert.ok(previewPort, 'PREVIEW_GATEWAY_PORT should be in registry');
-    assert.notEqual(apiPort.runtimeEditable, false);
-    assert.notEqual(previewPort.runtimeEditable, false);
+    assert.equal(apiPort.runtimeEditable, true);
+    assert.equal(previewPort.runtimeEditable, true);
   });
 
   it('no HINDSIGHT_* vars remain after D-1 cleanup', () => {
@@ -166,24 +166,26 @@ describe('buildEnvSummary', () => {
 });
 
 describe('GET /api/config/env-summary (route)', () => {
-  it('projectRoot points to monorepo root, not packages/api', async () => {
+  it('projectRoot follows CAT_TEMPLATE_PATH directory when set', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-summary-'));
+    const templatePath = resolve(tempRoot, 'cat-template.json');
+    writeFileSync(templatePath, '{}', 'utf8');
+    setEnv('CAT_TEMPLATE_PATH', templatePath);
     const app = Fastify({ logger: false });
-    await configRoutes(app);
-    await app.ready();
+    try {
+      await configRoutes(app);
+      await app.ready();
 
-    const res = await app.inject({ method: 'GET', url: '/api/config/env-summary' });
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.payload);
-    const root = body.paths.projectRoot;
-
-    assert.ok(
-      existsSync(resolve(root, 'pnpm-workspace.yaml')),
-      `projectRoot should contain pnpm-workspace.yaml, got: ${root}`,
-    );
-    assert.ok(!root.endsWith('/packages/api'), `projectRoot should not end with /packages/api, got: ${root}`);
-
-    await app.close();
+      const res = await app.inject({ method: 'GET', url: '/api/config/env-summary' });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      const root = body.paths.projectRoot;
+      assert.equal(root, tempRoot);
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it('dataDirs returns absolute resolved paths from API', async () => {

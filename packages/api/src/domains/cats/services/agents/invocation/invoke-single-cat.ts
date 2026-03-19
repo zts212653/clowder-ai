@@ -15,11 +15,16 @@ import { type CatId, type ContextHealth, catRegistry, type MessageContent } from
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import {
+  resolveBuiltinClientForProvider,
+  validateRuntimeProviderBinding,
+} from '../../../../../config/provider-binding-compat.js';
+import {
+  builtinAccountIdForClient,
   resolveAnthropicRuntimeProfile,
-  resolveRuntimeProviderProfile,
-  resolveRuntimeProviderProfileById,
+  resolveRuntimeProviderProfileForClient,
 } from '../../../../../config/provider-profiles.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
+import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
@@ -580,28 +585,52 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // Provider profile injection (F062/F127):
-    // Resolve runtime credentials from project-local `.cat-cafe` profile state.
-    // Member-level `providerProfileId` takes precedence over protocol-level active profiles.
+    // F127 account injection:
+    // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
+    // Legacy providerProfileId is still read as a migration fallback.
     const catConfig = catRegistry.tryGet(catId as string)?.config;
     const provider = catConfig?.provider;
-    const boundProviderProfileId = catConfig?.providerProfileId?.trim() || undefined;
-    const projectRoot = workingDirectory ?? findMonorepoRoot(process.cwd());
-    const resolveProfileForProtocol = async (protocol: 'anthropic' | 'openai' | 'google') => {
-      if (boundProviderProfileId) {
-        const bound = await resolveRuntimeProviderProfileById(projectRoot, boundProviderProfileId);
-        if (bound?.protocol === protocol) return bound;
+    const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
+    const legacyCatConfig = catConfig as (typeof catConfig & { providerProfileId?: string }) | undefined;
+    const defaultModel = catConfig?.defaultModel?.trim() || undefined;
+    const projectRoot = workingDirectory ? findMonorepoRoot(workingDirectory) : findMonorepoRoot(process.cwd());
+    const runtimeCatalogExists = existsSync(resolve(projectRoot, '.cat-cafe', 'cat-catalog.json'));
+    const explicitAccountRef = catConfig?.accountRef?.trim() || undefined;
+    const inheritedBuiltinAccountRef =
+      !runtimeCatalogExists &&
+      !!builtinClient &&
+      explicitAccountRef === builtinAccountIdForClient(builtinClient);
+    const boundAccountRef =
+      legacyCatConfig?.providerProfileId?.trim() || (inheritedBuiltinAccountRef ? undefined : explicitAccountRef);
+    const resolveRuntimeAccount = async () => {
+      if (!builtinClient) return null;
+      const runtime = await resolveRuntimeProviderProfileForClient(projectRoot, builtinClient, boundAccountRef);
+      if (boundAccountRef && !runtime) {
+        throw new Error(`bound account "${boundAccountRef}" not found`);
       }
-      return resolveRuntimeProviderProfile(projectRoot, protocol);
+      return runtime;
     };
+    const assertCompatibleRuntimeAccount = <T extends { id: string }>(
+      account: (T & Parameters<typeof validateRuntimeProviderBinding>[1]) | null,
+    ) => {
+      if (!provider || !account) return account;
+      const compatibilityError = validateRuntimeProviderBinding(provider, account, defaultModel);
+      if (compatibilityError) {
+        throw new Error(compatibilityError);
+      }
+      return account;
+    };
+    const isExplicitBindingCompatibilityError = (err: unknown): err is Error =>
+      err instanceof Error &&
+      (/bound provider profile/i.test(err.message) || /model ".+" is not available on provider/i.test(err.message));
 
     if (provider === 'anthropic' || provider === 'opencode') {
       try {
-        const profile = (await resolveProfileForProtocol('anthropic')) ?? (await resolveAnthropicRuntimeProfile(projectRoot));
-        callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = profile.mode;
-        if (profile.mode === 'api_key') {
-          if (profile.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = profile.apiKey;
-          if (profile.baseUrl) {
+        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
+        if (account?.authType === 'api_key') {
+          callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
+          if (account.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = account.apiKey;
+          if (account.baseUrl) {
             // Route through local proxy gateway if enabled (default: on).
             // Proxy uses slug-based routing: /SLUG/v1/messages → upstream/v1/messages
             const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
@@ -610,14 +639,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
               const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
               if (proxyAlive) {
-                const slug = deriveProxySlug(profile.id);
-                registerProxyUpstream(projectRoot, slug, profile.baseUrl);
+                const slug = deriveProxySlug(account.id);
+                registerProxyUpstream(projectRoot, slug, account.baseUrl);
                 callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
               } else {
                 console.warn(
-                  `[invoke] proxy 127.0.0.1:${proxyPortStr} unreachable, falling back to direct upstream: ${profile.baseUrl}`,
+                  `[invoke] proxy 127.0.0.1:${proxyPortStr} unreachable, falling back to direct upstream: ${account.baseUrl}`,
                 );
-                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
+                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = account.baseUrl;
               }
             } else {
               if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
@@ -625,67 +654,74 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   `[invoke] invalid ANTHROPIC_PROXY_PORT="${proxyPortStr}", falling back to direct upstream`,
                 );
               }
-              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
+              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = account.baseUrl;
             }
           }
+        } else {
+          callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
         }
-        if (profile.modelOverride) {
-          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = profile.modelOverride;
+      } catch (err) {
+        if (isExplicitBindingCompatibilityError(err)) {
+          throw err;
         }
-      } catch {
+        if (boundAccountRef) {
+          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
+        }
         // Best-effort fallback: default to subscription mode when profile resolution fails.
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
       }
     } else if (provider === 'openai') {
       try {
-        const profile = await resolveProfileForProtocol('openai');
-        if (profile) {
-          if (profile.mode === 'api_key') {
-            callbackEnv.CODEX_AUTH_MODE = 'api_key';
-            if (profile.apiKey) {
-              callbackEnv.OPENAI_API_KEY = profile.apiKey;
-            }
-          } else {
-            // Keep env-driven auth untouched when runtime falls back to default codex-oauth
-            // without an explicit member binding.
-            const shouldForceOauth = boundProviderProfileId === profile.id || profile.id !== 'codex-oauth';
-            if (shouldForceOauth) {
-              callbackEnv.CODEX_AUTH_MODE = 'oauth';
-            }
+        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
+        if (account?.authType === 'api_key') {
+          callbackEnv.CODEX_AUTH_MODE = 'api_key';
+          if (account.apiKey) {
+            callbackEnv.OPENAI_API_KEY = account.apiKey;
           }
-          if (profile.baseUrl) {
-            callbackEnv.OPENAI_BASE_URL = profile.baseUrl;
-            callbackEnv.OPENAI_API_BASE = profile.baseUrl;
-          }
-          if (profile.modelOverride) {
-            callbackEnv.CAT_CAFE_OPENAI_MODEL_OVERRIDE = profile.modelOverride;
+          if (account.baseUrl) {
+            callbackEnv.OPENAI_BASE_URL = account.baseUrl;
+            callbackEnv.OPENAI_API_BASE = account.baseUrl;
           }
         }
-      } catch {
+      } catch (err) {
+        if (isExplicitBindingCompatibilityError(err)) {
+          throw err;
+        }
+        if (boundAccountRef) {
+          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
+        }
         /* openai profile resolution is best-effort */
       }
     } else if (provider === 'google') {
       try {
-        const profile = await resolveProfileForProtocol('google');
-        if (profile?.mode === 'api_key' && profile.apiKey) {
-          callbackEnv.GEMINI_API_KEY = profile.apiKey;
-          callbackEnv.GOOGLE_API_KEY = profile.apiKey;
+        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
+        if (account?.authType === 'api_key' && account.apiKey) {
+          callbackEnv.GEMINI_API_KEY = account.apiKey;
+          callbackEnv.GOOGLE_API_KEY = account.apiKey;
         }
-        if (profile?.modelOverride) {
-          callbackEnv.CAT_CAFE_GEMINI_MODEL_OVERRIDE = profile.modelOverride;
+      } catch (err) {
+        if (isExplicitBindingCompatibilityError(err)) {
+          throw err;
         }
-      } catch {
+        if (boundAccountRef) {
+          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
+        }
         /* google profile resolution is best-effort */
       }
     } else if (provider === 'dare') {
       try {
-        const profile = await resolveProfileForProtocol('openai');
-        if (profile?.mode === 'api_key' && profile.apiKey) {
-          callbackEnv.DARE_API_KEY = profile.apiKey;
-          if (profile.baseUrl) callbackEnv.DARE_ENDPOINT = profile.baseUrl;
-          if (profile.modelOverride) callbackEnv.CAT_CAFE_DARE_MODEL_OVERRIDE = profile.modelOverride;
+        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
+        if (account?.authType === 'api_key' && account.apiKey) {
+          callbackEnv.DARE_API_KEY = account.apiKey;
+          if (account.baseUrl) callbackEnv.DARE_ENDPOINT = account.baseUrl;
         }
-      } catch {
+      } catch (err) {
+        if (isExplicitBindingCompatibilityError(err)) {
+          throw err;
+        }
+        if (boundAccountRef) {
+          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
+        }
         /* dare profile resolution is best-effort */
       }
     }

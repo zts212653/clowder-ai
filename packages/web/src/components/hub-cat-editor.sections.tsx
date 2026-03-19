@@ -5,7 +5,6 @@ import type { CatData } from '@/hooks/useCatData';
 import {
   CLIENT_OPTIONS,
   canonicalMentionPattern,
-  filterProfiles,
   type HubCatEditorFormState,
   joinTags,
   normalizeMentionPattern,
@@ -192,27 +191,28 @@ export function IdentitySection({
 
 export function AccountSection({
   form,
+  modelOptions,
   availableProfiles,
   selectedProfile,
   loadingProfiles,
   onChange,
 }: {
   form: HubCatEditorFormState;
+  modelOptions: string[];
   availableProfiles: ProfileItem[];
   selectedProfile: ProfileItem | null;
   loadingProfiles: boolean;
   onChange: (patch: FormPatch) => void;
 }) {
-  const protocolScopedProfiles = filterProfiles(form.client, availableProfiles);
+  const accountOptions = availableProfiles;
 
   return (
     <SectionCard
       title="认证与模型"
-      description="API Key 凭证在账号配置中管理；普通 Client 在此选择 Provider + 模型。若 Client=Antigravity，则直接配置 CLI 命令（默认值来自 cat-template）和模型。"
+      description="成员侧单独选择 client、绑定 provider、再选择模型。API Key provider 不和任何 client 预绑定，但 provider 本身维护可选模型列表。"
     >
       <p className="text-xs font-semibold leading-5 text-[#BF360C]">
-        ⚠️ 约束：Claude/Codex/Gemini = 同名 OAuth + 任意 API Key provider；Dare/OpenCode = 同协议账号（OAuth-like / API
-        Key 都可）；Antigravity = 直接配置 CLI 命令 + model。
+        ⚠️ 约束：每个 client 只能选自己的内置账号，或任意独立 API Key 账号；不校验 API Key 账号是否真的兼容该 client。
       </p>
       <div className="space-y-2">
         <SelectField
@@ -239,19 +239,22 @@ export function AccountSection({
           <>
             <SelectField
               label="Provider"
-              value={form.providerProfileId}
+              value={form.accountRef}
               options={[
                 { value: '', label: loadingProfiles ? '加载中…' : '未绑定' },
-                ...protocolScopedProfiles.map((profile) => ({ value: profile.id, label: profile.displayName })),
+                ...accountOptions.map((profile) => ({
+                  value: profile.id,
+                  label: profile.builtin ? profile.displayName : `${profile.displayName}（API Key）`,
+                })),
               ]}
-              onChange={(value) => onChange({ providerProfileId: value })}
+              onChange={(value) => onChange({ accountRef: value })}
               disabled={loadingProfiles}
             />
-            {selectedProfile?.models.length ? (
+            {modelOptions.length > 0 ? (
               <SelectField
                 label="Model"
                 value={form.defaultModel}
-                options={selectedProfile.models.map((model) => ({ value: model, label: model }))}
+                options={modelOptions.map((model) => ({ value: model, label: model }))}
                 onChange={(value) => onChange({ defaultModel: value })}
               />
             ) : (
@@ -261,6 +264,12 @@ export function AccountSection({
                 onChange={(value) => onChange({ defaultModel: value })}
               />
             )}
+            {selectedProfile ? (
+              <p className="text-[11px] leading-5 text-[#8A776B] sm:ml-[152px]">
+                当前绑定账号：{selectedProfile.displayName}
+                {selectedProfile.builtin ? '（内置 provider）' : '（独立 API Key provider）'}
+              </p>
+            ) : null}
           </>
         )}
       </div>

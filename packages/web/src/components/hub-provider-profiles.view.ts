@@ -1,56 +1,28 @@
-import type { ProfileItem } from './hub-provider-profiles.types';
+import type { BuiltinAccountClient, ProfileItem } from './hub-provider-profiles.types';
 
-function cloneProfile(
-  profile: ProfileItem,
-  override: Pick<ProfileItem, 'id' | 'provider' | 'displayName' | 'name'> & {
-    oauthLikeClient: NonNullable<ProfileItem['oauthLikeClient']>;
-  },
-): ProfileItem {
-  return {
-    ...profile,
-    id: override.id,
-    provider: override.provider,
-    displayName: override.displayName,
-    name: override.name,
-    targetProfileId: profile.id,
-    oauthLikeClient: override.oauthLikeClient,
-  };
-}
-
-export function expandProviderProfiles(profiles: ProfileItem[]): ProfileItem[] {
-  const expanded: ProfileItem[] = [];
-  for (const profile of profiles) {
-    expanded.push(profile);
-    if (profile.id === 'claude-oauth') {
-      expanded.push(
-        cloneProfile(profile, {
-          id: 'opencode-client-auth',
-          provider: 'opencode-client-auth',
-          displayName: 'OpenCode (client-auth)',
-          name: 'OpenCode (client-auth)',
-          oauthLikeClient: 'opencode',
-        }),
-      );
-    }
-    if (profile.id === 'codex-oauth') {
-      expanded.push(
-        cloneProfile(profile, {
-          id: 'dare-client-auth',
-          provider: 'dare-client-auth',
-          displayName: 'Dare (client-auth)',
-          name: 'Dare (client-auth)',
-          oauthLikeClient: 'dare',
-        }),
-      );
-    }
+export function builtinClientLabel(client?: BuiltinAccountClient): string {
+  switch (client) {
+    case 'anthropic':
+      return 'Claude';
+    case 'openai':
+      return 'Codex';
+    case 'google':
+      return 'Gemini';
+    case 'dare':
+      return 'Dare';
+    case 'opencode':
+      return 'OpenCode';
+    default:
+      return 'Builtin';
   }
-  return expanded;
 }
 
-export function resolveProfileActionId(profile: ProfileItem): string {
-  return profile.targetProfileId ?? profile.id;
+export function accountTone(profile: ProfileItem): 'purple' | 'green' | 'orange' {
+  if (profile.builtin) return 'orange';
+  if (profile.baseUrl?.toLowerCase().includes('google')) return 'green';
+  return 'purple';
 }
 
-export function isOAuthLikeBuiltin(profile: ProfileItem): boolean {
-  return Boolean(profile.oauthLikeClient);
+export function resolveAccountActionId(profile: ProfileItem): string {
+  return profile.id;
 }

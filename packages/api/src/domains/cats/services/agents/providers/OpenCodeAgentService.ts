@@ -175,6 +175,16 @@ export class OpenCodeAgentService implements AgentService {
 
   private buildEnv(callbackEnv?: Record<string, string>): Record<string, string | null> {
     const env: Record<string, string | null> = { ...callbackEnv };
+    const profileMode = callbackEnv?.CAT_CAFE_ANTHROPIC_PROFILE_MODE;
+
+    // Subscription mode must not inherit API-key credentials from parent env.
+    if (profileMode === 'subscription') {
+      env[ANTHROPIC_API_KEY_ENV] = null;
+      env[ANTHROPIC_BASE_URL_ENV] = null;
+      env[OPENCODE_API_KEY_ENV] = null;
+      env.OPENCODE_BASE_URL = null;
+      return env;
+    }
 
     // API key: callbackEnv > constructor > process.env
     const apiKey = callbackEnv?.CAT_CAFE_ANTHROPIC_API_KEY ?? callbackEnv?.[OPENCODE_API_KEY_ENV] ?? this.apiKey;

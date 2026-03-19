@@ -1,10 +1,19 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { isUnderAllowedRoot } from '../utils/project-path.js';
 
 async function realpathOrNull(path: string): Promise<string | null> {
   try {
     return await realpath(path);
+  } catch {
+    return null;
+  }
+}
+
+function realpathSyncOrNull(path: string): string | null {
+  try {
+    return realpathSync(path);
   } catch {
     return null;
   }
@@ -60,6 +69,30 @@ async function resolvePathPointer(filePath: string, baseDir: string): Promise<st
   return realpathOrNull(resolve(baseDir, pointer));
 }
 
+function resolveGitdirPointerSync(filePath: string, baseDir: string): string | null {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+  const pointer = parseGitdirPointer(raw);
+  if (!pointer) return null;
+  return realpathSyncOrNull(resolve(baseDir, pointer));
+}
+
+function resolvePathPointerSync(filePath: string, baseDir: string): string | null {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+  const pointer = parsePathPointer(raw);
+  if (!pointer) return null;
+  return realpathSyncOrNull(resolve(baseDir, pointer));
+}
+
 export function isAllowedProviderProfilesRoot(absPath: string): boolean {
   return isUnderAllowedRoot(absPath);
 }
@@ -94,6 +127,45 @@ export async function resolveProviderProfilesRoot(projectRoot: string): Promise<
     const commondirValue = commondirRaw.split(/\r?\n/, 1)[0]?.trim();
     if (!commondirValue) return rootReal;
     const commondirResolved = await realpathOrNull(resolve(gitDir, commondirValue));
+    if (!commondirResolved || !samePath(commondirResolved, commonGitDir)) return rootReal;
+
+    const candidateRoot = dirname(commonGitDir);
+    if (!isAllowedProviderProfilesRoot(candidateRoot)) return rootReal;
+    return candidateRoot;
+  } catch {
+    return rootReal;
+  }
+}
+
+export function resolveProviderProfilesRootSync(projectRoot: string): string {
+  const root = resolve(projectRoot);
+  const rootReal = realpathSyncOrNull(root) ?? root;
+  const gitPath = resolve(rootReal, '.git');
+  try {
+    const st = lstatSync(gitPath);
+    if (st.isDirectory()) return rootReal;
+    if (!st.isFile()) return rootReal;
+
+    const gitDir = resolveGitdirPointerSync(gitPath, rootReal);
+    if (!gitDir) return rootReal;
+
+    const worktreesDir = dirname(gitDir);
+    if (basename(worktreesDir) !== 'worktrees') return rootReal;
+    const commonGitDir = dirname(worktreesDir);
+    if (basename(commonGitDir) !== '.git') return rootReal;
+
+    const backRef = resolvePathPointerSync(resolve(gitDir, 'gitdir'), gitDir);
+    if (!backRef || !samePath(backRef, gitPath)) return rootReal;
+
+    let commondirRaw: string;
+    try {
+      commondirRaw = readFileSync(resolve(gitDir, 'commondir'), 'utf-8');
+    } catch {
+      return rootReal;
+    }
+    const commondirValue = commondirRaw.split(/\r?\n/, 1)[0]?.trim();
+    if (!commondirValue) return rootReal;
+    const commondirResolved = realpathSyncOrNull(resolve(gitDir, commondirValue));
     if (!commondirResolved || !samePath(commondirResolved, commonGitDir)) return rootReal;
 
     const candidateRoot = dirname(commonGitDir);

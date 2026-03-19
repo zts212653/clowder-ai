@@ -93,6 +93,28 @@ describe('HubAddMemberWizard', () => {
     root = createRoot(container);
     mockApiFetch.mockReset();
     mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/cats') {
+        return Promise.resolve(
+          jsonResponse({
+            cats: [
+              {
+                id: 'antigravity-template',
+                provider: 'antigravity',
+                source: 'seed',
+                defaultModel: 'template-antigravity-model',
+                commandArgs: ['. --remote-debugging-port=9010'],
+              },
+              {
+                id: 'runtime-antigravity-preview',
+                provider: 'antigravity',
+                source: 'runtime',
+                defaultModel: 'runtime-custom-model',
+                commandArgs: ['. --remote-debugging-port=9999'],
+              },
+            ],
+          }),
+        );
+      }
       if (path === '/api/provider-profiles') {
         return Promise.resolve(
           jsonResponse({
@@ -183,7 +205,7 @@ describe('HubAddMemberWizard', () => {
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('Antigravity');
     expect(container.textContent).toContain('Step 2: 选择 Provider / 配置 CLI');
     expect(container.textContent).toContain('Step 3: 选择模型');
-    expect(container.textContent).toContain('选择该 Provider 下的可用模型');
+    expect(container.textContent).toContain('模型列表来自所选 Provider 的配置');
     expect(container.textContent).not.toContain('【');
     expect(container.textContent).not.toContain('非 UI 直出');
 
@@ -191,18 +213,18 @@ describe('HubAddMemberWizard', () => {
     expect(container.textContent).toContain('Codex (OAuth)');
     expect(container.textContent).toContain('Codex Sponsor');
     expect(container.textContent).toContain('Claude Sponsor');
-    expect(container.textContent).toContain('OpenCode/Dare → 内置 client-auth provider + 任意 API Key provider');
+    expect(container.textContent).toContain('每个 client 只能选自己的内置账号，或任意独立 API Key 账号');
 
-    await click(queryButton(container, 'Claude Sponsor'));
-    expect(container.textContent).toContain('claude-opus-4-6');
-    await click(queryButton(container, 'claude-opus-4-6'));
+    await click(queryButton(container, 'Codex Sponsor'));
+    expect(container.textContent).toContain('gpt-5.4-mini');
+    await click(queryButton(container, 'gpt-5.4-mini'));
     await click(queryButton(container, '创建后继续编辑'));
     await flushEffects();
 
     expect(container.textContent).toContain('成员配置');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').value).toBe('openai');
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('claude-sponsor');
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('claude-opus-4-6');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('codex-sponsor');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('gpt-5.4-mini');
   });
 
   it('walks the Antigravity flow with default CLI args and lands in the editor', async () => {
@@ -216,22 +238,22 @@ describe('HubAddMemberWizard', () => {
     expect(container.textContent?.split('添加成员').length).toBe(2);
 
     const cliInput = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]');
-    expect(cliInput.value).toBe('. --remote-debugging-port=9000');
+    expect(cliInput.value).toBe('. --remote-debugging-port=9010');
     expect(container.textContent).toContain('Step 3: 选择模型');
 
-    await click(queryButton(container, 'gemini-3.1-pro'));
+    await click(queryButton(container, 'template-antigravity-model'));
     await click(queryButton(container, '创建后继续编辑'));
     await flushEffects();
 
     expect(container.textContent).toContain('成员配置');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').value).toBe('antigravity');
     expect(queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]').value).toBe(
-      '. --remote-debugging-port=9000',
+      '. --remote-debugging-port=9010',
     );
-    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').value).toBe('gemini-3.1-pro');
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').value).toBe('template-antigravity-model');
   });
 
-  it('uses template antigravity defaults instead of live cat values', async () => {
+  it('uses seed antigravity defaults from /api/cats instead of runtime cat values', async () => {
     await act(async () => {
       root.render(React.createElement(WizardHost));
     });
@@ -239,9 +261,8 @@ describe('HubAddMemberWizard', () => {
 
     await click(queryButton(container, 'Antigravity'));
     const cliInput = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]');
-    expect(cliInput.value).toBe('. --remote-debugging-port=9000');
-    expect(container.textContent).toContain('gemini-3.1-pro');
-    expect(container.textContent).toContain('claude-opus-4-6');
+    expect(cliInput.value).toBe('. --remote-debugging-port=9010');
+    expect(container.textContent).toContain('template-antigravity-model');
     expect(container.textContent).not.toContain('runtime-custom-model');
   });
 });

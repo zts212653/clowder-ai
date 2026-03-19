@@ -308,9 +308,10 @@ async function main(): Promise<void> {
         }
         const catConfig = catRegistry.tryGet(catId)?.config;
         if (catConfig?.provider === 'anthropic' || catConfig?.provider === 'opencode') {
-          const boundProfileId = catConfig.providerProfileId?.trim();
-          let runtime = boundProfileId ? await resolveRuntimeProviderProfileById(projectRoot, boundProfileId) : null;
-          if (!runtime || runtime.protocol !== 'anthropic') {
+          const legacyCatConfig = catConfig as CatConfig & { providerProfileId?: string };
+          const boundAccountRef = catConfig.accountRef?.trim() || legacyCatConfig.providerProfileId?.trim();
+          let runtime = boundAccountRef ? await resolveRuntimeProviderProfileById(projectRoot, boundAccountRef) : null;
+          if (!runtime && catConfig.provider === 'anthropic') {
             runtime = await resolveRuntimeProviderProfile(projectRoot, 'anthropic');
           }
           if (!runtime?.apiKey) return null;
@@ -441,6 +442,7 @@ async function main(): Promise<void> {
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
   const agentRegistry = new AgentRegistry();
+  let router!: AgentRouter;
   const syncAgentRegistry = async (configs: Record<string, CatConfig>) => {
     agentRegistry.reset();
     for (const [id, config] of Object.entries(configs)) {
@@ -487,6 +489,7 @@ async function main(): Promise<void> {
       }
       agentRegistry.register(id, service);
     }
+    if (router) router.refreshFromRegistry(agentRegistry);
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
@@ -528,7 +531,7 @@ async function main(): Promise<void> {
   });
 
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
-  const router = new AgentRouter({
+  router = new AgentRouter({
     agentRegistry,
     registry,
     messageStore,
@@ -1025,7 +1028,7 @@ async function main(): Promise<void> {
     const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
     const recoveryOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager });
     const recoveryPlayer = new GameAutoPlayer({ gameStore: f101GameStore, orchestrator: recoveryOrchestrator });
-    app.addHook('onClose', async () => {
+    app.server.once('close', () => {
       recoveryPlayer.stopAllLoops();
     });
     try {

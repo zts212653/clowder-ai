@@ -25,7 +25,7 @@ export interface RuntimeCatInput {
   avatar: string;
   color: CatColor;
   mentionPatterns: string[];
-  providerProfileId?: string;
+  accountRef?: string;
   roleDescription: string;
   personality?: string;
   teamStrengths?: string;
@@ -47,7 +47,7 @@ export interface RuntimeCatUpdate {
   avatar?: string;
   color?: CatColor;
   mentionPatterns?: string[];
-  providerProfileId?: string | null;
+  accountRef?: string | null;
   roleDescription?: string;
   personality?: string;
   teamStrengths?: string;
@@ -215,8 +215,8 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         defaultModel: input.defaultModel,
         mcpSupport: input.mcpSupport,
         cli: input.cli,
-        ...(input.providerProfileId != null && input.providerProfileId.trim().length > 0
-          ? { providerProfileId: input.providerProfileId.trim() }
+        ...(input.accountRef != null && input.accountRef.trim().length > 0
+          ? { accountRef: input.accountRef.trim() }
           : {}),
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
@@ -314,11 +314,11 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     }
   }
 
-  if (patch.providerProfileId !== undefined) {
-    if (patch.providerProfileId && patch.providerProfileId.trim().length > 0) {
-      variant.providerProfileId = patch.providerProfileId.trim();
+  if (patch.accountRef !== undefined) {
+    if (patch.accountRef && patch.accountRef.trim().length > 0) {
+      variant.accountRef = patch.accountRef.trim();
     } else {
-      delete variant.providerProfileId;
+      delete variant.accountRef;
     }
   }
   if (patch.personality !== undefined) {

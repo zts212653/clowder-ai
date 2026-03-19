@@ -7,13 +7,12 @@ import {
   CLIENT_ROW_1,
   CLIENT_ROW_2,
   clientLabel,
+  FALLBACK_ANTIGRAVITY_MODELS,
   FALLBACK_ANTIGRAVITY_ARGS,
   PillChoiceButton,
-  TEMPLATE_ANTIGRAVITY_MODELS,
 } from './hub-add-member-wizard.parts';
-import { type ClientValue, type HubCatEditorDraft } from './hub-cat-editor.model';
+import { builtinAccountIdForClient, filterAccounts, type ClientValue, type HubCatEditorDraft } from './hub-cat-editor.model';
 import type { ProfileItem, ProviderProfilesResponse } from './hub-provider-profiles.types';
-import { expandProviderProfiles } from './hub-provider-profiles.view';
 
 interface HubAddMemberWizardProps {
   open: boolean;
@@ -23,6 +22,9 @@ interface HubAddMemberWizardProps {
 
 export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWizardProps) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
+  const [seedCats, setSeedCats] = useState<Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }>>(
+    [],
+  );
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<ClientValue | null>(null);
@@ -30,49 +32,46 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   const [defaultModel, setDefaultModel] = useState('');
   const [commandArgs, setCommandArgs] = useState(FALLBACK_ANTIGRAVITY_ARGS);
 
-  const antigravityDefaults = useMemo(
-    (): { command: string; models: string[] } => ({
-      command: FALLBACK_ANTIGRAVITY_ARGS,
-      models: [...TEMPLATE_ANTIGRAVITY_MODELS],
-    }),
-    [],
-  );
+  const antigravityDefaults = useMemo((): { command: string; models: string[] } => {
+    const templateAntigravity = seedCats.filter(
+      (cat) => cat.provider === 'antigravity' && (cat.source === 'seed' || cat.source === undefined),
+    );
+    const command = templateAntigravity.find((cat) => (cat.commandArgs?.length ?? 0) > 0)?.commandArgs?.join(' ');
+    const models = templateAntigravity
+      .map((cat) => cat.defaultModel?.trim() ?? '')
+      .filter((value) => value.length > 0);
+    return {
+      command: command?.trim() || FALLBACK_ANTIGRAVITY_ARGS,
+      models: models.length > 0 ? Array.from(new Set(models)) : [...FALLBACK_ANTIGRAVITY_MODELS],
+    };
+  }, [seedCats]);
 
   const availableProfiles = useMemo(() => {
-    if (!client) return [];
-    if (client === 'antigravity') return [];
-    if (client === 'opencode') {
-      return profiles.filter((profile) => profile.oauthLikeClient === 'opencode' || profile.authType === 'api_key');
-    }
-    if (client === 'dare') {
-      return profiles.filter((profile) => profile.oauthLikeClient === 'dare' || profile.authType === 'api_key');
-    }
-    if (client === 'anthropic') {
-      return profiles.filter(
-        (profile) => (profile.protocol === 'anthropic' && !profile.oauthLikeClient) || profile.authType === 'api_key',
-      );
-    }
-    if (client === 'openai') {
-      return profiles.filter(
-        (profile) => (profile.protocol === 'openai' && !profile.oauthLikeClient) || profile.authType === 'api_key',
-      );
-    }
-    return profiles.filter((profile) => profile.protocol === 'google' || profile.authType === 'api_key');
+    if (!client || client === 'antigravity') return [];
+    return filterAccounts(client, profiles);
   }, [client, profiles]);
+
   const selectedProfile = useMemo(
     () => availableProfiles.find((profile) => profile.id === selectedProfileId) ?? null,
     [availableProfiles, selectedProfileId],
   );
+
   const selectableModels = useMemo(() => {
     if (client === 'antigravity') return antigravityDefaults.models;
-    return selectedProfile?.models ?? [];
-  }, [antigravityDefaults.models, client, selectedProfile?.models]);
+    const currentModel = defaultModel.trim();
+    const profileModels =
+      selectedProfile?.models
+        ?.map((value) => value.trim())
+        .filter((value) => value.length > 0) ?? [];
+    if (currentModel && !profileModels.includes(currentModel)) {
+      return [currentModel, ...profileModels];
+    }
+    return profileModels;
+  }, [antigravityDefaults.models, client, defaultModel, selectedProfile]);
 
   function profileSubtitle(profile: ProfileItem) {
-    if (profile.authType === 'api_key') {
-      return '赞助 / 自定义 provider 示例；凭证在账号配置管理';
-    }
-    return '内置 provider 示例；普通 Client 先选具体 provider，再选模型';
+    if (profile.builtin) return '当前 client 的内置 provider';
+    return '独立 API Key provider；兼容性由配置人自行保证';
   }
 
   useEffect(() => {
@@ -94,7 +93,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
         return (await res.json()) as ProviderProfilesResponse;
       })
       .then((body) => {
-        if (!cancelled) setProfiles(expandProviderProfiles(body.providers));
+        if (!cancelled) setProfiles(body.providers);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : '账号配置加载失败');
@@ -108,11 +107,34 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   }, [open]);
 
   useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    apiFetch('/api/cats')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`成员模板加载失败 (${res.status})`);
+        return (await res.json()) as { cats?: Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }> };
+      })
+      .then((body) => {
+        if (cancelled) return;
+        setSeedCats(Array.isArray(body.cats) ? body.cats : []);
+      })
+      .catch(() => {
+        if (!cancelled) setSeedCats([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
     if (!client || client === 'antigravity') return;
-    if (availableProfiles.some((profile) => profile.id === selectedProfileId)) return;
-    setSelectedProfileId('');
-    setDefaultModel('');
-  }, [availableProfiles, client, selectedProfileId]);
+    if (!availableProfiles.some((profile) => profile.id === selectedProfileId)) {
+      setSelectedProfileId(builtinAccountIdForClient(client) ?? availableProfiles[0]?.id ?? '');
+    }
+    if (!defaultModel.trim()) {
+      setDefaultModel(selectableModels[0] ?? '');
+    }
+  }, [availableProfiles, client, defaultModel, selectableModels, selectedProfileId]);
 
   useEffect(() => {
     if (client !== 'antigravity') return;
@@ -130,15 +152,15 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
 
   const handleClientSelect = (nextClient: ClientValue) => {
     setClient(nextClient);
-    setSelectedProfileId('');
+    setSelectedProfileId(nextClient === 'antigravity' ? '' : (builtinAccountIdForClient(nextClient) ?? ''));
     setDefaultModel(nextClient === 'antigravity' ? (antigravityDefaults.models[0] ?? '') : '');
     setCommandArgs(antigravityDefaults.command);
   };
 
   const handleProviderSelect = (nextProviderId: string) => {
     setSelectedProfileId(nextProviderId);
-    const nextProfile = availableProfiles.find((profile) => profile.id === nextProviderId) ?? null;
-    setDefaultModel(nextProfile?.models[0] ?? '');
+    const nextProfile = availableProfiles.find((profile) => profile.id === nextProviderId);
+    setDefaultModel(nextProfile?.models?.[0] ?? '');
   };
 
   const handleComplete = () => {
@@ -151,9 +173,11 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
       });
       return;
     }
+    const resolvedProfileId = availableProfiles.find((profile) => profile.id === selectedProfileId)?.id ?? selectedProfileId.trim();
+    if (!resolvedProfileId) return;
     onComplete({
       client,
-      providerProfileId: selectedProfile?.targetProfileId ?? selectedProfile?.id,
+      accountRef: resolvedProfileId,
       defaultModel: defaultModel.trim(),
     });
   };
@@ -228,13 +252,12 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
                   ))}
                 </div>
                 <p className="text-xs font-semibold leading-5 text-[#BF360C]">
-                  Claude/Codex/Gemini → 同名订阅 + 任意 API Key provider | OpenCode/Dare → 内置 client-auth provider +
-                  任意 API Key provider | 其他 Client → 仅 API Key | Antigravity → 此步改为配置 CLI 命令
+                  每个 client 只能选自己的内置账号，或任意独立 API Key 账号；系统不校验 API Key 是否真的兼容该 client。
                 </p>
               </>
             ) : (
               <p className="rounded-2xl border border-[#F1E7DF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
-                当前 Client 还没有可绑定的 Provider。
+                当前 Client 还没有可绑定的账号。
               </p>
             )}
           </section>
@@ -242,7 +265,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
           <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 3: 选择模型</h4>
-              <p className="mt-1 text-sm leading-6 text-[#7F7168]">选择该 Provider 下的可用模型</p>
+              <p className="mt-1 text-sm leading-6 text-[#7F7168]">模型列表来自所选 Provider 的配置</p>
             </div>
 
             {!client ? (
@@ -251,7 +274,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
               </p>
             ) : client !== 'antigravity' && !selectedProfile ? (
               <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
-                先在 Step 2 选择一个 Provider。
+                先在 Step 2 绑定一个账号。
               </p>
             ) : selectableModels.length > 0 ? (
               <div className="flex flex-wrap gap-3">

@@ -70,13 +70,21 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
 
 export const ENV_VARS: EnvDefinition[] = [
   // --- server ---
-  { name: 'API_SERVER_PORT', defaultValue: '3004', description: 'API 服务端口', category: 'server', sensitive: false },
+  {
+    name: 'API_SERVER_PORT',
+    defaultValue: '3004',
+    description: 'API 服务端口',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: true,
+  },
   {
     name: 'PREVIEW_GATEWAY_PORT',
     defaultValue: '4100',
     description: 'Preview Gateway 端口（F120 独立 origin 反向代理）',
     category: 'server',
     sensitive: false,
+    runtimeEditable: true,
   },
   {
     name: 'API_SERVER_HOST',

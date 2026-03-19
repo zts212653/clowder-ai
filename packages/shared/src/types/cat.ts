@@ -37,7 +37,7 @@ export interface CatConfig {
   readonly avatar: string;
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
-  readonly providerProfileId?: string;
+  readonly accountRef?: string;
   readonly provider: CatProvider;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;

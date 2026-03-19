@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
-import { buildAccountQuotaGroups, type AccountQuotaPoolGroup } from './hub-quota-pools';
+import { type AccountQuotaPoolGroup, buildAccountQuotaGroups } from './hub-quota-pools';
 import { type CodexUsageItem, QuotaPoolRow, type QuotaResponse, riskDotClass, toUtilization } from './quota-cards';
 
 export const POLL_INTERVAL_MS = 30_000;
@@ -57,8 +57,6 @@ export function HubQuotaBoardTab() {
   const [quota, setQuota] = useState<QuotaResponse | null>(null);
   const [quotaError, setQuotaError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<ProviderProfilesResponse['providers']>([]);
-  const [activeProfileId, setActiveProfileId] = useState<ProviderProfilesResponse['activeProfileId']>(null);
-  const [activeProfileIds, setActiveProfileIds] = useState<ProviderProfilesResponse['activeProfileIds']>({});
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const previousRiskRef = useRef<'ok' | 'warn' | 'high'>('ok');
@@ -95,9 +93,7 @@ export function HubQuotaBoardTab() {
       })
       .then((body) => {
         if (!cancelled && body) {
-          setProfiles(body.providers);
-          setActiveProfileId(body.activeProfileId);
-          setActiveProfileIds(body.activeProfileIds ?? {});
+          setProfiles(body.providers ?? []);
         }
       })
       .catch(() => {});
@@ -154,12 +150,17 @@ export function HubQuotaBoardTab() {
     }
   }, [fetchQuota]);
 
-  const accountGroups = buildAccountQuotaGroups(quota, profiles, cats, { activeProfileId, activeProfileIds });
+  const accountGroups = buildAccountQuotaGroups(quota, profiles, cats);
   const errors = [
     ...new Set(
-      [quotaError, refreshError, quota?.codex?.error, quota?.claude?.error, quota?.gemini?.error, quota?.antigravity?.error].filter(
-        Boolean,
-      ) as string[],
+      [
+        quotaError,
+        refreshError,
+        quota?.codex?.error,
+        quota?.claude?.error,
+        quota?.gemini?.error,
+        quota?.antigravity?.error,
+      ].filter(Boolean) as string[],
     ),
   ];
 
