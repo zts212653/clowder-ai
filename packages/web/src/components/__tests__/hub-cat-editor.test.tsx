@@ -1649,4 +1649,103 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('Codex PATCH failed');
     expect(onSaved).not.toHaveBeenCalled();
   });
+
+  it('rolls back the cat PATCH when a Codex runtime PATCH fails after the member save succeeds', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    const existingCat = {
+      id: 'codex',
+      name: 'codex',
+      displayName: '缅因猫',
+      nickname: '旧昵称',
+      provider: 'openai',
+      providerProfileId: 'codex-sponsor',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      source: 'runtime',
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                models: ['gpt-5.4'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(
+          jsonResponse({
+            config: {
+              cli: {
+                codexSandboxMode: 'workspace-write',
+                codexApprovalPolicy: 'on-request',
+              },
+              codexExecution: {
+                authMode: 'oauth',
+              },
+            },
+          }),
+        );
+      }
+      if (path === '/api/cats/codex' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'codex' } }));
+      }
+      if (path === '/api/config' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ error: 'Codex PATCH failed' }, 500));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved }));
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
+    await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存修改');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const catPatches = mockApiFetch.mock.calls.filter(
+      ([path, init]) => path === '/api/cats/codex' && init?.method === 'PATCH',
+    );
+    expect(catPatches).toHaveLength(2);
+
+    const firstPayload = JSON.parse(String(catPatches[0]?.[1]?.body));
+    expect(firstPayload.nickname).toBe('新昵称');
+
+    const rollbackPayload = JSON.parse(String(catPatches[1]?.[1]?.body));
+    expect(rollbackPayload.nickname).toBe('旧昵称');
+    expect(rollbackPayload.defaultModel).toBe('gpt-5.4');
+    expect(rollbackPayload.accountRef).toBe('codex-sponsor');
+    expect(container.textContent).toContain('Codex PATCH failed');
+    expect(onSaved).not.toHaveBeenCalled();
+  });
 });

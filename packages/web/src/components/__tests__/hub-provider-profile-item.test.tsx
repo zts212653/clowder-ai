@@ -62,7 +62,10 @@ describe('HubProviderProfileItem', () => {
         <HubProviderProfileItem
           profile={profile}
           busy={false}
+          activeClients={[]}
+          activationClients={[]}
           onSave={onSave}
+          onActivate={vi.fn(async () => {})}
           onTest={() => {}}
           onDelete={() => {}}
         />,
@@ -86,6 +89,59 @@ describe('HubProviderProfileItem', () => {
     expect(Object.prototype.hasOwnProperty.call(payload, 'modelOverride')).toBe(false);
   });
 
+  it('sends empty baseUrl when clearing an API-key account base URL', async () => {
+    const profile: ProfileItem = {
+      id: 'codex-api',
+      provider: 'codex-api',
+      displayName: 'Codex API',
+      name: 'Codex API',
+      authType: 'api_key',
+      protocol: 'openai',
+      builtin: false,
+      mode: 'api_key',
+      baseUrl: 'https://api.openai-proxy.dev',
+      models: ['gpt-5.4'],
+      hasApiKey: true,
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:00.000Z',
+    };
+    const onSave = vi.fn(async () => {});
+
+    await act(async () => {
+      root.render(
+        <HubProviderProfileItem
+          profile={profile}
+          busy={false}
+          activeClients={[]}
+          activationClients={[]}
+          onSave={onSave}
+          onActivate={vi.fn(async () => {})}
+          onTest={() => {}}
+          onDelete={() => {}}
+        />,
+      );
+    });
+
+    await act(async () => {
+      queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const baseUrlInput = container.querySelector('input[placeholder="Base URL"]') as HTMLInputElement | null;
+    if (!baseUrlInput) throw new Error('Missing Base URL input');
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(baseUrlInput), 'value');
+      descriptor?.set?.call(baseUrlInput, '');
+      baseUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const payload = onSave.mock.calls[0]?.[1] as ProfileEditPayload;
+    expect(payload.baseUrl).toBe('');
+  });
+
   it('keeps the + 添加 model entry visible for built-in cards', async () => {
     const profile: ProfileItem = {
       id: 'codex-oauth',
@@ -103,11 +159,23 @@ describe('HubProviderProfileItem', () => {
     };
 
     await act(async () => {
-      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onTest={() => {}} onDelete={() => {}} />);
+      root.render(
+        <HubProviderProfileItem
+          profile={profile}
+          busy={false}
+          activeClients={[]}
+          activationClients={['openai']}
+          onSave={vi.fn(async () => {})}
+          onActivate={vi.fn(async () => {})}
+          onTest={() => {}}
+          onDelete={() => {}}
+        />,
+      );
     });
 
     expect(container.textContent).toContain('+ 添加');
     expect(container.textContent).not.toContain('编辑');
+    expect(container.textContent).toContain('设为 Codex 默认');
   });
 
   it('hides unsupported 测试 actions for non-api-key profiles', async () => {
@@ -128,10 +196,22 @@ describe('HubProviderProfileItem', () => {
     };
 
     await act(async () => {
-      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onTest={() => {}} onDelete={() => {}} />);
+      root.render(
+        <HubProviderProfileItem
+          profile={profile}
+          busy={false}
+          activeClients={['opencode']}
+          activationClients={['opencode']}
+          onSave={vi.fn(async () => {})}
+          onActivate={vi.fn(async () => {})}
+          onTest={() => {}}
+          onDelete={() => {}}
+        />,
+      );
     });
 
     expect(container.textContent).not.toContain('测试');
     expect(container.textContent).toContain('+ 添加');
+    expect(container.textContent).toContain('OpenCode 默认中');
   });
 });

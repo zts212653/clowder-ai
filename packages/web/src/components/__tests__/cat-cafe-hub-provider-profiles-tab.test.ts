@@ -130,6 +130,9 @@ describe('CatCafeHub provider profiles tab', () => {
           jsonResponse({
             projectPath: '/tmp/project',
             activeProfileId: 'claude-oauth',
+            bootstrapBindings: {
+              anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude-oauth' },
+            },
             providers: [
               {
                 id: 'claude-oauth',
@@ -226,6 +229,10 @@ describe('CatCafeHub provider profiles tab', () => {
           jsonResponse({
             projectPath: '/tmp/project',
             activeProfileId: 'claude-oauth',
+            bootstrapBindings: {
+              anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude-oauth' },
+              openai: { enabled: true, mode: 'api_key', accountRef: 'codex-sponsor' },
+            },
             providers: [
               {
                 id: 'claude-oauth',
@@ -269,9 +276,9 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     expect(container.textContent).toContain('未验证');
-    expect(container.textContent).not.toContain('已激活');
-    expect(container.textContent).not.toContain('当前使用中');
-    expect(container.textContent).not.toContain('设为当前');
+    expect(container.textContent).toContain('当前默认：Claude');
+    expect(container.textContent).toContain('当前默认：Codex');
+    expect(container.textContent).toContain('Claude 默认中');
 
     await act(async () => {
       queryButton(container, '测试').dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -279,6 +286,92 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     expect(container.textContent).toContain('验证');
+  });
+
+  it('activates a compatible API-key account for its client from the tab', async () => {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles/codex-sponsor/activate' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ ok: true, profileId: 'codex-sponsor' }));
+      }
+      if (path.startsWith('/api/provider-profiles')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-oauth',
+            bootstrapBindings: {
+              anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude-oauth' },
+              openai: { enabled: true, mode: 'oauth', accountRef: 'codex-oauth' },
+            },
+            providers: [
+              {
+                id: 'claude-oauth',
+                provider: 'claude-oauth',
+                displayName: 'Claude (OAuth)',
+                name: 'Claude (OAuth)',
+                authType: 'oauth',
+                protocol: 'anthropic',
+                builtin: true,
+                mode: 'subscription',
+                client: 'anthropic',
+                models: ['claude-opus-4-6'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'codex-oauth',
+                provider: 'codex-oauth',
+                displayName: 'Codex (OAuth)',
+                name: 'Codex (OAuth)',
+                authType: 'oauth',
+                protocol: 'openai',
+                builtin: true,
+                mode: 'subscription',
+                client: 'openai',
+                models: ['gpt-5.4'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                baseUrl: 'https://api.openai-proxy.dev',
+                models: ['gpt-5.4'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubProviderProfilesTab));
+    });
+    await flushEffects();
+
+    await act(async () => {
+      queryButton(container, '设为 Codex 默认').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/provider-profiles/codex-sponsor/activate',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ projectPath: undefined, provider: 'openai' }),
+      }),
+    );
   });
 
   it('renders API key creation form inline without protocol suggestion copy', async () => {

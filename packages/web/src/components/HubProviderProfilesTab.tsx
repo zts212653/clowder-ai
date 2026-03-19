@@ -8,8 +8,16 @@ import {
   CreateApiKeyProfileSection,
   ProviderProfilesSummaryCard,
 } from './hub-provider-profiles.sections';
-import { resolveAccountActionId } from './hub-provider-profiles.view';
-import type { ProfileTestResult, ProviderProfilesResponse } from './hub-provider-profiles.types';
+import {
+  activationClientsForProfile,
+  ensureBuiltinProviderProfiles,
+  resolveAccountActionId,
+} from './hub-provider-profiles.view';
+import type {
+  BuiltinAccountClient,
+  ProfileTestResult,
+  ProviderProfilesResponse,
+} from './hub-provider-profiles.types';
 import { getProjectPaths, projectDisplayName } from './ThreadSidebar/thread-utils';
 
 export function HubProviderProfilesTab() {
@@ -23,6 +31,7 @@ export function HubProviderProfilesTab() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [testResultById, setTestResultById] = useState<Record<string, ProfileTestResult>>({});
   const [createDisplayName, setCreateDisplayName] = useState('');
+  const [createProtocol, setCreateProtocol] = useState<'anthropic' | 'openai' | 'google'>('openai');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
 
@@ -96,6 +105,7 @@ export function HubProviderProfilesTab() {
           projectPath: projectPath ?? undefined,
           displayName: createDisplayName.trim(),
           authType: 'api_key',
+          protocol: createProtocol,
           baseUrl: createBaseUrl.trim(),
           apiKey: createApiKey.trim(),
         }),
@@ -114,6 +124,7 @@ export function HubProviderProfilesTab() {
     createApiKey,
     createBaseUrl,
     createDisplayName,
+    createProtocol,
     projectPath,
     refresh,
   ]);
@@ -161,6 +172,28 @@ export function HubProviderProfilesTab() {
     [callApi, projectPath, refresh],
   );
 
+  const activateProfile = useCallback(
+    async (profileId: string, client: BuiltinAccountClient) => {
+      setBusyId(`${profileId}:activate:${client}`);
+      setError(null);
+      try {
+        await callApi(`/api/provider-profiles/${profileId}/activate`, {
+          method: 'POST',
+          body: JSON.stringify({
+            projectPath: projectPath ?? undefined,
+            provider: client,
+          }),
+        });
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [callApi, projectPath, refresh],
+  );
+
   const testProfile = useCallback(
     async (profileId: string) => {
       setBusyId(profileId);
@@ -189,10 +222,22 @@ export function HubProviderProfilesTab() {
     return [...paths].map((path) => ({ path, label: projectDisplayName(path) }));
   }, [data?.projectPath, knownProjects]);
 
-  const displayProfiles = useMemo(() => data?.providers ?? [], [data?.providers]);
+  const displayProfiles = useMemo(() => ensureBuiltinProviderProfiles(data?.providers ?? []), [data?.providers]);
   const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
   const customProfiles = useMemo(() => displayProfiles.filter((profile) => !profile.builtin), [displayProfiles]);
   const displayCards = useMemo(() => [...builtinProfiles, ...customProfiles], [builtinProfiles, customProfiles]);
+
+  const activeClientsForProfile = useCallback(
+    (profileId: string) =>
+      (
+        Object.entries(data?.bootstrapBindings ?? {}) as Array<
+          [BuiltinAccountClient, { enabled?: boolean; accountRef?: string } | undefined]
+        >
+      )
+        .filter(([, binding]) => binding?.enabled && binding.accountRef === profileId)
+        .map(([client]) => client),
+    [data?.bootstrapBindings],
+  );
 
   if (loading) return <p className="text-sm text-gray-400">加载中...</p>;
   if (!data) return <p className="text-sm text-gray-400">暂无数据</p>;
@@ -213,9 +258,15 @@ export function HubProviderProfilesTab() {
           <HubProviderProfileItem
             key={profile.id}
             profile={profile}
-            busy={busyId === resolveAccountActionId(profile)}
+            busy={
+              busyId === resolveAccountActionId(profile) ||
+              busyId?.startsWith(`${resolveAccountActionId(profile)}:activate:`) === true
+            }
             testResult={testResultById[resolveAccountActionId(profile)]}
+            activeClients={activeClientsForProfile(profile.id)}
+            activationClients={activationClientsForProfile(profile)}
             onSave={(_profileId, payload) => saveProfile(resolveAccountActionId(profile), payload)}
+            onActivate={(_profileId, client) => activateProfile(resolveAccountActionId(profile), client)}
             onTest={() => testProfile(resolveAccountActionId(profile))}
             onDelete={() => deleteProfile(resolveAccountActionId(profile))}
           />
@@ -224,10 +275,12 @@ export function HubProviderProfilesTab() {
 
       <CreateApiKeyProfileSection
         displayName={createDisplayName}
+        protocol={createProtocol}
         baseUrl={createBaseUrl}
         apiKey={createApiKey}
         busy={busyId === 'create'}
         onDisplayNameChange={setCreateDisplayName}
+        onProtocolChange={setCreateProtocol}
         onBaseUrlChange={setCreateBaseUrl}
         onApiKeyChange={setCreateApiKey}
         onCreate={createProfile}

@@ -40,19 +40,23 @@ export function ProviderProfilesSummaryCard({
 
 export function CreateApiKeyProfileSection({
   displayName,
+  protocol,
   baseUrl,
   apiKey,
   busy,
   onDisplayNameChange,
+  onProtocolChange,
   onBaseUrlChange,
   onApiKeyChange,
   onCreate,
 }: {
   displayName: string;
+  protocol: 'anthropic' | 'openai' | 'google';
   baseUrl: string;
   apiKey: string;
   busy: boolean;
   onDisplayNameChange: (value: string) => void;
+  onProtocolChange: (value: 'anthropic' | 'openai' | 'google') => void;
   onBaseUrlChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
   onCreate: () => void;
@@ -75,12 +79,22 @@ export function CreateApiKeyProfileSection({
           <input
             value={displayName}
             onChange={(e) => onDisplayNameChange(e.target.value)}
-            placeholder="账号显示名（例如 sponsor-1）"
+            placeholder="账号显示名（例如 my-glm）"
             className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
           />
           <div className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm text-[#8A776B]">
             独立 API Key 账号（无 client 归属）
           </div>
+          <select
+            aria-label="Protocol"
+            value={protocol}
+            onChange={(e) => onProtocolChange(e.target.value as 'anthropic' | 'openai' | 'google')}
+            className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
+          >
+            <option value="openai">openai</option>
+            <option value="anthropic">anthropic</option>
+            <option value="google">google</option>
+          </select>
           <input
             value={baseUrl}
             onChange={(e) => onBaseUrlChange(e.target.value)}

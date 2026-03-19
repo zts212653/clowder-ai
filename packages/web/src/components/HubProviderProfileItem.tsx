@@ -2,8 +2,8 @@
 
 import { useCallback, useState } from 'react';
 import { TagEditor } from './hub-tag-editor';
-import { accountTone, builtinClientLabel } from './hub-provider-profiles.view';
-import type { ProfileItem, ProfileTestResult } from './hub-provider-profiles.types';
+import { accountTone, activationLabel, builtinClientLabel } from './hub-provider-profiles.view';
+import type { BuiltinAccountClient, ProfileItem, ProfileTestResult } from './hub-provider-profiles.types';
 
 export interface ProfileEditPayload {
   displayName: string;
@@ -17,7 +17,10 @@ interface HubProviderProfileItemProps {
   profile: ProfileItem;
   busy: boolean;
   testResult?: ProfileTestResult;
+  activeClients?: BuiltinAccountClient[];
+  activationClients?: BuiltinAccountClient[];
   onSave: (profileId: string, payload: ProfileEditPayload) => Promise<void>;
+  onActivate: (profileId: string, client: BuiltinAccountClient) => Promise<void>;
   onTest: (profileId: string) => void;
   onDelete: (profileId: string) => void;
 }
@@ -62,7 +65,10 @@ export function HubProviderProfileItem({
   profile,
   busy,
   testResult,
+  activeClients = [],
+  activationClients = [],
   onSave,
+  onActivate,
   onTest,
   onDelete,
 }: HubProviderProfileItemProps) {
@@ -81,7 +87,7 @@ export function HubProviderProfileItem({
   const saveEdit = useCallback(async () => {
     await onSave(profile.id, {
       displayName: editDisplayName.trim(),
-      ...(profile.authType === 'api_key' && editBaseUrl.trim() ? { baseUrl: editBaseUrl.trim() } : {}),
+      ...(profile.authType === 'api_key' ? { baseUrl: editBaseUrl.trim() } : {}),
       ...(editApiKey.trim() ? { apiKey: editApiKey.trim() } : {}),
       ...(profile.models ? { models: profile.models } : {}),
     });
@@ -165,7 +171,32 @@ export function HubProviderProfileItem({
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${bindingBadgeClass(profile)}`}>
                 {profile.builtin ? `固定内置账号：${builtinClientLabel(profile.client)}` : '可被任意 client 成员绑定'}
               </span>
+              {activeClients.map((client) => (
+                <span key={client} className="rounded-full bg-[#E8F5E9] px-2.5 py-1 text-[11px] font-semibold text-[#2E7D32]">
+                  当前默认：{activationLabel(client)}
+                </span>
+              ))}
             </div>
+            {activationClients.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {activationClients.map((client) => {
+                  const active = activeClients.includes(client);
+                  return (
+                    <button
+                      key={client}
+                      type="button"
+                      className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${
+                        active ? 'bg-[#E8F5E9] text-[#2E7D32]' : 'bg-[#F7F3F0] text-[#8A776B]'
+                      }`}
+                      onClick={() => void onActivate(profile.id, client)}
+                      disabled={busy || active}
+                    >
+                      {active ? `${activationLabel(client)} 默认中` : `设为 ${activationLabel(client)} 默认`}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
           <div className="space-y-2">
             <p className="text-xs font-semibold text-[#8A776B]">可用模型</p>
@@ -179,7 +210,7 @@ export function HubProviderProfileItem({
                 if (busy) return;
                 void onSave(profile.id, {
                   displayName: profile.displayName,
-                  ...(profile.authType === 'api_key' && profile.baseUrl ? { baseUrl: profile.baseUrl } : {}),
+                  ...(profile.authType === 'api_key' ? { baseUrl: profile.baseUrl ?? '' } : {}),
                   models: nextModels,
                 });
               }}

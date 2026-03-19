@@ -240,6 +240,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     setError(null);
     try {
       const catPayload = buildCatPayload(form, cat);
+      const rollbackCatPayload = cat ? buildCatPayload(initialState(cat, null), cat) : null;
       const nextStrategyPayload = cat && strategyForm ? buildStrategyPayload(strategyForm) : null;
       const baselineStrategyPayload = cat && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
       const strategyChanged =
@@ -278,6 +279,8 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
         setError((payload.error as string) ?? `保存失败 (${res.status})`);
         return;
       }
+      const persistedCatBody = (await res.json().catch(() => ({}))) as { cat?: { id?: string } };
+      const persistedCatId = persistedCatBody.cat?.id ?? cat?.id ?? null;
 
       if (showCodexSettings && codexSettings) {
         const codexPatches = buildCodexConfigPatches(codexSettings, codexSettingsBaseline ?? toCodexRuntimeSettings());
@@ -288,6 +291,19 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             body: JSON.stringify(patch),
           });
           if (!configRes.ok) {
+            if (persistedCatId) {
+              if (cat && rollbackCatPayload) {
+                await apiFetch(`/api/cats/${persistedCatId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(rollbackCatPayload),
+                }).catch(() => {});
+              } else if (!cat) {
+                await apiFetch(`/api/cats/${persistedCatId}`, {
+                  method: 'DELETE',
+                }).catch(() => {});
+              }
+            }
             const payload = (await configRes.json().catch(() => ({}))) as Record<string, unknown>;
             setError((payload.error as string) ?? `Codex 运行参数保存失败 (${configRes.status})`);
             return;
