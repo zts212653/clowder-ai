@@ -206,7 +206,8 @@ The ops dashboard for tracking everything your team is building.
 
 ### Multi-Platform — Chat From Anywhere
 
-<!-- TODO: screenshot or demo of Feishu/Telegram multi-cat replies -->
+<!-- demo: Feishu multi-platform chat -->
+> 📹 **Demo video:** [Feishu (Lark) multi-cat chat](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/feishu-multi-platform-demo.mp4)
 
 Don't want to open the web UI? Chat with your team from the apps you already use.
 
@@ -568,7 +569,8 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ### 多平台 — 在哪都能聊
 
-<!-- TODO: 飞书/Telegram 多猫回复演示 -->
+<!-- 演示：飞书多猫聊天 -->
+> 📹 **演示视频：** [飞书多猫聊天](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/feishu-multi-platform-demo.mp4)
 
 不想开 web？用你已经在用的 app 跟团队聊。
 
