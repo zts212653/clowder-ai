@@ -16,6 +16,12 @@ const DEFAULT_OWNER: OwnerConfig = {
 
 let cachedOwner: OwnerConfig | null = null;
 let fetchOwnerPromise: Promise<OwnerConfig> | null = null;
+const listeners = new Set<(owner: OwnerConfig) => void>();
+
+function publishOwner(nextOwner: OwnerConfig): void {
+  cachedOwner = nextOwner;
+  for (const listener of listeners) listener(nextOwner);
+}
 
 async function fetchOwner(): Promise<OwnerConfig> {
   const res = await apiFetch('/api/config');
@@ -28,13 +34,16 @@ export function useOwnerConfig(): OwnerConfig {
   const [owner, setOwner] = useState<OwnerConfig>(() => cachedOwner ?? DEFAULT_OWNER);
 
   useEffect(() => {
+    listeners.add(setOwner);
     if (cachedOwner) {
       setOwner(cachedOwner);
-      return;
+      return () => {
+        listeners.delete(setOwner);
+      };
     }
     if (!fetchOwnerPromise) {
       fetchOwnerPromise = fetchOwner().then((nextOwner) => {
-        cachedOwner = nextOwner;
+        publishOwner(nextOwner);
         return nextOwner;
       });
     }
@@ -48,6 +57,7 @@ export function useOwnerConfig(): OwnerConfig {
       });
     return () => {
       cancelled = true;
+      listeners.delete(setOwner);
     };
   }, []);
 
@@ -57,9 +67,10 @@ export function useOwnerConfig(): OwnerConfig {
 export function resetOwnerConfigCacheForTest(): void {
   cachedOwner = null;
   fetchOwnerPromise = null;
+  listeners.clear();
 }
 
 export function primeOwnerConfigCache(owner: OwnerConfig): void {
-  cachedOwner = owner;
+  publishOwner(owner);
   fetchOwnerPromise = Promise.resolve(owner);
 }

@@ -61,9 +61,7 @@ describe('HubProviderProfileItem', () => {
       root.render(
         <HubProviderProfileItem
           profile={profile}
-          isActive={false}
           busy={false}
-          onActivate={() => {}}
           onSave={onSave}
           onTest={() => {}}
           onDelete={() => {}}
@@ -86,5 +84,29 @@ describe('HubProviderProfileItem', () => {
       models: ['claude-opus-4-1'],
     });
     expect(Object.prototype.hasOwnProperty.call(payload, 'modelOverride')).toBe(false);
+  });
+
+  it('keeps the + 添加 model entry visible for built-in cards', async () => {
+    const profile: ProfileItem = {
+      id: 'codex-oauth',
+      provider: 'codex-oauth',
+      displayName: 'Codex (OAuth)',
+      name: 'Codex (OAuth)',
+      authType: 'oauth',
+      protocol: 'openai',
+      builtin: true,
+      mode: 'subscription',
+      models: ['gpt-5.4'],
+      hasApiKey: false,
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:00.000Z',
+    };
+
+    await act(async () => {
+      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onTest={() => {}} onDelete={() => {}} />);
+    });
+
+    expect(container.textContent).toContain('+ 添加');
+    expect(container.textContent).not.toContain('编辑');
   });
 });

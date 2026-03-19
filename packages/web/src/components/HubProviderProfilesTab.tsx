@@ -6,13 +6,10 @@ import { apiFetch } from '@/utils/api-client';
 import { HubProviderProfileItem, type ProfileEditPayload } from './HubProviderProfileItem';
 import {
   CreateApiKeyProfileSection,
-  ProviderFilterTabs,
   ProviderProfilesSummaryCard,
-  type ProviderFilterKey,
 } from './hub-provider-profiles.sections';
-import { expandProviderProfiles, isOAuthLikeBuiltin, resolveProfileActionId } from './hub-provider-profiles.view';
+import { expandProviderProfiles, resolveProfileActionId } from './hub-provider-profiles.view';
 import type {
-  ProfileItem,
   ProfileProtocol,
   ProfileTestResult,
   ProviderProfilesResponse,
@@ -29,8 +26,6 @@ export function HubProviderProfilesTab() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [testResultById, setTestResultById] = useState<Record<string, ProfileTestResult>>({});
-  const [filter, setFilter] = useState<ProviderFilterKey>('all');
-
   const [createDisplayName, setCreateDisplayName] = useState('');
   const [createProtocol, setCreateProtocol] = useState<ProfileProtocol>('openai');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
@@ -136,27 +131,6 @@ export function HubProviderProfilesTab() {
     refresh,
   ]);
 
-  const activateProfile = useCallback(
-    async (profileId: string) => {
-      setBusyId(profileId);
-      setError(null);
-      try {
-        await callApi(`/api/provider-profiles/${profileId}/activate`, {
-          method: 'POST',
-          body: JSON.stringify({
-            projectPath: projectPath ?? undefined,
-          }),
-        });
-        await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [callApi, projectPath, refresh],
-  );
-
   const deleteProfile = useCallback(
     async (profileId: string) => {
       setBusyId(profileId);
@@ -231,24 +205,7 @@ export function HubProviderProfilesTab() {
   const displayProfiles = useMemo(() => expandProviderProfiles(data?.providers ?? []), [data?.providers]);
   const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
   const customProfiles = useMemo(() => displayProfiles.filter((profile) => !profile.builtin), [displayProfiles]);
-  const filteredBuiltinProfiles = useMemo(() => {
-    if (filter === 'all' || filter === 'api_key') return filter === 'all' ? builtinProfiles : [];
-    return builtinProfiles.filter((profile) => profile.protocol === filter && !profile.oauthLikeClient);
-  }, [builtinProfiles, filter]);
-  const filteredCustomProfiles = useMemo(() => {
-    if (filter === 'all' || filter === 'api_key') return customProfiles;
-    return [];
-  }, [customProfiles, filter]);
-  const isProfileActive = useCallback(
-    (profile: ProfileItem) => {
-      if (!data) return false;
-      const protocolActive = data.activeProfileIds?.[profile.protocol];
-      const targetProfileId = resolveProfileActionId(profile);
-      if (protocolActive !== undefined) return protocolActive === targetProfileId;
-      return data.activeProfileId === targetProfileId;
-    },
-    [data],
-  );
+  const displayCards = useMemo(() => [...builtinProfiles, ...customProfiles], [builtinProfiles, customProfiles]);
 
   if (loading) return <p className="text-sm text-gray-400">加载中...</p>;
   if (!data) return <p className="text-sm text-gray-400">暂无数据</p>;
@@ -263,57 +220,19 @@ export function HubProviderProfilesTab() {
         activePath={projectPath}
         onSwitchProject={switchProject}
       />
-      <ProviderFilterTabs value={filter} onChange={setFilter} />
 
       <div aria-label="Provider Profile List" className="space-y-4">
-        {filteredBuiltinProfiles.length > 0 ? (
-          <section className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-gray-700">内置认证</h4>
-              <span className="text-[11px] text-gray-400">{filteredBuiltinProfiles.length} 项</span>
-            </div>
-            <div className="space-y-2">
-              {filteredBuiltinProfiles.map((profile) => (
-                <HubProviderProfileItem
-                  key={profile.id}
-                  profile={profile}
-                  isActive={isOAuthLikeBuiltin(profile) ? false : isProfileActive(profile)}
-                  busy={busyId === resolveProfileActionId(profile)}
-                  testResult={testResultById[resolveProfileActionId(profile)]}
-                  onActivate={() => activateProfile(resolveProfileActionId(profile))}
-                  onSave={(_profileId, payload) => saveProfile(resolveProfileActionId(profile), payload)}
-                  onTest={() => testProfile(resolveProfileActionId(profile))}
-                  onDelete={() => deleteProfile(resolveProfileActionId(profile))}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {filter === 'all' || filter === 'api_key' ? (
-          <section className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-gray-700">自定义 API Key 账号</h4>
-              <span className="text-[11px] text-gray-400">{filteredCustomProfiles.length} 项</span>
-            </div>
-            <div className="space-y-2">
-              {filteredCustomProfiles.length === 0 ? <p className="text-xs text-gray-400">暂未创建自定义 API Key 账号</p> : null}
-              {filteredCustomProfiles.map((profile) => (
-                <HubProviderProfileItem
-                  key={profile.id}
-                  profile={profile}
-                  isActive={isProfileActive(profile)}
-                  busy={busyId === resolveProfileActionId(profile)}
-                  testResult={testResultById[resolveProfileActionId(profile)]}
-                  onActivate={activateProfile}
-                  onSave={saveProfile}
-                  onTest={testProfile}
-                  onDelete={deleteProfile}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
+        {displayCards.map((profile) => (
+          <HubProviderProfileItem
+            key={profile.id}
+            profile={profile}
+            busy={busyId === resolveProfileActionId(profile)}
+            testResult={testResultById[resolveProfileActionId(profile)]}
+            onSave={(_profileId, payload) => saveProfile(resolveProfileActionId(profile), payload)}
+            onTest={() => testProfile(resolveProfileActionId(profile))}
+            onDelete={() => deleteProfile(resolveProfileActionId(profile))}
+          />
+        ))}
       </div>
 
       <CreateApiKeyProfileSection
@@ -330,6 +249,9 @@ export function HubProviderProfilesTab() {
         onModelsChange={setCreateModels}
         onCreate={createProfile}
       />
+      <p className="text-xs leading-5 text-[#B59A88]">
+        secrets 继续存储在 `.cat-cafe/provider-profiles.secrets.local.json`，Git 忽略，worktree 间共享。
+      </p>
     </div>
   );
 }

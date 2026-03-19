@@ -2377,7 +2377,7 @@
               "fill": "#BF360C",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "【实现约束，非 UI 直出】Claude/Codex/Gemini = 同名订阅 + 任意 API Key provider；OpenCode/Dare = 内置 client-auth provider + 任意 API Key provider；其他 Client = 仅 API Key；Antigravity = 直接配置 CLI 命令 + model。",
+              "content": "【实现约束，非 UI 直出】Claude/Codex/Gemini = 同名订阅 + 任意 API Key provider；OpenCode/Dare = 内置 client-auth provider + 任意 API Key provider；Antigravity = 直接配置 CLI 命令 + model。",
               "lineHeight": 1.5,
               "fontFamily": "Inter",
               "fontSize": 12,

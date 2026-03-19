@@ -32,10 +32,10 @@ export function ChoiceButton({
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-[86px] w-full rounded-2xl border px-4 py-3 text-left transition ${cardClass(selected)}`}
+      className={`min-h-[74px] w-full rounded-2xl border px-4 py-3 text-left transition ${cardClass(selected)}`}
     >
       <div className="font-semibold">{label}</div>
-      {subtitle ? <div className="mt-1 text-xs opacity-80">{subtitle}</div> : null}
+      {subtitle ? <div className="mt-1 line-clamp-2 text-[11px] leading-5 opacity-80">{subtitle}</div> : null}
     </button>
   );
 }

@@ -8,18 +8,26 @@
 
 import { getUserId } from './userId';
 
+function getBrowserLocation(): Location | null {
+  if (typeof globalThis !== 'object' || globalThis === null) return null;
+  const candidate = (globalThis as { location?: Location }).location;
+  return candidate ?? null;
+}
+
 function resolveApiUrl(): string {
+  const location = getBrowserLocation();
+
   // Cloudflare Tunnel: API 走 api.clowder-ai.com，Access cookie 在 .clowder-ai.com 上共享
-  if (typeof window !== 'undefined' && window.location.hostname === 'cafe.clowder-ai.com') {
+  if (location?.hostname === 'cafe.clowder-ai.com') {
     return 'https://api.clowder-ai.com';
   }
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-  if (typeof window === 'undefined') return 'http://localhost:3003';
+  if (!location) return 'http://localhost:3003';
   // Derive API port from frontend port: convention is frontend + 1 = API
   // (runtime: 3001→3002, alpha: 3011→3012). Fallback to +1 of current port.
-  const frontendPort = Number(window.location.port) || 3001;
+  const frontendPort = Number(location.port) || 3001;
   const apiPort = frontendPort + 1;
-  return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+  return `${location.protocol}//${location.hostname}:${apiPort}`;
 }
 export const API_URL = resolveApiUrl();
 

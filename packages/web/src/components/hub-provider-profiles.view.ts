@@ -24,10 +24,10 @@ export function expandProviderProfiles(profiles: ProfileItem[]): ProfileItem[] {
     if (profile.id === 'claude-oauth') {
       expanded.push(
         cloneProfile(profile, {
-          id: 'opencode-oauth-like',
-          provider: 'opencode-oauth-like',
-          displayName: 'OpenCode (OAuth-like)',
-          name: 'OpenCode (OAuth-like)',
+          id: 'opencode-client-auth',
+          provider: 'opencode-client-auth',
+          displayName: 'OpenCode (client-auth)',
+          name: 'OpenCode (client-auth)',
           oauthLikeClient: 'opencode',
         }),
       );
@@ -35,10 +35,10 @@ export function expandProviderProfiles(profiles: ProfileItem[]): ProfileItem[] {
     if (profile.id === 'codex-oauth') {
       expanded.push(
         cloneProfile(profile, {
-          id: 'dare-oauth-like',
-          provider: 'dare-oauth-like',
-          displayName: 'Dare (OAuth-like)',
-          name: 'Dare (OAuth-like)',
+          id: 'dare-client-auth',
+          provider: 'dare-client-auth',
+          displayName: 'Dare (client-auth)',
+          name: 'Dare (client-auth)',
           oauthLikeClient: 'dare',
         }),
       );

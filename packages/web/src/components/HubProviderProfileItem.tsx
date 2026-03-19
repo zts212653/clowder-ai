@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { TagEditor, TagPillList } from './hub-tag-editor';
-import { isOAuthLikeBuiltin } from './hub-provider-profiles.view';
+import { useCallback, useEffect, useState } from 'react';
+import { TagEditor } from './hub-tag-editor';
 import { formatProtocolLabel } from './hub-provider-profiles.sections';
 import type { ProfileItem, ProfileTestResult } from './hub-provider-profiles.types';
 
@@ -16,10 +15,8 @@ export interface ProfileEditPayload {
 
 interface HubProviderProfileItemProps {
   profile: ProfileItem;
-  isActive: boolean;
   busy: boolean;
   testResult?: ProfileTestResult;
-  onActivate: (profileId: string) => void;
   onSave: (profileId: string, payload: ProfileEditPayload) => Promise<void>;
   onTest: (profileId: string) => void;
   onDelete: (profileId: string) => void;
@@ -27,23 +24,23 @@ interface HubProviderProfileItemProps {
 
 function summaryText(profile: ProfileItem): string {
   if (profile.oauthLikeClient === 'opencode') {
-    return 'OpenCode · subscription · 复用本机 Claude 登录态（OAuth-like）';
+    return 'OpenCode · client-auth · API Key 在 OpenCode 客户端本地配置，Clowder 不保存';
   }
   if (profile.oauthLikeClient === 'dare') {
-    return 'Dare · subscription · 复用本机 Codex 登录态（OAuth-like）';
+    return 'Dare · client-auth · API Key 在 Dare 客户端本地配置，Clowder 不保存';
   }
   if (profile.authType === 'api_key') {
     const host = profile.baseUrl?.replace(/^https?:\/\//, '') ?? '(未设置)';
     return `${formatProtocolLabel(profile.protocol)} · ${host} · apiKey: ${profile.hasApiKey ? '已配置' : '未配置'}`;
   }
   const runtimeName = profile.protocol === 'anthropic' ? 'Claude' : profile.protocol === 'google' ? 'Gemini' : 'Codex';
-  if (profile.protocol === 'anthropic') {
-    return `${runtimeName} · subscription · 走本机 ${runtimeName} 登录态（OpenCode 复用时视作 OAuth-like）`;
-  }
-  if (profile.protocol === 'openai') {
-    return `${runtimeName} · subscription · 走本机 ${runtimeName} 登录态（Dare 复用时视作 OAuth-like）`;
-  }
-  return `${runtimeName} · subscription · 走本机 ${runtimeName} 登录态`;
+  return `${runtimeName} · subscription · 走本机 ${runtimeName} 订阅登录态`;
+}
+
+function modelTone(profile: ProfileItem): 'purple' | 'green' | 'orange' {
+  if (profile.oauthLikeClient) return 'orange';
+  if (profile.protocol === 'google') return 'green';
+  return 'purple';
 }
 
 function verificationBadge(testResult?: ProfileTestResult) {
@@ -55,22 +52,20 @@ function verificationBadge(testResult?: ProfileTestResult) {
   }
   if (testResult.ok) {
     return {
-      label: 'Verified',
+      label: '验证',
       className: 'bg-[#E8F5E9] text-[#2E7D32]',
     };
   }
   return {
     label: '验证失败',
-    className: 'bg-[#FFF0F0] text-[#D14343]',
+    className: 'bg-[#EAF2FF] text-[#2F6FDE]',
   };
 }
 
 export function HubProviderProfileItem({
   profile,
-  isActive,
   busy,
   testResult,
-  onActivate,
   onSave,
   onTest,
   onDelete,
@@ -80,6 +75,7 @@ export function HubProviderProfileItem({
   const [editBaseUrl, setEditBaseUrl] = useState(profile.baseUrl ?? '');
   const [editApiKey, setEditApiKey] = useState('');
   const [editModels, setEditModels] = useState(profile.models);
+  const [inlineModels, setInlineModels] = useState(profile.models);
 
   const startEdit = useCallback(() => {
     setEditDisplayName(profile.displayName);
@@ -88,6 +84,10 @@ export function HubProviderProfileItem({
     setEditModels(profile.models);
     setEditing(true);
   }, [profile]);
+
+  useEffect(() => {
+    setInlineModels(profile.models);
+  }, [profile.models]);
 
   const saveEdit = useCallback(async () => {
     await onSave(profile.id, {
@@ -99,9 +99,20 @@ export function HubProviderProfileItem({
     setEditing(false);
   }, [editApiKey, editBaseUrl, editDisplayName, editModels, onSave, profile.authType, profile.id]);
 
-  const showTestButton = profile.authType === 'api_key';
-  const statusBadge = profile.authType === 'api_key' ? verificationBadge(testResult) : null;
-  const oauthLikeBuiltin = isOAuthLikeBuiltin(profile);
+  const saveInlineModels = useCallback(
+    async (nextModels: string[]) => {
+      setInlineModels(nextModels);
+      await onSave(profile.id, {
+        displayName: profile.displayName,
+        ...(profile.authType === 'api_key' && profile.baseUrl ? { baseUrl: profile.baseUrl } : {}),
+        models: nextModels,
+      });
+    },
+    [onSave, profile.authType, profile.baseUrl, profile.displayName, profile.id],
+  );
+
+  const showTestButton = true;
+  const statusBadge = verificationBadge(testResult);
 
   if (editing) {
     return (
@@ -181,27 +192,23 @@ export function HubProviderProfileItem({
                 {statusBadge.label}
               </span>
             ) : null}
-            {isActive ? <span className="text-[11px] font-semibold text-[#8A776B]">当前使用中</span> : null}
           </div>
           <p className="text-sm text-[#8A776B]">{summaryText(profile)}</p>
           <div className="space-y-2">
             <p className="text-xs font-semibold text-[#8A776B]">可用模型</p>
             <div className="flex flex-wrap gap-2">
-              <TagPillList tags={profile.models} emptyLabel="(暂无模型)" />
+              <TagEditor
+                tags={inlineModels}
+                onChange={saveInlineModels}
+                addLabel="+ 添加"
+                placeholder="输入模型名"
+                emptyLabel="(暂无模型)"
+                tone={modelTone(profile)}
+              />
             </div>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-1.5">
-          {!isActive && !oauthLikeBuiltin ? (
-            <button
-              type="button"
-              className="rounded-full bg-[#F7F3F0] px-3 py-1.5 text-xs font-semibold text-[#8A776B]"
-              onClick={() => onActivate(profile.id)}
-              disabled={busy}
-            >
-              设为当前
-            </button>
-          ) : null}
           {showTestButton ? (
             <button
               type="button"
@@ -212,7 +219,7 @@ export function HubProviderProfileItem({
               测试
             </button>
           ) : null}
-          {!oauthLikeBuiltin ? (
+          {!profile.builtin ? (
             <button
               type="button"
               className="rounded-full bg-[#F7F3F0] px-3 py-1.5 text-xs font-semibold text-[#8A776B]"

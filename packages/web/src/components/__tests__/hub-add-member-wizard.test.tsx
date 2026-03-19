@@ -7,8 +7,8 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
-import { HubCatEditor } from '@/components/HubCatEditor';
 import { HubAddMemberWizard } from '@/components/HubAddMemberWizard';
+import { HubCatEditor } from '@/components/HubCatEditor';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -26,7 +26,9 @@ async function flushEffects() {
 }
 
 function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent?.includes(text));
+  const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
+    candidate.textContent?.includes(text),
+  );
   if (!button) throw new Error(`Missing button: ${text}`);
   return button as HTMLButtonElement;
 }
@@ -61,7 +63,12 @@ function WizardHost() {
           setEditorOpen(true);
         }}
       />
-      <HubCatEditor open={editorOpen} draft={draft ?? undefined} onClose={() => setEditorOpen(false)} onSaved={vi.fn()} />
+      <HubCatEditor
+        open={editorOpen}
+        draft={draft ?? undefined}
+        onClose={() => setEditorOpen(false)}
+        onSaved={vi.fn()}
+      />
     </>
   );
 }
@@ -176,9 +183,11 @@ describe('HubAddMemberWizard', () => {
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('Antigravity');
     expect(container.textContent).toContain('Step 2: 选择 Provider / 配置 CLI');
     expect(container.textContent).toContain('Step 3: 选择模型');
+    expect(container.textContent).toContain('选择该 Provider 下的可用模型');
+    expect(container.textContent).not.toContain('【');
+    expect(container.textContent).not.toContain('非 UI 直出');
 
     await click(queryButton(container, 'Codex'));
-    expect(container.textContent).toContain('同名 OAuth + 任意 API Key provider');
     expect(container.textContent).toContain('Codex (OAuth)');
     expect(container.textContent).toContain('Codex Sponsor');
     expect(container.textContent).toContain('Claude Sponsor');
@@ -186,7 +195,7 @@ describe('HubAddMemberWizard', () => {
     await click(queryButton(container, 'Claude Sponsor'));
     expect(container.textContent).toContain('claude-opus-4-6');
     await click(queryButton(container, 'claude-opus-4-6'));
-    await click(queryButton(container, '进入成员配置'));
+    await click(queryButton(container, '创建后继续编辑'));
     await flushEffects();
 
     expect(container.textContent).toContain('成员配置');
@@ -203,13 +212,14 @@ describe('HubAddMemberWizard', () => {
 
     await click(queryButton(container, 'Antigravity'));
     expect(container.textContent).toContain('Step 2: 选择 Provider / 配置 CLI');
+    expect(container.textContent?.split('添加成员').length).toBe(2);
 
     const cliInput = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]');
     expect(cliInput.value).toBe('. --remote-debugging-port=9000');
     expect(container.textContent).toContain('Step 3: 选择模型');
 
     await click(queryButton(container, 'gemini-3.1-pro'));
-    await click(queryButton(container, '进入成员配置'));
+    await click(queryButton(container, '创建后继续编辑'));
     await flushEffects();
 
     expect(container.textContent).toContain('成员配置');

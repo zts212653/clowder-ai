@@ -1,8 +1,16 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MessageNavigator } from '@/components/MessageNavigator';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
+
+vi.mock('@/hooks/useOwnerConfig', () => ({
+  useOwnerConfig: () => ({
+    name: '始皇帝',
+    aliases: ['秦始皇'],
+    mentionPatterns: ['@owner', '@me'],
+  }),
+}));
 
 function makeMsg(id: string, type: 'user' | 'assistant' | 'system', catId?: string): ChatMessageData {
   return {
@@ -100,7 +108,7 @@ describe('MessageNavigator', () => {
 
     expect(html).toContain('跳转到 缅因猫（gpt52） 的消息');
 
-    const ownerLabels = html.match(/跳转到 铲屎官 的消息/g) ?? [];
+    const ownerLabels = html.match(/跳转到 始皇帝 的消息/g) ?? [];
     expect(ownerLabels.length).toBe(1);
   });
 
@@ -117,7 +125,7 @@ describe('MessageNavigator', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'codex'), makeMsg('m3', 'assistant', 'opus')];
     const html = render(msgs);
 
-    expect(html).toContain('跳转到 铲屎官 的消息');
+    expect(html).toContain('跳转到 始皇帝 的消息');
     expect(html).toContain('跳转到 缅因猫 的消息');
   });
 

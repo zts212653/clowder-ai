@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
+import { useOwnerConfig } from '@/hooks/useOwnerConfig';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 
@@ -58,10 +59,14 @@ function resolveCatById(getCatById: CatLookup, catId: string): CatData | undefin
   return undefined;
 }
 
-function getSenderLabel(msg: ChatMessageData, resolveCat: (catId: string) => CatData | undefined): string {
+function getSenderLabel(
+  msg: ChatMessageData,
+  resolveCat: (catId: string) => CatData | undefined,
+  ownerName: string,
+): string {
   const catId = msg.catId;
   const isOwner = msg.type === 'user' && !catId;
-  if (isOwner) return '铲屎官';
+  if (isOwner) return ownerName;
 
   const isAssistant = msg.type === 'assistant' || (msg.type === 'user' && !!catId);
   if (!isAssistant) return '系统';
@@ -91,13 +96,17 @@ interface MessageNavigatorProps {
 
 export function MessageNavigator({ messages, scrollContainerRef }: MessageNavigatorProps) {
   const { getCatById } = useCatData();
+  const owner = useOwnerConfig();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [viewport, setViewport] = useState({ top: 0, height: 1 });
   const trackRef = useRef<HTMLDivElement>(null);
 
   const resolveCat = useCallback((catId: string) => resolveCatById(getCatById, catId), [getCatById]);
 
-  const getSenderName = useCallback((msg: ChatMessageData) => getSenderLabel(msg, resolveCat), [resolveCat]);
+  const getSenderName = useCallback(
+    (msg: ChatMessageData) => getSenderLabel(msg, resolveCat, owner.name),
+    [owner.name, resolveCat],
+  );
 
   // Filter to user + assistant only
   const navItems = useMemo(() => messages.filter((m) => m.type === 'user' || m.type === 'assistant'), [messages]);
@@ -210,6 +219,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
           <NavTooltip
             message={sampledItems[hoveredIdx].msg}
             topPercent={sampledItems.length <= 1 ? 50 : (hoveredIdx / (sampledItems.length - 1)) * 100}
+            ownerName={owner.name}
           />
         )}
       </div>
@@ -217,13 +227,21 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
   );
 }
 
-function NavTooltip({ message, topPercent }: { message: ChatMessageData; topPercent: number }) {
+function NavTooltip({
+  message,
+  topPercent,
+  ownerName,
+}: {
+  message: ChatMessageData;
+  topPercent: number;
+  ownerName: string;
+}) {
   const { getCatById } = useCatData();
   const resolveCat = useCallback((catId: string) => resolveCatById(getCatById, catId), [getCatById]);
 
   const senderName = useMemo(() => {
-    return getSenderLabel(message, resolveCat);
-  }, [message, resolveCat]);
+    return getSenderLabel(message, resolveCat, ownerName);
+  }, [message, ownerName, resolveCat]);
 
   return (
     <div

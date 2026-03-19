@@ -64,7 +64,11 @@ async function flushEffects() {
   });
 }
 
-async function changeField(element: HTMLInputElement | HTMLSelectElement, value: string, eventType: 'input' | 'change' = 'input') {
+async function changeField(
+  element: HTMLInputElement | HTMLSelectElement,
+  value: string,
+  eventType: 'input' | 'change' = 'input',
+) {
   await act(async () => {
     const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value');
     descriptor?.set?.call(element, value);
@@ -73,7 +77,9 @@ async function changeField(element: HTMLInputElement | HTMLSelectElement, value:
 }
 
 function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent?.includes(text));
+  const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
+    candidate.textContent?.includes(text),
+  );
   if (!button) {
     throw new Error(`Missing button: ${text}`);
   }
@@ -199,9 +205,12 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).toContain('Codex (OAuth)');
     expect(container.textContent).toContain('Gemini (OAuth)');
     expect(container.textContent).toContain('Codex Sponsor');
-    expect(container.textContent).toContain('OpenCode / Dare 复用 OAuth-like 登录态');
-    expect(container.textContent).toContain('OpenCode (OAuth-like)');
-    expect(container.textContent).toContain('Dare (OAuth-like)');
+    expect(container.textContent).not.toContain('【');
+    expect(container.textContent).not.toContain('非 UI 直出');
+    expect(container.textContent).toContain('OpenCode (client-auth)');
+    expect(container.textContent).toContain('Dare (client-auth)');
+    expect(container.textContent).not.toContain('OAuth-like');
+    expect(container.textContent).not.toContain('内置认证');
     expect(container.textContent).toContain('新建 API Key 账号');
     expect(container.textContent).not.toContain('布偶猫救援中心');
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/claude-rescue/sessions');
@@ -209,7 +218,7 @@ describe('CatCafeHub provider profiles tab', () => {
 
   it('shows verification status for api-key accounts instead of repeating activation badges', async () => {
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles/codex-sponsor/test' && init?.method === 'POST') {
+      if (path.startsWith('/api/provider-profiles/') && path.endsWith('/test') && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ ok: true, mode: 'api_key', status: 200 }));
       }
       if (path.startsWith('/api/provider-profiles')) {
@@ -261,13 +270,15 @@ describe('CatCafeHub provider profiles tab', () => {
 
     expect(container.textContent).toContain('未验证');
     expect(container.textContent).not.toContain('已激活');
+    expect(container.textContent).not.toContain('当前使用中');
+    expect(container.textContent).not.toContain('设为当前');
 
     await act(async () => {
       queryButton(container, '测试').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('Verified');
+    expect(container.textContent).toContain('验证');
   });
 
   it('keeps API key creation collapsed by default and shows protocol controls on expand', async () => {
@@ -348,11 +359,7 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     expect(container.textContent).toContain('🔒');
-    expect(container.textContent).toContain('全部');
-    expect(container.textContent).toContain('Claude');
-    expect(container.textContent).toContain('Codex');
-    expect(container.textContent).toContain('Gemini');
-    expect(container.textContent).toContain('API Key');
+    expect(container.textContent).toContain('系统配置 > 账号配置');
     expect(container.textContent).toContain('+ 新建 API Key 账号');
     expect(container.textContent).not.toContain('协议建议：');
     expect(container.textContent).not.toContain('默认/覆盖模型');
@@ -423,11 +430,13 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    const displayNameInput = container.querySelector('input[placeholder="账号显示名（例如 my-glm）"]') as HTMLInputElement;
+    const displayNameInput = container.querySelector(
+      'input[placeholder="账号显示名（例如 my-glm）"]',
+    ) as HTMLInputElement;
     const baseUrlInput = container.querySelector('input[placeholder="Base URL"]') as HTMLInputElement;
     const apiKeyInput = container.querySelector('input[placeholder="API Key"]') as HTMLInputElement;
     const protocolSelect = container.querySelector('select[aria-label="Protocol"]') as HTMLSelectElement;
-    const createButton = queryButton(container, '创建并激活');
+    const createButton = queryButton(container, '创建');
 
     await changeField(displayNameInput, 'Sponsor Gemini');
     await changeField(baseUrlInput, 'https://llm.sponsor.example/v1');
@@ -450,7 +459,7 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(payload.protocol).toBe('google');
   });
 
-  it('filters provider cards with the wireframe tabs', async () => {
+  it('shows built-in and custom provider cards together without the old filter tabs', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/provider-profiles')) {
         return Promise.resolve(
@@ -532,33 +541,22 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(profileList?.textContent).toContain('Codex (OAuth)');
     expect(profileList?.textContent).toContain('Gemini (OAuth)');
     expect(profileList?.textContent).toContain('Codex Sponsor');
-
-    await act(async () => {
-      queryButton(container, 'API Key').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(profileList?.textContent).not.toContain('Claude (OAuth)');
-    expect(profileList?.textContent).not.toContain('Codex (OAuth)');
-    expect(profileList?.textContent).not.toContain('Gemini (OAuth)');
-    expect(profileList?.textContent).toContain('Codex Sponsor');
-
-    await act(async () => {
-      queryButton(container, 'Codex').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(profileList?.textContent).not.toContain('Claude (OAuth)');
-    expect(profileList?.textContent).toContain('Codex (OAuth)');
-    expect(profileList?.textContent).not.toContain('Gemini (OAuth)');
-    expect(profileList?.textContent).not.toContain('Codex Sponsor');
+    expect(profileList?.textContent).toContain('OpenCode (client-auth)');
+    expect(profileList?.textContent).toContain('Dare (client-auth)');
+    expect(container.textContent).not.toContain('全部');
+    expect(container.textContent).not.toContain('内置认证');
+    expect(
+      Array.from(container.querySelectorAll('button')).filter((button) => button.textContent?.includes('编辑')),
+    ).toHaveLength(1);
   });
 
   it('renders ragdoll rescue section from the dedicated rescue tab', async () => {
     storeState.hubState = { open: true, tab: 'rescue' };
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/config') {
-        return Promise.resolve(jsonResponse({ config: { cats: {}, perCatBudgets: {}, a2a: {}, memory: {}, hindsight: {}, governance: {} } }));
+        return Promise.resolve(
+          jsonResponse({ config: { cats: {}, perCatBudgets: {}, a2a: {}, memory: {}, hindsight: {}, governance: {} } }),
+        );
       }
       if (path === '/api/claude-rescue/sessions') {
         return Promise.resolve(
