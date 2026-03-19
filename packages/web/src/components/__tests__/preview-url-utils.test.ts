@@ -48,13 +48,13 @@ describe('parsePreviewUrl', () => {
   });
 
   it('warns when path starts with /api/ (Hub API URL)', () => {
-    const result = parsePreviewUrl('localhost:3003/api/threads');
+    const result = parsePreviewUrl('localhost:3004/api/threads');
     expect(result.valid).toBe(true);
     expect(result.warning).toMatch(/Cat Café/i);
   });
 
   it('warns when path starts with /api/preview (Hub preview endpoint)', () => {
-    const result = parsePreviewUrl('http://localhost:3003/api/preview/status');
+    const result = parsePreviewUrl('http://localhost:3004/api/preview/status');
     expect(result.valid).toBe(true);
     expect(result.warning).toMatch(/Cat Café/i);
   });

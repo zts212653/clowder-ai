@@ -160,6 +160,50 @@ describe('F055: PlanBoardPanel (猫猫祟祟)', () => {
     expect(container.textContent).toContain('Step 3');
   });
 
+  it('uses SVG status markers instead of emoji glyphs', async () => {
+    await renderPanel('thread-1', {
+      opus: makeInvocation({
+        taskProgress: {
+          tasks: makeTasks([
+            { status: 'completed', subject: 'Step 1' },
+            { status: 'in_progress', subject: 'Step 2' },
+            { status: 'pending', subject: 'Step 3' },
+          ]),
+          lastUpdate: Date.now(),
+          snapshotStatus: 'running',
+        },
+      }),
+    });
+
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('✅');
+    expect(text).not.toContain('🔄');
+    expect(text).not.toContain('⬚');
+  });
+
+  it('exposes per-task status as screen-reader-only text without invalid aria-label', async () => {
+    await renderPanel('thread-1', {
+      opus: makeInvocation({
+        taskProgress: {
+          tasks: makeTasks([
+            { status: 'completed', subject: 'Step 1' },
+            { status: 'in_progress', subject: 'Step 2' },
+            { status: 'pending', subject: 'Step 3' },
+          ]),
+          lastUpdate: Date.now(),
+          snapshotStatus: 'running',
+        },
+      }),
+    });
+
+    expect(container.querySelectorAll('div[aria-label]')).toHaveLength(0);
+
+    const srOnlyTexts = Array.from(container.querySelectorAll('.sr-only')).map((el) => el.textContent?.trim());
+    expect(srOnlyTexts).toContain('已完成');
+    expect(srOnlyTexts).toContain('进行中');
+    expect(srOnlyTexts).toContain('待处理');
+  });
+
   it('AC-4: running cats appear first, completed fold to bottom', async () => {
     await renderPanel('thread-1', {
       opus: makeInvocation({

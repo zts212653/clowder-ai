@@ -83,20 +83,22 @@ const bootcampStateSchema = z
   })
   .strict();
 
-const createThreadSchema = z.object({
-  /** Legacy fallback only; preferred identity source is X-Cat-Cafe-User header. */
-  userId: z.string().min(1).max(100).optional(),
-  title: z.string().min(1).max(200).optional(),
-  projectPath: z.string().min(1).max(500).optional(),
-  /** F32-b Phase 2: Thread-level cat preference (validated against catRegistry) */
-  preferredCats: z.array(catIdSchema()).max(10).optional(),
-  /** F095 Phase C: Pin thread on creation */
-  pinned: z.boolean().optional(),
-  /** F095 Phase C: Associate thread with a backlog item at creation */
-  backlogItemId: z.string().min(1).max(100).optional(),
-  /** F087: Initial bootcamp state */
-  bootcampState: bootcampStateSchema.optional(),
-});
+const createThreadSchema = z
+  .object({
+    /** Legacy fallback only; preferred identity source is X-Cat-Cafe-User header. */
+    userId: z.string().min(1).max(100).optional(),
+    title: z.string().min(1).max(200).optional(),
+    projectPath: z.string().min(1).max(500).optional(),
+    /** F32-b Phase 2: Thread-level cat preference (validated against catRegistry) */
+    preferredCats: z.array(catIdSchema()).max(10).optional(),
+    /** F095 Phase C: Pin thread on creation */
+    pinned: z.boolean().optional(),
+    /** F095 Phase C: Associate thread with a backlog item at creation */
+    backlogItemId: z.string().min(1).max(100).optional(),
+    /** F087: Initial bootcamp state */
+    bootcampState: bootcampStateSchema.optional(),
+  })
+  .strict();
 
 const listThreadsSchema = z.object({
   projectPath: z.string().min(1).max(500).optional(),
@@ -161,6 +163,7 @@ const updateThreadSchema = z
     /** F087: Update bootcamp state. null clears. */
     bootcampState: bootcampStateSchema.nullable().optional(),
   })
+  .strict()
   .refine(
     (data) =>
       data.title !== undefined ||

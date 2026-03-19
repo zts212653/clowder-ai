@@ -24,12 +24,21 @@ function nonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * Trusted request identity source for browser/API calls.
+ *
+ * Unlike resolveUserId(), this does not accept caller-controlled query params.
+ */
+export function resolveHeaderUserId(request: FastifyRequest): string | null {
+  return nonEmptyString(request.headers['x-cat-cafe-user']);
+}
+
 export function resolveUserId(request: FastifyRequest, options?: ResolveUserIdOptions): string | null {
-  const fromHeader = nonEmptyString(request.headers['x-cat-cafe-user']);
+  const fromHeader = resolveHeaderUserId(request);
   if (fromHeader) return fromHeader;
 
   const query = request.query as Record<string, unknown>;
-  const fromQuery = nonEmptyString(query['userId']);
+  const fromQuery = nonEmptyString(query.userId);
   if (fromQuery) return fromQuery;
 
   const fromFallback = nonEmptyString(options?.fallbackUserId);

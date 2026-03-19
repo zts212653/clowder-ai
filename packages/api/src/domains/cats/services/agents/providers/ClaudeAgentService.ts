@@ -16,8 +16,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { isAbsolute, resolve, win32 } from 'node:path';
-import { execSync } from 'node:child_process';
+import { isAbsolute, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
@@ -27,6 +26,7 @@ import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
+import { findGitBashPath } from './claude-agent-win.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 
 const PERMISSION_MODE = 'bypassPermissions';
@@ -53,72 +53,14 @@ function formatThinkingSignatureRescueError(sessionId: string | undefined): stri
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/**
- * Find git-bash executable on Windows (#64).
- * Claude CLI requires git-bash for shell operations.
- * Caches result after first lookup.
- */
-let cachedGitBashPath: string | undefined | null;
-
-function isWindowsSystemBash(candidate: string): boolean {
-  const normalized = win32.normalize(candidate).toLowerCase();
-  return normalized.endsWith('\\system32\\bash.exe');
-}
-
-export function pickGitBashPathFromWhere(whereOutput: string, pathExists = existsSync): string | undefined {
-  const existingCandidates: string[] = [];
-  for (const rawLine of whereOutput.split(/\r?\n/)) {
-    const candidate = rawLine.trim().replace(/^"+|"+$/g, '');
-    if (!candidate) continue;
-    if (win32.basename(candidate).toLowerCase() !== 'bash.exe') continue;
-    if (!pathExists(candidate)) continue;
-    existingCandidates.push(candidate);
-  }
-
-  for (const candidate of existingCandidates) {
-    if (!isWindowsSystemBash(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-}
-
-function findGitBashPath(): string | undefined {
-  if (!IS_WINDOWS) return undefined;
-  if (cachedGitBashPath !== undefined) return cachedGitBashPath ?? undefined;
-
-  // Check standard install path
-  const standardPath = 'C:\\Program Files\\Git\\bin\\bash.exe';
-  if (existsSync(standardPath)) {
-    cachedGitBashPath = standardPath;
-    return standardPath;
-  }
-
-  // Dynamic discovery via `where bash`
-  try {
-    const whereOutput = execSync('where bash', { encoding: 'utf-8', timeout: 5000 }).trim();
-    const discoveredPath = pickGitBashPathFromWhere(whereOutput);
-    if (discoveredPath) {
-      cachedGitBashPath = discoveredPath;
-      return discoveredPath;
-    }
-  } catch {
-    // `where` failed
-  }
-
-  cachedGitBashPath = null;
-  return undefined;
-}
+export { pickGitBashPathFromWhere } from './claude-agent-win.js';
 
 function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
   const env: Record<string, string | null> = { ...(callbackEnv ?? {}) };
 
-  // Always clear nested-session detection env vars (#64)
   env.CLAUDECODE = null;
   env.CLAUDE_CODE_ENTRYPOINT = null;
 
-  // Windows: set git-bash path for Claude CLI (#64)
   if (IS_WINDOWS) {
     const gitBash = findGitBashPath();
     if (gitBash) {

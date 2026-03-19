@@ -25,7 +25,7 @@ Clowder AI orchestrates AI agents that have access to code, files, and external 
 
 1. **Data Sanctuary**
    - Production data stores are isolated from development environments
-   - Development instances use separate ports/databases (e.g., Redis 6380 for dev, not production port)
+   - Development instances use separate ports/databases (e.g., Redis 6398 for dev, not production 6399)
    - Agents in development mode cannot access production data
 
 2. **No Self-Review**

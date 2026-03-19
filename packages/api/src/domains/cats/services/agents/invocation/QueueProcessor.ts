@@ -262,6 +262,14 @@ export class QueueProcessor {
       this.deps.queue.rollbackProcessing(threadId, entry.id);
       return { started: false };
     }
+    // Fix: skip if cat already has an active invocation via CLI/messages.ts (not in processingSlots).
+    // Without this, the completion chain would start a duplicate executeEntry that preempts the
+    // CLI's invocation (InvocationTracker.start aborts old controller + InvocationRegistry.create
+    // overwrites latestByThreadCat), causing all subsequent CLI callbacks to return stale_ignored.
+    if (this.deps.invocationTracker.has(threadId, entryCat)) {
+      this.deps.queue.rollbackProcessing(threadId, entry.id);
+      return { started: false };
+    }
 
     this.processingSlots.add(entrySk);
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
@@ -293,6 +301,10 @@ export class QueueProcessor {
 
     // Mutex check — per-slot (before mutating queue state)
     if (this.processingSlots.has(sk)) {
+      return { started: false };
+    }
+    // Fix: skip if cat already has an active invocation via CLI/messages.ts (same guard as above)
+    if (this.deps.invocationTracker.has(threadId, entryCat)) {
       return { started: false };
     }
 

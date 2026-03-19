@@ -47,6 +47,11 @@ packages/web/public/worker-*.js
 .claude/skills/pencil-renderer
 .claude/skills/pencil-to-code
 
+# Claude local project memory / backup files
+.claude/projects/
+.claude/settings.json.bak
+.claude/settings.json.abtest-backup
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -68,6 +73,7 @@ coverage/
 # Uploaded files (keep dir, ignore contents)
 packages/api/uploads/*
 !packages/api/uploads/.gitkeep
+/uploads/
 
 # Runtime data (audit logs, etc.)
 data/
@@ -76,6 +82,12 @@ test-audit-logs/
 # Temporary files
 tmp/
 temp/
+
+# Local demo/video scratch exports
+assets/demo-videos/
+
+# Local external repo scratch space
+gitnexus/
 
 # ASR runtime artifact (mlx-audio writes transcript.txt to CWD)
 transcript.txt

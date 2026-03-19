@@ -73,7 +73,7 @@ export class ConnectorMessageFormatter {
   /** Format a system/command response (no cat identity, lightweight envelope). */
   formatCommand(body: string): MessageEnvelope {
     return {
-      header: '⚙️ Cat Café',
+      header: 'Clowder AI',
       subtitle: '',
       body,
       footer: new Date().toISOString().slice(11, 16),

@@ -23,6 +23,8 @@ export interface StartupSweepResult {
   running: number;
   queued: number;
   taskProgressCleared: number;
+  /** Queued user messages made visible after orphan sweep. */
+  messagesRecovered: number;
   notifiedThreads: number;
   durationMs: number;
 }
@@ -34,6 +36,8 @@ interface ReconcilerLog {
 
 interface MessageAppender {
   append(msg: AppendMessageInput): unknown;
+  /** Mark a queued message as delivered (make visible in timeline). */
+  markDelivered?(id: string, deliveredAt: number): unknown;
 }
 
 interface AgentMessageBroadcaster {
@@ -81,6 +85,7 @@ export class StartupReconciler {
         running: 0,
         queued: 0,
         taskProgressCleared: 0,
+        messagesRecovered: 0,
         notifiedThreads: 0,
         durationMs: Date.now() - start,
       };
@@ -88,31 +93,33 @@ export class StartupReconciler {
 
     const scanStore = store as ScanStore;
     const affectedThreads = new Map<string, { catIds: CatId[]; userId: string }>();
-    const { running, taskProgressCleared } = await this.sweepRunning(
-      scanStore,
-      this.deps.processStartAt,
-      affectedThreads,
-    );
-    const queued = await this.sweepStaleQueued(scanStore, affectedThreads);
+    const runResult = await this.sweepRunning(scanStore, this.deps.processStartAt, affectedThreads);
+    const queueResult = await this.sweepStaleQueued(scanStore, affectedThreads);
 
     const notifiedThreads = await this.notifyAffectedThreads(affectedThreads);
 
+    const running = runResult.running;
+    const queued = queueResult.queued;
+    const taskProgressCleared = runResult.taskProgressCleared;
+    const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered;
     const swept = running + queued;
     const durationMs = Date.now() - start;
     this.deps.log.info(
       `[startup-reconciler] Sweep complete: ${swept} orphans (${running} running, ${queued} stale queued), ` +
-        `${taskProgressCleared} task-progress cleared, ${notifiedThreads} threads notified, ${durationMs}ms`,
+        `${taskProgressCleared} task-progress cleared, ${messagesRecovered} messages recovered, ` +
+        `${notifiedThreads} threads notified, ${durationMs}ms`,
     );
-    return { swept, running, queued, taskProgressCleared, notifiedThreads, durationMs };
+    return { swept, running, queued, taskProgressCleared, messagesRecovered, notifiedThreads, durationMs };
   }
 
   private async sweepRunning(
     store: ScanStore,
     cutoff: number | undefined,
     affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
-  ): Promise<{ running: number; taskProgressCleared: number }> {
+  ): Promise<{ running: number; taskProgressCleared: number; messagesRecovered: number }> {
     let running = 0;
     let taskProgressCleared = 0;
+    let messagesRecovered = 0;
 
     const ids = await store.scanByStatus('running');
     for (const id of ids) {
@@ -129,19 +136,24 @@ export class StartupReconciler {
           running++;
           this.trackAffectedThread(affectedThreads, record);
           taskProgressCleared += await this.clearTaskProgress(record.threadId, record.targetCats);
+          // Safe: markDelivered is a no-op for non-queued messages (undefined/delivered/canceled),
+          // so already-visible messages won't be re-scored. Only catches the edge case where
+          // process crashed between invocation→running and markDelivered.
+          if (await this.ensureMessageVisible(record)) messagesRecovered++;
         }
       } catch (err) {
         this.deps.log.warn(`[startup-reconciler] Failed to sweep running invocation ${id}: ${String(err)}`);
       }
     }
-    return { running, taskProgressCleared };
+    return { running, taskProgressCleared, messagesRecovered };
   }
 
   private async sweepStaleQueued(
     store: ScanStore,
     affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
-  ): Promise<number> {
+  ): Promise<{ queued: number; messagesRecovered: number }> {
     let queued = 0;
+    let messagesRecovered = 0;
     const ids = await store.scanByStatus('queued');
     const staleThreshold = Date.now() - STALE_QUEUED_THRESHOLD_MS;
 
@@ -157,12 +169,13 @@ export class StartupReconciler {
         if (updated) {
           queued++;
           this.trackAffectedThread(affectedThreads, record);
+          if (await this.ensureMessageVisible(record)) messagesRecovered++;
         }
       } catch (err) {
         this.deps.log.warn(`[startup-reconciler] Failed to sweep queued invocation ${id}: ${String(err)}`);
       }
     }
-    return queued;
+    return { queued, messagesRecovered };
   }
 
   private trackAffectedThread(map: Map<string, { catIds: CatId[]; userId: string }>, record: InvocationRecord): void {
@@ -239,5 +252,24 @@ export class StartupReconciler {
       }
     }
     return cleared;
+  }
+
+  /**
+   * P1-C: Make queued user messages visible after orphan invocation sweep.
+   * Without this, messages with deliveryStatus='queued' stay invisible in timeline/context
+   * after a process_restart, because markDelivered() was never called.
+   */
+  private async ensureMessageVisible(record: InvocationRecord): Promise<boolean> {
+    const { messageStore } = this.deps;
+    if (!messageStore?.markDelivered || !record.userMessageId) return false;
+    try {
+      const result = await messageStore.markDelivered(record.userMessageId, Date.now());
+      return result != null;
+    } catch (err) {
+      this.deps.log.warn(
+        `[startup-reconciler] Failed to recover message ${record.userMessageId} for invocation ${record.id}: ${String(err)}`,
+      );
+      return false;
+    }
   }
 }

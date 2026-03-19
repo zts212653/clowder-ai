@@ -1265,10 +1265,10 @@ describe('routeSerial: CLI error without text should not persist empty message (
     const errorMsgs = messages.filter((m) => m.type === 'error');
     assert.ok(errorMsgs.length > 0, 'error message should be yielded to frontend');
 
-    // Error text is appended to textContent and persisted (❌ prefix)
+    // Error text is appended to textContent and persisted ([错误] prefix)
     const catAppends = appendCalls.filter((c) => c.catId === 'codex');
     assert.equal(catAppends.length, 1, 'error text should be persisted as message content');
-    assert.ok(catAppends[0].content.includes('❌'), 'persisted content should contain error marker');
+    assert.ok(catAppends[0].content.includes('[错误]'), 'persisted content should contain error marker');
 
     // Done should still be yielded
     const doneMsgs = messages.filter((m) => m.type === 'done');
@@ -1316,7 +1316,7 @@ describe('routeSerial: CLI error without text should not persist empty message (
     const catAppends = appendCalls.filter((c) => c.catId === 'codex');
     assert.equal(catAppends.length, 1, 'partial response with text should still be persisted');
     assert.ok(catAppends[0].content.startsWith('partial output before error'), 'should start with partial text');
-    assert.ok(catAppends[0].content.includes('❌ timeout'), 'should include error suffix');
+    assert.ok(catAppends[0].content.includes('[错误] timeout'), 'should include error suffix');
   });
 });
 

@@ -1,4 +1,4 @@
-/** Cat Café Logo — 烁烁画的详细线稿版 + 三猫流光渐变 */
+/** Clowder AI Logo — 烁烁画的详细线稿版 + 三猫流光渐变 */
 export function CatCafeLogo({ className = 'w-6 h-6' }: { className?: string }) {
   return (
     <svg viewBox="0 0 640 640" className={className}>

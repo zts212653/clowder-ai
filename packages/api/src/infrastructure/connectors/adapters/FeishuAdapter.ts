@@ -43,7 +43,7 @@ export interface FeishuMediaPayload {
   type: 'image' | 'file' | 'audio';
   imageKey?: string;
   fileKey?: string;
-  /** Fallback URL when platform key is not available (outbound from Cat Café) */
+  /** Fallback URL when platform key is not available (outbound from Clowder AI) */
   url?: string;
   /** Absolute filesystem path for upload (from mediaPathResolver) */
   absPath?: string;
@@ -64,6 +64,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   private sendMessageFn: ((params: { chatId: string; content: string; msgType: string }) => Promise<unknown>) | null =
     null;
   private editMessageFn: ((params: { messageId: string; content: string }) => Promise<unknown>) | null = null;
+  private deleteMessageFn: ((params: { messageId: string }) => Promise<unknown>) | null = null;
 
   constructor(appId: string, appSecret: string, log: FastifyBaseLogger, options?: FeishuAdapterOptions) {
     this.client = new lark.Client({
@@ -334,14 +335,20 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   }
 
   async sendPlaceholder(externalChatId: string, text: string): Promise<string> {
-    const result = await this.sendLarkMessage(externalChatId, 'text', JSON.stringify({ text }));
+    const card = {
+      config: { update_multi: true },
+      header: { title: { tag: 'plain_text' as const, content: text }, template: 'grey' as const },
+      elements: [{ tag: 'markdown', content: '...' }],
+    };
+    const result = await this.sendLarkMessage(externalChatId, 'interactive', JSON.stringify(card));
     const data = result as { data?: { message_id?: string }; message_id?: string } | undefined;
     return data?.data?.message_id ?? data?.message_id ?? '';
   }
 
   /**
-   * Edit an already-sent message in place.
-   * Uses Lark im.message.patch API. Supports text messages sent within 14 days.
+   * Edit an already-sent message card in place.
+   * Uses Lark im.message.patch API — only supports interactive (card) messages.
+   * The text is rendered as markdown inside the card body.
    */
   async editMessage(_externalChatId: string, platformMessageId: string, text: string): Promise<void> {
     if (this.editMessageFn) {
@@ -349,11 +356,31 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
       return;
     }
 
+    const card = {
+      config: { update_multi: true },
+      header: { title: { tag: 'plain_text' as const, content: '🐱 回复中...' }, template: 'blue' as const },
+      elements: [{ tag: 'markdown', content: text }],
+    };
     await this.client.im.message.patch({
       path: { message_id: platformMessageId },
       data: {
-        content: JSON.stringify({ text }),
+        content: JSON.stringify(card),
       },
+    });
+  }
+
+  /**
+   * Delete a message by its platform message ID.
+   * Used to clean up streaming placeholder cards after final outbound delivery.
+   */
+  async deleteMessage(platformMessageId: string): Promise<void> {
+    if (this.deleteMessageFn) {
+      await this.deleteMessageFn({ messageId: platformMessageId });
+      return;
+    }
+
+    await this.client.im.message.delete({
+      path: { message_id: platformMessageId },
     });
   }
 
@@ -371,6 +398,14 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
    */
   _injectEditMessage(fn: (params: { messageId: string; content: string }) => Promise<unknown>): void {
     this.editMessageFn = fn;
+  }
+
+  /**
+   * Test helper: inject a mock delete function.
+   * @internal
+   */
+  _injectDeleteMessage(fn: (params: { messageId: string }) => Promise<unknown>): void {
+    this.deleteMessageFn = fn;
   }
 
   /**

@@ -94,7 +94,7 @@ describe('ConfigRegistry', () => {
   });
 
   it('shows redis=connected when REDIS_URL is set', async () => {
-    setEnv('REDIS_URL', 'redis://localhost:6379');
+    setEnv('REDIS_URL', 'redis://localhost:6399');
 
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();

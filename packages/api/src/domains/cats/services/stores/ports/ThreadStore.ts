@@ -118,6 +118,19 @@ export interface Thread {
   deletedAt?: number | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
+  /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
+  connectorHubState?: ConnectorHubStateV1;
+}
+
+/** F088 Phase G: Connector Hub thread state for IM command isolation. */
+export interface ConnectorHubStateV1 {
+  v: 1;
+  /** Which connector this hub serves (e.g. 'feishu', 'telegram'). */
+  connectorId: string;
+  /** The external chat ID this hub is bound to. */
+  externalChatId: string;
+  /** When this hub was created. */
+  createdAt: number;
 }
 
 /** F087: Bootcamp phase for CVO onboarding */
@@ -211,6 +224,8 @@ export interface IThreadStore {
   updateVoiceMode(threadId: string, voiceMode: boolean): void | Promise<void>;
   /** F087: Get/update bootcamp state. */
   updateBootcampState(threadId: string, state: BootcampStateV1 | null): void | Promise<void>;
+  /** F088 Phase G: Get/update connector hub state. */
+  updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
@@ -491,6 +506,16 @@ export class ThreadStore implements IThreadStore {
       delete thread.bootcampState;
     } else {
       thread.bootcampState = state;
+    }
+  }
+
+  updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (state === null) {
+      delete thread.connectorHubState;
+    } else {
+      thread.connectorHubState = state;
     }
   }
 

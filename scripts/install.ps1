@@ -116,11 +116,12 @@ Write-Ok "PowerShell $($PSVersionTable.PSVersion)"
 $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 if ($hasWinget) { Write-Ok "winget available" } else { Write-Warn "winget not found - manual install may be needed" }
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Write-Err "Git not found. Install from https://git-scm.com/ and re-run."
-    exit 1
+$gitCommand = Get-Command git -ErrorAction SilentlyContinue
+if (-not $gitCommand) {
+    Write-Warn "Git not found - git-dependent features will be unavailable"
+} else {
+    Write-Ok "Git: $(& $gitCommand.Source --version)"
 }
-Write-Ok "Git: $(git --version)"
 
 $ProjectRoot = Resolve-ProjectRoot
 $authState = New-InstallerAuthState -ProjectRoot $ProjectRoot
@@ -254,10 +255,10 @@ if (Test-Path $envFile) {
 } else {
     Write-Warn ".env.example not found - creating minimal .env"
     @"
-FRONTEND_PORT=3004
-API_SERVER_PORT=3003
-NEXT_PUBLIC_API_URL=http://localhost:3003
-REDIS_PORT=6379
+FRONTEND_PORT=3003
+API_SERVER_PORT=3004
+NEXT_PUBLIC_API_URL=http://localhost:3004
+REDIS_PORT=6399
 "@ | Out-File -FilePath $envFile -Encoding utf8
     Write-Ok "Minimal .env created"
 }
@@ -397,7 +398,7 @@ $startCmd = ".\scripts\start-windows.ps1"
 Write-Host "    $startCmd" -ForegroundColor White
 Write-Host ""
 $frontendPort = Get-InstallerEnvValueFromFile -EnvFile $envFile -Key "FRONTEND_PORT"
-if (-not $frontendPort) { $frontendPort = "3004" }
+if (-not $frontendPort) { $frontendPort = "3003" }
 Write-Host "  Then open http://localhost:$frontendPort" -ForegroundColor Cyan
 Write-Host ""
 

@@ -215,6 +215,19 @@ export class RedisConnectorThreadBindingStore implements IConnectorThreadBinding
     return bindings;
   }
 
+  async setHubThread(
+    connectorId: string,
+    externalChatId: string,
+    hubThreadId: string,
+  ): Promise<ConnectorThreadBinding | null> {
+    const key = ConnectorBindingKeys.detail(connectorId, externalChatId);
+    const data = await this.redis.hgetall(key);
+    if (!data || !data.connectorId) return null;
+    await this.redis.hset(key, 'hubThreadId', hubThreadId);
+    data.hubThreadId = hubThreadId;
+    return this.hydrate(data);
+  }
+
   private hydrate(data: Record<string, string>): ConnectorThreadBinding {
     return {
       connectorId: data.connectorId!,
@@ -222,6 +235,7 @@ export class RedisConnectorThreadBindingStore implements IConnectorThreadBinding
       threadId: data.threadId!,
       userId: data.userId!,
       createdAt: parseInt(data.createdAt ?? '0', 10),
+      ...(data.hubThreadId ? { hubThreadId: data.hubThreadId } : {}),
     };
   }
 }

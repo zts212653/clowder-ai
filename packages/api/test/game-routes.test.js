@@ -92,6 +92,19 @@ function createStubMessageStore() {
   };
 }
 
+function createStubAutoPlayer() {
+  return {
+    startedGameIds: [],
+    stopCalls: 0,
+    startLoop(gameId) {
+      this.startedGameIds.push(gameId);
+    },
+    stopAllLoops() {
+      this.stopCalls += 1;
+    },
+  };
+}
+
 function makeDefinition() {
   return {
     gameType: 'werewolf',
@@ -471,6 +484,39 @@ describe('Game API Routes', () => {
       assert.equal(res.statusCode, 400);
       const body = JSON.parse(res.body);
       assert.ok(body.error.includes('detectiveCatId'), 'error should mention detectiveCatId');
+    });
+
+    it('stops injected auto-player loops on app close', async () => {
+      const localApp = Fastify();
+      const autoPlayer = createStubAutoPlayer();
+
+      await localApp.register(gameRoutes, {
+        gameStore: createStubGameStore(),
+        socketManager: createStubSocket(),
+        threadStore: createStubThreadStore(),
+        messageStore: createStubMessageStore(),
+        autoPlayer,
+      });
+      await localApp.ready();
+
+      const res = await localApp.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'player',
+          playerCount: 7,
+          catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark'],
+          voiceMode: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(autoPlayer.startedGameIds.length, 1, 'should start injected auto-player');
+
+      await localApp.close();
+
+      assert.equal(autoPlayer.stopCalls, 1, 'should stop auto-player loops during close');
     });
   });
 });

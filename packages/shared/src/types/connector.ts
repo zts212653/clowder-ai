@@ -50,15 +50,17 @@ export interface ConnectorDefinition {
   readonly tailwindTheme?: ConnectorTailwindTheme;
 }
 
-// ── Thread Binding (external platform ↔ Cat Café thread) ──
+// ── Thread Binding (external platform ↔ Clowder AI thread) ──
 
-/** Bidirectional mapping between an external chat and a Cat Café thread. */
+/** Bidirectional mapping between an external chat and a Clowder AI thread. */
 export interface ConnectorThreadBinding {
   readonly connectorId: string;
   readonly externalChatId: string;
   readonly threadId: string;
   readonly userId: string;
   readonly createdAt: number;
+  /** IM Hub thread for command isolation (ISSUE-8 Phase 8A). Lazily created on first IM command. */
+  readonly hubThreadId?: string;
 }
 
 /** Target for outbound delivery after agent execution completes. */
@@ -74,7 +76,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   {
     id: 'github-review',
     displayName: 'GitHub Review',
-    icon: '🔔',
+    icon: 'github',
     color: { primary: '#2563EB', secondary: '#EFF6FF' },
     description: 'GitHub PR review 邮件通知',
     tailwindTheme: {
@@ -100,7 +102,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   {
     id: 'multi-mention-result',
     displayName: 'Multi-Mention 结果',
-    icon: '👥',
+    icon: 'users',
     color: { primary: '#059669', secondary: '#ECFDF5' },
     description: '多猫 @mention 聚合结果',
     tailwindTheme: {
@@ -113,7 +115,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   {
     id: 'feishu',
     displayName: '飞书',
-    icon: '🔵',
+    icon: '/images/connectors/feishu.png',
     color: { primary: '#3370FF', secondary: '#E8F0FE' },
     description: '飞书机器人',
     tailwindTheme: {
@@ -126,7 +128,7 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   {
     id: 'telegram',
     displayName: 'Telegram',
-    icon: '✈️',
+    icon: '/images/connectors/telegram.png',
     color: { primary: '#0088CC', secondary: '#E3F2FD' },
     description: 'Telegram Bot',
     tailwindTheme: {
@@ -138,8 +140,8 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   },
   {
     id: 'system-command',
-    displayName: '⚙️ Cat Café',
-    icon: '⚙️',
+    displayName: 'Clowder AI',
+    icon: 'settings',
     color: { primary: '#6B7280', secondary: '#F9FAFB' },
     description: '系统命令响应',
   },

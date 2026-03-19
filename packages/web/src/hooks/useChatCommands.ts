@@ -17,11 +17,11 @@ export function isCommandInvocation(input: string, command: string): boolean {
 
 /** Format ConfigSnapshot into readable multi-line text for /config display */
 function formatConfigForDisplay(config: ConfigSnapshot): string {
-  const lines: string[] = ['⚙️ Cat Cafe 运行配置', ''];
+  const lines: string[] = ['[配置] Clowder AI Config', ''];
 
   // Per-cat budgets first (the actual limits used)
   if (config.perCatBudgets) {
-    lines.push('🎯 Per-Cat 上下文预算');
+    lines.push('Per-Cat 上下文预算');
     for (const [catId, budget] of Object.entries(config.perCatBudgets)) {
       const b = budget as {
         maxPromptTokens: number;
@@ -38,7 +38,7 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
 
   // Legacy context section (deprecated)
   if (config.context) {
-    lines.push('📋 上下文默认值 (deprecated, see per-cat)');
+    lines.push('上下文默认值 (deprecated, see per-cat)');
     lines.push(`  历史条数: ${config.context.maxMessages}`);
     lines.push(`  每条截断: ${config.context.maxContentLength} 字符`);
     lines.push(`  总上下文: ${config.context.maxTotalChars} 字符`);
@@ -50,14 +50,14 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
   }
 
   if (config.cli) {
-    lines.push('🖥️ CLI');
+    lines.push('CLI');
     lines.push(`  超时: ${config.cli.timeoutMs / 1000}s`);
     lines.push(`  强制终止: ${config.cli.killGraceMs / 1000}s`);
     lines.push('');
   }
 
   if (config.storage) {
-    lines.push('💾 存储');
+    lines.push('存储');
     lines.push(`  消息 TTL: ${config.storage.messageTTL}`);
     lines.push(`  对话 TTL: ${config.storage.threadTTL}`);
     lines.push(`  任务 TTL: ${config.storage.taskTTL}`);
@@ -67,21 +67,21 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
   }
 
   if (config.upload) {
-    lines.push('📎 上传');
+    lines.push('上传');
     lines.push(`  最大文件: ${config.upload.maxFileSize}`);
     lines.push(`  最大数量: ${config.upload.maxFiles}`);
     lines.push('');
   }
 
   if (config.server) {
-    lines.push('🌐 服务器');
+    lines.push('服务器');
     lines.push(`  地址: ${config.server.host}:${config.server.port}`);
     lines.push(`  存储: ${config.server.redis === 'connected' ? 'Redis' : '内存'}`);
     lines.push('');
   }
 
   if (config.cats) {
-    lines.push('🐱 猫猫配置');
+    lines.push('猫猫配置');
     for (const [id, cat] of Object.entries(config.cats)) {
       const c = cat as { displayName: string; provider: string; model: string; mcpSupport: boolean };
       lines.push(`  ${c.displayName} (${id}): ${c.provider}/${c.model} ${c.mcpSupport ? '[MCP]' : ''}`);
@@ -90,21 +90,21 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
   }
 
   if (config.a2a) {
-    lines.push('🔗 A2A 猫猫互调');
+    lines.push('A2A 猫猫互调');
     lines.push(`  启用: ${config.a2a.enabled ? '是' : '否'}`);
     lines.push(`  最大深度: ${config.a2a.maxDepth}`);
     lines.push('');
   }
 
   if (config.memory) {
-    lines.push('📝 显式记忆 (F3-lite)');
+    lines.push('显式记忆 (F3-lite)');
     lines.push(`  启用: ${config.memory.enabled ? '是' : '否'}`);
     lines.push(`  每对话最大条数: ${config.memory.maxKeysPerThread}`);
     lines.push('');
   }
 
   if (config.governance) {
-    lines.push('🛡️ 治理 (4-D-lite)');
+    lines.push('治理 (4-D-lite)');
     lines.push(`  降级策略: ${config.governance.degradationEnabled ? '启用' : '禁用'}`);
     lines.push(`  Done 超时: ${config.governance.doneTimeoutMs / 1000}s`);
     lines.push(`  心跳间隔: ${config.governance.heartbeatIntervalMs / 1000}s`);
@@ -112,7 +112,7 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
   }
 
   if (config.deliberate) {
-    lines.push('🤔 两轮思考 (4-E)');
+    lines.push('两轮思考 (4-E)');
     lines.push(`  状态: ${config.deliberate.status === 'types_only' ? '类型预埋' : '已实现'}`);
   }
 
@@ -208,7 +208,7 @@ export function useChatCommands() {
               id: `config-${Date.now()}`,
               type: 'system',
               variant: 'info',
-              content: `✅ ${parts[0]} = ${parts[1]}\n\n${formatConfigForDisplay(data.config)}`,
+              content: `[已更新] ${parts[0]} = ${parts[1]}\n\n${formatConfigForDisplay(data.config)}`,
               timestamp: Date.now(),
             });
           } catch (err) {
@@ -258,7 +258,7 @@ export function useChatCommands() {
             id: `mem-${Date.now()}`,
             type: 'system',
             variant: 'info',
-            content: `📝 已记住: ${key}`,
+            content: `[记忆] 已记住: ${key}`,
             timestamp: Date.now(),
           });
         } catch (err) {
@@ -293,7 +293,7 @@ export function useChatCommands() {
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
-                content: `🔍 未找到: ${rest}`,
+                content: `[检索] 未找到: ${rest}`,
                 timestamp: Date.now(),
               });
             } else if (!res.ok) {
@@ -304,7 +304,7 @@ export function useChatCommands() {
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
-                content: `🔍 ${entry.key}: ${entry.value}`,
+                content: `[检索] ${entry.key}: ${entry.value}`,
                 timestamp: Date.now(),
               });
             }
@@ -318,7 +318,7 @@ export function useChatCommands() {
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
-                content: '🔍 此对话暂无记忆',
+                content: '[检索] 此对话暂无记忆',
                 timestamp: Date.now(),
               });
             } else {
@@ -327,7 +327,7 @@ export function useChatCommands() {
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
-                content: `🔍 对话记忆 (${entries.length} 条)\n${lines}`,
+                content: `[检索] 对话记忆 (${entries.length} 条)\n${lines}`,
                 timestamp: Date.now(),
               });
             }
@@ -425,7 +425,7 @@ export function useChatCommands() {
               id: `publish-${Date.now()}`,
               type: 'system',
               variant: 'info',
-              content: `✅ ${entryId}: ${data.previousStatus} → ${data.currentStatus}`,
+              content: `[已审批] ${entryId}: ${data.previousStatus} → ${data.currentStatus}`,
               timestamp: Date.now(),
             });
           }
@@ -471,7 +471,7 @@ export function useChatCommands() {
               id: `publish-${Date.now()}`,
               type: 'system',
               variant: 'info',
-              content: `📦 ${entryId}: ${data.previousStatus} → ${data.currentStatus}`,
+              content: `[已归档] ${entryId}: ${data.previousStatus} → ${data.currentStatus}`,
               timestamp: Date.now(),
             });
           }
@@ -521,7 +521,7 @@ export function useChatCommands() {
               id: `reflect-${Date.now()}`,
               type: 'system',
               variant: 'info',
-              content: `⚠️ Hindsight 不可用 (${data.degradeReason ?? '未知'})，无法生成反思`,
+              content: `[警告] Hindsight 不可用 (${data.degradeReason ?? '未知'})，无法生成反思`,
               timestamp: Date.now(),
             });
           } else {
@@ -529,7 +529,7 @@ export function useChatCommands() {
               id: `reflect-${Date.now()}`,
               type: 'system',
               variant: 'info',
-              content: `🪞 反思结果\n━━━━━━━━━\n${data.reflection}`,
+              content: `[反思] 结果\n━━━━━━━━━\n${data.reflection}`,
               timestamp: Date.now(),
             });
           }
@@ -763,7 +763,7 @@ export function useChatCommands() {
           id: `sysinfo-extract-${Date.now()}`,
           type: 'system',
           variant: 'info',
-          content: '🔍 正在从对话中提取任务...',
+          content: '[检索] 正在从对话中提取任务...',
           timestamp: Date.now(),
         });
 
@@ -787,7 +787,7 @@ export function useChatCommands() {
               id: `extract-result-${Date.now()}`,
               type: 'system',
               variant: 'info',
-              content: '📝 未找到可提取的任务',
+              content: '[任务] 未找到可提取的任务',
               timestamp: Date.now(),
             });
           } else {
@@ -796,7 +796,7 @@ export function useChatCommands() {
               id: `extract-result-${Date.now()}`,
               type: 'system',
               variant: 'info',
-              content: `✅ 已提取 ${data.count} 个任务${degradeNote}`,
+              content: `[已提取] ${data.count} 个任务${degradeNote}`,
               timestamp: Date.now(),
             });
           }

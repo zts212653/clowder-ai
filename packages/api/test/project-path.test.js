@@ -5,9 +5,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-const { validateProjectPath, isUnderAllowedRoot, getAllowedRoots, getDefaultRootsForPlatform, isPathUnderRoots } = await import(
-  '../dist/utils/project-path.js'
-);
+const { validateProjectPath, isUnderAllowedRoot, getAllowedRoots, getDefaultRootsForPlatform, isPathUnderRoots } =
+  await import('../dist/utils/project-path.js');
 
 describe('isUnderAllowedRoot', () => {
   it('accepts path under home directory', () => {
@@ -149,9 +148,10 @@ describe('PROJECT_ALLOWED_ROOTS env var', () => {
   it('uses default roots when env var is not set', () => {
     delete process.env.PROJECT_ALLOWED_ROOTS;
     delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
-    // Default: homedir + /tmp + /private/tmp + /Volumes (macOS)
+    // Default: homedir + /tmp + /private/tmp + /workspace + /Volumes (macOS)
     assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);
     assert.strictEqual(isUnderAllowedRoot('/tmp/foo'), true);
+    assert.strictEqual(isUnderAllowedRoot('/workspace/foo'), true);
   });
 
   it('includes /Volumes in default roots on macOS', () => {
@@ -206,5 +206,6 @@ describe('PROJECT_ALLOWED_ROOTS env var', () => {
     assert.ok(Array.isArray(roots));
     assert.ok(roots.includes(homedir()));
     assert.ok(roots.includes('/tmp'));
+    assert.ok(roots.includes('/workspace'));
   });
 });

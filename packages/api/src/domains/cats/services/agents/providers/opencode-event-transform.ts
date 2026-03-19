@@ -1,6 +1,6 @@
 /**
  * opencode Event Transformer
- * opencode JSON event stream → Cat Café AgentMessage 映射
+ * opencode JSON event stream → Clowder AI AgentMessage 映射
  *
  * opencode `run --format json` NDJSON 事件格式:
  *   { type, timestamp, sessionID, part: { type, ... } }

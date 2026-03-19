@@ -179,8 +179,8 @@ print_config_summary() {
 }
 
 # 默认端口 (not profile-dependent)
-API_PORT=${API_SERVER_PORT:-3003}
-WEB_PORT=${FRONTEND_PORT:-3004}
+API_PORT=${API_SERVER_PORT:-3004}
+WEB_PORT=${FRONTEND_PORT:-3003}
 REDIS_PORT=${REDIS_PORT:-$(default_redis_port)}
 
 # Profile-aware config resolution
@@ -232,6 +232,28 @@ kill_port() {
             sleep 1
         fi
         echo -e "${GREEN}  ✓ 端口 $port 已释放${NC}"
+    fi
+}
+
+kill_managed_ports() {
+    local preview_gateway_port="${PREVIEW_GATEWAY_PORT:-4100}"
+
+    kill_port $API_PORT "API"
+    kill_port $WEB_PORT "Frontend"
+    if [ "$preview_gateway_port" != "0" ]; then
+        kill_port $preview_gateway_port "Preview Gateway"
+    fi
+    if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
+        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
+    fi
+    if [ "${ASR_ENABLED:-0}" = "1" ]; then
+        kill_port ${WHISPER_PORT:-9876} "ASR"
+    fi
+    if [ "${TTS_ENABLED:-0}" = "1" ]; then
+        kill_port ${TTS_PORT:-9879} "TTS"
+    fi
+    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
+        kill_port ${LLM_POSTPROCESS_PORT:-9878} "LLM后修"
     fi
 }
 
@@ -404,27 +426,57 @@ print_redis_runtime_info() {
     [ -n "$appendonly" ] && echo "    - appendonly:$appendonly"
 }
 
+run_in_dir() {
+    local dir="$1"
+    shift
+    (
+        cd "$dir" &&
+        "$@"
+    )
+}
+
+run_logged_step() {
+    local label="$1"
+    local success_tail_lines="$2"
+    shift 2
+
+    local log_file rc
+    log_file=$(mktemp "${TMPDIR:-/tmp}/cat-cafe-build-XXXXXX")
+
+    if "$@" >"$log_file" 2>&1; then
+        tail -n "$success_tail_lines" "$log_file"
+        rm -f "$log_file"
+        return 0
+    else
+        rc=$?
+        echo -e "${RED}  ✗ ${label} 失败，完整日志如下：${NC}" >&2
+        cat "$log_file" >&2
+        echo -e "${RED}  日志文件: $log_file${NC}" >&2
+        return "$rc"
+    fi
+}
+
 # 构建 shared + MCP + API (tsc)；--prod-web 时额外构建 Frontend
 build_packages() {
     echo ""
     echo -e "${CYAN}构建 shared...${NC}"
-    (cd packages/shared && pnpm run build) 2>&1 | tail -3
+    run_logged_step "shared 构建" 3 run_in_dir "$PROJECT_DIR/packages/shared" pnpm run build
     echo -e "${GREEN}  ✓ shared 构建完成${NC}"
 
     echo ""
     echo -e "${CYAN}构建 MCP Server...${NC}"
-    (cd packages/mcp-server && pnpm run build) 2>&1 | tail -3
+    run_logged_step "MCP Server 构建" 3 run_in_dir "$PROJECT_DIR/packages/mcp-server" pnpm run build
     echo -e "${GREEN}  ✓ MCP Server 构建完成${NC}"
 
     echo ""
     echo -e "${CYAN}构建 API...${NC}"
-    (cd packages/api && pnpm run build) 2>&1 | tail -3
+    run_logged_step "API 构建" 3 run_in_dir "$PROJECT_DIR/packages/api" pnpm run build
     echo -e "${GREEN}  ✓ API 构建完成${NC}"
 
     if [ "$PROD_WEB" = true ]; then
         echo ""
         echo -e "${CYAN}构建 Frontend (production)...${NC}"
-        (cd packages/web && pnpm run build) 2>&1 | tail -10
+        run_logged_step "Frontend 构建" 10 run_in_dir "$PROJECT_DIR/packages/web" pnpm run build
         echo -e "${GREEN}  ✓ Frontend 构建完成 (PWA 已启用)${NC}"
     fi
 }
@@ -501,7 +553,7 @@ cleanup() {
     echo ""
     echo "正在关闭服务..."
     kill $(jobs -p) 2>/dev/null || true
-    # 关闭我们启动的专属 Redis (不影响系统默认 6379)
+    # 关闭我们启动的专属 Redis (不影响其他 Redis 实例)
     if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ] && redis-cli -p "$REDIS_PORT" ping &> /dev/null 2>&1; then
         archive_redis_snapshot "pre-stop"
         redis-cli -p "$REDIS_PORT" shutdown save &> /dev/null || true
@@ -576,20 +628,7 @@ main() {
     # 1. 杀掉残余进程
     echo ""
     echo -e "${CYAN}检查端口...${NC}"
-    kill_port $API_PORT "API"
-    kill_port $WEB_PORT "Frontend"
-    if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
-        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
-    fi
-    if [ "${ASR_ENABLED:-0}" = "1" ]; then
-        kill_port ${WHISPER_PORT:-9876} "ASR"
-    fi
-    if [ "${TTS_ENABLED:-0}" = "1" ]; then
-        kill_port ${TTS_PORT:-9879} "TTS"
-    fi
-    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
-        kill_port ${LLM_POSTPROCESS_PORT:-9878} "LLM后修"
-    fi
+    kill_managed_ports
 
     # 2. 清理缓存
     clean_cache

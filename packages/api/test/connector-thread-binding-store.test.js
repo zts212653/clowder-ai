@@ -49,4 +49,26 @@ describe('MemoryConnectorThreadBindingStore', () => {
   it('remove() returns false for unknown', () => {
     assert.equal(store.remove('feishu', 'nope'), false);
   });
+
+  it('setHubThread() attaches hubThreadId to existing binding', () => {
+    store.bind('feishu', 'chat-123', 'thread-abc', 'user-1');
+    const updated = store.setHubThread('feishu', 'chat-123', 'hub-thread-1');
+    assert.ok(updated);
+    assert.equal(updated.hubThreadId, 'hub-thread-1');
+    assert.equal(updated.threadId, 'thread-abc');
+    assert.equal(store.getByExternal('feishu', 'chat-123').hubThreadId, 'hub-thread-1');
+  });
+
+  it('setHubThread() returns null for non-existent binding', () => {
+    assert.equal(store.setHubThread('feishu', 'nope', 'hub-1'), null);
+  });
+
+  it('setHubThread() preserves other binding fields', () => {
+    store.bind('feishu', 'chat-123', 'thread-abc', 'user-1');
+    const updated = store.setHubThread('feishu', 'chat-123', 'hub-1');
+    assert.equal(updated.connectorId, 'feishu');
+    assert.equal(updated.externalChatId, 'chat-123');
+    assert.equal(updated.userId, 'user-1');
+    assert.ok(updated.createdAt > 0);
+  });
 });

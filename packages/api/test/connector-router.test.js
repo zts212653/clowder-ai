@@ -48,6 +48,15 @@ function mockThreadStore() {
       threads.set(thread.id, thread);
       return thread;
     },
+    updateConnectorHubState(threadId, state) {
+      const thread = threads.get(threadId);
+      if (!thread) return;
+      if (state === null) {
+        delete thread.connectorHubState;
+      } else {
+        thread.connectorHubState = state;
+      }
+    },
   };
 }
 
@@ -256,7 +265,7 @@ describe('ConnectorRouter', () => {
       const result = await router2.route('feishu', 'chat-123', '/where', 'ext-fmt-1');
       assert.equal(result.kind, 'command');
       assert.equal(envelopeCalls.length, 1);
-      assert.equal(envelopeCalls[0].envelope.header, '⚙️ Cat Café');
+      assert.equal(envelopeCalls[0].envelope.header, 'Cat Café');
       assert.equal(envelopeCalls[0].envelope.body, 'You are here');
       assert.ok(envelopeCalls[0].envelope.footer); // has timestamp
     });
@@ -276,7 +285,9 @@ describe('ConnectorRouter', () => {
       assert.equal(r2.reason, 'duplicate');
     });
 
-    it('stores command exchange in messageStore when contextThreadId present (Phase C)', async () => {
+    it('stores command exchange in Hub thread (ISSUE-8 8A)', async () => {
+      // Pre-create a binding so resolveHubThread can find it
+      bindingStore.bind('feishu', 'chat-hub-1', 'thread-conv-1', 'owner-1');
       const ctxRouter = new ConnectorRouter({
         bindingStore,
         dedup: new InboundMessageDedup(),
@@ -288,13 +299,15 @@ describe('ConnectorRouter', () => {
         defaultCatId: 'opus',
         log: noopLog(),
         commandLayer: mockCommandLayer({
-          '/where': { kind: 'where', response: 'Thread info here', contextThreadId: 'thread-ctx-1' },
+          '/where': { kind: 'where', response: 'Thread info here' },
         }),
         adapters: new Map([['feishu', mockAdapter()]]),
       });
-      const result = await ctxRouter.route('feishu', 'chat-123', '/where', 'ext-ctx-1');
+      const result = await ctxRouter.route('feishu', 'chat-hub-1', '/where', 'ext-ctx-1');
       assert.equal(result.kind, 'command');
-      assert.equal(result.threadId, 'thread-ctx-1');
+      // Hub thread should be lazily created (not the conversation thread)
+      assert.ok(result.threadId);
+      assert.notEqual(result.threadId, 'thread-conv-1', 'should NOT store in conversation thread');
       assert.ok(result.messageId);
       // Two messages stored: inbound command + outbound response
       assert.equal(messageStore.messages.length, 2);
@@ -302,9 +315,13 @@ describe('ConnectorRouter', () => {
       assert.equal(messageStore.messages[0].source.connector, 'feishu');
       assert.equal(messageStore.messages[1].content, 'Thread info here');
       assert.equal(messageStore.messages[1].source.connector, 'system-command');
+      // Hub thread should be persisted in binding
+      const binding = bindingStore.getByExternal('feishu', 'chat-hub-1');
+      assert.equal(binding.hubThreadId, result.threadId);
     });
 
-    it('broadcasts command exchange to WebSocket (Phase C)', async () => {
+    it('broadcasts command exchange to Hub thread WebSocket (ISSUE-8 8A)', async () => {
+      bindingStore.bind('feishu', 'chat-hub-bc', 'thread-conv-bc', 'owner-1');
       const ctxSocket = mockSocketManager();
       const ctxRouter = new ConnectorRouter({
         bindingStore,
@@ -317,16 +334,18 @@ describe('ConnectorRouter', () => {
         defaultCatId: 'opus',
         log: noopLog(),
         commandLayer: mockCommandLayer({
-          '/new': { kind: 'new', response: 'Created!', newActiveThreadId: 'thread-new', contextThreadId: 'thread-new' },
+          '/new': { kind: 'new', response: 'Created!', newActiveThreadId: 'thread-new' },
         }),
         adapters: new Map([['feishu', mockAdapter()]]),
       });
-      await ctxRouter.route('feishu', 'chat-123', '/new Test', 'ext-ctx-2');
-      // Two broadcasts: inbound command + outbound response
+      const result = await ctxRouter.route('feishu', 'chat-hub-bc', '/new Test', 'ext-ctx-2');
+      const hubThreadId = result.threadId;
+      assert.ok(hubThreadId);
+      assert.notEqual(hubThreadId, 'thread-conv-bc');
       assert.equal(ctxSocket.broadcasts.length, 2);
-      assert.equal(ctxSocket.broadcasts[0].room, 'thread:thread-new');
+      assert.equal(ctxSocket.broadcasts[0].room, `thread:${hubThreadId}`);
       assert.equal(ctxSocket.broadcasts[0].data.connectorId, 'feishu');
-      assert.equal(ctxSocket.broadcasts[1].room, 'thread:thread-new');
+      assert.equal(ctxSocket.broadcasts[1].room, `thread:${hubThreadId}`);
       assert.equal(ctxSocket.broadcasts[1].data.connectorId, 'system-command');
     });
 
@@ -396,8 +415,7 @@ describe('ConnectorRouter', () => {
       assert.ok(adapterSendCalls[0].content.includes('已路由'));
     });
 
-    it('skips messageStore when contextThreadId absent (Phase C)', async () => {
-      // /where without binding → no contextThreadId → no messages stored
+    it('skips message storage when no binding exists (ISSUE-8 8A)', async () => {
       const ctxRouter = new ConnectorRouter({
         bindingStore,
         dedup: new InboundMessageDedup(),
@@ -413,10 +431,93 @@ describe('ConnectorRouter', () => {
         }),
         adapters: new Map([['feishu', mockAdapter()]]),
       });
-      const result = await ctxRouter.route('feishu', 'chat-123', '/where', 'ext-ctx-3');
+      const result = await ctxRouter.route('feishu', 'chat-no-bind', '/where', 'ext-ctx-3');
       assert.equal(result.kind, 'command');
       assert.equal(result.threadId, undefined);
       assert.equal(messageStore.messages.length, 0);
+    });
+
+    it('Hub thread is lazily created once and reused (ISSUE-8 8A)', async () => {
+      bindingStore.bind('feishu', 'chat-reuse', 'thread-conv-reuse', 'owner-1');
+      const hubRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: cmdTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/where': { kind: 'where', response: 'Info' },
+          '/threads': { kind: 'threads', response: 'List' },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+
+      const r1 = await hubRouter.route('feishu', 'chat-reuse', '/where', 'ext-reuse-1');
+      assert.ok(r1.threadId);
+      const hubThreadId = r1.threadId;
+      assert.notEqual(hubThreadId, 'thread-conv-reuse');
+
+      const r2 = await hubRouter.route('feishu', 'chat-reuse', '/threads', 'ext-reuse-2');
+      assert.equal(r2.threadId, hubThreadId, 'second command should reuse same Hub thread');
+
+      const binding = bindingStore.getByExternal('feishu', 'chat-reuse');
+      assert.equal(binding.hubThreadId, hubThreadId);
+    });
+
+    it('Hub thread title includes connector display name (ISSUE-8 8A)', async () => {
+      bindingStore.bind('feishu', 'chat-title', 'thread-conv-title', 'owner-1');
+      const titleRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: cmdTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/where': { kind: 'where', response: 'info' },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+
+      const result = await titleRouter.route('feishu', 'chat-title', '/where', 'ext-title-1');
+      const hubThread = threadStore.threads.get(result.threadId);
+      assert.ok(hubThread);
+      assert.ok(hubThread.title.includes('IM Hub'), `expected "IM Hub" in title, got: ${hubThread.title}`);
+    });
+
+    it('Hub thread has connectorHubState after creation (F088 Phase G)', async () => {
+      bindingStore.bind('feishu', 'chat-state', 'thread-conv-state', 'owner-1');
+      const stateRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: cmdTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/where': { kind: 'where', response: 'info' },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+
+      const result = await stateRouter.route('feishu', 'chat-state', '/where', 'ext-state-1');
+      const hubThread = threadStore.threads.get(result.threadId);
+      assert.ok(hubThread);
+      assert.ok(hubThread.connectorHubState, 'Hub thread should have connectorHubState');
+      assert.equal(hubThread.connectorHubState.v, 1);
+      assert.equal(hubThread.connectorHubState.connectorId, 'feishu');
+      assert.equal(hubThread.connectorHubState.externalChatId, 'chat-state');
+      assert.ok(hubThread.connectorHubState.createdAt > 0);
     });
   });
 });

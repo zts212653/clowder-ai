@@ -125,6 +125,28 @@ describe('ConnectorBubble theme', () => {
     expect(html).not.toContain('bg-blue-100');
   });
 
+  it('preserves legacy warning icon for github-review triage messages', () => {
+    const message: ChatMessage = {
+      id: 'm-triage',
+      type: 'connector',
+      content: '**GitHub Review 需要分派**',
+      timestamp: Date.now(),
+      source: {
+        connector: 'github-review',
+        label: 'GitHub Review',
+        icon: '⚠️',
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    const html = container.innerHTML;
+    // Legacy triage icon should be preserved, not replaced with GitHub SVG
+    expect(html).toContain('⚠️');
+  });
+
   it('uses emerald theme for multi-mention-result connector', () => {
     const message: ChatMessage = {
       id: 'm-mm',

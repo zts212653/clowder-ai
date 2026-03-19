@@ -6,8 +6,8 @@ export interface WarnLoggerLike {
   warn: (...args: unknown[]) => void;
 }
 
-const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3004';
-const DEFAULT_CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:3004', 'https://cafe.clowder-ai.com'];
+const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003';
+const DEFAULT_CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:3003', 'https://cafe.clowder-ai.com'];
 
 /**
  * Match origins from private networks (RFC 1918 + Tailscale CGNAT 100.64/10 + loopback).
@@ -75,7 +75,7 @@ export function resolveFrontendBaseUrl(env: NodeJS.ProcessEnv, logger?: WarnLogg
   if (rawFrontendPort?.trim()) {
     logger?.warn(
       { frontendPort: rawFrontendPort },
-      '[thread-export] Invalid FRONTEND_PORT, fallback to localhost:3004',
+      '[thread-export] Invalid FRONTEND_PORT, fallback to localhost:3003',
     );
   }
 

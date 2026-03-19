@@ -1,9 +1,9 @@
 /**
- * F120: Preview URL parsing + Cat Café Hub URL detection.
+ * F120: Preview URL parsing + Clowder AI Hub URL detection.
  * Extracted as pure function for testability.
  */
 
-/** Paths that indicate a Cat Café Hub page (not a dev server app) */
+/** Paths that indicate a Clowder AI Hub page (not a dev server app) */
 const HUB_PATH_PATTERNS = [/^\/thread\//, /^\/api\//, /^\/settings\/?/];
 
 export interface ParsedPreviewUrl {
@@ -11,7 +11,7 @@ export interface ParsedPreviewUrl {
   port?: number;
   path?: string;
   error?: string;
-  /** Non-blocking warning: URL looks like a Cat Café Hub page */
+  /** Non-blocking warning: URL looks like a Clowder AI Hub page */
   warning?: string;
 }
 
@@ -32,7 +32,7 @@ export function parsePreviewUrl(input: string): ParsedPreviewUrl {
   for (const pattern of HUB_PATH_PATTERNS) {
     if (pattern.test(path)) {
       warning =
-        'This URL looks like a Cat Café Hub page, not a dev server. ' +
+        'This URL looks like a Clowder AI Hub page, not a dev server. ' +
         'Preview is designed for dev servers (Vite, Next.js, etc.).';
       break;
     }

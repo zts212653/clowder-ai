@@ -98,7 +98,6 @@ tty_select() {
     printf '\n%s\n' "$prompt" >/dev/tty
     printf '  Use ↑↓ arrows to move, Enter to select\n\n' >/dev/tty
 
-    # Draw initial menu
     local i
     for ((i=0; i<count; i++)); do
         if ((i == cur)); then
@@ -109,9 +108,6 @@ tty_select() {
     done
 
     stty -echo -icanon </dev/tty 2>/dev/null
-    # Restore terminal on signal (Ctrl-C, etc.) so it doesn't stay in raw mode.
-    # Use saved_tty captured at define-time (double-quoted trap) because local
-    # variables are not visible to signal handlers running in top-level scope.
     trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT; exit 130" INT TERM
     trap "stty '${saved_tty}' </dev/tty 2>/dev/null || true; trap - INT TERM EXIT" EXIT
     while true; do
@@ -121,13 +117,12 @@ tty_select() {
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
             case "$key" in
-                '[A') ((cur > 0)) && ((cur--)) || true; need_redraw=true ;;   # up
-                '[B') ((cur < count-1)) && ((cur++)) || true; need_redraw=true ;;  # down
+                '[A') ((cur > 0)) && ((cur--)) || true; need_redraw=true ;;
+                '[B') ((cur < count-1)) && ((cur++)) || true; need_redraw=true ;;
             esac
         elif [[ "$key" == '' ]]; then
-            break  # Enter
+            break
         fi
-        # Only redraw when state actually changed — ignore unrecognized keys
         [[ "$need_redraw" == true ]] || continue
         printf '\033[%dA' "$count" >/dev/tty
         for ((i=0; i<count; i++)); do
@@ -154,24 +149,23 @@ tty_multiselect() {
     local count=${#options[@]} cur=0
 
     if [[ "$HAS_TTY" != true || $count -eq 0 ]]; then
-        # Default: all selected
         local all_indices=""
+        local i
         for ((i=0; i<count; i++)); do
-            [[ -n "$all_indices" ]] && all_indices+="," 
+            [[ -n "$all_indices" ]] && all_indices+=","
             all_indices+="$i"
         done
         printf -v "$result_var" '%s' "$all_indices"; return
     fi
 
-    # All selected by default
     local -a selected=()
+    local i
     for ((i=0; i<count; i++)); do selected+=("1"); done
 
     local saved_tty; saved_tty="$(stty -g </dev/tty 2>/dev/null)"
     printf '\n%s\n' "$prompt" >/dev/tty
     printf '  Use ↑↓ to move, Space to toggle, Enter to confirm\n\n' >/dev/tty
 
-    local i
     for ((i=0; i<count; i++)); do
         local marker="◉"; [[ "${selected[$i]}" != "1" ]] && marker="○"
         if ((i == cur)); then
@@ -195,13 +189,11 @@ tty_multiselect() {
                 '[B') ((cur < count-1)) && ((cur++)) || true; need_redraw=true ;;
             esac
         elif [[ "$key" == ' ' ]]; then
-            # Toggle selection
             if [[ "${selected[$cur]}" == "1" ]]; then selected[$cur]="0"; else selected[$cur]="1"; fi
             need_redraw=true
         elif [[ "$key" == '' ]]; then
-            break  # Enter
+            break
         fi
-        # Only redraw when state changed — ignore unrecognized keys
         [[ "$need_redraw" == true ]] || continue
         printf '\033[%dA' "$count" >/dev/tty
         for ((i=0; i<count; i++)); do
@@ -217,11 +209,10 @@ tty_multiselect() {
     stty "$saved_tty" </dev/tty 2>/dev/null || true
     trap - INT TERM EXIT
 
-    # Build result: comma-separated 0-based indices
     local result=""
     for ((i=0; i<count; i++)); do
         if [[ "${selected[$i]}" == "1" ]]; then
-            [[ -n "$result" ]] && result+="," 
+            [[ -n "$result" ]] && result+=","
             result+="$i"
         fi
     done
@@ -240,6 +231,20 @@ delete_env_key() {
     mv "$tmp" .env
 }
 env_has_key() { grep -q "^${1}=" .env 2>/dev/null; }
+read_env_key() {
+    local key="$1" line value
+    line="$(grep "^${key}=" .env 2>/dev/null | tail -n 1)" || return 1
+    value="${line#*=}"
+    if [[ "$value" =~ ^\'(.*)\'$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    printf '%s\n' "$value"
+}
 pnpm_install_with_fallback() {
     pnpm install --frozen-lockfile && return 0; [[ -n "$NPM_REGISTRY" ]] && return 1
     warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
@@ -272,7 +277,7 @@ resolve_project_dir() {
     fi
 }
 default_project_allowed_roots() {
-    printf '%s\n' "$HOME" '/tmp' '/private/tmp'
+    printf '%s\n' "$HOME" '/tmp' '/private/tmp' '/workspace'
     [[ "$(uname -s)" == "Darwin" ]] && printf '%s\n' '/Volumes'
 }
 project_allowed_roots() {
@@ -352,21 +357,18 @@ candidate_root_is_allowed() {
     done < <(project_allowed_roots)
     return 1
 }
+provider_profiles_candidate_root_is_allowed() {
+    local candidate="$1"
+    candidate_root_is_allowed "$candidate"
+}
 resolve_provider_profiles_dir() {
-    # Mirror the runtime validation in provider-profiles-root.ts:
-    # Only redirect for validated git worktrees.  For normal repos,
-    # submodules, and nested archives, stay at $PROJECT_DIR.
-    # Security: verify gitdir back-reference and commondir to prevent
-    # forged .git files from redirecting secrets to another repo.
     local git_entry="$PROJECT_DIR/.git"
     if [[ ! -e "$git_entry" ]]; then
         printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
     fi
-    # .git is a directory → normal repo or submodule → stay local
     if [[ -d "$git_entry" ]]; then
         printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
     fi
-    # .git is a file → potential worktree; validate structure + back-refs
     if [[ -f "$git_entry" ]] && command -v git &>/dev/null; then
         local gitdir="" worktrees_dir="" common_git_dir="" candidate=""
         gitdir="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
@@ -376,8 +378,6 @@ resolve_provider_profiles_dir() {
         common_git_dir="$(dirname "$worktrees_dir" 2>/dev/null)"
         [[ "$(basename "$common_git_dir" 2>/dev/null)" == ".git" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
 
-        # Security check 1: gitdir back-reference (TS L81-82)
-        # <gitdir>/gitdir must point back to our .git file
         local backref_file="$gitdir/gitdir" backref_resolved=""
         if [[ ! -f "$backref_file" ]]; then
             printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
@@ -387,8 +387,6 @@ resolve_provider_profiles_dir() {
         git_entry_resolved="$(realpath "$git_entry" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         [[ "$backref_resolved" == "$git_entry_resolved" ]] || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
 
-        # Security check 2: commondir consistency (TS L84-93)
-        # <gitdir>/commondir resolved relative to gitdir must equal common_git_dir
         local commondir_file="$gitdir/commondir" commondir_value="" commondir_resolved=""
         if [[ ! -f "$commondir_file" ]]; then
             printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return
@@ -402,7 +400,7 @@ resolve_provider_profiles_dir() {
 
         candidate="$(dirname "$common_git_dir_resolved")"
         candidate="$(normalize_path_for_compare "$candidate" 2>/dev/null)" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
-        candidate_root_is_allowed "$candidate" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
+        provider_profiles_candidate_root_is_allowed "$candidate" || { printf '%s/.cat-cafe\n' "$PROJECT_DIR"; return; }
         printf '%s/.cat-cafe\n' "$candidate"; return
     fi
     printf '%s/.cat-cafe\n' "$PROJECT_DIR"
@@ -422,6 +420,15 @@ maybe_write_docker_api_host() {
         write_env_key "API_SERVER_HOST" "0.0.0.0"
         ok "Docker detected — added API_SERVER_HOST=0.0.0.0 (was missing from existing .env)"
     fi
+}
+
+default_frontend_url() {
+    local frontend_port=""
+    if [[ -f .env ]]; then
+        frontend_port="$(read_env_key FRONTEND_PORT || true)"
+    fi
+    frontend_port="${frontend_port:-${FRONTEND_PORT:-3001}}"
+    printf 'http://localhost:%s\n' "$frontend_port"
 }
 
 ENV_KEYS=(); ENV_VALUES=(); ENV_DELETE_KEYS=()
@@ -646,8 +653,8 @@ install_npm_cli() {
 install_claude_cli() {
     info "  Installing Claude Code..."
     # Download the installer to a temp file first, then run it.
-    # Running `curl ... | bash </dev/null` breaks the pipe (bash's stdin IS
-    # the pipe from curl).  A temp file avoids the stdin conflict entirely.
+    # Running `curl ... | bash </dev/null` breaks the pipe because bash's stdin
+    # becomes the pipe from curl. A temp file avoids the stdin conflict.
     local tmp_installer; tmp_installer="$(mktemp)"
     curl -fsSL https://claude.ai/install.sh -o "$tmp_installer" 2>&1
     bash "$tmp_installer" </dev/null 2>&1
@@ -764,7 +771,7 @@ chmod 600 .env 2>/dev/null || true
 step "[9/9] Installation complete! / 安装完成！"
 echo -e "\n  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
 START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
-echo -e "  Start: $START_CMD\n  Open:  http://localhost:3003\n"
+echo -e "  Start: $START_CMD\n  Open:  $(default_frontend_url)\n"
 if [[ "$AUTO_START" == true ]]; then
     echo -e "${CYAN}Starting service (--start)...${NC}"; echo ""
     if [[ "$MEMORY_MODE" == true ]]; then exec pnpm start --memory; else exec pnpm start; fi

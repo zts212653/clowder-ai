@@ -229,10 +229,10 @@ commit body 补一行 `Why:` 说明决策理由。
 ## 12. Runtime 单实例保护（Anti-Self-TERM）
 
 - `../cat-cafe-runtime` 是单实例运行态，默认当作在线服务处理。
-- `../cat-cafe-runtime` 的 `localhost:3004/3003` 默认视为**在线 runtime 端口**；对这两个端口做浏览器 / Playwright / curl 操作，等同于在操作 runtime，不是本地沙箱。
+- `../cat-cafe-runtime` 的 `localhost:3003/3004` 默认视为**在线 runtime 端口**；对这两个端口做浏览器 / Playwright / curl 操作，等同于在操作 runtime，不是本地沙箱。
 - 在 runtime 会话中禁止执行重启命令：`pnpm start`、`pnpm runtime:start`、`./scripts/start-dev.sh`。
-- 前端证据采集先复用现有服务：先查 `curl -sf http://localhost:3003/health`。
-- 如果目的是验证**未合入的本地改动**，必须先确认“当前 CWD / worktree”和“要访问的 URL”属于同一实例；看到 `3004/3003` 就先停下来，确认自己是不是误打到了 runtime。
+- 前端证据采集先复用现有服务：先查 `curl -sf http://localhost:3004/health`。
+- 如果目的是验证**未合入的本地改动**，必须先确认“当前 CWD / worktree”和“要访问的 URL”属于同一实例；看到 `3003/3004` 就先停下来，确认自己是不是误打到了 runtime。
 - 必须重启时先拿到铲屎官明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行。
 - `--force` 只用于同步/脏树场景，不是重启 runtime 的授权令牌。
 

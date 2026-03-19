@@ -51,8 +51,10 @@ export function SteerQueuedEntryModal({
                 : 'border-gray-200 hover:border-gray-300 bg-white'
             }`}
           >
-            <div className="text-sm font-medium text-gray-800">立即执行（取消当前猫）</div>
-            <div className="text-xs text-gray-500 mt-1">会先 cancel 当前 invocation，然后立刻执行这条排队消息。</div>
+            <div className="text-sm font-medium text-gray-800">立即执行（必要时中断目标猫）</div>
+            <div className="text-xs text-gray-500 mt-1">
+              若目标猫正在执行，会先 cancel 该猫当前 invocation；若目标猫空闲，则直接执行这条排队消息。
+            </div>
           </button>
 
           <button

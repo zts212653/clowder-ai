@@ -2,13 +2,14 @@
 
 import type { Achievement, CvoLevel, GameStats, SillyCatEntry } from '@cat-cafe/shared';
 import { CatAvatar } from './CatAvatar';
+import { CafeIcon } from './rich/CafeIcons';
 
 /** Phase B: Silly cats — 翻车现场 */
 export function SillyCatsList({ entries }: { entries: SillyCatEntry[] }) {
   if (entries.length === 0)
     return (
       <p className="text-sm" style={{ color: '#8E8E93' }}>
-        暂无翻车记录 🎉
+        暂无翻车记录
       </p>
     );
   return (
@@ -41,7 +42,10 @@ export function GameArena({ stats }: { stats: GameStats }) {
         </span>
         {stats.catKill.topCat && (
           <span className="text-[11px] font-semibold" style={{ color: '#D4845E' }}>
-            🏆 MVP: {stats.catKill.topCat.displayName}
+            <span className="inline-flex items-center gap-1">
+              <CafeIcon name="trophy" className="w-3 h-3" />
+              MVP: {stats.catKill.topCat.displayName}
+            </span>
           </span>
         )}
       </div>
@@ -54,7 +58,10 @@ export function GameArena({ stats }: { stats: GameStats }) {
         </span>
         {stats.whoSpy.shameCat && (
           <span className="text-[11px] font-semibold" style={{ color: '#D4845E' }}>
-            💀 社死王: {stats.whoSpy.shameCat.displayName}
+            <span className="inline-flex items-center gap-1">
+              <CafeIcon name="cross" className="w-3 h-3" />
+              社死王: {stats.whoSpy.shameCat.displayName}
+            </span>
           </span>
         )}
       </div>
@@ -79,7 +86,15 @@ export function AchievementWall({ achievements }: { achievements: Achievement[] 
           style={{ background: 'rgba(139,111,71,0.08)' }}
           title={a.description}
         >
-          <span className="text-lg">{a.emoji}</span>
+          <span className="text-amber-700" aria-hidden="true">
+            {a.icon ? (
+              <CafeIcon name={a.icon} className="w-4 h-4" />
+            ) : a.emoji ? (
+              a.emoji
+            ) : (
+              <CafeIcon name="star" className="w-4 h-4" />
+            )}
+          </span>
           <span className="text-[12px] font-semibold" style={{ color: '#8B6F47' }}>
             {a.label}
           </span>

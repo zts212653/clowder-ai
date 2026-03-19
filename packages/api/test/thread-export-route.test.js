@@ -73,7 +73,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
     }
   });
 
-  it('uses localhost:3004 as default frontend URL when FRONTEND_URL is missing', async () => {
+  it('uses localhost:3003 as default frontend URL when FRONTEND_URL is missing', async () => {
     delete process.env.FRONTEND_URL;
     delete process.env.FRONTEND_PORT;
 
@@ -87,7 +87,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
-    assert.equal(captures[0].url, 'http://localhost:3004/thread/thread-1');
+    assert.equal(captures[0].url, 'http://localhost:3003/thread/thread-1');
     assert.equal(captures[0].userId, 'user-1');
   });
 
@@ -151,7 +151,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
     assert.equal(closeCalled, true, 'close() must be called during app.close()');
   });
 
-  it('falls back to localhost:3004 when FRONTEND_PORT is invalid', async () => {
+  it('falls back to localhost:3003 when FRONTEND_PORT is invalid', async () => {
     delete process.env.FRONTEND_URL;
     process.env.FRONTEND_PORT = 'not-a-number';
 
@@ -165,7 +165,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
-    assert.equal(captures[0].url, 'http://localhost:3004/thread/thread-1');
+    assert.equal(captures[0].url, 'http://localhost:3003/thread/thread-1');
   });
 });
 
@@ -184,7 +184,7 @@ describe('resolveFrontendBaseUrl', () => {
 
     const baseUrl = resolveFrontendBaseUrl({ FRONTEND_PORT: 'abc' }, logger);
 
-    assert.equal(baseUrl, 'http://localhost:3004');
+    assert.equal(baseUrl, 'http://localhost:3003');
     assert.equal(warnings.length, 1);
     assert.match(String(warnings[0].message), /FRONTEND_PORT/i);
   });
@@ -195,7 +195,7 @@ describe('resolveFrontendCorsOrigins', () => {
     const origins = resolveFrontendCorsOrigins({ FRONTEND_PORT: '4101' });
     assert.ok(origins.includes('http://localhost:4101'));
     assert.ok(origins.includes('http://localhost:3000'));
-    assert.ok(origins.includes('http://localhost:3004'));
+    assert.ok(origins.includes('http://localhost:3003'));
   });
 
   it('includes FRONTEND_URL origin when configured', () => {

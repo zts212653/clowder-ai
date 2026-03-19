@@ -477,20 +477,23 @@ describe('FeishuAdapter', () => {
   });
 
   describe('sendPlaceholder()', () => {
-    it('sends text message and returns message_id', async () => {
+    it('sends interactive card and returns message_id', async () => {
       const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
       const sendCalls = [];
       adapter._injectSendMessage(async (params) => {
         sendCalls.push(params);
-        return { message_id: 'om_placeholder_123' };
+        return { data: { message_id: 'om_placeholder_123' } };
       });
 
       const messageId = await adapter.sendPlaceholder('oc_chat_789', '思考中...');
       assert.equal(messageId, 'om_placeholder_123');
       assert.equal(sendCalls.length, 1);
       assert.equal(sendCalls[0].chatId, 'oc_chat_789');
-      assert.equal(sendCalls[0].content, JSON.stringify({ text: '思考中...' }));
-      assert.equal(sendCalls[0].msgType, 'text');
+      assert.equal(sendCalls[0].msgType, 'interactive');
+      const card = JSON.parse(sendCalls[0].content);
+      assert.equal(card.header.title.content, '思考中...');
+      assert.equal(card.header.template, 'grey');
+      assert.equal(card.config.update_multi, true);
     });
 
     it('returns empty string when mock returns no message_id', async () => {
@@ -526,6 +529,20 @@ describe('FeishuAdapter', () => {
       await adapter.editMessage('any_chat', 'om_msg_789', 'text');
       assert.equal(editCalls.length, 1);
       assert.equal(editCalls[0].messageId, 'om_msg_789');
+    });
+  });
+
+  describe('deleteMessage()', () => {
+    it('calls delete with correct messageId', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const deleteCalls = [];
+      adapter._injectDeleteMessage(async (params) => {
+        deleteCalls.push(params);
+      });
+
+      await adapter.deleteMessage('om_msg_to_delete');
+      assert.equal(deleteCalls.length, 1);
+      assert.equal(deleteCalls[0].messageId, 'om_msg_to_delete');
     });
   });
 });

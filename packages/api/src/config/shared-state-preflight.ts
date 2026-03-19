@@ -102,7 +102,7 @@ export function checkSharedStatePreflight(projectRoot: string): SharedStatePrefl
           if (mergeBase) {
             unpushedShared = diffUnpushedShared(mergeBase, projectRoot);
           }
-        } 
+        }
       }
     }
 

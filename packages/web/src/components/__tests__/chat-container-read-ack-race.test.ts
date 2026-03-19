@@ -67,7 +67,7 @@ vi.mock('@/stores/chatStore', () => {
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: string[]) => mockApiFetch(args[0], args[1] as unknown as Record<string, unknown>),
-  API_URL: 'http://localhost:3003',
+  API_URL: 'http://localhost:3004',
 }));
 
 vi.mock('next/navigation', () => ({

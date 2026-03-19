@@ -34,6 +34,8 @@ export interface ConnectorInvokeTriggerOptions {
   readonly outboundHook?: OutboundDeliveryHook;
   readonly streamingHook?: StreamingOutboundHook;
   readonly threadMetaLookup?: (threadId: string) => ThreadMeta | undefined | Promise<ThreadMeta | undefined>;
+  /** Per-cat outbound deliver timeout in ms (default 10000). Prevents hanging deliver from blocking cleanup. */
+  readonly deliverTimeoutMs?: number;
   readonly log: FastifyBaseLogger;
 }
 
@@ -297,6 +299,15 @@ export class ConnectorInvokeTrigger {
       const collectedUsage = new Map<string, TokenUsage>();
       const collectedTextParts: string[] = [];
 
+      // ISSUE-9: Track per-turn content for individual outbound delivery
+      // Cloud-P1-4 fix: use ordered array (not Map) to preserve A→B→A turn boundaries
+      const outboundTurns: Array<{
+        catId: string;
+        textParts: string[];
+        richBlocks?: PersistenceContext['richBlocks'];
+      }> = [];
+      let currentTurnCatId: string | undefined;
+
       // Phase 4: Start streaming placeholder on external platforms
       // Fire-and-forget for the loop, but save the promise so onStreamEnd can await it
       // to prevent race (onStreamEnd before onStreamStart finishes registering sessions).
@@ -319,12 +330,36 @@ export class ConnectorInvokeTrigger {
       })) {
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
-        if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
-          collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
+        if (msg.type === 'done' && msg.catId) {
+          if (msg.metadata?.usage) {
+            collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
+          }
+          // ISSUE-9: snapshot richBlocks for current turn before next cat overwrites
+          // Cloud-P1-5 fix: only reuse turn if still open (currentTurnCatId matches)
+          if (persistenceContext.richBlocks) {
+            const turn = outboundTurns[outboundTurns.length - 1];
+            if (turn && turn.catId === msg.catId && currentTurnCatId === msg.catId) {
+              turn.richBlocks = [...persistenceContext.richBlocks];
+            } else {
+              // Cat had richBlocks but no text — create a turn
+              outboundTurns.push({ catId: msg.catId, textParts: [], richBlocks: [...persistenceContext.richBlocks] });
+            }
+            persistenceContext.richBlocks = undefined;
+          }
+          // Close current turn — next text message starts a new turn
+          currentTurnCatId = undefined;
         }
         // Collect text content for outbound delivery (final-only)
         if (msg.type === 'text' && typeof msg.content === 'string') {
           collectedTextParts.push(msg.content);
+          // ISSUE-9: per-turn text collection (new turn on catId change or after done)
+          if (msg.catId) {
+            if (msg.catId !== currentTurnCatId) {
+              outboundTurns.push({ catId: msg.catId, textParts: [] });
+              currentTurnCatId = msg.catId;
+            }
+            outboundTurns[outboundTurns.length - 1].textParts.push(msg.content);
+          }
           // Phase 4: Stream accumulated text to external platforms
           if (this.opts.streamingHook) {
             const accumulated = collectedTextParts.join('');
@@ -365,7 +400,6 @@ export class ConnectorInvokeTrigger {
         finalStatus = 'succeeded';
 
         // ⑥ Outbound delivery: send final text + rich blocks to bound external chats
-        const richBlocks = persistenceContext.richBlocks;
         const finalContent = collectedTextParts.join('');
 
         // Phase 4: Finalize streaming — ensure start completed before ending
@@ -382,14 +416,15 @@ export class ConnectorInvokeTrigger {
           });
         }
 
-        if (this.opts.outboundHook && (collectedTextParts.length > 0 || (richBlocks && richBlocks.length > 0))) {
+        // R1-P1 fix: restore OR condition — richBlocks-only replies must also trigger delivery
+        const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+        if (this.opts.outboundHook && hasContent) {
           // Best-effort threadMeta lookup — must not block invocation completion
           let threadMeta;
           try {
             const LOOKUP_TIMEOUT_MS = 2000;
             const rawResult = this.opts.threadMetaLookup?.(threadId);
             if (rawResult) {
-              // Guard late rejections after timeout wins the race
               const lookupPromise = Promise.resolve(rawResult).catch((err: unknown) => {
                 log.warn({ err, threadId }, '[ConnectorInvokeTrigger] threadMetaLookup late rejection');
                 return undefined;
@@ -405,9 +440,50 @@ export class ConnectorInvokeTrigger {
               '[ConnectorInvokeTrigger] threadMetaLookup failed, falling back to plain reply',
             );
           }
-          this.opts.outboundHook.deliver(threadId, finalContent, catId, richBlocks, threadMeta).catch((err) => {
-            log.error({ err, threadId }, '[ConnectorInvokeTrigger] Outbound delivery error');
-          });
+
+          // ISSUE-9 + Cloud-P1-4: deliver per-turn (ordered, supports A→B→A ping-pong)
+          const DELIVER_TIMEOUT_MS = this.opts.deliverTimeoutMs ?? 10_000;
+          // Filter out empty turns (silent cats with no text or richBlocks)
+          const nonEmptyTurns = outboundTurns.filter(
+            (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
+          );
+
+          if (nonEmptyTurns.length > 1) {
+            for (const turn of nonEmptyTurns) {
+              const turnContent = turn.textParts.join('');
+              try {
+                await Promise.race([
+                  this.opts.outboundHook.deliver(
+                    threadId,
+                    turnContent,
+                    turn.catId as CatId,
+                    turn.richBlocks,
+                    threadMeta,
+                  ),
+                  new Promise<void>((_, reject) =>
+                    setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+                  ),
+                ]);
+              } catch (err) {
+                log.error({ err, threadId, catId: turn.catId }, '[ConnectorInvokeTrigger] Outbound delivery error');
+              }
+            }
+          } else if (nonEmptyTurns.length === 1) {
+            // Single-turn path: use actual speaker catId
+            const turn = nonEmptyTurns[0];
+            const richBlocks = persistenceContext.richBlocks ?? turn.richBlocks;
+            this.opts.outboundHook
+              .deliver(threadId, finalContent, turn.catId as CatId, richBlocks, threadMeta)
+              .catch((err) => {
+                log.error({ err, threadId }, '[ConnectorInvokeTrigger] Outbound delivery error');
+              });
+          } else {
+            // No turns but hasContent — fallback to original catId (e.g. richBlocks only in persistenceContext)
+            const richBlocks = persistenceContext.richBlocks;
+            this.opts.outboundHook.deliver(threadId, finalContent, catId, richBlocks, threadMeta).catch((err) => {
+              log.error({ err, threadId }, '[ConnectorInvokeTrigger] Outbound delivery error');
+            });
+          }
         }
       }
 

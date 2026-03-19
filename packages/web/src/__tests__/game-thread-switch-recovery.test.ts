@@ -91,7 +91,7 @@ vi.mock('@/stores/taskStore', () => ({
 // ── Hooks (stubbed out) ──
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(async () => ({ ok: true })),
-  API_URL: 'http://localhost:3003',
+  API_URL: 'http://localhost:3004',
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useSocket', () => ({

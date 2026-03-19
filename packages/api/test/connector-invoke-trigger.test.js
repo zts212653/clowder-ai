@@ -411,6 +411,364 @@ describe('ConnectorInvokeTrigger', () => {
 
   // ── F39 Phase C: Queue mode tests ──
 
+  // ── ISSUE-9: Multi-cat A2A outbound delivery ──
+
+  it('delivers outbound messages per-cat for multi-cat A2A responses (ISSUE-9)', async () => {
+    // Mock router that yields messages from TWO cats (A2A chain: opus → codex)
+    const multiCatRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'Hello from opus!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+        };
+        yield { type: 'text', catId: 'codex', content: 'Hello from codex!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 80, outputTokens: 40 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: string}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ threadId, content, catId });
+      },
+    };
+
+    const trigger = createTrigger({ router: multiCatRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Hello', 'msg-1');
+    await waitForTrigger();
+
+    // Should deliver TWICE — one per cat, not merged into one
+    assert.strictEqual(deliverCalls.length, 2, 'Should deliver once per cat in A2A chain');
+    assert.strictEqual(deliverCalls[0].catId, 'opus');
+    assert.strictEqual(deliverCalls[0].content, 'Hello from opus!');
+    assert.strictEqual(deliverCalls[1].catId, 'codex');
+    assert.strictEqual(deliverCalls[1].content, 'Hello from codex!');
+  });
+
+  it('single-cat outbound delivery still works with per-cat logic', async () => {
+    const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: string}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ threadId, content, catId });
+      },
+    };
+
+    const trigger = createTrigger({ outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 1, 'Single cat should deliver once');
+    assert.strictEqual(deliverCalls[0].catId, 'opus');
+    assert.strictEqual(deliverCalls[0].content, 'Review noted. Working on it.');
+  });
+
+  it('R1-P1: delivers richBlocks-only reply (no text) via outbound hook', async () => {
+    // Router yields only richBlocks with no text content
+    const richOnlyRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        // Simulate richBlocks being stashed (no text message, just done with richBlocks)
+        if (options?.persistenceContext) {
+          options.persistenceContext.richBlocks = [{ type: 'code', language: 'js', content: 'console.log("hi")' }];
+        }
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 10, outputTokens: 5 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: string, richBlocks: any}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId, richBlocks) => {
+        deliverCalls.push({ threadId, content, catId, richBlocks });
+      },
+    };
+
+    const trigger = createTrigger({ router: richOnlyRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Show code', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 1, 'Should deliver richBlocks-only reply');
+    assert.ok(deliverCalls[0].richBlocks?.length > 0, 'Should include richBlocks');
+  });
+
+  it('R1-P2: multi-cat outbound delivery preserves order (sequential await)', async () => {
+    const multiCatRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'First', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 1, outputTokens: 1 } },
+        };
+        yield { type: 'text', catId: 'codex', content: 'Second', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 1, outputTokens: 1 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    // Simulate slow network: first deliver takes longer than second
+    const deliverOrder = /** @type {string[]} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        if (catId === 'opus') {
+          await new Promise((r) => setTimeout(r, 20)); // slow
+        }
+        deliverOrder.push(catId);
+      },
+    };
+
+    const trigger = createTrigger({ router: multiCatRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Hello', 'msg-1');
+    await new Promise((r) => setTimeout(r, 200)); // wait for async
+
+    assert.deepStrictEqual(deliverOrder, ['opus', 'codex'], 'Should deliver in cat order, not race order');
+  });
+
+  it('cloud-P1: does NOT deliver empty reply for silent invocation (no text, no richBlocks)', async () => {
+    // Router yields only 'done' — no text, no richBlocks
+    const silentRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 0, outputTokens: 0 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {any[]} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ threadId, content, catId });
+      },
+    };
+
+    const trigger = createTrigger({ router: silentRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 0, 'Should NOT deliver empty reply for silent cat');
+  });
+
+  it('cloud-P1: hanging deliver does not block tracker cleanup', async () => {
+    const hangingRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'Hello', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 1, outputTokens: 1 } },
+        };
+        yield { type: 'text', catId: 'codex', content: 'World', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 1, outputTokens: 1 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const outboundHook = {
+      deliver: async () => {
+        // Simulate hanging forever
+        await new Promise(() => {});
+      },
+    };
+
+    // Use short timeout (100ms) to keep test fast
+    const trigger = createTrigger({ router: hangingRouter, outboundHook, deliverTimeoutMs: 100 });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    // Wait longer than timeout (100ms * 2 cats + buffer)
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Tracker must have completed despite hanging deliver
+    assert.strictEqual(trackerMock.completes.length, 1, 'Tracker must complete even if deliver hangs');
+  });
+
+  it('cloud-P1-4: A→B→A ping-pong delivers 3 separate turns (not merged by catId)', async () => {
+    const pingPongRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        // Turn 1: opus responds
+        yield { type: 'text', catId: 'opus', content: 'Opus turn 1', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 10, outputTokens: 5 } },
+        };
+        // Turn 2: codex responds (A2A)
+        yield { type: 'text', catId: 'codex', content: 'Codex review', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 20, outputTokens: 10 } },
+        };
+        // Turn 3: opus responds again (A2A back)
+        yield { type: 'text', catId: 'opus', content: 'Opus turn 3', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 15, outputTokens: 8 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{catId: string, content: string}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ catId, content });
+      },
+    };
+
+    const trigger = createTrigger({ router: pingPongRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await waitForTrigger();
+
+    // Should deliver 3 separate turns, not 2 (with opus merged)
+    assert.strictEqual(deliverCalls.length, 3, 'Should deliver 3 turns for A→B→A');
+    assert.strictEqual(deliverCalls[0].catId, 'opus');
+    assert.strictEqual(deliverCalls[0].content, 'Opus turn 1');
+    assert.strictEqual(deliverCalls[1].catId, 'codex');
+    assert.strictEqual(deliverCalls[1].content, 'Codex review');
+    assert.strictEqual(deliverCalls[2].catId, 'opus');
+    assert.strictEqual(deliverCalls[2].content, 'Opus turn 3');
+  });
+
+  it('cloud-P1-5: richBlocks-only re-entry after silent cat gets own turn', async () => {
+    // A→B(silent)→A(richBlocks-only): opus text+done, codex silent done, opus richBlocks+done
+    const reentryRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        // Turn 1: opus responds with text
+        yield { type: 'text', catId: 'opus', content: 'Opus first', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 10, outputTokens: 5 } },
+        };
+        // Turn 2: codex is silent (only done, no text/richBlocks)
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 5, outputTokens: 0 } },
+        };
+        // Turn 3: opus re-enters with richBlocks only (no text)
+        if (options?.persistenceContext) {
+          options.persistenceContext.richBlocks = [{ type: 'code', language: 'js', content: 'return 42;' }];
+        }
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 8, outputTokens: 3 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{catId: string, content: string, richBlocks: any}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId, richBlocks) => {
+        deliverCalls.push({ catId, content, richBlocks });
+      },
+    };
+
+    const trigger = createTrigger({ router: reentryRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await waitForTrigger();
+
+    // Should deliver 2 turns: opus text + opus richBlocks (separate, not merged)
+    assert.strictEqual(deliverCalls.length, 2, 'Should deliver 2 separate turns');
+    assert.strictEqual(deliverCalls[0].catId, 'opus');
+    assert.strictEqual(deliverCalls[0].content, 'Opus first');
+    assert.strictEqual(deliverCalls[1].catId, 'opus');
+    assert.ok(deliverCalls[1].richBlocks?.length > 0, 'Second turn should have richBlocks');
+  });
+
+  it('cloud-P1-3: silent first cat → second cat reply uses actual speaker catId', async () => {
+    // opus is silent (no text, no richBlocks), codex responds
+    const silentFirstRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        // opus: silent — only done, no text
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 10, outputTokens: 0 } },
+        };
+        // codex: responds with text
+        yield { type: 'text', catId: 'codex', content: 'I can help!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 50, outputTokens: 20 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{catId: string, content: string}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ catId, content });
+      },
+    };
+
+    const trigger = createTrigger({ router: silentFirstRouter, outboundHook });
+    // Trigger as opus, but opus is silent — codex is the actual speaker
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 1, 'Should deliver only codex reply');
+    assert.strictEqual(deliverCalls[0].catId, 'codex', 'Should use actual speaker catId, not trigger catId');
+    assert.strictEqual(deliverCalls[0].content, 'I can help!');
+  });
+
   describe('queue mode (active invocation running)', () => {
     it('enqueues connector message when another cat is running', async () => {
       trackerMock.setActive('thread-1');

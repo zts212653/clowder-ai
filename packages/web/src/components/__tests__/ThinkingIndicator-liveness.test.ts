@@ -135,4 +135,17 @@ describe('F118 ThinkingIndicator liveness states', () => {
 
     expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1');
   });
+
+  it('normal thinking state does not render paw emoji glyph', async () => {
+    storeState.catStatuses = { codex: 'thinking' };
+    storeState.catInvocations = {};
+
+    const { ThinkingIndicator } = await import('../ThinkingIndicator');
+    act(() => {
+      root.render(React.createElement(ThinkingIndicator));
+    });
+
+    expect(container.textContent).toContain('思考中');
+    expect(container.textContent).not.toContain('🐾');
+  });
 });

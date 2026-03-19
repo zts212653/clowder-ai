@@ -11,6 +11,47 @@ export interface PlanBoardPanelProps {
   catInvocations: Record<string, CatInvocationInfo>;
 }
 
+function TaskStatusIcon({ status }: { status: 'completed' | 'in_progress' | 'pending' }) {
+  if (status === 'completed') {
+    return (
+      <svg
+        className="w-3.5 h-3.5 text-emerald-600"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+      </svg>
+    );
+  }
+  if (status === 'in_progress') {
+    return (
+      <svg
+        className="w-3.5 h-3.5 text-blue-600 animate-spin"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M20 9a8 8 0 00-14.9-3M4 15a8 8 0 0014.9 3" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+    </svg>
+  );
+}
+
+function taskStatusA11yText(status: 'completed' | 'in_progress' | 'pending'): string {
+  if (status === 'completed') return '已完成';
+  if (status === 'in_progress') return '进行中';
+  return '待处理';
+}
+
 /* ── Per-cat plan card ────────────────────────────────────── */
 
 function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; inv: CatInvocationInfo }) {
@@ -62,16 +103,20 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
         )}
       </div>
       <div className="space-y-0.5 ml-3.5">
-        {tasks.map((t) => (
-          <div key={t.id} className="flex items-start gap-1 text-[11px] leading-tight">
-            <span className="mt-px flex-shrink-0">
-              {t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬚'}
-            </span>
-            <span className={t.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-700'}>
-              {t.status === 'in_progress' ? (t.activeForm ?? t.subject) : t.subject}
-            </span>
-          </div>
-        ))}
+        {tasks.map((t) => {
+          const taskText = t.status === 'in_progress' ? (t.activeForm ?? t.subject) : t.subject;
+          return (
+            <div key={t.id} className="flex items-start gap-1 text-[11px] leading-tight">
+              <span className="sr-only">{taskStatusA11yText(t.status)} </span>
+              <span className="mt-px flex-shrink-0" aria-hidden="true">
+                <TaskStatusIcon status={t.status} />
+              </span>
+              <span className={t.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-700'}>
+                {taskText}
+              </span>
+            </div>
+          );
+        })}
       </div>
       <div className="mt-1 ml-3.5 h-1 bg-gray-200 rounded-full overflow-hidden">
         <div

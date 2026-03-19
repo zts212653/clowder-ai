@@ -197,7 +197,7 @@ export class TmuxGateway {
   async destroyServer(worktreeId: string): Promise<void> {
     const sock = this.socketName(worktreeId);
     try {
-      await exec(this.tmuxBin, ['-L', sock, 'kill-server']);
+      execFileSync(this.tmuxBin, ['-L', sock, 'kill-server'], { stdio: 'ignore' });
     } catch {
       // Already dead
     }

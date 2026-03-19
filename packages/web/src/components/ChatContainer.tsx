@@ -31,6 +31,7 @@ import { ChatContainerHeader } from './ChatContainerHeader';
 import { ChatInput } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
+import { HubListModal } from './HubListModal';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageActions } from './MessageActions';
@@ -100,6 +101,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [statusPanelOpen, setStatusPanelOpen] = useState(true);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
+  const [showHubList, setShowHubList] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
   // refreshKey increments only on modal close → avoids duplicate fetch on open
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -457,6 +459,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               onClose={() => setSidebarOpen(false)}
               className="w-full"
               onBootcampClick={() => setShowBootcampList(true)}
+              onHubClick={() => setShowHubList(true)}
             />
           </div>
           <div className="hidden md:flex items-center">
@@ -503,7 +506,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             {messages.length === 0 && !isLoadingHistory ? (
               <div className="text-center mt-20">
                 <PawIcon className="w-12 h-12 text-owner-light mx-auto mb-4" />
-                <p className="text-lg text-gray-500 mb-1">欢迎来到 Cat Cafe!</p>
+                <p className="text-lg text-gray-500 mb-1">Welcome to Clowder AI!</p>
                 <p className="text-sm text-gray-400">输入 @布偶 召唤布偶猫开始聊天</p>
                 {(() => {
                   const isCurrentBootcamp = storeThreads.find((t) => t.id === threadId)?.bootcampState;
@@ -683,6 +686,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       />
       <CatCafeHub />
       <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
+      <HubListModal open={showHubList} onClose={() => setShowHubList(false)} currentThreadId={threadId} />
       {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
     </div>
   );

@@ -33,6 +33,21 @@ describe('F087: Bootcamp Interactive Rich Block definitions', () => {
     assert.strictEqual(lv3.length, 2);
   });
 
+  it('uses icon keys instead of emoji for all bootcamp options', async () => {
+    const { taskSelectionBlock, catSelectionBlock } = await import(
+      '../dist/domains/cats/services/bootcamp/bootcamp-blocks.js'
+    );
+    const allOptions = [...catSelectionBlock.options, ...taskSelectionBlock.options];
+
+    for (const option of allOptions) {
+      assert.ok(typeof option.icon === 'string' && option.icon.length > 0, `${option.id} should define icon`);
+      assert.ok(!option.emoji, `${option.id} should not use emoji`);
+      if (option.group) {
+        assert.ok(!option.group.includes('⭐'), `${option.id} group label should be emoji-free`);
+      }
+    }
+  });
+
   it('all block IDs are unique', async () => {
     const { taskSelectionBlock, catSelectionBlock } = await import(
       '../dist/domains/cats/services/bootcamp/bootcamp-blocks.js'

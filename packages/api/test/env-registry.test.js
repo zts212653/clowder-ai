@@ -69,20 +69,20 @@ describe('env-registry', () => {
 
 describe('maskUrlCredentials', () => {
   it('masks user:password in redis URL', () => {
-    const result = maskUrlCredentials('redis://user:super-secret@localhost:6379/15');
+    const result = maskUrlCredentials('redis://user:super-secret@localhost:6399/15');
     assert.ok(!result.includes('super-secret'), `Leaked password: ${result}`);
-    assert.ok(result.includes('localhost:6379'), `Lost host: ${result}`);
+    assert.ok(result.includes('localhost:6399'), `Lost host: ${result}`);
     assert.ok(result.includes('/15'), `Lost db: ${result}`);
   });
 
   it('preserves URL without credentials', () => {
-    const result = maskUrlCredentials('redis://localhost:6379');
+    const result = maskUrlCredentials('redis://localhost:6399');
     assert.ok(result.includes('localhost:6399'), `Lost host: ${result}`);
     assert.ok(!result.includes('***'), `Unnecessary masking: ${result}`);
   });
 
   it('masks user-only auth', () => {
-    const result = maskUrlCredentials('redis://admin@localhost:6379');
+    const result = maskUrlCredentials('redis://admin@localhost:6399');
     assert.ok(!result.includes('admin'), `Leaked username: ${result}`);
     assert.ok(result.includes('***'), `Should have masked: ${result}`);
   });
@@ -120,12 +120,12 @@ describe('buildEnvSummary', () => {
   });
 
   it('masks REDIS_URL credentials but preserves host', () => {
-    setEnv('REDIS_URL', 'redis://user:super-secret@myhost:6379/15');
+    setEnv('REDIS_URL', 'redis://user:super-secret@myhost:6399/15');
     const summary = buildEnvSummary();
     const entry = summary.find((v) => v.name === 'REDIS_URL');
     assert.ok(entry);
     assert.ok(!entry.currentValue.includes('super-secret'), `Leaked password: ${entry.currentValue}`);
-    assert.ok(entry.currentValue.includes('myhost:6379'), `Lost host: ${entry.currentValue}`);
+    assert.ok(entry.currentValue.includes('myhost:6399'), `Lost host: ${entry.currentValue}`);
   });
 
   it('returns same number of entries as ENV_VARS', () => {

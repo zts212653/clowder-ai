@@ -5,7 +5,7 @@ import { TIER1_GLOBAL_SOURCES } from './sources-tier1-global.js';
 import { TIER2_COMMUNITY_SOURCES } from './sources-tier2-community.js';
 
 /**
- * Default signal sources for Cat Café Signal Hunter.
+ * Default signal sources for Clowder AI Signal Hunter.
  *
  * Split into topic files under config/:
  *  - sources-tier1-global.ts  — Global AI labs (Anthropic → Groq)

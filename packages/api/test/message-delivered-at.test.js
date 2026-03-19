@@ -11,7 +11,7 @@ import { describe, test } from 'node:test';
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
 describe('MessageStore.markDelivered', () => {
-  test('sets deliveredAt on an existing message', () => {
+  test('sets deliveredAt on a queued message', () => {
     const store = new MessageStore();
     const msg = store.append({
       userId: 'u1',
@@ -19,6 +19,7 @@ describe('MessageStore.markDelivered', () => {
       content: 'queued message',
       mentions: ['opus'],
       timestamp: 1000,
+      deliveryStatus: 'queued',
     });
 
     const now = Date.now();
@@ -26,6 +27,7 @@ describe('MessageStore.markDelivered', () => {
 
     assert.ok(updated, 'should return updated message');
     assert.equal(updated.deliveredAt, now);
+    assert.equal(updated.deliveryStatus, 'delivered');
     assert.equal(updated.content, 'queued message');
   });
 
@@ -43,12 +45,14 @@ describe('MessageStore.markDelivered', () => {
       content: 'test',
       mentions: [],
       timestamp: 1000,
+      deliveryStatus: 'queued',
     });
 
     store.markDelivered(msg.id, 5000);
 
     const fetched = store.getById(msg.id);
     assert.equal(fetched.deliveredAt, 5000);
+    assert.equal(fetched.deliveryStatus, 'delivered');
   });
 
   test('deliveredAt field exists on StoredMessage type (not set by default)', () => {

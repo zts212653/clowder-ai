@@ -3,7 +3,7 @@ name: cross-thread-sync
 description: >
   跨 thread 协同：发现平行 session → 通知（3+2 件套）→ 争用协调 → 确认。
   Use when: 平行 session 之间需要协同、通知改动影响、共享文件争用。
-  Not for: 跨猫工作交接（用 cross-cat-handoff）、单 session 内并行（用 parallel-execution）。
+  Not for: 跨猫工作交接（用 cross-cat-handoff）。
   Output: cross-post 通知 + 争用协调完成。
 triggers:
   - "通知另一个 session"
@@ -158,7 +158,6 @@ Action Needed 必须标注级别：
 |-------|--------|---------|
 | **cross-thread-sync** | 平行 session 之间的持续协同 | 3+2 件套、争用协议、FYI/ACTION/BLOCKING |
 | `cross-cat-handoff` | 不同猫之间的一次性工作交接 | 完整五件套、知识转移、角色切换 |
-| `parallel-execution` | 单 session 内分发多个 subagent | session 内部调度，不涉及跨 thread |
 
 ## 下一步
 

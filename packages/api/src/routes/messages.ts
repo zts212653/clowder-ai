@@ -71,6 +71,8 @@ export interface MessagesRoutesOptions {
   queueProcessor?: QueueProcessor;
   /** F101: Game store for /game command interception */
   gameStore?: IGameStore;
+  /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
+  autoPlayer?: Pick<GameAutoPlayer, 'startLoop' | 'stopAllLoops'>;
 }
 
 const getMessagesSchema = z.object({
@@ -109,6 +111,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
   // Shared AgentRouter injected via opts (created in index.ts)
   const router = opts.router;
+  const gameOrchestrator = opts.gameStore
+    ? new GameOrchestrator({
+        gameStore: opts.gameStore,
+        socketManager: opts.socketManager,
+      })
+    : null;
+  const gameAutoPlayer = gameOrchestrator
+    ? (opts.autoPlayer ?? new GameAutoPlayer({ gameStore: opts.gameStore!, orchestrator: gameOrchestrator }))
+    : null;
+
+  if (gameAutoPlayer) {
+    app.addHook('onClose', async () => {
+      gameAutoPlayer.stopAllLoops();
+    });
+  }
 
   // POST /api/messages - 发送消息（WebSocket 广播）
   app.post('/api/messages', async (request, reply) => {
@@ -208,6 +225,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // F101: /game command interception — start game directly, skip AI routing
     const parsedGame = parseGameCommand(content);
     if (parsedGame && opts.gameStore && opts.threadStore) {
+      if (!gameOrchestrator || !gameAutoPlayer) {
+        throw new Error('game auto-player is unavailable');
+      }
+
       const DEFAULT_PLAYER_COUNT = 7;
       const allCatIds = getAllCatIdsFromConfig();
       const sanitized = parsedGame.catIds ? sanitizeCatIds(parsedGame.catIds, allCatIds) : [];
@@ -253,14 +274,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       });
       lobby.startGame(lobbyRuntime);
 
-      const orchestrator = new GameOrchestrator({
-        gameStore: opts.gameStore,
-        socketManager: opts.socketManager,
-      });
-
       let gameRuntime;
       try {
-        gameRuntime = await orchestrator.startGame({
+        gameRuntime = await gameOrchestrator.startGame({
           threadId: gameThreadId,
           definition: lobbyRuntime.definition,
           seats: lobbyRuntime.seats,
@@ -281,14 +297,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
 
       // Broadcast scoped views so frontend receives game:state_update
-      await orchestrator.broadcastGameState(gameRuntime.gameId);
+      await gameOrchestrator.broadcastGameState(gameRuntime.gameId);
 
       // AC-C3: Start AI auto-play loop — cats submit actions asynchronously
-      const autoPlayer = new GameAutoPlayer({
-        gameStore: opts.gameStore,
-        orchestrator,
-      });
-      autoPlayer.startLoop(gameRuntime.gameId);
+      gameAutoPlayer.startLoop(gameRuntime.gameId);
 
       return {
         status: 'game_started',

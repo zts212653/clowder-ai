@@ -72,7 +72,7 @@ team experience（2026-03-14，Phase C 讨论）：
 2. **端口白名单**
    - Host 只允许：`localhost`、`127.0.0.1`、`::1`（解析后再校验必须是 loopback）
    - 端口策略：默认允许 `1024-65535`，只自动推荐"检测到的 dev server 端口"
-   - 强制排除（从配置动态读取 + 固定保底）：`3004/3003`（Hub）、`6398/6399`（Redis）、`18888/19999`（MCP/API）、`9876/9878/9879`（服务端口）、preview gateway 自身端口（防递归代理）
+   - 强制排除（从配置动态读取 + 固定保底）：`3003/3004`（Hub）、`6398/6399`（Redis）、`18888/19999`（MCP/API）、`9876/9878/9879`（服务端口）、preview gateway 自身端口（防递归代理）
 
 3. **iframe sandbox 策略**
    - 基线：`sandbox="allow-scripts allow-forms allow-popups allow-downloads allow-same-origin"`

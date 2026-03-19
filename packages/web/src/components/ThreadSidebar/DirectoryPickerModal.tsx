@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { CatSelector } from './CatSelector';
+import { DirectoryBrowser } from './DirectoryBrowser';
 import { projectDisplayName } from './thread-utils';
 
 /** F33: Session binding passed alongside thread creation */
@@ -39,7 +40,7 @@ export function DirectoryPickerModal({
   const [sessionInputs, setSessionInputs] = useState<Record<string, string>>({});
   const [bindExpanded, setBindExpanded] = useState(false);
   const [cwdPath, setCwdPath] = useState<string | null>(null);
-  const [isPicking, setIsPicking] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
   const [pathInput, setPathInput] = useState('');
   const [pathError, setPathError] = useState<string | null>(null);
   const { getCatById } = useCatData();
@@ -105,26 +106,14 @@ export function DirectoryPickerModal({
     selectWithOptions(selectedPath === 'lobby' ? undefined : selectedPath);
   }, [selectedPath, selectWithOptions]);
 
-  // F068: Open native macOS folder picker via backend osascript
-  const pickDirectory = useCallback(async () => {
-    setIsPicking(true);
-    setPathError(null);
-    try {
-      const res = await apiFetch('/api/projects/pick-directory', { method: 'POST' });
-      if (res.status === 204) return; // User cancelled
-      if (!res.ok) {
-        const data = await res.json();
-        setPathError(data.error || '选择失败');
-        return;
-      }
-      const data = await res.json();
-      handleSelectPath(data.path);
-    } catch {
-      setPathError('无法连接到服务器');
-    } finally {
-      setIsPicking(false);
-    }
-  }, [handleSelectPath]);
+  // F113: Handle directory selection from the web-based browser
+  const handleBrowserSelect = useCallback(
+    (path: string) => {
+      handleSelectPath(path);
+      setShowBrowser(false);
+    },
+    [handleSelectPath],
+  );
 
   // F068: Submit path from text input — validate via browse endpoint before accepting
   const handlePathSubmit = useCallback(async () => {
@@ -214,8 +203,8 @@ export function DirectoryPickerModal({
           />
         </div>
 
-        {/* ── Project list (PRIMARY ACTION — takes most space) ── */}
-        <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1 min-h-[180px]">
+        {/* ── Project list (PRIMARY ACTION — takes most space, hidden when browser is open) ── */}
+        <div className={`overflow-y-auto px-5 py-3 space-y-1 ${showBrowser ? 'hidden' : 'flex-1 min-h-[180px]'}`}>
           <div className="text-[10px] text-gray-400 font-medium mb-1">选择项目</div>
 
           {cwdPath && !existingProjects.includes(cwdPath) && (
@@ -260,8 +249,10 @@ export function DirectoryPickerModal({
           </button>
         </div>
 
-        {/* ── Options bar: feat + pin + cats toggle ── */}
-        <div className="px-5 py-2 border-t border-gray-100 flex items-center gap-3 flex-wrap">
+        {/* ── Options bar: feat + pin + cats toggle (hidden when browser is open) ── */}
+        <div
+          className={`px-5 py-2 border-t border-gray-100 flex items-center gap-3 flex-wrap ${showBrowser ? 'hidden' : ''}`}
+        >
           {backlogItems.length > 0 && (
             <div className="flex-1 min-w-[140px]">
               <select
@@ -309,8 +300,8 @@ export function DirectoryPickerModal({
           </button>
         </div>
 
-        {/* ── Cat selector (collapsed by default) ── */}
-        {catsExpanded && (
+        {/* ── Cat selector (collapsed by default, hidden when browser is open) ── */}
+        {catsExpanded && !showBrowser && (
           <div className="px-5 py-2 border-t border-gray-100">
             <CatSelector selectedCats={selectedCats} onSelectionChange={setSelectedCats} />
             {/* F33: Session binding */}
@@ -363,23 +354,30 @@ export function DirectoryPickerModal({
           </div>
         )}
 
-        {/* ── Bottom: folder picker + path input + confirm ── */}
-        <div className="px-5 py-3 border-t border-gray-100 space-y-2">
+        {/* ── F113: Inline directory browser (replaces osascript picker) ── */}
+        {showBrowser && (
+          <div className="border-t border-gray-100 flex-1 min-h-0 flex flex-col">
+            <DirectoryBrowser
+              initialPath={cwdPath ?? undefined}
+              activeProjectPath={cwdPath ?? undefined}
+              onSelect={handleBrowserSelect}
+              onCancel={() => setShowBrowser(false)}
+            />
+          </div>
+        )}
+
+        {/* ── Bottom: browse button + path input + confirm ── */}
+        <div className="px-5 py-3 border-t border-gray-100 space-y-2 flex-shrink-0">
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={pickDirectory}
-              disabled={isPicking}
-              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium transition-colors disabled:opacity-60"
+              onClick={() => setShowBrowser((v) => !v)}
+              className={`flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
+                showBrowser ? 'bg-owner-primary text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+              }`}
             >
-              {isPicking ? (
-                <span className="animate-pulse">等待选择...</span>
-              ) : (
-                <>
-                  <FolderOpenIcon />
-                  <span>选择文件夹...</span>
-                </>
-              )}
+              <FolderOpenIcon />
+              <span>{showBrowser ? '收起浏览' : '浏览文件夹...'}</span>
             </button>
             <input
               type="text"
@@ -413,7 +411,11 @@ export function DirectoryPickerModal({
           <div className="flex items-center gap-2 pt-1">
             {selectedPath && (
               <span
-                className="text-[11px] text-gray-500 truncate flex-1"
+                className={`truncate flex-1 ${
+                  showBrowser
+                    ? 'text-xs font-medium text-owner-primary bg-owner-bg px-2 py-1 rounded-md'
+                    : 'text-[11px] text-gray-500'
+                }`}
                 title={selectedPath === 'lobby' ? '大厅' : selectedPath}
               >
                 已选：{selectedPath === 'lobby' ? '大厅 (无项目)' : projectDisplayName(selectedPath)}

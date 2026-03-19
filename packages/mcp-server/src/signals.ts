@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Cat Café MCP Server — Signals Surface
+ * Clowder AI MCP Server — Signals Surface
  * 只暴露 Signal Hunter 工具。
  */
 

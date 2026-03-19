@@ -14,7 +14,7 @@ import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3003';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
 /** Resolve userId: env var (invocation-bound, tamper-proof) > default */
 function resolveToolUserId(): string {

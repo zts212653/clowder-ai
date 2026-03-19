@@ -67,7 +67,7 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   const maxFiles = 5;
 
   // Server
-  const port = parseInt(env.API_SERVER_PORT ?? '3003', 10);
+  const port = parseInt(env.API_SERVER_PORT ?? '3004', 10);
   const host = env.API_SERVER_HOST ?? '127.0.0.1';
   const redis: 'connected' | 'memory' = env.REDIS_URL ? 'connected' : 'memory';
 

@@ -9,7 +9,8 @@ describe('AchievementStore', () => {
     const ach = store.unlock('user1', 'cvo-first-review');
     assert.ok(ach);
     assert.equal(ach.id, 'cvo-first-review');
-    assert.equal(ach.emoji, '🔍');
+    assert.equal(ach.icon, 'search');
+    assert.equal(ach.emoji, undefined);
     assert.equal(ach.category, 'cvo');
     assert.ok(ach.unlockedAt);
   });

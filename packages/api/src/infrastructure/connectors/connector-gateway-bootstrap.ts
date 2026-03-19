@@ -63,12 +63,15 @@ export interface ConnectorGatewayDeps {
       | { id: string; title?: string | null; createdAt?: number }
       | null
       | Promise<{ id: string; title?: string | null; createdAt?: number } | null>;
-    /** Phase C: cross-platform thread listing. Phase D: backlogItemId for feat matching */
     list(
       userId: string,
     ):
       | Array<{ id: string; title?: string | null; lastActiveAt?: number; backlogItemId?: string }>
       | Promise<Array<{ id: string; title?: string | null; lastActiveAt?: number; backlogItemId?: string }>>;
+    updateConnectorHubState(
+      threadId: string,
+      state: { v: 1; connectorId: string; externalChatId: string; createdAt: number } | null,
+    ): void | Promise<void>;
   };
   /** Phase D: optional backlog store for feat-number matching in /use */
   readonly backlogStore?: {
@@ -146,7 +149,7 @@ export async function startConnectorGateway(
     bindingStore,
     threadStore: deps.threadStore,
     ...(deps.backlogStore ? { backlogStore: deps.backlogStore } : {}),
-    frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3004',
+    frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003',
   });
 
   // Phase 5+6: Media service + STT provider (optional)

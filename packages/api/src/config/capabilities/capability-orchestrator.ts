@@ -30,7 +30,34 @@ const CAT_CAFE_DIR = '.cat-cafe';
 
 const PENCIL_EXTENSIONS_DIR = resolve(homedir(), '.antigravity/extensions');
 const PENCIL_DIR_PREFIX = 'highagency.pencildev-';
-const PENCIL_BINARY_SUFFIX = '/out/mcp-server-darwin-arm64';
+/** @internal Exported for testing only */
+export const PENCIL_BINARY_SUFFIX = 'out/mcp-server-darwin-arm64';
+
+/**
+ * Parse semver-like version from a Pencil extension directory name.
+ * e.g. "highagency.pencildev-0.6.33-universal" → [0, 6, 33]
+ * Returns [0, 0, 0] if parsing fails (sorts to the bottom).
+ * @internal Exported for testing only
+ */
+export function parsePencilVersion(dirName: string): [number, number, number] {
+  const withoutPrefix = dirName.slice(PENCIL_DIR_PREFIX.length);
+  const match = withoutPrefix.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return [0, 0, 0];
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/**
+ * Compare two Pencil extension directory names by semver.
+ * @internal Exported for testing only
+ */
+export function comparePencilDirs(a: string, b: string): number {
+  const va = parsePencilVersion(a);
+  const vb = parsePencilVersion(b);
+  for (let i = 0; i < 3; i++) {
+    if (va[i] !== vb[i]) return va[i] - vb[i];
+  }
+  return 0;
+}
 
 /** Provider → CLI config writer mapping */
 const PROVIDER_WRITERS = {
@@ -50,7 +77,7 @@ function hasUsableStdioCommand(command: string | undefined): boolean {
 export async function resolvePencilBinary(): Promise<string | null> {
   try {
     const entries = await readdir(PENCIL_EXTENSIONS_DIR);
-    const pencilDirs = entries.filter((e) => e.startsWith(PENCIL_DIR_PREFIX)).sort(); // lexicographic sort works for semver with same prefix
+    const pencilDirs = entries.filter((e) => e.startsWith(PENCIL_DIR_PREFIX)).sort(comparePencilDirs);
     if (pencilDirs.length === 0) return null;
     const latest = pencilDirs[pencilDirs.length - 1];
     return resolve(PENCIL_EXTENSIONS_DIR, latest, PENCIL_BINARY_SUFFIX);

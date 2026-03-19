@@ -82,8 +82,10 @@ import {
 } from './infrastructure/connectors/connector-gateway-bootstrap.js';
 import {
   ConnectorInvokeTrigger,
+  GhCliReviewContentFetcher,
   MemoryProcessedEmailStore,
   MemoryPrTrackingStore,
+  RedisPrTrackingStore,
   ReviewRouter,
   startGithubReviewWatcher,
   stopGithubReviewWatcher,
@@ -104,6 +106,7 @@ import {
   claudeRescueRoutes,
   commandsRoutes,
   configRoutes,
+  connectorHubRoutes,
   connectorMediaRoutes,
   evidenceRoutes,
   executionDigestRoutes,
@@ -156,7 +159,7 @@ import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
 
-const PORT = parseInt(process.env.API_SERVER_PORT ?? '3003', 10);
+const PORT = parseInt(process.env.API_SERVER_PORT ?? '3004', 10);
 const HOST = process.env.API_SERVER_HOST ?? '127.0.0.1';
 
 let socketManager: SocketManager | null = null;
@@ -592,6 +595,7 @@ async function main(): Promise<void> {
   await app.register(leaderboardRoutes, { messageStore, gameStore, achievementStore });
   await app.register(leaderboardEventsRoutes, { gameStore, achievementStore });
   await app.register(bootcampRoutes, { threadStore });
+  await app.register(connectorHubRoutes, { threadStore });
   await app.register(brakeRoutes, { activityTracker });
 
   // F101: Game routes (store created earlier for /game command interception)
@@ -601,7 +605,8 @@ async function main(): Promise<void> {
   }
 
   // TD091: Create prTrackingStore early so callbacks can use it for MCP registration
-  const prTrackingStore = new MemoryPrTrackingStore();
+  const prTrackingStore = redis ? new RedisPrTrackingStore(redis) : new MemoryPrTrackingStore();
+  app.log.info(`[api] PrTrackingStore: ${redis ? 'Redis' : 'Memory'}`);
 
   // F126: Create LimbRegistry + Phase B deps for device/hardware capability management
   const { LimbRegistry } = await import('./domains/limb/LimbRegistry.js');
@@ -853,6 +858,7 @@ async function main(): Promise<void> {
     socketManager,
     log: app.log,
     defaultUserId: 'default-user',
+    reviewContentFetcher: new GhCliReviewContentFetcher(app.log),
   });
   await app.register(prTrackingRoutes, { prTrackingStore });
 
@@ -997,6 +1003,9 @@ async function main(): Promise<void> {
     const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
     const recoveryOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager });
     const recoveryPlayer = new GameAutoPlayer({ gameStore: f101GameStore, orchestrator: recoveryOrchestrator });
+    app.addHook('onClose', async () => {
+      recoveryPlayer.stopAllLoops();
+    });
     try {
       const recovered = await recoveryPlayer.recoverActiveGames();
       if (recovered > 0) {
