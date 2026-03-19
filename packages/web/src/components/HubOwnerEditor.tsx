@@ -2,15 +2,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { primeOwnerConfigCache } from '@/hooks/useOwnerConfig';
 import type { OwnerConfig } from './config-viewer-types';
 import { PersistenceBanner, SectionCard, TextField } from './hub-cat-editor-fields';
 import { uploadAvatarAsset } from './hub-cat-editor.client';
 import { TagEditor } from './hub-tag-editor';
 
 const DEFAULT_OWNER: OwnerConfig = {
-  name: 'Co-worker',
+  name: 'ME',
   aliases: [],
-  mentionPatterns: ['@co-worker', '@owner'],
+  mentionPatterns: ['@owner'],
   avatar: '',
   color: {
     primary: '#D4A76A',
@@ -108,6 +109,16 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
         setError((payload.error as string) ?? `保存失败 (${res.status})`);
         return;
       }
+      primeOwnerConfigCache({
+        name: cleanedName,
+        aliases: uniqueTags(aliases.map((alias) => alias.trim())),
+        mentionPatterns: cleanedMentions,
+        avatar: avatar.trim() || '',
+        color: {
+          primary: colorPrimary,
+          secondary: colorSecondary,
+        },
+      });
       await onSaved();
       onClose();
     } catch (err) {
@@ -125,8 +136,8 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
       >
         <div className="flex items-start justify-between border-b border-[#F0DDCD] px-6 py-5">
           <div>
-            <p className="text-xs font-semibold text-[#D18A61]">成员协作 &gt; 总览 &gt; Owner</p>
-            <h3 className="mt-2 text-2xl font-bold text-[#2D2118]">编辑 Co-worker / Owner</h3>
+            <p className="text-xs font-semibold text-[#D18A61]">成员协作 &gt; 总览 &gt; {currentOwner.name}</p>
+            <h3 className="mt-2 text-2xl font-bold text-[#2D2118]">编辑 {currentOwner.name}</h3>
             <p className="mt-1 text-sm text-[#8A776B]">可维护头像、别名、被 @ 标签与卡片背景色。</p>
           </div>
           <button type="button" onClick={onClose} className="text-2xl leading-none text-[#B59A88]" aria-label="关闭">
@@ -155,8 +166,8 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
                     )}
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[#2D2118]">{name.trim() || 'Co-worker'}</p>
-                    <p className="mt-1 text-xs text-[#8A776B]">{mentionPatterns.join('  ') || '@co-worker'}</p>
+                    <p className="truncate text-sm font-semibold text-[#2D2118]">{name.trim() || 'ME'}</p>
+                    <p className="mt-1 text-xs text-[#8A776B]">{mentionPatterns.join('  ') || '@owner'}</p>
                   </div>
                 </div>
               </div>
@@ -263,7 +274,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
                 tags={mentionPatterns}
                 onChange={(next) => setMentionPatterns(next.map(normalizeMentionTag).filter(Boolean))}
                 addLabel="+ 添加标签"
-                placeholder="@co-worker"
+                placeholder="@owner"
                 emptyLabel="至少保留一个标签"
                 tone="green"
                 normalize={normalizeMentionTag}

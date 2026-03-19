@@ -199,7 +199,9 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).toContain('Codex (OAuth)');
     expect(container.textContent).toContain('Gemini (OAuth)');
     expect(container.textContent).toContain('Codex Sponsor');
-    expect(container.textContent).toContain('OpenCode / Dare 走 OAuth-like 登录态');
+    expect(container.textContent).toContain('OpenCode / Dare 复用 OAuth-like 登录态');
+    expect(container.textContent).toContain('OpenCode (OAuth-like)');
+    expect(container.textContent).toContain('Dare (OAuth-like)');
     expect(container.textContent).toContain('新建 API Key 账号');
     expect(container.textContent).not.toContain('布偶猫救援中心');
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/claude-rescue/sessions');

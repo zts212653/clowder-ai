@@ -100,8 +100,8 @@ export function ProviderProfilesSummaryCard({
       </div>
       <p className="text-xs text-gray-500">secrets 存储在 `.cat-cafe/provider-profiles.secrets.local.json`（本机落盘，Git 忽略）</p>
       <p className="mt-1 text-xs text-amber-700">
-        Claude / Codex / Gemini 三项内置 OAuth 不可新增或删除，仅可管理可用模型和激活状态；OpenCode / Dare 走
-        OAuth-like 登录态，在 console 中统一按可复用账号看待，不再区分凭证来源；Antigravity 不在此页配置。
+        Claude / Codex / Gemini / OpenCode / Dare 五项内置账号都会在这里展示；其中 OpenCode / Dare 复用 OAuth-like 登录态，
+        console 里统一按可复用账号看待，不再区分凭证来源；Antigravity 不在此页配置。
       </p>
     </div>
   );
@@ -146,8 +146,8 @@ export function CreateApiKeyProfileSection({
         </div>
       </button>
       <p className="mt-2 text-sm leading-6 text-[#8A776B]">
-        仅支持新建 API Key 类型的账号配置。Claude / Codex / Gemini 三项内置 OAuth 订阅不可新增或删除，仅可管理可用模型和激活状态；OpenCode / Dare 走
-        OAuth-like 登录态，console 里统一视作可复用账号能力。
+        仅支持新建 API Key 类型的账号配置。内置区会显示 Claude / Codex / Gemini / OpenCode / Dare 五种账号；其中
+        OpenCode / Dare 复用 OAuth-like 登录态，console 里统一视作可复用账号能力。
       </p>
       {open ? (
         <div className="mt-4 space-y-3">

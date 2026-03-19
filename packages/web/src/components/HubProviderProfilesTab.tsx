@@ -10,7 +10,9 @@ import {
   ProviderProfilesSummaryCard,
   type ProviderFilterKey,
 } from './hub-provider-profiles.sections';
+import { expandProviderProfiles, isOAuthLikeBuiltin, resolveProfileActionId } from './hub-provider-profiles.view';
 import type {
+  ProfileItem,
   ProfileProtocol,
   ProfileTestResult,
   ProviderProfilesResponse,
@@ -226,22 +228,24 @@ export function HubProviderProfilesTab() {
     return [...paths].map((path) => ({ path, label: projectDisplayName(path) }));
   }, [data?.projectPath, knownProjects]);
 
-  const builtinProfiles = useMemo(() => data?.providers.filter((profile) => profile.builtin) ?? [], [data?.providers]);
-  const customProfiles = useMemo(() => data?.providers.filter((profile) => !profile.builtin) ?? [], [data?.providers]);
+  const displayProfiles = useMemo(() => expandProviderProfiles(data?.providers ?? []), [data?.providers]);
+  const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
+  const customProfiles = useMemo(() => displayProfiles.filter((profile) => !profile.builtin), [displayProfiles]);
   const filteredBuiltinProfiles = useMemo(() => {
     if (filter === 'all' || filter === 'api_key') return filter === 'all' ? builtinProfiles : [];
-    return builtinProfiles.filter((profile) => profile.protocol === filter);
+    return builtinProfiles.filter((profile) => profile.protocol === filter && !profile.oauthLikeClient);
   }, [builtinProfiles, filter]);
   const filteredCustomProfiles = useMemo(() => {
     if (filter === 'all' || filter === 'api_key') return customProfiles;
     return [];
   }, [customProfiles, filter]);
   const isProfileActive = useCallback(
-    (profile: { id: string; protocol: 'anthropic' | 'openai' | 'google' }) => {
+    (profile: ProfileItem) => {
       if (!data) return false;
       const protocolActive = data.activeProfileIds?.[profile.protocol];
-      if (protocolActive !== undefined) return protocolActive === profile.id;
-      return data.activeProfileId === profile.id;
+      const targetProfileId = resolveProfileActionId(profile);
+      if (protocolActive !== undefined) return protocolActive === targetProfileId;
+      return data.activeProfileId === targetProfileId;
     },
     [data],
   );
@@ -265,7 +269,7 @@ export function HubProviderProfilesTab() {
         {filteredBuiltinProfiles.length > 0 ? (
           <section className="space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-gray-700">内置 OAuth</h4>
+              <h4 className="text-xs font-semibold text-gray-700">内置认证</h4>
               <span className="text-[11px] text-gray-400">{filteredBuiltinProfiles.length} 项</span>
             </div>
             <div className="space-y-2">
@@ -273,13 +277,13 @@ export function HubProviderProfilesTab() {
                 <HubProviderProfileItem
                   key={profile.id}
                   profile={profile}
-                  isActive={isProfileActive(profile)}
-                  busy={busyId === profile.id}
-                  testResult={testResultById[profile.id]}
-                  onActivate={activateProfile}
-                  onSave={saveProfile}
-                  onTest={testProfile}
-                  onDelete={deleteProfile}
+                  isActive={isOAuthLikeBuiltin(profile) ? false : isProfileActive(profile)}
+                  busy={busyId === resolveProfileActionId(profile)}
+                  testResult={testResultById[resolveProfileActionId(profile)]}
+                  onActivate={() => activateProfile(resolveProfileActionId(profile))}
+                  onSave={(_profileId, payload) => saveProfile(resolveProfileActionId(profile), payload)}
+                  onTest={() => testProfile(resolveProfileActionId(profile))}
+                  onDelete={() => deleteProfile(resolveProfileActionId(profile))}
                 />
               ))}
             </div>
@@ -299,8 +303,8 @@ export function HubProviderProfilesTab() {
                   key={profile.id}
                   profile={profile}
                   isActive={isProfileActive(profile)}
-                  busy={busyId === profile.id}
-                  testResult={testResultById[profile.id]}
+                  busy={busyId === resolveProfileActionId(profile)}
+                  testResult={testResultById[resolveProfileActionId(profile)]}
                   onActivate={activateProfile}
                   onSave={saveProfile}
                   onTest={testProfile}

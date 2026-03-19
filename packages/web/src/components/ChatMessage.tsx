@@ -1,21 +1,20 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
-import { type TtsState, useTts } from '@/hooks/useTts';
+import { useOwnerConfig } from '@/hooks/useOwnerConfig';
+import { useTts } from '@/hooks/useTts';
 import { hexToRgba, tintedLight } from '@/lib/color-utils';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
-import { type ChatMessage as ChatMessageType, type MessageContent, useChatStore } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
+import { type ChatMessage as ChatMessageType, useChatStore } from '@/stores/chatStore';
 import { CatAvatar } from './CatAvatar';
 import { ConnectorBubble } from './ConnectorBubble';
+import { ContentBlocks } from './ContentBlocks';
 import { CliOutputBlock } from './cli-output/CliOutputBlock';
 import { toCliEvents } from './cli-output/toCliEvents';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
-import { Lightbox } from './Lightbox';
 import { MarkdownContent } from './MarkdownContent';
 import { MetadataBadge } from './MetadataBadge';
 import { ReplyPill } from './ReplyPill';
@@ -23,8 +22,8 @@ import { RichBlocks } from './rich/RichBlocks';
 import { SummaryCard } from './SummaryCard';
 import { ThinkingContent } from './ThinkingContent';
 import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
+import { TtsPlayButton } from './TtsPlayButton';
 
-/** Breed-level aesthetics — only changes when a new BREED is added */
 const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   ragdoll: { radius: 'rounded-2xl rounded-bl-sm' },
   'maine-coon': { radius: 'rounded-2xl rounded-br-sm', font: 'font-mono' },
@@ -33,93 +32,18 @@ const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
 };
 const DEFAULT_BREED_STYLE = { radius: 'rounded-2xl' };
 
-function ContentBlocks({ blocks }: { blocks: MessageContent[] }) {
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  return (
-    <>
-      {blocks.map((block, i) => {
-        if (block.type === 'text') {
-          return <MarkdownContent key={i} content={block.text} />;
-        }
-        if (block.type === 'image') {
-          const src = block.url.startsWith('/uploads/') ? `${API_URL}${block.url}` : block.url;
-          return (
-            // biome-ignore lint/performance/noImgElement: uploaded images cannot use next/image
-            <img
-              key={i}
-              src={src}
-              alt="attached image"
-              className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity"
-              onClick={() => setLightboxSrc(src)}
-            />
-          );
-        }
-        return null;
-      })}
-      {lightboxSrc && <Lightbox url={lightboxSrc} alt="attached image" onClose={() => setLightboxSrc(null)} />}
-    </>
-  );
-}
-
 function formatTime(ts: number): string {
   const d = new Date(ts);
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** F098-D: Threshold (ms) for showing dual timestamp. Gap <= this uses single timestamp. */
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
 
-/** F098-D: Format dual timestamp when deliveredAt gap is significant. */
 function formatDualTime(timestamp: number, deliveredAt?: number): string {
   if (!deliveredAt || deliveredAt - timestamp <= DELIVERED_AT_GAP_THRESHOLD) {
     return formatTime(timestamp);
   }
   return `发送 ${formatTime(timestamp)} · 收到 ${formatTime(deliveredAt)}`;
-}
-
-/** F34: Tiny TTS play button for cat messages */
-function TtsPlayButton({
-  messageId,
-  text,
-  catId,
-  ttsState,
-  activeMessageId,
-  onSynthesize,
-}: {
-  messageId: string;
-  text: string;
-  catId: string;
-  ttsState: TtsState;
-  activeMessageId: string | null;
-  onSynthesize: (messageId: string, text: string, catId?: string) => void;
-}) {
-  const isActive = activeMessageId === messageId;
-  const isLoading = isActive && ttsState === 'loading';
-  const isPlaying = isActive && ttsState === 'playing';
-
-  return (
-    <button
-      onClick={() => onSynthesize(messageId, text, catId)}
-      disabled={isLoading}
-      className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 p-0.5 rounded hover:bg-black/5 text-gray-400 hover:text-gray-600"
-      title={isPlaying ? '停止' : '播放语音'}
-    >
-      {isLoading ? (
-        <svg width="12" height="12" viewBox="0 0 12 12" className="animate-spin">
-          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="20 10" />
-        </svg>
-      ) : isPlaying ? (
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <rect x="2" y="1" width="3" height="10" rx="0.5" />
-          <rect x="7" y="1" width="3" height="10" rx="0.5" />
-        </svg>
-      ) : (
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <path d="M2.5 1L10.5 6L2.5 11V1Z" />
-        </svg>
-      )}
-    </button>
-  );
 }
 
 interface ChatMessageProps {
@@ -128,6 +52,7 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, getCatById }: ChatMessageProps) {
+  const owner = useOwnerConfig();
   const router = useRouter();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const threads = useChatStore((s) => s.threads);
@@ -137,7 +62,6 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const isSummary = message.type === 'summary';
   const isConnector = message.type === 'connector';
 
-  // Dynamic cat data lookup — works for any catId in cat-config.json
   const catData = message.catId ? getCatById(message.catId) : undefined;
   const catStyle = catData
     ? (() => {
@@ -146,7 +70,6 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
         const label = catData.variantLabel
           ? `${catData.displayName}（${catData.variantLabel}）`
           : `${catData.displayName}（${idLabel}）`;
-        // F098-A5: callback messages get subtle tinted bubble; stream/other keep breed secondary
         const isCallback = message.origin === 'callback';
         return {
           label,
@@ -163,10 +86,8 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const isWhisper = message.visibility === 'whisper';
   const isRevealed = isWhisper && !!message.revealedAt;
 
-  // F098: Direction info for pill badge
   const direction = catData ? parseDirection(message, () => ({ toCat: getMentionToCat(), re: getMentionRe() })) : null;
 
-  // F097: CLI Output Block — merge tool events + stream content into unified CliEvent[]
   const isStreamOrigin = message.origin === 'stream';
   const cliEvents = toCliEvents(message.toolEvents, isStreamOrigin ? message.content : undefined);
   const hasCliBlock = cliEvents.length > 0;
@@ -196,7 +117,6 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
     }
 
     // F045: variant='thinking' is deprecated — thinking is now embedded in assistant bubbles.
-    // Legacy standalone thinking messages fall through to normal system rendering.
 
     const isLegacyError = !message.variant && message.content.trim().startsWith('Error:');
     const isError = message.variant === 'error' || isLegacyError;
@@ -237,6 +157,8 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   }
 
   if (isUser) {
+    const ownerPrimary = owner.color?.primary ?? '#E29578';
+    const ownerSecondary = owner.color?.secondary ?? '#FFDDD2';
     return (
       <div data-message-id={message.id} className="flex justify-end gap-2 mb-4 items-start">
         <div className="max-w-[75%]">
@@ -252,14 +174,22 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
             )}
             <span className="text-xs text-gray-400">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
-            <span className="text-xs font-semibold text-owner-dark">铲屎官</span>
+            <span className="text-xs font-semibold" style={{ color: ownerPrimary }}>
+              {owner.name}
+            </span>
           </div>
           <div
             className={`rounded-2xl rounded-br-sm px-4 py-3 transition-transform hover:-translate-y-0.5 ${
-              isWhisper && !isRevealed
-                ? 'bg-amber-50 text-amber-900 border border-dashed border-amber-300'
-                : 'bg-owner-light text-owner-dark'
+              isWhisper && !isRevealed ? 'bg-amber-50 text-amber-900 border border-dashed border-amber-300' : ''
             }`}
+            style={
+              !isWhisper || isRevealed
+                ? {
+                    backgroundColor: ownerSecondary,
+                    color: ownerPrimary,
+                  }
+                : undefined
+            }
           >
             {hasBlocks ? (
               <ContentBlocks blocks={message.contentBlocks!} />
@@ -268,18 +198,24 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             )}
           </div>
         </div>
-        <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 ring-owner-light bg-owner-primary flex items-center justify-center">
-          <img
-            src="/avatars/owner.jpg"
-            alt="铲屎官"
-            width={32}
-            height={32}
-            className="object-cover w-full h-full"
-            onError={(e) => {
-              // Fallback: hide broken image, show background color
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
-          />
+        <div
+          className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-[11px] font-bold text-white"
+          style={{ backgroundColor: ownerPrimary, boxShadow: `0 0 0 2px ${ownerSecondary}` }}
+        >
+          {owner.avatar ? (
+            <img
+              src={owner.avatar}
+              alt={owner.name}
+              width={32}
+              height={32}
+              className="object-cover w-full h-full"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          ) : (
+            'ME'
+          )}
         </div>
       </div>
     );
@@ -370,9 +306,6 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               : undefined
           }
         >
-          {/* F097: Content first, then Thinking (reasoning before execution), then CLI output */}
-          {/* 1. Content — callback messages or non-stream text shown as normal content.
-              If CLI block exists, text is already inside it — never render outside. */}
           {hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (
             <ContentBlocks blocks={message.contentBlocks!} />
           ) : !isStreamOrigin && hasTextContent ? (
@@ -380,7 +313,6 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           ) : message.isStreaming ? (
             <span className="text-xs text-gray-500">Thinking...</span>
           ) : null}
-          {/* 2. 🧠 Thinking — reasoning happens before tool execution (AC-A3) */}
           {message.thinking && (
             <ThinkingContent
               content={message.thinking}
@@ -391,7 +323,6 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               breedColor={catData?.color.primary}
             />
           )}
-          {/* 3. CLI Output Block — tools + stream content merged */}
           {hasCliBlock && (
             <CliOutputBlock
               events={cliEvents}

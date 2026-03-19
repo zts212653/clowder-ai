@@ -175,7 +175,7 @@ describe('HubAddMemberWizard', () => {
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('Dare');
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('Antigravity');
     expect(container.textContent).toContain('Step 2: 选择 Provider / 配置 CLI');
-    expect(container.textContent).toContain('Step 3: 选择 Model');
+    expect(container.textContent).toContain('Step 3: 选择模型');
 
     await click(queryButton(container, 'Codex'));
     expect(container.textContent).toContain('同名 OAuth + 任意 API Key provider');
@@ -206,7 +206,7 @@ describe('HubAddMemberWizard', () => {
 
     const cliInput = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]');
     expect(cliInput.value).toBe('. --remote-debugging-port=9000');
-    expect(container.textContent).toContain('Step 3: 选择 Model');
+    expect(container.textContent).toContain('Step 3: 选择模型');
 
     await click(queryButton(container, 'gemini-3.1-pro'));
     await click(queryButton(container, '进入成员配置'));

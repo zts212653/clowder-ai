@@ -62,7 +62,7 @@ export function HubOwnerOverviewCard({
               'ME'
             )}
           </div>
-          <h3 className="text-base font-bold text-[#2D2118]">{owner.name} (铲屎官)</h3>
+          <h3 className="text-base font-bold text-[#2D2118]">{owner.name}</h3>
         </div>
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-[#FFF3E0] px-2.5 py-1 text-[11px] font-semibold text-[#E65100]">
@@ -74,7 +74,7 @@ export function HubOwnerOverviewCard({
             disabled={!onEdit}
             className="rounded-lg bg-white/80 px-2.5 py-1 text-[11px] font-medium text-[#9A5A2C] transition hover:bg-white disabled:cursor-default disabled:opacity-100"
           >
-            编辑 Owner
+            编辑
           </button>
         </div>
       </div>

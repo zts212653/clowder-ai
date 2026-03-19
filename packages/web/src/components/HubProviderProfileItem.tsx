@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { TagEditor, TagPillList } from './hub-tag-editor';
+import { isOAuthLikeBuiltin } from './hub-provider-profiles.view';
 import { formatProtocolLabel } from './hub-provider-profiles.sections';
 import type { ProfileItem, ProfileTestResult } from './hub-provider-profiles.types';
 
@@ -25,6 +26,12 @@ interface HubProviderProfileItemProps {
 }
 
 function summaryText(profile: ProfileItem): string {
+  if (profile.oauthLikeClient === 'opencode') {
+    return 'OpenCode · subscription · 复用本机 Claude 登录态（OAuth-like）';
+  }
+  if (profile.oauthLikeClient === 'dare') {
+    return 'Dare · subscription · 复用本机 Codex 登录态（OAuth-like）';
+  }
   if (profile.authType === 'api_key') {
     const host = profile.baseUrl?.replace(/^https?:\/\//, '') ?? '(未设置)';
     return `${formatProtocolLabel(profile.protocol)} · ${host} · apiKey: ${profile.hasApiKey ? '已配置' : '未配置'}`;
@@ -94,6 +101,7 @@ export function HubProviderProfileItem({
 
   const showTestButton = profile.authType === 'api_key';
   const statusBadge = profile.authType === 'api_key' ? verificationBadge(testResult) : null;
+  const oauthLikeBuiltin = isOAuthLikeBuiltin(profile);
 
   if (editing) {
     return (
@@ -184,7 +192,7 @@ export function HubProviderProfileItem({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-1.5">
-          {!isActive ? (
+          {!isActive && !oauthLikeBuiltin ? (
             <button
               type="button"
               className="rounded-full bg-[#F7F3F0] px-3 py-1.5 text-xs font-semibold text-[#8A776B]"
@@ -204,14 +212,16 @@ export function HubProviderProfileItem({
               测试
             </button>
           ) : null}
-          <button
-            type="button"
-            className="rounded-full bg-[#F7F3F0] px-3 py-1.5 text-xs font-semibold text-[#8A776B]"
-            onClick={startEdit}
-            disabled={busy}
-          >
-            编辑
-          </button>
+          {!oauthLikeBuiltin ? (
+            <button
+              type="button"
+              className="rounded-full bg-[#F7F3F0] px-3 py-1.5 text-xs font-semibold text-[#8A776B]"
+              onClick={startEdit}
+              disabled={busy}
+            >
+              编辑
+            </button>
+          ) : null}
           {!profile.builtin ? (
             <button
               type="button"

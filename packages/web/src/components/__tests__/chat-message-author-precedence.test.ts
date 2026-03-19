@@ -8,6 +8,16 @@ vi.mock('@/hooks/useTts', () => ({
   useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
 }));
 
+vi.mock('@/hooks/useOwnerConfig', () => ({
+  useOwnerConfig: () => ({
+    name: '始皇帝',
+    aliases: ['秦始皇'],
+    mentionPatterns: ['@owner', '@me'],
+    avatar: '/uploads/qin-owner.png',
+    color: { primary: '#B76E4C', secondary: '#F8D7C6' },
+  }),
+}));
+
 vi.mock('@/components/CatAvatar', () => ({
   CatAvatar: () => React.createElement('span', null, 'avatar'),
 }));
@@ -85,5 +95,30 @@ describe('ChatMessage author precedence', () => {
     expect(container.textContent).toContain('cross-posted review');
     expect(container.textContent).toContain('缅因猫（GPT-5.2）');
     expect(container.textContent).not.toContain('铲屎官');
+  });
+
+  it('uses configured owner name and avatar for plain user messages', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const msg = {
+      id: 'm2',
+      type: 'user' as const,
+      content: '你好',
+      timestamp: Date.now(),
+      contentBlocks: [],
+    };
+
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          message: msg as never,
+          getCatById: (() => undefined) as never,
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('始皇帝');
+    expect(container.textContent).not.toContain('铲屎官');
+    const avatar = container.querySelector('img[alt="始皇帝"]') as HTMLImageElement | null;
+    expect(avatar?.getAttribute('src')).toBe('/uploads/qin-owner.png');
   });
 });

@@ -17,6 +17,8 @@ export interface ProfileItem {
   hasApiKey: boolean;
   createdAt: string;
   updatedAt: string;
+  targetProfileId?: string;
+  oauthLikeClient?: 'dare' | 'opencode';
 }
 
 export interface ProviderProfilesResponse {
