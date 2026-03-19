@@ -301,11 +301,15 @@ export class ConnectorRouter {
   }
 
   private async resolveHubThread(connectorId: string, externalChatId: string): Promise<string | undefined> {
+    const binding = await this.opts.bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) return undefined;
+    if (binding.hubThreadId) return binding.hubThreadId;
+
     const key = `${connectorId}:${externalChatId}`;
     const inFlight = this.hubThreadResolvers.get(key);
     if (inFlight) return inFlight;
 
-    const creation = this.resolveHubThreadOnce(connectorId, externalChatId).finally(() => {
+    const creation = this.resolveHubThreadOnce(connectorId, externalChatId, binding).finally(() => {
       if (this.hubThreadResolvers.get(key) === creation) {
         this.hubThreadResolvers.delete(key);
       }
@@ -314,9 +318,12 @@ export class ConnectorRouter {
     return creation;
   }
 
-  private async resolveHubThreadOnce(connectorId: string, externalChatId: string): Promise<string | undefined> {
+  private async resolveHubThreadOnce(
+    connectorId: string,
+    externalChatId: string,
+    binding: Awaited<ReturnType<IConnectorThreadBindingStore['getByExternal']>>,
+  ): Promise<string | undefined> {
     const { bindingStore, threadStore, log } = this.opts;
-    const binding = await bindingStore.getByExternal(connectorId, externalChatId);
     if (!binding) return undefined;
     if (binding.hubThreadId) return binding.hubThreadId;
 

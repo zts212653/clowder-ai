@@ -155,4 +155,85 @@ describe('ConnectorRouter Hub thread race protection', () => {
     assert.equal(createCalls, 1);
     assert.equal(bindingStore.getByExternal('feishu', 'chat-race')?.hubThreadId, r1.threadId);
   });
+
+  it('does not reuse a no-binding hub lookup once a concurrent command creates the binding', async () => {
+    const baseBindingStore = new MemoryConnectorThreadBindingStore();
+
+    let releaseFirstLookup;
+    let firstLookupEnteredResolve;
+    const firstLookupEntered = new Promise((resolve) => {
+      firstLookupEnteredResolve = resolve;
+    });
+    const firstLookupBarrier = new Promise((resolve) => {
+      releaseFirstLookup = resolve;
+    });
+
+    let lookupCount = 0;
+    const bindingStore = {
+      bind(...args) {
+        return baseBindingStore.bind(...args);
+      },
+      async getByExternal(connectorId, externalChatId) {
+        lookupCount += 1;
+        if (lookupCount === 1) {
+          firstLookupEnteredResolve();
+          await firstLookupBarrier;
+          return null;
+        }
+        return baseBindingStore.getByExternal(connectorId, externalChatId);
+      },
+      getByThread(...args) {
+        return baseBindingStore.getByThread(...args);
+      },
+      remove(...args) {
+        return baseBindingStore.remove(...args);
+      },
+      listByUser(...args) {
+        return baseBindingStore.listByUser(...args);
+      },
+      setHubThread(...args) {
+        return baseBindingStore.setHubThread(...args);
+      },
+    };
+
+    const threadStore = mockThreadStore();
+    const router = new ConnectorRouter({
+      bindingStore,
+      dedup: new InboundMessageDedup(),
+      messageStore: mockMessageStore(),
+      threadStore,
+      invokeTrigger: mockTrigger(),
+      socketManager: mockSocketManager(),
+      defaultUserId: 'owner-1',
+      defaultCatId: 'opus',
+      log: noopLog(),
+      commandLayer: {
+        async handle(connectorId, externalChatId, userId, text) {
+          const cmd = text.trim().split(/\s+/)[0].toLowerCase();
+          if (cmd === '/where') {
+            return { kind: 'where', response: 'Info' };
+          }
+          if (cmd === '/new') {
+            baseBindingStore.bind(connectorId, externalChatId, 'thread-conv-new', userId);
+            return { kind: 'new', response: 'Created', newActiveThreadId: 'thread-conv-new' };
+          }
+          return { kind: 'not-command' };
+        },
+      },
+      adapters: new Map([['feishu', mockAdapter()]]),
+    });
+
+    const first = router.route('feishu', 'chat-1', '/where', 'm1');
+    await firstLookupEntered;
+
+    const second = router.route('feishu', 'chat-1', '/new demo', 'm2');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    releaseFirstLookup();
+    const [, secondResult] = await Promise.all([first, second]);
+
+    assert.equal(secondResult.kind, 'command');
+    assert.ok(secondResult.threadId, 'the /new command should still create and reuse one Hub thread');
+    assert.equal(baseBindingStore.getByExternal('feishu', 'chat-1')?.hubThreadId, secondResult.threadId);
+  });
 });
