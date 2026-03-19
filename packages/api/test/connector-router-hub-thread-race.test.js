@@ -242,6 +242,18 @@ describe('ConnectorRouter Hub thread race protection', () => {
     baseBindingStore.bind('feishu', 'chat-stale', 'thread-conv-stale', 'owner-1');
 
     let lookupCount = 0;
+    let releaseFirstLookup;
+    let firstLookupEnteredResolve;
+    let secondLookupCapturedResolve;
+    const firstLookupEntered = new Promise((resolve) => {
+      firstLookupEnteredResolve = resolve;
+    });
+    const secondLookupCaptured = new Promise((resolve) => {
+      secondLookupCapturedResolve = resolve;
+    });
+    const firstLookupBarrier = new Promise((resolve) => {
+      releaseFirstLookup = resolve;
+    });
     let firstRouteCompletedResolve;
     const firstRouteCompleted = new Promise((resolve) => {
       firstRouteCompletedResolve = resolve;
@@ -252,8 +264,14 @@ describe('ConnectorRouter Hub thread race protection', () => {
       },
       async getByExternal(connectorId, externalChatId) {
         lookupCount += 1;
-        if (lookupCount === 3) {
+        if (lookupCount === 1) {
+          firstLookupEnteredResolve();
+          await firstLookupBarrier;
+          return baseBindingStore.getByExternal(connectorId, externalChatId);
+        }
+        if (lookupCount === 2) {
           const stale = baseBindingStore.getByExternal(connectorId, externalChatId);
+          secondLookupCapturedResolve();
           await firstRouteCompleted;
           return stale ? { ...stale } : stale;
         }
@@ -274,24 +292,11 @@ describe('ConnectorRouter Hub thread race protection', () => {
     };
 
     let createCalls = 0;
-    let releaseFirstCreate;
-    let firstCreateEnteredResolve;
-    const firstCreateEntered = new Promise((resolve) => {
-      firstCreateEnteredResolve = resolve;
-    });
-    const firstCreateBarrier = new Promise((resolve) => {
-      releaseFirstCreate = resolve;
-    });
-
     const baseThreadStore = mockThreadStore();
     const threadStore = {
       ...baseThreadStore,
       async create(userId, title) {
         createCalls += 1;
-        if (createCalls === 1) {
-          firstCreateEnteredResolve();
-          await firstCreateBarrier;
-        }
         return baseThreadStore.create(userId, title);
       },
     };
@@ -314,12 +319,12 @@ describe('ConnectorRouter Hub thread race protection', () => {
     });
 
     const first = router.route('feishu', 'chat-stale', '/where', 'stale-1');
-    await firstCreateEntered;
+    await firstLookupEntered;
 
     const second = router.route('feishu', 'chat-stale', '/threads', 'stale-2');
-    await new Promise((resolve) => setImmediate(resolve));
+    await secondLookupCaptured;
 
-    releaseFirstCreate();
+    releaseFirstLookup();
     const firstResult = await first;
     firstRouteCompletedResolve();
     const secondResult = await second;
