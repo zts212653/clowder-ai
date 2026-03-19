@@ -8,7 +8,9 @@
  *
  * Convention (set by _sanitize-rules.pl + sync-to-opensource.sh):
  *   Home:        API=3002, Frontend=3001
- *   Open-source: API=3003, Frontend=3004
+ *   Open-source: API=3004, Frontend=3003
+ *   Redis:       stays 6399 in both repos
+ *   (API = Frontend + 1 in both environments)
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -57,39 +59,109 @@ function readPowerShellFallback(relPath, pattern) {
   return m ? m[1] : null;
 }
 
+function normalizeYamlListItem(line) {
+  return line
+    .replace(/\s+#.*$/, '')
+    .replaceAll('"', '')
+    .trim();
+}
+
+function readYamlTopLevelKey(line) {
+  return line.match(/^([A-Za-z0-9_-]+):\s*$/)?.[1] ?? null;
+}
+
+function parseYamlTopLevelList(content, sectionName) {
+  const lines = content.split('\n');
+  const values = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    const topLevelKey = readYamlTopLevelKey(line);
+    if (topLevelKey === sectionName) {
+      inSection = true;
+      continue;
+    }
+    if (topLevelKey && inSection) {
+      break;
+    }
+
+    if (!inSection) continue;
+
+    const listItem = line.match(/^ {2}- (.+)$/)?.[1];
+    if (listItem) {
+      const normalized = normalizeYamlListItem(listItem);
+      if (normalized.length > 0) {
+        values.push(normalized);
+      }
+    }
+  }
+
+  return values;
+}
+
+function readYamlTopLevelList(relPath, sectionName) {
+  return parseYamlTopLevelList(readFileSync(resolve(ROOT, relPath), 'utf-8'), sectionName);
+}
+
+function readSyncScript() {
+  return readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+}
+
+function readFunctionBody(content, functionName) {
+  const start = content.indexOf(`${functionName}() {`);
+  assert.notEqual(start, -1, `expected to find function ${functionName} in sync-to-opensource.sh`);
+
+  const end = content.indexOf('\n}\n', start);
+  assert.notEqual(end, -1, `expected to find the end of function ${functionName} in sync-to-opensource.sh`);
+
+  return content.slice(start, end);
+}
+
 describe(
   '.env.example.opensource port consistency',
   { skip: !hasEnvExampleOpensource && '.env.example.opensource not present (open-source repo uses .env.example)' },
   () => {
     const env = readEnvFile('.env.example.opensource');
 
-    it('API_SERVER_PORT matches sync convention (3003)', () => {
+    it('API_SERVER_PORT matches sync convention (3004)', () => {
       assert.equal(
         env.API_SERVER_PORT,
-        '3003',
-        `API_SERVER_PORT should be 3003 (open-source convention), got ${env.API_SERVER_PORT}`,
+        '3004',
+        `API_SERVER_PORT should be 3004 (open-source convention), got ${env.API_SERVER_PORT}`,
       );
     });
 
-    it('FRONTEND_PORT matches sync convention (3004)', () => {
+    it('FRONTEND_PORT matches sync convention (3003)', () => {
       assert.equal(
         env.FRONTEND_PORT,
-        '3004',
-        `FRONTEND_PORT should be 3004 (open-source convention), got ${env.FRONTEND_PORT}`,
+        '3003',
+        `FRONTEND_PORT should be 3003 (open-source convention), got ${env.FRONTEND_PORT}`,
       );
     });
 
-    it('NEXT_PUBLIC_API_URL uses API port (3003)', () => {
+    it('NEXT_PUBLIC_API_URL uses API port (3004)', () => {
       assert.equal(
         env.NEXT_PUBLIC_API_URL,
-        'http://localhost:3003',
-        `NEXT_PUBLIC_API_URL should point to API port 3003, got ${env.NEXT_PUBLIC_API_URL}`,
+        'http://localhost:3004',
+        `NEXT_PUBLIC_API_URL should point to API port 3004, got ${env.NEXT_PUBLIC_API_URL}`,
+      );
+    });
+
+    it('REDIS_PORT stays on 6399', () => {
+      assert.equal(env.REDIS_PORT, '6399', `REDIS_PORT should stay 6399, got ${env.REDIS_PORT}`);
+    });
+
+    it('REDIS_URL stays on localhost:6399', () => {
+      assert.equal(
+        env.REDIS_URL,
+        'redis://localhost:6399',
+        `REDIS_URL should stay on localhost:6399, got ${env.REDIS_URL}`,
       );
     });
 
     it('.env.example.opensource comment header documents correct ports', () => {
       const content = readFileSync(resolve(ROOT, '.env.example.opensource'), 'utf-8');
-      // The comment should say frontend=3004, API=3003
+      // The comment should say Frontend=3003, API=3004
       assert.ok(
         content.includes('3004') && content.includes('3003'),
         'Comment header should mention both 3003 and 3004',
@@ -98,10 +170,10 @@ describe(
   },
 );
 
-// In the home repo (cat-cafe), code defaults are 3002/3001.
-// In the open-source repo (clowder-ai), sync transforms them to 3003/3004.
-const expectedApiPort = isHomeRepo ? '3002' : '3003';
-const expectedFrontendPort = isHomeRepo ? '3001' : '3004';
+// In the home repo (cat-cafe), code defaults are API=3002 / Frontend=3001.
+// In the open-source repo (clowder-ai), sync transforms them to Frontend=3003 / API=3004.
+const expectedApiPort = isHomeRepo ? '3002' : '3004';
+const expectedFrontendPort = isHomeRepo ? '3001' : '3003';
 const repoLabel = isHomeRepo ? 'home' : 'open-source';
 
 describe(`Code-side port defaults are internally consistent (${repoLabel}: API=${expectedApiPort}, Frontend=${expectedFrontendPort})`, () => {
@@ -206,33 +278,6 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     );
   });
 
-  it(`.env.example FRONTEND_PORT is ${expectedFrontendPort}`, () => {
-    const env = readEnvFile('.env.example');
-    assert.equal(
-      env.FRONTEND_PORT,
-      expectedFrontendPort,
-      `.env.example FRONTEND_PORT should be ${expectedFrontendPort}, got ${env.FRONTEND_PORT}`,
-    );
-  });
-
-  it(`.env.example API_SERVER_PORT is ${expectedApiPort}`, () => {
-    const env = readEnvFile('.env.example');
-    assert.equal(
-      env.API_SERVER_PORT,
-      expectedApiPort,
-      `.env.example API_SERVER_PORT should be ${expectedApiPort}, got ${env.API_SERVER_PORT}`,
-    );
-  });
-
-  it(`.env.example NEXT_PUBLIC_API_URL uses port ${expectedApiPort}`, () => {
-    const env = readEnvFile('.env.example');
-    assert.equal(
-      env.NEXT_PUBLIC_API_URL,
-      `http://localhost:${expectedApiPort}`,
-      `.env.example NEXT_PUBLIC_API_URL should point to API port ${expectedApiPort}, got ${env.NEXT_PUBLIC_API_URL}`,
-    );
-  });
-
   it(`start-windows.ps1 API fallback is ${expectedApiPort}`, () => {
     const fallback = readPowerShellFallback(
       'scripts/start-windows.ps1',
@@ -257,6 +302,14 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     );
   });
 
+  it('start-windows.ps1 Redis fallback uses repo-local default', () => {
+    const fallback = readPowerShellFallback(
+      'scripts/start-windows.ps1',
+      /\$RedisPort = if \(\$env:REDIS_PORT\) \{ \$env:REDIS_PORT \} else \{ "(\d+)" \}/,
+    );
+    assert.equal(fallback, '6399');
+  });
+
   it(`stop-windows.ps1 API fallback is ${expectedApiPort}`, () => {
     const fallback = readPowerShellFallback('scripts/stop-windows.ps1', /\$ApiPort = (\d+)/);
     assert.equal(
@@ -275,6 +328,11 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     );
   });
 
+  it('stop-windows.ps1 Redis fallback uses repo-local default', () => {
+    const fallback = readPowerShellFallback('scripts/stop-windows.ps1', /\$RedisPort = (\d+)/);
+    assert.equal(fallback, '6399');
+  });
+
   it(`install.ps1 minimal .env fallback uses API ${expectedApiPort} and Frontend ${expectedFrontendPort}`, () => {
     const content = readFileSync(resolve(ROOT, 'scripts/install.ps1'), 'utf-8');
     assert.ok(
@@ -289,6 +347,11 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
       content.includes(`NEXT_PUBLIC_API_URL=http://localhost:${expectedApiPort}`),
       `install.ps1 minimal .env should set NEXT_PUBLIC_API_URL to localhost:${expectedApiPort}`,
     );
+  });
+
+  it('install.ps1 Redis fallback uses repo-local default', () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/install.ps1'), 'utf-8');
+    assert.ok(content.includes('REDIS_PORT=6399'));
   });
 
   it(`install.ps1 post-install open URL fallback uses frontend port ${expectedFrontendPort}`, () => {
@@ -308,67 +371,177 @@ describe(
   'Sync transform rules match convention',
   { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
   () => {
-    it('_sanitize-rules.pl transforms 3002→3003 (API)', () => {
+    it('_sanitize-rules.pl transforms 3002→3004 (API)', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
       assert.ok(
-        content.includes('s#localhost:3002#localhost:3003#g'),
-        'sanitize rules should transform localhost:3002 → localhost:3003',
+        content.includes('s#localhost:3002#localhost:3004#g'),
+        'sanitize rules should transform localhost:3002 → localhost:3004',
       );
     });
 
-    it('_sanitize-rules.pl transforms 3001→3004 (Frontend)', () => {
+    it('_sanitize-rules.pl transforms 3001→3003 (Frontend)', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
       assert.ok(
-        content.includes('s#localhost:3001#localhost:3004#g'),
-        'sanitize rules should transform localhost:3001 → localhost:3004',
+        content.includes('s#localhost:3001#localhost:3003#g'),
+        'sanitize rules should transform localhost:3001 → localhost:3003',
       );
     });
 
-    it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3003', () => {
+    it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3004', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      const expected = "'s/API_PORT=$" + '{API_SERVER_PORT:-3002}/API_PORT=$' + "{API_SERVER_PORT:-3004}/g'";
+      assert.ok(content.includes(expected), 'sync script should transform start-dev.sh API fallback 3002→3004');
+    });
+
+    it('sync-to-opensource.sh transforms start-dev.sh Frontend fallback to 3003', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      const expected = "'s/WEB_PORT=$" + '{FRONTEND_PORT:-3001}/WEB_PORT=$' + "{FRONTEND_PORT:-3003}/g'";
+      assert.ok(content.includes(expected), 'sync script should transform start-dev.sh Frontend fallback 3001→3003');
+    });
+
+    it('sync-to-opensource.sh transforms setup.sh API port to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes(`'s/API_PORT=\${API_SERVER_PORT:-3002}/API_PORT=\${API_SERVER_PORT:-3003}/g'`),
-        'sync script should transform start-dev.sh API fallback 3002→3003',
+        content.includes("'s/API_SERVER_PORT=3002/API_SERVER_PORT=3004/g'"),
+        'sync script should transform setup.sh API_SERVER_PORT 3002→3004',
       );
     });
 
-    it('sync-to-opensource.sh transforms start-dev.sh Frontend fallback to 3004', () => {
+    it('sync-to-opensource.sh transforms setup.sh Frontend port to 3003', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes(`'s/WEB_PORT=\${FRONTEND_PORT:-3001}/WEB_PORT=\${FRONTEND_PORT:-3004}/g'`),
-        'sync script should transform start-dev.sh Frontend fallback 3001→3004',
+        content.includes("'s/FRONTEND_PORT=3001/FRONTEND_PORT=3003/g'"),
+        'sync script should transform setup.sh FRONTEND_PORT 3001→3003',
       );
     });
 
-    it('sync-to-opensource.sh transforms setup.sh API port to 3003', () => {
+    it('sync-to-opensource.sh transforms runtime-worktree.sh API port to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes("'s/API_SERVER_PORT=3002/API_SERVER_PORT=3003/g'"),
-        'sync script should transform setup.sh API_SERVER_PORT 3002→3003',
+        content.includes("'s/API_SERVER_PORT:-3002/API_SERVER_PORT:-3004/g'"),
+        'sync script should transform runtime-worktree.sh API port 3002→3004',
       );
     });
 
-    it('sync-to-opensource.sh transforms setup.sh Frontend port to 3004', () => {
+    it('sync-to-opensource.sh transforms install.ps1 to public defaults', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(content.includes("'s/FRONTEND_PORT=3001/FRONTEND_PORT=3003/g'"));
+      assert.ok(content.includes("'s/API_SERVER_PORT=3002/API_SERVER_PORT=3004/g'"));
+      assert.ok(content.includes('$frontendPort = "3003"'));
+    });
+
+    it('sync-to-opensource.sh transforms start-windows.ps1 API/frontend defaults', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(content.includes('s/else { "3002" }/else { "3004" }/g'));
+      assert.ok(content.includes('s/else { "3001" }/else { "3003" }/g'));
+    });
+
+    it('sync-to-opensource.sh transforms stop-windows.ps1 API/frontend defaults', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(content.includes('s/\\$ApiPort = 3002/$ApiPort = 3004/g'));
+      assert.ok(content.includes('s/\\$WebPort = 3001/$WebPort = 3003/g'));
+    });
+
+    it('sync-to-opensource.sh keeps Windows Redis defaults unchanged', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(!content.includes("'s/REDIS_PORT=6399/REDIS_PORT=6379/g'"));
+      assert.ok(!content.includes('s/else { "6399" }/else { "6379" }/g'));
+      assert.ok(!content.includes('s/\\$RedisPort = 6399/$RedisPort = 6379/g'));
+      assert.ok(!content.includes('s/\\$redisPort = "6399"/$redisPort = "6379"/g'));
+    });
+
+    it('sync shell parsers preserve # inside YAML values but strip inline comments', () => {
+      const outbound = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      const hotfix = readFileSync(resolve(ROOT, 'scripts/sync-hotfix.sh'), 'utf-8');
+
+      assert.match(outbound, /sub\(\/\[\[:space:\]\]#\.\*\/,\s*"",\s*line\)/);
+      assert.match(hotfix, /sub\(\/\[\[:space:\]\]#\.\*\/,\s*"",\s*l\)/);
+    });
+
+    it('YAML parser scopes list membership to managed_scripts only', () => {
+      const fixture = `
+managed_scripts:
+  - scripts/install.ps1 # keep this in sync
+  - scripts/start-windows.ps1
+  - scripts/foo#1.ps1
+excluded:
+  - scripts/install.ps1
+`;
+
+      assert.deepEqual(parseYamlTopLevelList(fixture, 'managed_scripts'), [
+        'scripts/install.ps1',
+        'scripts/start-windows.ps1',
+        'scripts/foo#1.ps1',
+      ]);
+    });
+
+    it('sync-manifest exports the Windows deploy scripts needed by F113', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+      const requiredScripts = [
+        'scripts/install-auth-config.mjs',
+        'scripts/install-windows-helpers.ps1',
+        'scripts/install.ps1',
+        'scripts/start-windows.ps1',
+        'scripts/start.bat',
+        'scripts/stop-windows.ps1',
+        'scripts/windows-command-helpers.ps1',
+        'scripts/windows-installer-ui.ps1',
+      ];
+
+      for (const scriptPath of requiredScripts) {
+        assert.ok(
+          managedScripts.includes(scriptPath),
+          `sync-manifest should export ${scriptPath} instead of deleting it from clowder-ai`,
+        );
+      }
+    });
+
+    it('sync-to-opensource.sh transforms AgentRouter.ts API port to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes("'s/FRONTEND_PORT=3001/FRONTEND_PORT=3004/g'"),
-        'sync script should transform setup.sh FRONTEND_PORT 3001→3004',
+        content.includes("process.env.API_SERVER_PORT ?? '3004'"),
+        'sync script should transform AgentRouter.ts API port 3002→3004',
+      );
+    });
+  },
+);
+
+describe(
+  'Sync validation enforces static quality gates',
+  { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
+  () => {
+    it('validate mode stays aligned with post-sync static gates', () => {
+      const content = readSyncScript();
+      const staticGateFn = readFunctionBody(content, 'run_static_quality_gates');
+      const validateBlock = content.match(
+        /echo -e "\$\{GREEN\}\[Step 5\/6\] Validate \(install \+ static gates \+ build \+ port check\)\.\.\.\$\{NC\}"[\s\S]*?echo -e " {2}\$\{GREEN\}✓ Validate passed\$\{NC\}"/,
+      )?.[0];
+
+      assert.match(
+        staticGateFn,
+        /pnpm check:fix[\s\S]*pnpm check 2>&1[\s\S]*pnpm lint 2>&1/,
+        'run_static_quality_gates should run pnpm check:fix → pnpm check → pnpm lint in order',
+      );
+      assert.ok(validateBlock, 'expected to find the validate block in sync-to-opensource.sh');
+      assert.ok(
+        validateBlock.includes('run_static_quality_gates false'),
+        'validate mode should invoke the same non-mutating static gates as the post-sync path',
       );
     });
 
-    it('sync-to-opensource.sh transforms runtime-worktree.sh API port to 3003', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
-      assert.ok(
-        content.includes("'s/API_SERVER_PORT:-3002/API_SERVER_PORT:-3003/g'"),
-        'sync script should transform runtime-worktree.sh API port 3002→3003',
-      );
-    });
+    it('post-sync fast/full validation keeps static gates before startup acceptance split', () => {
+      const content = readSyncScript();
+      const step6Block = content.match(/# 6b: Install \+ build[\s\S]*?if \[ "\$FAST_VALIDATE" = true \]; then/)?.[0];
 
-    it('sync-to-opensource.sh transforms AgentRouter.ts API port to 3003', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.ok(step6Block, 'expected to find the Step 6 validation block in sync-to-opensource.sh');
       assert.ok(
-        content.includes("process.env.API_SERVER_PORT ?? '3003'"),
-        'sync script should transform AgentRouter.ts API port 3002→3003',
+        step6Block.includes('run_static_quality_gates false'),
+        'Step 6 should invoke run_static_quality_gates with autofix disabled',
+      );
+      assert.ok(
+        step6Block.indexOf('run_static_quality_gates false') <
+          step6Block.indexOf('if [ "$FAST_VALIDATE" = true ]; then'),
+        '--fast-validate should only skip startup acceptance, not static gates',
       );
     });
   },

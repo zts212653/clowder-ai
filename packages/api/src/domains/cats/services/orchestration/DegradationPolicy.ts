@@ -99,9 +99,9 @@ export function formatDegradationMessage(result: DegradationResult): string {
 
   const strategyLabels: Record<DegradationStrategy, string> = {
     full: '',
-    truncated: '⚠️ 上下文已截断',
-    pattern_only: '⚠️ 使用简化模式',
-    abort: '❌ 无法处理',
+    truncated: '[警告] 上下文已截断',
+    pattern_only: '[警告] 使用简化模式',
+    abort: '[错误] 无法处理',
   };
 
   const label = strategyLabels[result.strategy];

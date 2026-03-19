@@ -543,7 +543,7 @@
     {
       "id": "F088",
       "name": "Multi-Platform Chat Gateway — 聊天平台接入网关",
-      "status": "Phase 1-6+A+B+C+E done, Phase D in-progress | **Owner**: Ragdoll",
+      "status": "Phase 1-6+A+B+C+D+E+G(8A) done | **Owner**: Ragdoll",
       "file": "F088-multi-platform-chat-gateway.md"
     },
     {
@@ -781,5 +781,5 @@
       "file": "F127-cat-instance-management.md"
     }
   ],
-  "generated_at": "2026-03-18T12:09:18.262Z"
+  "generated_at": "2026-03-19T13:29:27.358Z"
 }

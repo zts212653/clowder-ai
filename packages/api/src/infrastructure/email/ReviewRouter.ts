@@ -17,6 +17,7 @@ import type { IThreadStore, Thread } from '../../domains/cats/services/stores/po
 import type { GithubReviewEvent } from './GithubReviewWatcher.js';
 import type { IProcessedEmailStore } from './ProcessedEmailStore.js';
 import type { IPrTrackingStore } from './PrTrackingStore.js';
+import type { IReviewContentFetcher, ReviewContent } from './ReviewContentFetcher.js';
 
 export type RouteResult =
   | {
@@ -42,6 +43,8 @@ export interface ReviewRouterOptions {
   readonly log: FastifyBaseLogger;
   readonly triageThreadId?: string;
   readonly defaultUserId?: string;
+  /** Optional: fetches GitHub review content for severity extraction. */
+  readonly reviewContentFetcher?: IReviewContentFetcher;
 }
 
 /** Cached Review Inbox thread IDs per cat (in-memory, lost on restart). */
@@ -191,26 +194,27 @@ export class ReviewRouter {
     userId: string,
     event: GithubReviewEvent,
   ): Promise<{ messageId: string; content: string }> {
-    const { messageStore } = this.opts;
+    const { messageStore, log } = this.opts;
     const reviewTypeLabel = formatReviewType(event.reviewType);
 
-    const content = [
-      `**GitHub Review 通知** 🔔`,
-      ``,
-      `PR #${event.prNumber}: ${event.title}`,
-      `仓库: ${event.repository}`,
-      `Review 类型: ${reviewTypeLabel}`,
-      event.reviewer ? `Reviewer: @${event.reviewer}` : '',
-      ``,
-      `请处理 review 意见。完成后通知铲屎官确认合入。`,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    // Plan A: proactively fetch review content for severity extraction
+    let reviewContent: ReviewContent | null = null;
+    if (this.opts.reviewContentFetcher) {
+      try {
+        reviewContent = await this.opts.reviewContentFetcher.fetch(event.repository, event.prNumber);
+      } catch (err) {
+        log.warn(
+          `[ReviewRouter] Failed to fetch review content for ${event.repository}#${event.prNumber}: ${String(err)}`,
+        );
+      }
+    }
+
+    const content = buildReviewMessageContent(event, reviewTypeLabel, reviewContent);
 
     const source: ConnectorSource = {
       connector: 'github-review',
       label: 'GitHub Review',
-      icon: '🔔',
+      icon: 'github',
       url: `https://github.com/${event.repository}/pull/${event.prNumber}`,
     };
 
@@ -234,7 +238,7 @@ export class ReviewRouter {
     const userId = this.resolveUserId();
 
     const content = [
-      `**GitHub Review 需要分派** ⚠️`,
+      `**GitHub Review 需要分派**`,
       ``,
       `PR #${event.prNumber}: ${event.title}`,
       `仓库: ${event.repository}`,
@@ -250,7 +254,7 @@ export class ReviewRouter {
     const source: ConnectorSource = {
       connector: 'github-review',
       label: 'GitHub Review',
-      icon: '⚠️',
+      icon: 'github',
       url: `https://github.com/${event.repository}/pull/${event.prNumber}`,
     };
 
@@ -318,14 +322,76 @@ export class ReviewRouter {
 function formatReviewType(type: string): string {
   switch (type) {
     case 'approved':
-      return '✅ Approved';
+      return 'Approved';
     case 'changes_requested':
-      return '🔴 Changes Requested';
+      return 'Changes Requested';
     case 'commented':
-      return '💬 Commented';
+      return 'Commented';
     case 'reviewed':
-      return '🧾 Reviewed';
+      return 'Reviewed';
     default:
-      return `❓ ${type}`;
+      return type;
   }
+}
+
+/**
+ * Build review notification content with optional severity findings.
+ * Exported for testing.
+ */
+export function buildReviewMessageContent(
+  event: Pick<GithubReviewEvent, 'prNumber' | 'title' | 'repository' | 'reviewType' | 'reviewer'>,
+  reviewTypeLabel: string,
+  reviewContent: ReviewContent | null,
+): string {
+  const severityHeader =
+    reviewContent?.maxSeverity &&
+    (reviewContent.maxSeverity === 'P0' || reviewContent.maxSeverity === 'P1' || reviewContent.maxSeverity === 'P2')
+      ? `**Review 检测到 ${reviewContent.maxSeverity}**`
+      : null;
+
+  const lines: string[] = [];
+
+  if (severityHeader) {
+    lines.push(severityHeader, '');
+  }
+
+  lines.push(
+    `**GitHub Review 通知**`,
+    ``,
+    `PR #${event.prNumber}: ${event.title}`,
+    `仓库: ${event.repository}`,
+    `Review 类型: ${reviewTypeLabel}`,
+  );
+
+  if (event.reviewer) {
+    lines.push(`Reviewer: @${event.reviewer}`);
+  }
+
+  // Append findings summary (P0/P1/P2 only — P3 is informational)
+  if (reviewContent && reviewContent.findings.length > 0) {
+    const actionable = reviewContent.findings.filter(
+      (f) => f.severity === 'P0' || f.severity === 'P1' || f.severity === 'P2',
+    );
+    if (actionable.length > 0) {
+      lines.push('', `--- Findings (${actionable.length}) ---`);
+      for (const f of actionable) {
+        const loc = f.source === 'inline_comment' && f.path ? ` (${f.path})` : '';
+        lines.push(`**${f.severity}**${loc}: ${f.excerpt.slice(0, 200)}`);
+      }
+    }
+  }
+
+  // P1-2 fix: warn when fetch failed — "no findings" is NOT confirmed safe (砚砚 review)
+  if (reviewContent?.fetchFailed) {
+    lines.push('', '⚠️ 未能完整拉取 review 内容，severity 状态未确认。请手动检查 PR 页面。');
+  }
+
+  // Incremental window indicator — so cats know scope of the scan
+  if (reviewContent?.since) {
+    lines.push('', `_基于最新 review（${reviewContent.since}）的增量扫描_`);
+  }
+
+  lines.push('', `请处理 review 意见。完成后通知铲屎官确认合入。`);
+
+  return lines.join('\n');
 }

@@ -17,7 +17,7 @@ export interface PathConfig {
 }
 
 /**
- * 默认的 Cat Café 子目录
+ * 默认的 Clowder AI 子目录
  */
 const CAT_CAFE_SUBDIRS = ['chat', 'memory', 'workspace', 'assets', '.state'] as const;
 
@@ -95,9 +95,9 @@ export function isPathAllowed(targetPath: string, config?: PathConfig): boolean 
 }
 
 /**
- * 获取 Cat Café 数据目录
+ * 获取 Clowder AI 数据目录
  * @param config - 可选的配置
- * @returns Cat Café 数据目录路径
+ * @returns Clowder AI 数据目录路径
  */
 export function getCatCafeDir(config?: PathConfig): string {
   const { catCafeDir } = config ?? getDefaultConfig();
@@ -115,7 +115,7 @@ export function ensureDir(dirPath: string): void {
 }
 
 /**
- * 初始化 Cat Café 目录结构
+ * 初始化 Clowder AI 目录结构
  * 创建 ~/.cat-cafe/ 及其子目录
  * @param config - 可选的配置
  */

@@ -13,9 +13,9 @@ import { delimiter, relative, resolve, win32 } from 'node:path';
 /**
  * Allowed root directories for project paths.
  *
- * Default: homedir + /tmp + /private/tmp + /Volumes (macOS only).
+ * Default: homedir + /tmp + /private/tmp + /workspace + /Volumes (macOS only).
  *
- * PROJECT_ALLOWED_ROOTS (colon-separated):
+ * PROJECT_ALLOWED_ROOTS (system path delimiter separated):
  *   - Default behaviour: **replaces** built-in defaults (backward compat).
  *   - Set PROJECT_ALLOWED_ROOTS_APPEND=true to merge with defaults instead.
  */
@@ -32,6 +32,7 @@ export function getDefaultRootsForPlatform(
 
   roots.add('/tmp');
   roots.add('/private/tmp');
+  roots.add('/workspace');
   if (platformName === 'darwin') roots.add('/Volumes');
   return [...roots];
 }
@@ -48,10 +49,10 @@ const DEFAULT_ROOTS = (): string[] => {
 };
 
 const ALLOWED_ROOTS = (): string[] => {
-  const envRoots = process.env['PROJECT_ALLOWED_ROOTS'];
+  const envRoots = process.env.PROJECT_ALLOWED_ROOTS;
   if (envRoots?.trim()) {
     const custom = envRoots.split(delimiter).filter(Boolean);
-    const append = process.env['PROJECT_ALLOWED_ROOTS_APPEND'] === 'true';
+    const append = process.env.PROJECT_ALLOWED_ROOTS_APPEND === 'true';
     return append ? [...new Set([...DEFAULT_ROOTS(), ...custom])] : custom;
   }
   return DEFAULT_ROOTS();
@@ -60,23 +61,6 @@ const ALLOWED_ROOTS = (): string[] => {
 /** Expose the computed allowlist for structured error responses. */
 export function getAllowedRoots(): string[] {
   return ALLOWED_ROOTS();
-}
-
-export function isPathUnderRoots(absPath: string, allowedRoots: string[], platformName = process.platform): boolean {
-  const isWindows = platformName === 'win32';
-  for (const root of allowedRoots) {
-    const rel = isWindows ? win32.relative(root, absPath) : relative(root, absPath);
-    if (rel === '') {
-      return true;
-    }
-    if (isWindows && win32.isAbsolute(rel)) {
-      continue;
-    }
-    if (!rel.startsWith('..') && !rel.startsWith('/') && !rel.startsWith('\\')) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /**
@@ -105,6 +89,23 @@ export async function validateProjectPath(rawPath: string): Promise<string | nul
     // ENOENT, EACCES, etc.
     return null;
   }
+}
+
+export function isPathUnderRoots(absPath: string, allowedRoots: string[], platformName = process.platform): boolean {
+  const isWindows = platformName === 'win32';
+  for (const root of allowedRoots) {
+    const rel = isWindows ? win32.relative(root, absPath) : relative(root, absPath);
+    if (rel === '') {
+      return true;
+    }
+    if (isWindows && win32.isAbsolute(rel)) {
+      continue;
+    }
+    if (!rel.startsWith('..') && !rel.startsWith('/') && !rel.startsWith('\\')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

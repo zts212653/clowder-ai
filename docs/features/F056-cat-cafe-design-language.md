@@ -113,6 +113,23 @@ Maine Coon发散了 5 个方向后收敛为一套：
 - 导航（参考猫爪导航概念）
 - 状态指示器（参考咖啡香气进度条）
 
+### Phase B-0：Emoji 清扫（Emoji → Designed Icons）
+
+**目标**：全站 emoji 替换为设计过的 SVG/PNG 图标，落实四大宪章第三条"猫咖隐喻，不堆砌猫 emoji"。
+
+**B0-Wave1（用户可见优先，已完成）**：
+- Connector 气泡图标：🔵→飞书PNG、✈️→Telegram PNG、🔔→GitHub SVG、⚙️→Settings SVG、👥→Users SVG
+- ConnectorBubble 组件改为 ID 驱动渲染（向后兼容旧消息）
+- ReviewRouter / ConnectorRouter / ConnectorMessageFormatter 去除 emoji
+- 设计资产：`public/images/connectors/`（IM PNG）+ `icons/ConnectorIcons.tsx`（SVG 组件）
+
+**B0-Wave2（已完成，Maine Coon执行）**：
+- Bootcamp 任务卡片 emoji → SVG icon set（16 个任务类型）
+- 成就/排行榜 emoji → 成就徽章 SVG
+- 系统消息 ⚠️/❌/✅ → alert/error/success SVG
+- 飞书/TG 纯文本 formatter 中的功能性 emoji（checklist ✅☐、audio 🔊、gallery 🖼️）
+- 前端 UI 组件中零散 emoji（PlanBoard、ThinkingIndicator、BrakeModal 等）
+
 ### Phase B：存量改造（Retrofit）
 
 把现有页面逐步迁移到新设计语言，按使用频率排序：
@@ -138,6 +155,11 @@ Maine Coon发散了 5 个方向后收敛为一套：
 - [ ] AC-A6: Semantic token 色板通过 WCAG AA 对比度检查
 - [x] AC-A4: F052 跨线程气泡作为"打样参考"收入设计原则文档
 
+### Phase B-0
+- [x] AC-B0-W1: Connector 气泡图标全部替换为设计图标（PNG/SVG），向后兼容
+- [x] AC-B0-W2: Bootcamp 任务卡片/成就/排行榜 emoji → SVG（Maine Coon负责）
+- [x] AC-B0-W3: 系统消息/前端零散 emoji → 文本标签 + SVG（Maine Coon负责）
+
 ### Phase B
 - [ ] AC-B1: 聊天界面全面应用新设计语言
 - [ ] AC-B2: 侧边栏应用新设计语言
@@ -157,6 +179,7 @@ Maine Coon发散了 5 个方向后收敛为一套：
 | R4 | "你这个可以当打样" | AC-A4 | F052 气泡收入设计原则 | [x] |
 | R5 | "对齐设计语言" | AC-A2 | Token 体系 + 组件库 | [/] |
 | R6 | "猫猫头像点击出信息/生活照/心情"（不是工卡，是伙伴名片） | AC-C2 | manual | [ ] |
+| R7 | "飞书系统消息充满丑陋的emoji！你自己画过svg的！"（2026-03-18） | AC-B0-W1, AC-B0-W2 | 截图对比 + grep 验证 | [/] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC

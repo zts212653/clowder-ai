@@ -10,7 +10,7 @@ import { ThreadCatSettings } from '../ThreadCatSettings';
 // ── Mock apiFetch (used by useCatData inside CatSelector) ──
 vi.mock('@/utils/api-client', () => ({
   apiFetch: () => Promise.resolve({ ok: false, json: () => Promise.resolve({}) }),
-  API_URL: 'http://localhost:3004',
+  API_URL: 'http://localhost:3003',
 }));
 
 describe('ThreadCatSettings', () => {

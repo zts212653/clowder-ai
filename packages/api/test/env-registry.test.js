@@ -63,13 +63,13 @@ describe('env-registry', () => {
     assert.equal(redis.maskMode, 'url');
   });
 
-  it('marks bootstrap-only server ports as runtime read-only', () => {
+  it('keeps server ports editable for F127 hub env editor', () => {
     const apiPort = ENV_VARS.find((v) => v.name === 'API_SERVER_PORT');
     const previewPort = ENV_VARS.find((v) => v.name === 'PREVIEW_GATEWAY_PORT');
     assert.ok(apiPort, 'API_SERVER_PORT should be in registry');
     assert.ok(previewPort, 'PREVIEW_GATEWAY_PORT should be in registry');
-    assert.equal(apiPort.runtimeEditable, false);
-    assert.equal(previewPort.runtimeEditable, false);
+    assert.notEqual(apiPort.runtimeEditable, false);
+    assert.notEqual(previewPort.runtimeEditable, false);
   });
 
   it('no HINDSIGHT_* vars remain after D-1 cleanup', () => {
@@ -80,20 +80,20 @@ describe('env-registry', () => {
 
 describe('maskUrlCredentials', () => {
   it('masks user:password in redis URL', () => {
-    const result = maskUrlCredentials('redis://user:super-secret@localhost:6379/15');
+    const result = maskUrlCredentials('redis://user:super-secret@localhost:6399/15');
     assert.ok(!result.includes('super-secret'), `Leaked password: ${result}`);
-    assert.ok(result.includes('localhost:6379'), `Lost host: ${result}`);
+    assert.ok(result.includes('localhost:6399'), `Lost host: ${result}`);
     assert.ok(result.includes('/15'), `Lost db: ${result}`);
   });
 
   it('preserves URL without credentials', () => {
-    const result = maskUrlCredentials('redis://localhost:6379');
-    assert.ok(result.includes('localhost:6379'), `Lost host: ${result}`);
+    const result = maskUrlCredentials('redis://localhost:6399');
+    assert.ok(result.includes('localhost:6399'), `Lost host: ${result}`);
     assert.ok(!result.includes('***'), `Unnecessary masking: ${result}`);
   });
 
   it('masks user-only auth', () => {
-    const result = maskUrlCredentials('redis://admin@localhost:6379');
+    const result = maskUrlCredentials('redis://admin@localhost:6399');
     assert.ok(!result.includes('admin'), `Leaked username: ${result}`);
     assert.ok(result.includes('***'), `Should have masked: ${result}`);
   });
@@ -131,12 +131,12 @@ describe('buildEnvSummary', () => {
   });
 
   it('masks REDIS_URL credentials but preserves host', () => {
-    setEnv('REDIS_URL', 'redis://user:super-secret@myhost:6379/15');
+    setEnv('REDIS_URL', 'redis://user:super-secret@myhost:6399/15');
     const summary = buildEnvSummary();
     const entry = summary.find((v) => v.name === 'REDIS_URL');
     assert.ok(entry);
     assert.ok(!entry.currentValue.includes('super-secret'), `Leaked password: ${entry.currentValue}`);
-    assert.ok(entry.currentValue.includes('myhost:6379'), `Lost host: ${entry.currentValue}`);
+    assert.ok(entry.currentValue.includes('myhost:6399'), `Lost host: ${entry.currentValue}`);
   });
 
   it('returns same number of entries as ENV_VARS', () => {
@@ -358,7 +358,7 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
-  it('rejects bootstrap-only env vars from hub writes', async () => {
+  it('accepts server port env vars from hub writes under F127 semantics', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
@@ -381,8 +381,7 @@ describe('PATCH /api/config/env (route)', () => {
           updates: [{ name: 'API_SERVER_PORT', value: '3203' }],
         },
       });
-      assert.equal(apiPortRes.statusCode, 400);
-      assert.match(JSON.parse(apiPortRes.payload).error, /not editable/);
+      assert.equal(apiPortRes.statusCode, 200);
 
       const previewPortRes = await app.inject({
         method: 'PATCH',
@@ -392,10 +391,11 @@ describe('PATCH /api/config/env (route)', () => {
           updates: [{ name: 'PREVIEW_GATEWAY_PORT', value: '4200' }],
         },
       });
-      assert.equal(previewPortRes.statusCode, 400);
-      assert.match(JSON.parse(previewPortRes.payload).error, /not editable/);
+      assert.equal(previewPortRes.statusCode, 200);
 
-      assert.equal(readFileSync(envFilePath, 'utf8'), 'API_SERVER_PORT=3003\nPREVIEW_GATEWAY_PORT=4100\n');
+      const nextEnv = readFileSync(envFilePath, 'utf8');
+      assert.match(nextEnv, /API_SERVER_PORT=3203/);
+      assert.match(nextEnv, /PREVIEW_GATEWAY_PORT=4200/);
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

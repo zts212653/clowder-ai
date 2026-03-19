@@ -1,10 +1,10 @@
 {
-  "source_commit_sha": "96210b11196b",
-  "target_head_sha": "2e4c05a05e042fc2ea94e3cff6db26ef5d7fd930",
+  "source_commit_sha": "7e2dd4ed67b0",
+  "target_head_sha": "c02591be7e1012810a20bb8b43200a6e77985292",
   "manifest_version": 3,
-  "included_file_count": 1727,
+  "included_file_count": 1764,
   "excluded_file_count": 13,
-  "transform_count": 25,
+  "transform_count": 28,
   "secret_scan_result": "clean",
-  "synced_at": "2026-03-18T12:09:21Z"
+  "synced_at": "2026-03-19T13:29:30Z"
 }

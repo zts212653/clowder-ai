@@ -681,4 +681,74 @@ describe('ReviewRouter', () => {
       assert.ok(evt.room.startsWith('thread:thread-'));
     });
   });
+
+  // ── Integration: ReviewRouter + reviewContentFetcher (砚砚 P2-new-3) ──
+
+  describe('reviewContentFetcher integration', () => {
+    it('includes severity findings when fetcher returns P1', async () => {
+      /** @type {import('../dist/infrastructure/email/ReviewContentFetcher.js').IReviewContentFetcher} */
+      const mockFetcher = {
+        async fetch() {
+          return {
+            findings: [
+              { severity: 'P1', excerpt: 'race condition in flush', source: 'inline_comment', path: 'src/x.ts' },
+            ],
+            maxSeverity: 'P1',
+            fetchFailed: false,
+          };
+        },
+      };
+
+      const router = createRouter({ reviewContentFetcher: mockFetcher });
+
+      const result = await router.route(makeEvent());
+      assert.strictEqual(result.kind, 'routed');
+      if (result.kind === 'routed') {
+        assert.ok(result.content.includes('Review 检测到 P1'), 'should include severity header');
+        assert.ok(result.content.includes('race condition'), 'should include finding excerpt');
+      }
+    });
+
+    it('shows fetch-failure warning when fetcher partially fails', async () => {
+      /** @type {import('../dist/infrastructure/email/ReviewContentFetcher.js').IReviewContentFetcher} */
+      const mockFetcher = {
+        async fetch() {
+          return {
+            findings: [],
+            maxSeverity: null,
+            fetchFailed: true,
+          };
+        },
+      };
+
+      const router = createRouter({ reviewContentFetcher: mockFetcher });
+
+      const result = await router.route(makeEvent());
+      assert.strictEqual(result.kind, 'routed');
+      if (result.kind === 'routed') {
+        assert.ok(result.content.includes('未能完整拉取'), 'should warn about fetch failure');
+        assert.ok(!result.content.includes('检测到'), 'should not claim severity found');
+      }
+    });
+
+    it('delivers notification normally when fetcher throws', async () => {
+      /** @type {import('../dist/infrastructure/email/ReviewContentFetcher.js').IReviewContentFetcher} */
+      const mockFetcher = {
+        async fetch() {
+          throw new Error('gh CLI not found');
+        },
+      };
+
+      const router = createRouter({ reviewContentFetcher: mockFetcher });
+
+      const result = await router.route(makeEvent());
+      assert.strictEqual(result.kind, 'routed');
+      if (result.kind === 'routed') {
+        assert.ok(result.content.includes('GitHub Review 通知'), 'message should still be delivered');
+        assert.ok(!result.content.includes('检测到'), 'no severity claimed');
+      }
+      // Message was still posted
+      assert.strictEqual(messageMock.messages.length, 1);
+    });
+  });
 });

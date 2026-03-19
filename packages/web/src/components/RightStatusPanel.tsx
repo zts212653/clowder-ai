@@ -268,7 +268,7 @@ export function RightStatusPanel({
           <button
             onClick={() => openHub()}
             className="text-base text-gray-400 hover:text-blue-600 hover:rotate-45 transition-all duration-200"
-            title="Cat Café Hub"
+            title="Clowder AI Hub"
           >
             &#9881;
           </button>

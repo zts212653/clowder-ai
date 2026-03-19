@@ -8,8 +8,8 @@ export function HubButton() {
     <button
       onClick={() => openHub()}
       className="p-1 rounded-lg hover:bg-owner-light transition-colors"
-      aria-label="Cat Café Hub"
-      title="Cat Café Hub"
+      aria-label="Clowder AI Hub"
+      title="Clowder AI Hub"
     >
       <svg
         className="w-5 h-5 text-gray-500"

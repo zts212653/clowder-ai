@@ -354,6 +354,7 @@ describe('GET /api/messages', () => {
       content: 'queued message',
       mentions: [],
       timestamp: 5000,
+      deliveryStatus: 'queued',
     });
     messageStore.markDelivered(stored.id, 12000);
 

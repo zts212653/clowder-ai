@@ -175,7 +175,7 @@ export class EventAuditLog {
   }
 }
 
-/** Common event types for Cat Café */
+/** Common event types for Clowder AI */
 export const AuditEventTypes = {
   /** 辩论/讨论冠军宣判 */
   DEBATE_WINNER: 'debate_winner',

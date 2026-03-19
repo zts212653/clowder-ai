@@ -131,6 +131,19 @@ function createStubThreadStore() {
   };
 }
 
+function createStubAutoPlayer() {
+  return {
+    startedGameIds: [],
+    stopCalls: 0,
+    startLoop(gameId) {
+      this.startedGameIds.push(gameId);
+    },
+    stopAllLoops() {
+      this.stopCalls += 1;
+    },
+  };
+}
+
 describe('/game command bridge in POST /api/messages', () => {
   let app;
   let gameStore;
@@ -317,5 +330,49 @@ describe('/game command bridge in POST /api/messages', () => {
     assert.equal(res2.json().status, 'game_started');
     const threadId2 = res2.json().gameThreadId;
     assert.notEqual(threadId1, threadId2, 'each game should get its own thread');
+  });
+
+  it('stops injected auto-player loops on app close', async () => {
+    const localApp = Fastify();
+    const autoPlayer = createStubAutoPlayer();
+
+    await localApp.register(messagesRoutes, {
+      registry: createStubRegistry(),
+      messageStore: createStubMessageStore(),
+      socketManager: createStubSocket(),
+      router: createStubRouter(),
+      threadStore: createStubThreadStore(),
+      gameStore: createStubGameStore(),
+      autoPlayer,
+      invocationTracker: {
+        has: () => false,
+        isDeleting: () => false,
+        tryStartThread: () => new AbortController(),
+        start: () => new AbortController(),
+        complete: () => {},
+      },
+      invocationRecordStore: {
+        create: async () => ({ outcome: 'created', invocationId: 'inv-stub' }),
+        update: async () => {},
+      },
+    });
+    await localApp.ready();
+
+    const res = await localApp.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'owner' },
+      payload: {
+        content: '/game werewolf player',
+        threadId: 'thread-test-close',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(autoPlayer.startedGameIds.length, 1, 'should start injected auto-player');
+
+    await localApp.close();
+
+    assert.equal(autoPlayer.stopCalls, 1, 'should stop auto-player loops during close');
   });
 });

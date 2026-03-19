@@ -41,9 +41,9 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
     const callbackEnv = {
       CAT_CAFE_ANTHROPIC_API_KEY: 'sk-test',
       CAT_CAFE_ANTHROPIC_BASE_URL: 'http://proxy:9877/slug',
-      CAT_CAFE_MCP_SERVER_URL: 'http://localhost:3004/mcp',
+      CAT_CAFE_MCP_SERVER_URL: 'http://localhost:3003/mcp',
       CAT_CAFE_MCP_TOKEN: 'secret-mcp-token',
-      CAT_CAFE_MCP_ENDPOINT: 'ws://localhost:3004/mcp/ws',
+      CAT_CAFE_MCP_ENDPOINT: 'ws://localhost:3003/mcp/ws',
     };
 
     const promise = collect(service.invoke('Test', { callbackEnv }));

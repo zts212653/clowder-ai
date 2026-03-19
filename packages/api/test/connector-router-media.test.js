@@ -27,6 +27,7 @@ function makeMockDeps(overrides = {}) {
       create: async () => ({ id: 'T1' }),
       get: async () => ({ id: 'T1', title: 'Test' }),
       list: async () => [],
+      updateConnectorHubState: async () => {},
     },
     invokeTrigger: {
       trigger: mock.fn(),

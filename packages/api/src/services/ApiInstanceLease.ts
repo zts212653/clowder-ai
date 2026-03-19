@@ -52,6 +52,8 @@ export interface ApiInstanceLeaseOptions {
   key?: string;
   ttlMs?: number;
   heartbeatMs?: number;
+  /** Consecutive renew failures before invalidation (default: 3). */
+  maxRenewFailures?: number;
   instanceId?: string;
   pid?: number;
   hostname?: string;
@@ -86,6 +88,7 @@ export class ApiInstanceLease {
   private readonly apiPort: number;
   private readonly cwd: string;
   private readonly startedAt: number;
+  private readonly maxRenewFailures: number;
   private readonly isPidAlive: (pid: number) => boolean;
   private readonly onLeaseInvalidated?: (event: ApiInstanceLeaseInvalidation) => void;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -93,6 +96,8 @@ export class ApiInstanceLease {
   private currentHolder: ApiInstanceLeaseHolder | null = null;
   private leaseInvalidated = false;
   private releasing = false;
+  private consecutiveRenewFailures = 0;
+  private renewInFlight = false;
 
   constructor(
     private readonly redis: Pick<RedisClient, 'set' | 'get' | 'eval'>,
@@ -101,6 +106,7 @@ export class ApiInstanceLease {
     this.key = options.key ?? API_INSTANCE_LEASE_KEY;
     this.ttlMs = options.ttlMs ?? 30_000;
     this.heartbeatMs = options.heartbeatMs ?? 10_000;
+    this.maxRenewFailures = options.maxRenewFailures ?? 3;
     this.instanceId = options.instanceId ?? `api-${randomUUID()}`;
     this.token = randomUUID();
     this.pid = options.pid ?? process.pid;
@@ -214,15 +220,54 @@ export class ApiInstanceLease {
   }
 
   private async renewOnce(): Promise<void> {
-    if (!this.currentRaw) return;
+    if (!this.currentRaw || this.renewInFlight) return;
+    this.renewInFlight = true;
     try {
       const renewed = Number(await this.redis.eval(RENEW_LEASE_LUA, 1, this.key, this.currentRaw, String(this.ttlMs)));
-      if (renewed !== 1) {
-        await this.invalidateLease('lease_lost');
+      if (renewed === 1) {
+        this.consecutiveRenewFailures = 0;
+        return;
       }
+      // P1-A: Key expired (lid-close / sleep) or someone else holds it.
+      // Try to re-acquire before giving up — if nobody else grabbed it, just take it back.
+      if (this.leaseInvalidated) return; // another tick already resolved this
+      const reacquired = await this.tryReacquire();
+      if (reacquired) {
+        this.consecutiveRenewFailures = 0;
+        return;
+      }
+      await this.invalidateLease('lease_lost');
     } catch (error) {
-      await this.invalidateLease('renew_failed', error);
+      // P1-B: Network flicker / transient Redis error — count consecutive failures.
+      // Only invalidate after exceeding the grace window.
+      this.consecutiveRenewFailures++;
+      if (this.consecutiveRenewFailures >= this.maxRenewFailures) {
+        await this.invalidateLease('renew_failed', error);
+      }
+    } finally {
+      this.renewInFlight = false;
     }
+  }
+
+  /** Attempt to re-acquire a lost lease (key expired with no contention). */
+  private async tryReacquire(): Promise<boolean> {
+    const holder = this.buildHolder();
+    const raw = JSON.stringify(holder);
+    const acquired = await this.trySet(raw);
+    if (acquired) {
+      this.setCurrentLease(raw, holder);
+      return true;
+    }
+    // Key exists — check if it's held by someone else or if we raced
+    const existingRaw = await this.redis.get(this.key);
+    if (!existingRaw) {
+      const retried = await this.trySet(raw);
+      if (retried) {
+        this.setCurrentLease(raw, holder);
+        return true;
+      }
+    }
+    return false;
   }
 
   private async invalidateLease(reason: ApiInstanceLeaseInvalidationReason, error?: unknown): Promise<void> {

@@ -2,7 +2,7 @@
  * RemoteLimbNode — F126 Phase C
  *
  * ILimbNode proxy that forwards invoke/healthCheck to a remote HTTP endpoint.
- * Remote nodes register themselves via /api/limb/register, then Cat Café
+ * Remote nodes register themselves via /api/limb/register, then Clowder AI
  * creates a RemoteLimbNode to represent them in the LimbRegistry.
  */
 

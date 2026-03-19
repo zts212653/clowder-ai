@@ -35,7 +35,23 @@ export {
   type PrTrackingEntry,
   type PrTrackingInput,
 } from './PrTrackingStore.js';
+export { RedisPrTrackingStore } from './RedisPrTrackingStore.js';
 export {
+  extractSeverityFindings,
+  GhCliReviewContentFetcher,
+  getMaxSeverity,
+  type IReviewContentFetcher,
+  normalizeReviewText,
+  type RawReview,
+  type ReviewContent,
+  type SelectedReview,
+  type Severity,
+  type SeverityFinding,
+  selectLatestReview,
+  type TextFragment,
+} from './ReviewContentFetcher.js';
+export {
+  buildReviewMessageContent,
   ReviewRouter,
   type ReviewRouterOptions,
   type RouteResult,

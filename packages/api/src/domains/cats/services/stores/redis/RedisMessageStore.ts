@@ -699,6 +699,7 @@ export class RedisMessageStore {
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
+    if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
     const pipeline = this.redis.multi();
     pipeline.hset(MessageKeys.detail(id), {
       deliveredAt: String(deliveredAt),

@@ -102,4 +102,41 @@ describe('ChatContainerHeader thread indicator', () => {
 
     expect(container.textContent).toContain('未命名对话');
   });
+
+  it('hides sentinel projectPath "default" from thread label', () => {
+    mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_sentinel', projectPath: 'default' }];
+    act(() => {
+      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_sentinel' }));
+    });
+
+    expect(container.textContent).toContain('讨论 F095 设计');
+    expect(container.textContent).not.toContain('default');
+  });
+
+  it('preserves "default" label for real path ending in /default', () => {
+    mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_real_default', projectPath: '/tmp/default' }];
+    act(() => {
+      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_real_default' }));
+    });
+
+    expect(container.textContent).toContain('讨论 F095 设计');
+    expect(container.textContent).toContain('default');
+  });
+
+  it('maps internal basename to brand name when NEXT_PUBLIC_BRAND_NAME is set', () => {
+    const origEnv = process.env.NEXT_PUBLIC_BRAND_NAME;
+    process.env.NEXT_PUBLIC_BRAND_NAME = 'Clowder AI';
+    try {
+      mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_brand', projectPath: '/home/user/cat-cafe' }];
+      act(() => {
+        root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_brand' }));
+      });
+
+      expect(container.textContent).toContain('Clowder AI');
+      expect(container.textContent).not.toContain('cat-cafe');
+    } finally {
+      if (origEnv === undefined) delete process.env.NEXT_PUBLIC_BRAND_NAME;
+      else process.env.NEXT_PUBLIC_BRAND_NAME = origEnv;
+    }
+  });
 });

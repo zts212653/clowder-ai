@@ -437,6 +437,49 @@ search_evidence(query, {
 - lesson/pitfall 召回质量改进（keywords 补充 + FTS5 索引调优）
 - session digest 路径修复（确认 transcriptDataDir 解析正确）
 
+### Phase F: 多项目记忆 — 猫猫出征新家/接手老项目（待实现）
+
+> **触发**：team lead问"猫出征到 dare/studio-flow 怎么办？记忆系统怎么办？"
+> **核心决策**：KD-35（两种策略）+ KD-36（遗留项目 frontmatter formatter）
+
+**F-1. 新项目策略：家规引导建标准 docs 体系**
+
+- 猫带着 Skills 出征 → Skills 里 feat-lifecycle 引导建 `docs/features/`、`docs/decisions/` 等标准目录
+- `IndexBuilder` 的 KIND_DIRS 直接适配（13 个标准目录）
+- 需要：`project-init` skill 或脚本，猫到新项目时自动创建 docs 骨架
+
+**F-2. 遗留项目策略：通用递归扫描**
+
+- `discoverFiles()` 增加 fallback：先扫 KIND_DIRS 标准目录，再递归扫剩余 `.md`
+- Kind 从路径推断（KIND_DIRS 表）→ frontmatter → 默认 `plan`
+- 不要求遗留项目有特定目录结构——有 `.md` 就索引
+
+**F-3. 遗留项目 Frontmatter Formatter**
+
+- 扫描遗留项目的 `.md` 文件，自动补充 frontmatter metadata
+- 推断 `doc_kind`（从路径/内容关键词）、`topics`（从标题/内容提取）、`anchor`（从文件名）
+- 可选人工确认或全自动
+- 提升 kind 推断准确度和检索质量
+
+**F-4. 全局知识层（跟猫走）**
+
+- 编译 `global_knowledge.sqlite`：从 Skills/家规/MEMORY.md/lessons-learned 编译只读索引
+- 放在猫猫 home 目录（`~/.cat-cafe/global_knowledge.sqlite`），不在项目里
+- `KnowledgeResolver` 联邦检索：search 时同时查 project + global 两个 SQLite，RRF 融合
+- 猫出征新项目 → 带走全局层，在新项目搜"Redis 坑"能命中 cat-cafe 的教训
+
+**当前可用度**（无需 Phase F 即可用）：
+- 新项目 docs 自动索引 ✅（如果按标准目录建）
+- thread 消息自动入库 ✅（append listener）
+- Skills/提示词跟猫走 ✅
+- "开工前先搜"的习惯跟猫走 ✅
+- SessionBootstrap auto-recall ✅
+
+**Phase F 后新增**：
+- 遗留项目任意 `.md` 可索引
+- 跨项目检索（在 dare 里搜 cat-cafe 的教训）
+- frontmatter 自动补全工具
+
 ## Phase D 完成后的预期效果
 
 > team lead指示：做完后要讲清楚"team lead日常使用感受到什么优化"和"猫猫自己感受到什么优化"。跑一段时间才知道做得好不好。
@@ -608,6 +651,8 @@ search_evidence(query, {
 | KD-32 | **Thread 索引不导出 markdown**——直接从 messageStore 读消息内容编译索引，不转中间层 md 文件 | team lead明确否决 + Maine Coon方案共识：真相源在 Redis（TTL=0 永久），索引是编译产物，导出 md = 重复真相源 | 2026-03-18 |
 | KD-33 | **Thread 索引不靠 threadMemory.summary**——340 thread 中 326 个 summary 为空，必须从消息内容本身提取可搜文本 | team lead指出"threadMemory.summary 不靠谱"，回溯 QMD proposal 确认：正确做法是 turn-by-turn 消息拼接 | 2026-03-18 |
 | KD-34 | **Thread 索引增量更新必须覆盖所有 messageStore.append 调用点（36 个）**——不能只 hook 2 条 HTTP 路由，必须在 messageStore 内部加 post-append callback | team lead问"好几天不重启怎么办"，代价分析：IO/CPU 可忽略（<5ms/thread），真实代价只是"确保覆盖所有写入路径" | 2026-03-18 |
+| KD-35 | **多项目记忆分两种策略**：(1) 新项目：猫按家规建标准 docs 体系（feat-lifecycle/Skills 引导），IndexBuilder KIND_DIRS 直接适配；(2) 遗留老项目：通用递归扫描所有 `.md`，不硬编码目录名。两种共存，先标准后兜底 | team lead指出"新项目猫不知道要建 docs 体系"，分两种情况设计 | 2026-03-19 |
+| KD-36 | **遗留项目需要 frontmatter formatter**——老项目 .md 文件可能没有 frontmatter（feature_ids/doc_kind/topics），需要一个工具自动扫描并补充 metadata，提升 kind 推断和检索质量 | team lead提出"接手垃圾项目也需要 formatter 那个 metadata" | 2026-03-19 |
 
 ## Review Gate
 

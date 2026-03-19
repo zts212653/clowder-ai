@@ -44,6 +44,21 @@ die() {
   exit 1
 }
 
+join_by() {
+  local delim="$1"
+  shift || true
+  local first=true
+  local value
+  for value in "$@"; do
+    if [ "$first" = true ]; then
+      printf '%s' "$value"
+      first=false
+    else
+      printf '%s%s' "$delim" "$value"
+    fi
+  done
+}
+
 abs_path() {
   local input="$1"
   local dir base
@@ -90,8 +105,80 @@ ensure_remote_exists() {
 }
 
 is_api_running() {
-  local port="${API_SERVER_PORT:-3003}"
+  local port="${API_SERVER_PORT:-3004}"
   lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+start_arg_present() {
+  local needle="$1"
+  local arg
+
+  if [ "${START_ARGS+set}" != "set" ]; then
+    return 1
+  fi
+
+  for arg in "${START_ARGS[@]}"; do
+    if [ "$arg" = "$needle" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+runtime_quick_mode() {
+  start_arg_present "--quick" || start_arg_present "-q"
+}
+
+install_runtime_dependencies() {
+  info "runtime prerequisites missing; running pnpm install --frozen-lockfile"
+  pnpm -C "$RUNTIME_DIR" install --frozen-lockfile
+}
+
+ensure_runtime_dependencies() {
+  local missing=()
+
+  [ -d "$RUNTIME_DIR/node_modules" ] || missing+=("node_modules")
+  [ -f "$RUNTIME_DIR/packages/web/node_modules/next/package.json" ] || missing+=("packages/web:next")
+  [ -f "$RUNTIME_DIR/packages/api/node_modules/tsx/package.json" ] || missing+=("packages/api:tsx")
+  [ -f "$RUNTIME_DIR/packages/mcp-server/node_modules/typescript/package.json" ] || missing+=("packages/mcp-server:typescript")
+
+  if [ "${#missing[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  local joined_missing
+  joined_missing=$(join_by ", " "${missing[@]}")
+  info "detected missing runtime prerequisites: $joined_missing"
+
+  if [ "$RUN_INSTALL" != "true" ]; then
+    die "runtime prerequisites missing ($joined_missing). Run 'pnpm -C \"$RUNTIME_DIR\" install --frozen-lockfile' or omit --no-install."
+  fi
+
+  install_runtime_dependencies
+}
+
+ensure_quick_start_artifacts() {
+  runtime_quick_mode || return 0
+
+  if [ ! -f "$RUNTIME_DIR/packages/shared/dist/index.js" ]; then
+    info "quick start missing shared dist; running pnpm -C \"$RUNTIME_DIR/packages/shared\" run build"
+    pnpm -C "$RUNTIME_DIR/packages/shared" run build
+  fi
+
+  if [ ! -f "$RUNTIME_DIR/packages/mcp-server/dist/index.js" ]; then
+    info "quick start missing MCP server dist; running pnpm -C \"$RUNTIME_DIR/packages/mcp-server\" run build"
+    pnpm -C "$RUNTIME_DIR/packages/mcp-server" run build
+  fi
+
+  if [ ! -f "$RUNTIME_DIR/packages/web/.next/BUILD_ID" ]; then
+    info "quick start missing web production build; running pnpm -C \"$RUNTIME_DIR/packages/web\" run build"
+    pnpm -C "$RUNTIME_DIR/packages/web" run build
+  fi
+}
+
+ensure_runtime_start_prereqs() {
+  ensure_runtime_dependencies
+  ensure_quick_start_artifacts
 }
 
 ensure_restart_authorized() {
@@ -224,6 +311,8 @@ status_runtime_worktree() {
 start_runtime_worktree() {
   if ! is_git_repo; then
     ensure_restart_authorized
+    RUNTIME_DIR="$PROJECT_DIR"
+    ensure_runtime_start_prereqs
     info "running in-place (deployment mode): $PROJECT_DIR"
     cd "$PROJECT_DIR"
     exec ./scripts/start-dev.sh --prod-web ${START_ARGS[@]+"${START_ARGS[@]}"}
@@ -247,6 +336,8 @@ start_runtime_worktree() {
       sync_runtime_worktree
     fi
   fi
+
+  ensure_runtime_start_prereqs
 
   info "starting production stack from runtime worktree: $RUNTIME_DIR"
   cd "$RUNTIME_DIR"

@@ -135,29 +135,15 @@ describe('PreviewGateway', () => {
     assert.ok(res.body.includes('cat-cafe-ws-patch'), 'Should inject ws-patch script tag');
   });
 
-  it('rejects start when the requested gateway port is already in use', async () => {
-    const occupied = await new Promise((resolve) => {
-      const server = http.createServer();
-      server.listen(0, '127.0.0.1', () => {
-        const addr = server.address();
-        resolve({ server, port: addr.port });
-      });
-    });
+  it('rejects start when configured port is already in use', async () => {
+    const blocker = http.createServer();
+    await new Promise((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    const address = blocker.address();
+    const blockedPort = typeof address === 'object' && address ? address.port : 0;
+    const blockedGateway = new PreviewGateway({ port: blockedPort });
 
-    const conflictingGateway = new PreviewGateway({ port: occupied.port, host: '127.0.0.1' });
-    conflictingGateway.server.on('error', () => {});
-
-    try {
-      await assert.rejects(
-        Promise.race([
-          conflictingGateway.start(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('start timeout')), 250)),
-        ]),
-        /EADDRINUSE/,
-      );
-    } finally {
-      await new Promise((resolve) => occupied.server.close(() => resolve()));
-      await conflictingGateway.stop().catch(() => {});
-    }
+    await assert.rejects(blockedGateway.start(), /EADDRINUSE/);
+    await blockedGateway.stop();
+    await new Promise((resolve) => blocker.close(() => resolve()));
   });
 });

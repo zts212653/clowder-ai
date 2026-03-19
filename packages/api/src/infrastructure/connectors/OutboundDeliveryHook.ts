@@ -28,6 +28,8 @@ export interface IStreamableOutboundAdapter extends IOutboundAdapter {
   sendPlaceholder(externalChatId: string, text: string): Promise<string>;
   /** Edit an already-sent message in place. */
   editMessage(externalChatId: string, platformMessageId: string, text: string): Promise<void>;
+  /** Delete a message by platform message ID (cleanup after streaming). */
+  deleteMessage?(platformMessageId: string): Promise<void>;
 }
 
 export interface ThreadMeta {

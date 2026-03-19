@@ -4,6 +4,7 @@ import type { ConnectorTailwindTheme } from '@cat-cafe/shared';
 import { getConnectorDefinition } from '@cat-cafe/shared';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
+import { ConnectorImage, GitHubIcon, SettingsIcon, UsersIcon } from './icons/ConnectorIcons';
 import { BallotIcon } from './icons/VoteIcons';
 import { MarkdownContent } from './MarkdownContent';
 import { RichBlocks } from './rich/RichBlocks';
@@ -47,6 +48,35 @@ const DEFAULT_CONNECTOR_THEME: ConnectorTailwindTheme = {
   bubble: 'border border-blue-200 bg-blue-50',
 };
 
+/** F056: Designed icon per connector — replaces emoji with SVG/PNG icons. */
+function ConnectorIcon({ connector, fallbackIcon }: { connector: string; fallbackIcon: string }) {
+  switch (connector) {
+    case 'feishu':
+      return <ConnectorImage src="/images/connectors/feishu.png" alt="Feishu" className="w-5 h-5" />;
+    case 'telegram':
+      return <ConnectorImage src="/images/connectors/telegram.png" alt="Telegram" className="w-5 h-5" />;
+    case 'imessage':
+      return <ConnectorImage src="/images/connectors/imessage.png" alt="iMessage" className="w-5 h-5" />;
+    case 'github-review':
+      // Preserve legacy non-default icons (e.g., triage stored ⚠️ instead of 🔔)
+      if (fallbackIcon !== 'github' && fallbackIcon !== '🔔') {
+        return <span>{fallbackIcon}</span>;
+      }
+      return <GitHubIcon className="w-4 h-4" />;
+    case 'vote-result':
+      return <BallotIcon className="w-4 h-4" />;
+    case 'multi-mention-result':
+      return <UsersIcon className="w-4 h-4" />;
+    case 'system-command':
+      return <SettingsIcon className="w-4 h-4" />;
+    default:
+      if (fallbackIcon.startsWith('/') || fallbackIcon.startsWith('http')) {
+        return <ConnectorImage src={fallbackIcon} alt="connector" className="w-5 h-5" />;
+      }
+      return <span>{fallbackIcon}</span>;
+  }
+}
+
 /**
  * F098-B5: Registry-driven connector theme lookup.
  * New connectors only need an entry in CONNECTOR_DEFINITIONS (shared package).
@@ -76,7 +106,7 @@ export function ConnectorBubble({ message }: ConnectorBubbleProps) {
     <div data-message-id={message.id} className="flex gap-2 mb-4 items-start">
       {/* Connector icon avatar */}
       <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-base ${theme.avatar}`}>
-        {source.connector === 'vote-result' ? <BallotIcon className="w-4 h-4" /> : source.icon}
+        <ConnectorIcon connector={source.connector} fallbackIcon={source.icon} />
       </div>
       <div className="max-w-[85%] md:max-w-[75%] min-w-0">
         <div className="flex items-center gap-2 mb-1">

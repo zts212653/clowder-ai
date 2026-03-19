@@ -18,6 +18,11 @@ export interface IConnectorThreadBindingStore {
     userId: string,
     limit?: number,
   ): ConnectorThreadBinding[] | Promise<ConnectorThreadBinding[]>;
+  setHubThread(
+    connectorId: string,
+    externalChatId: string,
+    hubThreadId: string,
+  ): ConnectorThreadBinding | null | Promise<ConnectorThreadBinding | null>;
 }
 
 export class MemoryConnectorThreadBindingStore implements IConnectorThreadBindingStore {
@@ -54,5 +59,13 @@ export class MemoryConnectorThreadBindingStore implements IConnectorThreadBindin
   listByUser(connectorId: string, userId: string, limit?: number): ConnectorThreadBinding[] {
     const all = [...this.bindings.values()].filter((b) => b.connectorId === connectorId && b.userId === userId);
     return limit ? all.slice(0, limit) : all;
+  }
+
+  setHubThread(connectorId: string, externalChatId: string, hubThreadId: string): ConnectorThreadBinding | null {
+    const existing = this.bindings.get(this.key(connectorId, externalChatId));
+    if (!existing) return null;
+    const updated = { ...existing, hubThreadId };
+    this.bindings.set(this.key(connectorId, externalChatId), updated);
+    return updated;
   }
 }

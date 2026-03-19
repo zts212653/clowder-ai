@@ -68,9 +68,9 @@ Step 3: VERIFY — 逐项检查
   - 🔴 新增行为规则 → governance digest / shared-rules 注入更新了吗？
 
 Step 4: RUNTIME GUARD — 前端证据采集前先做运行态保护
-  - 若会话在 `cat-cafe-runtime`，先探活：`curl -sf http://localhost:3003/health`
+  - 若会话在 `cat-cafe-runtime`，先探活：`curl -sf http://localhost:3004/health`
   - 服务已在线时直接复用，禁止在该会话执行 `pnpm start` / `pnpm runtime:start` / `./scripts/start-dev.sh`
-  - `localhost:3004/3003` 默认按 runtime 处理；如果你要验证未合入改动，不能把这两个端口的页面/接口响应当成当前分支的证据
+  - `localhost:3003/3004` 默认按 runtime 处理；如果你要验证未合入改动，不能把这两个端口的页面/接口响应当成当前分支的证据
   - 证明“这是我当前 worktree 的验证证据”时，必须同时说清：`worktree/cwd` + 目标 URL。两者对不上 = 证据无效
   - 确需重启时，先获铲屎官明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行
   - **Alpha 优先**：验证已合入 main 的改动时，优先用 `pnpm alpha:start`（3011/3012/4111/6398）取证，而非 runtime。Alpha 环境每次启动自动同步 origin/main
@@ -177,7 +177,7 @@ pnpm -r --if-present run build → exit 0 ✅
 | 前端功能没有截图证据 | ≤3 张截图 + 15s 录屏 + 映射表 |
 | 有 .pen 设计稿但没对照实现 | Step 5 自动 glob 检测，匹配到就强制对照，不靠记忆 |
 | 为了截图在 runtime 会话里重跑 `pnpm start` | 先探活复用现有 runtime；确需重启必须显式授权 |
-| 拿 runtime 的 `3004/3003` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3004/3003`，默认这是 runtime 证据，不是未合入改动证据 |
+| 拿 runtime 的 `3003/3004` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3003/3004`，默认这是 runtime 证据，不是未合入改动证据 |
 | 截图顺手掉进仓库根目录 | Step 7.5 必查；先移到 `${TMPDIR}/cat-cafe-evidence/...` 或正式归档目录，再继续 |
 | Redis 改动用默认测试命令 | 必须跑 `test:redis`，禁止直连 6399 |
 | 只看 spec checkbox 就声称完成/未完成 | 核实 `git log --grep` + `gh pr list` + 实际 commit（LL-029）|

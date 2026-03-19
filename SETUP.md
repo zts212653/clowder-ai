@@ -33,15 +33,9 @@ cp .env.example .env
 pnpm start
 ```
 
-This starts the stable runtime environment. Use these entrypoints:
+This auto-starts Redis, builds packages, and launches both Frontend (port 3003) and API (port 3004).
 
-- `pnpm start` — stable runtime environment (runtime worktree)
-- `pnpm start:direct` — stable start from the current directory/worktree (`next start` + non-watch API)
-- `pnpm dev:direct` — hot-reload development start from the current directory/worktree
-
-`--quick` only means "reuse existing build outputs and skip rebuilding". It does not switch dev/prod mode.
-
-Open the Frontend URL printed by the startup summary.
+Open `http://localhost:3003` and start talking to your team.
 
 ## Required Configuration
 
@@ -65,20 +59,18 @@ GOOGLE_API_KEY=...
 Redis is the persistent store for threads, messages, tasks, and memory.
 
 ```bash
-REDIS_URL=redis://localhost:<REDIS_PORT>
+REDIS_URL=redis://localhost:6399
 ```
 
-When you use the repo start scripts, Redis is auto-started on the configured `REDIS_PORT` (repo defaults come from the startup scripts and `.env`). Set `REDIS_URL` only when pointing to an external Redis or overriding the port family yourself.
+The `pnpm start` command auto-starts Redis on port 6399. Data persists in `~/.cat-cafe/redis-dev/`.
 
 **No Redis?** Use `pnpm start --memory` for in-memory mode (data lost on restart — fine for trying things out).
 
 ### Frontend
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:<API_SERVER_PORT>
+NEXT_PUBLIC_API_URL=http://localhost:3004
 ```
-
-If you override ports for direct modes, set `NEXT_PUBLIC_API_URL` to the matching API address before building/starting.
 
 ## Optional Features
 
@@ -107,39 +99,6 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 
 Supported engines: Qwen3-ASR (primary), Whisper (fallback) for input; Kokoro, edge-tts, Qwen3-TTS for output.
 These services are disabled by default. Set the corresponding `*_ENABLED=1` flags only after you have installed the local dependencies.
-
-### Manual Mirror / Download Overrides
-
-Use explicit overrides when the default external sources are blocked. Clowder does not auto-switch to domestic mirrors in this flow; you choose the mirror or direct download URL yourself.
-
-Persistent configuration in `.env`:
-
-```bash
-CAT_CAFE_NPM_REGISTRY=https://registry.npmmirror.com
-CAT_CAFE_PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-CAT_CAFE_PIP_EXTRA_INDEX_URL=https://mirror.example/simple
-CAT_CAFE_HF_ENDPOINT=https://hf-mirror.com
-CAT_CAFE_WINDOWS_REDIS_RELEASE_API=https://mirror.example/redis/releases/latest.json
-CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL=https://mirror.example/redis.zip
-```
-
-One-off Bash startup overrides:
-
-```bash
-pnpm start -- \
-  --npm-registry=https://registry.npmmirror.com \
-  --pip-index-url=https://pypi.tuna.tsinghua.edu.cn/simple \
-  --pip-extra-index-url=https://mirror.example/simple \
-  --hf-endpoint=https://hf-mirror.com
-```
-
-Windows install override example:
-
-```powershell
-$env:CAT_CAFE_NPM_REGISTRY="https://registry.npmmirror.com"
-$env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL="https://mirror.example/redis.zip"
-.\scripts\install.ps1
-```
 
 ### API Gateway Proxy
 
@@ -217,11 +176,11 @@ pnpm hindsight:stop     # Shut down
 
 ## Ports Overview
 
-| Service | Port / Env | Required |
-|---------|------------|----------|
-| Frontend (Next.js) | `FRONTEND_PORT` | Yes |
-| API Backend | `API_SERVER_PORT` | Yes |
-| Redis | `REDIS_PORT` | Yes (or use `--memory`) |
+| Service | Port | Required |
+|---------|------|----------|
+| Frontend (Next.js) | 3003 | Yes |
+| API Backend | 3004 | Yes |
+| Redis | 6399 | Yes (or use `--memory`) |
 | ASR | 9876 | No — voice input |
 | TTS | 9879 | No — voice output |
 | LLM Post-process | 9878 | No — speech correction |
@@ -231,12 +190,9 @@ pnpm hindsight:stop     # Shut down
 ## Useful Commands
 
 ```bash
-pnpm start                     # Stable runtime environment (runtime worktree)
-pnpm start --quick             # Reuse existing runtime build outputs
-pnpm start --memory            # Runtime environment without Redis
-pnpm start:direct              # Stable start from current directory/worktree (non-watch API)
-pnpm start:direct --quick      # Reuse current-directory build outputs
-pnpm dev:direct                # Hot-reload development start from current directory/worktree
+pnpm start              # Start everything (Redis + API + Frontend)
+pnpm start --memory     # No Redis, in-memory mode
+pnpm start --quick      # Skip rebuild, use existing dist/
 
 pnpm check              # Biome lint + format check
 pnpm check:fix          # Auto-fix lint issues
@@ -250,7 +206,7 @@ pnpm redis:user:backup  # Manual backup
 ## Troubleshooting
 
 **Redis won't start?**
-- Check if your configured `REDIS_PORT` is in use: `lsof -i :<REDIS_PORT>`
+- Check if port 6399 is in use: `lsof -i :6399`
 - Make sure Redis is installed: `redis-server --version`
 
 **No agents responding?**
@@ -258,7 +214,7 @@ pnpm redis:user:backup  # Manual backup
 - Check the API logs in terminal for auth errors
 
 **Frontend can't connect to API?**
-- When overriding direct-start ports, make sure `NEXT_PUBLIC_API_URL` matches the API address
+- Make sure `NEXT_PUBLIC_API_URL=http://localhost:3004` is set
 - API must be running before frontend loads
 
 ---
@@ -292,15 +248,9 @@ cp .env.example .env
 pnpm start
 ```
 
-这会启动稳定的 runtime 环境。按场景使用下面这些入口：
+自动启动 Redis，构建包，启动前端（端口 3003）和 API（端口 3004）。
 
-- `pnpm start` — 稳定的 runtime 环境（runtime worktree）
-- `pnpm start:direct` — 从当前目录/worktree 稳定启动（`next start` + 非 watch API）
-- `pnpm dev:direct` — 从当前目录/worktree 以热重载开发模式启动
-
-`--quick` 只表示“复用已有构建产物，跳过重复构建”，不负责切换 dev/prod 模式。
-
-打开启动摘要里打印出来的 Frontend URL，开始和你的团队对话。
+打开 `http://localhost:3003`，开始和你的团队对话。
 
 ## 必须配置
 
@@ -324,20 +274,18 @@ GOOGLE_API_KEY=...
 Redis 是线程、消息、任务和记忆的持久化存储。
 
 ```bash
-REDIS_URL=redis://localhost:<REDIS_PORT>
+REDIS_URL=redis://localhost:6399
 ```
 
-使用仓库自带启动脚本时，Redis 会按配置的 `REDIS_PORT` 自动启动（repo 默认值由启动脚本和 `.env` 决定）。只有在你要接外部 Redis 或自己改端口族时，才需要手动设置 `REDIS_URL`。
+`pnpm start` 会自动启动 Redis（端口 6399）。数据持久化在 `~/.cat-cafe/redis-dev/`。
 
 **没有 Redis？** 用 `pnpm start --memory` 启动纯内存模式（重启后数据丢失 — 试玩够用了）。
 
 ### 前端
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:<API_SERVER_PORT>
+NEXT_PUBLIC_API_URL=http://localhost:3004
 ```
-
-如果 direct 模式改了端口，记得把 `NEXT_PUBLIC_API_URL` 改成对应的 API 地址再 build / start。
 
 ## 可选功能
 
@@ -366,39 +314,6 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 
 支持引擎：输入用 Qwen3-ASR（主）/ Whisper（备）；输出用 Kokoro / edge-tts / Qwen3-TTS。
 这些服务默认关闭。只有在本地依赖安装完成后，再把对应的 `*_ENABLED=1` 打开。
-
-### 手动镜像 / 下载地址覆盖
-
-当默认外部源不可达时，可以显式指定镜像或直链下载地址。这里不做“自动切国内镜像”；所有覆盖都必须由你手动配置。
-
-把以下变量写进 `.env`，可长期生效：
-
-```bash
-CAT_CAFE_NPM_REGISTRY=https://registry.npmmirror.com
-CAT_CAFE_PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-CAT_CAFE_PIP_EXTRA_INDEX_URL=https://mirror.example/simple
-CAT_CAFE_HF_ENDPOINT=https://hf-mirror.com
-CAT_CAFE_WINDOWS_REDIS_RELEASE_API=https://mirror.example/redis/releases/latest.json
-CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL=https://mirror.example/redis.zip
-```
-
-只想临时覆盖一次，Bash 启动可直接传参：
-
-```bash
-pnpm start -- \
-  --npm-registry=https://registry.npmmirror.com \
-  --pip-index-url=https://pypi.tuna.tsinghua.edu.cn/simple \
-  --pip-extra-index-url=https://mirror.example/simple \
-  --hf-endpoint=https://hf-mirror.com
-```
-
-Windows 安装临时覆盖示例：
-
-```powershell
-$env:CAT_CAFE_NPM_REGISTRY="https://registry.npmmirror.com"
-$env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL="https://mirror.example/redis.zip"
-.\scripts\install.ps1
-```
 
 ### API 网关代理
 
@@ -476,11 +391,11 @@ pnpm hindsight:stop     # 关闭
 
 ## 端口概览
 
-| 服务 | 端口 / 环境变量 | 必需 |
-|------|-----------------|------|
-| 前端（Next.js） | `FRONTEND_PORT` | 是 |
-| API 后端 | `API_SERVER_PORT` | 是 |
-| Redis | `REDIS_PORT` | 是（或用 `--memory`） |
+| 服务 | 端口 | 必需 |
+|------|------|------|
+| 前端（Next.js） | 3003 | 是 |
+| API 后端 | 3004 | 是 |
+| Redis | 6399 | 是（或用 `--memory`） |
 | ASR | 9876 | 否 — 语音输入 |
 | TTS | 9879 | 否 — 语音输出 |
 | LLM 后处理 | 9878 | 否 — 语音纠正 |
@@ -490,12 +405,9 @@ pnpm hindsight:stop     # 关闭
 ## 常用命令
 
 ```bash
-pnpm start                     # 稳定的 runtime 环境（runtime worktree）
-pnpm start --quick             # 复用已有 runtime 构建产物
-pnpm start --memory            # 无 Redis 的 runtime 环境
-pnpm start:direct              # 从当前目录/worktree 稳定启动（非 watch API）
-pnpm start:direct --quick      # 复用当前目录的构建产物
-pnpm dev:direct                # 从当前目录/worktree 以热重载开发模式启动
+pnpm start              # 启动全部（Redis + API + 前端）
+pnpm start --memory     # 无 Redis，纯内存模式
+pnpm start --quick      # 跳过重编译，用已有 dist/
 
 pnpm check              # Biome lint + 格式检查
 pnpm check:fix          # 自动修复 lint 问题
@@ -509,7 +421,7 @@ pnpm redis:user:backup  # 手动备份
 ## 常见问题
 
 **Redis 启动不了？**
-- 检查当前配置的 `REDIS_PORT` 是否被占用：`lsof -i :<REDIS_PORT>`
+- 检查端口 6399 是否被占用：`lsof -i :6399`
 - 确认 Redis 已安装：`redis-server --version`
 
 **没有 agent 响应？**
@@ -517,5 +429,5 @@ pnpm redis:user:backup  # 手动备份
 - 看终端里 API 日志有没有认证错误
 
 **前端连不上 API？**
-- 如果你在 direct 模式里改了端口，确认 `NEXT_PUBLIC_API_URL` 指向对应的 API 地址
+- 确认设了 `NEXT_PUBLIC_API_URL=http://localhost:3004`
 - API 必须在前端加载前启动
