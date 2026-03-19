@@ -115,7 +115,6 @@ export function DailyUsageSection() {
 }
 
 function CatUsageRow({ catId, usage }: { catId: string; usage: CatDailyUsage }) {
-  const totalTokens = usage.inputTokens + usage.outputTokens;
   return (
     <div className="flex items-center justify-between gap-2 text-xs">
       <div className="flex items-center gap-2 min-w-0">
@@ -125,10 +124,6 @@ function CatUsageRow({ catId, usage }: { catId: string; usage: CatDailyUsage }) 
       <div className="flex items-center gap-3 text-gray-500 shrink-0">
         <span title="输入 tokens">入 {formatTokens(usage.inputTokens)}</span>
         <span title="输出 tokens">出 {formatTokens(usage.outputTokens)}</span>
-        <span className="font-medium text-gray-700 w-16 text-right" title="总 tokens">
-          {formatTokens(totalTokens)}
-        </span>
-        {usage.costUsd > 0 && <span className="text-amber-600 w-14 text-right">${usage.costUsd.toFixed(2)}</span>}
       </div>
     </div>
   );
