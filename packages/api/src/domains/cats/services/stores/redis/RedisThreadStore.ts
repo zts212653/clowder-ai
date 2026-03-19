@@ -591,6 +591,10 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.bootcampState) {
       result.bootcampState = JSON.stringify(thread.bootcampState);
     }
+    // F128: Parent thread for orchestration tracking
+    if (thread.parentThreadId) {
+      result.parentThreadId = thread.parentThreadId;
+    }
     return result;
   }
 
@@ -664,6 +668,10 @@ export class RedisThreadStore implements IThreadStore {
       } catch {
         /* ignore malformed JSON */
       }
+    }
+    // F128: Parent thread for orchestration tracking
+    if (data.parentThreadId) {
+      result.parentThreadId = data.parentThreadId;
     }
     return result;
   }

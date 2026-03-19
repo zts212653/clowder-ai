@@ -49,7 +49,11 @@ export function registerCallbackCreateThreadRoutes(
     const sourceThread = await threadStore.get(record.threadId);
     const projectPath = sourceThread?.projectPath;
 
-    const thread = await threadStore.create(record.userId, title, projectPath, parentThreadId);
+    // F128: Auto-set parentThreadId to the invoking thread if not explicitly provided.
+    // Cats don't know their own threadId as a string, so the server infers it.
+    const effectiveParentThreadId = parentThreadId ?? record.threadId;
+
+    const thread = await threadStore.create(record.userId, title, projectPath, effectiveParentThreadId);
 
     if (preferredCats && preferredCats.length > 0) {
       await threadStore.updatePreferredCats(thread.id, preferredCats as CatId[]);
@@ -62,6 +66,6 @@ export function registerCallbackCreateThreadRoutes(
     }
 
     reply.status(201);
-    return { threadId: thread.id, ...(parentThreadId ? { parentThreadId } : {}) };
+    return { threadId: thread.id, parentThreadId: effectiveParentThreadId };
   });
 }
