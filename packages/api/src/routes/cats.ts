@@ -201,7 +201,10 @@ async function validateProviderBindingOrThrow(params: {
   if (!profile) {
     throw new Error(`provider profile "${trimmedProfileId}" not found`);
   }
-  if (profile.protocol !== protocol) {
+  const protocolCompatible = profile.protocol === protocol;
+  const clientAllowsAnyApiKey = params.client === 'anthropic' || params.client === 'openai' || params.client === 'google';
+  const bindingAllowed = protocolCompatible || (clientAllowsAnyApiKey && profile.authType === 'api_key');
+  if (!bindingAllowed) {
     throw new Error(
       `provider profile "${trimmedProfileId}" protocol "${profile.protocol}" is incompatible with client "${params.client}"`,
     );

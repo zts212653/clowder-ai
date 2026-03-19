@@ -282,12 +282,16 @@ describe('provider profiles routes', () => {
     }
   });
 
-  it('POST /api/provider-profiles/:id/test rejects non-anthropic providers', async () => {
+  it('POST /api/provider-profiles/:id/test validates openai api_key providers via fetch', async () => {
     const Fastify = (await import('fastify')).default;
+    const calls = [];
     const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
     const app = Fastify();
     await app.register(providerProfilesRoutes, {
-      fetchImpl: async () => new Response('{}', { status: 200 }),
+      fetchImpl: async (url, init) => {
+        calls.push({ url: String(url), headers: init?.headers });
+        return new Response('{}', { status: 200 });
+      },
     });
     await app.ready();
 
@@ -319,8 +323,10 @@ describe('provider profiles routes', () => {
           projectPath: projectDir,
         }),
       });
-      assert.equal(testRes.statusCode, 400);
-      assert.match(testRes.body, /only anthropic api_key providers can be tested/i);
+      assert.equal(testRes.statusCode, 200);
+      assert.equal(testRes.json().ok, true);
+      assert.equal(new URL(calls[0].url).pathname, '/v1/models');
+      assert.equal(calls[0].headers.authorization, 'Bearer sk-openai');
     } finally {
       await rm(projectDir, { recursive: true, force: true });
       await app.close();

@@ -199,9 +199,73 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).toContain('Codex (OAuth)');
     expect(container.textContent).toContain('Gemini (OAuth)');
     expect(container.textContent).toContain('Codex Sponsor');
+    expect(container.textContent).toContain('OpenCode / Dare 走 OAuth-like 登录态');
     expect(container.textContent).toContain('新建 API Key 账号');
     expect(container.textContent).not.toContain('布偶猫救援中心');
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/claude-rescue/sessions');
+  });
+
+  it('shows verification status for api-key accounts instead of repeating activation badges', async () => {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles/codex-sponsor/test' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ ok: true, mode: 'api_key', status: 200 }));
+      }
+      if (path.startsWith('/api/provider-profiles')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-oauth',
+            providers: [
+              {
+                id: 'claude-oauth',
+                provider: 'claude-oauth',
+                displayName: 'Claude (OAuth)',
+                name: 'Claude (OAuth)',
+                authType: 'oauth',
+                protocol: 'anthropic',
+                builtin: true,
+                mode: 'subscription',
+                models: ['claude-opus-4-6'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                baseUrl: 'https://api.openai-proxy.dev',
+                models: ['gpt-5.4'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubProviderProfilesTab));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('未验证');
+    expect(container.textContent).not.toContain('已激活');
+
+    await act(async () => {
+      queryButton(container, '测试').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('Verified');
   });
 
   it('keeps API key creation collapsed by default and shows protocol controls on expand', async () => {

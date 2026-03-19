@@ -2,11 +2,38 @@ const withPWA = require('@ducanh2912/next-pwa').default;
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
 
+function resolveApiBaseUrl() {
+  const explicit = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '');
+  if (explicit) return explicit;
+
+  const apiPort = Number(process.env.API_SERVER_PORT);
+  if (Number.isInteger(apiPort) && apiPort > 0) {
+    return `http://localhost:${apiPort}`;
+  }
+
+  const frontendPort = Number(process.env.FRONTEND_PORT);
+  if (Number.isInteger(frontendPort) && frontendPort > 0) {
+    return `http://localhost:${frontendPort + 1}`;
+  }
+
+  return 'http://localhost:3003';
+}
+
+const apiBaseUrl = resolveApiBaseUrl();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
+  async rewrites() {
+    return [
+      {
+        source: '/uploads/:path*',
+        destination: `${apiBaseUrl}/uploads/:path*`,
+      },
+    ];
+  },
 };
 
 module.exports = withPWA({

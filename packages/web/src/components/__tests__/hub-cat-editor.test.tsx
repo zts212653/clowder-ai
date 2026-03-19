@@ -310,7 +310,7 @@ describe('HubCatEditor', () => {
     const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
     expect(optionLabels).toContain('Codex (OAuth)');
-    expect(optionLabels).not.toContain('Claude Sponsor');
+    expect(optionLabels).toContain('Claude Sponsor');
   });
 
   it('filters Dare/OpenCode profiles to same-protocol accounts regardless of auth type', () => {
@@ -373,6 +373,16 @@ describe('HubCatEditor', () => {
       },
     ];
 
+    expect(filterProfiles('openai', profiles).map((profile) => profile.id)).toEqual([
+      'claude-sponsor',
+      'codex-oauth',
+      'codex-sponsor',
+    ]);
+    expect(filterProfiles('anthropic', profiles).map((profile) => profile.id)).toEqual([
+      'claude-oauth',
+      'claude-sponsor',
+      'codex-sponsor',
+    ]);
     expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual(['codex-oauth', 'codex-sponsor']);
     expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual([
       'claude-oauth',

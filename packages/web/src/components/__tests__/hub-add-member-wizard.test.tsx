@@ -107,6 +107,34 @@ describe('HubAddMemberWizard', () => {
                 updatedAt: '2026-03-18T00:00:00.000Z',
               },
               {
+                id: 'codex-oauth',
+                provider: 'codex-oauth',
+                displayName: 'Codex (OAuth)',
+                name: 'Codex (OAuth)',
+                authType: 'oauth',
+                protocol: 'openai',
+                builtin: true,
+                mode: 'subscription',
+                models: ['gpt-5.4'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'claude-sponsor',
+                provider: 'claude-sponsor',
+                displayName: 'Claude Sponsor',
+                name: 'Claude Sponsor',
+                authType: 'api_key',
+                protocol: 'anthropic',
+                builtin: false,
+                mode: 'api_key',
+                models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
                 id: 'codex-sponsor',
                 provider: 'codex-sponsor',
                 displayName: 'Codex Sponsor',
@@ -146,21 +174,25 @@ describe('HubAddMemberWizard', () => {
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('OpenCode');
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('Dare');
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('Antigravity');
-
-    await click(queryButton(container, 'Codex'));
     expect(container.textContent).toContain('Step 2: 选择 Provider / 配置 CLI');
-
-    await click(queryButton(container, 'Codex Sponsor'));
     expect(container.textContent).toContain('Step 3: 选择 Model');
 
-    await click(queryButton(container, 'gpt-5.4-mini'));
+    await click(queryButton(container, 'Codex'));
+    expect(container.textContent).toContain('同名 OAuth + 任意 API Key provider');
+    expect(container.textContent).toContain('Codex (OAuth)');
+    expect(container.textContent).toContain('Codex Sponsor');
+    expect(container.textContent).toContain('Claude Sponsor');
+
+    await click(queryButton(container, 'Claude Sponsor'));
+    expect(container.textContent).toContain('claude-opus-4-6');
+    await click(queryButton(container, 'claude-opus-4-6'));
     await click(queryButton(container, '进入成员配置'));
     await flushEffects();
 
     expect(container.textContent).toContain('成员配置');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').value).toBe('openai');
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('codex-sponsor');
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('gpt-5.4-mini');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('claude-sponsor');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('claude-opus-4-6');
   });
 
   it('walks the Antigravity flow with default CLI args and lands in the editor', async () => {
@@ -174,8 +206,6 @@ describe('HubAddMemberWizard', () => {
 
     const cliInput = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]');
     expect(cliInput.value).toBe('. --remote-debugging-port=9000');
-
-    await click(queryButton(container, '下一步'));
     expect(container.textContent).toContain('Step 3: 选择 Model');
 
     await click(queryButton(container, 'gemini-3.1-pro'));
@@ -199,8 +229,6 @@ describe('HubAddMemberWizard', () => {
     await click(queryButton(container, 'Antigravity'));
     const cliInput = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]');
     expect(cliInput.value).toBe('. --remote-debugging-port=9000');
-
-    await click(queryButton(container, '下一步'));
     expect(container.textContent).toContain('gemini-3.1-pro');
     expect(container.textContent).toContain('claude-opus-4-6');
     expect(container.textContent).not.toContain('runtime-custom-model');

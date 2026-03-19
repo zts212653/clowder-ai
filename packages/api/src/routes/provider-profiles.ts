@@ -12,7 +12,7 @@ import {
   type ProviderProfileProtocol,
   type ProviderProfileProvider,
   readProviderProfiles,
-  resolveAnthropicRuntimeProfileById,
+  resolveRuntimeProviderProfileById,
   updateProviderProfile,
 } from '../config/provider-profiles.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
@@ -313,15 +313,15 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
       return { error: 'Profile not found' };
     }
 
-    if (profile.protocol !== 'anthropic' || profile.authType !== 'api_key') {
+    if (profile.authType !== 'api_key') {
       reply.status(400);
-      return { error: 'Only anthropic api_key providers can be tested' };
+      return { error: 'Only api_key providers can be tested' };
     }
 
-    const runtime = await resolveAnthropicRuntimeProfileById(projectRoot, params.profileId);
+    const runtime = await resolveRuntimeProviderProfileById(projectRoot, params.profileId);
     if (!runtime || runtime.mode !== 'api_key' || !runtime.baseUrl || !runtime.apiKey) {
       reply.status(400);
-      return { error: 'Only anthropic api_key providers can be tested' };
+      return { error: 'Only api_key providers can be tested' };
     }
 
     const baseUrl = normalizeBaseUrl(runtime.baseUrl);
@@ -329,7 +329,7 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     try {
       const modelsRes = await fetchImpl(modelsUrl, {
         method: 'GET',
-        headers: buildProbeHeaders(runtime.apiKey),
+        headers: buildProbeHeaders(profile.protocol, runtime.apiKey),
       });
 
       if (modelsRes.ok) {
@@ -340,11 +340,11 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
         };
       }
 
-      if (modelsRes.status === 404) {
+      if (profile.protocol === 'anthropic' && modelsRes.status === 404) {
         const messagesRes = await fetchImpl(`${baseUrl}/v1/messages`, {
           method: 'POST',
           headers: {
-            ...buildProbeHeaders(runtime.apiKey),
+            ...buildProbeHeaders(profile.protocol, runtime.apiKey),
             'content-type': 'application/json',
           },
           body: JSON.stringify({

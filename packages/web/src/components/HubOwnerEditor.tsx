@@ -165,7 +165,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-[#5C4B42]">Avatar</span>
-                <span className="text-xs text-[#8A776B]">点击上传或直接粘贴 URL</span>
+                <span className="text-xs text-[#8A776B]">仅显示预览，不回填上传路径</span>
               </div>
               <button
                 type="button"
@@ -182,7 +182,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[#2D2118]">{uploadingAvatar ? '上传中…' : '点击上传头像'}</p>
-                  <p className="mt-1 text-xs text-[#8A776B]">支持 png / jpg / webp，上传后自动回填</p>
+                  <p className="mt-1 text-xs text-[#8A776B]">支持 png / jpg / webp，上传后仅显示头像预览</p>
                 </div>
               </button>
               <input
@@ -198,13 +198,17 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
                   });
                 }}
               />
-              <input
-                aria-label="Owner Avatar"
-                value={avatar}
-                onChange={(event) => setAvatar(event.target.value)}
-                className="w-full rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2.5 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
-                placeholder="/uploads/owner.png"
-              />
+              {avatar ? (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setAvatar('')}
+                    className="rounded-full bg-[#F7F3F0] px-3 py-1.5 text-xs font-semibold text-[#8A776B] transition hover:bg-[#EFE5DD]"
+                  >
+                    清除头像
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">

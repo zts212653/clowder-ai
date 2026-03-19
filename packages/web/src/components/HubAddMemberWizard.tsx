@@ -23,7 +23,6 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [client, setClient] = useState<ClientValue | null>(null);
   const [providerProfileId, setProviderProfileId] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
@@ -45,14 +44,17 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
     () => availableProfiles.find((profile) => profile.id === providerProfileId) ?? null,
     [availableProfiles, providerProfileId],
   );
-  const stepTwoTitle = 'Step 2: 选择 Provider / 配置 CLI';
+  const selectableModels = useMemo(() => {
+    if (client === 'antigravity') return antigravityDefaults.models;
+    return selectedProfile?.models ?? [];
+  }, [antigravityDefaults.models, client, selectedProfile?.models]);
 
   function profileSubtitle(profile: ProfileItem) {
     if (profile.builtin && profile.authType === 'oauth') {
-      return '内置订阅账号，可直接从该账号的模型列表中创建成员';
+      return '内置订阅账号；Claude / Codex / Gemini 可直接复用，Dare / OpenCode 视作 OAuth-like 兼容账号';
     }
     if (profile.authType === 'api_key') {
-      return '自定义账号，可复用该账号下的模型能力';
+      return 'API Key 账号；Claude / Codex / Gemini 也可直接绑定，不受内置 OAuth 限制';
     }
     return '选择具体账号后，再从该账号可用模型中继续创建';
   }
@@ -60,7 +62,6 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setStep(1);
     setClient(null);
     setProviderProfileId('');
     setDefaultModel('');
@@ -92,44 +93,36 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
 
   useEffect(() => {
     if (!client || client === 'antigravity') return;
-    if (availableProfiles.length === 0) {
-      setProviderProfileId('');
-      return;
-    }
-    const nextProfile =
-      availableProfiles.find((profile) => profile.id === providerProfileId) ?? availableProfiles[0] ?? null;
-    if (!nextProfile) return;
-    setProviderProfileId(nextProfile.id);
-    if (!nextProfile.models.includes(defaultModel)) {
-      setDefaultModel(nextProfile.models[0] ?? '');
-    }
-  }, [availableProfiles, client, defaultModel, providerProfileId]);
+    if (availableProfiles.some((profile) => profile.id === providerProfileId)) return;
+    setProviderProfileId('');
+    setDefaultModel('');
+  }, [availableProfiles, client, providerProfileId]);
 
   useEffect(() => {
     if (client !== 'antigravity') return;
-    if (!antigravityDefaults.models.includes(defaultModel)) {
-      setDefaultModel(antigravityDefaults.models[0] ?? '');
-    }
+    if (defaultModel.trim()) return;
+    setDefaultModel(antigravityDefaults.models[0] ?? '');
   }, [antigravityDefaults.models, client, defaultModel]);
 
   if (!open) return null;
 
-  const canAdvanceFromStepTwo = client === 'antigravity' ? commandArgs.trim().length > 0 : providerProfileId.length > 0;
-  const canFinish = Boolean(client && defaultModel.trim() && (client === 'antigravity' || providerProfileId));
+  const canFinish = Boolean(
+    client &&
+      defaultModel.trim() &&
+      (client === 'antigravity' ? commandArgs.trim().length > 0 : providerProfileId.trim().length > 0),
+  );
 
   const handleClientSelect = (nextClient: ClientValue) => {
     setClient(nextClient);
     setProviderProfileId('');
-    setDefaultModel('');
+    setDefaultModel(nextClient === 'antigravity' ? antigravityDefaults.models[0] ?? '' : '');
     setCommandArgs(antigravityDefaults.command);
-    setStep(2);
   };
 
   const handleProviderSelect = (nextProviderId: string) => {
     setProviderProfileId(nextProviderId);
     const nextProfile = availableProfiles.find((profile) => profile.id === nextProviderId) ?? null;
     setDefaultModel(nextProfile?.models[0] ?? '');
-    setStep(3);
   };
 
   const handleComplete = () => {
@@ -172,124 +165,110 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
         </div>
 
         <div className="space-y-5 px-7 py-6">
-          {step === 1 ? (
-            <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
-              <div>
-                <h4 className="text-[17px] font-bold text-[#2D2118]">Step 1: 选择 Client</h4>
-                <p className="mt-1 text-sm leading-6 text-[#7F7168]">选择要接入的 CLI 工具、Agent 平台或 Antigravity bridge</p>
-              </div>
-              {[CLIENT_ROW_1, CLIENT_ROW_2].map((row, index) => (
-                <div key={index} aria-label={`Client Row ${index + 1}`} className="grid gap-3 sm:grid-cols-3">
-                  {row.map((value) => (
-                    <ChoiceButton
-                      key={value}
-                      label={clientLabel(value)}
-                      selected={client === value}
-                      onClick={() => handleClientSelect(value)}
-                    />
-                  ))}
-                </div>
-              ))}
-            </section>
-          ) : null}
-
-          {step === 2 ? (
-            <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
-              <div>
-                <h4 className="text-[17px] font-bold text-[#2D2118]">{stepTwoTitle}</h4>
-                <p className="mt-1 text-sm leading-6 text-[#7F7168]">
-                  {client === 'antigravity'
-                    ? 'Client=Antigravity 时，直接配置 CLI 命令；默认值来自 cat-template。'
-                    : '普通 Client 先选具体账号，再从该账号的模型列表中继续创建成员。'}
-                </p>
-              </div>
-
-              {client === 'antigravity' ? (
-                <label className="space-y-1.5 text-sm text-[#5C4B42]">
-                  <span className="font-medium">CLI Command</span>
-                  <input
-                    aria-label="CLI Command"
-                    value={commandArgs}
-                    onChange={(event) => setCommandArgs(event.target.value)}
-                    className="w-full rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2.5 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+          <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+            <div>
+              <h4 className="text-[17px] font-bold text-[#2D2118]">Step 1: 选择 Client</h4>
+              <p className="mt-1 text-sm leading-6 text-[#7F7168]">选择要接入的 CLI 工具、Agent 平台或 Antigravity bridge</p>
+            </div>
+            {[CLIENT_ROW_1, CLIENT_ROW_2].map((row, index) => (
+              <div key={index} aria-label={`Client Row ${index + 1}`} className="grid gap-3 sm:grid-cols-3">
+                {row.map((value) => (
+                  <ChoiceButton
+                    key={value}
+                    label={clientLabel(value)}
+                    selected={client === value}
+                    onClick={() => handleClientSelect(value)}
                   />
-                </label>
-              ) : loadingProfiles ? (
-                <p className="text-sm text-[#8A776B]">账号配置加载中...</p>
-              ) : availableProfiles.length > 0 ? (
-                <div className="grid gap-3">
-                  {availableProfiles.map((profile) => (
-                    <ChoiceButton
-                      key={profile.id}
-                      label={profile.displayName}
-                      subtitle={profileSubtitle(profile)}
-                      selected={providerProfileId === profile.id}
-                      onClick={() => handleProviderSelect(profile.id)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="rounded-2xl border border-[#F1E7DF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
-                  当前 Client 还没有可绑定的 Provider。
-                </p>
-              )}
-            </section>
-          ) : null}
-
-          {step === 3 ? (
-            <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
-              <div>
-                <h4 className="text-[17px] font-bold text-[#2D2118]">Step 3: 选择 Model</h4>
-                <p className="mt-1 text-sm leading-6 text-[#7F7168]">完成这一步后，会进入成员配置页继续补充身份、别名和高级参数。</p>
+                ))}
               </div>
+            ))}
+          </section>
 
-              {client === 'antigravity' ? (
-                antigravityDefaults.models.length > 0 ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {antigravityDefaults.models.map((model) => (
-                      <ChoiceButton
-                        key={model}
-                        label={model}
-                        selected={defaultModel === model}
-                        onClick={() => setDefaultModel(model)}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <label className="space-y-1.5 text-sm text-[#5C4B42]">
-                    <span className="font-medium">Model</span>
-                    <input
-                      aria-label="Model"
-                      value={defaultModel}
-                      onChange={(event) => setDefaultModel(event.target.value)}
-                      className="w-full rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2.5 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
-                    />
-                  </label>
-                )
-              ) : selectedProfile?.models.length ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {selectedProfile.models.map((model) => (
-                    <ChoiceButton
-                      key={model}
-                      label={model}
-                      selected={defaultModel === model}
-                      onClick={() => setDefaultModel(model)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <label className="space-y-1.5 text-sm text-[#5C4B42]">
-                  <span className="font-medium">Model</span>
-                  <input
-                    aria-label="Model"
-                    value={defaultModel}
-                    onChange={(event) => setDefaultModel(event.target.value)}
-                    className="w-full rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2.5 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+          <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+            <div>
+              <h4 className="text-[17px] font-bold text-[#2D2118]">Step 2: 选择 Provider / 配置 CLI</h4>
+              <p className="mt-1 text-sm leading-6 text-[#7F7168]">
+                {client === 'antigravity'
+                  ? 'Client=Antigravity 时，直接配置 CLI 命令；默认值来自 cat-template。'
+                  : 'Claude/Codex/Gemini → 同名 OAuth + 任意 API Key provider；Dare / OpenCode 继续复用协议兼容账号。'}
+              </p>
+              <p className="mt-2 text-xs font-semibold text-[#B58A6C]">
+                Claude/Codex/Gemini → 同名 OAuth + 任意 API Key provider | 其他 Client → 复用兼容账号 | Antigravity → 此步改为配置 CLI 命令
+              </p>
+            </div>
+
+            {!client ? (
+              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+                先在 Step 1 选择 Client，Provider / CLI 配置会自动展开。
+              </p>
+            ) : client === 'antigravity' ? (
+              <label className="space-y-1.5 text-sm text-[#5C4B42]">
+                <span className="font-medium">CLI Command</span>
+                <input
+                  aria-label="CLI Command"
+                  value={commandArgs}
+                  onChange={(event) => setCommandArgs(event.target.value)}
+                  className="w-full rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2.5 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+                />
+              </label>
+            ) : loadingProfiles ? (
+              <p className="text-sm text-[#8A776B]">账号配置加载中...</p>
+            ) : availableProfiles.length > 0 ? (
+              <div className="grid gap-3">
+                {availableProfiles.map((profile) => (
+                  <ChoiceButton
+                    key={profile.id}
+                    label={profile.displayName}
+                    subtitle={profileSubtitle(profile)}
+                    selected={providerProfileId === profile.id}
+                    onClick={() => handleProviderSelect(profile.id)}
                   />
-                </label>
-              )}
-            </section>
-          ) : null}
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-2xl border border-[#F1E7DF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+                当前 Client 还没有可绑定的 Provider。
+              </p>
+            )}
+          </section>
+
+          <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+            <div>
+              <h4 className="text-[17px] font-bold text-[#2D2118]">Step 3: 选择 Model</h4>
+              <p className="mt-1 text-sm leading-6 text-[#7F7168]">完成后自动跳转到成员配置页，可继续调整身份、别名和高级参数。</p>
+            </div>
+
+            {!client ? (
+              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+                先选择 Client，模型列表会跟着 Provider / CLI 配置一起收敛。
+              </p>
+            ) : client !== 'antigravity' && !providerProfileId ? (
+              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+                先在 Step 2 选择一个 Provider，再从该账号的可用模型里继续创建成员。
+              </p>
+            ) : selectableModels.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {selectableModels.map((model) => (
+                  <ChoiceButton
+                    key={model}
+                    label={model}
+                    selected={defaultModel === model}
+                    onClick={() => setDefaultModel(model)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <label className="space-y-1.5 text-sm text-[#5C4B42]">
+                <span className="font-medium">Model</span>
+                <input
+                  aria-label="Model"
+                  value={defaultModel}
+                  onChange={(event) => setDefaultModel(event.target.value)}
+                  className="w-full rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2.5 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+                />
+              </label>
+            )}
+          </section>
 
           {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p> : null}
         </div>
@@ -297,34 +276,20 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
         <div className="flex items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-7 py-4">
           <button
             type="button"
-            onClick={step === 1 ? onClose : () => setStep((prev) => (prev === 3 ? 2 : 1))}
+            onClick={onClose}
             className="rounded-xl bg-white px-4 py-2 text-sm text-[#6A5A50] transition hover:bg-[#F7EEE6]"
           >
-            {step === 1 ? '取消' : '上一步'}
+            取消
           </button>
 
-          <div className="flex gap-2">
-            {step === 2 && client === 'antigravity' ? (
-              <button
-                type="button"
-                onClick={() => setStep(3)}
-                disabled={!canAdvanceFromStepTwo}
-                className="rounded-xl bg-[#D49266] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
-              >
-                下一步
-              </button>
-            ) : null}
-            {step === 3 ? (
-              <button
-                type="button"
-                onClick={handleComplete}
-                disabled={!canFinish}
-                className="rounded-xl bg-[#D49266] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
-              >
-                进入成员配置
-              </button>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            onClick={handleComplete}
+            disabled={!canFinish}
+            className="rounded-xl bg-[#D49266] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
+          >
+            进入成员配置
+          </button>
         </div>
       </div>
     </div>

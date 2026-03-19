@@ -30,7 +30,32 @@ function summaryText(profile: ProfileItem): string {
     return `${formatProtocolLabel(profile.protocol)} · ${host} · apiKey: ${profile.hasApiKey ? '已配置' : '未配置'}`;
   }
   const runtimeName = profile.protocol === 'anthropic' ? 'Claude' : profile.protocol === 'google' ? 'Gemini' : 'Codex';
+  if (profile.protocol === 'anthropic') {
+    return `${runtimeName} · subscription · 走本机 ${runtimeName} 登录态（OpenCode 复用时视作 OAuth-like）`;
+  }
+  if (profile.protocol === 'openai') {
+    return `${runtimeName} · subscription · 走本机 ${runtimeName} 登录态（Dare 复用时视作 OAuth-like）`;
+  }
   return `${runtimeName} · subscription · 走本机 ${runtimeName} 登录态`;
+}
+
+function verificationBadge(testResult?: ProfileTestResult) {
+  if (!testResult) {
+    return {
+      label: '未验证',
+      className: 'bg-[#FFF7E1] text-[#B58100]',
+    };
+  }
+  if (testResult.ok) {
+    return {
+      label: 'Verified',
+      className: 'bg-[#E8F5E9] text-[#2E7D32]',
+    };
+  }
+  return {
+    label: '验证失败',
+    className: 'bg-[#FFF0F0] text-[#D14343]',
+  };
 }
 
 export function HubProviderProfileItem({
@@ -67,7 +92,8 @@ export function HubProviderProfileItem({
     setEditing(false);
   }, [editApiKey, editBaseUrl, editDisplayName, editModels, onSave, profile.authType, profile.id]);
 
-  const showTestButton = profile.protocol === 'anthropic' && profile.authType === 'api_key';
+  const showTestButton = profile.authType === 'api_key';
+  const statusBadge = profile.authType === 'api_key' ? verificationBadge(testResult) : null;
 
   if (editing) {
     return (
@@ -138,13 +164,16 @@ export function HubProviderProfileItem({
         <div className="min-w-0 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-base font-bold text-[#2D2118]">{profile.displayName}</span>
-            {isActive ? (
-              <span className="rounded-full bg-[#E8F5E9] px-2.5 py-1 text-[11px] font-semibold text-[#4CAF50]">已激活</span>
-            ) : null}
             {profile.builtin ? <span className="text-[11px] font-semibold text-[#8A776B]">🔒 内置</span> : null}
             {!profile.builtin ? (
               <span className="rounded-full bg-[#F3E8FF] px-2.5 py-1 text-[11px] font-semibold text-[#9D7BC7]">api_key</span>
             ) : null}
+            {statusBadge ? (
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusBadge.className}`}>
+                {statusBadge.label}
+              </span>
+            ) : null}
+            {isActive ? <span className="text-[11px] font-semibold text-[#8A776B]">当前使用中</span> : null}
           </div>
           <p className="text-sm text-[#8A776B]">{summaryText(profile)}</p>
           <div className="space-y-2">
@@ -162,7 +191,7 @@ export function HubProviderProfileItem({
               onClick={() => onActivate(profile.id)}
               disabled={busy}
             >
-              激活
+              设为当前
             </button>
           ) : null}
           {showTestButton ? (
@@ -196,7 +225,7 @@ export function HubProviderProfileItem({
         </div>
       </div>
 
-      {testResult ? (
+      {testResult?.ok === false || testResult?.message ? (
         <p className={`mt-3 text-xs ${testResult.ok ? 'text-green-700' : 'text-red-600'}`}>
           {testResult.ok
             ? `测试通过${testResult.status ? ` (HTTP ${testResult.status})` : ''}`

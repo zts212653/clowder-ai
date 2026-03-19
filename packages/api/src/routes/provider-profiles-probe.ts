@@ -1,5 +1,13 @@
-export function buildProbeHeaders(apiKey: string): Record<string, string> {
-  return { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+export function buildProbeHeaders(protocol: 'anthropic' | 'openai' | 'google', apiKey: string): Record<string, string> {
+  switch (protocol) {
+    case 'anthropic':
+      return { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+    case 'google':
+      return { 'x-goog-api-key': apiKey };
+    case 'openai':
+    default:
+      return { authorization: `Bearer ${apiKey}` };
+  }
 }
 
 export async function readProbeError(res: Response): Promise<string> {
