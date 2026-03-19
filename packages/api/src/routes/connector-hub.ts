@@ -1,19 +1,27 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 interface ConnectorHubRoutesOptions {
   threadStore: IThreadStore;
+}
+
+function requireTrustedHubIdentity(request: FastifyRequest, reply: FastifyReply): string | null {
+  const userId = resolveHeaderUserId(request);
+  if (!userId) {
+    reply.status(401);
+    return null;
+  }
+  return userId;
 }
 
 export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> = async (app, opts) => {
   const { threadStore } = opts;
 
   app.get('/api/connector/hub-threads', async (request, reply) => {
-    const userId = resolveUserId(request);
+    const userId = requireTrustedHubIdentity(request, reply);
     if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required' };
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
     const allThreads = await threadStore.list(userId);
     const hubThreads = allThreads

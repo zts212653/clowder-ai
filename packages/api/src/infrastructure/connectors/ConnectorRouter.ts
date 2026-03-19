@@ -87,6 +87,7 @@ export interface ConnectorRouterOptions {
 
 export class ConnectorRouter {
   private readonly formatter = new ConnectorMessageFormatter();
+  private readonly hubThreadResolvers = new Map<string, Promise<string | undefined>>();
 
   constructor(private readonly opts: ConnectorRouterOptions) {}
 
@@ -300,6 +301,20 @@ export class ConnectorRouter {
   }
 
   private async resolveHubThread(connectorId: string, externalChatId: string): Promise<string | undefined> {
+    const key = `${connectorId}:${externalChatId}`;
+    const inFlight = this.hubThreadResolvers.get(key);
+    if (inFlight) return inFlight;
+
+    const creation = this.resolveHubThreadOnce(connectorId, externalChatId).finally(() => {
+      if (this.hubThreadResolvers.get(key) === creation) {
+        this.hubThreadResolvers.delete(key);
+      }
+    });
+    this.hubThreadResolvers.set(key, creation);
+    return creation;
+  }
+
+  private async resolveHubThreadOnce(connectorId: string, externalChatId: string): Promise<string | undefined> {
     const { bindingStore, threadStore, log } = this.opts;
     const binding = await bindingStore.getByExternal(connectorId, externalChatId);
     if (!binding) return undefined;
