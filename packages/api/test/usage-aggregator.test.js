@@ -201,16 +201,19 @@ describe('aggregateUsageByDay', () => {
 
   test('days parameter excludes records outside the window', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
-    const now = Date.now();
+    // Anchor to today's UTC noon to avoid midnight rollover flakiness
+    const todayNoon = new Date();
+    todayNoon.setUTCHours(12, 0, 0, 0);
+    const anchor = todayNoon.getTime();
     const oneDay = 24 * 60 * 60 * 1000;
     const records = [
-      makeRecord('inv-today', now - 1000, {
+      makeRecord('inv-today', anchor, {
         opus: { inputTokens: 100, outputTokens: 50 },
       }),
-      makeRecord('inv-yesterday', now - oneDay, {
+      makeRecord('inv-yesterday', anchor - oneDay, {
         opus: { inputTokens: 200, outputTokens: 100 },
       }),
-      makeRecord('inv-3-days-ago', now - 3 * oneDay, {
+      makeRecord('inv-3-days-ago', anchor - 3 * oneDay, {
         opus: { inputTokens: 300, outputTokens: 150 },
       }),
     ];
@@ -225,16 +228,19 @@ describe('aggregateUsageByDay', () => {
 
   test('days=2 includes today and yesterday only', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
-    const now = Date.now();
+    // Anchor to today's UTC noon to avoid midnight rollover flakiness
+    const todayNoon = new Date();
+    todayNoon.setUTCHours(12, 0, 0, 0);
+    const anchor = todayNoon.getTime();
     const oneDay = 24 * 60 * 60 * 1000;
     const records = [
-      makeRecord('inv-today', now - 1000, {
+      makeRecord('inv-today', anchor, {
         opus: { inputTokens: 100, outputTokens: 50 },
       }),
-      makeRecord('inv-yesterday', now - oneDay, {
+      makeRecord('inv-yesterday', anchor - oneDay, {
         opus: { inputTokens: 200, outputTokens: 100 },
       }),
-      makeRecord('inv-3-days-ago', now - 3 * oneDay, {
+      makeRecord('inv-3-days-ago', anchor - 3 * oneDay, {
         opus: { inputTokens: 300, outputTokens: 150 },
       }),
     ];
