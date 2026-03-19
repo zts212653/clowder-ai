@@ -1,6 +1,6 @@
 ---
 feature_ids: [F008]
-related_features: []
+related_features: [F128]
 topics: [token, budget, observability]
 doc_kind: note
 created: 2026-02-26

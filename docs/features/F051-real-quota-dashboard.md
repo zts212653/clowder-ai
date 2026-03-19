@@ -1,6 +1,6 @@
 ---
 feature_ids: [F051]
-related_features: [F042]
+related_features: [F042, F128]
 topics: [quota, dashboard, usage, scheduling, degradation, claudebar, gemini, antigravity]
 doc_kind: spec
 created: 2026-03-02
