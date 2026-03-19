@@ -63,7 +63,7 @@ Clowder is model-agnostic. Each agent CLI plugs in via a unified output adapter:
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | Yes | Shipped |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | Yes | Shipped |
 | [Antigravity](https://github.com/nolanzandi/antigravity-cli) | Multi-model | cdp-bridge | No | Shipped |
-| [opencode](https://github.com/sst/opencode) | Multi-model | ndjson | Yes | In Progress |
+| [opencode](https://github.com/sst/opencode) | Multi-model | ndjson | Yes | Shipped |
 
 > Clowder doesn't replace your agent CLI — it's the layer *above* it that makes agents work as a team.
 
@@ -141,7 +141,7 @@ You don't need to be a developer. You need to know what you want — and who you
 
 ## Quick Start
 
-> CVO Bootcamp coming soon — a guided onboarding where your AI team walks you through a complete feature lifecycle.
+> **CVO Bootcamp is live!** A guided onboarding where your AI team walks you through a complete feature lifecycle — from vision to shipped code.
 
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
@@ -211,6 +211,7 @@ The ops dashboard for tracking everything your team is building.
 Don't want to open the web UI? Chat with your team from the apps you already use.
 
 - **Feishu (Lark)** and **Telegram** — send messages, get replies from specific cats
+- **GitHub PR Review Routing** — review comments from GitHub flow back to the right thread automatically via IMAP polling. Cats track which PRs they opened and route reviews to the author.
 - Each cat replies as a **distinct card** — no more merged indistinguishable bubbles
 - Slash commands: `/new` (new thread), `/threads` (list), `/use <id>` (switch), `/where` (current)
 - Voice messages and file transfer supported both ways
@@ -273,9 +274,11 @@ We build in the open. Here's where we are.
 
 | Feature | Status |
 |---------|--------|
-| Multi-Platform Gateway (Feishu / Telegram) | Phase 5-6 Done |
+| Multi-Platform Gateway — Feishu (Lark) | Shipped |
+| Multi-Platform Gateway — Telegram | In Progress |
+| GitHub PR Review Notification Routing | Shipped |
 | External Agent Onboarding (A2A contract) | In Progress |
-| opencode Integration | Phase 1 Done |
+| opencode Integration | Shipped |
 | Local Omni Perception (Qwen) | Spec |
 
 ### Experience
@@ -283,8 +286,8 @@ We build in the open. Here's where we are.
 | Feature | Status |
 |---------|--------|
 | Hub UI (React + Tailwind) | Shipped |
-| CVO Bootcamp | In Progress |
-| Voice Companion (per-agent voice) | Spec |
+| CVO Bootcamp | Shipped |
+| Voice Companion (per-agent voice) | Shipped |
 | Game Modes (Werewolf, Pixel Cat Brawl) | In Progress |
 
 ### Governance
@@ -424,7 +427,7 @@ Clowder 不绑定模型。当前支持的 Agent CLI：
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | 是 | 已发布 |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | 是 | 已发布 |
 | [Antigravity](https://github.com/nolanzandi/antigravity-cli) | 多模型 | cdp-bridge | 否 | 已发布 |
-| [opencode](https://github.com/sst/opencode) | 多模型 | ndjson | 是 | 进行中 |
+| [opencode](https://github.com/sst/opencode) | 多模型 | ndjson | 是 | 已发布 |
 
 > Clowder 不替代你的 Agent CLI — 它是 CLI *之上*的那一层，让 agent 们作为团队协作。
 
@@ -503,7 +506,7 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 
 ## 快速开始
 
-> CVO 训练营即将推出 — AI 团队亲自带你走完一个完整的 feature 生命周期。
+> **CVO 训练营已上线！** AI 团队亲自带你走完一个完整的 feature 生命周期 — 从愿景表达到代码上线。
 
 ```bash
 git clone https://github.com/zts212653/clowder-ai.git
@@ -573,6 +576,7 @@ bash scripts/install.sh
 不想开 web？用你已经在用的 app 跟团队聊。
 
 - **飞书** 和 **Telegram** — 发消息，收到指定猫猫的回复
+- **GitHub PR Review 路由** — GitHub 上的 review 评论通过 IMAP 轮询自动回流到对应线程。猫猫追踪自己开的 PR，review 自动路由给作者猫。
 - 每只猫的回复是**独立的卡片** — 不再是混在一起分不清谁是谁的气泡
 - 指令：`/new`（新线程）、`/threads`（列表）、`/use <id>`（切换）、`/where`（当前位置）
 - 语音消息和文件互传双向支持
@@ -635,9 +639,11 @@ bash scripts/install.sh
 
 | 功能 | 状态 |
 |------|------|
-| 多平台网关（飞书 / Telegram） | Phase 5-6 完成 |
+| 多平台网关 — 飞书 | 已发布 |
+| 多平台网关 — Telegram | 进行中 |
+| GitHub PR Review 通知路由 | 已发布 |
 | 外部 Agent 接入（A2A 契约） | 进行中 |
-| opencode 集成 | Phase 1 完成 |
+| opencode 集成 | 已发布 |
 | 本地全感知（Qwen Omni） | 规划中 |
 
 ### 体验
@@ -645,8 +651,8 @@ bash scripts/install.sh
 | 功能 | 状态 |
 |------|------|
 | Hub UI（React + Tailwind） | 已发布 |
-| CVO 新手训练营 | 进行中 |
-| 语音陪伴（独立声线） | 规划中 |
+| CVO 新手训练营 | 已发布 |
+| 语音陪伴（独立声线） | 已发布 |
 | 游戏模式（狼人杀、像素猫大作战） | 进行中 |
 
 ### 治理

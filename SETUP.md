@@ -100,6 +100,18 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 Supported engines: Qwen3-ASR (primary), Whisper (fallback) for input; Kokoro, edge-tts, Qwen3-TTS for output.
 These services are disabled by default. Set the corresponding `*_ENABLED=1` flags only after you have installed the local dependencies.
 
+**Starting voice services:**
+```bash
+# TTS (Text-to-Speech) — requires Python 3, creates venv at ~/.cat-cafe/tts-venv
+./scripts/tts-server.sh                    # default: Qwen3-TTS (三猫声线)
+TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts fallback (no GPU needed)
+
+# ASR (Speech-to-Text) — requires Python 3 + ffmpeg
+./scripts/qwen3-asr-server.sh             # Qwen3-ASR server
+```
+
+> **System dependency**: `ffmpeg` is required for audio processing. Install with `brew install ffmpeg` (macOS) or `apt install ffmpeg` (Linux).
+
 ### API Gateway Proxy
 
 Optional reverse proxy for routing API requests through third-party gateways. Useful when you need to route Claude API calls through a custom endpoint.
@@ -116,13 +128,31 @@ Configure upstreams in `.cat-cafe/proxy-upstreams.json`:
 
 ### Feishu (飞书 / Lark) Integration
 
-Chat with your team from Feishu. Requires a Feishu app.
+Chat with your team from Feishu. Requires a self-built Feishu app.
 
+**Step 1 — Create a Feishu app:**
+Go to [Feishu Open Platform](https://open.feishu.cn/app) → Create Custom App (自建应用).
+
+**Step 2 — Enable permissions:**
+Under Permissions & Scopes (权限管理), add: `im:message`, `im:message:send_as_bot`, `im:resource`.
+
+**Step 3 — Configure event subscription:**
+Under Event Subscriptions (事件订阅):
+- **Request URL**: `http(s)://<your-host>:3004/api/connectors/feishu/webhook`
+- Subscribe to event: `im.message.receive_v1`
+- The system auto-responds to Feishu's URL verification challenge.
+
+**Step 4 — Set env vars:**
 ```bash
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
-FEISHU_VERIFICATION_TOKEN=xxx
+FEISHU_VERIFICATION_TOKEN=xxx    # from Event Subscriptions page
 ```
+
+**Step 5 — Enable the bot:**
+In the Feishu app console → Bot (机器人), enable the bot capability. Users can then DM the bot to chat with your AI team.
+
+> Currently supports DM (1:1) only. Group chat support is planned.
 
 ### Telegram Integration
 
@@ -134,7 +164,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 
 ### GitHub PR Review Notifications
 
-Get notified when GitHub review emails arrive (polls IMAP).
+Get notified when GitHub review emails arrive (polls IMAP). Review comments are automatically routed to the right cat and thread.
 
 ```bash
 GITHUB_REVIEW_IMAP_USER=xxx@qq.com
@@ -142,9 +172,16 @@ GITHUB_REVIEW_IMAP_PASS=<auth-code>    # app-specific password, not login
 GITHUB_REVIEW_IMAP_HOST=imap.qq.com
 GITHUB_REVIEW_IMAP_PORT=993
 
-# GitHub MCP tools (for PR operations)
+# GitHub MCP tools (for PR operations + review content fetching)
 GITHUB_MCP_PAT=ghp_...
 ```
+
+**How routing works (3-tier):**
+1. **PR Registration** (primary): Cats register PRs via `register_pr_tracking` MCP tool when they open a PR. When a review email arrives, it routes directly to that cat's thread.
+2. **Title Tag** (fallback): If no registration found, the system looks for a cat name tag in the PR title (e.g., `[宪宪🐾]`) and routes to that cat's Review Inbox.
+3. **Triage** (last resort): If no cat can be identified, the review goes to a Triage thread for manual assignment.
+
+Review content is fetched via GitHub API (using `GITHUB_MCP_PAT`) for automatic severity extraction (P0/P1/P2 labeling).
 
 ### Web Push Notifications
 
@@ -158,21 +195,54 @@ VAPID_SUBJECT=mailto:you@example.com
 
 Generate keys: `npx web-push generate-vapid-keys`
 
-### Hindsight (Long-Term Memory)
+### Long-Term Memory (Evidence Store)
 
-AI-powered evidence recall and knowledge management. Runs as a Docker container.
+Project knowledge (decisions, lessons, discussions) is stored locally in SQLite — no external services required.
 
-```bash
-HINDSIGHT_ENABLED=true
-HINDSIGHT_URL=http://localhost:18888
+Each project gets its own `evidence.sqlite` file (auto-created on first run) with FTS5 full-text search. Data stays on your machine.
+
+Cats use `search_evidence` and `reflect` MCP tools to query this store. No configuration needed — it works out of the box.
+
+## Agent CLI Configuration
+
+Each agent CLI (Claude Code, Codex, Gemini CLI) has its own configuration. Clowder provides project-level MCP server configs that connect agents to the platform:
+
+- **Claude Code**: reads `.mcp.json` for MCP servers, `CLAUDE.md` for project instructions
+- **Codex CLI**: reads `.codex/config.toml` for MCP servers, `CODEX.md` for project instructions
+- **Gemini CLI**: reads `.gemini/settings.json` for MCP servers, `GEMINI.md` for project instructions
+
+### Codex CLI — "Stuck in a Box" Fix
+
+If Codex (Maine Coon / 缅因猫) reports being unable to access files or tools, it's likely running in sandbox mode. Add these settings to your **user-level** Codex config (`~/.codex/config.toml`):
+
+```toml
+approval_policy = "on-request"         # ask before dangerous ops
+sandbox_mode = "danger-full-access"    # allow file/network access
+
+[sandbox_workspace_write]
+network_access = true
 ```
 
-First start downloads embedding models (~1-3 min). Manage with:
-```bash
-pnpm hindsight:start    # Docker compose up
-pnpm hindsight:status   # Health check
-pnpm hindsight:stop     # Shut down
+> The project-level `.codex/config.toml` only contains MCP server definitions. Runtime settings like `sandbox_mode` and `approval_policy` must be set in `~/.codex/config.toml`.
+
+## Windows Setup
+
+Full Windows support is available via PowerShell scripts.
+
+```powershell
+# Install everything (Node.js, pnpm, Redis, CLI tools, auth)
+.\scripts\install.ps1
+
+# Start services
+.\scripts\start-windows.ps1            # Full start (build + run)
+.\scripts\start-windows.ps1 -Quick     # Skip rebuild
+.\scripts\start-windows.ps1 -Memory    # No Redis (in-memory mode)
+
+# Stop services
+.\scripts\stop-windows.ps1
 ```
+
+> **Note**: `scripts/install.sh` is Linux-only (Debian/RHEL). macOS users should install prerequisites manually (`brew install node pnpm redis`) and run `pnpm install && pnpm start`.
 
 ## Ports Overview
 
@@ -184,22 +254,26 @@ pnpm hindsight:stop     # Shut down
 | ASR | 9876 | No — voice input |
 | TTS | 9879 | No — voice output |
 | LLM Post-process | 9878 | No — speech correction |
-| Hindsight API | 18888 | No — long-term memory |
-| Hindsight UI | 19999 | No — memory dashboard |
 
 ## Useful Commands
 
 ```bash
-pnpm start              # Start everything (Redis + API + Frontend)
+pnpm start              # Start everything (Redis + API + Frontend) via runtime worktree
 pnpm start --memory     # No Redis, in-memory mode
 pnpm start --quick      # Skip rebuild, use existing dist/
+pnpm start:direct       # Start dev server directly (bypasses worktree)
 
-pnpm check              # Biome lint + format check
+pnpm build              # Build all packages
+pnpm dev                # Run all packages in parallel dev mode
+pnpm test               # Run all tests
+
+pnpm check              # Biome lint + format + feature doc + env-port drift checks
 pnpm check:fix          # Auto-fix lint issues
-pnpm lint               # TypeScript type check
+pnpm lint               # TypeScript type check (per-package)
 
 pnpm redis:user:start   # Start Redis manually
 pnpm redis:user:stop    # Stop Redis
+pnpm redis:user:status  # Check Redis status
 pnpm redis:user:backup  # Manual backup
 ```
 
@@ -315,6 +389,18 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 支持引擎：输入用 Qwen3-ASR（主）/ Whisper（备）；输出用 Kokoro / edge-tts / Qwen3-TTS。
 这些服务默认关闭。只有在本地依赖安装完成后，再把对应的 `*_ENABLED=1` 打开。
 
+**启动语音服务：**
+```bash
+# TTS（文字转语音）— 需要 Python 3，自动创建 venv 到 ~/.cat-cafe/tts-venv
+./scripts/tts-server.sh                    # 默认: Qwen3-TTS（三猫声线）
+TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts 备选（无需 GPU）
+
+# ASR（语音转文字）— 需要 Python 3 + ffmpeg
+./scripts/qwen3-asr-server.sh             # Qwen3-ASR 服务器
+```
+
+> **系统依赖**：音频处理需要 `ffmpeg`。安装方式：`brew install ffmpeg`（macOS）或 `apt install ffmpeg`（Linux）。
+
 ### API 网关代理
 
 可选的反向代理，用于将 API 请求路由到第三方网关。适用于需要通过自定义端点调用 Claude API 的场景。
@@ -331,13 +417,31 @@ ANTHROPIC_PROXY_PORT=9877          # 代理监听端口
 
 ### 飞书接入
 
-在飞书里直接跟猫猫团队聊天。需要创建一个飞书应用。
+在飞书里直接跟猫猫团队聊天。需要创建一个飞书自建应用。
 
+**第 1 步 — 创建飞书应用：**
+前往 [飞书开放平台](https://open.feishu.cn/app) → 创建自建应用。
+
+**第 2 步 — 开通权限：**
+在权限管理中，添加：`im:message`、`im:message:send_as_bot`、`im:resource`。
+
+**第 3 步 — 配置事件订阅：**
+在事件订阅中：
+- **请求地址**：`http(s)://<你的域名或IP>:3004/api/connectors/feishu/webhook`
+- 订阅事件：`im.message.receive_v1`
+- 系统会自动响应飞书的 URL 验证 challenge。
+
+**第 4 步 — 设置环境变量：**
 ```bash
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
-FEISHU_VERIFICATION_TOKEN=xxx
+FEISHU_VERIFICATION_TOKEN=xxx    # 在事件订阅页面获取
 ```
+
+**第 5 步 — 启用机器人：**
+在飞书应用控制台 → 机器人，启用机器人能力。之后用户可以直接 DM 机器人和 AI 团队聊天。
+
+> 目前仅支持私聊（1:1），群聊支持计划中。
 
 ### Telegram 接入
 
@@ -349,7 +453,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 
 ### GitHub PR Review 通知
 
-当 GitHub review 邮件到达时自动通知（轮询 IMAP）。
+当 GitHub review 邮件到达时自动通知（轮询 IMAP）。Review 评论自动路由到对应的猫和线程。
 
 ```bash
 GITHUB_REVIEW_IMAP_USER=xxx@qq.com
@@ -357,9 +461,16 @@ GITHUB_REVIEW_IMAP_PASS=<授权码>    # 应用专用密码，不是登录密码
 GITHUB_REVIEW_IMAP_HOST=imap.qq.com
 GITHUB_REVIEW_IMAP_PORT=993
 
-# GitHub MCP 工具（用于 PR 操作）
+# GitHub MCP 工具（用于 PR 操作 + 获取 review 内容）
 GITHUB_MCP_PAT=ghp_...
 ```
+
+**路由机制（三层）：**
+1. **PR 注册**（首选）：猫猫在开 PR 时通过 `register_pr_tracking` MCP 工具注册。收到 review 邮件后，直接路由到该猫的线程。
+2. **标题标签**（备选）：如果没有注册记录，系统从 PR 标题中查找猫名标签（如 `[宪宪🐾]`），路由到该猫的 Review 收件箱。
+3. **分诊**（兜底）：如果无法识别猫，review 进入分诊线程等待手动分配。
+
+Review 内容通过 GitHub API（使用 `GITHUB_MCP_PAT`）获取，自动提取严重等级（P0/P1/P2 标签）。
 
 ### Web Push 通知
 
@@ -373,21 +484,54 @@ VAPID_SUBJECT=mailto:you@example.com
 
 生成密钥：`npx web-push generate-vapid-keys`
 
-### Hindsight（长期记忆）
+### 长期记忆（Evidence Store）
 
-AI 驱动的证据检索和知识管理。以 Docker 容器运行。
+项目知识（决策、教训、讨论）存储在本地 SQLite — 不需要外部服务。
 
-```bash
-HINDSIGHT_ENABLED=true
-HINDSIGHT_URL=http://localhost:18888
+每个项目有自己的 `evidence.sqlite` 文件（首次启动自动创建），支持 FTS5 全文检索。数据留在你的机器上。
+
+猫猫通过 `search_evidence` 和 `reflect` MCP 工具查询这个存储。开箱即用，无需配置。
+
+## Agent CLI 配置
+
+每个 Agent CLI（Claude Code、Codex、Gemini CLI）有自己的配置。Clowder 提供项目级 MCP server 配置，将 agent 连接到平台：
+
+- **Claude Code**：读取 `.mcp.json` 获取 MCP 服务器，`CLAUDE.md` 获取项目指令
+- **Codex CLI**：读取 `.codex/config.toml` 获取 MCP 服务器，`CODEX.md` 获取项目指令
+- **Gemini CLI**：读取 `.gemini/settings.json` 获取 MCP 服务器，`GEMINI.md` 获取项目指令
+
+### Codex CLI — "困在箱子里"修复
+
+如果 Codex（缅因猫/砚砚）报告无法访问文件或工具，可能是因为在沙箱模式中运行。在**用户级** Codex 配置（`~/.codex/config.toml`）中添加以下设置：
+
+```toml
+approval_policy = "on-request"         # 危险操作前询问
+sandbox_mode = "danger-full-access"    # 允许文件/网络访问
+
+[sandbox_workspace_write]
+network_access = true
 ```
 
-首次启动会下载嵌入模型（约 1-3 分钟）。管理命令：
-```bash
-pnpm hindsight:start    # Docker compose 启动
-pnpm hindsight:status   # 健康检查
-pnpm hindsight:stop     # 关闭
+> 项目级 `.codex/config.toml` 只包含 MCP 服务器定义。`sandbox_mode` 和 `approval_policy` 等运行时设置必须在 `~/.codex/config.toml` 中配置。
+
+## Windows 安装
+
+Windows 通过 PowerShell 脚本完整支持。
+
+```powershell
+# 安装一切（Node.js、pnpm、Redis、CLI 工具、认证）
+.\scripts\install.ps1
+
+# 启动服务
+.\scripts\start-windows.ps1            # 完整启动（构建 + 运行）
+.\scripts\start-windows.ps1 -Quick     # 跳过重编译
+.\scripts\start-windows.ps1 -Memory    # 无 Redis（内存模式）
+
+# 停止服务
+.\scripts\stop-windows.ps1
 ```
+
+> **注意**：`scripts/install.sh` 仅适用于 Linux（Debian/RHEL）。macOS 用户请手动安装依赖（`brew install node pnpm redis`）后运行 `pnpm install && pnpm start`。
 
 ## 端口概览
 
@@ -399,22 +543,26 @@ pnpm hindsight:stop     # 关闭
 | ASR | 9876 | 否 — 语音输入 |
 | TTS | 9879 | 否 — 语音输出 |
 | LLM 后处理 | 9878 | 否 — 语音纠正 |
-| Hindsight API | 18888 | 否 — 长期记忆 |
-| Hindsight UI | 19999 | 否 — 记忆面板 |
 
 ## 常用命令
 
 ```bash
-pnpm start              # 启动全部（Redis + API + 前端）
+pnpm start              # 启动全部（Redis + API + 前端），通过运行时 worktree
 pnpm start --memory     # 无 Redis，纯内存模式
 pnpm start --quick      # 跳过重编译，用已有 dist/
+pnpm start:direct       # 直接启动 dev server（跳过 worktree）
 
-pnpm check              # Biome lint + 格式检查
+pnpm build              # 构建所有包
+pnpm dev                # 所有包并行 dev 模式
+pnpm test               # 运行所有测试
+
+pnpm check              # Biome lint + 格式检查 + Feature 文档 + 端口漂移检测
 pnpm check:fix          # 自动修复 lint 问题
-pnpm lint               # TypeScript 类型检查
+pnpm lint               # TypeScript 类型检查（按包）
 
 pnpm redis:user:start   # 手动启动 Redis
 pnpm redis:user:stop    # 停止 Redis
+pnpm redis:user:status  # 检查 Redis 状态
 pnpm redis:user:backup  # 手动备份
 ```
 
