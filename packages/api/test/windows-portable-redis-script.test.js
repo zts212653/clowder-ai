@@ -480,9 +480,15 @@ test('Windows startup preserves runtime Redis overrides, validates artifacts, an
   assert.match(startWindowsScript, /Service job '\$\(\$job.Name\)' stopped \(\$\(\$job.State\)\)/);
 });
 
-test('Windows Redis URL handling preserves external backends and treats localhost URLs with suffixes as local', () => {
+test('Windows Redis URL handling preserves external backends and treats loopback URLs with suffixes as local', () => {
   assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
-  assert.match(helpersScript, /\$uri\.Host -notin @\("localhost", "127\.0\.0\.1"\)/);
+  assert.match(helpersScript, /\$isLoopbackHost = \$uri\.Host -eq "localhost"/);
+  assert.match(
+    helpersScript,
+    /if \(-not \$isLoopbackHost -and \[System\.Net\.IPAddress\]::TryParse\(\$uri\.Host, \[ref\]\$ipAddress\)\) \{/,
+  );
+  assert.match(helpersScript, /\$isLoopbackHost = \[System\.Net\.IPAddress\]::IsLoopback\(\$ipAddress\)/);
+  assert.match(helpersScript, /if \(-not \$isLoopbackHost\) \{/);
   assert.match(helpersScript, /if \(\$uri\.Port -gt 0 -and "\$\(\$uri\.Port\)" -ne "\$RedisPort"\) \{/);
   assert.match(
     stopWindowsScript,
@@ -495,6 +501,24 @@ test('Windows Redis URL handling preserves external backends and treats localhos
   assert.match(
     stopWindowsScript,
     /Write-Warn "Skipping local Redis shutdown because REDIS_URL points to an external host"/,
+  );
+});
+
+test('Windows installer refreshes stale skill junctions instead of skipping any existing target', () => {
+  assert.match(helpersScript, /function Get-InstallerNormalizedPath/);
+  assert.match(helpersScript, /function Get-InstallerSkillLinkTarget/);
+  assert.match(helpersScript, /\$expectedTarget = Get-InstallerNormalizedPath -Path \$skill\.FullName/);
+  assert.match(helpersScript, /\$existingItem = Get-Item -LiteralPath \$skillTarget -Force -ErrorAction SilentlyContinue/);
+  assert.match(helpersScript, /\$existingTarget = Get-InstallerSkillLinkTarget -Path \$skillTarget/);
+  assert.match(
+    helpersScript,
+    /if \(\$existingTarget -eq \$expectedTarget\) \{\s+Write-Ok "Skill already mounted: \$skillTarget"\s+continue\s+\}/s,
+  );
+  assert.match(helpersScript, /Write-Warn "Refreshing stale skill mount: \$skillTarget"/);
+  assert.match(helpersScript, /cmd \/c rmdir "\$skillTarget" 2>\$null \| Out-Null/);
+  assert.doesNotMatch(
+    helpersScript,
+    /if \(Test-Path \$skillTarget\) \{\s+Write-Ok "Skill already mounted: \$skillTarget"\s+continue\s+\}/s,
   );
 });
 
