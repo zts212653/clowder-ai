@@ -163,9 +163,10 @@ $redisLogFile = Join-Path $redisLayout.Logs "redis-$RedisPort.log"
 $redisPidFile = Join-Path $redisLayout.Data "redis-$RedisPort.pid"
 $configuredRedisUrl = if ($env:REDIS_URL) { $env:REDIS_URL.Trim() } else { "" }
 $useExternalRedis = $useRedis -and $configuredRedisUrl -and -not (Test-LocalRedisUrl -RedisUrl $configuredRedisUrl -RedisPort $RedisPort)
+$safeConfiguredRedisUrl = Get-RedactedRedisUrl -RedisUrl $configuredRedisUrl
 
 if ($useExternalRedis) {
-    Write-Ok "Using external Redis: $configuredRedisUrl"
+    Write-Ok "Using external Redis: $safeConfiguredRedisUrl"
 } elseif ($useRedis) {
     $redisCommands = Resolve-PortableRedisBinaries -ProjectRoot $ProjectRoot
     if (-not $redisCommands) {
@@ -203,7 +204,13 @@ if ($useExternalRedis) {
                 New-Item -Path $redisLayout.Logs -ItemType Directory -Force | Out-Null
                 $redisAclFile = Join-Path $redisLayout.Data "redis-$RedisPort.acl"
                 $redisServerAuthArgs = Get-RedisServerAuthArgs -RedisUrl $configuredRedisUrl -AclFilePath $redisAclFile
-                $redisArgs = @("--port", $RedisPort, "--bind", "127.0.0.1", "--dir", $redisLayout.Data, "--logfile", $redisLogFile, "--pidfile", $redisPidFile) + $redisServerAuthArgs
+                $redisArgs = @(
+                    "--port", $RedisPort,
+                    "--bind", "127.0.0.1",
+                    "--dir", (Quote-WindowsProcessArgument -Value $redisLayout.Data),
+                    "--logfile", (Quote-WindowsProcessArgument -Value $redisLogFile),
+                    "--pidfile", (Quote-WindowsProcessArgument -Value $redisPidFile)
+                ) + $redisServerAuthArgs
                 Write-Host "  Starting Redis on port $RedisPort ($redisSource)..."
                 Start-Process -FilePath $redisServerPath -ArgumentList $redisArgs -WindowStyle Hidden
                 Start-Sleep -Seconds 2
@@ -376,7 +383,8 @@ try {
 
     # -- Status --------------------------------------------------
     $effectiveRedisUrl = if ($env:REDIS_URL) { $env:REDIS_URL } else { "" }
-    $storageMode = if ($useRedis -and $effectiveRedisUrl) { "Redis ($effectiveRedisUrl)" } elseif ($useRedis) { "Redis (redis://localhost:$RedisPort)" } else { "Memory (restart loses data)" }
+    $safeEffectiveRedisUrl = Get-RedactedRedisUrl -RedisUrl $effectiveRedisUrl
+    $storageMode = if ($useRedis -and $safeEffectiveRedisUrl) { "Redis ($safeEffectiveRedisUrl)" } elseif ($useRedis) { "Redis (redis://localhost:$RedisPort)" } else { "Memory (restart loses data)" }
     $frontendMode = if ($Dev) { "development (hot reload)" } else { "production (PWA enabled)" }
 
     Write-Host ""

@@ -114,6 +114,35 @@ function Test-LocalRedisUrl {
     return $true
 }
 
+function Quote-WindowsProcessArgument {
+    param([string]$Value)
+
+    if ($null -eq $Value -or $Value -eq "") {
+        return '""'
+    }
+
+    if ($Value -notmatch '[\s"]') {
+        return $Value
+    }
+
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+function Get-RedactedRedisUrl {
+    param([string]$RedisUrl)
+    if (-not $RedisUrl) { return "" }
+    try {
+        $uri = [System.Uri]::new($RedisUrl)
+        if (-not $uri.UserInfo) { return $RedisUrl }
+        $authority = if ($uri.Port -gt 0) { "$($uri.Host):$($uri.Port)" } else { $uri.Host }
+        return "$($uri.Scheme)://$authority$($uri.AbsolutePath)"
+    } catch {
+        return $RedisUrl -replace '://[^@]+@', '://'
+    }
+}
+
 function Get-RedisAuthArgs {
     param([string]$RedisUrl)
     if (-not $RedisUrl) { return @() }
@@ -124,10 +153,10 @@ function Get-RedisAuthArgs {
         $parts = $userInfo -split ":", 2
         $authArgs = @()
         if ($parts.Count -eq 2) {
-            if ($parts[0]) { $authArgs += @("--user", $parts[0]) }
-            if ($parts[1]) { $authArgs += @("-a", $parts[1]) }
+            if ($parts[0]) { $authArgs += @("--user", [System.Uri]::UnescapeDataString($parts[0])) }
+            if ($parts[1]) { $authArgs += @("-a", [System.Uri]::UnescapeDataString($parts[1])) }
         } elseif ($parts[0]) {
-            $authArgs += @("-a", $parts[0])
+            $authArgs += @("-a", [System.Uri]::UnescapeDataString($parts[0]))
         }
         return $authArgs
     } catch {}
@@ -146,10 +175,10 @@ function Get-RedisServerAuthArgs {
         $username = ""
         $password = ""
         if ($parts.Count -eq 2) {
-            $username = $parts[0]
-            $password = $parts[1]
+            $username = if ($parts[0]) { [System.Uri]::UnescapeDataString($parts[0]) } else { "" }
+            $password = if ($parts[1]) { [System.Uri]::UnescapeDataString($parts[1]) } else { "" }
         } elseif ($parts[0]) {
-            $password = $parts[0]
+            $password = [System.Uri]::UnescapeDataString($parts[0])
         }
 
         if (-not $password) { return @() }
@@ -167,10 +196,10 @@ function Get-RedisServerAuthArgs {
                 )
             }
             Set-Content -Path $AclFilePath -Value $aclLines -Encoding ascii
-            return @("--aclfile", $AclFilePath)
+            return @("--aclfile", (Quote-WindowsProcessArgument -Value $AclFilePath))
         }
 
-        return @("--requirepass", $password)
+        return @("--requirepass", (Quote-WindowsProcessArgument -Value $password))
     } catch {}
     return @()
 }

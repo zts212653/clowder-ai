@@ -280,15 +280,16 @@ test('Windows installer headless rerun preserves local authenticated Redis URL v
   assert.match(uiHelpersScript, /Value = "keep_local"/);
   assert.match(uiHelpersScript, /function Get-InstallerRedactedRedisUrl/);
   assert.match(uiHelpersScript, /\$safeLabel = Get-InstallerRedactedRedisUrl -RedisUrl \$anyRedisUrl/);
+  assert.match(uiHelpersScript, /Get-RedactedRedisUrl -RedisUrl \$RedisUrl/);
 });
 
-test('Windows installer prefers this repo .env REDIS_URL before any ambient process value', () => {
-  const envFirstPattern =
-    /\$envFile = Join-Path \$ProjectRoot "\.env"\s+\$rawUrl = Get-InstallerEnvValueFromFile -EnvFile \$envFile -Key "REDIS_URL"\s+if \(-not \$rawUrl -and \$env:REDIS_URL\) \{\s+\$rawUrl = \$env:REDIS_URL\.Trim\(\)\s+\}/g;
-  const matches = uiHelpersScript.match(envFirstPattern);
+test('Windows installer ignores ambient REDIS_URL until this repo has its own .env', () => {
+  const guardedAmbientPattern =
+    /\$rawUrl = Get-InstallerEnvValueFromFile -EnvFile \$envFile -Key "REDIS_URL"\s+if \(-not \$rawUrl -and \(Test-Path \$envFile\) -and \$env:REDIS_URL\) \{\s+\$rawUrl = \$env:REDIS_URL\.Trim\(\)\s+\}/g;
+  const matches = uiHelpersScript.match(guardedAmbientPattern);
   assert.ok(
     matches && matches.length >= 2,
-    `expected both installer REDIS_URL helpers to prefer ProjectRoot/.env before ambient REDIS_URL, found ${matches ? matches.length : 0}`,
+    `expected both installer REDIS_URL helpers to guard ambient fallback behind repo .env existence, found ${matches ? matches.length : 0}`,
   );
 });
 
@@ -298,12 +299,15 @@ test('Windows service job failure sets exit code 1 instead of falling through wi
   assert.match(startWindowsScript, /if \(\$serviceFailure\) \{\s+exit 1\s+\}/s);
 });
 
-test('Windows Get-RedisAuthArgs supports Redis 6 ACL username:password URLs', () => {
+test('Windows Redis auth helpers decode percent-escaped ACL credentials before invoking redis-cli or redis-server', () => {
   assert.match(helpersScript, /function Get-RedisAuthArgs/);
+  assert.match(helpersScript, /function Get-RedisServerAuthArgs/);
   assert.match(helpersScript, /\$parts = \$userInfo -split ":", 2/);
-  assert.match(helpersScript, /if \(\$parts\[0\]\) \{ \$authArgs \+= @\("--user", \$parts\[0\]\) \}/);
-  assert.match(helpersScript, /if \(\$parts\[1\]\) \{ \$authArgs \+= @\("-a", \$parts\[1\]\) \}/);
-  assert.match(helpersScript, /elseif \(\$parts\[0\]\) \{\s+\$authArgs \+= @\("-a", \$parts\[0\]\)\s+\}/s);
+  const decodeMatches = helpersScript.match(/\[System\.Uri\]::UnescapeDataString\(\$parts\[(0|1)\]\)/g);
+  assert.ok(
+    decodeMatches && decodeMatches.length >= 4,
+    `expected Redis auth helpers to decode both username/password parts before use, found ${decodeMatches ? decodeMatches.length : 0}`,
+  );
 });
 
 test('Windows installer exits immediately when native installs are cancelled by the user', () => {
@@ -387,10 +391,16 @@ test('Windows startup resolves portable Redis from the shared helper before glob
   assert.match(startWindowsScript, /install-windows-helpers\.ps1/);
   assert.match(startWindowsScript, /Resolve-PortableRedisBinaries -ProjectRoot \$ProjectRoot/);
   assert.match(startWindowsScript, /Resolve-PortableRedisLayout -ProjectRoot \$ProjectRoot/);
-  assert.match(startWindowsScript, /"--dir", \$redisLayout\.Data/);
-  assert.match(startWindowsScript, /"--logfile", \$redisLogFile/);
   assert.match(helpersScript, /function Resolve-GlobalRedisBinaries/);
   assert.match(helpersScript, /Get-Command redis-server -ErrorAction SilentlyContinue/);
+});
+
+test('Windows startup quotes portable Redis file arguments before Start-Process', () => {
+  assert.match(helpersScript, /function Quote-WindowsProcessArgument/);
+  assert.match(startWindowsScript, /Quote-WindowsProcessArgument -Value \$redisLayout\.Data/);
+  assert.match(startWindowsScript, /Quote-WindowsProcessArgument -Value \$redisLogFile/);
+  assert.match(startWindowsScript, /Quote-WindowsProcessArgument -Value \$redisPidFile/);
+  assert.match(helpersScript, /Quote-WindowsProcessArgument -Value \$AclFilePath/);
 });
 
 test('Windows stop script only stops Clowder-owned API and frontend listeners', () => {
@@ -412,11 +422,15 @@ test('Windows stop script only stops Clowder-owned API and frontend listeners', 
 test('Windows startup preserves runtime Redis overrides, validates artifacts, and exits when service jobs stop', () => {
   assert.match(startWindowsScript, /\$configuredRedisUrl = if \(\$env:REDIS_URL\)/);
   assert.match(helpersScript, /function Test-LocalRedisUrl/);
+  assert.match(helpersScript, /function Get-RedactedRedisUrl/);
   assert.match(
     startWindowsScript,
     /\$useExternalRedis = \$useRedis -and \$configuredRedisUrl -and -not \(Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort\)/,
   );
-  assert.match(startWindowsScript, /Write-Ok "Using external Redis: \$configuredRedisUrl"/);
+  assert.match(startWindowsScript, /\$safeConfiguredRedisUrl = Get-RedactedRedisUrl -RedisUrl \$configuredRedisUrl/);
+  assert.match(startWindowsScript, /Write-Ok "Using external Redis: \$safeConfiguredRedisUrl"/);
+  assert.match(startWindowsScript, /\$safeEffectiveRedisUrl = Get-RedactedRedisUrl -RedisUrl \$effectiveRedisUrl/);
+  assert.match(startWindowsScript, /\$storageMode = if \(\$useRedis -and \$safeEffectiveRedisUrl\) \{ "Redis \(\$safeEffectiveRedisUrl\)" \}/);
   assert.match(startWindowsScript, /\$runtimeEnvOverrides = @\{/);
   assert.match(startWindowsScript, /REDIS_URL = \$env:REDIS_URL/);
   assert.match(startWindowsScript, /MEMORY_STORE = \$env:MEMORY_STORE/);

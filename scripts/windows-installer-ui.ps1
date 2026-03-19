@@ -150,7 +150,7 @@ function Get-InstallerExternalRedisUrl {
     param([string]$ProjectRoot)
     $envFile = Join-Path $ProjectRoot ".env"
     $rawUrl = Get-InstallerEnvValueFromFile -EnvFile $envFile -Key "REDIS_URL"
-    if (-not $rawUrl -and $env:REDIS_URL) {
+    if (-not $rawUrl -and (Test-Path $envFile) -and $env:REDIS_URL) {
         $rawUrl = $env:REDIS_URL.Trim()
     }
     if (-not $rawUrl) { return "" }
@@ -164,7 +164,7 @@ function Get-InstallerAnyRedisUrl {
     param([string]$ProjectRoot)
     $envFile = Join-Path $ProjectRoot ".env"
     $rawUrl = Get-InstallerEnvValueFromFile -EnvFile $envFile -Key "REDIS_URL"
-    if (-not $rawUrl -and $env:REDIS_URL) {
+    if (-not $rawUrl -and (Test-Path $envFile) -and $env:REDIS_URL) {
         $rawUrl = $env:REDIS_URL.Trim()
     }
     if (-not $rawUrl) { return "" }
@@ -173,15 +173,7 @@ function Get-InstallerAnyRedisUrl {
 
 function Get-InstallerRedactedRedisUrl {
     param([string]$RedisUrl)
-    if (-not $RedisUrl) { return "" }
-    try {
-        $uri = [System.Uri]::new($RedisUrl)
-        if (-not $uri.UserInfo) { return $RedisUrl }
-        $authority = if ($uri.Port -gt 0) { "$($uri.Host):$($uri.Port)" } else { $uri.Host }
-        return "$($uri.Scheme)://$authority$($uri.AbsolutePath)"
-    } catch {
-        return $RedisUrl -replace '://[^@]+@', '://'
-    }
+    return Get-RedactedRedisUrl -RedisUrl $RedisUrl
 }
 
 function Resolve-InstallerRedisPlan {
@@ -225,10 +217,11 @@ function Apply-InstallerRedisPlan {
     if ($Plan.Mode -eq "external" -or $Plan.Mode -eq "keep_local") {
         Set-InstallerEnvValue $State "REDIS_URL" $Plan.RedisUrl
         Add-InstallerEnvDelete $State "MEMORY_STORE"
+        $safeRedisUrl = Get-InstallerRedactedRedisUrl -RedisUrl $Plan.RedisUrl
         if ($Plan.Mode -eq "keep_local") {
-            Write-Ok "Preserving local Redis URL: $($Plan.RedisUrl)"
+            Write-Ok "Preserving local Redis URL: $safeRedisUrl"
         } else {
-            Write-Ok "Using external Redis: $($Plan.RedisUrl)"
+            Write-Ok "Using external Redis: $safeRedisUrl"
         }
         return $true
     }
