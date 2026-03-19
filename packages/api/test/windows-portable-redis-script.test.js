@@ -204,7 +204,7 @@ test('Windows installer uses interactive selectors instead of typed or letter-ba
   assert.doesNotMatch(uiHelpersScript, /Label = "&All"/);
   assert.doesNotMatch(uiHelpersScript, /Label = "&Select"/);
   assert.doesNotMatch(uiHelpersScript, /Prompt "Install \$\(\$option.Name\)\?"/);
-  assert.doesNotMatch(installScript, /Read-Host " {4}Install which\?/);
+  assert.doesNotMatch(installScript, /Read-Host " {4}Install which\?"/);
   assert.doesNotMatch(uiHelpersScript, /↑|↓|◉|◯/);
   assert.match(helpersScript, /Select-InstallerChoice -Title "Claude auth"/);
   assert.match(helpersScript, /Select-InstallerChoice -Title "Codex auth"/);
@@ -549,6 +549,11 @@ test('Windows installer strips surrounding quotes when loading .env into the bui
   assert.match(installScript, /SetEnvironmentVariable\(\$key, \$val, "Process"\)/);
 });
 
+test('Windows installer overwrites stale process env with the current repo .env before build', () => {
+  assert.match(installScript, /SetEnvironmentVariable\(\$key, \$val, "Process"\)/);
+  assert.doesNotMatch(installScript, /if \(-not \[System\.Environment\]::GetEnvironmentVariable\(\$key\)\) \{/);
+});
+
 test('Windows startup preserves configured REDIS_URL with DB suffix after Redis auto-start', () => {
   // Need >= 2 matches: "already running" branch + "auto-start" branch
   const pattern =
@@ -574,7 +579,7 @@ test('Windows startup passes localhost REDIS_URL auth into redis-server auto-sta
   );
   assert.ok(
     pingMatches && pingMatches.length >= 2,
-    `Expected authenticated redis-cli ping in both already-running and auto-start branches, found ${matches ? matches.length : 0}`,
+    `Expected authenticated redis-cli ping in both already-running and auto-start branches, found ${pingMatches ? pingMatches.length : 0}`,
   );
   assert.match(startWindowsScript, /& \$redisCliPath -p \$RedisPort @redisAuthArgs shutdown save 2>\$null/);
 });

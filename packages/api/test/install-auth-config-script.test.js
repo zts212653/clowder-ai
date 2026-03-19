@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -142,7 +142,9 @@ test('claude-profile create and remove keeps installer-managed profile in sync',
     const secretsFile = join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json');
     const profiles = JSON.parse(readFileSync(profileFile, 'utf8'));
     const secrets = JSON.parse(readFileSync(secretsFile, 'utf8'));
-    const installerManaged = profiles.providers.anthropic.profiles.find((profile) => profile.id === 'installer-managed');
+    const installerManaged = profiles.providers.anthropic.profiles.find(
+      (profile) => profile.id === 'installer-managed',
+    );
 
     assert.equal(profiles.version, 1);
     assert.equal(profiles.providers.anthropic.activeProfileId, 'installer-managed');
@@ -158,7 +160,10 @@ test('claude-profile create and remove keeps installer-managed profile in sync',
     const profilesAfterRemove = JSON.parse(readFileSync(profileFile, 'utf8'));
     const secretsAfterRemove = JSON.parse(readFileSync(secretsFile, 'utf8'));
 
-    assert.equal(profilesAfterRemove.providers.anthropic.profiles.some((profile) => profile.id === 'installer-managed'), false);
+    assert.equal(
+      profilesAfterRemove.providers.anthropic.profiles.some((profile) => profile.id === 'installer-managed'),
+      false,
+    );
     assert.equal(profilesAfterRemove.providers.anthropic.activeProfileId, '');
     assert.equal('installer-managed' in (secretsAfterRemove.providers.anthropic ?? {}), false);
   } finally {
@@ -195,6 +200,115 @@ test('claude-profile set accepts API key from _INSTALLER_API_KEY environment var
   }
 });
 
+test('claude-profile v2 migration preserves non-installer profiles and secrets on set/remove', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-v2-migrate-'));
+
+  try {
+    const profileDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(profileDir, { recursive: true });
+    const profileFile = join(profileDir, 'provider-profiles.json');
+    const secretsFile = join(profileDir, 'provider-profiles.secrets.local.json');
+
+    writeFileSync(
+      profileFile,
+      `${JSON.stringify(
+        {
+          version: 2,
+          activeProfileId: 'personal',
+          profiles: [
+            {
+              id: 'installer-managed',
+              provider: 'anthropic',
+              name: 'Installer API Key',
+              authType: 'api_key',
+              baseUrl: 'https://installer.example',
+              modelOverride: 'claude-installer',
+              createdAt: '2026-03-01T00:00:00.000Z',
+              updatedAt: '2026-03-01T00:00:00.000Z',
+            },
+            {
+              id: 'personal',
+              provider: 'anthropic',
+              name: 'Personal Key',
+              authType: 'api_key',
+              baseUrl: 'https://personal.example',
+              modelOverride: 'claude-personal',
+              createdAt: '2026-03-02T00:00:00.000Z',
+              updatedAt: '2026-03-02T00:00:00.000Z',
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      secretsFile,
+      `${JSON.stringify(
+        {
+          version: 2,
+          profiles: {
+            'installer-managed': { apiKey: 'installer-key' },
+            personal: { apiKey: 'personal-key' },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    runHelper([
+      'claude-profile',
+      'set',
+      '--project-dir',
+      projectRoot,
+      '--api-key',
+      'new-installer-key',
+      '--base-url',
+      'https://installer.new',
+      '--model',
+      'claude-new',
+    ]);
+
+    const migratedProfiles = JSON.parse(readFileSync(profileFile, 'utf8'));
+    const migratedSecrets = JSON.parse(readFileSync(secretsFile, 'utf8'));
+    const personalProfile = migratedProfiles.providers.anthropic.profiles.find((profile) => profile.id === 'personal');
+    const installerProfile = migratedProfiles.providers.anthropic.profiles.find(
+      (profile) => profile.id === 'installer-managed',
+    );
+
+    assert.equal(migratedProfiles.version, 1);
+    assert.equal(migratedProfiles.providers.anthropic.activeProfileId, 'installer-managed');
+    assert.equal(personalProfile?.baseUrl, 'https://personal.example');
+    assert.equal(personalProfile?.modelOverride, 'claude-personal');
+    assert.equal(migratedSecrets.providers.anthropic.personal.apiKey, 'personal-key');
+    assert.equal(installerProfile?.baseUrl, 'https://installer.new');
+    assert.equal(installerProfile?.modelOverride, 'claude-new');
+    assert.equal(migratedSecrets.providers.anthropic['installer-managed'].apiKey, 'new-installer-key');
+
+    runHelper(['claude-profile', 'remove', '--project-dir', projectRoot]);
+
+    const profilesAfterRemove = JSON.parse(readFileSync(profileFile, 'utf8'));
+    const secretsAfterRemove = JSON.parse(readFileSync(secretsFile, 'utf8'));
+
+    assert.equal(
+      profilesAfterRemove.providers.anthropic.profiles.some((profile) => profile.id === 'installer-managed'),
+      false,
+    );
+    assert.equal(profilesAfterRemove.providers.anthropic.activeProfileId, 'personal');
+    assert.equal(
+      profilesAfterRemove.providers.anthropic.profiles.some((profile) => profile.id === 'personal'),
+      true,
+    );
+    assert.equal(secretsAfterRemove.providers.anthropic.personal.apiKey, 'personal-key');
+    assert.equal('installer-managed' in (secretsAfterRemove.providers.anthropic ?? {}), false);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test('env-apply writes apostrophes with dotenv-compatible double quotes', () => {
   const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-env-apostrophe-'));
 
@@ -203,13 +317,7 @@ test('env-apply writes apostrophes with dotenv-compatible double quotes', () => 
     mkdirSync(envRoot, { recursive: true });
     writeFileSync(envFile, '', 'utf8');
 
-    runHelper([
-      'env-apply',
-      '--env-file',
-      envFile,
-      '--set',
-      "OPENAI_BASE_URL=https://proxy.example/o'hara",
-    ]);
+    runHelper(['env-apply', '--env-file', envFile, '--set', "OPENAI_BASE_URL=https://proxy.example/o'hara"]);
 
     const output = readFileSync(envFile, 'utf8');
     assert.match(output, /^OPENAI_BASE_URL="https:\/\/proxy\.example\/o'hara"$/m);

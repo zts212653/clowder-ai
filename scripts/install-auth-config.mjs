@@ -118,14 +118,17 @@ function createDefaultSecrets() {
 }
 
 function normalizeInstallerMetaProfile(rawProfile) {
-  if (!rawProfile || rawProfile.id !== INSTALLER_PROFILE_ID) {
+  if (!rawProfile?.id) {
     return null;
   }
   const now = new Date().toISOString();
   return {
-    id: INSTALLER_PROFILE_ID,
+    id: rawProfile.id,
     provider: 'anthropic',
-    name: rawProfile.name ?? rawProfile.displayName ?? 'Installer API Key',
+    name:
+      rawProfile.name ??
+      rawProfile.displayName ??
+      (rawProfile.id === INSTALLER_PROFILE_ID ? 'Installer API Key' : rawProfile.id),
     mode: rawProfile.mode === 'api_key' || rawProfile.authType === 'api_key' ? 'api_key' : 'subscription',
     ...(rawProfile.baseUrl ? { baseUrl: rawProfile.baseUrl } : {}),
     ...(rawProfile.modelOverride ? { modelOverride: rawProfile.modelOverride } : {}),
@@ -141,13 +144,15 @@ function normalizeProfilesFile(raw) {
 
   const next = createDefaultProfiles();
   if (raw?.version === 2 && Array.isArray(raw.profiles)) {
-    const installerManaged = raw.profiles
+    const migratedProfiles = raw.profiles
       .map((profile) => normalizeInstallerMetaProfile(profile))
-      .find((profile) => profile !== null);
-    if (installerManaged) {
-      next.providers.anthropic.profiles.push(installerManaged);
-      next.providers.anthropic.activeProfileId =
-        raw.activeProfileId === INSTALLER_PROFILE_ID ? INSTALLER_PROFILE_ID : installerManaged.id;
+      .filter((profile) => profile !== null);
+    if (migratedProfiles.length > 0) {
+      next.providers.anthropic.profiles.push(...migratedProfiles);
+      const activeProfileId = migratedProfiles.some((profile) => profile.id === raw.activeProfileId)
+        ? raw.activeProfileId
+        : migratedProfiles[0].id;
+      next.providers.anthropic.activeProfileId = activeProfileId;
     }
   }
   return next;
@@ -159,9 +164,12 @@ function normalizeSecretsFile(raw) {
   }
 
   const next = createDefaultSecrets();
-  const apiKey = raw?.version === 2 ? raw.profiles?.[INSTALLER_PROFILE_ID]?.apiKey : undefined;
-  if (apiKey) {
-    next.providers.anthropic[INSTALLER_PROFILE_ID] = { apiKey };
+  if (raw?.version === 2 && raw.profiles && typeof raw.profiles === 'object') {
+    for (const [profileId, profileSecrets] of Object.entries(raw.profiles)) {
+      if (profileSecrets?.apiKey) {
+        next.providers.anthropic[profileId] = { apiKey: profileSecrets.apiKey };
+      }
+    }
   }
   return next;
 }
