@@ -276,7 +276,7 @@ skills:
     description: >
       跨 thread 协同：发现平行 session → 通知（3+2 件套）→ 争用协调 → 确认。
       Use when: 平行 session 之间需要协同、通知改动影响、共享文件争用。
-      Not for: 跨猫工作交接（用 cross-cat-handoff）、单 session 内并行（用 parallel-execution）。
+      Not for: 跨猫工作交接（用 cross-cat-handoff）、单 session 内 subagent 并行（CLI 内置能力）。
       Output: cross-post 通知 + 争用协调完成。
     triggers:
       - "通知另一个 session"
@@ -287,31 +287,11 @@ skills:
       - "cross-thread"
     not_for:
       - "跨猫交接（用 cross-cat-handoff）"
-      - "单 session 内并行（用 parallel-execution）"
+      - "单 session 内 subagent 并行（CLI 内置能力）"
     output: "cross-post notification + contention resolution"
     next: []
     sop_step: null
     merged_from: null
-
-  # ── 并行执行 ──
-  parallel-execution:
-    description: >
-      多个独立任务的并行分发、子代理驱动、计划执行。
-      Use when: 有 2+ 个互不依赖的任务、需要子代理并行工作。
-      Not for: 单一任务、有依赖链的任务（顺序执行即可）。
-      Output: 并行任务完成 + 集成验证。
-    triggers:
-      - "多个独立任务"
-      - "并行"
-      - "parallel"
-      - "subagent"
-    not_for:
-      - "单一任务"
-      - "有依赖链"
-    output: "Parallel task completion + integration"
-    next: ["quality-gate"]
-    sop_step: null
-    merged_from: ["dispatching-parallel-agents", "subagent-driven-development", "executing-plans"]
 
   # ── 深度调研 ──
   deep-research:
