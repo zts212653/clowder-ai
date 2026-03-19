@@ -101,9 +101,22 @@ git branch -d {branch-name} && git worktree prune
 
 ### 云端 review 处理规则
 
+**⚠️ LL-033 教训：必须检查 inline code comments！**
+
+云端 review 的 P1/P2 可能在 **inline code comments** 里，不在 review body 里。
+`gh pr view` 的 `--json reviews` 只返回 review body（可能显示"no major issues"），
+但 inline code comment 里可能有 P1。
+
+**merge 前必须执行**：
+```bash
+gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
+  --jq '.[] | select(.body | test("P[012]")) | {body: .body[:200], path: .path}'
+```
+有 P1/P2 输出 → **BLOCKED，不能 merge**。无输出 → 可以继续。
+
 | 结果 | 处理 |
 |------|------|
-| 0 P1/P2 | 通过，执行 Step 7 |
+| 0 P1/P2（review body + inline comments 都无） | 通过，执行 Step 7 |
 | P1/P2 有复现证据 | 在 feature branch 修 → push → **re-trigger review** → 等通过 |
 | P1/P2 无复现证据 | 降级 P3，留 comment，视为通过 |
 | 误报 | 留 comment 解释，视为通过 |

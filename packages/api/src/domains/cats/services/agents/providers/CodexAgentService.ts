@@ -288,6 +288,8 @@ export class CodexAgentService implements AgentService {
       // overwriting pre-copied auth.json/config.toml/sessions (see bug-report/tea-coffee/).
       const codexEnv = applyAuthMode(options?.callbackEnv ?? {});
 
+      const semanticCompletionController = new AbortController();
+
       const cliOpts = {
         command: 'codex' as const,
         args,
@@ -300,6 +302,7 @@ export class CodexAgentService implements AgentService {
           ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
           : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
+        semanticCompletionSignal: semanticCompletionController.signal,
       };
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
@@ -424,6 +427,7 @@ export class CodexAgentService implements AgentService {
         if (typeof event === 'object' && event !== null) {
           const raw = event as Record<string, unknown>;
           if (raw.type === 'turn.completed') {
+            semanticCompletionController.abort();
             const u = raw.usage as Record<string, unknown> | undefined;
             if (u) {
               const usage: TokenUsage = {};

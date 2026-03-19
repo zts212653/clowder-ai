@@ -1075,3 +1075,58 @@ test('F24: enriches Codex context snapshot from resolver into done metadata', as
   assert.equal(done.metadata.usage.contextResetsAtMs, Date.UTC(2026, 1, 18, 0, 0, 0));
   assert.equal(done.metadata.usage.lastTurnInputTokens, 186_749);
 });
+
+test('Issue #116: turn.completed unblocks done even when process exit is delayed', async () => {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const emitter = new EventEmitter();
+  const proc = {
+    stdout,
+    stderr,
+    pid: 12345,
+    exitCode: null,
+    kill: mock.fn(() => true),
+    on: (event, listener) => {
+      emitter.on(event, listener);
+      return proc;
+    },
+    once: (event, listener) => {
+      emitter.once(event, listener);
+      return proc;
+    },
+    _emitter: emitter,
+  };
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn });
+
+  const startMs = Date.now();
+  const promise = collect(service.invoke('test'));
+
+  proc.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread-116' }) + '\n');
+  proc.stdout.write(
+    JSON.stringify({
+      type: 'item.completed',
+      item: { id: 'msg-1', type: 'agent_message', text: 'Done!' },
+    }) + '\n',
+  );
+  proc.stdout.write(
+    JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 100, output_tokens: 50 },
+    }) + '\n',
+  );
+  proc.stdout.end();
+
+  // Process exits naturally during grace period (simulating delayed but normal exit)
+  setTimeout(() => emitter.emit('exit', 0, null), 300);
+
+  const msgs = await promise;
+  const elapsedMs = Date.now() - startMs;
+
+  assert.ok(elapsedMs < 2000, `Should complete quickly once process exits during grace, took ${elapsedMs}ms`);
+
+  const done = msgs.find((m) => m.type === 'done');
+  assert.ok(done, 'should have done message');
+  assert.equal(done.metadata?.usage?.inputTokens, 100);
+  assert.equal(done.metadata?.usage?.outputTokens, 50);
+});

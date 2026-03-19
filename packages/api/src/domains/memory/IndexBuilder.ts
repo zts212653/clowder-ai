@@ -208,12 +208,35 @@ export class IndexBuilder implements IIndexBuilder {
       }
 
       for (const thread of threads) {
-        const summary = thread.threadMemory?.summary;
-        if (!summary) continue;
-
         const anchor = `thread-${thread.id}`;
         const title = thread.title ?? `Thread ${thread.id.slice(0, 12)}`;
         const keywords = [...thread.participants, ...(thread.featureIds ?? [])];
+
+        // KD-32/33: Build summary from message content, not threadMemory.summary
+        // threadMemory.summary is empty for 96% of threads — useless as data source
+        let summary = '';
+        if (this.messageListFn) {
+          try {
+            const messages = await this.messageListFn(thread.id, 100);
+            if (messages.length > 0) {
+              const turns = messages.map((m) => `[${m.catId ?? 'user'}] ${m.content}`);
+              // Truncate to ~3000 chars for FTS5 summary field
+              const joined = turns.join('\n');
+              summary = joined.length > 3000 ? `${joined.slice(0, 2997)}...` : joined;
+            }
+          } catch {
+            // fail-open: skip this thread's messages
+          }
+        }
+        // Fallback: use threadMemory.summary if messages unavailable
+        if (!summary) {
+          summary = thread.threadMemory?.summary ?? '';
+        }
+        // Still nothing? Use title as minimal searchable content
+        if (!summary) {
+          summary = title;
+        }
+
         const sourceHash = createHash('sha256').update(summary).digest('hex').slice(0, 16);
 
         currentAnchors.add(anchor);
@@ -659,18 +682,31 @@ export class IndexBuilder implements IIndexBuilder {
       const thread = threadMap.get(threadId);
       if (!thread) continue;
 
-      const summary = thread.threadMemory?.summary;
       const anchor = `thread-${threadId}`;
-
-      if (!summary) {
-        // Thread lost its summary — remove from index
-        await this.store.deleteByAnchor(anchor);
-        this.embedDeps?.vectorStore.delete(anchor);
-        continue;
-      }
-
       const title = thread.title ?? `Thread ${threadId.slice(0, 12)}`;
       const keywords = [...thread.participants, ...(thread.featureIds ?? [])];
+
+      // KD-32/33: Build summary from message content, same logic as rebuild()
+      let summary = '';
+      if (this.messageListFn) {
+        try {
+          const messages = await this.messageListFn(threadId, 100);
+          if (messages.length > 0) {
+            const turns = messages.map((m) => `[${m.catId ?? 'user'}] ${m.content}`);
+            const joined = turns.join('\n');
+            summary = joined.length > 3000 ? `${joined.slice(0, 2997)}...` : joined;
+          }
+        } catch {
+          // fail-open
+        }
+      }
+      if (!summary) {
+        summary = thread.threadMemory?.summary ?? '';
+      }
+      if (!summary) {
+        summary = title;
+      }
+
       const sourceHash = createHash('sha256').update(summary).digest('hex').slice(0, 16);
 
       const existing = await this.store.getByAnchor(anchor);

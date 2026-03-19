@@ -261,7 +261,14 @@ async function main(): Promise<void> {
   const storageResult = assertStorageReady(!!redis);
   app.log.info(`[api] Storage mode: ${storageResult.mode}`);
 
-  const messageStore = createMessageStore(redis);
+  // F102 KD-34: append listener placeholder (wired after memoryServices init)
+  let appendListener: ((msg: { id: string; threadId: string; timestamp: number }) => void) | null = null;
+
+  const messageStore = createMessageStore(redis, {
+    onAppend: (msg) => {
+      appendListener?.(msg);
+    },
+  });
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
   const threadStore = createThreadStore(redis);
@@ -374,27 +381,14 @@ async function main(): Promise<void> {
     const { IndexBuilder } = await import('./domains/memory/IndexBuilder.js');
     const ib = memoryServices.indexBuilder;
     if (ib instanceof IndexBuilder) {
-      // Hook: mark thread dirty on POST /api/messages (message creation)
-      app.addHook('onResponse', (request, _reply, done) => {
-        if (request.method === 'POST' && request.url.startsWith('/api/messages')) {
-          const body = request.body as { threadId?: string } | undefined;
-          if (body?.threadId) {
-            ib.markThreadDirty(body.threadId);
-          }
+      // F102 KD-34: Wire append listener now that memoryServices is ready.
+      // This covers ALL 36 messageStore.append() call sites via the store itself,
+      // replacing the old HTTP onResponse hooks that only caught 2 routes.
+      appendListener = (msg) => {
+        if (msg.threadId) {
+          ib.markThreadDirty(msg.threadId);
         }
-        done();
-      });
-
-      // Hook: also mark dirty on POST /api/callbacks/post-message (cat messages)
-      app.addHook('onResponse', (request, _reply, done) => {
-        if (request.method === 'POST' && request.url.includes('/post-message')) {
-          const body = request.body as { threadId?: string } | undefined;
-          if (body?.threadId) {
-            ib.markThreadDirty(body.threadId);
-          }
-        }
-        done();
-      });
+      };
 
       const dirtyFlushTimer = setInterval(async () => {
         try {

@@ -681,19 +681,19 @@
     {
       "id": "F111",
       "name": "Streaming TTS Chunker — 流式分句合成管线",
-      "status": "done | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1",
+      "status": "done | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1 | **Completed**: 2026-03-17",
       "file": "F111-streaming-tts-chunker.md"
     },
     {
       "id": "F112",
       "name": "Voice Playback Queue — 语音播放队列 + 播放器统一",
-      "status": "in-progress | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1",
+      "status": "done | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1 | **Completed**: 2026-03-18",
       "file": "F112-voice-playback-queue.md"
     },
     {
       "id": "F113",
       "name": "Multi-Platform One-Click Deploy",
-      "status": "backlog | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2",
+      "status": "in-progress | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2",
       "file": "F113-multi-platform-one-click-deploy.md"
     },
     {
@@ -747,7 +747,7 @@
     {
       "id": "F122",
       "name": "执行通道统一 — A2A/multi_mention 入 Dispatch Queue",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-18",
       "file": "F122-unified-dispatch-queue.md"
     },
     {
@@ -781,5 +781,5 @@
       "file": "F127-cat-instance-management.md"
     }
   ],
-  "generated_at": "2026-03-18T07:32:09.806Z"
+  "generated_at": "2026-03-18T12:09:18.262Z"
 }

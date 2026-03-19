@@ -1,9 +1,9 @@
 ---
 feature_ids: [F113]
-topics: [deploy, onboarding, linux, macos, windows, community]
+topics: [deploy, onboarding, linux, macos, windows, community, directory-picker, cross-platform]
 doc_kind: spec
 created: 2026-03-13
-updated: 2026-03-16
+updated: 2026-03-18
 source: community
 community_issue: https://github.com/zts212653/clowder-ai/issues/14
 ---
@@ -16,14 +16,25 @@ community_issue: https://github.com/zts212653/clowder-ai/issues/14
 
 当前安装流程需要手动安装十几个依赖（Node.js、Redis、pnpm、Claude CLI 等），并手动配置环境变量。对新用户门槛过高，特别是非开发者背景的内测小伙伴。
 
-## Current State
+此外，目录选择器（`pick-directory`）依赖 macOS 的 `osascript`，在 Linux/Windows 上完全不可用。我们已有自建的 WorkspaceTree 文件浏览器，应统一用 web-based 方案替代原生系统调用。
 
-- [clowder-ai #14](https://github.com/zts212653/clowder-ai/issues/14) 已被明确为 F113 的 umbrella issue，用来聚合 Linux / macOS / Windows 的整体进度。
-- [PR #102](https://github.com/zts212653/clowder-ai/pull/102) 已形成 Linux 一键安装的 9 步骨架，但当前仍未合入。
-- 截至 GitHub `main@1cc0bce`，Windows 关键兼容修复仍未在主线落地：
-  - `packages/api/src/utils/cli-spawn.ts` 仍是直接 `spawn(command, args)`，没有 #64 的 `.cmd` shim 绕过逻辑。
-  - `ClaudeAgentService.ts` 的 `buildClaudeEnvOverrides()` 仍会在 `callbackEnv` 缺失时返回 `undefined`。
-  - `scripts/start-dev.sh` 仍依赖 Bash `source .env`、`lsof` 和 `kill $(jobs -p)`，不能作为 Windows 启动链路。
+## What
+
+### Phase D: 跨平台目录选择器（当前实施）
+
+用 web-based 目录浏览器替代 macOS `osascript` 原生文件夹选择：
+
+- **后端**: 将 `execPickDirectory()`（osascript）替换为基于现有 `browse` API 的跨平台目录列表
+- **前端**: `DirectoryPickerModal` 内嵌目录浏览器面板（面包屑导航 + 目录列表 + 路径输入）
+- **设计稿**: `designs/f113-cross-platform-directory-picker.pen`（已完成，Design Gate 通过）
+
+UX 要点：
+1. 面包屑导航 — Home > projects > relay-station，每层可点击跳转
+2. 目录列表 — 只显示文件夹，当前项目高亮
+3. 手动路径输入 — 底部保留输入框（高级用户 / 系统路径）
+4. 全平台统一体验 — macOS/Windows/Linux 完全一致
+
+### Phase A–C: 一键部署脚本
 
 ## Phase Plan
 
@@ -113,6 +124,10 @@ Native PowerShell Installer + Production-like Runtime。
 
 ## Acceptance Criteria
 
+- [ ] AC-D1: 目录选择器不依赖任何 OS 特定 API（无 osascript / zenity / PowerShell）
+- [ ] AC-D2: 面包屑导航可在任意层级间跳转
+- [ ] AC-D3: 手动输入路径可直接跳转到目标目录
+- [ ] AC-D4: 现有功能不退化（项目列表、CWD 推荐、路径校验）
 - [ ] AC-1: Linux 用户执行单条命令完成全部安装并能启动服务
 - [ ] AC-2: macOS 用户同上
 - [ ] AC-3: Windows 11 用户在裸机上执行单条 PowerShell 命令完成安装并启动

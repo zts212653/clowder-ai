@@ -8,7 +8,7 @@ created: 2026-03-12
 
 # F112: Voice Playback Queue — 语音播放队列 + 播放器统一
 
-> **Status**: in-progress | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1
+> **Status**: done | **Owner**: 金渐层 (OpenCode, claude-opus-4-6) | **Priority**: P1 | **Completed**: 2026-03-18
 
 ## Why
 
@@ -56,7 +56,7 @@ created: 2026-03-12
 
 ### Phase B: 播放器统一 — PodcastPlayer → PlaybackManager（第二刀）
 
-> **Scope 重定义（2026-03-19）**：原始 Phase B（replace + Intent + 双猫实时编排）暂无真实场景，降级为未来备选。新 Phase B 聚焦实际需求 — 将 Signal Study 播客播放器迁移到 PlaybackManager，消除重复的 Audio 管理代码。
+> **Scope 重定义（2026-03-17）**：原始 Phase B（replace + Intent + 双猫实时编排）暂无真实场景，降级为未来备选。新 Phase B 聚焦实际需求 — 将 Signal Study 播客播放器迁移到 PlaybackManager，消除重复的 Audio 管理代码。
 
 1. **PodcastPlayer 播放逻辑迁移**
    - 现状：`PodcastPlayer.tsx` 使用 `usePlayAll()` 手搓 for 循环 + `new Audio()` 播放预生成播客
@@ -74,7 +74,7 @@ created: 2026-03-12
 
 ### Phase B-Future: replace + Intent + 双猫实时编排（未来备选方案，暂无场景）
 
-> **归档原因（2026-03-19）**：route-serial 目前只支持单猫输出，没有双猫同时实时语音的场景。replace/intent 行为也暂无使用方。设计保留以备未来语音陪伴模式扩展。
+> **归档原因（2026-03-17）**：route-serial 目前只支持单猫输出，没有双猫同时实时语音的场景。replace/intent 行为也暂无使用方。设计保留以备未来语音陪伴模式扩展。
 
 1. **双猫播客实时编排**（原 Phase B-1）
    - 两只猫的语音片段按 `queue` 行为交替播放
@@ -92,7 +92,7 @@ created: 2026-03-12
 
 ### Phase C: VAD 打断 — 用户开口猫停嘴（第三刀）
 
-> **技术选型已决（2026-03-20）**：使用 `@ricky0123/vad-web`（底层 Silero VAD v5 ONNX + onnxruntime-web）。纯浏览器前端闭环，不依赖后端 ASR/TTS 模型，不依赖 F104。
+> **技术选型已决（2026-03-17）**：使用 `@ricky0123/vad-web`（底层 Silero VAD v5 ONNX + onnxruntime-web）。纯浏览器前端闭环，不依赖后端 ASR/TTS 模型，不依赖 F104。
 
 1. **VAD 检测 → PlaybackManager interrupt**
    - 使用 `@ricky0123/vad-web` 的 `MicVAD` 接入麦克风

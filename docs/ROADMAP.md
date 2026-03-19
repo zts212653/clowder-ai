@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-03-16
+> 维护者：三猫 | 最后更新：2026-03-18
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -47,10 +47,8 @@ created: 2026-02-26
 | F108 | Side-Dispatch — 同一 Thread 多猫并发执行 | in-progress | Ragdoll | internal | [F108](features/F108-side-dispatch-concurrent-invocation.md) |
 | F109 | Message Actions 修复与增强 — 软删除/Branch/编辑/通知 | spec | Ragdoll | internal | [F109](features/F109-message-actions-overhaul.md) |
 | F110 | 训练营愿景引导增强 — CVO 需求挖掘 + SOP 显式加载 | spec | Ragdoll | internal | [F110](features/F110-bootcamp-vision-elicitation.md) |
-| F112 | Voice Playback Queue — 语音播放队列 + Intent 调度 | impl | 金渐层 | internal | [F112](features/F112-voice-playback-queue.md) |
 | F113 | Multi-Platform One-Click Deploy — 多平台一键部署 | spec | community | community [#14](https://github.com/zts212653/clowder-ai/issues/14) | [F113](features/F113-multi-platform-one-click-deploy.md) |
 | F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
-| F122 | 执行通道统一 — A2A/multi_mention 入 Dispatch Queue | in-progress | Ragdoll | internal | [F122](features/F122-unified-dispatch-queue.md) |
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Cat Café Limb Control Plane | spec | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
 | F127 | 猫猫管理重构 — 账户配置与猫猫实例分离，动态创建猫 + 自定义别名 @ 路由 | spec | 待定 | community [#109](https://github.com/zts212653/clowder-ai/issues/109) | [F127](features/F127-cat-instance-management.md) |

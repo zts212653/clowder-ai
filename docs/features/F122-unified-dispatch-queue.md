@@ -8,7 +8,7 @@ created: 2026-03-14
 
 # F122: 执行通道统一 — A2A/multi_mention 入 Dispatch Queue
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-18
 
 ## Why
 

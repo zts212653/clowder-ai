@@ -8,9 +8,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 
-const { spawnCli, isCliError, isCliTimeout, isLivenessWarning, KILL_GRACE_MS } = await import(
-  '../dist/utils/cli-spawn.js'
-);
+const { spawnCli, isCliError, isCliTimeout, isLivenessWarning, KILL_GRACE_MS, SEMANTIC_COMPLETION_GRACE_MS } =
+  await import('../dist/utils/cli-spawn.js');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -856,4 +855,180 @@ test('isLivenessWarning returns false for non-warning objects', () => {
   assert.ok(!isLivenessWarning(null));
   assert.ok(!isLivenessWarning(42));
   assert.ok(!isLivenessWarning({ __livenessWarning: false }));
+});
+
+// === Issue #116: Semantic completion decoupled from process exit ===
+
+test('Group A: semanticCompletionSignal aborted → generator finishes without waiting for exit', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const semanticController = new AbortController();
+
+  const startMs = Date.now();
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec', '--json'],
+        timeoutMs: 10_000,
+        semanticCompletionSignal: semanticController.signal,
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 't1' }) + '\n');
+  proc.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100 } }) + '\n');
+
+  semanticController.abort();
+  proc.stdout.end();
+
+  // Simulate process exiting naturally during grace period (e.g. git push finishes)
+  setTimeout(() => proc._emitter.emit('exit', 0, null), 200);
+
+  const results = await promise;
+  const elapsedMs = Date.now() - startMs;
+
+  // Should finish after process exits (~200ms), not wait for full timeout (10s)
+  assert.ok(elapsedMs < 2000, `Should finish once process exits during grace, took ${elapsedMs}ms`);
+  assert.equal(results.length, 2);
+  assert.deepEqual(results[0], { type: 'thread.started', thread_id: 't1' });
+  assert.deepEqual(results[1], { type: 'turn.completed', usage: { input_tokens: 100 } });
+});
+
+test('Group A: semanticCompletionSignal skips __cliError for post-completion exit', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const semanticController = new AbortController();
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec'],
+        semanticCompletionSignal: semanticController.signal,
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'item.completed', text: 'hello' }) + '\n');
+  semanticController.abort();
+  proc.stdout.end();
+
+  // Process exits with non-zero during grace (Codex CLI quirk)
+  setTimeout(() => proc._emitter.emit('exit', 1, null), 100);
+
+  const results = await promise;
+
+  const hasCliError = results.some((r) => isCliError(r));
+  assert.equal(hasCliError, false, 'Post-semantic-completion exit error should be suppressed');
+
+  assert.equal(results.length, 1);
+  assert.deepEqual(results[0], { type: 'item.completed', text: 'hello' });
+});
+
+test('Group B: no semanticCompletionSignal → generator waits for exit (existing behavior)', async () => {
+  const proc = createMockProcess({ exitOnKill: true });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const startMs = Date.now();
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec'],
+        timeoutMs: 200,
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 't1' }) + '\n');
+  proc.stdout.end();
+
+  const results = await promise;
+  const elapsedMs = Date.now() - startMs;
+
+  assert.ok(elapsedMs >= 150, `Should wait for timeout (~200ms), only took ${elapsedMs}ms`);
+  const hasTimeout = results.some((r) => isCliTimeout(r));
+  assert.equal(hasTimeout, true, 'Without semanticCompletionSignal, should wait for exit and eventually timeout');
+});
+
+test('Group B: semanticCompletionSignal not aborted → still waits for exit', async () => {
+  const proc = createMockProcess({ exitOnKill: true });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const semanticController = new AbortController();
+
+  const startMs = Date.now();
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec'],
+        timeoutMs: 200,
+        semanticCompletionSignal: semanticController.signal,
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 't1' }) + '\n');
+  proc.stdout.end();
+
+  const results = await promise;
+  const elapsedMs = Date.now() - startMs;
+
+  assert.ok(elapsedMs >= 150, `Should wait for timeout (~200ms), only took ${elapsedMs}ms`);
+  const hasTimeout = results.some((r) => isCliTimeout(r));
+  assert.equal(hasTimeout, true, 'Un-aborted semanticCompletionSignal should behave like no signal');
+});
+
+test('Group A: lingering process is killed after grace period expires', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const semanticController = new AbortController();
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec'],
+        timeoutMs: 60_000,
+        semanticCompletionSignal: semanticController.signal,
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\n');
+  semanticController.abort();
+  proc.stdout.end();
+
+  // Process never exits — grace timer (SEMANTIC_COMPLETION_GRACE_MS) should expire,
+  // then killChild() in finally should fire SIGTERM.
+  // Emit exit after kill so generator can resolve.
+  const exitAfterKill = () => {
+    if (proc.kill.mock.callCount() > 0) {
+      proc._emitter.emit('exit', null, 'SIGTERM');
+    } else {
+      setTimeout(exitAfterKill, 50);
+    }
+  };
+  setTimeout(exitAfterKill, 100);
+
+  const startMs = Date.now();
+  await promise;
+  const elapsedMs = Date.now() - startMs;
+
+  assert.ok(proc.kill.mock.callCount() >= 1, 'Should kill lingering process after grace');
+  assert.equal(proc.kill.mock.calls[0].arguments[0], 'SIGTERM');
+  assert.ok(
+    elapsedMs >= SEMANTIC_COMPLETION_GRACE_MS - 500,
+    `Should wait for grace period (~${SEMANTIC_COMPLETION_GRACE_MS}ms), took ${elapsedMs}ms`,
+  );
 });
