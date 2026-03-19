@@ -16,7 +16,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
@@ -181,6 +181,31 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
   return args;
 }
 
+export function isGitRepositoryPath(workingDirectory: string): boolean {
+  let current = resolve(workingDirectory);
+  while (true) {
+    if (existsSync(join(current, '.git'))) {
+      return true;
+    }
+
+    const root = parse(current).root;
+    if (current === root) {
+      return false;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
+}
+
+function buildGitRepoArgs(workingDirectory?: string): string[] {
+  const repoCheckDir = workingDirectory ?? process.cwd();
+  return isGitRepositoryPath(repoCheckDir) ? [] : ['--skip-git-repo-check'];
+}
+
 /**
  * Service for invoking Codex via CLI subprocess.
  * Uses ChatGPT Plus/Pro subscription instead of API key.
@@ -215,6 +240,7 @@ export class CodexAgentService implements AgentService {
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
+    const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
 
     // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
@@ -231,6 +257,7 @@ export class CodexAgentService implements AgentService {
           ...modelArgs,
           ...reasoningArgs,
           ...approvalArgs,
+          ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
           ...promptArgs,
@@ -245,6 +272,7 @@ export class CodexAgentService implements AgentService {
           '--add-dir',
           '.git',
           ...approvalArgs,
+          ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
           ...promptArgs,

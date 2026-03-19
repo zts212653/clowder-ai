@@ -5,10 +5,14 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 
-const { CodexAgentService } = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
+const { CodexAgentService, isGitRepositoryPath } = await import(
+  '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
+);
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -183,6 +187,52 @@ test('does not include resume when no sessionId', async () => {
   assert.ok(args.includes('danger-full-access'), 'default sandbox should allow git writes');
   assert.ok(args.includes('approval_policy="on-request"'), 'fresh exec should set default approval policy');
   assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
+});
+
+test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
+
+  try {
+    const promise = collect(service.invoke('hello', { workingDirectory: nonGitDir }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-non-git' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--skip-git-repo-check'));
+  } finally {
+    rmSync(nonGitDir, { recursive: true, force: true });
+  }
+});
+
+test('does not add --skip-git-repo-check inside a git repository', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+
+  const promise = collect(service.invoke('hello', { workingDirectory: process.cwd() }));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-git-root' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(!args.includes('--skip-git-repo-check'));
+});
+
+test('isGitRepositoryPath walks parent directories instead of shelling out to git', () => {
+  const root = mkdtempSync(join('/tmp', 'codex-git-marker-'));
+  const nestedDir = join(root, 'packages', 'api');
+
+  try {
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(root, '.git'), 'gitdir: /tmp/example\n', 'utf8');
+
+    assert.equal(isGitRepositoryPath(nestedDir), true);
+    assert.equal(isGitRepositoryPath(join('/tmp', 'codex-not-a-repo')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('uses env-configured sandbox and approval policy for fresh exec', async () => {

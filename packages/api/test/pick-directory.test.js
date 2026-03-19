@@ -30,6 +30,54 @@ describe('execPickDirectory()', () => {
   });
 });
 
+describe('getPickDirectoryCommand()', () => {
+  it('uses osascript on macOS', () => {
+    const command = mod.getPickDirectoryCommand('darwin');
+    assert.ok(command);
+    assert.equal(command.command, 'osascript');
+    assert.deepEqual(command.args, ['-e', 'POSIX path of (choose folder)']);
+  });
+
+  it('uses PowerShell folder picker on Windows', () => {
+    const command = mod.getPickDirectoryCommand('win32');
+    assert.ok(command);
+    assert.equal(command.command, 'powershell.exe');
+    assert.ok(command.args.includes('-STA'));
+    assert.match(command.args.at(-1), /FolderBrowserDialog/);
+  });
+
+  it('returns null on unsupported platforms', () => {
+    assert.equal(mod.getPickDirectoryCommand('linux'), null);
+  });
+});
+
+describe('normalizePickedDirectoryPath()', () => {
+  it('preserves Windows drive roots', () => {
+    assert.equal(mod.normalizePickedDirectoryPath('C:\\'), 'C:\\');
+    assert.equal(mod.normalizePickedDirectoryPath('D:/'), 'D:\\');
+  });
+
+  it('trims trailing separators from non-root directories', () => {
+    assert.equal(mod.normalizePickedDirectoryPath('C:\\workspace\\clowder-ai\\'), 'C:\\workspace\\clowder-ai');
+    assert.equal(mod.normalizePickedDirectoryPath('/tmp/demo/'), '/tmp/demo');
+  });
+});
+
+describe('splitProjectCompletePrefix()', () => {
+  it('treats a trailing backslash as a directory prefix on Windows', () => {
+    const result = mod.splitProjectCompletePrefix('C:\\Users\\alice\\repo\\', 'C:\\Users\\alice', 'win32');
+    assert.equal(result.parentDir, 'C:\\Users\\alice\\repo');
+    assert.equal(result.fragment, '');
+  });
+});
+
+describe('getProjectBrowseParent()', () => {
+  it('returns the parent path for Windows browse results', () => {
+    assert.equal(mod.getProjectBrowseParent('C:\\Users\\alice\\repo', 'win32'), 'C:\\Users\\alice');
+    assert.equal(mod.getProjectBrowseParent('C:\\', 'win32'), null);
+  });
+});
+
 describe('POST /api/projects/pick-directory', () => {
   it('returns 401 without identity header', async () => {
     const app = await buildApp();

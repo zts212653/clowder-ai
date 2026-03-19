@@ -5,9 +5,12 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
+import { escapeCmdArg, resolveWindowsShimSpawn } from './cli-spawn-win.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
 import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
+
+const IS_WINDOWS = process.platform === 'win32';
 
 type CliErrorReasonCode = 'invalid_thinking_signature';
 
@@ -369,7 +372,11 @@ export function isLivenessWarning(value: unknown): value is import('./ProcessLiv
 }
 
 /**
- * Default spawn function wrapping child_process.spawn
+ * Default spawn function wrapping child_process.spawn.
+ *
+ * On Windows (#64): bypasses .cmd shim by resolving the underlying .js
+ * script and spawning via `node` directly. Falls back to `shell: true`
+ * if shim resolution fails.
  */
 function defaultSpawn(
   command: string,
@@ -380,6 +387,25 @@ function defaultSpawn(
     stdio: ['ignore', 'pipe', 'pipe'];
   },
 ): ChildProcessLike {
+  if (IS_WINDOWS) {
+    const shimSpawn = resolveWindowsShimSpawn(command, args);
+    if (shimSpawn) {
+      // Direct node invocation — no shell needed
+      return nodeSpawn(shimSpawn.command, shimSpawn.args, {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: options.stdio,
+      });
+    }
+    // Fallback: shell mode with escaped args
+    return nodeSpawn(command, args.map(escapeCmdArg), {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: options.stdio,
+      shell: true,
+    });
+  }
+
   return nodeSpawn(command, [...args], {
     cwd: options.cwd,
     env: options.env,

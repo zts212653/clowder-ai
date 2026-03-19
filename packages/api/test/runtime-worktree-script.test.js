@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -31,6 +31,11 @@ afterEach(async () => {
 });
 
 describe('runtime-worktree.sh', () => {
+  it('keeps the runtime-worktree entrypoint executable in the repository', () => {
+    const mode = statSync(runtimeScriptSource).mode & 0o111;
+    assert.notEqual(mode, 0, 'runtime-worktree.sh should retain an executable bit');
+  });
+
   it('starts in-place when project is not a git repository', () => {
     const projectDir = createTempProject('runtime-non-git');
 

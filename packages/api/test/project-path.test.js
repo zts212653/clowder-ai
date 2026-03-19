@@ -5,7 +5,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-const { validateProjectPath, isUnderAllowedRoot, getAllowedRoots } = await import('../dist/utils/project-path.js');
+const { validateProjectPath, isUnderAllowedRoot, getAllowedRoots, getDefaultRootsForPlatform, isPathUnderRoots } = await import(
+  '../dist/utils/project-path.js'
+);
 
 describe('isUnderAllowedRoot', () => {
   it('accepts path under home directory', () => {
@@ -33,6 +35,24 @@ describe('isUnderAllowedRoot', () => {
 
   it('rejects root directory', () => {
     assert.strictEqual(isUnderAllowedRoot('/'), false);
+  });
+
+  it('rejects cross-drive Windows paths when custom roots are configured', () => {
+    assert.strictEqual(isPathUnderRoots('D:\\repo', ['C:\\work'], 'win32'), false);
+    assert.strictEqual(isPathUnderRoots('C:\\work\\repo', ['C:\\work'], 'win32'), true);
+  });
+});
+
+describe('getDefaultRootsForPlatform', () => {
+  it('keeps Windows defaults scoped to the user home directory', () => {
+    const roots = getDefaultRootsForPlatform('win32', {
+      homeDir: 'C:\\Users\\share',
+      pathExists: (target) => target === 'C:\\' || target === 'D:\\',
+    });
+    assert.deepStrictEqual(roots, ['C:\\Users\\share']);
+    assert.strictEqual(isPathUnderRoots('C:\\Users\\share\\repo', roots, 'win32'), true);
+    assert.strictEqual(isPathUnderRoots('C:\\Windows', roots, 'win32'), false);
+    assert.strictEqual(isPathUnderRoots('D:\\other-user', roots, 'win32'), false);
   });
 });
 

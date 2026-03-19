@@ -8,7 +8,7 @@
 
 import { realpath, stat } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
-import { relative, resolve } from 'node:path';
+import { delimiter, relative, resolve, win32 } from 'node:path';
 
 /**
  * Allowed root directories for project paths.
@@ -19,16 +19,38 @@ import { relative, resolve } from 'node:path';
  *   - Default behaviour: **replaces** built-in defaults (backward compat).
  *   - Set PROJECT_ALLOWED_ROOTS_APPEND=true to merge with defaults instead.
  */
+export function getDefaultRootsForPlatform(
+  platformName = platform(),
+  opts?: { homeDir?: string; pathExists?: (targetPath: string) => boolean },
+): string[] {
+  const homeDir = opts?.homeDir ?? homedir();
+  const roots = new Set<string>([homeDir]);
+
+  if (platformName === 'win32') {
+    return [...roots];
+  }
+
+  roots.add('/tmp');
+  roots.add('/private/tmp');
+  if (platformName === 'darwin') roots.add('/Volumes');
+  return [...roots];
+}
+
+const defaultRootsCache = new Map<string, string[]>();
+
 const DEFAULT_ROOTS = (): string[] => {
-  const roots = [homedir(), '/tmp', '/private/tmp'];
-  if (platform() === 'darwin') roots.push('/Volumes');
+  const platformName = platform();
+  const cached = defaultRootsCache.get(platformName);
+  if (cached) return cached;
+  const roots = getDefaultRootsForPlatform(platformName);
+  defaultRootsCache.set(platformName, roots);
   return roots;
 };
 
 const ALLOWED_ROOTS = (): string[] => {
   const envRoots = process.env['PROJECT_ALLOWED_ROOTS'];
   if (envRoots?.trim()) {
-    const custom = envRoots.split(':').filter(Boolean);
+    const custom = envRoots.split(delimiter).filter(Boolean);
     const append = process.env['PROJECT_ALLOWED_ROOTS_APPEND'] === 'true';
     return append ? [...new Set([...DEFAULT_ROOTS(), ...custom])] : custom;
   }
@@ -38,6 +60,23 @@ const ALLOWED_ROOTS = (): string[] => {
 /** Expose the computed allowlist for structured error responses. */
 export function getAllowedRoots(): string[] {
   return ALLOWED_ROOTS();
+}
+
+export function isPathUnderRoots(absPath: string, allowedRoots: string[], platformName = process.platform): boolean {
+  const isWindows = platformName === 'win32';
+  for (const root of allowedRoots) {
+    const rel = isWindows ? win32.relative(root, absPath) : relative(root, absPath);
+    if (rel === '') {
+      return true;
+    }
+    if (isWindows && win32.isAbsolute(rel)) {
+      continue;
+    }
+    if (!rel.startsWith('..') && !rel.startsWith('/') && !rel.startsWith('\\')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -75,13 +114,5 @@ export async function validateProjectPath(rawPath: string): Promise<string | nul
  * For full validation (including symlinks), use validateProjectPath().
  */
 export function isUnderAllowedRoot(absPath: string): boolean {
-  for (const root of ALLOWED_ROOTS()) {
-    // path.relative(root, target): if target is under root,
-    // the result won't start with '..'
-    const rel = relative(root, absPath);
-    if (rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'))) {
-      return true;
-    }
-  }
-  return false;
+  return isPathUnderRoots(absPath, ALLOWED_ROOTS());
 }

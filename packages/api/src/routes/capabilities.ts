@@ -436,7 +436,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const validated = await validateProjectPath(query.projectPath);
       if (!validated) {
         reply.status(400);
-        return { error: 'Invalid project path: must be an existing directory under home' };
+        return { error: 'Invalid project path: must be an existing directory under allowed roots' };
       }
       projectRoot = validated;
     }
@@ -800,7 +800,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const validated = await validateProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
-        return { error: 'Invalid project path: must be an existing directory under home' };
+        return { error: 'Invalid project path: must be an existing directory under allowed roots' };
       }
       projectRoot = validated;
     }

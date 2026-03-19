@@ -200,7 +200,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       const validated = await validateProjectPath(projectPath);
       if (!validated) {
         reply.status(400);
-        return { error: 'Invalid projectPath: must be an existing directory under home' };
+        return { error: 'Invalid projectPath: must be an existing directory under allowed roots' };
       }
       thread = await threadStore.create(userId, title, validated);
     } else {

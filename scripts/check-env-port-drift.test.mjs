@@ -51,6 +51,12 @@ function readTsFallback(relPath, pattern) {
   return m ? m[1] : null;
 }
 
+function readPowerShellFallback(relPath, pattern) {
+  const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
+  const m = content.match(pattern);
+  return m ? m[1] : null;
+}
+
 describe(
   '.env.example.opensource port consistency',
   { skip: !hasEnvExampleOpensource && '.env.example.opensource not present (open-source repo uses .env.example)' },
@@ -199,6 +205,103 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
       `AgentRouter.ts API fallback should be ${expectedApiPort}, got ${fallback}`,
     );
   });
+
+  it(`.env.example FRONTEND_PORT is ${expectedFrontendPort}`, () => {
+    const env = readEnvFile('.env.example');
+    assert.equal(
+      env.FRONTEND_PORT,
+      expectedFrontendPort,
+      `.env.example FRONTEND_PORT should be ${expectedFrontendPort}, got ${env.FRONTEND_PORT}`,
+    );
+  });
+
+  it(`.env.example API_SERVER_PORT is ${expectedApiPort}`, () => {
+    const env = readEnvFile('.env.example');
+    assert.equal(
+      env.API_SERVER_PORT,
+      expectedApiPort,
+      `.env.example API_SERVER_PORT should be ${expectedApiPort}, got ${env.API_SERVER_PORT}`,
+    );
+  });
+
+  it(`.env.example NEXT_PUBLIC_API_URL uses port ${expectedApiPort}`, () => {
+    const env = readEnvFile('.env.example');
+    assert.equal(
+      env.NEXT_PUBLIC_API_URL,
+      `http://localhost:${expectedApiPort}`,
+      `.env.example NEXT_PUBLIC_API_URL should point to API port ${expectedApiPort}, got ${env.NEXT_PUBLIC_API_URL}`,
+    );
+  });
+
+  it(`start-windows.ps1 API fallback is ${expectedApiPort}`, () => {
+    const fallback = readPowerShellFallback(
+      'scripts/start-windows.ps1',
+      /\$ApiPort = if \(\$env:API_SERVER_PORT\) \{ \$env:API_SERVER_PORT \} else \{ "(\d+)" \}/,
+    );
+    assert.equal(
+      fallback,
+      expectedApiPort,
+      `start-windows.ps1 API fallback should be ${expectedApiPort}, got ${fallback}`,
+    );
+  });
+
+  it(`start-windows.ps1 Frontend fallback is ${expectedFrontendPort}`, () => {
+    const fallback = readPowerShellFallback(
+      'scripts/start-windows.ps1',
+      /\$WebPort = if \(\$env:FRONTEND_PORT\) \{ \$env:FRONTEND_PORT \} else \{ "(\d+)" \}/,
+    );
+    assert.equal(
+      fallback,
+      expectedFrontendPort,
+      `start-windows.ps1 Frontend fallback should be ${expectedFrontendPort}, got ${fallback}`,
+    );
+  });
+
+  it(`stop-windows.ps1 API fallback is ${expectedApiPort}`, () => {
+    const fallback = readPowerShellFallback('scripts/stop-windows.ps1', /\$ApiPort = (\d+)/);
+    assert.equal(
+      fallback,
+      expectedApiPort,
+      `stop-windows.ps1 API fallback should be ${expectedApiPort}, got ${fallback}`,
+    );
+  });
+
+  it(`stop-windows.ps1 Frontend fallback is ${expectedFrontendPort}`, () => {
+    const fallback = readPowerShellFallback('scripts/stop-windows.ps1', /\$WebPort = (\d+)/);
+    assert.equal(
+      fallback,
+      expectedFrontendPort,
+      `stop-windows.ps1 Frontend fallback should be ${expectedFrontendPort}, got ${fallback}`,
+    );
+  });
+
+  it(`install.ps1 minimal .env fallback uses API ${expectedApiPort} and Frontend ${expectedFrontendPort}`, () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/install.ps1'), 'utf-8');
+    assert.ok(
+      content.includes(`FRONTEND_PORT=${expectedFrontendPort}`),
+      `install.ps1 minimal .env should set FRONTEND_PORT=${expectedFrontendPort}`,
+    );
+    assert.ok(
+      content.includes(`API_SERVER_PORT=${expectedApiPort}`),
+      `install.ps1 minimal .env should set API_SERVER_PORT=${expectedApiPort}`,
+    );
+    assert.ok(
+      content.includes(`NEXT_PUBLIC_API_URL=http://localhost:${expectedApiPort}`),
+      `install.ps1 minimal .env should set NEXT_PUBLIC_API_URL to localhost:${expectedApiPort}`,
+    );
+  });
+
+  it(`install.ps1 post-install open URL fallback uses frontend port ${expectedFrontendPort}`, () => {
+    const fallback = readPowerShellFallback(
+      'scripts/install.ps1',
+      /if \(-not \$frontendPort\) \{ \$frontendPort = "(\d+)" \}/,
+    );
+    assert.equal(
+      fallback,
+      expectedFrontendPort,
+      `install.ps1 final frontend fallback should be ${expectedFrontendPort}, got ${fallback}`,
+    );
+  });
 });
 
 describe(
@@ -224,7 +327,7 @@ describe(
     it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3003', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes("'s/API_PORT=${API_SERVER_PORT:-3002}/API_PORT=${API_SERVER_PORT:-3003}/g'"),
+        content.includes(`'s/API_PORT=\${API_SERVER_PORT:-3002}/API_PORT=\${API_SERVER_PORT:-3003}/g'`),
         'sync script should transform start-dev.sh API fallback 3002→3003',
       );
     });
@@ -232,7 +335,7 @@ describe(
     it('sync-to-opensource.sh transforms start-dev.sh Frontend fallback to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes("'s/WEB_PORT=${FRONTEND_PORT:-3001}/WEB_PORT=${FRONTEND_PORT:-3004}/g'"),
+        content.includes(`'s/WEB_PORT=\${FRONTEND_PORT:-3001}/WEB_PORT=\${FRONTEND_PORT:-3004}/g'`),
         'sync script should transform start-dev.sh Frontend fallback 3001→3004',
       );
     });
