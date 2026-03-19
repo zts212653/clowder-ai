@@ -342,7 +342,7 @@ export function CatCafeHub() {
             {tab === 'leaderboard' && <HubLeaderboardTab />}
           </div>
         </div>
-        <HubAddMemberWizard open={wizardOpen} cats={cats} onClose={() => setWizardOpen(false)} onComplete={handleCreateFlowComplete} />
+        <HubAddMemberWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onComplete={handleCreateFlowComplete} />
         <HubCatEditor open={editorOpen} cat={editingCat} draft={createDraft} onClose={closeEditor} onSaved={handleEditorSaved} />
       </div>
     </div>

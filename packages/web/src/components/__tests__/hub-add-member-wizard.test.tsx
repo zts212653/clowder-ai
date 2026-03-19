@@ -1,7 +1,6 @@
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 
 vi.mock('@/utils/api-client', () => ({
@@ -46,7 +45,7 @@ async function click(button: HTMLElement) {
   });
 }
 
-function WizardHost({ cats }: { cats: CatData[] }) {
+function WizardHost() {
   const [wizardOpen, setWizardOpen] = useState(true);
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -55,7 +54,6 @@ function WizardHost({ cats }: { cats: CatData[] }) {
     <>
       <HubAddMemberWizard
         open={wizardOpen}
-        cats={cats}
         onClose={() => setWizardOpen(false)}
         onComplete={(nextDraft) => {
           setDraft(nextDraft as Record<string, string>);
@@ -71,37 +69,6 @@ function WizardHost({ cats }: { cats: CatData[] }) {
 describe('HubAddMemberWizard', () => {
   let container: HTMLDivElement;
   let root: Root;
-
-  const cats: CatData[] = [
-    {
-      id: 'antigravity',
-      name: 'antigravity',
-      displayName: '孟加拉猫',
-      provider: 'antigravity',
-      defaultModel: 'gemini-3.1-pro',
-      commandArgs: ['.', '--remote-debugging-port=9000'],
-      color: { primary: '#C97A35', secondary: '#F5E4D0' },
-      mentionPatterns: ['@antigravity'],
-      avatar: '/avatars/antigravity.png',
-      roleDescription: 'browser automation',
-      personality: 'curious',
-      source: 'seed',
-    },
-    {
-      id: 'antig-opus',
-      name: 'antig-opus',
-      displayName: '孟加拉猫',
-      provider: 'antigravity',
-      defaultModel: 'claude-opus-4-6',
-      commandArgs: ['.', '--remote-debugging-port=9000'],
-      color: { primary: '#C97A35', secondary: '#F5E4D0' },
-      mentionPatterns: ['@antig-opus'],
-      avatar: '/avatars/antig-opus.png',
-      roleDescription: 'browser automation',
-      personality: 'steady',
-      source: 'seed',
-    },
-  ];
 
   beforeAll(() => {
     (globalThis as { React?: typeof React }).React = React;
@@ -169,7 +136,7 @@ describe('HubAddMemberWizard', () => {
 
   it('walks the normal member flow from client to provider to model and lands in the editor', async () => {
     await act(async () => {
-      root.render(React.createElement(WizardHost, { cats }));
+      root.render(React.createElement(WizardHost));
     });
     await flushEffects();
 
@@ -198,7 +165,7 @@ describe('HubAddMemberWizard', () => {
 
   it('walks the Antigravity flow with default CLI args and lands in the editor', async () => {
     await act(async () => {
-      root.render(React.createElement(WizardHost, { cats }));
+      root.render(React.createElement(WizardHost));
     });
     await flushEffects();
 
@@ -224,18 +191,8 @@ describe('HubAddMemberWizard', () => {
   });
 
   it('uses template antigravity defaults instead of live cat values', async () => {
-    const mutatedCats: CatData[] = cats.map((cat) =>
-      cat.provider === 'antigravity'
-        ? {
-            ...cat,
-            defaultModel: 'runtime-custom-model',
-            commandArgs: ['runtime', '--bridge-port=9999'],
-          }
-        : cat,
-    );
-
     await act(async () => {
-      root.render(React.createElement(WizardHost, { cats: mutatedCats }));
+      root.render(React.createElement(WizardHost));
     });
     await flushEffects();
 

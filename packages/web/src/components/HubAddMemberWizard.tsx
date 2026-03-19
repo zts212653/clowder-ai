@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { filterProfiles, type ClientValue, type HubCatEditorDraft } from './hub-cat-editor.model';
 import {
@@ -17,12 +16,11 @@ import type { ProfileItem, ProviderProfilesResponse } from './hub-provider-profi
 
 interface HubAddMemberWizardProps {
   open: boolean;
-  cats: CatData[];
   onClose: () => void;
   onComplete: (draft: HubCatEditorDraft) => void;
 }
 
-export function HubAddMemberWizard({ open, cats, onClose, onComplete }: HubAddMemberWizardProps) {
+export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWizardProps) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +31,10 @@ export function HubAddMemberWizard({ open, cats, onClose, onComplete }: HubAddMe
   const [commandArgs, setCommandArgs] = useState(FALLBACK_ANTIGRAVITY_ARGS);
 
   const antigravityDefaults = useMemo(
-    () => ({ command: FALLBACK_ANTIGRAVITY_ARGS, models: [...TEMPLATE_ANTIGRAVITY_MODELS] }),
+    (): { command: string; models: string[] } => ({
+      command: FALLBACK_ANTIGRAVITY_ARGS,
+      models: [...TEMPLATE_ANTIGRAVITY_MODELS],
+    }),
     [],
   );
 
