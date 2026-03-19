@@ -72,6 +72,11 @@ require_git_repo() {
 }
 
 is_git_repo() {
+  # Check for .git in the project itself — not a parent repo that happens
+  # to contain this directory (archive unpacked inside another checkout).
+  # A copied worktree/submodule can leave behind a dangling .git pointer
+  # file; treat that as non-repo so start falls back to in-place mode.
+  [ -e "$PROJECT_DIR/.git" ] || return 1
   git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
