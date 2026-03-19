@@ -236,4 +236,98 @@ describe('ConnectorRouter Hub thread race protection', () => {
     assert.ok(secondResult.threadId, 'the /new command should still create and reuse one Hub thread');
     assert.equal(baseBindingStore.getByExternal('feishu', 'chat-1')?.hubThreadId, secondResult.threadId);
   });
+
+  it('does not create a second Hub thread from a stale binding snapshot after the first creation finishes', async () => {
+    const baseBindingStore = new MemoryConnectorThreadBindingStore();
+    baseBindingStore.bind('feishu', 'chat-stale', 'thread-conv-stale', 'owner-1');
+
+    let lookupCount = 0;
+    let firstRouteCompletedResolve;
+    const firstRouteCompleted = new Promise((resolve) => {
+      firstRouteCompletedResolve = resolve;
+    });
+    const bindingStore = {
+      bind(...args) {
+        return baseBindingStore.bind(...args);
+      },
+      async getByExternal(connectorId, externalChatId) {
+        lookupCount += 1;
+        if (lookupCount === 3) {
+          const stale = baseBindingStore.getByExternal(connectorId, externalChatId);
+          await firstRouteCompleted;
+          return stale ? { ...stale } : stale;
+        }
+        return baseBindingStore.getByExternal(connectorId, externalChatId);
+      },
+      getByThread(...args) {
+        return baseBindingStore.getByThread(...args);
+      },
+      remove(...args) {
+        return baseBindingStore.remove(...args);
+      },
+      listByUser(...args) {
+        return baseBindingStore.listByUser(...args);
+      },
+      setHubThread(...args) {
+        return baseBindingStore.setHubThread(...args);
+      },
+    };
+
+    let createCalls = 0;
+    let releaseFirstCreate;
+    let firstCreateEnteredResolve;
+    const firstCreateEntered = new Promise((resolve) => {
+      firstCreateEnteredResolve = resolve;
+    });
+    const firstCreateBarrier = new Promise((resolve) => {
+      releaseFirstCreate = resolve;
+    });
+
+    const baseThreadStore = mockThreadStore();
+    const threadStore = {
+      ...baseThreadStore,
+      async create(userId, title) {
+        createCalls += 1;
+        if (createCalls === 1) {
+          firstCreateEnteredResolve();
+          await firstCreateBarrier;
+        }
+        return baseThreadStore.create(userId, title);
+      },
+    };
+
+    const router = new ConnectorRouter({
+      bindingStore,
+      dedup: new InboundMessageDedup(),
+      messageStore: mockMessageStore(),
+      threadStore,
+      invokeTrigger: mockTrigger(),
+      socketManager: mockSocketManager(),
+      defaultUserId: 'owner-1',
+      defaultCatId: 'opus',
+      log: noopLog(),
+      commandLayer: mockCommandLayer({
+        '/where': { kind: 'where', response: 'Info' },
+        '/threads': { kind: 'threads', response: 'List' },
+      }),
+      adapters: new Map([['feishu', mockAdapter()]]),
+    });
+
+    const first = router.route('feishu', 'chat-stale', '/where', 'stale-1');
+    await firstCreateEntered;
+
+    const second = router.route('feishu', 'chat-stale', '/threads', 'stale-2');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    releaseFirstCreate();
+    const firstResult = await first;
+    firstRouteCompletedResolve();
+    const secondResult = await second;
+
+    assert.equal(firstResult.kind, 'command');
+    assert.equal(secondResult.kind, 'command');
+    assert.equal(createCalls, 1, 'stale binding snapshots must not create a second Hub thread');
+    assert.equal(firstResult.threadId, secondResult.threadId);
+    assert.equal(baseBindingStore.getByExternal('feishu', 'chat-stale')?.hubThreadId, firstResult.threadId);
+  });
 });
