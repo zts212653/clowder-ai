@@ -215,6 +215,8 @@ export interface IThreadStore {
   updateBootcampState(threadId: string, state: BootcampStateV1 | null): void | Promise<void>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
+  /** F128: List child threads that have this thread as parentThreadId. */
+  getChildThreads(parentThreadId: string): Thread[] | Promise<Thread[]>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
   softDelete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Restore a soft-deleted thread. */
@@ -513,6 +515,17 @@ export class ThreadStore implements IThreadStore {
     this.clearActivityForThread(threadId);
     this.clearMentionRoutingFeedbackForThread(threadId);
     return this.threads.delete(threadId);
+  }
+
+  /** F128: List child threads that have this thread as parentThreadId. */
+  getChildThreads(parentThreadId: string): Thread[] {
+    const children: Thread[] = [];
+    for (const thread of this.threads.values()) {
+      if (thread.parentThreadId === parentThreadId && !thread.deletedAt) {
+        children.push(thread);
+      }
+    }
+    return children.sort((a, b) => a.createdAt - b.createdAt);
   }
 
   /** F095 Phase D: Soft-delete — mark thread as deleted. */

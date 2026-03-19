@@ -214,6 +214,29 @@ describe('POST /api/callbacks/create-thread (F128)', () => {
     assert.equal(newThread.projectPath, '/Users/dev/my-project', 'new thread should inherit projectPath');
   });
 
+  // F128: parent thread can discover its children
+  test('getChildThreads returns sub-threads', async () => {
+    const app = await createApp();
+    const mainThread = await threadStore.create('user-1', 'Main orchestration thread');
+
+    // Create two child threads via API
+    for (const title of ['Sub-task A', 'Sub-task B']) {
+      const { invocationId, callbackToken } = registry.create('user-1', 'opus', mainThread.id);
+      await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/create-thread',
+        payload: { invocationId, callbackToken, title, parentThreadId: mainThread.id },
+      });
+    }
+
+    const children = await threadStore.getChildThreads(mainThread.id);
+    assert.equal(children.length, 2, 'main thread should have 2 children');
+    assert.equal(children[0].title, 'Sub-task A');
+    assert.equal(children[1].title, 'Sub-task B');
+    assert.equal(children[0].parentThreadId, mainThread.id);
+    assert.equal(children[1].parentThreadId, mainThread.id);
+  });
+
   // P2 fix: stale invocation guard
   test('returns stale_ignored for superseded invocation', async () => {
     const app = await createApp();
