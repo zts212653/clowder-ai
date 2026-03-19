@@ -75,6 +75,28 @@ BEFORE 发 review 请求:
 
 存档：*(internal reference removed)*
 
+### Review 沙盒约定（review-target-id）
+
+Review 请求必须包含 `review-target-id`，reviewer 据此创建标准路径的沙盒，merge-gate 回收时依赖此 ID。
+
+**review-target-id 推导规则：**
+- 分支名含 `fNNN` → 取 feature ID（如 `f113`）
+- 无 Feature ID → 取 branch slug（如 `fix-redis-keyprefix`）
+
+**在 review 请求信中附上：**
+```
+Review-Target-ID: {id}
+Branch: {branch-name}
+```
+
+**Reviewer 创建沙盒的标准路径：**
+```
+/tmp/cat-cafe-review/{review-target-id}/{reviewer-handle}
+```
+例：`/tmp/cat-cafe-review/f113/codex`
+
+沙盒必须是 detached HEAD / read-only。要改代码 = TAKEOVER，开正式 worktree。
+
 ## Block 场景
 
 **❌ 没有 quality-gate 报告**

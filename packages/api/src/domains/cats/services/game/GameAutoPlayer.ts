@@ -36,6 +36,7 @@ export class GameAutoPlayer {
   private readonly store: IGameStore;
   private readonly orchestrator: GameOrchestrator;
   private readonly activeLoops = new Set<string>();
+  private stopController: AbortController | null = null;
 
   constructor(deps: AutoPlayerDeps) {
     this.store = deps.gameStore;
@@ -46,6 +47,7 @@ export class GameAutoPlayer {
   startLoop(gameId: string): void {
     if (this.activeLoops.has(gameId)) return;
     this.activeLoops.add(gameId);
+    if (!this.stopController) this.stopController = new AbortController();
     console.log(`[GameAutoPlayer] Loop started for ${gameId}`);
     this.runLoop(gameId)
       .catch((err) => {
@@ -60,6 +62,17 @@ export class GameAutoPlayer {
   /** Stop tracking a game loop */
   stopLoop(gameId: string): void {
     this.activeLoops.delete(gameId);
+  }
+
+  /** Stop all in-flight loops, used by test/server teardown.
+   *  Clears the active set AND aborts any in-flight sleep so loops
+   *  exit promptly instead of waiting for the current tick to finish. */
+  stopAllLoops(): void {
+    this.activeLoops.clear();
+    if (this.stopController) {
+      this.stopController.abort();
+      this.stopController = null;
+    }
   }
 
   /** Check if a loop is active for a game */
@@ -92,9 +105,11 @@ export class GameAutoPlayer {
 
   private async runLoop(gameId: string): Promise<void> {
     const loopStart = Date.now();
+    const signal = this.stopController?.signal;
 
     for (;;) {
       if (!this.activeLoops.has(gameId)) return;
+      if (signal?.aborted) return;
       if (Date.now() - loopStart > GameAutoPlayer.MAX_WALL_CLOCK_MS) {
         console.warn(
           `[GameAutoPlayer] ${gameId} wall-clock safety limit reached (${GameAutoPlayer.MAX_WALL_CLOCK_MS}ms), exiting loop`,
@@ -106,7 +121,7 @@ export class GameAutoPlayer {
       if (!runtime || runtime.status === 'finished') return;
 
       if (runtime.status === 'paused') {
-        await sleep(GameAutoPlayer.TICK_MS * 2);
+        await sleep(GameAutoPlayer.TICK_MS * 2, signal);
         continue;
       }
 
@@ -114,7 +129,7 @@ export class GameAutoPlayer {
 
       if (SKIP_PHASES.has(runtime.currentPhase)) {
         await this.orchestrator.tick(gameId);
-        await sleep(GameAutoPlayer.TICK_MS / 2);
+        await sleep(GameAutoPlayer.TICK_MS / 2, signal);
         continue;
       }
 
@@ -125,7 +140,7 @@ export class GameAutoPlayer {
         );
       }
 
-      await sleep(acted ? GameAutoPlayer.TICK_MS : GameAutoPlayer.TICK_MS * 2);
+      await sleep(acted ? GameAutoPlayer.TICK_MS : GameAutoPlayer.TICK_MS * 2, signal);
     }
   }
 
@@ -231,6 +246,24 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]!;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    let onAbort: (() => void) | undefined;
+    const timer = setTimeout(() => {
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    timer.unref?.();
+    if (signal) {
+      onAbort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
 }

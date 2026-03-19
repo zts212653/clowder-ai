@@ -271,6 +271,8 @@ export interface Thread {
   deletedAt?: number | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
+  /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub. */
+  connectorHubState?: ConnectorHubStateV1;
 }
 
 /** F087: Bootcamp state for CVO onboarding threads */
@@ -283,6 +285,14 @@ export interface BootcampStateV1 {
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
   completedAt?: number;
+}
+
+/** F088 Phase G: Connector Hub state for IM command isolation */
+export interface ConnectorHubStateV1 {
+  v: 1;
+  connectorId: string;
+  externalChatId: string;
+  createdAt: number;
 }
 
 export type ThreadRoutingScope = 'review' | 'architecture';

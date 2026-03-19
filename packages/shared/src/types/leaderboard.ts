@@ -67,7 +67,10 @@ export interface GameStats {
 /** Phase C: Achievement badge */
 export interface Achievement {
   id: string;
-  emoji: string;
+  /** Preferred icon key from the café SVG set (F056). */
+  icon?: string;
+  /** Legacy fallback for old records/messages. */
+  emoji?: string;
   label: string;
   description: string;
   category: 'cvo' | 'daily';

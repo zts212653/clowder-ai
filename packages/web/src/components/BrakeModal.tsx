@@ -25,18 +25,18 @@ const MESSAGES: Record<1 | 2 | 3, { catId: string; nickname: string; text: strin
 };
 
 const LEVEL_STYLE: Record<1 | 2 | 3, { border: string; bg: string; title: string }> = {
-  1: { border: 'border-amber-300', bg: 'bg-amber-50', title: '🐾 休息时间到啦！' },
-  2: { border: 'border-orange-400', bg: 'bg-orange-50', title: '🐾 猫猫们有点担心你了！' },
-  3: { border: 'border-red-400', bg: 'bg-red-50', title: '🐾 三猫紧急拦截！' },
+  1: { border: 'border-amber-300', bg: 'bg-amber-50', title: '休息时间到啦！' },
+  2: { border: 'border-orange-400', bg: 'bg-orange-50', title: '猫猫们有点担心你了！' },
+  3: { border: 'border-red-400', bg: 'bg-red-50', title: '三猫紧急拦截！' },
 };
 
 const NIGHT_STYLE = { border: 'border-indigo-300', bg: 'bg-indigo-50/80' };
 
-/** Expression emoji per level (AC30) */
-const CAT_EXPRESSION: Record<1 | 2 | 3, string> = {
-  1: '🥺', // gentle pleading
-  2: '😤', // concerned
-  3: '😴', // sleepy/urgent
+/** Compact urgency badge for avatar corner (emoji-free) */
+const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
+  1: 'L1',
+  2: 'L2',
+  3: 'L3',
 };
 
 export function BrakeModal() {
@@ -102,7 +102,7 @@ export function BrakeModal() {
   const messages = MESSAGES[level];
   const borderClass = nightMode ? NIGHT_STYLE.border : style.border;
   const bgClass = nightMode ? NIGHT_STYLE.bg : style.bg;
-  const expression = CAT_EXPRESSION[level];
+  const alertBadge = CAT_ALERT_BADGE[level];
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -115,18 +115,20 @@ export function BrakeModal() {
         {/* Header */}
         <div className="text-center">
           <h2 className={`text-lg font-bold ${nightMode ? 'text-indigo-200' : ''}`}>
-            {nightMode ? '🌙 深夜了，猫猫们想你休息' : style.title}
+            {nightMode ? '深夜了，猫猫们想你休息' : style.title}
           </h2>
           <p className="text-sm text-gray-500 mt-1">已专注工作 {activeMinutes} 分钟</p>
         </div>
 
-        {/* Cat messages (AC30: enlarged avatars + expression emoji) */}
+        {/* Cat messages (AC30: enlarged avatars + urgency badge) */}
         <div className="space-y-3">
           {messages.map((msg) => (
             <div key={msg.catId} className="flex items-start gap-3">
               <div className="relative shrink-0">
                 <CatAvatar catId={msg.catId} size={48} />
-                <span className="absolute -bottom-1 -right-1 text-base">{expression}</span>
+                <span className="absolute -bottom-1 -right-1 text-[10px] px-1 py-0.5 rounded bg-white/90 border border-gray-200">
+                  {alertBadge}
+                </span>
               </div>
               <div className="flex-1 min-w-0">
                 <span className="text-xs font-semibold text-gray-600">{msg.nickname}</span>
@@ -143,7 +145,7 @@ export function BrakeModal() {
             onClick={handleTtsRetry}
             className="w-full text-xs text-gray-500 hover:text-gray-700 underline py-1"
           >
-            🔊 点击播放猫猫语音
+            点击播放猫猫语音
           </button>
         )}
 
@@ -175,7 +177,7 @@ export function BrakeModal() {
             disabled={submitting}
             className="w-full py-2.5 rounded-xl text-sm font-medium text-white bg-green-500 hover:bg-green-600 transition-colors disabled:opacity-50"
           >
-            😴 立刻休息（5 分钟）
+            立刻休息（5 分钟）
           </button>
           <button
             type="button"
@@ -183,7 +185,7 @@ export function BrakeModal() {
             disabled={submitting}
             className="w-full py-2.5 rounded-xl text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50"
           >
-            ⏱️ 收尾（10 分钟）
+            收尾（10 分钟）
           </button>
           {!bypassDisabled && (
             <button
@@ -192,7 +194,7 @@ export function BrakeModal() {
               disabled={submitting || (showReason && !reason.trim())}
               className="w-full py-2 rounded-xl text-sm text-gray-500 hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
-              {showReason ? '确认继续' : '⚡ 我有紧急情况（需要理由）'}
+              {showReason ? '确认继续' : '我有紧急情况（需要理由）'}
             </button>
           )}
           {bypassDisabled && (

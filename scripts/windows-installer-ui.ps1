@@ -155,7 +155,7 @@ function Get-InstallerExternalRedisUrl {
     }
     if (-not $rawUrl) { return "" }
     $redisPort = Get-InstallerEnvValueFromFile -EnvFile $envFile -Key "REDIS_PORT"
-    if (-not $redisPort) { $redisPort = "6379" }
+    if (-not $redisPort) { $redisPort = "6399" }
     if (Test-LocalRedisUrl -RedisUrl $rawUrl -RedisPort $redisPort) { return "" }
     return $rawUrl
 }

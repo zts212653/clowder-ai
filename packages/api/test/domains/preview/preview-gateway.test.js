@@ -134,4 +134,16 @@ describe('PreviewGateway', () => {
     // include __preview_port, allowing the gateway to proxy them correctly
     assert.ok(res.body.includes('cat-cafe-ws-patch'), 'Should inject ws-patch script tag');
   });
+
+  it('rejects start when configured port is already in use', async () => {
+    const blocker = http.createServer();
+    await new Promise((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    const address = blocker.address();
+    const blockedPort = typeof address === 'object' && address ? address.port : 0;
+    const blockedGateway = new PreviewGateway({ port: blockedPort });
+
+    await assert.rejects(blockedGateway.start(), /EADDRINUSE/);
+    await blockedGateway.stop();
+    await new Promise((resolve) => blocker.close(() => resolve()));
+  });
 });

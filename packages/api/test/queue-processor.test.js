@@ -617,4 +617,60 @@ describe('QueueProcessor', () => {
       assert.equal(firstStartCall.arguments[1], 'codex', 'should start codex (free slot) first, not opus (busy)');
     });
   });
+
+  // ── Tracker guard: prevent duplicate execution for CLI-active cats ──
+
+  describe('tracker guard on completion chain (tryExecuteNextAcrossUsers)', () => {
+    it('does NOT start queued entry when target cat has active CLI invocation', async () => {
+      // Simulate: opus is running via CLI (tracked in invocationTracker but NOT in processingSlots)
+      const entry = enqueueEntry(deps.queue, { targetCats: ['opus'] });
+      deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      // invocationTracker reports opus is active (CLI invocation)
+      deps.invocationTracker.has = mock.fn((_tid, catId) => catId === 'opus');
+
+      // codex completes → triggers tryExecuteNextAcrossUsers which finds the opus entry
+      await processor.onInvocationComplete('t1', 'codex', 'succeeded');
+      await new Promise((r) => setTimeout(r, 50));
+
+      // executeEntry must NOT have been called
+      assert.equal(
+        deps.invocationTracker.start.mock.calls.length,
+        0,
+        'must not call executeEntry (tracker.start not called)',
+      );
+      assert.equal(deps.router.routeExecution.mock.calls.length, 0, 'must not call routeExecution');
+
+      // Entry must be rolled back to queued (not stuck as processing)
+      const queue = deps.queue.list('t1', 'u1');
+      assert.equal(queue.length, 1);
+      assert.equal(queue[0].status, 'queued', 'entry must rollback to queued');
+    });
+  });
+
+  describe('tracker guard on processNext (tryExecuteNextForUser)', () => {
+    it('does NOT start queued entry when target cat has active CLI invocation', async () => {
+      const entry = enqueueEntry(deps.queue, { targetCats: ['opus'] });
+      deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      // invocationTracker reports opus is active (CLI invocation)
+      deps.invocationTracker.has = mock.fn((_tid, catId) => catId === 'opus');
+
+      const result = await processor.processNext('t1', 'u1');
+
+      assert.equal(result.started, false, 'must not start when tracker has active invocation');
+      // executeEntry must NOT have been called
+      assert.equal(
+        deps.invocationTracker.start.mock.calls.length,
+        0,
+        'must not call executeEntry (tracker.start not called)',
+      );
+      assert.equal(deps.router.routeExecution.mock.calls.length, 0, 'must not call routeExecution');
+
+      // Entry must still be queued (never marked processing since guard fires before markProcessing)
+      const queue = deps.queue.list('t1', 'u1');
+      assert.equal(queue.length, 1);
+      assert.equal(queue[0].status, 'queued', 'entry must remain queued');
+    });
+  });
 });

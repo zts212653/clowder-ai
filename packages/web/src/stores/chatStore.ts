@@ -228,7 +228,7 @@ function fireOwnerMentionNotification(msg: ChatMessage) {
   const catConfig = CAT_CONFIGS[msg.catId ?? ''];
   const catName = catConfig?.displayName ?? msg.catId ?? '猫猫';
   const preview = typeof msg.content === 'string' ? msg.content.replace(/\n/g, ' ').slice(0, 120) : '';
-  new Notification(`🐾 ${catName} @ 了你`, {
+  new Notification(`${catName} @ 了你`, {
     body: preview,
     icon: catConfig?.avatar ?? '/favicon.ico',
     tag: `owner-mention-${msg.id}`,

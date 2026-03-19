@@ -66,7 +66,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
 
 export const ENV_VARS: EnvDefinition[] = [
   // --- server ---
-  { name: 'API_SERVER_PORT', defaultValue: '3003', description: 'API 服务端口', category: 'server', sensitive: false },
+  { name: 'API_SERVER_PORT', defaultValue: '3004', description: 'API 服务端口', category: 'server', sensitive: false },
   {
     name: 'PREVIEW_GATEWAY_PORT',
     defaultValue: '4100',
@@ -84,8 +84,9 @@ export const ENV_VARS: EnvDefinition[] = [
   { name: 'UPLOAD_DIR', defaultValue: './uploads', description: '文件上传目录', category: 'server', sensitive: false },
   {
     name: 'PROJECT_ALLOWED_ROOTS',
-    defaultValue: 'home, tmp roots, /Volumes (macOS), existing drive roots (Windows)',
-    description: '允许访问的项目根目录（按系统路径分隔符分隔，设置后覆盖默认值；配合 PROJECT_ALLOWED_ROOTS_APPEND=true 可追加）',
+    defaultValue: 'home, tmp roots, /workspace, /Volumes (macOS), home-only (Windows)',
+    description:
+      '允许访问的项目根目录（按系统路径分隔符分隔，设置后覆盖默认值；配合 PROJECT_ALLOWED_ROOTS_APPEND=true 可追加）',
     category: 'server',
     sensitive: false,
   },
@@ -105,7 +106,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'FRONTEND_PORT',
-    defaultValue: '3004',
+    defaultValue: '3003',
     description: '前端端口（导出长图用）',
     category: 'server',
     sensitive: false,
@@ -559,7 +560,7 @@ export const ENV_VARS: EnvDefinition[] = [
   // --- frontend ---
   {
     name: 'NEXT_PUBLIC_API_URL',
-    defaultValue: 'http://localhost:3003',
+    defaultValue: 'http://localhost:3004',
     description: '前端连接的 API 地址',
     category: 'frontend',
     sensitive: false,

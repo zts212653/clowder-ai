@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- TODO: replace with actual logo once synced from assets/icons/cat-cafe-logo-v2-clean.svg -->
+<!-- TODO: replace with actual logo once synced from assets/icons/clowder-ai-logo-v2-clean.svg -->
 # Clowder AI
 
 **Hard Rails. Soft Power. Shared Mission.**
@@ -139,7 +139,7 @@ Clowder isn't just a coding platform. Your AI team can:
 
 You don't need to be a developer. You need to know what you want — and who you want to build it with.
 
-## Quick Start (Linux)
+## Quick Start
 
 > CVO Bootcamp coming soon — a guided onboarding where your AI team walks you through a complete feature lifecycle.
 
@@ -152,7 +152,6 @@ bash scripts/install.sh
 The script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools (Claude / Codex / Gemini), and authentication — with interactive prompts to guide you through each step.
 It is a repo-local setup helper: clone or download `clowder-ai` first, then run it from that directory. It is not a bare-metal `curl | bash` bootstrapper.
 Downloaded archives (without `.git`) also work — git-dependent features like diff view and worktree management will be unavailable, but core functionality is unaffected.
-On macOS or Windows, use the manual setup path in `SETUP.md` instead — `scripts/install.sh` exits on non-Linux kernels.
 
 Options:
 - `--start` — auto-start services after install
@@ -165,10 +164,12 @@ Then open `http://localhost:3003` and start talking to your team.
 
 ## Usage Guide
 
+> 📹 **Full platform walkthrough:** [Overview demo (3:45)](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/overview-preview.mp4)
+
 ### Chat — Your AI Team in One Place
 
-<!-- screenshot: main chat view — thread sidebar + conversation + right status panel -->
-![Chat View](docs/screenshots/chat-main.png)
+<!-- demo: multi-cat coding collaboration + rich blocks + voice input -->
+> 📹 **Demo videos:** [Multi-cat coding](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S1-multi-cat-coding.mp4) · [Rich blocks](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/rich-blocks-demo.mp4) · [Voice input + widgets](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-input-widget-demo.mp4)
 
 The main interface is a multi-threaded chat where your AI team lives. Each thread is an isolated workspace — one per feature, bug, or topic.
 
@@ -178,8 +179,8 @@ The main interface is a multi-threaded chat where your AI team lives. Each threa
 
 ### Hub — Command Center
 
-<!-- screenshot: Hub modal — showing Capability / Skills / Quota Board tabs -->
-![Hub Modal](docs/screenshots/hub-modal.png)
+<!-- demo: Hub command center — mission hub operations -->
+> 📹 **Demo video:** [Hub & Mission Hub walkthrough](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4)
 
 Hit the Hub button to open the floating command center. Tabs include:
 
@@ -193,8 +194,8 @@ Hit the Hub button to open the floating command center. Tabs include:
 
 ### Mission Hub — Feature Governance
 
-<!-- screenshot: Mission Hub — feature list with status badges + detail panel -->
-![Mission Hub](docs/screenshots/mission-hub.png)
+<!-- demo: Mission Hub — feature governance dashboard -->
+> 📹 **Demo video:** [Mission Hub in action](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4) · [Cat leaderboard (fun!)](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S5-leaderboard.mp4)
 
 The ops dashboard for tracking everything your team is building.
 
@@ -204,8 +205,8 @@ The ops dashboard for tracking everything your team is building.
 
 ### Multi-Platform — Chat From Anywhere
 
-<!-- screenshot: Feishu/Telegram conversation showing multi-cat replies as distinct cards -->
-![Multi-Platform Chat](docs/screenshots/multi-platform.png)
+<!-- demo: Feishu multi-platform chat -->
+> 📹 **Demo video:** [Feishu (Lark) multi-cat chat](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/feishu-multi-platform-demo.mp4)
 
 Don't want to open the web UI? Chat with your team from the apps you already use.
 
@@ -216,8 +217,8 @@ Don't want to open the web UI? Chat with your team from the apps you already use
 
 ### Voice Companion — Hands-Free Mode
 
-<!-- screenshot: voice mode — audio rich blocks auto-playing in chat -->
-![Voice Companion](docs/screenshots/voice-companion.png)
+<!-- demo: per-agent TTS voice showcase -->
+> 📹 **Demo video:** [Per-cat TTS voice showcase](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-showcase-compressed.mp4)
 
 Working out? Commuting? Turn on Voice Companion and talk to your team through AirPods.
 
@@ -228,8 +229,7 @@ Working out? Commuting? Turn on Voice Companion and talk to your team through Ai
 
 ### Signals — AI Research Feed
 
-<!-- screenshot: Signal inbox page with article cards and tier badges -->
-![Signals](docs/screenshots/signals-inbox.png)
+<!-- TODO: demo of Signals inbox — waiting for external speaker recording -->
 
 A curated feed of AI and tech articles, built into your workspace.
 
@@ -239,8 +239,8 @@ A curated feed of AI and tech articles, built into your workspace.
 
 ### Game Modes — Play With Your Team
 
-<!-- screenshot: Werewolf game — full-screen PlayerGrid + PhaseTimeline + ActionDock -->
-![Game Modes](docs/screenshots/game-werewolf.png)
+<!-- demo: Werewolf game — the accidental one 🐺 -->
+> 📹 **Demo video:** [The accidental Werewolf game 🐺](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/T2-werewolf-compressed.mp4)
 
 Yes, your AI team plays games. Currently shipping:
 
@@ -501,7 +501,7 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 
 你不需要会写代码。你需要知道自己想要什么 — 以及想和谁一起去实现它。
 
-## 快速开始（Linux）
+## 快速开始
 
 > CVO 训练营即将推出 — AI 团队亲自带你走完一个完整的 feature 生命周期。
 
@@ -514,7 +514,6 @@ bash scripts/install.sh
 安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具（Claude / Codex / Gemini）和认证配置 — 全程交互式引导。
 这是一个 repo 内安装助手：先 clone 或下载 `clowder-ai`，再在目录里运行。它不是 bare-metal 的 `curl | bash` 引导脚本。
 下载的压缩包（没有 `.git`）同样可用 — diff 视图和 worktree 管理等 git 相关功能不可用，但核心功能不受影响。
-macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/install.sh` 只支持 Linux 内核。
 
 可选参数：
 - `--start` — 安装完成后自动启动服务
@@ -527,10 +526,12 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ## 使用指南
 
+> 📹 **平台完整演示：** [Overview demo (3:45)](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/overview-preview.mp4)
+
 ### 聊天 — 你的 AI 团队就在这里
 
-<!-- screenshot: 主聊天界面 — 左侧线程列表 + 中间对话 + 右侧状态面板 -->
-![聊天界面](docs/screenshots/chat-main.png)
+<!-- 演示：多猫协作编码 + 富文本卡片 + 语音输入 -->
+> 📹 **演示视频：** [多猫协作编码](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S1-multi-cat-coding.mp4) · [Rich Blocks 卡片](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/rich-blocks-demo.mp4) · [语音输入 + Widget](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-input-widget-demo.mp4)
 
 主界面是一个多线程聊天空间，你的 AI 团队在这里工作。每个线程是独立的工作区 — 一个功能一个线程。
 
@@ -540,8 +541,8 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ### Hub — 指挥中心
 
-<!-- screenshot: Hub 弹窗 — 显示 Capability / Skills / Quota Board 等 tab -->
-![Hub 弹窗](docs/screenshots/hub-modal.png)
+<!-- 演示：Hub 指挥中心 -->
+> 📹 **演示视频：** [Hub & 作战中枢操作演示](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4)
 
 点击 Hub 按钮打开浮动指挥面板：
 
@@ -555,8 +556,8 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ### 作战中枢（Mission Hub） — Feature 治理
 
-<!-- screenshot: Mission Hub — Feature 列表 + 状态 badge + 详情面板 -->
-![作战中枢](docs/screenshots/mission-hub.png)
+<!-- 演示：作战中枢 — Feature 治理面板 -->
+> 📹 **演示视频：** [作战中枢实操](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4) · [猫猫排行榜（好玩！）](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S5-leaderboard.mp4)
 
 追踪团队正在做的所有事情的运营面板。
 
@@ -566,8 +567,8 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ### 多平台 — 在哪都能聊
 
-<!-- screenshot: 飞书/Telegram 对话 — 多猫独立卡片回复 -->
-![多平台聊天](docs/screenshots/multi-platform.png)
+<!-- 演示：飞书多猫聊天 -->
+> 📹 **演示视频：** [飞书多猫聊天](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/feishu-multi-platform-demo.mp4)
 
 不想开 web？用你已经在用的 app 跟团队聊。
 
@@ -578,8 +579,8 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ### 语音陪伴 — 解放双手
 
-<!-- screenshot: 语音模式 — 音频 rich block 自动播放 -->
-![语音陪伴](docs/screenshots/voice-companion.png)
+<!-- 演示：每只猫独立声线 TTS -->
+> 📹 **演示视频：** [猫猫们的声线](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-showcase-compressed.mp4)
 
 在运动？在通勤？打开语音陪伴，戴上 AirPods 跟团队对话。
 
@@ -590,8 +591,7 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ### Signals — AI 研究信息流
 
-<!-- screenshot: Signal inbox 页面 — 文章卡片 + tier 标签 -->
-![Signals](docs/screenshots/signals-inbox.png)
+<!-- TODO: Signal 信息流演示 — 等外放录音 -->
 
 内嵌在工作空间里的 AI/技术文章聚合。
 
@@ -601,8 +601,8 @@ macOS 或 Windows 请走 `SETUP.md` 里的手动安装路径 —— `scripts/ins
 
 ### 游戏模式 — 和团队一起玩
 
-<!-- screenshot: 狼人杀 — 全屏 PlayerGrid + PhaseTimeline + ActionDock -->
-![游戏模式](docs/screenshots/game-werewolf.png)
+<!-- 演示：意外的狼人杀 🐺 -->
+> 📹 **演示视频：** [意外的狼人杀 🐺](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/T2-werewolf-compressed.mp4)
 
 没错，你的 AI 团队会玩游戏。当前已有：
 

@@ -9,11 +9,15 @@ import { catRegistry } from '@cat-cafe/shared';
 import {
   bootstrapCapabilities,
   buildCatCafeMcpDescriptor,
+  comparePencilDirs,
   discoverExternalMcpServers,
   generateCliConfigs,
   migrateLegacyCatCafeCapability,
   orchestrate,
+  PENCIL_BINARY_SUFFIX,
+  parsePencilVersion,
   readCapabilitiesConfig,
+  resolvePencilBinary,
   resolveServersForCat,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
@@ -223,6 +227,82 @@ describe('discoverExternalMcpServers', () => {
 
     assert.equal(servers.length, 1);
     assert.equal(servers[0].name, 'filesystem');
+  });
+});
+
+// ────────── resolvePencilBinary ──────────
+
+describe('parsePencilVersion', () => {
+  it('parses standard version from directory name', () => {
+    assert.deepEqual(parsePencilVersion('highagency.pencildev-0.6.33-universal'), [0, 6, 33]);
+  });
+
+  it('parses version without suffix', () => {
+    assert.deepEqual(parsePencilVersion('highagency.pencildev-1.2.3'), [1, 2, 3]);
+  });
+
+  it('returns [0,0,0] for unparseable directory name', () => {
+    assert.deepEqual(parsePencilVersion('highagency.pencildev-invalid'), [0, 0, 0]);
+  });
+});
+
+describe('comparePencilDirs', () => {
+  it('sorts 0.6.9 before 0.6.10 (the bug that lexicographic sort gets wrong)', () => {
+    const dirs = ['highagency.pencildev-0.6.10-universal', 'highagency.pencildev-0.6.9-universal'];
+    dirs.sort(comparePencilDirs);
+    assert.equal(dirs[dirs.length - 1], 'highagency.pencildev-0.6.10-universal');
+  });
+
+  it('sorts multiple versions correctly', () => {
+    const dirs = [
+      'highagency.pencildev-0.7.1-universal',
+      'highagency.pencildev-0.6.33-universal',
+      'highagency.pencildev-1.0.0-universal',
+      'highagency.pencildev-0.6.9-universal',
+    ];
+    dirs.sort(comparePencilDirs);
+    assert.deepEqual(dirs, [
+      'highagency.pencildev-0.6.9-universal',
+      'highagency.pencildev-0.6.33-universal',
+      'highagency.pencildev-0.7.1-universal',
+      'highagency.pencildev-1.0.0-universal',
+    ]);
+  });
+
+  it('handles equal versions', () => {
+    assert.equal(
+      comparePencilDirs('highagency.pencildev-0.6.33-universal', 'highagency.pencildev-0.6.33-universal'),
+      0,
+    );
+  });
+});
+
+describe('resolvePencilBinary', () => {
+  it('PENCIL_BINARY_SUFFIX must not start with / (deterministic regression guard)', () => {
+    assert.ok(
+      !PENCIL_BINARY_SUFFIX.startsWith('/'),
+      `PENCIL_BINARY_SUFFIX is '${PENCIL_BINARY_SUFFIX}' — leading '/' causes path.resolve() to discard all prefix segments`,
+    );
+  });
+
+  it('returns a full path under ~/.antigravity/extensions when Pencil is installed', async () => {
+    const result = await resolvePencilBinary();
+    if (result === null) {
+      // No Pencil installation — skip gracefully (CI / environments without Antigravity)
+      return;
+    }
+    assert.ok(
+      !result.startsWith('/out/'),
+      `resolvePencilBinary() returned '${result}' — looks like PENCIL_BINARY_SUFFIX has a leading '/' that breaks path.resolve()`,
+    );
+    assert.ok(
+      result.includes('.antigravity/extensions'),
+      `resolvePencilBinary() should return a path under ~/.antigravity/extensions, got '${result}'`,
+    );
+    assert.ok(
+      result.includes('/out/mcp-server-'),
+      `resolvePencilBinary() should include the binary suffix, got '${result}'`,
+    );
   });
 });
 

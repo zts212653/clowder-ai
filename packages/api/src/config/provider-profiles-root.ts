@@ -60,6 +60,10 @@ async function resolvePathPointer(filePath: string, baseDir: string): Promise<st
   return realpathOrNull(resolve(baseDir, pointer));
 }
 
+export function isAllowedProviderProfilesRoot(absPath: string): boolean {
+  return isUnderAllowedRoot(absPath);
+}
+
 export async function resolveProviderProfilesRoot(projectRoot: string): Promise<string> {
   const root = resolve(projectRoot);
   const rootReal = (await realpathOrNull(root)) ?? root;
@@ -93,7 +97,7 @@ export async function resolveProviderProfilesRoot(projectRoot: string): Promise<
     if (!commondirResolved || !samePath(commondirResolved, commonGitDir)) return rootReal;
 
     const candidateRoot = dirname(commonGitDir);
-    if (!isUnderAllowedRoot(candidateRoot)) return rootReal;
+    if (!isAllowedProviderProfilesRoot(candidateRoot)) return rootReal;
     return candidateRoot;
   } catch {
     return rootReal;

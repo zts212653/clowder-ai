@@ -217,7 +217,37 @@ describe('ApiInstanceLease', () => {
     assert.equal(await redis.get(API_INSTANCE_LEASE_KEY), null);
   });
 
-  test('fails fast when heartbeat renewals start throwing', async () => {
+  test('tolerates transient renew failures within grace window (P1-B)', async () => {
+    const redis = new FakeRedis();
+    const invalidations = [];
+
+    const lease = new ApiInstanceLease(redis, {
+      instanceId: 'runtime-a',
+      pid: 1111,
+      hostname: 'same-host',
+      apiPort: 3002,
+      cwd: '/runtime-a',
+      ttlMs: 200,
+      heartbeatMs: 5,
+      maxRenewFailures: 3,
+      isPidAlive: () => true,
+      onLeaseInvalidated: (event) => invalidations.push(event),
+    });
+
+    await lease.acquire();
+
+    // Fail only 2 renewals (below threshold of 3) — should NOT invalidate
+    redis.failNextRenewals(2);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(invalidations.length, 0, 'should tolerate failures below maxRenewFailures');
+
+    // Lease should still be alive after transient failures recover
+    assert.ok((await redis.pttl(API_INSTANCE_LEASE_KEY)) > 0, 'lease should still be alive');
+
+    await lease.release();
+  });
+
+  test('invalidates after consecutive renew failures exceed grace window (P1-B)', async () => {
     const redis = new FakeRedis();
     let primaryAlive = true;
     const invalidations = [];
@@ -229,8 +259,9 @@ describe('ApiInstanceLease', () => {
       hostname: 'same-host',
       apiPort: 3002,
       cwd: '/runtime-a',
-      ttlMs: 30,
+      ttlMs: 200,
       heartbeatMs: 5,
+      maxRenewFailures: 3,
       isPidAlive: (pid) => (pid === 1111 ? primaryAlive : livePids.has(pid)),
       onLeaseInvalidated: (event) => {
         invalidations.push(event);
@@ -241,8 +272,9 @@ describe('ApiInstanceLease', () => {
     const first = await lease1.acquire();
     assert.equal(first.acquired, true);
 
+    // Fail many renewals — should invalidate after 3 consecutive failures
     redis.failNextRenewals(20);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await new Promise((resolve) => setTimeout(resolve, 80));
 
     assert.equal(invalidations.length, 1);
     assert.equal(invalidations[0].reason, 'renew_failed');
@@ -254,12 +286,11 @@ describe('ApiInstanceLease', () => {
       hostname: 'same-host',
       apiPort: 3012,
       cwd: '/runtime-b',
-      ttlMs: 30,
+      ttlMs: 200,
       heartbeatMs: 5,
       isPidAlive: (pid) => (pid === 1111 ? primaryAlive : livePids.has(pid)),
     });
     const second = await lease2.acquire();
-
     assert.equal(second.acquired, true);
 
     await lease1.release();
@@ -277,8 +308,9 @@ describe('ApiInstanceLease', () => {
       hostname: 'same-host',
       apiPort: 3002,
       cwd: '/runtime-a',
-      ttlMs: 30,
+      ttlMs: 200,
       heartbeatMs: 5,
+      maxRenewFailures: 3,
       isPidAlive: () => true,
       onLeaseInvalidated: (event) => {
         invalidations.push(event);
@@ -289,10 +321,133 @@ describe('ApiInstanceLease', () => {
     assert.equal(acquired.acquired, true);
 
     redis.failNextRenewals(20);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await new Promise((resolve) => setTimeout(resolve, 80));
 
     assert.equal(invalidations.length, 1);
     assert.equal(invalidations[0].reason, 'renew_failed');
+
+    await lease.release();
+  });
+
+  test('re-acquires lease after lid-close TTL expiry instead of dying (P1-A)', async () => {
+    const redis = new FakeRedis();
+    const invalidations = [];
+
+    const lease = new ApiInstanceLease(redis, {
+      instanceId: 'runtime-a',
+      pid: 1111,
+      hostname: 'same-host',
+      apiPort: 3002,
+      cwd: '/runtime-a',
+      ttlMs: 30,
+      heartbeatMs: 5,
+      isPidAlive: () => true,
+      onLeaseInvalidated: (event) => invalidations.push(event),
+    });
+
+    await lease.acquire();
+
+    // Simulate lid-close: TTL expires, key disappears, but nobody else grabs it
+    redis.store.delete(API_INSTANCE_LEASE_KEY);
+    redis.expiries.delete(API_INSTANCE_LEASE_KEY);
+
+    // Wait for heartbeat to discover the lost lease and re-acquire
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // Should NOT have invalidated — should have re-acquired
+    assert.equal(invalidations.length, 0, 'should re-acquire instead of invalidating');
+    // Key should exist again with our instance
+    const raw = await redis.get(API_INSTANCE_LEASE_KEY);
+    assert.ok(raw, 'lease key should exist after re-acquire');
+    const holder = JSON.parse(raw);
+    assert.equal(holder.instanceId, 'runtime-a');
+
+    await lease.release();
+  });
+
+  test('invalidates when another instance holds the lease (true conflict, P1-A)', async () => {
+    const redis = new FakeRedis();
+    const invalidations = [];
+
+    const lease = new ApiInstanceLease(redis, {
+      instanceId: 'runtime-a',
+      pid: 1111,
+      hostname: 'same-host',
+      apiPort: 3002,
+      cwd: '/runtime-a',
+      ttlMs: 50,
+      heartbeatMs: 5,
+      isPidAlive: () => true,
+      onLeaseInvalidated: (event) => invalidations.push(event),
+    });
+
+    await lease.acquire();
+
+    // Another instance steals the lease while we were asleep
+    const intruder = {
+      version: 1,
+      token: 'intruder-token',
+      instanceId: 'runtime-b',
+      pid: 2222,
+      hostname: 'same-host',
+      apiPort: 3012,
+      cwd: '/runtime-b',
+      startedAt: Date.now(),
+      acquiredAt: Date.now(),
+    };
+    await redis.set(API_INSTANCE_LEASE_KEY, JSON.stringify(intruder), 'PX', 5_000);
+
+    // Wait for heartbeat to discover and try re-acquire (should fail, key is held)
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // Should have invalidated — someone else holds the key
+    assert.equal(invalidations.length, 1);
+    assert.equal(invalidations[0].reason, 'lease_lost');
+
+    await lease.release();
+  });
+
+  test('single-flight guard prevents concurrent renewOnce from false lease_lost (P1 review fix)', async () => {
+    const redis = new FakeRedis();
+    const invalidations = [];
+
+    // Slow eval: delay renew responses to force overlapping heartbeats
+    const originalEval = redis.eval.bind(redis);
+    let evalDelay = 0;
+    redis.eval = async (script, ...args) => {
+      if (evalDelay > 0 && script.includes('PEXPIRE')) {
+        await new Promise((r) => setTimeout(r, evalDelay));
+      }
+      return originalEval(script, ...args);
+    };
+
+    const lease = new ApiInstanceLease(redis, {
+      instanceId: 'runtime-a',
+      pid: 1111,
+      hostname: 'same-host',
+      apiPort: 3002,
+      cwd: '/runtime-a',
+      ttlMs: 200,
+      heartbeatMs: 5,
+      isPidAlive: () => true,
+      onLeaseInvalidated: (event) => invalidations.push(event),
+    });
+
+    await lease.acquire();
+
+    // Delete the key to simulate TTL expiry, then make eval slow
+    // so multiple ticks pile up
+    redis.store.delete(API_INSTANCE_LEASE_KEY);
+    redis.expiries.delete(API_INSTANCE_LEASE_KEY);
+    evalDelay = 20; // slow enough for 2-3 ticks to overlap
+
+    // Wait for heartbeats to discover + re-acquire
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    // Key: should NOT have false-invalidated despite overlapping ticks
+    assert.equal(invalidations.length, 0, 'single-flight must prevent concurrent false lease_lost');
+    const raw = await redis.get(API_INSTANCE_LEASE_KEY);
+    assert.ok(raw, 'lease should be re-acquired');
 
     await lease.release();
   });

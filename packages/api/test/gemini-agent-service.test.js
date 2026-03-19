@@ -149,7 +149,7 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
     const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-789',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-789',
     };
@@ -174,7 +174,7 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
     const service = new GeminiAgentService({ spawnFn, adapter: 'gemini-cli' });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-123',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-456',
     };
@@ -419,7 +419,7 @@ describe('GeminiAgentService (antigravity adapter)', () => {
     });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-1',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-1',
     };
@@ -447,7 +447,7 @@ describe('GeminiAgentService (antigravity adapter)', () => {
     });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-2',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-2',
     };
@@ -503,7 +503,7 @@ describe('GeminiAgentService (antigravity adapter)', () => {
     });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-async',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-async',
     };
@@ -532,7 +532,7 @@ describe('GeminiAgentService (antigravity adapter)', () => {
     });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-3',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-3',
     };
@@ -563,7 +563,7 @@ describe('GeminiAgentService (antigravity adapter)', () => {
     });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-4',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-4',
     };
@@ -607,7 +607,7 @@ describe('GeminiAgentService (adapter selection)', () => {
     });
 
     const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3003',
+      CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-5',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-5',
     };

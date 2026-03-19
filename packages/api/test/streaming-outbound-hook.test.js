@@ -15,12 +15,17 @@ describe('StreamingOutboundHook', () => {
       sendReply: async () => {},
       sendPlaceholder: async (_chatId, _text) => 'msg-placeholder-1',
       editMessage: async (_chatId, _msgId, _text) => {},
-      _calls: { sendPlaceholder: [], editMessage: [] },
+      deleteMessage: async (_msgId) => {},
+      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [] },
     };
   }
 
   function wrapAdapter(adapter) {
-    const original = { sendPlaceholder: adapter.sendPlaceholder, editMessage: adapter.editMessage };
+    const original = {
+      sendPlaceholder: adapter.sendPlaceholder,
+      editMessage: adapter.editMessage,
+      deleteMessage: adapter.deleteMessage,
+    };
     adapter.sendPlaceholder = async (chatId, text) => {
       adapter._calls.sendPlaceholder.push({ chatId, text });
       return original.sendPlaceholder(chatId, text);
@@ -28,6 +33,10 @@ describe('StreamingOutboundHook', () => {
     adapter.editMessage = async (chatId, msgId, text) => {
       adapter._calls.editMessage.push({ chatId, msgId, text });
       return original.editMessage(chatId, msgId, text);
+    };
+    adapter.deleteMessage = async (msgId) => {
+      adapter._calls.deleteMessage.push({ msgId });
+      return original.deleteMessage(msgId);
     };
     return adapter;
   }
@@ -107,13 +116,23 @@ describe('StreamingOutboundHook', () => {
     assert.equal(adapter._calls.editMessage.length, 0);
   });
 
-  it('onStreamEnd sends final edit with full content', async () => {
+  it('onStreamEnd deletes placeholder message (cleanup before outbound card)', async () => {
     const { hook, adapter } = createHook();
+    await hook.onStreamStart('thread-1');
+    await hook.onStreamEnd('thread-1', 'Final complete response text');
+    assert.equal(adapter._calls.deleteMessage.length, 1);
+    assert.equal(adapter._calls.deleteMessage[0].msgId, 'msg-placeholder-1');
+    assert.equal(adapter._calls.editMessage.length, 0);
+  });
+
+  it('onStreamEnd falls back to editMessage when deleteMessage not available', async () => {
+    const { hook, adapter } = createHook();
+    delete adapter.deleteMessage;
+    adapter._calls.deleteMessage = [];
     await hook.onStreamStart('thread-1');
     await hook.onStreamEnd('thread-1', 'Final complete response text');
     assert.equal(adapter._calls.editMessage.length, 1);
     assert.ok(adapter._calls.editMessage[0].text.includes('Final complete response'));
-    // Should NOT have cursor indicator
     assert.ok(!adapter._calls.editMessage[0].text.includes('▌'));
   });
 
@@ -122,7 +141,7 @@ describe('StreamingOutboundHook', () => {
     await hook.onStreamStart('thread-1');
     await hook.onStreamEnd('thread-1', 'Done');
     await hook.onStreamEnd('thread-1', 'Done again');
-    assert.equal(adapter._calls.editMessage.length, 1);
+    assert.equal(adapter._calls.deleteMessage.length, 1);
   });
 
   it('onStreamChunk appends cursor indicator', async () => {

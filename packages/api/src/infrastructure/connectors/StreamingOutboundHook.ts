@@ -91,11 +91,15 @@ export class StreamingOutboundHook {
 
     for (const session of sessions) {
       const adapter = this.opts.adapters.get(session.connectorId);
-      if (!adapter?.editMessage || !session.platformMessageId) continue;
+      if (!session.platformMessageId) continue;
       try {
-        await adapter.editMessage(session.externalChatId, session.platformMessageId, finalText);
+        if (adapter?.deleteMessage) {
+          await adapter.deleteMessage(session.platformMessageId);
+        } else if (adapter?.editMessage) {
+          await adapter.editMessage(session.externalChatId, session.platformMessageId, finalText);
+        }
       } catch (err) {
-        this.opts.log.warn({ err }, '[StreamingOutbound] final editMessage failed');
+        this.opts.log.warn({ err }, '[StreamingOutbound] onStreamEnd cleanup failed');
       }
     }
   }

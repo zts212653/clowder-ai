@@ -214,7 +214,7 @@ test('preserves inherited Anthropic credentials when no profile mode override is
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3003',
+          CAT_CAFE_API_URL: 'http://localhost:3004',
           CAT_CAFE_INVOCATION_ID: 'inv-keep',
           CAT_CAFE_CALLBACK_TOKEN: 'token-keep',
         },
@@ -248,7 +248,7 @@ test('F062: subscription profile clears inherited ANTHROPIC env vars', async () 
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3003',
+          CAT_CAFE_API_URL: 'http://localhost:3004',
           CAT_CAFE_INVOCATION_ID: 'inv-1',
           CAT_CAFE_CALLBACK_TOKEN: 'token-1',
           CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription',
@@ -283,7 +283,7 @@ test('F062: api_key profile injects ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL', a
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3003',
+          CAT_CAFE_API_URL: 'http://localhost:3004',
           CAT_CAFE_INVOCATION_ID: 'inv-2',
           CAT_CAFE_CALLBACK_TOKEN: 'token-2',
           CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
@@ -312,8 +312,9 @@ test('pickGitBashPathFromWhere accepts nonstandard bash.exe locations returned b
     'C:\\Program Files\\Git\\bin\\bash.exe',
   ].join('\r\n');
 
-  const resolved = pickGitBashPathFromWhere(whereOutput, (candidate) =>
-    candidate === 'C:\\Users\\lang\\scoop\\apps\\git\\current\\bin\\bash.exe',
+  const resolved = pickGitBashPathFromWhere(
+    whereOutput,
+    (candidate) => candidate === 'C:\\Users\\lang\\scoop\\apps\\git\\current\\bin\\bash.exe',
   );
 
   assert.equal(resolved, 'C:\\Users\\lang\\scoop\\apps\\git\\current\\bin\\bash.exe');
@@ -325,9 +326,11 @@ test('pickGitBashPathFromWhere skips System32 bash.exe when a Git Bash candidate
     'C:\\Users\\lang\\scoop\\apps\\git\\current\\bin\\bash.exe',
   ].join('\r\n');
 
-  const resolved = pickGitBashPathFromWhere(whereOutput, (candidate) =>
-    candidate === 'C:\\Windows\\System32\\bash.exe' ||
-    candidate === 'C:\\Users\\lang\\scoop\\apps\\git\\current\\bin\\bash.exe',
+  const resolved = pickGitBashPathFromWhere(
+    whereOutput,
+    (candidate) =>
+      candidate === 'C:\\Windows\\System32\\bash.exe' ||
+      candidate === 'C:\\Users\\lang\\scoop\\apps\\git\\current\\bin\\bash.exe',
   );
 
   assert.equal(resolved, 'C:\\Users\\lang\\scoop\\apps\\git\\current\\bin\\bash.exe');
@@ -714,7 +717,7 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
-          CAT_CAFE_API_URL: 'http://localhost:3003',
+          CAT_CAFE_API_URL: 'http://localhost:3004',
           CAT_CAFE_INVOCATION_ID: 'inv-1',
           CAT_CAFE_CALLBACK_TOKEN: 'token-1',
         },

@@ -97,6 +97,29 @@ gh pr merge {PR_NUMBER} --squash --delete-branch
 git checkout main && git pull origin main
 git worktree remove ../cat-cafe-{feature-name}
 git branch -d {branch-name} && git worktree prune
+
+# 8.5 回收 review 沙盒（review-target-id 与 request-review 约定一致）
+REVIEW_TARGET_ID="{review-target-id}"  # e.g. f113 or fix-redis-keyprefix
+REVIEW_BASE="/tmp/cat-cafe-review/${REVIEW_TARGET_ID}"
+if [ -d "$REVIEW_BASE" ]; then
+  for sandbox in "$REVIEW_BASE"/*/; do
+    [ ! -d "$sandbox" ] && continue
+    # no-force 铁律（LL-012）：有未保存改动 → 报阻塞，不硬删
+    if git worktree list 2>/dev/null | grep -q "$sandbox"; then
+      STATUS=$(cd "$sandbox" && git status --porcelain 2>/dev/null)
+      if [ -n "$STATUS" ]; then
+        echo "⚠️ Review 沙盒 $sandbox 有未保存改动，跳过"
+        continue
+      fi
+      git worktree remove "$sandbox"
+    else
+      rm -rf "$sandbox"
+    fi
+  done
+  rmdir "$REVIEW_BASE" 2>/dev/null
+  echo "✅ Review 沙盒已回收: $REVIEW_BASE"
+fi
+git worktree prune  # 清理 dangling worktree references
 ```
 
 ### 云端 review 处理规则
@@ -107,12 +130,25 @@ git branch -d {branch-name} && git worktree prune
 `gh pr view` 的 `--json reviews` 只返回 review body（可能显示"no major issues"），
 但 inline code comment 里可能有 P1。
 
-**merge 前必须执行**：
+#### 层级 A：通知已包含 severity（自动）
+
+ReviewRouter 现在会在投递通知时**主动拉取** review body + inline comments，
+提取 P0/P1/P2 findings 并写入通知消息。如果通知里已有 severity header
+（`Review 检测到 P1`），说明**有 actionable findings，必须处理**。
+
+#### 层级 B：merge 前软守护（手动确认）
+
+即使通知层漏报（GitHub API 暂时不可用、新 commit 后内容变化），
+merge 前仍需执行以下检查作为兜底：
+
 ```bash
-gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
-  --jq '.[] | select(.body | test("P[012]")) | {body: .body[:200], path: .path}'
+gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
+  --jq '.[] | select(.body | test("\\bP[012]\\b"; "i")) | {body: .body[:200], path: .path}'
 ```
-有 P1/P2 输出 → **BLOCKED，不能 merge**。无输出 → 可以继续。
+
+- 有 P1/P2 输出 → **WARNING**，确认是否已处理后再决定是否继续
+- 无输出 → 通过，继续 Step 7
+- 命令执行失败 → **不默认通过**，排查原因或手动检查 PR 页面
 
 | 结果 | 处理 |
 |------|------|
@@ -171,6 +207,7 @@ gh api repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 | 本地 merge 后 `gh pr close` | `gh pr close` = 放弃，`gh pr merge` = 合入 |
 | 不等云端 review 直接合入 | 必须等 0 P1/P2 |
 | Merge 后不更新 feature doc | Step 7.5 Phase 文档同步（每次 merge 必做！） |
+| Merge 后不清理 review 沙盒 | Step 8.5 按 review-target-id 回收 `/tmp/cat-cafe-review/` |
 
 ### **⚠️⚠️ 反面案例（PR #160）— 必须记住**
 

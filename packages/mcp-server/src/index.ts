@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Cat Café MCP Server (legacy all-in-one entrypoint)
+ * Clowder AI MCP Server (legacy all-in-one entrypoint)
  * 保持向后兼容：聚合注册 collab + memory + signals。
  */
 

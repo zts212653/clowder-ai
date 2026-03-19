@@ -69,9 +69,9 @@ if (-not $pnpmCommand) {
 Write-Ok "pnpm: $pnpmCommand"
 
 # -- Ports ---------------------------------------------------
-$ApiPort = if ($env:API_SERVER_PORT) { $env:API_SERVER_PORT } else { "3003" }
-$WebPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3004" }
-$RedisPort = if ($env:REDIS_PORT) { $env:REDIS_PORT } else { "6379" }
+$ApiPort = if ($env:API_SERVER_PORT) { $env:API_SERVER_PORT } else { "3004" }
+$WebPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3003" }
+$RedisPort = if ($env:REDIS_PORT) { $env:REDIS_PORT } else { "6399" }
 $RunDir = Join-Path $ProjectRoot ".cat-cafe/run/windows"
 $ApiPidFile = Join-Path $RunDir "api-$ApiPort.pid"
 $WebPidFile = Join-Path $RunDir "web-$WebPort.pid"
@@ -186,6 +186,19 @@ if ($useExternalRedis) {
         }
         $redisPing = & $redisCliPath -p $RedisPort @redisAuthArgs ping 2>$null
         if ($redisPing -eq "PONG") {
+            $redisConnections = Get-NetTCPConnection -LocalPort $RedisPort -State Listen -ErrorAction SilentlyContinue
+            if (-not $redisConnections) {
+                throw "not running"
+            }
+            $managedRedisPid = Get-ManagedProcessId -PidFile $redisPidFile
+            foreach ($conn in $redisConnections) {
+                $isManagedPid = $managedRedisPid -and ($conn.OwningProcess -eq $managedRedisPid)
+                $isClowderOwned = $isManagedPid -or (Test-ClowderOwnedProcess -ProcessId $conn.OwningProcess -ProjectRoot $ProjectRoot)
+                if (-not $isClowderOwned) {
+                    Write-Err "Redis port $RedisPort is in use by non-Clowder PID $($conn.OwningProcess). Stop it manually or change REDIS_PORT."
+                    throw "Redis port $RedisPort is in use by a non-Clowder process"
+                }
+            }
             Write-Ok "Redis already running on port $RedisPort"
             if ($configuredRedisUrl) {
                 $env:REDIS_URL = $configuredRedisUrl
@@ -196,6 +209,9 @@ if ($useExternalRedis) {
             throw "not running"
         }
     } catch {
+        if ($_.Exception -and $_.Exception.Message -like "Redis port $RedisPort is in use by a non-Clowder process") {
+            throw
+        }
         Write-Warn "Redis not running on port $RedisPort"
         # Try to start Redis
         try {

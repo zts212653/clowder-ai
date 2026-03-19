@@ -27,9 +27,9 @@ Write-Host "============================="
 
 # Load .env for port config
 $envFile = Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) ".env"
-$ApiPort = 3003
-$WebPort = 3004
-$RedisPort = 6379
+$ApiPort = 3004
+$WebPort = 3003
+$RedisPort = 6399
 
 if (Test-Path $envFile) {
     Get-Content $envFile | ForEach-Object {
@@ -49,7 +49,10 @@ if (Test-Path $envFile) {
     }
 }
 
-$configuredRedisUrl = if ($env:REDIS_URL) { $env:REDIS_URL.Trim() } else { Get-InstallerEnvValueFromFile -EnvFile $envFile -Key "REDIS_URL" }
+$configuredRedisUrl = Get-InstallerEnvValueFromFile -EnvFile $envFile -Key "REDIS_URL"
+if (-not $configuredRedisUrl -and $env:REDIS_URL) {
+    $configuredRedisUrl = $env:REDIS_URL.Trim()
+}
 
 function Get-ManagedProcessId {
     param([string]$ManagedPidFile)

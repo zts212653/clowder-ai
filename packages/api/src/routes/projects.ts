@@ -8,11 +8,11 @@
 import { execFile } from 'node:child_process';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, posix, resolve, win32 } from 'node:path';
+import { basename, posix, resolve, win32 } from 'node:path';
 import { promisify } from 'node:util';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { getAllowedRoots, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -104,13 +104,10 @@ export async function execPickDirectory(): Promise<PickDirectoryResult> {
     const { stdout } = await execFileAsync(picker.command, picker.args, { timeout: 120_000 });
     const picked = normalizePickedDirectoryPath(stdout);
     if (!picked) return { status: 'cancelled' };
-    const s = await stat(picked);
-    if (!s.isDirectory()) return { status: 'error', message: 'Selected path is not a directory' };
+    const pickedStat = await stat(picked);
+    if (!pickedStat.isDirectory()) return { status: 'error', message: 'Selected path is not a directory' };
     return { status: 'picked', path: picked };
   } catch (err: unknown) {
-    // osascript reports "User canceled. (-128)" in stderr when user presses Cancel.
-    // Exit code 1 is generic — also used for permission denial, script errors, etc.
-    // Only treat explicit "User canceled" as cancellation.
     const stderr = String((err as { stderr?: unknown }).stderr ?? '');
     if (stderr.includes('User canceled')) return { status: 'cancelled' };
     return { status: 'error', message: stderr || (err instanceof Error ? err.message : 'Unknown error') };
@@ -129,6 +126,15 @@ export interface ProjectEntry {
   isDirectory: boolean;
 }
 
+function requireTrustedProjectIdentity(request: FastifyRequest, reply: FastifyReply): string | null {
+  const userId = resolveHeaderUserId(request);
+  if (!userId) {
+    reply.status(401);
+    return null;
+  }
+  return userId;
+}
+
 export const projectsRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/projects/cwd - return server's working directory
   app.get('/api/projects/cwd', async () => {
@@ -136,12 +142,10 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     return { path: cwd, name: basename(cwd) };
   });
 
-  // POST /api/projects/pick-directory - open native macOS folder picker
+  // POST /api/projects/pick-directory - open native folder picker
   app.post('/api/projects/pick-directory', async (request, reply) => {
-    const userId = resolveUserId(request);
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+    if (!requireTrustedProjectIdentity(request, reply)) {
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
     const result = await _pickDirectoryImpl();
     if (result.status === 'cancelled') {
@@ -166,6 +170,9 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/projects/complete?prefix=src/comp&cwd=/path/to/project&limit=10
   app.get('/api/projects/complete', async (request, reply) => {
+    if (!requireTrustedProjectIdentity(request, reply)) {
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
     const query = request.query as { prefix?: string; cwd?: string; limit?: string };
     if (!query.prefix && query.prefix !== '') {
       reply.status(400);
@@ -174,7 +181,6 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const prefix = query.prefix;
     const limit = Math.min(Math.max(parseInt(query.limit || '10', 10) || 10, 1), 50);
 
-    // Resolve prefix: expand ~ to homedir, then resolve relative paths
     const cwd = query.cwd || process.cwd();
     const { parentDir, fragment } = splitProjectCompletePrefix(prefix, cwd);
 
@@ -221,6 +227,9 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/projects/browse?path=/some/dir - list subdirectories
   app.get('/api/projects/browse', async (request, reply) => {
+    if (!requireTrustedProjectIdentity(request, reply)) {
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
     const query = request.query as { path?: string };
     const targetPath = query.path || homedir();
 
@@ -255,14 +264,14 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
       // Sort alphabetically
       dirs.sort((a, b) => a.name.localeCompare(b.name));
 
-      // Compute parent (use validatedPath which is already canonicalized)
-      const parent = getProjectBrowseParent(validatedPath);
-      const canGoUp = parent !== null && isUnderAllowedRoot(parent);
+      const parentDir = getProjectBrowseParent(validatedPath);
+      const canGoUp = parentDir !== null && isUnderAllowedRoot(parentDir);
 
       return {
         current: validatedPath,
         name: basename(validatedPath),
-        parent: canGoUp ? parent : null,
+        parent: canGoUp ? parentDir : null,
+        homePath: homedir(),
         entries: dirs,
       };
     } catch (err) {

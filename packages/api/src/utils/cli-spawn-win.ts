@@ -6,8 +6,8 @@
  * with escaped arguments if resolution fails.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -40,7 +40,11 @@ export interface WindowsShimSpawn {
  */
 export function resolveCmdShimScript(command: string): string | null {
   const cached = resolvedShimCache.get(command);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    if (cached === null) return null;
+    if (existsSync(cached)) return cached;
+    resolvedShimCache.delete(command);
+  }
 
   // Strategy 1: parse the .cmd shim selected by PATH via `where`
   try {
@@ -116,7 +120,7 @@ export function escapeCmdArg(arg: string): string {
       backslashes++;
     } else if (ch === '"') {
       // Double the backslashes before a quote, then emit \"
-      crtEscaped += '\\'.repeat(backslashes * 2) + '\\"';
+      crtEscaped += `${'\\'.repeat(backslashes * 2)}\\"`;
       backslashes = 0;
     } else {
       crtEscaped += '\\'.repeat(backslashes) + ch;

@@ -94,7 +94,7 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 | **为什么不直连** | iframe 跨端口需要代理剥离 X-Frame-Options/CSP |
 | **iframe sandbox** | `allow-scripts allow-forms allow-popups allow-downloads allow-same-origin`（安全：独立 origin） |
 | **WebSocket/HMR** | 代理层支持 WebSocket 升级，Vite/Next/Webpack HMR 正常工作 |
-| **端口排除** | Cat Cafe 自身端口（3004/3003/6398/6399/18888 等）自动排除 |
+| **端口排除** | Cat Cafe 自身端口（3003/3004/6398/6399/18888 等）自动排除 |
 | **审计** | 每次 open/close/navigate 都有审计日志 |
 | **Console 面板** | bridge script 注入到 iframe，捕获 console.log/warn/error，在面板展示 |
 | **一键截图** | SVG foreignObject + canvas 截图，上传后端，toast 展示 |

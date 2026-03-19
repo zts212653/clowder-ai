@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Cat Café MCP Server — Collab Surface
+ * Clowder AI MCP Server — Collab Surface
  * 只暴露协作核心工具（消息、上下文、任务、权限）。
  */
 

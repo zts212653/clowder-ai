@@ -28,6 +28,7 @@ export interface GameRoutesOptions {
   socketManager: SocketLike;
   threadStore: IThreadStore;
   messageStore: IMessageStore;
+  autoPlayer?: Pick<GameAutoPlayer, 'startLoop' | 'stopAllLoops'>;
 }
 
 const seatSchema = z.object({
@@ -123,6 +124,11 @@ const gameStartSchema = z.object({
 export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opts) => {
   const { gameStore, socketManager, threadStore, messageStore } = opts;
   const orchestrator = new GameOrchestrator({ gameStore, socketManager });
+  const autoPlayer = opts.autoPlayer ?? new GameAutoPlayer({ gameStore, orchestrator });
+
+  app.addHook('onClose', async () => {
+    autoPlayer.stopAllLoops();
+  });
 
   // POST /api/game/start — High-level game creation (frontend-driven)
   // Accepts structured payload, creates game thread, builds seats, starts game,
@@ -222,7 +228,6 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
     await orchestrator.broadcastGameState(gameRuntime.gameId);
 
     // Start AI auto-play loop
-    const autoPlayer = new GameAutoPlayer({ gameStore, orchestrator });
     autoPlayer.startLoop(gameRuntime.gameId);
 
     return {

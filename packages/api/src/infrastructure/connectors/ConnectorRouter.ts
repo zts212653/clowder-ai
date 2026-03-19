@@ -1,6 +1,6 @@
 /**
  * Connector Router
- * Routes inbound messages from external platforms to Cat Café threads.
+ * Routes inbound messages from external platforms to Clowder AI threads.
  *
  * Flow:
  *   1. Dedup check (skip webhook retries)
@@ -45,6 +45,10 @@ export interface ConnectorRouterOptions {
   };
   readonly threadStore: {
     create(userId: string, title?: string): { id: string } | Promise<{ id: string }>;
+    updateConnectorHubState(
+      threadId: string,
+      state: { v: 1; connectorId: string; externalChatId: string; createdAt: number } | null,
+    ): void | Promise<void>;
   };
   readonly invokeTrigger: {
     trigger(
@@ -131,14 +135,13 @@ export class ConnectorRouter {
             await adapter.sendReply(externalChatId, cmdResult.response);
           }
         }
-        // Phase C: store command exchange in messageStore + broadcast
-        const stored = await this.storeCommandExchange(
-          connectorId,
-          cmdResult.contextThreadId,
-          text,
-          cmdResult.response,
+        // ISSUE-8 (8A): Store command exchange in Hub thread, not conversation thread
+        const hubThreadId = await this.resolveHubThread(connectorId, externalChatId);
+        const stored = await this.storeCommandExchange(connectorId, hubThreadId, text, cmdResult.response);
+        log.info(
+          { connectorId, command: cmdResult.kind, hubThreadId },
+          '[ConnectorRouter] Command handled → Hub thread',
         );
-        log.info({ connectorId, command: cmdResult.kind }, '[ConnectorRouter] Command handled');
 
         // /thread: forward message content to the target thread
         if (cmdResult.forwardContent && cmdResult.newActiveThreadId) {
@@ -148,7 +151,7 @@ export class ConnectorRouter {
           const fwdSource: ConnectorSource = {
             connector: connectorId,
             label: def2?.displayName ?? connectorId,
-            icon: def2?.icon ?? '💬',
+            icon: def2?.icon ?? 'message',
           };
           const mentionPatterns = this.getMentionPatterns();
           const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.opts.defaultCatId);
@@ -173,7 +176,7 @@ export class ConnectorRouter {
         }
 
         const result: RouteResult = { kind: 'command' };
-        if (cmdResult.contextThreadId) (result as { threadId?: string }).threadId = cmdResult.contextThreadId;
+        if (hubThreadId) (result as { threadId?: string }).threadId = hubThreadId;
         if (stored?.responseId) (result as { messageId?: string }).messageId = stored.responseId;
         return result;
       }
@@ -206,7 +209,7 @@ export class ConnectorRouter {
     const source: ConnectorSource = {
       connector: connectorId,
       label: def?.displayName ?? connectorId,
-      icon: def?.icon ?? '💬',
+      icon: def?.icon ?? 'message',
     };
 
     // Parse @-mentions to determine target cat
@@ -296,7 +299,26 @@ export class ConnectorRouter {
     return { text: parts.length > 0 ? parts.join('\n') : originalText, contentBlocks };
   }
 
-  /** Phase C: Store command inbound + outbound in messageStore, broadcast to WebSocket */
+  private async resolveHubThread(connectorId: string, externalChatId: string): Promise<string | undefined> {
+    const { bindingStore, threadStore, log } = this.opts;
+    const binding = await bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) return undefined;
+    if (binding.hubThreadId) return binding.hubThreadId;
+
+    const def = getConnectorDefinition(connectorId);
+    const label = def?.displayName ?? connectorId;
+    const hubThread = await threadStore.create(this.opts.defaultUserId, `${label} IM Hub`);
+    await threadStore.updateConnectorHubState(hubThread.id, {
+      v: 1,
+      connectorId,
+      externalChatId,
+      createdAt: Date.now(),
+    });
+    await bindingStore.setHubThread(connectorId, externalChatId, hubThread.id);
+    log.info({ connectorId, externalChatId, hubThreadId: hubThread.id }, '[ConnectorRouter] Hub thread created');
+    return hubThread.id;
+  }
+
   private async storeCommandExchange(
     connectorId: string,
     threadId: string | undefined,
@@ -314,7 +336,7 @@ export class ConnectorRouter {
       userId: this.opts.defaultUserId,
       catId: null,
       content: commandText,
-      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: def?.icon ?? '💬' },
+      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: def?.icon ?? 'message' },
       mentions: [],
       timestamp: now,
     });
@@ -325,7 +347,7 @@ export class ConnectorRouter {
       userId: this.opts.defaultUserId,
       catId: null,
       content: responseText,
-      source: { connector: 'system-command', label: '⚙️ Cat Café', icon: '⚙️' },
+      source: { connector: 'system-command', label: 'Clowder AI', icon: 'settings' },
       mentions: [],
       timestamp: now + 1,
     });

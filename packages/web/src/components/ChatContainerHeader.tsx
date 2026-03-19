@@ -53,7 +53,7 @@ export function ChatContainerHeader({
         </button>
         <CatCafeLogo className="h-16 w-auto -my-3" />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-cafe-black">Cat Cafe</h1>
+          <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
           <ThreadIndicator threadId={threadId} />
         </div>
         <ExportButton threadId={threadId} />
@@ -110,11 +110,17 @@ function ThreadIndicator({ threadId }: { threadId: string }) {
   const currentThread = threads.find((t) => t.id === threadId);
 
   if (threadId === 'default') {
-    return <p className="text-xs text-gray-500">大厅 · 三只 AI 猫猫的协作空间</p>;
+    return <p className="text-xs text-gray-500">大厅 · Your AI team collaboration space</p>;
   }
 
   const title = currentThread?.title ?? '未命名对话';
-  const projectName = currentThread?.projectPath?.split('/').pop() ?? '';
+  const rawPath = currentThread?.projectPath ?? '';
+  // 'default' is a sentinel for threads without a real projectPath — match exact value, not basename
+  const rawBasename = rawPath === 'default' ? '' : (rawPath.split('/').pop() ?? '');
+  // Map known internal repo basenames to brand name; preserve real project paths for multi-workspace
+  const INTERNAL_BASENAMES = ['cat-cafe', 'cat-cafe-runtime', 'clowder-ai'];
+  const brandName = process.env.NEXT_PUBLIC_BRAND_NAME ?? '';
+  const projectName = INTERNAL_BASENAMES.includes(rawBasename) && brandName ? brandName : rawBasename;
 
   return (
     <p className="text-xs text-gray-500 truncate" title={`${title}${projectName ? ` · ${projectName}` : ''}`}>

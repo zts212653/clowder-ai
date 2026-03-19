@@ -112,6 +112,49 @@ test('resolveCmdShimScript prefers the shim selected by PATH over APPDATA fallba
   }
 });
 
+test('resolveCmdShimScript revalidates cached shim targets after upgrades move the entrypoint', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-cache-refresh-'));
+  const originalPath = process.env.PATH;
+  const fakeBin = join(tempRoot, 'bin');
+  const v1Dir = join(tempRoot, 'v1');
+  const v2Dir = join(tempRoot, 'v2');
+  const commandName = 'fake-cmd-cache-refresh';
+
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(join(v1Dir, 'node_modules', 'pkg'), { recursive: true });
+  mkdirSync(join(v2Dir, 'node_modules', 'pkg'), { recursive: true });
+
+  const v1Cmd = join(v1Dir, `${commandName}.cmd`);
+  const v2Cmd = join(v2Dir, `${commandName}.cmd`);
+  const v1Script = join(v1Dir, 'node_modules', 'pkg', 'cli.js');
+  const v2Script = join(v2Dir, 'node_modules', 'pkg', 'cli.js');
+  const whereScript = join(fakeBin, 'where');
+
+  writeFileSync(v1Cmd, '@"%dp0\\node_modules\\pkg\\cli.js" %*\n', 'utf8');
+  writeFileSync(v2Cmd, '@"%dp0\\node_modules\\pkg\\cli.js" %*\n', 'utf8');
+  writeFileSync(v1Script, 'console.log("v1");\n', 'utf8');
+  writeFileSync(v2Script, 'console.log("v2");\n', 'utf8');
+  writeFileSync(whereScript, `#!/bin/sh\nprintf '%s\n' '${v1Cmd}'\n`, 'utf8');
+  chmodSync(whereScript, 0o755);
+
+  try {
+    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+
+    const initialResolved = resolveCmdShimScript(commandName);
+    assert.equal(initialResolved, v1Script);
+
+    rmSync(v1Script, { force: true });
+    writeFileSync(whereScript, `#!/bin/sh\nprintf '%s\n' '${v2Cmd}'\n`, 'utf8');
+    chmodSync(whereScript, 0o755);
+
+    const refreshedResolved = resolveCmdShimScript(commandName);
+    assert.equal(refreshedResolved, v2Script);
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('resolveWindowsShimSpawn uses the current Node executable for direct shim launches', () => {
   const shimScript = join(tmpdir(), 'codex-shim-target.js');
 

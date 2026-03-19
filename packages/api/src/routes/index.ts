@@ -11,6 +11,7 @@ export { catsRoutes } from './cats.js';
 export { claudeRescueRoutes } from './claude-rescue.js';
 export { commandsRoutes } from './commands.js';
 export { configRoutes } from './config.js';
+export { connectorHubRoutes } from './connector-hub.js';
 export { connectorMediaRoutes } from './connector-media.js';
 export { evidenceRoutes } from './evidence.js';
 export { executionDigestRoutes } from './execution-digests.js';

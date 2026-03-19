@@ -25,7 +25,7 @@ export function getCallbackConfig(): CallbackConfig | null {
 }
 
 export const NO_CONFIG_ERROR =
-  'Cat Café callback not configured. Missing CAT_CAFE_API_URL, CAT_CAFE_INVOCATION_ID, or CAT_CAFE_CALLBACK_TOKEN environment variables.';
+  'Clowder AI callback not configured. Missing CAT_CAFE_API_URL, CAT_CAFE_INVOCATION_ID, or CAT_CAFE_CALLBACK_TOKEN environment variables.';
 // ============ HTTP helpers ============
 
 export async function callbackPost(
@@ -681,7 +681,7 @@ export const callbackTools = [
   {
     name: 'cat_cafe_post_message',
     description:
-      'Post a proactive async message to the Cat Café chat mid-task (e.g. progress updates, sharing results). To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires.',
+      'Post a proactive async message to the Clowder AI chat mid-task (e.g. progress updates, sharing results). To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
   },

@@ -348,7 +348,7 @@ export async function* routeParallel(
       catHadError.add(msg.catId);
       if (msg.error) {
         const prev = catText.get(msg.catId) ?? '';
-        catText.set(msg.catId, `${prev + (prev ? '\n\n' : '')}❌ ${msg.error}`);
+        catText.set(msg.catId, `${prev + (prev ? '\n\n' : '')}[错误] ${msg.error}`);
       }
     }
     // Accumulate tool events per cat

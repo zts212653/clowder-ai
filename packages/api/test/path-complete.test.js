@@ -5,6 +5,7 @@ import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 const { projectsRoutes } = await import('../dist/routes/projects.js');
+const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
 
 async function buildApp() {
   const app = Fastify();
@@ -37,10 +38,21 @@ describe('GET /api/projects/complete', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
+  it('returns 401 when only a spoofed userId query param is provided', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&cwd=${encodeURIComponent(testDir)}&userId=spoofed`,
+    });
+    assert.equal(res.statusCode, 401);
+    const body = JSON.parse(res.body);
+    assert.ok(body.error.includes('Identity required'));
+  });
+
   it('returns matching entries for directory prefix', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -55,6 +67,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/comp'))}&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -67,6 +80,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     const body = JSON.parse(res.body);
     for (const entry of body.entries) {
@@ -82,6 +96,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&limit=1&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     const body = JSON.parse(res.body);
     assert.equal(body.entries.length, 1);
@@ -91,6 +106,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'nonexistent'))}&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -101,6 +117,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent(`${testDir}/`)}&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     const body = JSON.parse(res.body);
     const names = body.entries.map((e) => e.name);
@@ -112,6 +129,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent('/etc/pass')}&cwd=/etc`,
+      headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 403);
   });
@@ -120,6 +138,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/projects/complete',
+      headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 400);
   });
@@ -128,6 +147,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=src/&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -141,6 +161,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent('~/')}&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -154,6 +175,7 @@ describe('GET /api/projects/complete', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/projects/complete?prefix=${encodeURIComponent(`${testDir}/`)}&cwd=${encodeURIComponent(testDir)}`,
+      headers: AUTH_HEADERS,
     });
     const body = JSON.parse(res.body);
     const dirs = body.entries.filter((e) => e.isDirectory);

@@ -64,7 +64,7 @@ describe('parsePortFromStdout', () => {
   });
 
   it('returns null for excluded ports', () => {
-    assert.equal(parsePortFromStdout('Server on http://localhost:3003'), null);
+    assert.equal(parsePortFromStdout('Server on http://localhost:3004'), null);
   });
 
   it('returns null for port below range', () => {

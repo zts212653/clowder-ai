@@ -474,7 +474,7 @@ export async function* routeSerial(
         if (msg.type === 'error') {
           hadError = true;
           if (msg.error) {
-            textContent += `${textContent ? '\n\n' : ''}❌ ${msg.error}`;
+            textContent += `${textContent ? '\n\n' : ''}[错误] ${msg.error}`;
           }
         }
         if (msg.metadata && !firstMetadata) {

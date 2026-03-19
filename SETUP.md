@@ -33,7 +33,7 @@ cp .env.example .env
 pnpm start
 ```
 
-This auto-starts Redis, builds packages, and launches both API (port 3004) and Frontend (port 3003).
+This auto-starts Redis, builds packages, and launches both Frontend (port 3003) and API (port 3004).
 
 Open `http://localhost:3003` and start talking to your team.
 
@@ -59,10 +59,10 @@ GOOGLE_API_KEY=...
 Redis is the persistent store for threads, messages, tasks, and memory.
 
 ```bash
-REDIS_URL=redis://localhost:6379
+REDIS_URL=redis://localhost:6399
 ```
 
-The `pnpm start` command auto-starts Redis on port 6379. Data persists in `~/.cat-cafe/redis-dev/`.
+The `pnpm start` command auto-starts Redis on port 6399. Data persists in `~/.cat-cafe/redis-dev/`.
 
 **No Redis?** Use `pnpm start --memory` for in-memory mode (data lost on restart — fine for trying things out).
 
@@ -180,7 +180,7 @@ pnpm hindsight:stop     # Shut down
 |---------|------|----------|
 | Frontend (Next.js) | 3003 | Yes |
 | API Backend | 3004 | Yes |
-| Redis | 6379 | Yes (or use `--memory`) |
+| Redis | 6399 | Yes (or use `--memory`) |
 | ASR | 9876 | No — voice input |
 | TTS | 9879 | No — voice output |
 | LLM Post-process | 9878 | No — speech correction |
@@ -206,7 +206,7 @@ pnpm redis:user:backup  # Manual backup
 ## Troubleshooting
 
 **Redis won't start?**
-- Check if port 6379 is in use: `lsof -i :6379`
+- Check if port 6399 is in use: `lsof -i :6399`
 - Make sure Redis is installed: `redis-server --version`
 
 **No agents responding?**
@@ -248,7 +248,7 @@ cp .env.example .env
 pnpm start
 ```
 
-自动启动 Redis，构建包，启动 API（端口 3004）和前端（端口 3003）。
+自动启动 Redis，构建包，启动前端（端口 3003）和 API（端口 3004）。
 
 打开 `http://localhost:3003`，开始和你的团队对话。
 
@@ -274,10 +274,10 @@ GOOGLE_API_KEY=...
 Redis 是线程、消息、任务和记忆的持久化存储。
 
 ```bash
-REDIS_URL=redis://localhost:6379
+REDIS_URL=redis://localhost:6399
 ```
 
-`pnpm start` 会自动启动 Redis（端口 6379）。数据持久化在 `~/.cat-cafe/redis-dev/`。
+`pnpm start` 会自动启动 Redis（端口 6399）。数据持久化在 `~/.cat-cafe/redis-dev/`。
 
 **没有 Redis？** 用 `pnpm start --memory` 启动纯内存模式（重启后数据丢失 — 试玩够用了）。
 
@@ -395,7 +395,7 @@ pnpm hindsight:stop     # 关闭
 |------|------|------|
 | 前端（Next.js） | 3003 | 是 |
 | API 后端 | 3004 | 是 |
-| Redis | 6379 | 是（或用 `--memory`） |
+| Redis | 6399 | 是（或用 `--memory`） |
 | ASR | 9876 | 否 — 语音输入 |
 | TTS | 9879 | 否 — 语音输出 |
 | LLM 后处理 | 9878 | 否 — 语音纠正 |
@@ -421,7 +421,7 @@ pnpm redis:user:backup  # 手动备份
 ## 常见问题
 
 **Redis 启动不了？**
-- 检查端口 6379 是否被占用：`lsof -i :6379`
+- 检查端口 6399 是否被占用：`lsof -i :6399`
 - 确认 Redis 已安装：`redis-server --version`
 
 **没有 agent 响应？**

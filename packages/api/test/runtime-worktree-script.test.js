@@ -15,6 +15,10 @@ function createTempProject(name) {
   const projectDir = mkdtempSync(join(tmpdir(), `${name}-`));
   tempDirs.push(projectDir);
   mkdirSync(join(projectDir, 'scripts'), { recursive: true });
+  mkdirSync(join(projectDir, 'packages', 'web'), { recursive: true });
+  mkdirSync(join(projectDir, 'packages', 'api'), { recursive: true });
+  mkdirSync(join(projectDir, 'packages', 'mcp-server'), { recursive: true });
+  mkdirSync(join(projectDir, 'packages', 'shared'), { recursive: true });
   writeFileSync(join(projectDir, 'scripts', 'runtime-worktree.sh'), readFileSync(runtimeScriptSource, 'utf8'), {
     mode: 0o755,
   });
@@ -22,6 +26,75 @@ function createTempProject(name) {
     mode: 0o755,
   });
   return projectDir;
+}
+
+function createPnpmStub(projectDir) {
+  const binDir = join(projectDir, 'bin');
+  const logFile = join(projectDir, 'pnpm.log');
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(
+    join(binDir, 'pnpm'),
+    `#!/bin/bash
+set -euo pipefail
+log_file="\${RUNTIME_TEST_PNPM_LOG:?}"
+printf '%s\\n' "$*" >> "$log_file"
+target_dir="$PWD"
+if [ "\${1:-}" = "-C" ]; then
+  target_dir="$2"
+  shift 2
+fi
+if [ "\${1:-}" = "install" ] && [ "\${2:-}" = "--frozen-lockfile" ]; then
+  mkdir -p "$target_dir/node_modules/.pnpm"
+  mkdir -p "$target_dir/packages/web/node_modules/next"
+  : > "$target_dir/packages/web/node_modules/next/package.json"
+  mkdir -p "$target_dir/packages/api/node_modules/tsx"
+  : > "$target_dir/packages/api/node_modules/tsx/package.json"
+  mkdir -p "$target_dir/packages/mcp-server/node_modules/typescript"
+  : > "$target_dir/packages/mcp-server/node_modules/typescript/package.json"
+  exit 0
+fi
+if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "build" ]; then
+  case "$target_dir" in
+    */packages/shared)
+      mkdir -p "$target_dir/dist"
+      : > "$target_dir/dist/index.js"
+      ;;
+    */packages/mcp-server)
+      mkdir -p "$target_dir/dist"
+      : > "$target_dir/dist/index.js"
+      ;;
+    */packages/web)
+      mkdir -p "$target_dir/.next"
+      printf 'stub-build-id\\n' > "$target_dir/.next/BUILD_ID"
+      ;;
+  esac
+  exit 0
+fi
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  return { binDir, logFile };
+}
+
+function withStubbedPnpmEnv(projectDir) {
+  const { binDir, logFile } = createPnpmStub(projectDir);
+  return {
+    ...process.env,
+    CAT_CAFE_RUNTIME_RESTART_OK: '1',
+    PATH: `${binDir}:${process.env.PATH}`,
+    RUNTIME_TEST_PNPM_LOG: logFile,
+  };
+}
+
+function seedRuntimeDependencyMarkers(projectDir) {
+  mkdirSync(join(projectDir, 'node_modules', '.pnpm'), { recursive: true });
+  mkdirSync(join(projectDir, 'packages', 'web', 'node_modules', 'next'), { recursive: true });
+  writeFileSync(join(projectDir, 'packages', 'web', 'node_modules', 'next', 'package.json'), '{}');
+  mkdirSync(join(projectDir, 'packages', 'api', 'node_modules', 'tsx'), { recursive: true });
+  writeFileSync(join(projectDir, 'packages', 'api', 'node_modules', 'tsx', 'package.json'), '{}');
+  mkdirSync(join(projectDir, 'packages', 'mcp-server', 'node_modules', 'typescript'), { recursive: true });
+  writeFileSync(join(projectDir, 'packages', 'mcp-server', 'node_modules', 'typescript', 'package.json'), '{}');
 }
 
 afterEach(async () => {
@@ -38,6 +111,7 @@ describe('runtime-worktree.sh', () => {
 
   it('starts in-place when project is not a git repository', () => {
     const projectDir = createTempProject('runtime-non-git');
+    seedRuntimeDependencyMarkers(projectDir);
 
     const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
       cwd: projectDir,
@@ -65,8 +139,74 @@ describe('runtime-worktree.sh', () => {
     assert.doesNotMatch(result.stdout, /running in-place \(deployment mode\)/);
   });
 
+  it('auto-installs missing runtime dependencies before in-place start', () => {
+    const projectDir = createTempProject('runtime-self-heal-install');
+    const env = withStubbedPnpmEnv(projectDir);
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env,
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /detected missing runtime prerequisites/);
+    assert.match(result.stdout, /running pnpm install --frozen-lockfile/);
+    assert.match(result.stdout, /STARTED:/);
+    const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8');
+    assert.match(pnpmLog, /install --frozen-lockfile/);
+  });
+
+  it('fails with guidance when auto-install is disabled and prerequisites are missing', () => {
+    const projectDir = createTempProject('runtime-self-heal-no-install');
+    const env = withStubbedPnpmEnv(projectDir);
+
+    const result = spawnSync(
+      'bash',
+      [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync', '--no-install'],
+      {
+        cwd: projectDir,
+        encoding: 'utf8',
+        env,
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /runtime prerequisites missing/);
+    assert.match(result.stderr, /pnpm -C .* install --frozen-lockfile/);
+    assert.doesNotMatch(result.stdout, /STARTED:/);
+  });
+
+  it('rebuilds missing quick-start artifacts before start', () => {
+    const projectDir = createTempProject('runtime-self-heal-quick-build');
+    const env = withStubbedPnpmEnv(projectDir);
+    seedRuntimeDependencyMarkers(projectDir);
+
+    const result = spawnSync(
+      'bash',
+      [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync', '--', '--quick'],
+      {
+        cwd: projectDir,
+        encoding: 'utf8',
+        env,
+      },
+    );
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /quick start missing shared dist/);
+    assert.match(result.stdout, /quick start missing MCP server dist/);
+    assert.match(result.stdout, /quick start missing web production build/);
+    assert.match(result.stdout, /STARTED:/);
+
+    const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8');
+    assert.match(pnpmLog, /-C .*packages\/shared run build/);
+    assert.match(pnpmLog, /-C .*packages\/mcp-server run build/);
+    assert.match(pnpmLog, /-C .*packages\/web run build/);
+  });
+
   it('starts in-place when .git is a dangling pointer file', () => {
     const projectDir = createTempProject('runtime-dangling-git');
+    seedRuntimeDependencyMarkers(projectDir);
     writeFileSync(join(projectDir, '.git'), 'gitdir: /tmp/does-not-exist-anymore\n', 'utf8');
 
     const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
