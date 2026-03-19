@@ -281,6 +281,15 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       callbacksRef.current.onThreadUpdated?.(data);
     });
 
+    // F128: New thread created via MCP callback — prepend to sidebar thread list
+    socket.on('thread_created', (thread: import('../stores/chat-types').Thread) => {
+      const store = useChatStore.getState();
+      const existing = store.threads;
+      if (!existing.some((t) => t.id === thread.id)) {
+        store.setThreads([thread, ...existing]);
+      }
+    });
+
     socket.on(
       'intent_mode',
       (data: { threadId: string; mode: string; targetCats: string[]; invocationId?: string }) => {

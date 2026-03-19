@@ -293,6 +293,29 @@ skills:
     sop_step: null
     merged_from: null
 
+  # ── Thread 编排 ──
+  thread-orchestration:
+    description: >
+      大任务的主动拆解与多 thread 并行编排。
+      Use when: 任务涉及 2+ 个独立可交付子任务，需要不同猫参与、不同 thread 并行推进。
+      Not for: 单一任务（直接做）、已有 thread 之间的被动协调（用 cross-thread-sync）、单 session 内 subagent 并行（用 parallel-execution）。
+      Output: 子 thread 创建 + 选猫 + 各 thread 交付 + 主 thread 汇聚报告。
+    triggers:
+      - "拆任务"
+      - "分 thread"
+      - "并行推进"
+      - "开多个 thread"
+      - "thread orchestration"
+      - "任务分解"
+    not_for:
+      - "单一任务（直接做）"
+      - "被动跨 thread 协调（用 cross-thread-sync）"
+      - "单 session 内 subagent 并行（用 parallel-execution）"
+    output: "子 thread 创建 + 选猫 + 各 thread 交付 + 主 thread 汇聚报告"
+    next: ["worktree", "tdd", "quality-gate"]
+    sop_step: null
+    merged_from: null
+
   # ── 并行执行 ──
   parallel-execution:
     description: >

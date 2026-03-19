@@ -677,6 +677,52 @@ export async function handleBootcampEnvCheck(input: { threadId: string }): Promi
   return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId });
 }
 
+// ============ Create Thread (F128) ============
+
+export const createThreadInputSchema = {
+  title: z.string().min(1).max(200).describe('Title for the new thread'),
+  preferredCats: z
+    .array(z.string().min(1))
+    .max(10)
+    .optional()
+    .describe('Optional cat IDs to set as preferred cats for the thread (e.g. ["codex","gemini"])'),
+  parentThreadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('ID of the parent/main thread for orchestration tracking. Sub-threads should set this so cats know where to report back.'),
+};
+
+export async function handleCreateThread(input: {
+  title: string;
+  preferredCats?: string[] | undefined;
+  parentThreadId?: string | undefined;
+}): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/create-thread', {
+    title: input.title,
+    ...(input.preferredCats?.length ? { preferredCats: input.preferredCats } : {}),
+    ...(input.parentThreadId ? { parentThreadId: input.parentThreadId } : {}),
+  });
+
+  // Detect stale_ignored: server returned 200 but thread was NOT created
+  // because a newer invocation has superseded this one.
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Thread was NOT created: this invocation has been superseded by a newer one. ' +
+            'Your request was silently discarded by the server (stale_ignored).',
+        );
+      }
+    } catch {
+      // parse failure is fine
+    }
+  }
+
+  return result;
+}
+
 export const callbackTools = [
   {
     name: 'cat_cafe_post_message',
@@ -811,5 +857,18 @@ export const callbackTools = [
       'Returns the full check results for display to the user.',
     inputSchema: bootcampEnvCheckInputSchema,
     handler: handleBootcampEnvCheck,
+  },
+  // F128: Cat-initiated thread creation
+  {
+    name: 'cat_cafe_create_thread',
+    description:
+      'Create a new thread. ONLY use when the owner explicitly asks you to create a new thread. ' +
+      'Do NOT create threads proactively on your own judgment. ' +
+      'Returns the new threadId. Set parentThreadId to your current threadId so the new thread ' +
+      'knows where to report back. IMPORTANT: After creating, you MUST use cross_post_message ' +
+      'with the returned threadId to send all subsequent messages there — do NOT continue ' +
+      'posting in the current thread about the new topic.',
+    inputSchema: createThreadInputSchema,
+    handler: handleCreateThread,
   },
 ] as const;

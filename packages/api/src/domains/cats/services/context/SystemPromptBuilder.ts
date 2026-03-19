@@ -218,6 +218,7 @@ MCP 工具用于异步汇报等场景（token 有效期有限）：
 - cat_cafe_create_rich_block: 创建 rich block
 - cat_cafe_get_rich_block_rules: 获取 rich block 规则（fallback）
 - cat_cafe_multi_mention: 并行拉1-3只猫讨论同一问题（先搜后问：必须带searchEvidenceRefs或overrideReason）
+- cat_cafe_create_thread: 创建新 thread（仅在 owner 显式请求时使用）。设置 parentThreadId 为当前 threadId 以便子 thread 知道向哪里汇报。创建后必须用 cross_post_message 将后续消息发到新 thread，不要在当前 thread 继续讨论新话题
 
 ${RICH_BLOCK_SHORT}
 When the user asks to say/show/present something richly, consider rich blocks (audio/card/gallery/checklist/diff); call get_rich_block_rules before first use in a session.

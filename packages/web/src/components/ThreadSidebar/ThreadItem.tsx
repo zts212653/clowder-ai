@@ -6,6 +6,7 @@ import { CatAvatar } from '../CatAvatar';
 import { PawIcon } from '../icons/PawIcon';
 import { ThreadCatStatus } from '../ThreadCatStatus';
 import { ThreadCatSettings } from './ThreadCatSettings';
+import { ThreadHierarchyToggle } from './ThreadHierarchyToggle';
 import { formatRelativeTime } from './thread-utils';
 
 export interface ThreadItemProps {
@@ -25,6 +26,14 @@ export interface ThreadItemProps {
   threadState?: ThreadState;
   indented?: boolean;
   preferredCats?: string[];
+  /** Thread hierarchy: number of child threads (>0 = parent thread) */
+  childCount?: number;
+  /** Thread hierarchy: whether child threads are visible */
+  isExpanded?: boolean;
+  /** Thread hierarchy: toggle expand/collapse of child threads */
+  onToggleExpand?: () => void;
+  /** Thread hierarchy: this thread is a child of another thread */
+  isChildThread?: boolean;
 }
 
 export function ThreadItem({
@@ -44,6 +53,10 @@ export function ThreadItem({
   threadState,
   indented,
   preferredCats,
+  childCount,
+  isExpanded,
+  onToggleExpand,
+  isChildThread,
 }: ThreadItemProps) {
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
@@ -98,14 +111,19 @@ export function ThreadItem({
 
   return (
     <div
-      className={`group relative ${indented ? 'pl-7 pr-3' : 'px-3'} py-2.5 border-b border-gray-50 transition-colors cursor-pointer ${
-        isActive ? 'bg-owner-bg' : 'hover:bg-gray-50'
+      className={`group relative ${isChildThread ? 'pl-10 pr-3' : indented ? 'pl-7 pr-3' : 'px-3'} py-2.5 border-b border-gray-50 transition-colors cursor-pointer ${
+        isActive ? 'bg-owner-bg' : isExpanded ? 'bg-purple-50/40' : 'hover:bg-gray-50'
       }`}
       onClick={() => onSelect(id)}
       title={tooltip}
     >
+      {/* Child thread tree-line connector */}
+      {isChildThread && <div className="absolute left-7 top-0 bottom-0 w-px bg-gray-200" />}
       {/* Title row */}
       <div className="flex items-start justify-between gap-1 mb-1">
+        {childCount != null && childCount > 0 && onToggleExpand && (
+          <ThreadHierarchyToggle childCount={childCount} isExpanded={isExpanded ?? false} onToggle={onToggleExpand} />
+        )}
         {isEditing ? (
           <input
             ref={inputRef}

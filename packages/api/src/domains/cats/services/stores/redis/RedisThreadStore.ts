@@ -131,7 +131,7 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  async create(userId: string, title?: string, projectPath?: string): Promise<Thread> {
+  async create(userId: string, title?: string, projectPath?: string, parentThreadId?: string): Promise<Thread> {
     const now = Date.now();
     const thread: Thread = {
       id: generateThreadId(),
@@ -141,6 +141,7 @@ export class RedisThreadStore implements IThreadStore {
       participants: [],
       lastActiveAt: now,
       createdAt: now,
+      ...(parentThreadId ? { parentThreadId } : {}),
     };
 
     const key = ThreadKeys.detail(thread.id);
@@ -152,6 +153,14 @@ export class RedisThreadStore implements IThreadStore {
     pipeline.zadd(ThreadKeys.userList(userId), String(now), thread.id);
     if (this.ttlSeconds !== null) {
       pipeline.expire(ThreadKeys.userList(userId), this.ttlSeconds);
+    }
+    // F128: Maintain parent→children secondary index
+    if (parentThreadId) {
+      const childrenKey = ThreadKeys.children(parentThreadId);
+      pipeline.zadd(childrenKey, String(now), thread.id);
+      if (this.ttlSeconds !== null) {
+        pipeline.expire(childrenKey, this.ttlSeconds);
+      }
     }
     await pipeline.exec();
 
@@ -448,6 +457,18 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  /** F128: List child threads that have this thread as parentThreadId. */
+  async getChildThreads(parentThreadId: string): Promise<Thread[]> {
+    const childIds = await this.redis.zrange(ThreadKeys.children(parentThreadId), 0, -1);
+    if (!childIds.length) return [];
+    const children: Thread[] = [];
+    for (const id of childIds) {
+      const thread = await this.get(id);
+      if (thread && !thread.deletedAt) children.push(thread);
+    }
+    return children;
+  }
+
   /** F095 Phase D: Soft-delete — set deletedAt timestamp. */
   async softDelete(threadId: string): Promise<boolean> {
     if (threadId === DEFAULT_THREAD_ID) return false;
@@ -570,6 +591,10 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.bootcampState) {
       result.bootcampState = JSON.stringify(thread.bootcampState);
     }
+    // F128: Parent thread for orchestration tracking
+    if (thread.parentThreadId) {
+      result.parentThreadId = thread.parentThreadId;
+    }
     return result;
   }
 
@@ -643,6 +668,10 @@ export class RedisThreadStore implements IThreadStore {
       } catch {
         /* ignore malformed JSON */
       }
+    }
+    // F128: Parent thread for orchestration tracking
+    if (data.parentThreadId) {
+      result.parentThreadId = data.parentThreadId;
     }
     return result;
   }

@@ -9,6 +9,7 @@ import { TaskPanel } from '../TaskPanel';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { SectionGroup } from './SectionGroup';
 import { ThreadItem } from './ThreadItem';
+import { buildChildMap, getRootThreads, readHierarchyExpanded, writeHierarchyExpanded } from './thread-hierarchy';
 import { getProjectPaths, sortAndGroupThreadsWithWorkspace } from './thread-utils';
 import { createToggleWithReconcile } from './toggle-with-reconcile';
 import { useCollapseState } from './use-collapse-state';
@@ -48,6 +49,10 @@ export function ThreadSidebar({ onClose, className, onBootcampClick }: ThreadSid
   const [isLoadingTrash, setIsLoadingTrash] = useState(false);
   // F070: governance health by project path
   const [govHealth, setGovHealth] = useState<Record<string, string>>({});
+  // Thread hierarchy: expanded parent thread IDs
+  const [hierarchyExpanded, setHierarchyExpanded] = useState<Set<string>>(() =>
+    typeof window !== 'undefined' ? readHierarchyExpanded(window.localStorage) : new Set(),
+  );
 
   // Shared seq maps — created once, cross-referenced between pin/fav toggle instances
   const pinSeqMap = useRef(new Map<string, number>());
@@ -104,6 +109,20 @@ export function ThreadSidebar({ onClose, className, onBootcampClick }: ThreadSid
   useEffect(() => {
     void loadThreads();
   }, [loadThreads]);
+
+  // Thread hierarchy: persist expanded state
+  useEffect(() => {
+    if (typeof window !== 'undefined') writeHierarchyExpanded(hierarchyExpanded, window.localStorage);
+  }, [hierarchyExpanded]);
+
+  const toggleHierarchy = useCallback((threadId: string) => {
+    setHierarchyExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(threadId)) next.delete(threadId);
+      else next.add(threadId);
+      return next;
+    });
+  }, []);
 
   // F070: Fetch governance health for all registered external projects
   useEffect(() => {
@@ -376,11 +395,74 @@ export function ThreadSidebar({ onClose, className, onBootcampClick }: ThreadSid
     }
   }, []);
 
+  // Thread hierarchy: compute child map and root threads
+  const childMap = useMemo(() => buildChildMap(filteredThreads), [filteredThreads]);
+  const rootThreads = useMemo(() => getRootThreads(filteredThreads), [filteredThreads]);
+
+  /** Render a thread with its expandable children inline. Shared by both group render sites. */
+  const renderThreadWithChildren = useCallback(
+    (t: Thread, indented: boolean) => {
+      const children = childMap.get(t.id);
+      const isParent = children && children.length > 0;
+      const expanded = hierarchyExpanded.has(t.id);
+      return (
+        <div key={t.id}>
+          <ThreadItem
+            id={t.id}
+            title={t.title}
+            participants={t.participants}
+            lastActiveAt={t.lastActiveAt}
+            isActive={currentThreadId === t.id}
+            onSelect={handleSelect}
+            onDelete={handleDeleteRequest}
+            onRename={handleRename}
+            onTogglePin={handleTogglePin}
+            onToggleFavorite={handleToggleFavorite}
+            onUpdatePreferredCats={handleUpdatePreferredCats}
+            isPinned={t.pinned}
+            isFavorited={t.favorited}
+            threadState={getThreadState(t.id)}
+            indented={indented}
+            preferredCats={t.preferredCats}
+            childCount={children?.length}
+            isExpanded={expanded}
+            onToggleExpand={isParent ? () => toggleHierarchy(t.id) : undefined}
+          />
+          {isParent &&
+            expanded &&
+            children.map((child) => (
+              <ThreadItem
+                key={child.id}
+                id={child.id}
+                title={child.title}
+                participants={child.participants}
+                lastActiveAt={child.lastActiveAt}
+                isActive={currentThreadId === child.id}
+                onSelect={handleSelect}
+                onDelete={handleDeleteRequest}
+                onRename={handleRename}
+                onTogglePin={handleTogglePin}
+                onToggleFavorite={handleToggleFavorite}
+                onUpdatePreferredCats={handleUpdatePreferredCats}
+                isPinned={child.pinned}
+                isFavorited={child.favorited}
+                threadState={getThreadState(child.id)}
+                preferredCats={child.preferredCats}
+                isChildThread
+              />
+            ))}
+        </div>
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [childMap, hierarchyExpanded, currentThreadId, getThreadState, toggleHierarchy],
+  );
+
   // F095 Phase B: Active workspace grouping
   const { pinnedProjects, toggleProjectPin } = useProjectPins();
   const threadGroups = useMemo(
-    () => sortAndGroupThreadsWithWorkspace(filteredThreads, unreadIds, pinnedProjects),
-    [filteredThreads, unreadIds, pinnedProjects],
+    () => sortAndGroupThreadsWithWorkspace(rootThreads, unreadIds, pinnedProjects),
+    [rootThreads, unreadIds, pinnedProjects],
   );
   const existingProjects = useMemo(() => getProjectPaths(threads), [threads]);
   const showDefaultThread = normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery);
@@ -551,27 +633,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick }: ThreadSid
                         onToggleProjectPin={sub.projectPath ? () => toggleProjectPin(sub.projectPath!) : undefined}
                         isProjectPinned={sub.projectPath ? pinnedProjects.has(sub.projectPath) : undefined}
                       >
-                        {sub.threads.map((t) => (
-                          <ThreadItem
-                            key={t.id}
-                            id={t.id}
-                            title={t.title}
-                            participants={t.participants}
-                            lastActiveAt={t.lastActiveAt}
-                            isActive={currentThreadId === t.id}
-                            onSelect={handleSelect}
-                            onDelete={handleDeleteRequest}
-                            onRename={handleRename}
-                            onTogglePin={handleTogglePin}
-                            onToggleFavorite={handleToggleFavorite}
-                            onUpdatePreferredCats={handleUpdatePreferredCats}
-                            isPinned={t.pinned}
-                            isFavorited={t.favorited}
-                            threadState={getThreadState(t.id)}
-                            indented
-                            preferredCats={t.preferredCats}
-                          />
-                        ))}
+                        {sub.threads.map((t) => renderThreadWithChildren(t, true))}
                       </SectionGroup>
                     );
                   })}
@@ -596,27 +658,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick }: ThreadSid
                   group.type === 'project' && group.projectPath ? pinnedProjects.has(group.projectPath) : undefined
                 }
               >
-                {group.threads.map((t) => (
-                  <ThreadItem
-                    key={t.id}
-                    id={t.id}
-                    title={t.title}
-                    participants={t.participants}
-                    lastActiveAt={t.lastActiveAt}
-                    isActive={currentThreadId === t.id}
-                    onSelect={handleSelect}
-                    onDelete={handleDeleteRequest}
-                    onRename={handleRename}
-                    onTogglePin={handleTogglePin}
-                    onToggleFavorite={handleToggleFavorite}
-                    onUpdatePreferredCats={handleUpdatePreferredCats}
-                    isPinned={t.pinned}
-                    isFavorited={t.favorited}
-                    threadState={getThreadState(t.id)}
-                    indented={group.type === 'project'}
-                    preferredCats={t.preferredCats}
-                  />
-                ))}
+                {group.threads.map((t) => renderThreadWithChildren(t, group.type === 'project'))}
               </SectionGroup>
             );
           })}
