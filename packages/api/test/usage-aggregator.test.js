@@ -199,6 +199,53 @@ describe('aggregateUsageByDay', () => {
     assert.equal(result.daily[0].total.invocations, 2);
   });
 
+  test('days parameter excludes records outside the window', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const records = [
+      makeRecord('inv-today', now - 1000, {
+        opus: { inputTokens: 100, outputTokens: 50 },
+      }),
+      makeRecord('inv-yesterday', now - oneDay, {
+        opus: { inputTokens: 200, outputTokens: 100 },
+      }),
+      makeRecord('inv-3-days-ago', now - 3 * oneDay, {
+        opus: { inputTokens: 300, outputTokens: 150 },
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 1 });
+
+    // days=1 should only include today
+    assert.equal(result.daily.length, 1);
+    assert.equal(result.grandTotal.inputTokens, 100);
+    assert.equal(result.grandTotal.invocations, 1);
+  });
+
+  test('days=2 includes today and yesterday only', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const records = [
+      makeRecord('inv-today', now - 1000, {
+        opus: { inputTokens: 100, outputTokens: 50 },
+      }),
+      makeRecord('inv-yesterday', now - oneDay, {
+        opus: { inputTokens: 200, outputTokens: 100 },
+      }),
+      makeRecord('inv-3-days-ago', now - 3 * oneDay, {
+        opus: { inputTokens: 300, outputTokens: 150 },
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 2 });
+
+    assert.equal(result.daily.length, 2);
+    assert.equal(result.grandTotal.inputTokens, 300); // 100 + 200, not 600
+    assert.equal(result.grandTotal.invocations, 2);
+  });
+
   test('handles missing numeric fields gracefully (treats as 0)', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
     const records = [

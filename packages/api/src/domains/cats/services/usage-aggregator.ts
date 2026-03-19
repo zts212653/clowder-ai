@@ -65,6 +65,9 @@ export function aggregateUsageByDay(records: InvocationRecord[], options: Aggreg
 
     const date = toDateString(record.createdAt);
 
+    // P1 fix: skip records outside the requested date window
+    if (date < from || date > to) continue;
+
     for (const [catId, usage] of Object.entries(record.usageByCat)) {
       if (options.catId && catId !== options.catId) continue;
 
