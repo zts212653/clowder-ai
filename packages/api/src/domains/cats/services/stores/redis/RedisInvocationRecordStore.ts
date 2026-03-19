@@ -218,6 +218,36 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     return ids;
   }
 
+  /**
+   * F128: Scan ALL invocation records.
+   * Uses Redis SCAN (non-blocking cursor) + pipeline HGETALL for full hydration.
+   */
+  async scanAll(): Promise<InvocationRecord[]> {
+    const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+    const matchPattern = `${prefix}${InvocationKeys.detail('*')}`;
+    const records: InvocationRecord[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          const bareKey = prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key;
+          pipeline.hgetall(bareKey);
+        }
+        const results = await pipeline.exec();
+        for (const entry of results ?? []) {
+          const [err, data] = entry!;
+          if (!err && data && typeof data === 'object' && (data as Record<string, string>).id) {
+            records.push(this.hydrateRecord(data as Record<string, string>));
+          }
+        }
+      }
+    } while (cursor !== '0');
+    return records;
+  }
+
   private hydrateRecord(data: Record<string, string>): InvocationRecord {
     const errorValue = data.error;
     const hasError = errorValue !== undefined && errorValue !== '';

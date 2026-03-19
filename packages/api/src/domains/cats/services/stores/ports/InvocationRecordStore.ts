@@ -80,6 +80,9 @@ export interface IInvocationRecordStore {
     userId: string,
     key: string,
   ): InvocationRecord | null | Promise<InvocationRecord | null>;
+
+  /** F128: Scan all invocation records (optional — only Redis impl provides this) */
+  scanAll?(): Promise<InvocationRecord[]>;
 }
 
 /** Max records in memory store */
