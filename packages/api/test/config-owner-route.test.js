@@ -115,4 +115,31 @@ describe('PATCH /api/config/owner', () => {
     assert.equal(body.config.owner.avatar, '/uploads/owner-lang.png');
     assert.deepEqual(body.config.owner.color, { primary: '#D49266', secondary: '#FFE4D6' });
   });
+
+  it('rejects owner mention patterns that overlap cat aliases', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/owner',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      payload: {
+        name: 'Co-worker',
+        aliases: ['共创伙伴'],
+        mentionPatterns: ['@owner', '@opus'],
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(res.json().error, /owner mention alias "@opus" conflicts with cat "opus"/);
+  });
 });

@@ -153,6 +153,16 @@ function assertUniqueMentionAliases(catalog: CatCafeConfig): void {
       aliasOwners.set(key, catId);
     }
   }
+
+  const ownerMentionPatterns = catalog.version === 2 ? catalog.owner?.mentionPatterns ?? [] : [];
+  for (const mentionPattern of ownerMentionPatterns) {
+    const trimmed = mentionPattern.trim();
+    if (!trimmed) continue;
+    const owner = aliasOwners.get(trimmed.toLowerCase());
+    if (owner) {
+      throw new Error(`owner mention alias "${trimmed}" conflicts with cat "${owner}"`);
+    }
+  }
 }
 
 function writeAndValidateCatalog(projectRoot: string, catalog: unknown): CatCafeConfig {

@@ -16,7 +16,7 @@ function resolveApiBaseUrl() {
     return `http://localhost:${frontendPort + 1}`;
   }
 
-  return 'http://localhost:3003';
+  return 'http://localhost:3004';
 }
 
 const apiBaseUrl = resolveApiBaseUrl();
