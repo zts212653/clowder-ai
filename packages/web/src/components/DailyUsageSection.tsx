@@ -59,14 +59,21 @@ function catLabel(catId: string): string {
 export function DailyUsageSection() {
   const [report, setReport] = useState<DailyUsageReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchUsage = useCallback(async () => {
+  const fetchUsage = useCallback(async (refresh = false) => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await apiFetch('/api/usage/daily?days=7');
-      if (res.ok) setReport((await res.json()) as DailyUsageReport);
+      const url = refresh ? '/api/usage/daily?days=7&refresh=1' : '/api/usage/daily?days=7';
+      const res = await apiFetch(url);
+      if (res.ok) {
+        setReport((await res.json()) as DailyUsageReport);
+      } else {
+        setError(`获取失败 (${res.status})`);
+      }
     } catch {
-      /* silent */
+      setError('无法连接到服务器');
     } finally {
       setLoading(false);
     }
@@ -85,7 +92,7 @@ export function DailyUsageSection() {
         <h3 className="text-sm font-semibold text-gray-800">近 7 日猫粮消耗</h3>
         <button
           type="button"
-          onClick={fetchUsage}
+          onClick={() => fetchUsage(true)}
           disabled={loading}
           className="px-3 py-1 text-xs rounded-md bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-50"
         >
@@ -93,7 +100,9 @@ export function DailyUsageSection() {
         </button>
       </div>
 
-      {days.length === 0 && !loading && <div className="text-xs text-gray-400 py-2">暂无消耗记录</div>}
+      {error && <div className="text-xs text-red-500 bg-red-50 rounded px-2 py-1">{error}</div>}
+
+      {!error && days.length === 0 && !loading && <div className="text-xs text-gray-400 py-2">暂无消耗记录</div>}
 
       {days.map((day) => {
         const cats = Object.entries(day.cats).sort(

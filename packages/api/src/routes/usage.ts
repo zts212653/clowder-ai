@@ -28,7 +28,7 @@ export function clearUsageCache(): void {
 
 export const usageRoutes: FastifyPluginAsync<UsageRoutesOptions> = async (app, opts) => {
   app.get<{
-    Querystring: { days?: string; catId?: string };
+    Querystring: { days?: string; catId?: string; refresh?: string };
   }>('/api/usage/daily', async (request, reply) => {
     const store = opts.invocationRecordStore;
 
@@ -41,10 +41,11 @@ export const usageRoutes: FastifyPluginAsync<UsageRoutesOptions> = async (app, o
     const daysParam = request.query.days;
     const days = daysParam ? Math.min(Math.max(1, parseInt(daysParam, 10) || 7), 7) : 7;
     const catId = request.query.catId || undefined;
+    const forceRefresh = request.query.refresh === '1';
     const cacheKey = `${days}:${catId ?? ''}`;
 
-    // Return cached response if valid
-    if (cache && cache.key === cacheKey && cache.expiresAt > Date.now()) {
+    // Return cached response if valid (unless force refresh)
+    if (!forceRefresh && cache && cache.key === cacheKey && cache.expiresAt > Date.now()) {
       return cache.report;
     }
 

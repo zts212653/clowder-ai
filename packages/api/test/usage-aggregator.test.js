@@ -7,8 +7,26 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('aggregateUsageByDay', () => {
-  /** helper: build a minimal InvocationRecord with usageByCat */
-  function makeRecord(id, createdAt, usageByCat, status = 'succeeded') {
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+
+  /** Today's UTC noon — safe anchor that never crosses midnight */
+  function todayNoon() {
+    const d = new Date();
+    d.setUTCHours(12, 0, 0, 0);
+    return d.getTime();
+  }
+
+  /** UTC date string for an epoch ms */
+  function dateOf(epochMs) {
+    return new Date(epochMs).toISOString().slice(0, 10);
+  }
+
+  /**
+   * Build a minimal InvocationRecord. Both createdAt and updatedAt default
+   * to the given timestamp (aggregator buckets by updatedAt).
+   */
+  function makeRecord(id, ts, usageByCat, status = 'succeeded') {
+    const epoch = typeof ts === 'number' ? ts : new Date(ts).getTime();
     return {
       id,
       threadId: 'thread-1',
@@ -19,8 +37,8 @@ describe('aggregateUsageByDay', () => {
       status,
       idempotencyKey: `key-${id}`,
       usageByCat,
-      createdAt: typeof createdAt === 'number' ? createdAt : new Date(createdAt).getTime(),
-      updatedAt: Date.now(),
+      createdAt: epoch,
+      updatedAt: epoch,
     };
   }
 
@@ -43,8 +61,9 @@ describe('aggregateUsageByDay', () => {
 
   test('single record aggregates correctly to one day', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
-      makeRecord('inv-1', '2026-03-19T10:00:00Z', {
+      makeRecord('inv-1', anchor, {
         opus: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 200, costUsd: 0.05 },
       }),
     ];
@@ -52,7 +71,7 @@ describe('aggregateUsageByDay', () => {
     const result = aggregateUsageByDay(records, { days: 7 });
 
     assert.equal(result.daily.length, 1);
-    assert.equal(result.daily[0].date, '2026-03-19');
+    assert.equal(result.daily[0].date, dateOf(anchor));
     assert.deepEqual(result.daily[0].cats.opus, {
       inputTokens: 1000,
       outputTokens: 500,
@@ -78,11 +97,12 @@ describe('aggregateUsageByDay', () => {
 
   test('multiple cats on same day aggregate per-cat and total', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
-      makeRecord('inv-1', '2026-03-19T08:00:00Z', {
+      makeRecord('inv-1', anchor - 4 * 3600_000, {
         opus: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 100, costUsd: 0.05 },
       }),
-      makeRecord('inv-2', '2026-03-19T14:00:00Z', {
+      makeRecord('inv-2', anchor + 2 * 3600_000, {
         codex: { inputTokens: 2000, outputTokens: 800, cacheReadTokens: 300, costUsd: 0 },
       }),
     ];
@@ -91,7 +111,6 @@ describe('aggregateUsageByDay', () => {
 
     assert.equal(result.daily.length, 1);
     const day = result.daily[0];
-    assert.equal(day.date, '2026-03-19');
     assert.equal(day.cats.opus.inputTokens, 1000);
     assert.equal(day.cats.codex.inputTokens, 2000);
     assert.equal(day.total.inputTokens, 3000);
@@ -101,14 +120,15 @@ describe('aggregateUsageByDay', () => {
 
   test('multiple days are sorted descending (newest first)', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
-      makeRecord('inv-1', '2026-03-17T10:00:00Z', {
+      makeRecord('inv-1', anchor - 2 * ONE_DAY, {
         opus: { inputTokens: 100, outputTokens: 50 },
       }),
-      makeRecord('inv-2', '2026-03-19T10:00:00Z', {
+      makeRecord('inv-2', anchor, {
         opus: { inputTokens: 300, outputTokens: 150 },
       }),
-      makeRecord('inv-3', '2026-03-18T10:00:00Z', {
+      makeRecord('inv-3', anchor - ONE_DAY, {
         opus: { inputTokens: 200, outputTokens: 100 },
       }),
     ];
@@ -116,18 +136,19 @@ describe('aggregateUsageByDay', () => {
     const result = aggregateUsageByDay(records, { days: 7 });
 
     assert.equal(result.daily.length, 3);
-    assert.equal(result.daily[0].date, '2026-03-19');
-    assert.equal(result.daily[1].date, '2026-03-18');
-    assert.equal(result.daily[2].date, '2026-03-17');
+    assert.equal(result.daily[0].date, dateOf(anchor));
+    assert.equal(result.daily[1].date, dateOf(anchor - ONE_DAY));
+    assert.equal(result.daily[2].date, dateOf(anchor - 2 * ONE_DAY));
   });
 
   test('same cat multiple invocations on same day accumulates', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
-      makeRecord('inv-1', '2026-03-19T08:00:00Z', {
+      makeRecord('inv-1', anchor - 4 * 3600_000, {
         opus: { inputTokens: 1000, outputTokens: 500, costUsd: 0.05 },
       }),
-      makeRecord('inv-2', '2026-03-19T16:00:00Z', {
+      makeRecord('inv-2', anchor + 4 * 3600_000, {
         opus: { inputTokens: 2000, outputTokens: 1000, costUsd: 0.1 },
       }),
     ];
@@ -143,8 +164,9 @@ describe('aggregateUsageByDay', () => {
 
   test('catId filter returns only matching cat data', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
-      makeRecord('inv-1', '2026-03-19T10:00:00Z', {
+      makeRecord('inv-1', anchor, {
         opus: { inputTokens: 1000, outputTokens: 500 },
         codex: { inputTokens: 2000, outputTokens: 800 },
       }),
@@ -160,6 +182,7 @@ describe('aggregateUsageByDay', () => {
 
   test('records without usageByCat are skipped', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
       {
         id: 'inv-no-usage',
@@ -170,8 +193,8 @@ describe('aggregateUsageByDay', () => {
         intent: 'execute',
         status: 'succeeded',
         idempotencyKey: 'key-no-usage',
-        createdAt: new Date('2026-03-19T10:00:00Z').getTime(),
-        updatedAt: Date.now(),
+        createdAt: anchor,
+        updatedAt: anchor,
         // no usageByCat
       },
     ];
@@ -184,8 +207,9 @@ describe('aggregateUsageByDay', () => {
 
   test('multi-cat invocation: participations per cat, invocations = 1 record', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
-      makeRecord('inv-1', '2026-03-19T10:00:00Z', {
+      makeRecord('inv-1', anchor, {
         opus: { inputTokens: 1000, outputTokens: 500 },
         sonnet: { inputTokens: 800, outputTokens: 400 },
       }),
@@ -193,36 +217,29 @@ describe('aggregateUsageByDay', () => {
 
     const result = aggregateUsageByDay(records, { days: 7 });
 
-    // Each cat participated once
     assert.equal(result.daily[0].cats.opus.participations, 1);
     assert.equal(result.daily[0].cats.sonnet.participations, 1);
-    // But it's ONE invocation (one record), not two
     assert.equal(result.daily[0].total.invocations, 1);
     assert.equal(result.grandTotal.invocations, 1);
   });
 
   test('days parameter excludes records outside the window', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
-    // Anchor to today's UTC noon to avoid midnight rollover flakiness
-    const todayNoon = new Date();
-    todayNoon.setUTCHours(12, 0, 0, 0);
-    const anchor = todayNoon.getTime();
-    const oneDay = 24 * 60 * 60 * 1000;
+    const anchor = todayNoon();
     const records = [
       makeRecord('inv-today', anchor, {
         opus: { inputTokens: 100, outputTokens: 50 },
       }),
-      makeRecord('inv-yesterday', anchor - oneDay, {
+      makeRecord('inv-yesterday', anchor - ONE_DAY, {
         opus: { inputTokens: 200, outputTokens: 100 },
       }),
-      makeRecord('inv-3-days-ago', anchor - 3 * oneDay, {
+      makeRecord('inv-3-days-ago', anchor - 3 * ONE_DAY, {
         opus: { inputTokens: 300, outputTokens: 150 },
       }),
     ];
 
     const result = aggregateUsageByDay(records, { days: 1 });
 
-    // days=1 should only include today
     assert.equal(result.daily.length, 1);
     assert.equal(result.grandTotal.inputTokens, 100);
     assert.equal(result.grandTotal.invocations, 1);
@@ -230,19 +247,15 @@ describe('aggregateUsageByDay', () => {
 
   test('days=2 includes today and yesterday only', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
-    // Anchor to today's UTC noon to avoid midnight rollover flakiness
-    const todayNoon = new Date();
-    todayNoon.setUTCHours(12, 0, 0, 0);
-    const anchor = todayNoon.getTime();
-    const oneDay = 24 * 60 * 60 * 1000;
+    const anchor = todayNoon();
     const records = [
       makeRecord('inv-today', anchor, {
         opus: { inputTokens: 100, outputTokens: 50 },
       }),
-      makeRecord('inv-yesterday', anchor - oneDay, {
+      makeRecord('inv-yesterday', anchor - ONE_DAY, {
         opus: { inputTokens: 200, outputTokens: 100 },
       }),
-      makeRecord('inv-3-days-ago', anchor - 3 * oneDay, {
+      makeRecord('inv-3-days-ago', anchor - 3 * ONE_DAY, {
         opus: { inputTokens: 300, outputTokens: 150 },
       }),
     ];
@@ -256,8 +269,9 @@ describe('aggregateUsageByDay', () => {
 
   test('handles missing numeric fields gracefully (treats as 0)', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
     const records = [
-      makeRecord('inv-1', '2026-03-19T10:00:00Z', {
+      makeRecord('inv-1', anchor, {
         opus: { inputTokens: 1000 }, // no outputTokens, no cacheReadTokens, no costUsd
       }),
     ];
