@@ -243,6 +243,18 @@ export class CodexAgentService implements AgentService {
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
 
+    // Codex CLI deprecated OPENAI_BASE_URL env var — use --config model_providers instead.
+    // When a custom base URL is provided via callbackEnv, set up a custom provider config.
+    const customBaseUrl = options?.callbackEnv?.OPENAI_BASE_URL ?? options?.callbackEnv?.OPENAI_API_BASE;
+    const customProviderArgs: string[] = customBaseUrl
+      ? [
+          '--config', 'model_provider="custom"',
+          '--config', `model_providers.custom.base_url=${toTomlString(customBaseUrl)}`,
+          '--config', 'model_providers.custom.name="custom"',
+          '--config', 'model_providers.custom.wire_api="responses"',
+        ]
+      : [];
+
     // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
     // 注意：旧 session resume 时沿用创建时的沙箱参数，不会带 --add-dir。
@@ -258,6 +270,7 @@ export class CodexAgentService implements AgentService {
           ...modelArgs,
           ...reasoningArgs,
           ...approvalArgs,
+          ...customProviderArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
@@ -273,6 +286,7 @@ export class CodexAgentService implements AgentService {
           '--add-dir',
           '.git',
           ...approvalArgs,
+          ...customProviderArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
@@ -288,7 +302,13 @@ export class CodexAgentService implements AgentService {
       // HOME isolation was removed because Codex CLI rebuilds ~/.codex/ on startup,
       // overwriting pre-copied auth.json/config.toml/sessions (see bug-report/tea-coffee/).
       const authMode = getCodexAuthMode(options?.callbackEnv);
-      const codexEnv = applyAuthMode(options?.callbackEnv ?? {}, authMode);
+      const rawEnv = { ...(options?.callbackEnv ?? {}) };
+      // Strip deprecated OPENAI_BASE_URL — now handled via --config model_providers
+      if (customBaseUrl) {
+        delete rawEnv.OPENAI_BASE_URL;
+        delete rawEnv.OPENAI_API_BASE;
+      }
+      const codexEnv = applyAuthMode(rawEnv, authMode);
 
       const semanticCompletionController = new AbortController();
 
