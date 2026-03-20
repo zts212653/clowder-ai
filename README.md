@@ -396,6 +396,7 @@ We're not building tools. We're building homes.
 
 - **[Tutorials](https://github.com/zts212653/cat-cafe-tutorials)** — Step-by-step guides for building with Clowder AI
 - **[SETUP.md](SETUP.md)** — Full installation and configuration guide
+- **[Tips](docs/TIPS.md)** — Magic words, @mentions, voice companion, and other usage tips
 - **[docs/](docs/)** — Architecture decisions, feature specs, and lessons learned
 
 ## Contributing
@@ -808,6 +809,7 @@ AI 不一定是冰冷的 API 和无状态调用。它可以是陪伴——有持
 
 - **[教程](https://github.com/zts212653/cat-cafe-tutorials)** — Clowder AI 的分步教程
 - **[SETUP.md](SETUP.md)** — 完整安装和配置指南
+- **[使用小 Tips](docs/TIPS.md)** — Magic Words、@提及、语音陪伴等使用技巧
 - **[docs/](docs/)** — 架构决策、功能规格、经验教训
 
 ## 贡献
