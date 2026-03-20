@@ -268,7 +268,7 @@ describe('ConnectorRouter', () => {
       const result = await router2.route('feishu', 'chat-123', '/where', 'ext-fmt-1');
       assert.equal(result.kind, 'command');
       assert.equal(envelopeCalls.length, 1);
-      assert.equal(envelopeCalls[0].envelope.header, 'Cat Café');
+      assert.equal(envelopeCalls[0].envelope.header, 'Clowder AI');
       assert.equal(envelopeCalls[0].envelope.body, 'You are here');
       assert.ok(envelopeCalls[0].envelope.footer); // has timestamp
     });

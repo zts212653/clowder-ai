@@ -43,7 +43,7 @@ describe('signal daily digest template', () => {
       ],
     });
 
-    assert.equal(digest.subject, '🐱 Cat Café 信号日报 - 2026-02-19');
+    assert.equal(digest.subject, '🐱 Clowder AI 信号日报 - 2026-02-19');
     assert.match(digest.html, /Tier 1/);
     assert.match(digest.html, /Tier 2/);
     assert.match(digest.html, /Claude 5 roadmap/);
@@ -58,7 +58,7 @@ describe('signal daily digest template', () => {
       articles: [],
     });
 
-    assert.equal(digest.subject, '🐱 Cat Café 信号日报 - 2026-02-19');
+    assert.equal(digest.subject, '🐱 Clowder AI 信号日报 - 2026-02-19');
     assert.match(digest.html, /今日无新增信号/);
     assert.match(digest.text, /今日无新增信号/);
   });
