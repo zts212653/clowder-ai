@@ -137,7 +137,7 @@ export function ThreadItem({
           const avatarCatId = participants[0] ?? preferredCats?.[0];
           return avatarCatId ? (
             <div className="flex-shrink-0 mt-0.5">
-              <CatAvatar catId={avatarCatId} size={28} />
+              <CatAvatar catId={avatarCatId} size={20} />
             </div>
           ) : null;
         })()}
