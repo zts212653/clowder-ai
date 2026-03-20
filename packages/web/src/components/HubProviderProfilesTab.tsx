@@ -17,7 +17,9 @@ import { getProjectPaths, projectDisplayName } from './ThreadSidebar/thread-util
 
 export function HubProviderProfilesTab() {
   const threads = useChatStore((s) => s.threads);
+  const currentProjectPath = useChatStore((s) => s.currentProjectPath);
   const knownProjects = useMemo(() => getProjectPaths(threads), [threads]);
+  const threadProjectPath = currentProjectPath && currentProjectPath !== 'default' ? currentProjectPath : null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +30,8 @@ export function HubProviderProfilesTab() {
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
   const [createModels, setCreateModels] = useState<string[]>([]);
+  const requestProjectPath = projectPath ?? threadProjectPath;
+  const mutationProjectPath = projectPath ?? data?.projectPath ?? threadProjectPath;
 
   const fetchProfiles = useCallback(async (forProject?: string) => {
     setError(null);
@@ -50,16 +54,17 @@ export function HubProviderProfilesTab() {
   }, []);
 
   useEffect(() => {
-    fetchProfiles();
-  }, [fetchProfiles]);
+    setLoading(true);
+    fetchProfiles(requestProjectPath ?? undefined);
+  }, [fetchProfiles, requestProjectPath]);
 
   const switchProject = useCallback(
     (nextPath: string | null) => {
       setProjectPath(nextPath);
       setLoading(true);
-      fetchProfiles(nextPath ?? undefined);
+      fetchProfiles((nextPath ?? threadProjectPath) ?? undefined);
     },
-    [fetchProfiles],
+    [fetchProfiles, threadProjectPath],
   );
 
   const callApi = useCallback(async (path: string, init: RequestInit) => {
@@ -78,8 +83,8 @@ export function HubProviderProfilesTab() {
   }, []);
 
   const refresh = useCallback(async () => {
-    await fetchProfiles(projectPath ?? undefined);
-  }, [fetchProfiles, projectPath]);
+    await fetchProfiles(mutationProjectPath ?? undefined);
+  }, [fetchProfiles, mutationProjectPath]);
 
   const createProfile = useCallback(async () => {
     if (!createDisplayName.trim()) {
@@ -96,7 +101,7 @@ export function HubProviderProfilesTab() {
       await callApi('/api/provider-profiles', {
         method: 'POST',
         body: JSON.stringify({
-          projectPath: projectPath ?? undefined,
+          projectPath: mutationProjectPath ?? undefined,
           displayName: createDisplayName.trim(),
           authType: 'api_key',
           baseUrl: createBaseUrl.trim(),
@@ -120,7 +125,7 @@ export function HubProviderProfilesTab() {
     createBaseUrl,
     createDisplayName,
     createModels,
-    projectPath,
+    mutationProjectPath,
     refresh,
   ]);
 
@@ -132,7 +137,7 @@ export function HubProviderProfilesTab() {
         await callApi(`/api/provider-profiles/${profileId}`, {
           method: 'DELETE',
           body: JSON.stringify({
-            projectPath: projectPath ?? undefined,
+            projectPath: mutationProjectPath ?? undefined,
           }),
         });
         await refresh();
@@ -142,7 +147,7 @@ export function HubProviderProfilesTab() {
         setBusyId(null);
       }
     },
-    [callApi, projectPath, refresh],
+    [callApi, mutationProjectPath, refresh],
   );
 
   const saveProfile = useCallback(
@@ -153,7 +158,7 @@ export function HubProviderProfilesTab() {
         await callApi(`/api/provider-profiles/${profileId}`, {
           method: 'PATCH',
           body: JSON.stringify({
-            projectPath: projectPath ?? undefined,
+            projectPath: mutationProjectPath ?? undefined,
             ...payload,
           }),
         });
@@ -164,15 +169,16 @@ export function HubProviderProfilesTab() {
         setBusyId(null);
       }
     },
-    [callApi, projectPath, refresh],
+    [callApi, mutationProjectPath, refresh],
   );
 
   const allPaths = useMemo(() => {
     const paths = new Set<string>();
     if (data?.projectPath) paths.add(data.projectPath);
+    if (threadProjectPath) paths.add(threadProjectPath);
     for (const p of knownProjects) paths.add(p);
     return [...paths].map((path) => ({ path, label: projectDisplayName(path) }));
-  }, [data?.projectPath, knownProjects]);
+  }, [data?.projectPath, knownProjects, threadProjectPath]);
 
   const displayProfiles = useMemo(() => ensureBuiltinProviderProfiles(data?.providers ?? []), [data?.providers]);
   const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
@@ -189,7 +195,7 @@ export function HubProviderProfilesTab() {
       <ProviderProfilesSummaryCard
         projectLabel={projectDisplayName(data.projectPath)}
         allPaths={allPaths}
-        activePath={projectPath}
+        activePath={mutationProjectPath}
         onSwitchProject={switchProject}
       />
 

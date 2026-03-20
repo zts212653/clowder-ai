@@ -9,6 +9,7 @@ const storeState = {
   closeHub: () => {},
   threads: [],
   currentThreadId: 'thread-active',
+  currentProjectPath: 'default',
   catInvocations: {},
   threadStates: {},
 };
@@ -121,6 +122,29 @@ describe('CatCafeHub provider profiles tab', () => {
   it('renders provider profiles tab initial loading state', () => {
     const html = renderToStaticMarkup(React.createElement(HubProviderProfilesTab));
     expect(html).toContain('加载中');
+  });
+
+  it('loads provider profiles for the current thread project when no explicit switcher selection exists', async () => {
+    storeState.currentProjectPath = '/tmp/f127-worktree';
+    let requestedPath = '';
+    mockApiFetch.mockImplementation((path: string) => {
+      requestedPath = path;
+      return Promise.resolve(
+        jsonResponse({
+          projectPath: '/tmp/f127-worktree',
+          activeProfileId: null,
+          bootstrapBindings: {},
+          providers: [],
+        }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubProviderProfilesTab));
+    });
+    await flushEffects();
+
+    expect(requestedPath).toBe(`/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/f127-worktree')}`);
   });
 
   it('keeps ragdoll rescue controls out of provider profiles after tab data loads', async () => {
@@ -505,6 +529,95 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.querySelector('textarea[aria-label="Supported Models"]')).toBeNull();
     expect(container.textContent).toContain('可用模型');
     expect(container.textContent).toContain('至少添加 1 个模型');
+  });
+
+  it('pins create requests to the resolved projectPath even before the user touches the project switcher', async () => {
+    storeState.currentProjectPath = 'default';
+    let createPayload: Record<string, unknown> | null = null;
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/provider-profiles' && init?.method === 'POST') {
+        createPayload = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return Promise.resolve(
+          jsonResponse({
+            profile: {
+              id: 'vendor-profile',
+              displayName: 'Vendor Profile',
+            },
+          }),
+        );
+      }
+      if (path.startsWith('/api/provider-profiles')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project-from-get',
+            activeProfileId: null,
+            bootstrapBindings: {},
+            providers: [
+              {
+                id: 'claude-oauth',
+                provider: 'claude-oauth',
+                displayName: 'Claude (OAuth)',
+                name: 'Claude (OAuth)',
+                authType: 'oauth',
+                protocol: 'anthropic',
+                builtin: true,
+                mode: 'subscription',
+                models: ['claude-opus-4-6'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubProviderProfilesTab));
+    });
+    await flushEffects();
+
+    const displayNameInput = container.querySelector(
+      'input[placeholder="账号显示名（例如 my-glm）"]',
+    ) as HTMLInputElement;
+    const baseUrlInput = container.querySelector('input[placeholder="Base URL"]') as HTMLInputElement;
+    const apiKeyInput = container.querySelector('input[placeholder="API Key"]') as HTMLInputElement;
+
+    await changeField(displayNameInput, 'Sponsor Gemini');
+    await changeField(baseUrlInput, 'https://llm.sponsor.example/v1');
+    await changeField(apiKeyInput, 'sk-test');
+
+    const addButtons = Array.from(container.querySelectorAll('button')).filter(
+      (button) => button.textContent?.trim() === '+ 添加',
+    );
+    const createFormAddButton = addButtons[addButtons.length - 1] as HTMLButtonElement;
+    await act(async () => {
+      createFormAddButton.click();
+    });
+
+    const tagDraftInput = container.querySelector('input[placeholder="输入模型名"]') as HTMLInputElement;
+    await changeField(tagDraftInput, 'gemini-2.5-pro');
+
+    const confirmAddButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '添加',
+    ) as HTMLButtonElement | undefined;
+    expect(confirmAddButton).toBeTruthy();
+    await act(async () => {
+      confirmAddButton?.click();
+    });
+
+    const createButton = queryButton(container, '创建');
+    expect(createButton.disabled).toBe(false);
+
+    await act(async () => {
+      createButton.click();
+    });
+    await flushEffects();
+
+    expect(createPayload).not.toBeNull();
+    expect(createPayload?.projectPath).toBe('/tmp/project-from-get');
   });
 
   it('shows built-in and custom provider cards together without the old filter tabs', async () => {

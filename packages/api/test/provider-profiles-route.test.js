@@ -522,6 +522,7 @@ describe('provider profiles routes', () => {
 
     const projectDir = await makeTmpDir('default-root');
     const templatePath = join(projectDir, 'cat-template.json');
+    await writeFile(templatePath, '{}\n', 'utf-8');
     const prevTemplate = process.env.CAT_TEMPLATE_PATH;
     process.env.CAT_TEMPLATE_PATH = templatePath;
 

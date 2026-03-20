@@ -3564,8 +3564,8 @@
       "children": [
         {
           "type": "text",
-          "id": "NhdEZ",
-          "name": "e4",
+          "id": "9pm6p",
+          "name": "breadcrumb",
           "fill": "#D18A61",
           "content": "成员协作 > 总览 > 添加成员",
           "fontFamily": "Inter",
@@ -3574,487 +3574,91 @@
         },
         {
           "type": "text",
-          "id": "ms4gG",
-          "name": "st4",
-          "fill": "#8A776B",
+          "id": "n0npj",
+          "name": "note1",
+          "fill": "#2D2118",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "【流程逻辑，非 UI 直出】API Key 凭证在账号配置中管理；普通 Client 在此选择 Provider + 模型。若 Client=Antigravity，则直接配置 CLI 命令（默认值来自 cat-template）和模型。",
-          "lineHeight": 1.5,
+          "content": "添加成员不再使用独立的 3-step wizard。\n点击「+ 添加成员」后，直接打开与 Screen 3 相同的编辑面板，区别仅在于：",
+          "lineHeight": 1.6,
           "fontFamily": "Inter",
           "fontSize": 15,
-          "fontWeight": "normal"
+          "fontWeight": "700"
         },
         {
           "type": "frame",
-          "id": "VUGqP",
-          "name": "Step 1 选择Client",
+          "id": "QlO5A",
+          "name": "diffList",
           "width": "fill_container",
-          "fill": "#FFFDFC",
-          "cornerRadius": 20,
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "#F1E7DF"
-          },
           "layout": "vertical",
-          "gap": 12,
-          "padding": 18,
+          "gap": 8,
           "children": [
             {
               "type": "text",
-              "id": "RjkHf",
-              "name": "step1t",
-              "fill": "#2D2118",
-              "content": "Step 1: 选择 Client",
-              "fontFamily": "Inter",
-              "fontSize": 17,
-              "fontWeight": "700"
-            },
-            {
-              "type": "text",
-              "id": "iA9kI",
-              "name": "step1b",
-              "fill": "#7F7168",
+              "id": "84CAe",
+              "name": "d1",
+              "fill": "#5C4B42",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "选择要接入的 CLI 工具、Agent 平台或 Antigravity bridge",
+              "content": "1. 标题显示「添加成员」而非「编辑成员」",
               "lineHeight": 1.5,
               "fontFamily": "Inter",
               "fontSize": 14,
               "fontWeight": "normal"
             },
             {
-              "type": "frame",
-              "id": "zbU7e",
-              "name": "clientRow",
-              "width": "fill_container",
-              "layout": "vertical",
-              "gap": 8,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "CliR1",
-                  "name": "clientRowTop",
-                  "width": "fill_container",
-                  "gap": 8,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "6OlCN",
-                      "name": "c1",
-                      "fill": "#F7EEE6",
-                      "cornerRadius": 12,
-                      "stroke": {
-                        "align": "inside",
-                        "thickness": 2,
-                        "fill": "#D49266"
-                      },
-                      "padding": [
-                        10,
-                        16
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "Dfqd3",
-                          "name": "c1t",
-                          "fill": "#D49266",
-                          "content": "Claude",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "700"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "Nfmli",
-                      "name": "c2",
-                      "fill": "#F7F3F0",
-                      "cornerRadius": 12,
-                      "padding": [
-                        10,
-                        16
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "5ASpg",
-                          "name": "c2t",
-                          "fill": "#8A776B",
-                          "content": "Codex",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "600"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "YEiRb",
-                      "name": "c3",
-                      "fill": "#F7F3F0",
-                      "cornerRadius": 12,
-                      "padding": [
-                        10,
-                        16
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "yYKxQ",
-                          "name": "c3t",
-                          "fill": "#8A776B",
-                          "content": "Gemini",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "600"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "CliR2",
-                  "name": "clientRowBottom",
-                  "width": "fill_container",
-                  "gap": 8,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "ZTjHn",
-                      "name": "c4",
-                      "fill": "#F7F3F0",
-                      "cornerRadius": 12,
-                      "padding": [
-                        10,
-                        16
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "FjC0A",
-                          "name": "c4t",
-                          "fill": "#8A776B",
-                          "content": "OpenCode",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "600"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "6GI3k",
-                      "name": "c5",
-                      "fill": "#F7F3F0",
-                      "cornerRadius": 12,
-                      "padding": [
-                        10,
-                        16
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "q5aU7",
-                          "name": "c5t",
-                          "fill": "#8A776B",
-                          "content": "Dare",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "600"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "AgBr1",
-                      "name": "c6",
-                      "fill": "#F7F3F0",
-                      "cornerRadius": 12,
-                      "padding": [
-                        10,
-                        16
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "AgBr2",
-                          "name": "c6t",
-                          "fill": "#8A776B",
-                          "content": "Antigravity",
-                          "fontFamily": "Inter",
-                          "fontSize": 14,
-                          "fontWeight": "600"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "KZ5tq",
-          "name": "Step 2 选择Provider / 配置CLI",
-          "width": "fill_container",
-          "fill": "#FFFDFC",
-          "cornerRadius": 20,
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "#F1E7DF"
-          },
-          "layout": "vertical",
-          "gap": 12,
-          "padding": 18,
-          "children": [
-            {
               "type": "text",
-              "id": "rvKHz",
-              "name": "step2t",
-              "fill": "#2D2118",
-              "content": "Step 2: 选择 Provider / 配置 CLI",
-              "fontFamily": "Inter",
-              "fontSize": 17,
-              "fontWeight": "700"
-            },
-            {
-              "type": "frame",
-              "id": "XCaD7",
-              "name": "authRow",
-              "width": "fill_container",
-              "gap": 12,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "iykad",
-                  "name": "auth1",
-                  "width": "fill_container",
-                  "fill": "#F7EEE6",
-                  "cornerRadius": 14,
-                  "stroke": {
-                    "align": "inside",
-                    "thickness": 2,
-                    "fill": "#D49266"
-                  },
-                  "layout": "vertical",
-                  "gap": 8,
-                  "padding": 14,
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "HhYv7",
-                      "name": "auth1t",
-                      "fill": "#D49266",
-                      "content": "Claude (OAuth)",
-                      "fontFamily": "Inter",
-                      "fontSize": 14,
-                      "fontWeight": "700"
-                    },
-                    {
-                      "type": "text",
-                      "id": "qkcNB",
-                      "name": "auth1d",
-                      "fill": "#8A776B",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "内置 provider 示例；普通 Client 先选具体 provider，再选模型",
-                      "lineHeight": 1.4,
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "g1q1O",
-                  "name": "auth2",
-                  "width": "fill_container",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 14,
-                  "layout": "vertical",
-                  "gap": 8,
-                  "padding": 14,
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "0YoUq",
-                      "name": "auth2t",
-                      "fill": "#2D2118",
-                      "content": "Name1 (API Key)",
-                      "fontFamily": "Inter",
-                      "fontSize": 14,
-                      "fontWeight": "700"
-                    },
-                    {
-                      "type": "text",
-                      "id": "9GTWA",
-                      "name": "auth2d",
-                      "fill": "#8A776B",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "赞助 / 自定义 provider 示例；凭证在账号配置管理",
-                      "lineHeight": 1.4,
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "text",
-              "id": "9hkuY",
-              "name": "step2ImplConstraint",
-              "fill": "#BF360C",
+              "id": "oUCkl",
+              "name": "d2",
+              "fill": "#5C4B42",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "【实现约束，非 UI 直出】Claude/Codex/Gemini → 同名订阅 + 任意 API Key provider | OpenCode/Dare → 内置 client-auth provider + 任意 API Key provider | 其他 Client → 仅 API Key | Antigravity → 此步改为配置 CLI 命令",
-              "lineHeight": 1.4,
-              "fontFamily": "Inter",
-              "fontSize": 12,
-              "fontWeight": "600"
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "JtO9H",
-          "name": "Step 3 选择模型",
-          "width": "fill_container",
-          "fill": "#FFFDFC",
-          "cornerRadius": 20,
-          "stroke": {
-            "align": "inside",
-            "thickness": 1,
-            "fill": "#F1E7DF"
-          },
-          "layout": "vertical",
-          "gap": 10,
-          "padding": 18,
-          "children": [
-            {
-              "type": "text",
-              "id": "3Vctm",
-              "name": "step3t",
-              "fill": "#2D2118",
-              "content": "Step 3: 选择模型",
-              "fontFamily": "Inter",
-              "fontSize": 17,
-              "fontWeight": "700"
-            },
-            {
-              "type": "text",
-              "id": "0uSAA",
-              "name": "step3b",
-              "fill": "#7F7168",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "【流程逻辑，非 UI 直出】普通 Client：选择该 Client + Provider 下的可用模型；Antigravity：选择 bridge 默认模型。",
+              "content": "2. 所有字段为空，Client / Provider / Model 必填",
               "lineHeight": 1.5,
               "fontFamily": "Inter",
               "fontSize": 14,
               "fontWeight": "normal"
             },
             {
-              "type": "frame",
-              "id": "sOsb3",
-              "name": "modelRow",
+              "type": "text",
+              "id": "wlD2P",
+              "name": "d3",
+              "fill": "#5C4B42",
+              "textGrowth": "fixed-width",
               "width": "fill_container",
-              "gap": 8,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "ozkkC",
-                  "name": "m1",
-                  "fill": "#F3E8FF",
-                  "cornerRadius": 10,
-                  "padding": [
-                    8,
-                    14
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "WXKGD",
-                      "name": "m1t",
-                      "fill": "#9D7BC7",
-                      "content": "claude-opus-4-6",
-                      "fontFamily": "Inter",
-                      "fontSize": 13,
-                      "fontWeight": "600"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "QrxT8",
-                  "name": "m2",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 10,
-                  "padding": [
-                    8,
-                    14
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "baCkG",
-                      "name": "m2t",
-                      "fill": "#8A776B",
-                      "content": "claude-sonnet-4",
-                      "fontFamily": "Inter",
-                      "fontSize": 13,
-                      "fontWeight": "600"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "LlHXf",
-                  "name": "m3",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 10,
-                  "padding": [
-                    8,
-                    14
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "BlD6x",
-                      "name": "m3t",
-                      "fill": "#8A776B",
-                      "content": "opus-4.5",
-                      "fontFamily": "Inter",
-                      "fontSize": 13,
-                      "fontWeight": "600"
-                    }
-                  ]
-                }
-              ]
+              "content": "3. 底部按钮为「创建」而非「保存修改」",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "eNqRA",
+              "name": "d4",
+              "fill": "#5C4B42",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "4. 创建成功后停留在编辑面板（变成编辑模式）",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
             }
           ]
         },
         {
           "type": "text",
-          "id": "EpLwq",
-          "name": "finishNote",
-          "fill": "#B59A88",
+          "id": "7Uvo2",
+          "name": "implNote",
+          "fill": "#BF360C",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "【流程逻辑，非 UI 直出】完成后自动跳转到成员配置页，可进一步调整身份、别名和高级参数。",
+          "content": "【实现约束】复用 HubCatEditor 组件，通过 cat=null 区分新建/编辑模式。不再需要 HubAddMemberWizard。",
           "lineHeight": 1.5,
           "fontFamily": "Inter",
-          "fontSize": 13,
-          "fontWeight": "normal"
+          "fontSize": 12,
+          "fontWeight": "600"
         }
       ]
     },
@@ -4778,7 +4382,7 @@
           "fill": "#8A776B",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "每个账号可添加或删除模型；状态 badge 只表示验证结果，不表示当前是否激活。",
+          "content": "每个账号可添加或删除模型（至少保留 1 个）。",
           "lineHeight": 1.5,
           "fontFamily": "Inter",
           "fontSize": 14,
@@ -4861,18 +4465,6 @@
                   ]
                 }
               ]
-            },
-            {
-              "type": "text",
-              "id": "aT7le",
-              "name": "prof1m",
-              "fill": "#8A776B",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "Claude · subscription · 走本机 Claude 订阅登录态",
-              "fontFamily": "Inter",
-              "fontSize": 13,
-              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -4994,38 +4586,6 @@
                   ]
                 }
               ]
-            },
-            {
-              "type": "frame",
-              "id": "vQdxg",
-              "name": "prof1a",
-              "width": "fill_container",
-              "gap": 8,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "kPQLN",
-                  "name": "tBtn",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 999,
-                  "padding": [
-                    6,
-                    12
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "V5Ik6",
-                      "name": "tBtnt",
-                      "fill": "#8A776B",
-                      "content": "测试",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
-                    }
-                  ]
-                }
-              ]
             }
           ]
         },
@@ -5106,18 +4666,6 @@
                   ]
                 }
               ]
-            },
-            {
-              "type": "text",
-              "id": "HopAN",
-              "name": "prof2m",
-              "fill": "#8A776B",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "Codex · subscription · 走本机 Codex 登录态",
-              "fontFamily": "Inter",
-              "fontSize": 13,
-              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -5216,38 +4764,6 @@
                   ]
                 }
               ]
-            },
-            {
-              "type": "frame",
-              "id": "G7IP5",
-              "name": "prof2a",
-              "width": "fill_container",
-              "gap": 8,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "mG3SP",
-                  "name": "t2Btn",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 999,
-                  "padding": [
-                    6,
-                    12
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "uyXug",
-                      "name": "t2Btnt",
-                      "fill": "#8A776B",
-                      "content": "测试",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
-                    }
-                  ]
-                }
-              ]
             }
           ]
         },
@@ -5330,18 +4846,6 @@
               ]
             },
             {
-              "type": "text",
-              "id": "agsb7",
-              "name": "prof4m",
-              "fill": "#8A776B",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "Gemini · subscription · 走本机 Gemini 登录态",
-              "fontFamily": "Inter",
-              "fontSize": 13,
-              "fontWeight": "normal"
-            },
-            {
               "type": "frame",
               "id": "kIweo",
               "name": "modelList4",
@@ -5411,38 +4915,6 @@
                           "fontWeight": "600"
                         }
                       ]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "EdgZo",
-              "name": "prof4a",
-              "width": "fill_container",
-              "gap": 8,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "BaZDH",
-                  "name": "t4Btn",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 999,
-                  "padding": [
-                    6,
-                    12
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "YmH5s",
-                      "name": "geminiTestBtnT",
-                      "fill": "#8A776B",
-                      "content": "测试",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
                     }
                   ]
                 }
@@ -5529,18 +5001,6 @@
               ]
             },
             {
-              "type": "text",
-              "id": "Opc07",
-              "name": "prof5m",
-              "fill": "#8A776B",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "OpenCode · client-auth · API Key 在 OpenCode 客户端本地配置，Clowder 不保存",
-              "fontFamily": "Inter",
-              "fontSize": 13,
-              "fontWeight": "normal"
-            },
-            {
               "type": "frame",
               "id": "Opc08",
               "name": "modelList5",
@@ -5610,38 +5070,6 @@
                           "fontWeight": "600"
                         }
                       ]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "Opc15",
-              "name": "prof5a",
-              "width": "fill_container",
-              "gap": 8,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "Opc16",
-                  "name": "t5Btn",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 999,
-                  "padding": [
-                    6,
-                    12
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "Opc17",
-                      "name": "t5Btnt",
-                      "fill": "#8A776B",
-                      "content": "测试",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
                     }
                   ]
                 }
@@ -5728,18 +5156,6 @@
               ]
             },
             {
-              "type": "text",
-              "id": "Dar07",
-              "name": "prof6m",
-              "fill": "#8A776B",
-              "textGrowth": "fixed-width",
-              "width": "fill_container",
-              "content": "Dare · client-auth · API Key 在 Dare 客户端本地配置，Clowder 不保存",
-              "fontFamily": "Inter",
-              "fontSize": 13,
-              "fontWeight": "normal"
-            },
-            {
               "type": "frame",
               "id": "Dar08",
               "name": "modelList6",
@@ -5813,38 +5229,6 @@
                   ]
                 }
               ]
-            },
-            {
-              "type": "frame",
-              "id": "Dar15",
-              "name": "prof6a",
-              "width": "fill_container",
-              "gap": 8,
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "Dar16",
-                  "name": "t6Btn",
-                  "fill": "#F7F3F0",
-                  "cornerRadius": 999,
-                  "padding": [
-                    6,
-                    12
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "Dar17",
-                      "name": "t6Btnt",
-                      "fill": "#8A776B",
-                      "content": "测试",
-                      "fontFamily": "Inter",
-                      "fontSize": 12,
-                      "fontWeight": "600"
-                    }
-                  ]
-                }
-              ]
             }
           ]
         },
@@ -5914,7 +5298,7 @@
               "fill": "#8A776B",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "OpenAI-Compatible · api.zhipu.ai · apiKey: 已配置",
+              "content": "api.zhipu.ai · 已配置",
               "fontFamily": "Inter",
               "fontSize": 13,
               "fontWeight": "normal"
@@ -6122,34 +5506,11 @@
                       "fill": "#8A776B",
                       "textGrowth": "fixed-width",
                       "width": 280,
-                      "content": "直接填写显示名、协议、Base URL 和 API Key；创建后会立即出现在上方账号卡片中。",
+                      "content": "填写显示名、Base URL、API Key 和模型。至少添加 1 个模型才能创建。",
                       "lineHeight": 1.5,
                       "fontFamily": "Inter",
                       "fontSize": 12,
                       "fontWeight": "normal"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "nHdr3",
-                  "name": "newInferBadge",
-                  "fill": "#FFFFFFCC",
-                  "cornerRadius": 999,
-                  "padding": [
-                    6,
-                    10
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "nHdr4",
-                      "name": "newInferText",
-                      "fill": "#B07A4C",
-                      "content": "当前推断：OpenAI-Compatible",
-                      "fontFamily": "Inter",
-                      "fontSize": 11,
-                      "fontWeight": "600"
                     }
                   ]
                 }
@@ -6196,47 +5557,6 @@
                           "fontFamily": "Inter",
                           "fontSize": 13,
                           "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "nInp2",
-                      "name": "newProtocol",
-                      "width": 180,
-                      "fill": "#FFFFFF",
-                      "cornerRadius": 10,
-                      "stroke": {
-                        "align": "inside",
-                        "thickness": 1,
-                        "fill": "#E8DCCF"
-                      },
-                      "padding": [
-                        10,
-                        12
-                      ],
-                      "justifyContent": "space_between",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "nTxt2",
-                          "name": "newProtocolText",
-                          "fill": "#5C4B42",
-                          "content": "OpenAI-Compatible",
-                          "fontFamily": "Inter",
-                          "fontSize": 13,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "nTxt3",
-                          "name": "newProtocolCaret",
-                          "fill": "#8A776B",
-                          "content": "▾",
-                          "fontFamily": "Inter",
-                          "fontSize": 13,
-                          "fontWeight": "600"
                         }
                       ]
                     }

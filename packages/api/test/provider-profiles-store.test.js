@@ -203,7 +203,7 @@ describe('provider profile store', () => {
     );
   });
 
-  it('rejects deleting an account that is still referenced by a sibling worktree runtime member', async () => {
+  it('does not let sibling worktree runtime data block deleting a local account', async () => {
     const repoRoot = await makeTmpDir('shared-delete-main');
     const runtimeRoot = await makeTmpDir('shared-delete-runtime');
     try {
@@ -238,9 +238,12 @@ describe('provider profile store', () => {
         cli: { command: 'claude', outputFormat: 'stream-json' },
       });
 
-      await assert.rejects(
-        deleteProviderProfile(runtimeRoot, created.id, created.id),
-        /still referenced by runtime cats: shared-root-bound-cat/i,
+      await deleteProviderProfile(runtimeRoot, created.id, created.id);
+
+      const profiles = await readProviderProfiles(runtimeRoot);
+      assert.equal(
+        profiles.providers.some((profile) => profile.id === created.id),
+        false,
       );
     } finally {
       await Promise.all([
@@ -278,7 +281,7 @@ describe('provider profile store', () => {
     assert.equal(secretsAfter.mtimeMs, secretsBefore.mtimeMs);
   });
 
-  it('shares provider account storage across worktrees of the same repo', async () => {
+  it('keeps provider account storage isolated to the current worktree', async () => {
     const repoRoot = await makeTmpDir('repo-main');
     const runtimeRoot = await makeTmpDir('repo-runtime');
     try {
@@ -296,10 +299,22 @@ describe('provider profile store', () => {
       });
       await activateProviderProfile(runtimeRoot, 'anthropic', created.id);
 
-      const runtime = await resolveAnthropicRuntimeProfile(repoRoot);
-      assert.equal(runtime.mode, 'api_key');
-      assert.equal(runtime.baseUrl, 'https://api.shared.dev');
-      assert.equal(runtime.apiKey, 'sk-shared');
+      const repoRuntime = await resolveAnthropicRuntimeProfile(repoRoot);
+      assert.equal(repoRuntime.mode, 'subscription');
+
+      const worktreeRuntime = await resolveAnthropicRuntimeProfile(runtimeRoot);
+      assert.equal(worktreeRuntime.mode, 'api_key');
+      assert.equal(worktreeRuntime.baseUrl, 'https://api.shared.dev');
+      assert.equal(worktreeRuntime.apiKey, 'sk-shared');
+
+      const repoMetaPath = join(repoRoot, '.cat-cafe', 'provider-profiles.json');
+      const worktreeMetaPath = join(runtimeRoot, '.cat-cafe', 'provider-profiles.json');
+      const [repoMetaRaw, worktreeMetaRaw] = await Promise.all([
+        readFile(repoMetaPath, 'utf-8'),
+        readFile(worktreeMetaPath, 'utf-8'),
+      ]);
+      assert.equal(repoMetaRaw.includes(created.id), false);
+      assert.equal(worktreeMetaRaw.includes(created.id), true);
     } finally {
       await Promise.all([
         rm(repoRoot, { recursive: true, force: true }),
