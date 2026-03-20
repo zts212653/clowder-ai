@@ -55,7 +55,7 @@ export function DailyUsageSection() {
   const fetchUsage = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch('/api/usage/daily?days=1');
+      const res = await apiFetch('/api/usage/daily?days=7');
       if (res.ok) setReport((await res.json()) as DailyUsageReport);
     } catch {
       /* silent */
@@ -68,18 +68,13 @@ export function DailyUsageSection() {
     fetchUsage();
   }, [fetchUsage]);
 
-  const today = report?.daily[0] ?? null;
-  const cats = today
-    ? Object.entries(today.cats).sort(
-        (a, b) => b[1].inputTokens + b[1].outputTokens - (a[1].inputTokens + a[1].outputTokens),
-      )
-    : [];
-  const total = today?.total ?? report?.grandTotal;
+  const days = report?.daily ?? [];
+  const grandTotal = report?.grandTotal;
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">今日猫粮消耗</h3>
+        <h3 className="text-sm font-semibold text-gray-800">近 7 日猫粮消耗</h3>
         <button
           type="button"
           onClick={fetchUsage}
@@ -90,23 +85,33 @@ export function DailyUsageSection() {
         </button>
       </div>
 
-      {!today && !loading && <div className="text-xs text-gray-400 py-2">今日暂无消耗记录</div>}
+      {days.length === 0 && !loading && <div className="text-xs text-gray-400 py-2">暂无消耗记录</div>}
 
-      {cats.length > 0 && (
-        <div className="space-y-2">
-          {cats.map(([catId, usage]) => (
-            <CatUsageRow key={catId} catId={catId} usage={usage} />
-          ))}
-        </div>
-      )}
+      {days.map((day) => {
+        const cats = Object.entries(day.cats).sort(
+          (a, b) => b[1].inputTokens + b[1].outputTokens - (a[1].inputTokens + a[1].outputTokens),
+        );
+        return (
+          <div key={day.date} className="border-t border-gray-100 pt-2 space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-gray-600">{day.date}</span>
+              <span className="text-gray-400">{day.total.invocations} 次调用</span>
+            </div>
+            {cats.map(([catId, usage]) => (
+              <CatUsageRow key={catId} catId={catId} usage={usage} />
+            ))}
+          </div>
+        );
+      })}
 
-      {total && total.invocations > 0 && (
-        <div className="border-t border-gray-100 pt-2 flex items-center justify-between text-xs text-gray-500">
-          <span>合计 {total.invocations} 次调用</span>
+      {grandTotal && grandTotal.invocations > 0 && (
+        <div className="border-t-2 border-gray-200 pt-2 flex items-center justify-between text-xs text-gray-500">
+          <span className="font-semibold text-gray-700">7 日合计 {grandTotal.invocations} 次</span>
           <span className="flex gap-3">
-            <span>入 {formatTokens(total.inputTokens)}</span>
-            <span>出 {formatTokens(total.outputTokens)}</span>
-            {total.costUsd > 0 && <span className="text-amber-600">${total.costUsd.toFixed(2)}</span>}
+            <span className="font-semibold text-gray-700">总 {formatTokens(grandTotal.inputTokens + grandTotal.outputTokens)}</span>
+            <span>入 {formatTokens(grandTotal.inputTokens)}</span>
+            <span>出 {formatTokens(grandTotal.outputTokens)}</span>
+            {grandTotal.costUsd > 0 && <span className="text-amber-600 font-semibold">${grandTotal.costUsd.toFixed(2)}</span>}
           </span>
         </div>
       )}
