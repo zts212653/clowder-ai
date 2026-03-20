@@ -193,12 +193,11 @@ export class OpenCodeAgentService implements AgentService {
     }
 
     // Base URL: callbackEnv > constructor > process.env
-    // P1-1: opencode's Anthropic SDK calls {baseURL}/messages (not /v1/messages),
-    // so proxy URLs need /v1 appended to route correctly through nuoda.vip.
+    // Pass through as-is — user configures the exact URL expected by their endpoint.
+    // opencode CLI calls {ANTHROPIC_BASE_URL}/messages directly.
     const rawBaseUrl = callbackEnv?.CAT_CAFE_ANTHROPIC_BASE_URL ?? this.baseUrl;
     if (rawBaseUrl) {
-      const needsV1 = !rawBaseUrl.endsWith('/v1') && !rawBaseUrl.endsWith('/v1/');
-      env[ANTHROPIC_BASE_URL_ENV] = needsV1 ? `${rawBaseUrl}/v1` : rawBaseUrl;
+      env[ANTHROPIC_BASE_URL_ENV] = rawBaseUrl;
     }
 
     // Clean up intermediate env vars (don't leak to child)

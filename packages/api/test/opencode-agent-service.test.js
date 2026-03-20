@@ -343,9 +343,9 @@ describe('OpenCodeAgentService', () => {
     );
   });
 
-  // ── P1-1: callbackEnv BASE_URL gets /v1 suffix for opencode ──
+  // ── Base URL passthrough: no /v1 auto-append ──
 
-  test('callbackEnv CAT_CAFE_ANTHROPIC_BASE_URL appends /v1 for opencode', async () => {
+  test('callbackEnv CAT_CAFE_ANTHROPIC_BASE_URL is passed through as-is', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
@@ -360,12 +360,12 @@ describe('OpenCodeAgentService', () => {
     const opts = spawnFn.mock.calls[0].arguments[2];
     assert.strictEqual(
       opts.env.ANTHROPIC_BASE_URL,
-      'http://127.0.0.1:9877/a247a834/v1',
-      'opencode needs /v1 suffix because its SDK calls {baseURL}/messages not {baseURL}/v1/messages',
+      'http://127.0.0.1:9877/a247a834',
+      'base URL should be passed through without modification',
     );
   });
 
-  test('callbackEnv BASE_URL with trailing /v1 is not double-suffixed', async () => {
+  test('callbackEnv BASE_URL with trailing /v1 is preserved as-is', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
@@ -378,7 +378,7 @@ describe('OpenCodeAgentService', () => {
     await promise;
 
     const opts = spawnFn.mock.calls[0].arguments[2];
-    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:9877/slug/v1', 'should not double-append /v1');
+    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:9877/slug/v1', 'explicit /v1 should be preserved');
   });
 
   // ── P2-1: multiple step_start should NOT produce multiple session_init ──
