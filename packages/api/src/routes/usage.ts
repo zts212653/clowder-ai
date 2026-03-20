@@ -1,6 +1,9 @@
 /**
- * Usage Routes — F128
+ * Usage Routes — F051 daily consumption
  * GET /api/usage/daily — 按日 × 猫聚合 token 消耗报表
+ *
+ * Scope: workspace-global (same as /api/quota). Per-user isolation is F077 scope.
+ * Current system is single-user; all dashboard routes share this pattern.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
