@@ -9,7 +9,13 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type DailyUsageReport, aggregateUsageByDay } from '../domains/cats/services/usage-aggregator.js';
-import { resolveUserId } from '../utils/request-identity.js';
+/** Header-only identity: no query param fallback, no default-user fallback */
+function resolveHeaderUserId(request: import('fastify').FastifyRequest): string | null {
+  const raw = request.headers['x-cat-cafe-user'];
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
 
 export interface UsageRoutesOptions {
   invocationRecordStore: IInvocationRecordStore;
@@ -43,9 +49,10 @@ export const usageRoutes: FastifyPluginAsync<UsageRoutesOptions> = async (app, o
       });
     }
 
-    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    // Header-only auth: no query param fallback, no default-user fallback
+    const userId = resolveHeaderUserId(request);
     if (!userId) {
-      return reply.status(401).send({ error: 'Missing user identity' });
+      return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
     }
 
     const daysParam = request.query.days;
