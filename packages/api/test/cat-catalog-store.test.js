@@ -724,4 +724,74 @@ describe('cat-catalog-store', () => {
       'runtime cat matching a sibling seed id should still be deletable',
     );
   });
+
+  it('api_key bootstrap uses profile model when template defaultModel is not in profile', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-model-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const catCafeDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(catCafeDir, { recursive: true });
+
+    writeFileSync(
+      templatePath,
+      JSON.stringify({
+        version: 2,
+        breeds: [
+          {
+            id: 'ragdoll',
+            catId: 'opus',
+            name: '布偶猫',
+            displayName: '布偶猫',
+            avatar: '/avatars/opus.png',
+            color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+            mentionPatterns: ['@opus'],
+            roleDescription: '主架构师',
+            defaultVariantId: 'opus-default',
+            variants: [
+              {
+                id: 'opus-default',
+                provider: 'anthropic',
+                defaultModel: 'claude-opus-4-6',
+                cli: { command: 'claude' },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    // API key profile with different models
+    writeFileSync(
+      join(catCafeDir, 'provider-profiles.json'),
+      JSON.stringify({
+        version: 3,
+        activeProfileId: null,
+        providers: [
+          {
+            id: 'installer-anthropic',
+            displayName: 'Installer anthropic API Key',
+            kind: 'api_key',
+            authType: 'api_key',
+            protocol: 'anthropic',
+            baseUrl: 'https://openrouter.ai/api',
+            models: ['z-ai/glm-4.7', 'z-ai/glm-4.6'],
+          },
+        ],
+        bootstrapBindings: {
+          anthropic: { mode: 'api_key', accountRef: 'installer-anthropic' },
+        },
+      }),
+    );
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const catalog = readRuntimeCatCatalog(projectRoot);
+    const opus = catalog.breeds.find((b) => b.catId === 'opus');
+    assert.ok(opus, 'opus seed cat should exist');
+    const variant = opus.variants[0];
+    assert.equal(
+      variant.defaultModel,
+      'z-ai/glm-4.7',
+      'defaultModel should fall back to first model from the API key profile',
+    );
+  });
 });

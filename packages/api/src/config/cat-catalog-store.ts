@@ -4,8 +4,10 @@ import type { CatCafeConfig, Roster } from '@cat-cafe/shared';
 import { builtinAccountIdForClient, readBootstrapBindingsSync } from './provider-profiles.js';
 import type { BootstrapBinding, BuiltinAccountClient } from './provider-profiles.types.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
+import { resolveProviderProfilesRootSync } from './provider-profiles-root.js';
 
 const CAT_CAFE_DIR = '.cat-cafe';
+const META_FILENAME = 'provider-profiles.json';
 const CAT_CATALOG_FILENAME = 'cat-catalog.json';
 
 function safePath(projectRoot: string, ...segments: string[]): string {
@@ -45,10 +47,24 @@ function resolveExplicitVariantAccountRef(variant: Record<string, unknown>): str
   return trimBinding(variant.providerProfileId) ?? trimBinding(variant.accountRef);
 }
 
+function readProfileModelsSync(projectRoot: string, accountRef: string): string[] | null {
+  try {
+    const storageRoot = resolveProviderProfilesRootSync(projectRoot);
+    const metaPath = resolve(storageRoot, CAT_CAFE_DIR, META_FILENAME);
+    if (!existsSync(metaPath)) return null;
+    const raw = JSON.parse(readFileSync(metaPath, 'utf-8'));
+    const providers = raw?.providers ?? raw?.profiles ?? [];
+    const profile = (providers as Array<{ id?: string; models?: string[] }>).find((p) => p.id === accountRef);
+    return profile?.models ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function cloneWithAccountRef(
   variant: Record<string, unknown>,
   accountRef: string,
-  options?: { explicit?: boolean },
+  options?: { explicit?: boolean; profileModels?: string[] | null },
 ): Record<string, unknown> {
   const next: Record<string, unknown> = { ...variant, accountRef };
   if (options?.explicit) {
@@ -56,12 +72,22 @@ function cloneWithAccountRef(
   } else {
     delete (next as { providerProfileId?: unknown }).providerProfileId;
   }
+  // If the variant's defaultModel is not in the bound profile's model list,
+  // fall back to the first available model from the profile.
+  const models = options?.profileModels;
+  if (models && models.length > 0) {
+    const currentModel = typeof next.defaultModel === 'string' ? next.defaultModel.trim() : '';
+    if (!currentModel || !models.includes(currentModel)) {
+      next.defaultModel = models[0];
+    }
+  }
   return next;
 }
 
 function resolveSelectedVariants(
   breed: Record<string, unknown>,
   binding: BootstrapBinding | undefined,
+  projectRoot: string,
 ): Record<string, unknown>[] {
   if (!binding || binding.mode === 'skip' || binding.enabled === false) return [];
   const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
@@ -75,9 +101,12 @@ function resolveSelectedVariants(
       variants.find((variant) => providerToBootstrapClient(variant.provider) != null);
     if (!selected) return [];
     const explicitAccountRef = resolveExplicitVariantAccountRef(selected);
+    const effectiveRef = explicitAccountRef ?? accountRef;
+    const profileModels = readProfileModelsSync(projectRoot, effectiveRef);
     return [
-      cloneWithAccountRef(selected, explicitAccountRef ?? accountRef, {
+      cloneWithAccountRef(selected, effectiveRef, {
         explicit: explicitAccountRef != null,
+        profileModels,
       }),
     ];
   }
@@ -246,7 +275,7 @@ function filterBootstrapCatalog(template: CatCafeConfig, projectRoot: string): C
       for (const catId of collectBreedCatIds(rawBreed)) selectedCatIds.add(catId);
       continue;
     }
-    const selectedVariants = resolveSelectedVariants(rawBreed, binding);
+    const selectedVariants = resolveSelectedVariants(rawBreed, binding, projectRoot);
     if (selectedVariants.length === 0) {
       selectedBreeds.push(rawBreed);
       for (const catId of collectBreedCatIds(rawBreed)) selectedCatIds.add(catId);
