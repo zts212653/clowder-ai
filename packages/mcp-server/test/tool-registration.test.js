@@ -17,7 +17,6 @@ const EXPECTED_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
-  'cat_cafe_search_messages',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',
   'cat_cafe_cross_post_message',
@@ -39,8 +38,6 @@ const EXPECTED_TOOLS = [
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
   // Callback-scoped memory tools
-  'cat_cafe_search_evidence_callback',
-  'cat_cafe_reflect_callback',
   'cat_cafe_retain_memory_callback',
   // Direct evidence/reflect tools
   'cat_cafe_search_evidence',
@@ -63,7 +60,11 @@ const EXPECTED_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
-  'cat_cafe_session_search',
+  // Limb tools
+  'limb_list_available',
+  'limb_invoke',
+  'limb_pair_list',
+  'limb_pair_approve',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
@@ -71,7 +72,6 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
-  'cat_cafe_search_messages',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',
   'cat_cafe_cross_post_message',
@@ -90,8 +90,6 @@ const EXPECTED_COLLAB_TOOLS = [
 ];
 
 const EXPECTED_MEMORY_TOOLS = [
-  'cat_cafe_search_evidence_callback',
-  'cat_cafe_reflect_callback',
   'cat_cafe_retain_memory_callback',
   'cat_cafe_search_evidence',
   'cat_cafe_reflect',
@@ -99,7 +97,6 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
-  'cat_cafe_session_search',
 ];
 
 const EXPECTED_SIGNAL_TOOLS = [

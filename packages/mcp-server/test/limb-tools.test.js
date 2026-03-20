@@ -21,10 +21,12 @@ describe('limb-tools schema', () => {
     assert.deepEqual(limbInvokeInputSchema.required, ['nodeId', 'command']);
   });
 
-  it('limbTools array has 2 tools', () => {
-    assert.equal(limbTools.length, 2);
+  it('limbTools array has 4 tools', () => {
+    assert.equal(limbTools.length, 4);
     assert.equal(limbTools[0].name, 'limb_list_available');
     assert.equal(limbTools[1].name, 'limb_invoke');
+    assert.equal(limbTools[2].name, 'limb_pair_list');
+    assert.equal(limbTools[3].name, 'limb_pair_approve');
   });
 
   it('each tool has name, description, inputSchema, handler', () => {

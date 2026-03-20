@@ -25,10 +25,10 @@ describe('session-strategy', () => {
       };
     }
 
-    // -- Budget exhausted (universal, strategy-independent) --
+    // -- Budget exhausted --
 
-    describe('budget exhausted (all strategies)', () => {
-      test('seals when remaining < turnBudget + safetyMargin', async () => {
+    describe('budget exhausted', () => {
+      test('seals when remaining < turnBudget + safetyMargin (handoff)', async () => {
         const { shouldTakeAction } = await loadModule();
         const strategy = makeStrategy();
         // 200k window, 185k used → 15k remaining < 16k (12k+4k)
@@ -37,23 +37,35 @@ describe('session-strategy', () => {
         assert.equal(action.reason, 'budget_exhausted');
       });
 
-      test('seals even for compress strategy when budget exhausted', async () => {
+      test('allows compress for compress strategy even when budget exhausted', async () => {
         const { shouldTakeAction } = await loadModule();
         const strategy = makeStrategy({ strategy: 'compress' });
+        // compress = CLI handles compression, server should not pre-emptively seal
         const action = shouldTakeAction(0.8, 200_000, 185_000, 0, strategy);
-        assert.equal(action.type, 'seal');
-        assert.equal(action.reason, 'budget_exhausted');
+        assert.equal(action.type, 'allow_compress');
       });
 
-      test('seals even for hybrid strategy when budget exhausted', async () => {
+      test('seals for hybrid strategy when budget exhausted AND max compressions reached', async () => {
         const { shouldTakeAction } = await loadModule();
         const strategy = makeStrategy({
           strategy: 'hybrid',
           hybrid: { maxCompressions: 3 },
         });
-        const action = shouldTakeAction(0.8, 200_000, 185_000, 0, strategy);
+        // hybrid with max reached → seal
+        const action = shouldTakeAction(0.8, 200_000, 185_000, 3, strategy);
         assert.equal(action.type, 'seal');
         assert.equal(action.reason, 'budget_exhausted');
+      });
+
+      test('allows compress for hybrid strategy when budget exhausted but compressions remain', async () => {
+        const { shouldTakeAction } = await loadModule();
+        const strategy = makeStrategy({
+          strategy: 'hybrid',
+          hybrid: { maxCompressions: 3 },
+        });
+        // hybrid with compressions left → allow compress (CLI will free up space)
+        const action = shouldTakeAction(0.8, 200_000, 185_000, 1, strategy);
+        assert.equal(action.type, 'allow_compress');
       });
     });
 

@@ -143,12 +143,14 @@ describe('sendGameCommand respects sendTemporarilyDisabled', () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid="game-lobby"]')).toBeTruthy();
 
-    // Select at least one cat (required for confirm to be enabled)
-    const catToggle = container.querySelector('[data-testid="cat-toggle-opus"]') as HTMLButtonElement;
-    expect(catToggle).toBeTruthy();
-    act(() => {
-      catToggle.click();
-    });
+    // Select all required cats (7-player mode needs catSeatsNeeded=6 cats)
+    for (const catId of ['opus', 'sonnet', 'codex', 'gpt52', 'spark', 'gemini']) {
+      const toggle = container.querySelector(`[data-testid="cat-toggle-${catId}"]`) as HTMLButtonElement;
+      expect(toggle).toBeTruthy();
+      act(() => {
+        toggle.click();
+      });
+    }
 
     // Confirm in lobby calls game API directly (not onSend)
     const confirmBtn = container.querySelector('[data-testid="lobby-confirm"]') as HTMLButtonElement;
@@ -350,12 +352,14 @@ describe('game start calls dedicated API (not message pipeline)', () => {
     // Lobby opens, confirm to trigger game API call
     expect(container.querySelector('[data-testid="game-lobby"]')).toBeTruthy();
 
-    // Select at least one cat (required for confirm to be enabled)
-    const catToggle = container.querySelector('[data-testid="cat-toggle-opus"]') as HTMLButtonElement;
-    expect(catToggle).toBeTruthy();
-    act(() => {
-      catToggle.click();
-    });
+    // Select all required cats (7-player mode needs catSeatsNeeded=6 cats)
+    for (const catId of ['opus', 'sonnet', 'codex', 'gpt52', 'spark', 'gemini']) {
+      const toggle = container.querySelector(`[data-testid="cat-toggle-${catId}"]`) as HTMLButtonElement;
+      expect(toggle).toBeTruthy();
+      act(() => {
+        toggle.click();
+      });
+    }
 
     const confirmBtn = container.querySelector('[data-testid="lobby-confirm"]') as HTMLButtonElement;
     act(() => {

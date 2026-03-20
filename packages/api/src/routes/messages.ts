@@ -115,10 +115,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     ? new GameOrchestrator({
         gameStore: opts.gameStore,
         socketManager: opts.socketManager,
+        messageStore: opts.messageStore,
       })
     : null;
   const gameAutoPlayer = gameOrchestrator
-    ? (opts.autoPlayer ?? new GameAutoPlayer({ gameStore: opts.gameStore!, orchestrator: gameOrchestrator }))
+    ? (opts.autoPlayer ??
+      new GameAutoPlayer({
+        gameStore: opts.gameStore!,
+        orchestrator: gameOrchestrator,
+        messageStore: opts.messageStore,
+      }))
     : null;
 
   if (gameAutoPlayer) {
@@ -285,6 +291,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             voiceMode: parsedGame.voiceMode,
             humanRole: parsedGame.humanRole,
             ...(parsedGame.humanRole === 'player' ? { humanSeat: 'P1' } : {}),
+            observerUserId: userId, // H2 fix: messageStore dual-write needs userId for thread visibility
           },
         });
       } catch (err: unknown) {

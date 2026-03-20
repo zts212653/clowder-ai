@@ -911,6 +911,7 @@ async function main(): Promise<void> {
   }
 
   // F101: register onClose hook BEFORE listen (Fastify forbids addHook after listen).
+  // The actual recovery player is assigned post-listen; stopAllLoops is a no-op if null.
   let f101RecoveryPlayer: { stopAllLoops(): void } | null = null;
   app.addHook('onClose', async () => {
     f101RecoveryPlayer?.stopAllLoops();
@@ -1007,8 +1008,14 @@ async function main(): Promise<void> {
   if (f101GameStore && socketManager) {
     const { GameAutoPlayer } = await import('./domains/cats/services/game/GameAutoPlayer.js');
     const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
-    const recoveryOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager });
-    const recoveryPlayer = new GameAutoPlayer({ gameStore: f101GameStore, orchestrator: recoveryOrchestrator });
+    const recoveryOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager, messageStore });
+    const recoveryPlayer = new GameAutoPlayer({
+      gameStore: f101GameStore,
+      orchestrator: recoveryOrchestrator,
+      messageStore,
+    });
+    // NOTE: stopAllLoops is idempotent; safe to call even if no games were recovered.
+    // We keep a reference so the onClose hook (registered before listen) can access it.
     f101RecoveryPlayer = recoveryPlayer;
     try {
       const recovered = await recoveryPlayer.recoverActiveGames();
@@ -1070,6 +1077,21 @@ async function main(): Promise<void> {
     if (connectorGatewayHandle) {
       invokeTrigger.setOutboundHook(connectorGatewayHandle.outboundHook);
       invokeTrigger.setStreamingHook(connectorGatewayHandle.streamingHook);
+      queueProcessor.setOutboundHook(
+        connectorGatewayHandle.outboundHook as Parameters<typeof queueProcessor.setOutboundHook>[0],
+      );
+      queueProcessor.setStreamingHook(
+        connectorGatewayHandle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0],
+      );
+      queueProcessor.setThreadMetaLookup(async (threadId) => {
+        const thread = await threadStore.get(threadId);
+        if (!thread) return undefined;
+        return {
+          threadShortId: threadId.slice(0, 15),
+          threadTitle: thread.title ?? undefined,
+          deepLinkUrl: `${frontendBaseUrl}/threads/${threadId}`,
+        };
+      });
       for (const [id, handler] of connectorGatewayHandle.webhookHandlers) {
         connectorWebhookHandlers.set(id, handler);
       }

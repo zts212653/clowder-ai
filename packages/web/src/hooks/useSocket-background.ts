@@ -145,20 +145,43 @@ function recoverStreamingMessage(
 function findBackgroundCallbackReplacementTarget(
   msg: BackgroundAgentMessage,
   options: HandleBackgroundMessageOptions,
-): { id: string; invocationId: string } | null {
+): { id: string; invocationId: string | null } | null {
   const invocationId = msg.invocationId ?? getThreadInvocationId(msg, options);
-  if (!invocationId) return null;
 
   const threadMessages = options.store.getThreadState(msg.threadId).messages;
+
+  // Try invocationId-based match first
+  if (invocationId) {
+    for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
+      const m = threadMessages[i];
+      if (
+        m?.type === 'assistant' &&
+        m.catId === msg.catId &&
+        m.origin === 'stream' &&
+        m.extra?.stream?.invocationId === invocationId
+      ) {
+        return { id: m.id, invocationId };
+      }
+    }
+  }
+
+  // #586 Bug 1: Fallback — find invocationless stream placeholder from the same cat.
+  // Background system-info creates bg-rich/bg-think placeholders without invocationId;
+  // without this fallback, callback creates a duplicate bubble alongside the placeholder.
+  // #586 P1-2 fix: Return real invocationId (may be null) — callers must guard
+  // against null before writing to replacedInvocations. Using a pseudo ID would
+  // cause shouldSuppressLateBackgroundStreamChunk to permanently drop future
+  // invocationless stream chunks.
   for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
     const m = threadMessages[i];
     if (
       m?.type === 'assistant' &&
       m.catId === msg.catId &&
       m.origin === 'stream' &&
-      m.extra?.stream?.invocationId === invocationId
+      m.isStreaming &&
+      !m.extra?.stream?.invocationId
     ) {
-      return { id: m.id, invocationId };
+      return { id: m.id, invocationId: invocationId ?? null };
     }
   }
 
@@ -296,7 +319,12 @@ export function handleBackgroundAgentMessage(
           ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
         });
         options.bgStreamRefs.delete(streamKey);
-        options.replacedInvocations.set(streamKey, replacementTarget.invocationId);
+        // #586 P1-2 fix: Only set replacedInvocations when we have a real invocationId.
+        // Fallback matches return null — writing a pseudo ID would permanently suppress
+        // future invocationless stream chunks via shouldSuppressLateBackgroundStreamChunk.
+        if (replacementTarget.invocationId) {
+          options.replacedInvocations.set(streamKey, replacementTarget.invocationId);
+        }
         finalMsgId = cbId;
       } else {
         const cbId = msg.messageId ?? `bg-cb-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`;
@@ -313,6 +341,13 @@ export function handleBackgroundAgentMessage(
           timestamp: msg.timestamp,
           origin: 'callback',
         });
+        // #586 Bug 1 (TD112): Callback created new bubble without finding a stream
+        // placeholder. Mark invocation as replaced so late background stream chunks
+        // are suppressed instead of spawning a duplicate bubble.
+        const bgInvocationId = msg.invocationId ?? getThreadInvocationId(msg, options);
+        if (bgInvocationId) {
+          options.replacedInvocations.set(streamKey, bgInvocationId);
+        }
         finalMsgId = cbId;
       }
     } else {

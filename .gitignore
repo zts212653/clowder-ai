@@ -85,6 +85,7 @@ temp/
 
 # Local demo/video scratch exports
 assets/demo-videos/
+assets/screenshots/
 
 # Local external repo scratch space
 gitnexus/

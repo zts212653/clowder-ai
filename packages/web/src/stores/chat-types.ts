@@ -293,6 +293,8 @@ export interface ConnectorHubStateV1 {
   connectorId: string;
   externalChatId: string;
   createdAt: number;
+  /** G+ audit: timestamp of the most recent command exchange routed through this hub. */
+  lastCommandAt?: number;
 }
 
 export type ThreadRoutingScope = 'review' | 'architecture';

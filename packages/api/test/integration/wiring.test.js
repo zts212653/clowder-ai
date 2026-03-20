@@ -28,6 +28,7 @@ const { GeminiAgentService } = await import('../../dist/domains/cats/services/ag
 const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
 
 // --- Helpers ---
@@ -49,7 +50,7 @@ function createMockProcess() {
   const proc = {
     stdout,
     stderr,
-    pid: 12345,
+    pid: process.pid,
     exitCode: null,
     kill: mock.fn(() => {
       process.nextTick(() => {
@@ -365,6 +366,10 @@ describe('AgentRouter + Services wiring', () => {
     const codexSpawn = createTrackingSpawnFn(() => codexEvents('t-1', 'codex ack'));
     const geminiSpawn = createTrackingSpawnFn(() => geminiEvents('g-1', 'hi'));
 
+    const threadStore = new ThreadStore();
+    const thread = threadStore.create('user-1', 'serial chain test');
+    threadStore.updateThinkingMode(thread.id, 'debug');
+
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: new ClaudeAgentService({ spawnFn: claudeSpawn }),
@@ -372,10 +377,11 @@ describe('AgentRouter + Services wiring', () => {
         geminiService: new GeminiAgentService({ spawnFn: geminiSpawn, adapter: 'gemini-cli' }),
         registry,
         messageStore,
+        threadStore,
       }),
     );
 
-    await collect(router.route('user-1', '#execute @opus @codex hello'));
+    await collect(router.route('user-1', '#execute @opus @codex hello', thread.id));
 
     // Codex spawn should receive prompt containing opus's reply (serial chain)
     const codexArgs = codexSpawn._calls[0].args;

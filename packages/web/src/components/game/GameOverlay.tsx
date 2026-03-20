@@ -81,6 +81,24 @@ export function GameOverlay({
   const phases = buildPhaseEntries(view);
   const timeLeftMs = useCountdown(view.config.timeoutMs, view.phaseStartedAt);
 
+  // H6: Derive active speaking seat (during day_discuss, the seat that last submitted speech)
+  const activeSeatId: SeatId | null = (() => {
+    if (view.currentPhase !== 'day_discuss') return null;
+    // Find last speech event in this round
+    const speeches = view.visibleEvents.filter((e) => e.round === view.round && e.type === 'speech');
+    if (speeches.length === 0) return null;
+    const last = speeches[speeches.length - 1]!;
+    return (last.payload.seatId as SeatId) ?? null;
+  })();
+
+  // H6: Build maps for EventFlow (actorId → display name, seatId → actorId)
+  const catDisplayNames: Record<string, string> = {};
+  const seatToActor: Record<string, string> = {};
+  for (const seat of view.seats) {
+    catDisplayNames[seat.actorId] = seat.displayName;
+    seatToActor[seat.seatId] = seat.actorId;
+  }
+
   // Show result screen when game is finished with stats
   if (view.status === 'finished' && view.gameStats) {
     return (
@@ -100,7 +118,7 @@ export function GameOverlay({
         onClose={onClose}
       />
       <PhaseTimeline phases={phases} currentIndex={0} />
-      <PlayerGrid seats={view.seats} gameStatus={view.status} />
+      <PlayerGrid seats={view.seats} activeSeatId={activeSeatId} gameStatus={view.status} />
 
       <div className="flex flex-1 min-h-0">
         {/* Main content area */}
@@ -124,7 +142,7 @@ export function GameOverlay({
             </div>
           ) : (
             <>
-              <EventFlow events={view.visibleEvents} />
+              <EventFlow events={view.visibleEvents} catDisplayNames={catDisplayNames} seatToActor={seatToActor} />
               {!isNight && <ActionDock onVote={onVote} onSpeak={onSpeak} />}
             </>
           )}

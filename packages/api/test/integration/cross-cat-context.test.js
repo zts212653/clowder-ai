@@ -14,6 +14,7 @@ import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
 
 const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
 const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 
 /** Collect all items from async iterable */
@@ -37,10 +38,12 @@ function createCapturingService(catId, replyText) {
 
 describe('Cross-Cat Context (暗号测试)', () => {
   let messageStore;
+  let threadStore;
   let registry;
 
   beforeEach(() => {
     messageStore = new MessageStore();
+    threadStore = new ThreadStore();
     registry = new InvocationRegistry();
   });
 
@@ -49,6 +52,10 @@ describe('Cross-Cat Context (暗号测试)', () => {
     const opusService = createCapturingService('opus', `I confirm: ${SECRET}`);
     const codexService = createCapturingService('codex', 'Received');
 
+    // Use debug thinkingMode so stream-origin cat messages are visible in incremental context
+    const thread = threadStore.create('user-1', 'secret token test');
+    threadStore.updateThinkingMode(thread.id, 'debug');
+
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: opusService,
@@ -56,14 +63,15 @@ describe('Cross-Cat Context (暗号测试)', () => {
         geminiService: createCapturingService('gemini', 'skip'),
         registry,
         messageStore,
+        threadStore,
       }),
     );
 
     // Round 1: user → opus → opus replies with SECRET
-    await collect(router.route('user-1', '@opus tell me the secret', 'thread-1'));
+    await collect(router.route('user-1', '@opus tell me the secret', thread.id));
 
     // Round 2: user → codex — codex should see opus's reply in context history
-    await collect(router.route('user-1', '@codex what was the secret?', 'thread-1'));
+    await collect(router.route('user-1', '@codex what was the secret?', thread.id));
 
     const codexPrompt = codexService.capturedPrompts[0];
     assert.ok(
@@ -80,6 +88,9 @@ describe('Cross-Cat Context (暗号测试)', () => {
     const codexService = createCapturingService('codex', `My secret is ${SECRET_B}`);
     const geminiService = createCapturingService('gemini', 'I see them');
 
+    const thread = threadStore.create('user-1', 'three-cat secret test');
+    threadStore.updateThinkingMode(thread.id, 'debug');
+
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: opusService,
@@ -87,15 +98,13 @@ describe('Cross-Cat Context (暗号测试)', () => {
         geminiService: geminiService,
         registry,
         messageStore,
+        threadStore,
       }),
     );
 
-    // Round 1: opus says its secret
-    await collect(router.route('user-1', '@opus share your secret', 'thread-2'));
-    // Round 2: codex says its secret
-    await collect(router.route('user-1', '@codex share your secret', 'thread-2'));
-    // Round 3: gemini asked to recall
-    await collect(router.route('user-1', '@gemini what secrets did they share?', 'thread-2'));
+    await collect(router.route('user-1', '@opus share your secret', thread.id));
+    await collect(router.route('user-1', '@codex share your secret', thread.id));
+    await collect(router.route('user-1', '@gemini what secrets did they share?', thread.id));
 
     const geminiPrompt = geminiService.capturedPrompts[0];
     assert.ok(geminiPrompt.includes(SECRET_A), 'Gemini should see opus secret in history');
@@ -142,6 +151,9 @@ describe('Cross-Cat Context (暗号测试)', () => {
     const codexService = createCapturingService('codex', 'Round 2 codex answer');
     const geminiService = createCapturingService('gemini', 'I see everything');
 
+    const thread = threadStore.create('user-1', 'multi-round test');
+    threadStore.updateThinkingMode(thread.id, 'debug');
+
     const router = new AgentRouter(
       await migrateRouterOpts({
         claudeService: opusService,
@@ -149,15 +161,16 @@ describe('Cross-Cat Context (暗号测试)', () => {
         geminiService: geminiService,
         registry,
         messageStore,
+        threadStore,
       }),
     );
 
     // Round 1
-    await collect(router.route('user-1', '@opus first question', 'thread-4'));
+    await collect(router.route('user-1', '@opus first question', thread.id));
     // Round 2
-    await collect(router.route('user-1', '@codex second question', 'thread-4'));
+    await collect(router.route('user-1', '@codex second question', thread.id));
     // Round 3: new cat joins
-    await collect(router.route('user-1', '@gemini what happened?', 'thread-4'));
+    await collect(router.route('user-1', '@gemini what happened?', thread.id));
 
     const geminiPrompt = geminiService.capturedPrompts[0];
     assert.ok(geminiPrompt.includes('first question'), 'Gemini sees round 1 user message');

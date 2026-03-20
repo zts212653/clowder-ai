@@ -48,6 +48,9 @@ function mockThreadStore() {
       threads.set(thread.id, thread);
       return thread;
     },
+    async get(threadId) {
+      return threads.get(threadId) ?? null;
+    },
     updateConnectorHubState(threadId, state) {
       const thread = threads.get(threadId);
       if (!thread) return;
@@ -518,6 +521,35 @@ describe('ConnectorRouter', () => {
       assert.equal(hubThread.connectorHubState.connectorId, 'feishu');
       assert.equal(hubThread.connectorHubState.externalChatId, 'chat-state');
       assert.ok(hubThread.connectorHubState.createdAt > 0);
+    });
+
+    it('storeCommandExchange updates lastCommandAt on Hub thread (G+)', async () => {
+      bindingStore.bind('feishu', 'chat-lca', 'thread-conv-lca', 'owner-1');
+      const lcaRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: cmdTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/where': { kind: 'where', response: 'info' },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+
+      const beforeCmd = Date.now();
+      await lcaRouter.route('feishu', 'chat-lca', '/where', 'ext-lca-1');
+
+      const hubThread = [...threadStore.threads.values()].find(
+        (t) => t.connectorHubState?.externalChatId === 'chat-lca',
+      );
+      assert.ok(hubThread, 'Hub thread should exist');
+      assert.ok(hubThread.connectorHubState.lastCommandAt, 'lastCommandAt should be set');
+      assert.ok(hubThread.connectorHubState.lastCommandAt >= beforeCmd, 'lastCommandAt should be recent');
     });
   });
 });

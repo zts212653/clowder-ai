@@ -71,7 +71,9 @@ describe('DARE L1 acceptance contract', () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const oldOpenrouter = process.env.OPENROUTER_API_KEY;
+    const oldDareKey = process.env.DARE_API_KEY;
     process.env.OPENROUTER_API_KEY = 'sk-openrouter-test';
+    delete process.env.DARE_API_KEY;
 
     try {
       const service = new DareAgentService({
@@ -107,6 +109,8 @@ describe('DARE L1 acceptance contract', () => {
     } finally {
       if (oldOpenrouter === undefined) delete process.env.OPENROUTER_API_KEY;
       else process.env.OPENROUTER_API_KEY = oldOpenrouter;
+      if (oldDareKey === undefined) delete process.env.DARE_API_KEY;
+      else process.env.DARE_API_KEY = oldDareKey;
     }
   });
 

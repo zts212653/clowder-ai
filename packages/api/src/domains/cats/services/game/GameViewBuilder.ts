@@ -15,6 +15,7 @@ import type {
   SeatId,
   SeatView,
 } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import { GameStatsRecorder } from './GameStatsRecorder.js';
 
 export class GameViewBuilder {
@@ -64,7 +65,7 @@ export class GameViewBuilder {
         seatId: seat.seatId,
         actorType: seat.actorType,
         actorId: seat.actorId,
-        displayName: seat.actorId,
+        displayName: GameViewBuilder.enrichDisplayName(seat.actorId),
         alive: seat.alive,
         hasActed: canSeeActed ? !!pending : undefined,
       };
@@ -167,5 +168,14 @@ export class GameViewBuilder {
     if (scope === `seat:${viewer}`) return true;
     if (viewerFaction && scope === `faction:${viewerFaction}`) return true;
     return false;
+  }
+
+  /** H6: Enrich actorId to "breed(actorId)" format.
+   *  e.g. "opus" → "布偶猫(opus)", "codex" → "缅因猫(codex)" */
+  private static enrichDisplayName(actorId: string): string {
+    const entry = catRegistry.tryGet(actorId);
+    if (!entry) return actorId;
+    const breed = entry.config.breedDisplayName ?? entry.config.displayName;
+    return breed ? `${breed}(${actorId})` : actorId;
   }
 }

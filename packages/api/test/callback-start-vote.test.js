@@ -304,4 +304,132 @@ describe('POST /api/callbacks/start-vote', () => {
     const now = Date.now();
     assert.ok(deadline > now && deadline <= now + 121_000, 'deadline should be ~120s from now');
   });
+
+  test('dispatches voter cats via A2A when router + invocationRecordStore are provided', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+
+    const dispatchedCats = [];
+    const invocationQueue = new InvocationQueue();
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      threadStore,
+      router: {
+        routeExecution: async function* () {
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+      invocationRecordStore: {
+        create: async (opts) => {
+          dispatchedCats.push(...opts.targetCats);
+          return { outcome: 'created', invocationId: `inv-${Date.now()}` };
+        },
+        update: async () => {},
+      },
+      invocationTracker: {
+        start: () => new AbortController(),
+        complete: () => {},
+        has: () => false,
+        getActiveSlots: () => [],
+      },
+      invocationQueue,
+      queueProcessor: {
+        onInvocationComplete: async () => {},
+        tryAutoExecute: async () => {},
+        registerEntryCompleteHook: () => {},
+        unregisterEntryCompleteHook: () => {},
+      },
+    });
+
+    const thread = threadStore.create('user-1', 'Test');
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/start-vote',
+      payload: {
+        invocationId,
+        callbackToken,
+        question: '哪个方案好？',
+        options: ['A', 'B'],
+        voters: ['codex', 'gemini'],
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    // Voters should have been dispatched (either via queue or fallback)
+    const queueEntries = invocationQueue.listAutoExecute?.(thread.id) ?? [];
+    // At least the queue should have been populated or fallback dispatch triggered
+    const dispatched = queueEntries.length > 0 || dispatchedCats.length > 0;
+    assert.ok(dispatched, 'voter cats should be dispatched after start-vote');
+  });
+
+  test('voters > MAX_QUEUE_DEPTH: first 5 enqueued, remaining fall back to direct dispatch', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+
+    const fallbackTargets = [];
+    const invocationQueue = new InvocationQueue();
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      threadStore,
+      router: {
+        routeExecution: async function* () {
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      invocationRecordStore: {
+        create: async (opts) => {
+          // Track fallback (direct dispatch) targets — these are called AFTER queue overflow
+          fallbackTargets.push(...opts.targetCats);
+          return { outcome: 'created', invocationId: `inv-${Date.now()}` };
+        },
+        update: async () => {},
+      },
+      invocationTracker: {
+        start: () => new AbortController(),
+        complete: () => {},
+        has: () => false,
+        getActiveSlots: () => [],
+      },
+      invocationQueue,
+      queueProcessor: {
+        onInvocationComplete: async () => {},
+        tryAutoExecute: async () => {},
+        registerEntryCompleteHook: () => {},
+        unregisterEntryCompleteHook: () => {},
+      },
+    });
+
+    const thread = threadStore.create('user-1', 'Test');
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+
+    // 7 voters: queue can hold 5, remaining 2 should fall back to direct dispatch
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/start-vote',
+      payload: {
+        invocationId,
+        callbackToken,
+        question: 'Overflow test?',
+        options: ['A', 'B'],
+        voters: ['codex', 'gemini', 'sonnet', 'gpt52', 'spark', 'dare', 'antigravity'],
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+
+    // Queue should have exactly 5 entries (MAX_QUEUE_DEPTH)
+    const queueEntries = invocationQueue.listAutoExecute?.(thread.id) ?? [];
+    assert.equal(queueEntries.length, 5, 'queue should hold exactly 5 entries (MAX_QUEUE_DEPTH)');
+
+    // Fallback direct dispatch should have been called with the remaining 2
+    assert.equal(fallbackTargets.length, 2, 'remaining 2 voters should fall back to direct dispatch');
+  });
 });

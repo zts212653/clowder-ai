@@ -35,9 +35,8 @@ function mockThreadStore() {
   return {
     threads,
     create(userId, title) {
-      counter += 1;
       const thread = {
-        id: `thread-${counter}`,
+        id: `thread-${++counter}`,
         createdBy: userId,
         title,
         participants: [],

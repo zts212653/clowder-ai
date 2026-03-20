@@ -34,6 +34,7 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
         connectorId: t.connectorHubState?.connectorId,
         externalChatId: t.connectorHubState?.externalChatId,
         createdAt: t.connectorHubState?.createdAt,
+        lastCommandAt: t.connectorHubState?.lastCommandAt,
       })),
     };
   });

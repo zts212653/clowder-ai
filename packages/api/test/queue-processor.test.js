@@ -616,6 +616,42 @@ describe('QueueProcessor', () => {
       const firstStartCall = deps.invocationTracker.start.mock.calls[0];
       assert.equal(firstStartCall.arguments[1], 'codex', 'should start codex (free slot) first, not opus (busy)');
     });
+
+    it('starts multiple free-slot entries in a single tryAutoExecute call (parallel dispatch)', async () => {
+      // Enqueue 3 entries for 3 different cats — all slots free
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['opus'],
+        autoExecute: true,
+        callerCatId: 'gemini',
+      });
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'gemini',
+      });
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['gemini'],
+        autoExecute: true,
+        callerCatId: 'opus',
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 100));
+
+      // All 3 should have been started (different cat slots, all free)
+      const startCalls = deps.invocationTracker.start.mock.calls;
+      assert.equal(startCalls.length, 3, 'should start all 3 entries in one call');
+      const startedCats = startCalls.map((c) => c.arguments[1]);
+      assert.ok(startedCats.includes('opus'), 'opus should be started');
+      assert.ok(startedCats.includes('codex'), 'codex should be started');
+      assert.ok(startedCats.includes('gemini'), 'gemini should be started');
+    });
   });
 
   // ── Tracker guard: prevent duplicate execution for CLI-active cats ──
@@ -671,6 +707,248 @@ describe('QueueProcessor', () => {
       const queue = deps.queue.list('t1', 'u1');
       assert.equal(queue.length, 1);
       assert.equal(queue[0].status, 'queued', 'entry must remain queued');
+    });
+  });
+
+  // ── F088 fix: OutboundDeliveryHook regression tests ──
+
+  describe('outbound delivery via QueueProcessor (F088)', () => {
+    /** Poll until predicate returns true or timeout (deterministic, no fixed sleeps). */
+    async function waitFor(predicate, timeoutMs = 5000, intervalMs = 10) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (predicate()) return;
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+      throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+    }
+
+    it('single-cat execution: outboundHook.deliver called once with correct catId + content', async () => {
+      const deliverCalls = [];
+      const outboundHook = {
+        deliver: mock.fn(async (threadId, content, catId, richBlocks, threadMeta) => {
+          deliverCalls.push({ threadId, content, catId, richBlocks, threadMeta });
+        }),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+      const threadMetaLookup = mock.fn(async () => ({
+        threadShortId: 't1-short',
+        threadTitle: 'Test Thread',
+        deepLinkUrl: 'https://example.com/threads/t1',
+      }));
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: 'Hello from opus', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        threadMetaLookup,
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue);
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => deliverCalls.length >= 1);
+
+      assert.equal(deliverCalls.length, 1, 'deliver should be called once for single-cat execution');
+      assert.equal(deliverCalls[0].threadId, 't1');
+      assert.equal(deliverCalls[0].catId, 'opus');
+      assert.equal(deliverCalls[0].content, 'Hello from opus');
+      assert.ok(deliverCalls[0].threadMeta, 'threadMeta should be provided');
+      assert.equal(deliverCalls[0].threadMeta.threadTitle, 'Test Thread');
+
+      assert.ok(streamingHook.onStreamStart.mock.calls.length >= 1, 'onStreamStart should be called');
+      assert.ok(streamingHook.onStreamEnd.mock.calls.length >= 1, 'onStreamEnd should be called');
+
+      await waitFor(() => streamingHook.cleanupPlaceholders.mock.calls.length >= 1);
+      assert.ok(
+        streamingHook.cleanupPlaceholders.mock.calls.length >= 1,
+        'cleanupPlaceholders should be called on successful delivery',
+      );
+    });
+
+    it('multi-cat execution: outboundHook.deliver called per-turn with each catId', async () => {
+      const deliverCalls = [];
+      const outboundHook = {
+        deliver: mock.fn(async (threadId, content, catId, richBlocks, threadMeta) => {
+          deliverCalls.push({ threadId, content, catId, richBlocks, threadMeta });
+        }),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: 'Opus says hi. ', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+            yield { type: 'text', catId: 'codex', content: 'Codex chimes in.', timestamp: Date.now() };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue, { targetCats: ['opus'] });
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => deliverCalls.length >= 2);
+
+      assert.equal(deliverCalls.length, 2, 'deliver should be called once per cat turn');
+      assert.equal(deliverCalls[0].catId, 'opus', 'first deliver should be for opus');
+      assert.equal(deliverCalls[0].content, 'Opus says hi. ', 'opus content should match');
+      assert.equal(deliverCalls[1].catId, 'codex', 'second deliver should be for codex');
+      assert.equal(deliverCalls[1].content, 'Codex chimes in.', 'codex content should match');
+    });
+
+    it('no outboundHook: execution completes normally without delivery', async () => {
+      const entry = enqueueEntry(deps.queue);
+      deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await processor.processNext('t1', 'u1');
+      await waitFor(() =>
+        deps.invocationRecordStore.update.mock.calls.some((c) => c.arguments[1]?.status === 'succeeded'),
+      );
+
+      const updateCalls = deps.invocationRecordStore.update.mock.calls;
+      const succeededUpdate = updateCalls.find((c) => c.arguments[1]?.status === 'succeeded');
+      assert.ok(succeededUpdate, 'should succeed even without outboundHook');
+    });
+
+    it('delivery failure: cleanupPlaceholders NOT called when delivery partially fails', async () => {
+      let deliverCallCount = 0;
+      const outboundHook = {
+        deliver: mock.fn(async () => {
+          deliverCallCount++;
+          if (deliverCallCount === 1) throw new Error('delivery failed');
+        }),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: 'Turn 1. ', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+            yield { type: 'text', catId: 'codex', content: 'Turn 2.', timestamp: Date.now() };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue, { targetCats: ['opus'] });
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => outboundHook.deliver.mock.calls.length >= 2);
+
+      assert.equal(outboundHook.deliver.mock.calls.length, 2, 'deliver should be attempted for both turns');
+
+      // One rejection → Promise.allSettled sees mixed results → cleanupPlaceholders skipped
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(
+        streamingHook.cleanupPlaceholders.mock.calls.length,
+        0,
+        'cleanupPlaceholders should NOT be called when delivery partially fails',
+      );
+    });
+
+    it('all deliveries succeed: cleanupPlaceholders called', async () => {
+      const outboundHook = {
+        deliver: mock.fn(async () => {}),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: 'Success text', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue);
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => streamingHook.cleanupPlaceholders.mock.calls.length >= 1);
+
+      assert.equal(outboundHook.deliver.mock.calls.length, 1, 'deliver called once');
+      assert.ok(
+        streamingHook.cleanupPlaceholders.mock.calls.length >= 1,
+        'cleanupPlaceholders should be called when all deliveries succeed',
+      );
+    });
+
+    it('outboundHook set via late-bind setOutboundHook: deliver is called', async () => {
+      const lateDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: 'Late-bound delivery', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const lateProcessor = new QueueProcessor(lateDeps);
+
+      const deliverCalls = [];
+      lateProcessor.setOutboundHook({
+        deliver: mock.fn(async (threadId, content, catId) => {
+          deliverCalls.push({ threadId, content, catId });
+        }),
+      });
+
+      const entry = enqueueEntry(lateDeps.queue);
+      lateDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await lateProcessor.processNext('t1', 'u1');
+      await waitFor(() => deliverCalls.length >= 1);
+
+      assert.equal(deliverCalls.length, 1, 'late-bound hook should be called');
+      assert.equal(deliverCalls[0].content, 'Late-bound delivery');
     });
   });
 });
