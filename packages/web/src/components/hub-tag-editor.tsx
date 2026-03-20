@@ -103,7 +103,12 @@ export function TagEditor({
           emptyLabel={emptyLabel}
           tone={tone}
           lockedTags={lockedTags}
-          onRemove={tags.length > minCount ? (tag) => onChange(tags.filter((item) => item !== tag)) : undefined}
+          onRemove={
+            // Only count removable (non-locked) tags against minCount
+            tags.filter((t) => !lockedTags.includes(t)).length > minCount
+              ? (tag) => onChange(tags.filter((item) => item !== tag))
+              : undefined
+          }
         />
         <button
           type="button"

@@ -798,7 +798,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(patchRes.statusCode, 400);
     const patchBody = JSON.parse(patchRes.body);
-    assert.match(patchBody.error, /mention alias "@opus" is already used by cat "opus"/i);
+    assert.match(patchBody.error, /@opus.*opus/i);
   });
 
   it('POST /api/cats still requires a concrete provider binding for dare and opencode clients', async () => {

@@ -73,7 +73,14 @@ function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<s
     const apiKey = callbackEnv?.[ANTHROPIC_PROFILE_API_KEY]?.trim();
     const baseUrl = callbackEnv?.[ANTHROPIC_PROFILE_BASE_URL]?.trim();
     if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
-    if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
+    if (baseUrl) {
+      // Claude CLI internally appends /v1 to the base URL.
+      // If the user configured it with /v1 already, strip it to prevent
+      // double /v1/v1 and to avoid the CLI's model validation against
+      // the /v1/models endpoint (which many proxies don't support).
+      const cleanUrl = baseUrl.replace(/\/v1\/?$/, '');
+      env.ANTHROPIC_BASE_URL = cleanUrl;
+    }
   } else if (mode === 'subscription') {
     // Subscription mode: explicitly clear inherited key-based env vars.
     env.ANTHROPIC_API_KEY = null;
@@ -207,6 +214,7 @@ export class ClaudeAgentService implements AgentService {
     try {
       let sawResultError = false;
       const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv);
+
       const cliOpts = {
         command: 'claude' as const,
         args,

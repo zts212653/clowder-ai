@@ -188,6 +188,34 @@ export function IdentitySection({
   );
 }
 
+// Generate a hint showing what API endpoint the CLI will actually call
+function buildCallHint(client: string, profile: ProfileItem | undefined, model: string): string | null {
+  if (!profile || profile.builtin || !profile.baseUrl) return null;
+  const base = profile.baseUrl.replace(/\/+$/, '');
+  const hasV1Suffix = /\/v1$/i.test(base);
+
+  // Claude CLI internally adds /v1, so if user already has /v1 it will become /v1/v1
+  const cliEndpoints: Record<string, { cli: string; pathSuffix: string }> = {
+    anthropic: { cli: 'claude', pathSuffix: '/v1/messages' },
+    opencode: { cli: 'opencode', pathSuffix: '/messages' },
+    openai: { cli: 'codex', pathSuffix: '/responses' },
+    google: { cli: 'gemini', pathSuffix: `/models/${model || '...'}:generateContent` },
+    dare: { cli: 'dare', pathSuffix: '/chat/completions' },
+  };
+  const info = cliEndpoints[client];
+  if (!info) return null;
+
+  const fullUrl = `${base}${info.pathSuffix}`;
+  let warning = '';
+  if (client === 'anthropic' && hasV1Suffix) {
+    warning = `\n⚠️ base URL 末尾的 /v1 会导致路径重复（/v1/v1/messages），建议去掉 /v1 后缀`;
+  }
+  if (client === 'google') {
+    warning = `\n⚠️ Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client`;
+  }
+  return `${info.cli} CLI 实际调用: ${fullUrl}${warning}`;
+}
+
 export function AccountSection({
   form,
   modelOptions,
@@ -202,6 +230,8 @@ export function AccountSection({
   onChange: (patch: FormPatch) => void;
 }) {
   const accountOptions = availableProfiles;
+  const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
+  const callHint = buildCallHint(form.client, selectedProfile, form.defaultModel);
 
   return (
     <SectionCard title="认证与模型">
@@ -238,15 +268,26 @@ export function AccountSection({
               value={form.accountRef}
               options={[
                 { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
-                ...accountOptions.map((profile) => ({
-                  value: profile.id,
-                  label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
-                })),
+                ...accountOptions
+                  .filter((profile) => {
+                    // Gemini CLI doesn't support custom API endpoints — only show builtin
+                    if (form.client === 'google' && !profile.builtin) return false;
+                    return true;
+                  })
+                  .map((profile) => ({
+                    value: profile.id,
+                    label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
+                  })),
               ]}
               onChange={(value) => onChange({ accountRef: value, defaultModel: '' })}
               disabled={loadingProfiles}
               required
             />
+            {callHint ? (
+              <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
+                <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">{callHint}</p>
+              </div>
+            ) : null}
             {modelOptions.length > 0 ? (
               <SelectField
                 label="Model"

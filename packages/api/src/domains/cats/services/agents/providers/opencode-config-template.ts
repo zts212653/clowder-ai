@@ -12,9 +12,9 @@
 interface OpenCodeConfigOptions {
   /** Anthropic API key — validated but NOT written to config (stays in ANTHROPIC_API_KEY env var) */
   apiKey: string;
-  /** Base URL for Anthropic API (auto-normalized: /v1 appended if missing) */
+  /** Base URL for Anthropic API (passed through as configured) */
   baseUrl: string;
-  /** Model name (e.g. 'claude-sonnet-4-6') */
+  /** Model name (e.g. 'claude-sonnet-4-6' or 'openrouter/google/gemini-3-flash-preview') */
   model: string;
   /** Enable Oh My OpenCode plugin (default: true) */
   enableOmoc?: boolean;
@@ -37,13 +37,9 @@ interface OpenCodeConfig {
 export function generateOpenCodeConfig(options: OpenCodeConfigOptions): OpenCodeConfig {
   const { baseUrl, model, enableOmoc = true } = options;
 
-  const modelStr = model.includes('/') ? model : `anthropic/${model}`;
-
-  // Normalize baseUrl: opencode's SDK calls {baseURL}/messages (not /v1/messages),
-  // so proxy URLs need /v1 appended. Same logic as OpenCodeAgentService.buildEnv().
-  const trimmed = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-  const needsV1 = !trimmed.endsWith('/v1');
-  const normalizedBaseUrl = needsV1 ? `${trimmed}/v1` : baseUrl;
+  // Keep user input as-is (no implicit model/baseUrl rewriting).
+  const modelStr = model;
+  const normalizedBaseUrl = baseUrl;
 
   const config: OpenCodeConfig = {
     $schema: 'https://opencode.ai/config.json',

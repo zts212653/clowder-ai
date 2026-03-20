@@ -631,18 +631,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // Debug: log account resolution result
-    console.info('[invoke/F127-debug] account resolution', {
-      catId,
-      provider,
-      boundAccountRef,
-      resolvedAccountId: resolvedAccount?.id ?? null,
-      resolvedAuthType: resolvedAccount?.authType ?? null,
-      resolvedProtocol: (resolvedAccount as unknown as Record<string, unknown>)?.protocol ?? null,
-      resolvedBaseUrl: resolvedAccount?.baseUrl ? `${resolvedAccount.baseUrl.slice(0, 60)}...` : null,
-      hasApiKey: resolvedAccount?.authType === 'api_key' ? Boolean((resolvedAccount as unknown as Record<string, unknown>).apiKey) : false,
-    });
-
     // Determine effective protocol: account.protocol > provider-based default
     const defaultProtocolForProvider: Record<string, string> = {
       anthropic: 'anthropic',
@@ -690,6 +678,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         callbackEnv.CODEX_AUTH_MODE = 'api_key';
         if (resolvedAccount.apiKey) {
           callbackEnv.OPENAI_API_KEY = resolvedAccount.apiKey;
+          // OpenCode selects provider by model prefix; `openrouter/...` models require this key name.
+          callbackEnv.OPENROUTER_API_KEY = resolvedAccount.apiKey;
         }
         if (resolvedAccount.baseUrl) {
           callbackEnv.OPENAI_BASE_URL = resolvedAccount.baseUrl;
@@ -700,8 +690,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     } else if (effectiveProtocol === 'google') {
       if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
+        // Gemini CLI: native Google SDK, uses GEMINI_API_KEY
         callbackEnv.GEMINI_API_KEY = resolvedAccount.apiKey;
         callbackEnv.GOOGLE_API_KEY = resolvedAccount.apiKey;
+        // opencode CLI: OpenRouter provider uses OPENROUTER_API_KEY
+        callbackEnv.OPENROUTER_API_KEY = resolvedAccount.apiKey;
         if (resolvedAccount.baseUrl) {
           callbackEnv.GEMINI_BASE_URL = resolvedAccount.baseUrl;
         }
@@ -716,23 +709,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (resolvedAccount.apiKey) callbackEnv.DARE_API_KEY = resolvedAccount.apiKey;
       if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
     }
-
-    // Debug: log final env injection result
-    console.info('[invoke/F127-debug] env injection', {
-      catId,
-      effectiveProtocol,
-      ANTHROPIC_PROFILE_MODE: callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE ?? '(not set)',
-      ANTHROPIC_BASE_URL: callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL ? `${callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL.slice(0, 60)}...` : '(not set)',
-      ANTHROPIC_API_KEY: callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY ? 'sk-***' : '(not set)',
-      CODEX_AUTH_MODE: callbackEnv.CODEX_AUTH_MODE ?? '(not set)',
-      OPENAI_BASE_URL: callbackEnv.OPENAI_BASE_URL ? `${callbackEnv.OPENAI_BASE_URL.slice(0, 60)}...` : '(not set)',
-      OPENAI_API_KEY: callbackEnv.OPENAI_API_KEY ? 'sk-***' : '(not set)',
-      GEMINI_API_KEY: callbackEnv.GEMINI_API_KEY ? '***' : '(not set)',
-      GEMINI_BASE_URL: callbackEnv.GEMINI_BASE_URL ? `${callbackEnv.GEMINI_BASE_URL.slice(0, 60)}...` : '(not set)',
-      DARE_API_KEY: callbackEnv.DARE_API_KEY ? '***' : '(not set)',
-      DARE_ENDPOINT: callbackEnv.DARE_ENDPOINT ? `${callbackEnv.DARE_ENDPOINT.slice(0, 60)}...` : '(not set)',
-      EFFECTIVE_PROTOCOL: callbackEnv.CAT_CAFE_EFFECTIVE_PROTOCOL ?? '(not set)',
-    });
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new sessions for cats
     // that support persistent sessions (sessionChain=true).

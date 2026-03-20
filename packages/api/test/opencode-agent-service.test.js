@@ -155,7 +155,7 @@ describe('OpenCodeAgentService', () => {
     assert.ok(args.includes('--format') && args.includes('json'), `expected --format json in args: ${args}`);
     const mIdx = args.indexOf('-m');
     assert.ok(mIdx >= 0, `expected -m in args: ${args}`);
-    assert.strictEqual(args[mIdx + 1], 'anthropic/claude-sonnet-4-6');
+    assert.strictEqual(args[mIdx + 1], 'claude-sonnet-4-6');
   });
 
   test('API key is passed via ANTHROPIC_API_KEY env, not CLI args', async () => {
@@ -338,7 +338,7 @@ describe('OpenCodeAgentService', () => {
     const mIdx = args.indexOf('-m');
     assert.strictEqual(
       args[mIdx + 1],
-      'anthropic/claude-haiku-4-5',
+      'claude-haiku-4-5',
       `expected model override to be used, got: ${args[mIdx + 1]}`,
     );
   });

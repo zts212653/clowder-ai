@@ -2993,6 +2993,76 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
+  it('F127: injects OPENROUTER_API_KEY for opencode members bound to openai api_key profiles', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const root = await mkdtemp(join(tmpdir(), 'f127-openrouter-key-injection-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const openrouterProfile = await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'openrouter-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-openrouter-key',
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-openrouter-bound-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'opencode',
+      providerProfileId: openrouterProfile.id,
+      defaultModel: 'openrouter/google/gemini-3-flash-preview',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-f127-openrouter-key-injection',
+          threadId: 'thread-f127-openrouter-key-injection',
+          isLastCat: true,
+        }),
+      );
+      assert.ok(messages.some((m) => m.type === 'done'));
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CAT_CAFE_EFFECTIVE_PROTOCOL, 'openai');
+    assert.equal(callbackEnv.OPENAI_BASE_URL, 'https://openrouter.ai/api/v1');
+    assert.equal(callbackEnv.OPENAI_API_KEY, 'sk-openrouter-key');
+    assert.equal(callbackEnv.OPENROUTER_API_KEY, 'sk-openrouter-key');
+  });
+
   it('F062-fix: skips auto-seal for api_key mode when context health is approx', async () => {
     const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const root = await mkdtemp(join(tmpdir(), 'f062-approx-no-seal-'));

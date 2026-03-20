@@ -715,6 +715,17 @@ step "[7/9] Authentication setup / 认证配置..."
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
+
+    # Gemini CLI doesn't support custom API endpoints — always use OAuth
+    if [[ "$cmd" == "gemini" ]]; then
+        node scripts/install-auth-config.mjs client-auth set \
+            --project-dir "$PROJECT_DIR" \
+            --client "$cmd" \
+            --mode oauth
+        ok "$name: OAuth mode (Gemini CLI only supports Google official API)"
+        return 0
+    fi
+
     local auth_sel
     tty_select auth_sel "  $name ($cmd) — auth mode:" \
         "OAuth / Subscription (recommended / 推荐)" \

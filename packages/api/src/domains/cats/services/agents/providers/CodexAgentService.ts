@@ -243,15 +243,20 @@ export class CodexAgentService implements AgentService {
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
 
-    // Codex CLI deprecated OPENAI_BASE_URL env var — use --config model_providers instead.
-    // When a custom base URL is provided via callbackEnv, set up a custom provider config.
+    // Codex CLI deprecated OPENAI_BASE_URL env var.
+    // Configure a custom model provider via --config model_providers.*
+    // Source: https://github.com/openai/codex codex-rs/core/src/model_provider_info.rs
+    //   - env_key: env var name for the API key
+    //   - base_url: API endpoint
+    //   - wire_api: "responses" (HTTP, the only supported value)
     const customBaseUrl = options?.callbackEnv?.OPENAI_BASE_URL ?? options?.callbackEnv?.OPENAI_API_BASE;
     const customProviderArgs: string[] = customBaseUrl
       ? [
           '--config', 'model_provider="custom"',
           '--config', `model_providers.custom.base_url=${toTomlString(customBaseUrl)}`,
-          '--config', 'model_providers.custom.name="custom"',
+          '--config', 'model_providers.custom.name="Custom API Key"',
           '--config', 'model_providers.custom.wire_api="responses"',
+          '--config', 'model_providers.custom.env_key="OPENAI_API_KEY"',
         ]
       : [];
 
@@ -298,9 +303,10 @@ export class CodexAgentService implements AgentService {
     const recentStreamErrors: string[] = [];
 
     try {
-      // Use real HOME — project-level AGENTS.md already overrides global ~/.codex/AGENTS.md.
-      // HOME isolation was removed because Codex CLI rebuilds ~/.codex/ on startup,
-      // overwriting pre-copied auth.json/config.toml/sessions (see bug-report/tea-coffee/).
+      // HOME isolation: only for API Key mode.
+      // OAuth mode needs real HOME (~/.codex/auth.json for token refresh).
+      // API Key mode must AVOID real HOME — stale OAuth token refresh will fail
+      // and abort the CLI before it reaches the custom provider config.
       const authMode = getCodexAuthMode(options?.callbackEnv);
       const rawEnv = { ...(options?.callbackEnv ?? {}) };
       // Strip deprecated OPENAI_BASE_URL — now handled via --config model_providers
@@ -308,18 +314,14 @@ export class CodexAgentService implements AgentService {
         delete rawEnv.OPENAI_BASE_URL;
         delete rawEnv.OPENAI_API_BASE;
       }
+      // For API Key mode: use temp HOME to prevent OAuth token refresh interference
+      if (authMode === 'api_key' && customBaseUrl) {
+        const { mkdtempSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const isolatedHome = mkdtempSync(`${tmpdir()}/codex-apikey-`);
+        rawEnv.HOME = isolatedHome;
+      }
       const codexEnv = applyAuthMode(rawEnv, authMode);
-
-      // Debug: log CLI invocation details
-      console.info('[codex/F127-debug] CLI invocation', {
-        catId: this.catId,
-        model: effectiveModel,
-        authMode,
-        customBaseUrl: customBaseUrl ? `${customBaseUrl.slice(0, 60)}...` : null,
-        customProviderArgs: customProviderArgs.length > 0 ? customProviderArgs : '(none)',
-        hasApiKey: Boolean(codexEnv.OPENAI_API_KEY),
-        envBaseUrl: codexEnv.OPENAI_BASE_URL ?? '(stripped/not set)',
-      });
 
       const semanticCompletionController = new AbortController();
 

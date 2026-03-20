@@ -43,7 +43,7 @@ const baseCatSchema = z.object({
   name: z.string().min(1),
   displayName: z.string().min(1),
   nickname: z.string().optional(),
-  avatar: z.string().min(1).optional(),
+  avatar: z.preprocess((val) => (typeof val === 'string' && val.trim() === '' ? undefined : val), z.string().min(1).optional()),
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
   accountRef: z.string().min(1).optional(),
@@ -337,6 +337,21 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const projectRoot = resolveProjectRoot();
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     const body = parsed.data;
+
+    // Validate alias uniqueness across all existing members
+    if (body.mentionPatterns?.length) {
+      const allConfigs = catRegistry.getAllConfigs();
+      for (const pattern of body.mentionPatterns) {
+        const normalized = pattern.toLowerCase();
+        for (const [existingId, existingConfig] of Object.entries(allConfigs)) {
+          if (existingConfig.mentionPatterns.some((p: string) => p.toLowerCase() === normalized)) {
+            reply.status(400);
+            return { error: `别名 "${pattern}" 已被成员 "${existingId}" 使用` };
+          }
+        }
+      }
+    }
+
     const accountRef = resolveAccountRef(body);
     try {
       await validateAccountBindingOrThrow(projectRoot, body.client, accountRef, body.defaultModel);
@@ -424,6 +439,22 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const body = parsed.data;
     const projectRoot = resolveProjectRoot();
+
+    // Validate alias uniqueness when mentionPatterns are being updated
+    if (body.mentionPatterns?.length) {
+      const allConfigs = catRegistry.getAllConfigs();
+      for (const pattern of body.mentionPatterns) {
+        const normalized = pattern.toLowerCase();
+        for (const [existingId, existingConfig] of Object.entries(allConfigs)) {
+          if (existingId === request.params.id) continue; // skip self
+          if (existingConfig.mentionPatterns.some((p: string) => p.toLowerCase() === normalized)) {
+            reply.status(400);
+            return { error: `别名 "${pattern}" 已被成员 "${existingId}" 使用` };
+          }
+        }
+      }
+    }
+
     const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver(projectRoot);
     const currentCat = getResolvedCats(projectRoot)[request.params.id] ?? catRegistry.tryGet(request.params.id)?.config;
     if (!currentCat) {

@@ -24,7 +24,7 @@ import { transformOpenCodeEvent } from './opencode-event-transform.js';
 
 interface OpenCodeAgentServiceOptions {
   catId?: CatId;
-  /** Model name (e.g. 'claude-sonnet-4-6') — will be prefixed with 'anthropic/' for CLI */
+  /** Model name (e.g. 'claude-sonnet-4-6' or 'openrouter/google/gemini-3-flash-preview') */
   model?: string;
   /** API key for Anthropic provider */
   apiKey?: string;
@@ -56,7 +56,7 @@ export class OpenCodeAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     // P1-2: runtime model override takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE ?? this.model;
-    const args = this.buildArgs(prompt, options?.sessionId, effectiveModel, options);
+    const args = this.buildArgs(prompt, options?.sessionId, effectiveModel);
     const cwd = options?.workingDirectory;
     const childEnv = this.buildEnv(options?.callbackEnv);
     const metadata: MessageMetadata = { provider: 'opencode', model: effectiveModel };
@@ -151,7 +151,7 @@ export class OpenCodeAgentService implements AgentService {
     }
   }
 
-  private buildArgs(prompt: string, sessionId?: string, model?: string, options?: AgentServiceOptions): string[] {
+  private buildArgs(prompt: string, sessionId?: string, model?: string): string[] {
     const args = ['run'];
 
     // Session resume
@@ -159,12 +159,11 @@ export class OpenCodeAgentService implements AgentService {
       args.push('--session', sessionId);
     }
 
-    // Model: opencode expects provider/model format (e.g. anthropic/claude-opus-4-6 or openai/gpt-4o)
-    // Use protocol hint from callbackEnv if available, otherwise default to anthropic
+    // Model is passed through as-is.
+    // Do not silently prepend provider prefixes (e.g. anthropic/, openrouter/).
+    // The user-configured model string is the source of truth.
     const effectiveModel = model ?? this.model;
-    const protocolHint = options?.callbackEnv?.CAT_CAFE_EFFECTIVE_PROTOCOL ?? 'anthropic';
-    const modelStr = effectiveModel.includes('/') ? effectiveModel : `${protocolHint}/${effectiveModel}`;
-    args.push('-m', modelStr);
+    args.push('-m', effectiveModel);
 
     // JSON event stream output
     args.push('--format', 'json');
@@ -205,16 +204,6 @@ export class OpenCodeAgentService implements AgentService {
     // Clean up intermediate env vars (don't leak to child)
     env[OPENCODE_API_KEY_ENV] = null;
     env.OPENCODE_BASE_URL = null;
-
-    // Debug: log final CLI env
-    const protocolHint = callbackEnv?.CAT_CAFE_EFFECTIVE_PROTOCOL ?? 'anthropic';
-    console.info('[opencode/F127-debug] CLI env', {
-      catId: this.catId,
-      profileMode,
-      protocolHint,
-      ANTHROPIC_API_KEY: env[ANTHROPIC_API_KEY_ENV] ? 'sk-***' : '(not set)',
-      ANTHROPIC_BASE_URL: env[ANTHROPIC_BASE_URL_ENV] ? `${String(env[ANTHROPIC_BASE_URL_ENV]).slice(0, 60)}...` : '(not set)',
-    });
 
     return env;
   }
