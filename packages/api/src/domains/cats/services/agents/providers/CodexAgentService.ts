@@ -310,6 +310,17 @@ export class CodexAgentService implements AgentService {
       }
       const codexEnv = applyAuthMode(rawEnv, authMode);
 
+      // Debug: log CLI invocation details
+      console.info('[codex/F127-debug] CLI invocation', {
+        catId: this.catId,
+        model: effectiveModel,
+        authMode,
+        customBaseUrl: customBaseUrl ? `${customBaseUrl.slice(0, 60)}...` : null,
+        customProviderArgs: customProviderArgs.length > 0 ? customProviderArgs : '(none)',
+        hasApiKey: Boolean(codexEnv.OPENAI_API_KEY),
+        envBaseUrl: codexEnv.OPENAI_BASE_URL ?? '(stripped/not set)',
+      });
+
       const semanticCompletionController = new AbortController();
 
       const cliOpts = {

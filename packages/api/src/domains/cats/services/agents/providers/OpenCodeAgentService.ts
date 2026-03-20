@@ -206,6 +206,16 @@ export class OpenCodeAgentService implements AgentService {
     env[OPENCODE_API_KEY_ENV] = null;
     env.OPENCODE_BASE_URL = null;
 
+    // Debug: log final CLI env
+    const protocolHint = callbackEnv?.CAT_CAFE_EFFECTIVE_PROTOCOL ?? 'anthropic';
+    console.info('[opencode/F127-debug] CLI env', {
+      catId: this.catId,
+      profileMode,
+      protocolHint,
+      ANTHROPIC_API_KEY: env[ANTHROPIC_API_KEY_ENV] ? 'sk-***' : '(not set)',
+      ANTHROPIC_BASE_URL: env[ANTHROPIC_BASE_URL_ENV] ? `${String(env[ANTHROPIC_BASE_URL_ENV]).slice(0, 60)}...` : '(not set)',
+    });
+
     return env;
   }
 }
