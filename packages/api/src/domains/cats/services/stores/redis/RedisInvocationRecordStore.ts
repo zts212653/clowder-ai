@@ -111,6 +111,17 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     this.redis = redis;
   }
 
+  /** Resolve ioredis keyPrefix (SCAN doesn't auto-apply it) */
+  private get keyPrefix(): string {
+    return (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+  }
+
+  /** Strip keyPrefix from a raw SCAN key for use with normal commands (which auto-prefix) */
+  private stripPrefix(rawKey: string): string {
+    const p = this.keyPrefix;
+    return p && rawKey.startsWith(p) ? rawKey.slice(p.length) : rawKey;
+  }
+
   async create(input: CreateInvocationInput): Promise<CreateResult> {
     const { randomUUID } = await import('node:crypto');
     const id = randomUUID();
@@ -190,8 +201,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
    * We must manually prepend the prefix for matching, then strip it from results.
    */
   async scanByStatus(status: InvocationStatus): Promise<string[]> {
-    const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
-    const matchPattern = `${prefix}${InvocationKeys.detail('*')}`;
+    const matchPattern = `${this.keyPrefix}${InvocationKeys.detail('*')}`;
     const ids: string[] = [];
     let cursor = '0';
     do {
@@ -200,17 +210,13 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       if (keys.length > 0) {
         const pipeline = this.redis.pipeline();
         for (const key of keys) {
-          // Strip prefix for HGET (ioredis auto-prefixes normal commands)
-          const bareKey = prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key;
-          pipeline.hget(bareKey, 'status');
+          pipeline.hget(this.stripPrefix(key), 'status');
         }
         const results = await pipeline.exec();
         for (let i = 0; i < keys.length; i++) {
           const [err, val] = results?.[i]!;
           if (!err && val === status) {
-            // Extract ID: strip prefix + "invoc:" prefix
-            const bareKey = prefix && keys[i]?.startsWith(prefix) ? keys[i]?.slice(prefix.length) : keys[i]!;
-            ids.push(bareKey.replace(/^invoc:/, ''));
+            ids.push(this.stripPrefix(keys[i]!).replace(/^invoc:/, ''));
           }
         }
       }
@@ -223,8 +229,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
    * Uses Redis SCAN (non-blocking cursor) + pipeline HGETALL for full hydration.
    */
   async scanAll(): Promise<InvocationRecord[]> {
-    const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
-    const matchPattern = `${prefix}${InvocationKeys.detail('*')}`;
+    const matchPattern = `${this.keyPrefix}${InvocationKeys.detail('*')}`;
     const records: InvocationRecord[] = [];
     let cursor = '0';
     do {
@@ -233,8 +238,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       if (keys.length > 0) {
         const pipeline = this.redis.pipeline();
         for (const key of keys) {
-          const bareKey = prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key;
-          pipeline.hgetall(bareKey);
+          pipeline.hgetall(this.stripPrefix(key));
         }
         const results = await pipeline.exec();
         for (const entry of results ?? []) {

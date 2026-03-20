@@ -58,7 +58,7 @@ describe('aggregateUsageByDay', () => {
       outputTokens: 500,
       cacheReadTokens: 200,
       costUsd: 0.05,
-      invocations: 1,
+      participations: 1,
     });
     assert.deepEqual(result.daily[0].total, {
       inputTokens: 1000,
@@ -138,7 +138,7 @@ describe('aggregateUsageByDay', () => {
     assert.equal(result.daily[0].cats.opus.inputTokens, 3000);
     assert.equal(result.daily[0].cats.opus.outputTokens, 1500);
     assert.equal(result.daily[0].cats.opus.costUsd, 0.15);
-    assert.equal(result.daily[0].cats.opus.invocations, 2);
+    assert.equal(result.daily[0].cats.opus.participations, 2);
   });
 
   test('catId filter returns only matching cat data', async () => {
@@ -182,7 +182,7 @@ describe('aggregateUsageByDay', () => {
     assert.equal(result.grandTotal.invocations, 0);
   });
 
-  test('multi-cat invocation counts once per cat', async () => {
+  test('multi-cat invocation: participations per cat, invocations = 1 record', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
     const records = [
       makeRecord('inv-1', '2026-03-19T10:00:00Z', {
@@ -193,10 +193,12 @@ describe('aggregateUsageByDay', () => {
 
     const result = aggregateUsageByDay(records, { days: 7 });
 
-    assert.equal(result.daily[0].cats.opus.invocations, 1);
-    assert.equal(result.daily[0].cats.sonnet.invocations, 1);
-    // total.invocations = sum of per-cat invocations
-    assert.equal(result.daily[0].total.invocations, 2);
+    // Each cat participated once
+    assert.equal(result.daily[0].cats.opus.participations, 1);
+    assert.equal(result.daily[0].cats.sonnet.participations, 1);
+    // But it's ONE invocation (one record), not two
+    assert.equal(result.daily[0].total.invocations, 1);
+    assert.equal(result.grandTotal.invocations, 1);
   });
 
   test('days parameter excludes records outside the window', async () => {

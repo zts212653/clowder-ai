@@ -11,6 +11,17 @@ export interface CatDailyUsage {
   outputTokens: number;
   cacheReadTokens: number;
   costUsd: number;
+  /** Number of times this cat participated (one multi-cat invocation = 1 per cat) */
+  participations: number;
+}
+
+/** Aggregated totals for a day or grand total */
+export interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  /** True invocation count (one multi-cat invocation = 1) */
   invocations: number;
 }
 
@@ -18,14 +29,14 @@ export interface CatDailyUsage {
 export interface DailyUsageEntry {
   date: string; // YYYY-MM-DD
   cats: Record<string, CatDailyUsage>;
-  total: CatDailyUsage;
+  total: UsageTotals;
 }
 
 /** Full aggregation result */
 export interface DailyUsageReport {
   period: { from: string; to: string };
   daily: DailyUsageEntry[];
-  grandTotal: CatDailyUsage;
+  grandTotal: UsageTotals;
 }
 
 export interface AggregateOptions {
@@ -33,12 +44,19 @@ export interface AggregateOptions {
   catId?: string;
 }
 
-function emptyUsage(): CatDailyUsage {
+function emptyCatUsage(): CatDailyUsage {
+  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, participations: 0 };
+}
+
+function emptyTotals(): UsageTotals {
   return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, invocations: 0 };
 }
 
-/** Round costUsd to avoid floating-point drift (keep 6 decimal places) */
-function roundCost(usage: CatDailyUsage): CatDailyUsage {
+function roundCostCat(usage: CatDailyUsage): CatDailyUsage {
+  return { ...usage, costUsd: Math.round(usage.costUsd * 1_000_000) / 1_000_000 };
+}
+
+function roundCostTotals(usage: UsageTotals): UsageTotals {
   return { ...usage, costUsd: Math.round(usage.costUsd * 1_000_000) / 1_000_000 };
 }
 
@@ -58,52 +76,61 @@ export function aggregateUsageByDay(records: InvocationRecord[], options: Aggreg
   const from = toDateString(fromDate.getTime());
 
   // Bucket: date -> catId -> CatDailyUsage
-  const buckets = new Map<string, Map<string, CatDailyUsage>>();
+  const catBuckets = new Map<string, Map<string, CatDailyUsage>>();
+  // Track true invocation count per day (record-level, not per-cat)
+  const dayInvocations = new Map<string, number>();
 
   for (const record of records) {
     if (!record.usageByCat) continue;
 
     const date = toDateString(record.createdAt);
 
-    // P1 fix: skip records outside the requested date window
+    // Skip records outside the requested date window
     if (date < from || date > to) continue;
 
+    let contributed = false;
     for (const [catId, usage] of Object.entries(record.usageByCat)) {
       if (options.catId && catId !== options.catId) continue;
+      contributed = true;
 
-      let dayBucket = buckets.get(date);
+      let dayBucket = catBuckets.get(date);
       if (!dayBucket) {
         dayBucket = new Map();
-        buckets.set(date, dayBucket);
+        catBuckets.set(date, dayBucket);
       }
 
-      const existing = dayBucket.get(catId) ?? emptyUsage();
+      const existing = dayBucket.get(catId) ?? emptyCatUsage();
       existing.inputTokens += usage.inputTokens ?? 0;
       existing.outputTokens += usage.outputTokens ?? 0;
       existing.cacheReadTokens += usage.cacheReadTokens ?? 0;
       existing.costUsd += usage.costUsd ?? 0;
-      existing.invocations += 1;
+      existing.participations += 1;
       dayBucket.set(catId, existing);
+    }
+
+    // Count this record as one invocation (regardless of how many cats participated)
+    if (contributed) {
+      dayInvocations.set(date, (dayInvocations.get(date) ?? 0) + 1);
     }
   }
 
   // Build sorted daily entries (newest first)
-  const dates = [...buckets.keys()].sort((a, b) => b.localeCompare(a));
-  const grandTotal = emptyUsage();
+  const dates = [...catBuckets.keys()].sort((a, b) => b.localeCompare(a));
+  const grandTotal = emptyTotals();
   const daily: DailyUsageEntry[] = [];
 
   for (const date of dates) {
-    const dayBucket = buckets.get(date)!;
+    const dayBucket = catBuckets.get(date)!;
     const cats: Record<string, CatDailyUsage> = {};
-    const dayTotal = emptyUsage();
+    const dayTotal = emptyTotals();
+    dayTotal.invocations = dayInvocations.get(date) ?? 0;
 
     for (const [catId, usage] of dayBucket) {
-      cats[catId] = roundCost(usage);
+      cats[catId] = roundCostCat(usage);
       dayTotal.inputTokens += usage.inputTokens;
       dayTotal.outputTokens += usage.outputTokens;
       dayTotal.cacheReadTokens += usage.cacheReadTokens;
       dayTotal.costUsd += usage.costUsd;
-      dayTotal.invocations += usage.invocations;
     }
 
     grandTotal.inputTokens += dayTotal.inputTokens;
@@ -112,8 +139,8 @@ export function aggregateUsageByDay(records: InvocationRecord[], options: Aggreg
     grandTotal.costUsd += dayTotal.costUsd;
     grandTotal.invocations += dayTotal.invocations;
 
-    daily.push({ date, cats, total: roundCost(dayTotal) });
+    daily.push({ date, cats, total: roundCostTotals(dayTotal) });
   }
 
-  return { period: { from, to }, daily, grandTotal: roundCost(grandTotal) };
+  return { period: { from, to }, daily, grandTotal: roundCostTotals(grandTotal) };
 }
