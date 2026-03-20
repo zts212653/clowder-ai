@@ -62,11 +62,7 @@ describe('HubProviderProfileItem', () => {
         <HubProviderProfileItem
           profile={profile}
           busy={false}
-          activeClients={[]}
-          activationClients={[]}
           onSave={onSave}
-          onActivate={vi.fn(async () => {})}
-          onTest={() => {}}
           onDelete={() => {}}
         />,
       );
@@ -112,11 +108,7 @@ describe('HubProviderProfileItem', () => {
         <HubProviderProfileItem
           profile={profile}
           busy={false}
-          activeClients={[]}
-          activationClients={[]}
           onSave={onSave}
-          onActivate={vi.fn(async () => {})}
-          onTest={() => {}}
           onDelete={() => {}}
         />,
       );
@@ -142,7 +134,7 @@ describe('HubProviderProfileItem', () => {
     expect(payload.baseUrl).toBe('');
   });
 
-  it('keeps the + 添加 model entry visible for built-in cards', async () => {
+  it('keeps the + 添加 model entry visible for built-in cards without binding-scope controls', async () => {
     const profile: ProfileItem = {
       id: 'codex-oauth',
       provider: 'codex-oauth',
@@ -163,11 +155,7 @@ describe('HubProviderProfileItem', () => {
         <HubProviderProfileItem
           profile={profile}
           busy={false}
-          activeClients={[]}
-          activationClients={['openai']}
           onSave={vi.fn(async () => {})}
-          onActivate={vi.fn(async () => {})}
-          onTest={() => {}}
           onDelete={() => {}}
         />,
       );
@@ -175,7 +163,8 @@ describe('HubProviderProfileItem', () => {
 
     expect(container.textContent).toContain('+ 添加');
     expect(container.textContent).not.toContain('编辑');
-    expect(container.textContent).toContain('设为 Codex 默认');
+    expect(container.textContent).not.toContain('绑定范围');
+    expect(container.textContent).not.toContain('设为 Codex 默认');
   });
 
   it('hides unsupported 测试 actions for non-api-key profiles', async () => {
@@ -200,11 +189,7 @@ describe('HubProviderProfileItem', () => {
         <HubProviderProfileItem
           profile={profile}
           busy={false}
-          activeClients={['opencode']}
-          activationClients={['opencode']}
           onSave={vi.fn(async () => {})}
-          onActivate={vi.fn(async () => {})}
-          onTest={() => {}}
           onDelete={() => {}}
         />,
       );
@@ -212,6 +197,6 @@ describe('HubProviderProfileItem', () => {
 
     expect(container.textContent).not.toContain('测试');
     expect(container.textContent).toContain('+ 添加');
-    expect(container.textContent).toContain('OpenCode 默认中');
+    expect(container.textContent).toContain('OpenCode (client-auth)');
   });
 });

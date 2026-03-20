@@ -65,7 +65,7 @@ async function flushEffects() {
 }
 
 async function changeField(
-  element: HTMLInputElement | HTMLSelectElement,
+  element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
   value: string,
   eventType: 'input' | 'change' = 'input',
 ) {
@@ -219,11 +219,8 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/claude-rescue/sessions');
   });
 
-  it('shows verification status for api-key accounts instead of repeating activation badges', async () => {
-    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path.startsWith('/api/provider-profiles/') && path.endsWith('/test') && init?.method === 'POST') {
-        return Promise.resolve(jsonResponse({ ok: true, mode: 'api_key', status: 200 }));
-      }
+  it('does not surface verify or activation controls on provider cards', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/provider-profiles')) {
         return Promise.resolve(
           jsonResponse({
@@ -275,24 +272,14 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('未验证');
-    expect(container.textContent).toContain('当前默认：Claude');
-    expect(container.textContent).toContain('当前默认：Codex');
-    expect(container.textContent).toContain('Claude 默认中');
-
-    await act(async () => {
-      queryButton(container, '测试').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(container.textContent).toContain('验证');
+    expect(container.textContent).not.toContain('验证');
+    expect(container.textContent).not.toContain('当前默认：');
+    expect(container.textContent).not.toContain('默认中');
+    expect(container.textContent).not.toContain('测试');
   });
 
-  it('activates a compatible API-key account for its client from the tab', async () => {
-    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles/codex-sponsor/activate' && init?.method === 'POST') {
-        return Promise.resolve(jsonResponse({ ok: true, profileId: 'codex-sponsor' }));
-      }
+  it('renders provider cards without binding-scope action buttons', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/provider-profiles')) {
         return Promise.resolve(
           jsonResponse({
@@ -360,21 +347,11 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    await act(async () => {
-      queryButton(container, '设为 Codex 默认').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/provider-profiles/codex-sponsor/activate',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ projectPath: undefined, provider: 'openai' }),
-      }),
-    );
+    expect(container.textContent).not.toContain('设为 Codex 默认');
+    expect(container.textContent).not.toContain('绑定范围');
   });
 
-  it('renders API key creation form inline without protocol suggestion copy', async () => {
+  it('renders API key creation form inline without protocol or verify controls', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/provider-profiles')) {
         return Promise.resolve(
@@ -454,18 +431,18 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).toContain('🔒');
     expect(container.textContent).toContain('系统配置 > 账号配置');
     expect(container.textContent).toContain('+ 新建 API Key 账号');
-    expect(container.textContent).not.toContain('协议建议：');
     expect(container.textContent).not.toContain('默认/覆盖模型');
     expect(container.querySelector('input[placeholder="Base URL"]')).toBeTruthy();
-    expect(container.querySelector('select[aria-label="Protocol"]')).toBeTruthy();
     expect(container.querySelector('input[placeholder="API Key"]')).toBeTruthy();
+    expect(container.querySelector('textarea[aria-label="Supported Models"]')).toBeTruthy();
 
     const profileList = container.querySelector('[aria-label="Provider Profile List"]');
     expect(profileList?.textContent).not.toContain('Antigravity');
     expect(container.textContent).toContain('可用模型');
+    expect(container.textContent).not.toContain('测试');
   });
 
-  it('creates api-key profile with the manually selected protocol', async () => {
+  it('creates api-key profile from name, url, api key, and supported models only', async () => {
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/provider-profiles' && init?.method === 'POST') {
         return Promise.resolve(
@@ -514,13 +491,13 @@ describe('CatCafeHub provider profiles tab', () => {
     ) as HTMLInputElement;
     const baseUrlInput = container.querySelector('input[placeholder="Base URL"]') as HTMLInputElement;
     const apiKeyInput = container.querySelector('input[placeholder="API Key"]') as HTMLInputElement;
-    const protocolSelect = container.querySelector('select[aria-label="Protocol"]') as HTMLSelectElement;
+    const modelsInput = container.querySelector('textarea[aria-label="Supported Models"]') as HTMLTextAreaElement;
     const createButton = queryButton(container, '创建');
 
     await changeField(displayNameInput, 'Sponsor Gemini');
     await changeField(baseUrlInput, 'https://llm.sponsor.example/v1');
     await changeField(apiKeyInput, 'sk-test');
-    await changeField(protocolSelect, 'google', 'change');
+    await changeField(modelsInput, 'gemini-2.5-pro, gemini-3.1-pro-preview');
     await flushEffects();
 
     await act(async () => {
@@ -535,7 +512,7 @@ describe('CatCafeHub provider profiles tab', () => {
     const payload = JSON.parse(String(postCall?.[1]?.body));
     expect(payload.displayName).toBe('Sponsor Gemini');
     expect(payload.baseUrl).toBe('https://llm.sponsor.example/v1');
-    expect(payload.protocol).toBe('google');
+    expect(payload.models).toEqual(['gemini-2.5-pro', 'gemini-3.1-pro-preview']);
   });
 
   it('shows built-in and custom provider cards together without the old filter tabs', async () => {
@@ -629,7 +606,7 @@ describe('CatCafeHub provider profiles tab', () => {
     ).toHaveLength(1);
   });
 
-  it('only exposes 测试 on api-key provider cards', async () => {
+  it('does not expose 测试 buttons on provider cards', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/provider-profiles')) {
         return Promise.resolve(
@@ -678,7 +655,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(Array.from(container.querySelectorAll('button')).filter((button) => button.textContent?.trim() === '测试')).toHaveLength(1);
+    expect(Array.from(container.querySelectorAll('button')).filter((button) => button.textContent?.trim() === '测试')).toHaveLength(0);
     expect(container.textContent).toContain('Codex Sponsor');
   });
 

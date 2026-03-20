@@ -387,7 +387,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
               成员协作 &gt; 总览 &gt; {cat ? '编辑成员' : '添加成员'}
             </p>
             <p className="mt-2 text-[15px] leading-6 text-[#8A776B]">
-              默认值继承 cat-template；预设成员与动态成员走同一套表单。
+              身份信息、认证账号、模型与 @ 路由统一在这里维护。
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -427,7 +427,6 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             form={form}
             modelOptions={modelOptions}
             availableProfiles={availableProfiles}
-            selectedProfile={selectedProfile}
             loadingProfiles={loadingProfiles}
             onChange={patchForm}
           />

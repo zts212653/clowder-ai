@@ -205,7 +205,7 @@ describe('HubAddMemberWizard', () => {
     expect(queryField(container, '[aria-label="Client Row 2"]').textContent).toContain('Antigravity');
     expect(container.textContent).toContain('Step 2: 选择 Provider / 配置 CLI');
     expect(container.textContent).toContain('Step 3: 选择模型');
-    expect(container.textContent).toContain('模型列表来自所选 Provider 的配置');
+    expect(container.textContent).toContain('Step 3: 选择模型');
     expect(container.textContent).not.toContain('【');
     expect(container.textContent).not.toContain('非 UI 直出');
 
@@ -213,7 +213,6 @@ describe('HubAddMemberWizard', () => {
     expect(container.textContent).toContain('Codex (OAuth)');
     expect(container.textContent).toContain('Codex Sponsor');
     expect(container.textContent).toContain('Claude Sponsor');
-    expect(container.textContent).toContain('每个 client 只能选自己的内置账号，或任意独立 API Key 账号');
 
     await click(queryButton(container, 'Codex Sponsor'));
     expect(container.textContent).toContain('gpt-5.4-mini');

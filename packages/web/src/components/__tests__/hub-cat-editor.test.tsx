@@ -303,7 +303,7 @@ describe('HubCatEditor', () => {
     expect(container.querySelector('select[aria-label="Provider"]')).toBeNull();
   });
 
-  it('shows the selected client builtin provider and hides incompatible API key providers', async () => {
+  it('shows the selected client builtin account together with all API key accounts', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/provider-profiles') {
         return Promise.resolve(
@@ -355,11 +355,11 @@ describe('HubCatEditor', () => {
     await flushEffects();
     const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
-    expect(optionLabels).toContain('Codex (OAuth)');
-    expect(optionLabels).not.toContain('Claude Sponsor（API Key）');
+    expect(optionLabels).toContain('Codex (OAuth)（内置）');
+    expect(optionLabels).toContain('Claude Sponsor（API Key）');
   });
 
-  it('filters api-key providers by protocol while retaining the selected client builtin provider', () => {
+  it('keeps builtin accounts client-specific while exposing all API key accounts', () => {
     const profiles = [
       {
         id: 'claude-oauth',
@@ -419,13 +419,24 @@ describe('HubCatEditor', () => {
       },
     ];
 
-    expect(filterProfiles('openai', profiles).map((profile) => profile.id)).toEqual(['codex-oauth', 'codex-sponsor']);
+    expect(filterProfiles('openai', profiles).map((profile) => profile.id)).toEqual([
+      'codex-oauth',
+      'claude-sponsor',
+      'codex-sponsor',
+    ]);
     expect(filterProfiles('anthropic', profiles).map((profile) => profile.id)).toEqual([
       'claude-oauth',
       'claude-sponsor',
+      'codex-sponsor',
     ]);
-    expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual(['codex-sponsor']);
-    expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual(['claude-sponsor']);
+    expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual([
+      'claude-sponsor',
+      'codex-sponsor',
+    ]);
+    expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual([
+      'claude-sponsor',
+      'codex-sponsor',
+    ]);
   });
 
   it('preserves existing model when it is not listed in provider defaults', async () => {

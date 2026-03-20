@@ -2758,6 +2758,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       protocol: 'openai',
       baseUrl: 'https://api.bound.example',
       apiKey: 'sk-bound-openai',
+      models: ['claude-sonnet-4-6'],
       setActive: false,
     });
 
@@ -2926,7 +2927,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
   });
 
-  it('F127 P1: fails fast when member-bound profile protocol mismatches provider', async () => {
+  it('F127: ignores legacy api_key protocol metadata when the member explicitly selected the client', async () => {
     const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-bound-mismatch-'));
     const apiDir = join(root, 'packages', 'api');
@@ -2979,8 +2980,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           isLastCat: true,
         }),
       );
-      assert.equal(invokeCount, 0, 'service.invoke should not run when bound profile is incompatible');
-      assert.ok(messages.some((m) => m.type === 'error' && /bound provider profile/i.test(String(m.error))));
+      assert.equal(invokeCount, 1, 'service.invoke should run when api_key profile is member-bound');
+      assert.ok(messages.some((m) => m.type === 'done'));
+      assert.equal(messages.some((m) => m.type === 'error' && /bound provider profile/i.test(String(m.error))), false);
     } finally {
       process.chdir(previousCwd);
       catRegistry.reset();

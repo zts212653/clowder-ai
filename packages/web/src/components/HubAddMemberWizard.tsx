@@ -70,8 +70,8 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   }, [antigravityDefaults.models, client, defaultModel, selectedProfile]);
 
   function profileSubtitle(profile: ProfileItem) {
-    if (profile.builtin) return '当前 client 的内置 provider';
-    return '独立 API Key provider；兼容性由配置人自行保证';
+    if (profile.builtin) return '内置';
+    return 'API Key';
   }
 
   useEffect(() => {
@@ -199,9 +199,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
           <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 1: 选择 Client</h4>
-              <p className="mt-1 text-sm leading-6 text-[#7F7168]">
-                选择要接入的 CLI 工具、Agent 平台或 Antigravity bridge
-              </p>
+              <p className="mt-1 text-sm leading-6 text-[#7F7168]">选择要接入的 CLI 工具、Agent 平台或 Antigravity bridge</p>
             </div>
             {[CLIENT_ROW_1, CLIENT_ROW_2].map((row, index) => (
               <div key={index} aria-label={`Client Row ${index + 1}`} className="flex flex-wrap gap-3">
@@ -251,13 +249,10 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
                     />
                   ))}
                 </div>
-                <p className="text-xs font-semibold leading-5 text-[#BF360C]">
-                  每个 client 只能选自己的内置账号，或任意独立 API Key 账号；系统不校验 API Key 是否真的兼容该 client。
-                </p>
               </>
             ) : (
               <p className="rounded-2xl border border-[#F1E7DF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
-                当前 Client 还没有可绑定的账号。
+                当前 Client 还没有可用 Provider。
               </p>
             )}
           </section>
@@ -265,7 +260,6 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
           <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 3: 选择模型</h4>
-              <p className="mt-1 text-sm leading-6 text-[#7F7168]">模型列表来自所选 Provider 的配置</p>
             </div>
 
             {!client ? (
@@ -274,7 +268,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
               </p>
             ) : client !== 'antigravity' && !selectedProfile ? (
               <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
-                先在 Step 2 绑定一个账号。
+                先在 Step 2 选择 Provider。
               </p>
             ) : selectableModels.length > 0 ? (
               <div className="flex flex-wrap gap-3">

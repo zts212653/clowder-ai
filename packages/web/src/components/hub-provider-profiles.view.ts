@@ -4,14 +4,13 @@ const FALLBACK_BUILTIN_PROFILE_SPECS: Array<{
   client: BuiltinAccountClient;
   id: string;
   displayName: string;
-  protocol: string;
   models: string[];
 }> = [
-  { client: 'anthropic', id: 'claude', displayName: 'Claude (OAuth)', protocol: 'anthropic', models: [] },
-  { client: 'openai', id: 'codex', displayName: 'Codex (OAuth)', protocol: 'openai', models: [] },
-  { client: 'google', id: 'gemini', displayName: 'Gemini (OAuth)', protocol: 'google', models: [] },
-  { client: 'dare', id: 'dare', displayName: 'Dare (client-auth)', protocol: 'openai', models: [] },
-  { client: 'opencode', id: 'opencode', displayName: 'OpenCode (client-auth)', protocol: 'anthropic', models: [] },
+  { client: 'anthropic', id: 'claude', displayName: 'Claude (OAuth)', models: [] },
+  { client: 'openai', id: 'codex', displayName: 'Codex (OAuth)', models: [] },
+  { client: 'google', id: 'gemini', displayName: 'Gemini (OAuth)', models: [] },
+  { client: 'dare', id: 'dare', displayName: 'Dare (client-auth)', models: [] },
+  { client: 'opencode', id: 'opencode', displayName: 'OpenCode (client-auth)', models: [] },
 ];
 
 function inferBuiltinClient(profile: ProfileItem): BuiltinAccountClient | undefined {
@@ -52,7 +51,6 @@ export function ensureBuiltinProviderProfiles(profiles: ProfileItem[]): ProfileI
       builtin: true,
       mode: 'subscription',
       client: spec.client,
-      protocol: spec.protocol,
       models: spec.models,
       hasApiKey: false,
       createdAt: '',
@@ -89,33 +87,4 @@ export function accountTone(profile: ProfileItem): 'purple' | 'green' | 'orange'
 
 export function resolveAccountActionId(profile: ProfileItem): string {
   return profile.id;
-}
-
-export function activationLabel(client: BuiltinAccountClient): string {
-  switch (client) {
-    case 'anthropic':
-      return 'Claude';
-    case 'openai':
-      return 'Codex';
-    case 'google':
-      return 'Gemini';
-    case 'dare':
-      return 'Dare';
-    case 'opencode':
-      return 'OpenCode';
-  }
-}
-
-export function activationClientsForProfile(profile: ProfileItem): BuiltinAccountClient[] {
-  if (profile.client) return [profile.client];
-  switch (profile.protocol) {
-    case 'anthropic':
-      return ['anthropic', 'opencode'];
-    case 'openai':
-      return ['openai', 'dare'];
-    case 'google':
-      return ['google'];
-    default:
-      return [];
-  }
 }

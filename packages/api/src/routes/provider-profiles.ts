@@ -117,6 +117,8 @@ function resolveProviderSelector(selector: string | undefined, fallback: string)
 function inferProbeProtocol(
   baseUrl: string | undefined,
   selector: string | undefined,
+  models: string[] | undefined = [],
+  ...nameHints: Array<string | undefined>
 ): 'anthropic' | 'openai' | 'google' {
   const normalizedSelector = selector?.trim().toLowerCase();
   if (normalizedSelector === 'anthropic' || normalizedSelector === 'claude' || normalizedSelector === 'opencode') {
@@ -126,6 +128,28 @@ function inferProbeProtocol(
     return 'google';
   }
   if (normalizedSelector === 'openai' || normalizedSelector === 'codex' || normalizedSelector === 'dare') {
+    return 'openai';
+  }
+
+  const normalizedModels = models.map((model) => model.trim().toLowerCase()).filter(Boolean);
+  if (normalizedModels.some((model) => model.includes('claude') || model.includes('anthropic'))) {
+    return 'anthropic';
+  }
+  if (normalizedModels.some((model) => model.includes('gemini') || model.includes('google'))) {
+    return 'google';
+  }
+  if (normalizedModels.some((model) => model.includes('gpt') || model.includes('o1') || model.includes('o3'))) {
+    return 'openai';
+  }
+
+  const normalizedHints = nameHints.map((hint) => hint?.trim().toLowerCase() ?? '').filter(Boolean).join(' ');
+  if (normalizedHints.includes('claude') || normalizedHints.includes('anthropic') || normalizedHints.includes('opencode')) {
+    return 'anthropic';
+  }
+  if (normalizedHints.includes('gemini') || normalizedHints.includes('google')) {
+    return 'google';
+  }
+  if (normalizedHints.includes('codex') || normalizedHints.includes('openai') || normalizedHints.includes('dare')) {
     return 'openai';
   }
 
@@ -369,7 +393,16 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
 
     const baseUrl = normalizeBaseUrl(runtime.baseUrl);
     const probeProtocol =
-      runtime.protocol ?? inferProbeProtocol(runtime.baseUrl, parsed.data.protocol ?? parsed.data.provider);
+      runtime.protocol ??
+      inferProbeProtocol(
+        runtime.baseUrl,
+        parsed.data.protocol ?? parsed.data.provider,
+        runtime.models,
+        profile.displayName,
+        profile.name,
+        profile.provider,
+        profile.id,
+      );
     const modelProbePaths = probeProtocol === 'google' ? ['/v1beta/models', '/models', '/v1/models'] : ['/v1/models'];
     let modelsRes: Response | null = null;
     let modelsError: string | null = null;

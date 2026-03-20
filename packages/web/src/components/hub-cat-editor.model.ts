@@ -180,6 +180,12 @@ function isBuiltinClient(client: ClientValue): client is BuiltinAccountClient {
 function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undefined {
   if (profile.client) return profile.client;
   if (profile.oauthLikeClient === 'dare' || profile.oauthLikeClient === 'opencode') return profile.oauthLikeClient;
+  const normalizedId = `${profile.id} ${profile.provider ?? ''} ${profile.displayName} ${profile.name}`.toLowerCase();
+  if (normalizedId.includes('claude')) return 'anthropic';
+  if (normalizedId.includes('codex')) return 'openai';
+  if (normalizedId.includes('gemini')) return 'google';
+  if (normalizedId.includes('dare')) return 'dare';
+  if (normalizedId.includes('opencode')) return 'opencode';
   switch (profile.protocol) {
     case 'anthropic':
       return 'anthropic';
@@ -190,24 +196,6 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
     default:
       return undefined;
   }
-}
-
-function expectedProtocolForClient(client: BuiltinAccountClient): string | null {
-  switch (client) {
-    case 'anthropic':
-    case 'opencode':
-      return 'anthropic';
-    case 'openai':
-    case 'dare':
-      return 'openai';
-    case 'google':
-      return 'google';
-  }
-}
-
-function isApiKeyProfileCompatible(client: BuiltinAccountClient, profile: ProfileItem): boolean {
-  const expectedProtocol = expectedProtocolForClient(client);
-  return !expectedProtocol || !profile.protocol || profile.protocol === expectedProtocol;
 }
 
 export function builtinAccountIdForClient(client: ClientValue): string | null {
@@ -231,9 +219,7 @@ export function filterAccounts(client: ClientValue, profiles: ProfileItem[]): Pr
   const builtinProfiles = profiles.filter(
     (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === client,
   );
-  const apiKeyProfiles = profiles.filter(
-    (profile) => profile.authType === 'api_key' && isApiKeyProfileCompatible(client, profile),
-  );
+  const apiKeyProfiles = profiles.filter((profile) => profile.authType === 'api_key');
   return [...builtinProfiles, ...apiKeyProfiles.filter((profile) => !builtinProfiles.includes(profile))];
 }
 

@@ -32,7 +32,7 @@ export function ProviderProfilesSummaryCard({
         ) : null}
       </div>
       <p className="mt-2 text-[13px] leading-6 text-[#8A776B]">
-        账号配置管理认证资源和 provider 级模型列表。成员侧单独选择 client、绑定 provider、再选择模型；API Key provider 不和任何 client 预绑定。
+        每个账号可添加或删除模型。
       </p>
     </div>
   );
@@ -40,39 +40,31 @@ export function ProviderProfilesSummaryCard({
 
 export function CreateApiKeyProfileSection({
   displayName,
-  protocol,
   baseUrl,
   apiKey,
+  modelsText,
   busy,
   onDisplayNameChange,
-  onProtocolChange,
   onBaseUrlChange,
   onApiKeyChange,
+  onModelsTextChange,
   onCreate,
 }: {
   displayName: string;
-  protocol: 'anthropic' | 'openai' | 'google';
   baseUrl: string;
   apiKey: string;
+  modelsText: string;
   busy: boolean;
   onDisplayNameChange: (value: string) => void;
-  onProtocolChange: (value: 'anthropic' | 'openai' | 'google') => void;
   onBaseUrlChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
+  onModelsTextChange: (value: string) => void;
   onCreate: () => void;
 }) {
   return (
     <div className="rounded-[20px] border border-[#E8C9AF] bg-[#F7EEE6] p-[18px]">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h4 className="text-base font-bold text-[#D49266]">+ 新建 API Key 账号</h4>
-          <p className="mt-1 text-xs leading-5 text-[#8A776B]">
-            只填写显示名、Base URL 和 API Key。它是独立 provider 资源，不预先绑定任何 client。
-          </p>
-        </div>
-        <span className="rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-[#B07A4C]">
-          创建后去成员编辑里绑定
-        </span>
+        <h4 className="text-base font-bold text-[#D49266]">+ 新建 API Key 账号</h4>
       </div>
       <div className="mt-4 space-y-3">
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
@@ -83,18 +75,8 @@ export function CreateApiKeyProfileSection({
             className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
           />
           <div className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm text-[#8A776B]">
-            独立 API Key 账号（无 client 归属）
+            API Key 账号
           </div>
-          <select
-            aria-label="Protocol"
-            value={protocol}
-            onChange={(e) => onProtocolChange(e.target.value as 'anthropic' | 'openai' | 'google')}
-            className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
-          >
-            <option value="openai">openai</option>
-            <option value="anthropic">anthropic</option>
-            <option value="google">google</option>
-          </select>
           <input
             value={baseUrl}
             onChange={(e) => onBaseUrlChange(e.target.value)}
@@ -107,10 +89,14 @@ export function CreateApiKeyProfileSection({
             placeholder="API Key"
             className="rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm md:col-span-2"
           />
+          <textarea
+            aria-label="Supported Models"
+            value={modelsText}
+            onChange={(e) => onModelsTextChange(e.target.value)}
+            placeholder="支持模型（逗号或换行分隔）"
+            className="min-h-[92px] rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm md:col-span-2"
+          />
         </div>
-        <p className="text-xs leading-5 text-[#8A776B]">
-          不校验这个 Base URL / API Key 是否适配某个 client；兼容性由配置人自己负责。
-        </p>
         <button
           type="button"
           onClick={onCreate}

@@ -193,27 +193,19 @@ export function AccountSection({
   form,
   modelOptions,
   availableProfiles,
-  selectedProfile,
   loadingProfiles,
   onChange,
 }: {
   form: HubCatEditorFormState;
   modelOptions: string[];
   availableProfiles: ProfileItem[];
-  selectedProfile: ProfileItem | null;
   loadingProfiles: boolean;
   onChange: (patch: FormPatch) => void;
 }) {
   const accountOptions = availableProfiles;
 
   return (
-    <SectionCard
-      title="认证与模型"
-      description="成员侧单独选择 client、绑定 provider、再选择模型。API Key provider 不和任何 client 预绑定，但 provider 本身维护可选模型列表。"
-    >
-      <p className="text-xs font-semibold leading-5 text-[#BF360C]">
-        ⚠️ 约束：每个 client 只能选自己的内置账号，或任意独立 API Key 账号；不校验 API Key 账号是否真的兼容该 client。
-      </p>
+    <SectionCard title="认证与模型">
       <div className="space-y-2">
         <SelectField
           label="Client"
@@ -241,10 +233,10 @@ export function AccountSection({
               label="Provider"
               value={form.accountRef}
               options={[
-                { value: '', label: loadingProfiles ? '加载中…' : '未绑定' },
+                { value: '', label: loadingProfiles ? '加载中…' : '请选择' },
                 ...accountOptions.map((profile) => ({
                   value: profile.id,
-                  label: profile.builtin ? profile.displayName : `${profile.displayName}（API Key）`,
+                  label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
                 })),
               ]}
               onChange={(value) => onChange({ accountRef: value })}
@@ -264,12 +256,6 @@ export function AccountSection({
                 onChange={(value) => onChange({ defaultModel: value })}
               />
             )}
-            {selectedProfile ? (
-              <p className="text-[11px] leading-5 text-[#8A776B] sm:ml-[152px]">
-                当前绑定账号：{selectedProfile.displayName}
-                {selectedProfile.builtin ? '（内置 provider）' : '（独立 API Key provider）'}
-              </p>
-            ) : null}
           </>
         )}
       </div>
@@ -291,10 +277,7 @@ export function RoutingSection({
   const lockedTags = catId ? [canonicalMentionPattern(catId)] : [];
 
   return (
-    <SectionCard
-      title="别名与 @ 路由"
-      description="默认包含 @catId；前端自动 @ 仅提示首个 mention，后续别名仍可路由但不进入提示列表。唯一性校验自动进行。"
-    >
+    <SectionCard title="别名与 @ 路由">
       <div className="sm:ml-[152px]">
         <TagEditor
           tags={aliases}

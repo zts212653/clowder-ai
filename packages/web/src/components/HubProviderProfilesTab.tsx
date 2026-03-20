@@ -9,16 +9,15 @@ import {
   ProviderProfilesSummaryCard,
 } from './hub-provider-profiles.sections';
 import {
-  activationClientsForProfile,
   ensureBuiltinProviderProfiles,
   resolveAccountActionId,
 } from './hub-provider-profiles.view';
-import type {
-  BuiltinAccountClient,
-  ProfileTestResult,
-  ProviderProfilesResponse,
-} from './hub-provider-profiles.types';
+import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
 import { getProjectPaths, projectDisplayName } from './ThreadSidebar/thread-utils';
+
+function parseModelsInput(raw: string): string[] {
+  return Array.from(new Set(raw.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean)));
+}
 
 export function HubProviderProfilesTab() {
   const threads = useChatStore((s) => s.threads);
@@ -29,11 +28,10 @@ export function HubProviderProfilesTab() {
   const [data, setData] = useState<ProviderProfilesResponse | null>(null);
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [testResultById, setTestResultById] = useState<Record<string, ProfileTestResult>>({});
   const [createDisplayName, setCreateDisplayName] = useState('');
-  const [createProtocol, setCreateProtocol] = useState<'anthropic' | 'openai' | 'google'>('openai');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
+  const [createModelsText, setCreateModelsText] = useState('');
 
   const fetchProfiles = useCallback(async (forProject?: string) => {
     setError(null);
@@ -105,14 +103,15 @@ export function HubProviderProfilesTab() {
           projectPath: projectPath ?? undefined,
           displayName: createDisplayName.trim(),
           authType: 'api_key',
-          protocol: createProtocol,
           baseUrl: createBaseUrl.trim(),
           apiKey: createApiKey.trim(),
+          models: parseModelsInput(createModelsText),
         }),
       });
       setCreateDisplayName('');
       setCreateBaseUrl('');
       setCreateApiKey('');
+      setCreateModelsText('');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -124,7 +123,7 @@ export function HubProviderProfilesTab() {
     createApiKey,
     createBaseUrl,
     createDisplayName,
-    createProtocol,
+    createModelsText,
     projectPath,
     refresh,
   ]);
@@ -172,49 +171,6 @@ export function HubProviderProfilesTab() {
     [callApi, projectPath, refresh],
   );
 
-  const activateProfile = useCallback(
-    async (profileId: string, client: BuiltinAccountClient) => {
-      setBusyId(`${profileId}:activate:${client}`);
-      setError(null);
-      try {
-        await callApi(`/api/provider-profiles/${profileId}/activate`, {
-          method: 'POST',
-          body: JSON.stringify({
-            projectPath: projectPath ?? undefined,
-            provider: client,
-          }),
-        });
-        await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [callApi, projectPath, refresh],
-  );
-
-  const testProfile = useCallback(
-    async (profileId: string) => {
-      setBusyId(profileId);
-      setError(null);
-      try {
-        const body = (await callApi(`/api/provider-profiles/${profileId}/test`, {
-          method: 'POST',
-          body: JSON.stringify({
-            projectPath: projectPath ?? undefined,
-          }),
-        })) as unknown as ProfileTestResult;
-        setTestResultById((prev) => ({ ...prev, [profileId]: body }));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [callApi, projectPath],
-  );
-
   const allPaths = useMemo(() => {
     const paths = new Set<string>();
     if (data?.projectPath) paths.add(data.projectPath);
@@ -226,18 +182,6 @@ export function HubProviderProfilesTab() {
   const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
   const customProfiles = useMemo(() => displayProfiles.filter((profile) => !profile.builtin), [displayProfiles]);
   const displayCards = useMemo(() => [...builtinProfiles, ...customProfiles], [builtinProfiles, customProfiles]);
-
-  const activeClientsForProfile = useCallback(
-    (profileId: string) =>
-      (
-        Object.entries(data?.bootstrapBindings ?? {}) as Array<
-          [BuiltinAccountClient, { enabled?: boolean; accountRef?: string } | undefined]
-        >
-      )
-        .filter(([, binding]) => binding?.enabled && binding.accountRef === profileId)
-        .map(([client]) => client),
-    [data?.bootstrapBindings],
-  );
 
   if (loading) return <p className="text-sm text-gray-400">加载中...</p>;
   if (!data) return <p className="text-sm text-gray-400">暂无数据</p>;
@@ -258,16 +202,8 @@ export function HubProviderProfilesTab() {
           <HubProviderProfileItem
             key={profile.id}
             profile={profile}
-            busy={
-              busyId === resolveAccountActionId(profile) ||
-              busyId?.startsWith(`${resolveAccountActionId(profile)}:activate:`) === true
-            }
-            testResult={testResultById[resolveAccountActionId(profile)]}
-            activeClients={activeClientsForProfile(profile.id)}
-            activationClients={activationClientsForProfile(profile)}
+            busy={busyId === resolveAccountActionId(profile)}
             onSave={(_profileId, payload) => saveProfile(resolveAccountActionId(profile), payload)}
-            onActivate={(_profileId, client) => activateProfile(resolveAccountActionId(profile), client)}
-            onTest={() => testProfile(resolveAccountActionId(profile))}
             onDelete={() => deleteProfile(resolveAccountActionId(profile))}
           />
         ))}
@@ -275,18 +211,18 @@ export function HubProviderProfilesTab() {
 
       <CreateApiKeyProfileSection
         displayName={createDisplayName}
-        protocol={createProtocol}
         baseUrl={createBaseUrl}
         apiKey={createApiKey}
+        modelsText={createModelsText}
         busy={busyId === 'create'}
         onDisplayNameChange={setCreateDisplayName}
-        onProtocolChange={setCreateProtocol}
         onBaseUrlChange={setCreateBaseUrl}
         onApiKeyChange={setCreateApiKey}
+        onModelsTextChange={setCreateModelsText}
         onCreate={createProfile}
       />
       <p className="text-xs leading-5 text-[#B59A88]">
-        secrets 继续存储在 `.cat-cafe/provider-profiles.secrets.local.json`，Git 忽略，worktree 间共享。
+        secrets 存储在 `.cat-cafe/provider-profiles.secrets.local.json`，Git 忽略。
       </p>
     </div>
   );

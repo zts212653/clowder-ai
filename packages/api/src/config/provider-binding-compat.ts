@@ -1,5 +1,5 @@
 import type { CatProvider } from '@cat-cafe/shared';
-import type { BuiltinAccountClient, ProviderProfileProtocol, RuntimeProviderProfile } from './provider-profiles.types.js';
+import type { BuiltinAccountClient, RuntimeProviderProfile } from './provider-profiles.types.js';
 
 export function resolveBuiltinClientForProvider(provider: CatProvider): BuiltinAccountClient | null {
   switch (provider) {
@@ -18,21 +18,6 @@ export function resolveBuiltinClientForProvider(provider: CatProvider): BuiltinA
   }
 }
 
-export function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProfileProtocol | null {
-  switch (provider) {
-    case 'anthropic':
-    case 'opencode':
-      return 'anthropic';
-    case 'openai':
-    case 'dare':
-      return 'openai';
-    case 'google':
-      return 'google';
-    default:
-      return null;
-  }
-}
-
 export function validateRuntimeProviderBinding(
   provider: CatProvider,
   profile: RuntimeProviderProfile,
@@ -40,11 +25,6 @@ export function validateRuntimeProviderBinding(
 ): string | null {
   const expectedClient = resolveBuiltinClientForProvider(provider);
   if (expectedClient && profile.kind === 'builtin' && profile.client && profile.client !== expectedClient) {
-    return `bound provider profile "${profile.id}" is incompatible with client "${provider}"`;
-  }
-
-  const expectedProtocol = resolveExpectedProtocolForProvider(provider);
-  if (expectedProtocol && profile.protocol && profile.protocol !== expectedProtocol) {
     return `bound provider profile "${profile.id}" is incompatible with client "${provider}"`;
   }
 

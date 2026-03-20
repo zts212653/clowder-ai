@@ -484,7 +484,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(patchBody.error, /provider "claude-oauth" not found/i);
   });
 
-  it('POST /api/cats rejects provider bindings whose protocol is incompatible with the selected client', async () => {
+  it('POST /api/cats allows generic api_key bindings even when legacy protocol metadata does not match the selected client', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -495,7 +495,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       protocol: 'openai',
       baseUrl: 'https://api.bound.example',
       apiKey: 'sk-bound-openai',
-      models: ['gpt-5.4'],
+      models: ['claude-sonnet-4-6'],
     });
 
     const Fastify = (await import('fastify')).default;
@@ -525,9 +525,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       }),
     });
 
-    assert.equal(createRes.statusCode, 400);
+    assert.equal(createRes.statusCode, 201);
     const createBody = JSON.parse(createRes.body);
-    assert.match(createBody.error, /incompatible with client "opencode"/i);
+    assert.equal(createBody.cat.id, 'runtime-opencode-mismatch');
+    assert.equal(createBody.cat.accountRef, mismatchedProfile.id);
   });
 
   it('POST /api/cats rejects builtin bindings from the wrong client family even when protocol matches', async () => {

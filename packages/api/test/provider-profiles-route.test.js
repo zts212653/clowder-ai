@@ -145,9 +145,9 @@ describe('provider profiles routes', () => {
         headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
         payload: JSON.stringify({
           projectPath: projectDir,
+          provider: 'anthropic',
           displayName: 'sponsor-route',
           authType: 'api_key',
-          protocol: 'anthropic',
           baseUrl: 'https://api.route.dev',
           apiKey: 'sk-route',
           models: ['claude-opus-4-6'],
@@ -157,7 +157,6 @@ describe('provider profiles routes', () => {
       assert.equal(createRes.statusCode, 200);
       const created = createRes.json();
       assert.equal(created.profile.authType, 'api_key');
-      assert.equal(created.profile.protocol, 'anthropic');
       assert.equal(created.profile.hasApiKey, true);
 
       const listRes = await app.inject({
@@ -208,7 +207,6 @@ describe('provider profiles routes', () => {
           projectPath: projectDir,
           displayName: 'sponsor-test',
           authType: 'api_key',
-          protocol: 'anthropic',
           baseUrl: 'https://api.route.dev',
           apiKey: 'sk-route',
           models: ['claude-opus-4-6'],
@@ -223,6 +221,7 @@ describe('provider profiles routes', () => {
         headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
         payload: JSON.stringify({
           projectPath: projectDir,
+          protocol: 'anthropic',
         }),
       });
       assert.equal(testRes.statusCode, 200);
@@ -264,7 +263,6 @@ describe('provider profiles routes', () => {
           projectPath: projectDir,
           displayName: 'felix',
           authType: 'api_key',
-          protocol: 'anthropic',
           baseUrl: 'https://chat.nuoda.vip/claudecode',
           apiKey: 'sk-route',
           models: ['claude-opus-4-6'],
@@ -279,6 +277,7 @@ describe('provider profiles routes', () => {
         headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
         payload: JSON.stringify({
           projectPath: projectDir,
+          protocol: 'anthropic',
         }),
       });
       assert.equal(testRes.statusCode, 200);
@@ -327,7 +326,6 @@ describe('provider profiles routes', () => {
           projectPath: projectDir,
           displayName: 'felix-invalid-model',
           authType: 'api_key',
-          protocol: 'anthropic',
           baseUrl: 'https://chat.nuoda.vip/claudecode',
           apiKey: 'sk-route',
           models: ['claude-opus-4-6'],
@@ -374,7 +372,6 @@ describe('provider profiles routes', () => {
           projectPath: projectDir,
           displayName: '   ',
           authType: 'api_key',
-          protocol: 'anthropic',
         }),
       });
       assert.equal(createRes.statusCode, 400);
@@ -407,7 +404,6 @@ describe('provider profiles routes', () => {
           projectPath: projectDir,
           displayName: 'codex-sponsor',
           authType: 'api_key',
-          protocol: 'openai',
           baseUrl: 'https://api.openai-proxy.dev',
           apiKey: 'sk-openai',
           models: ['gpt-5.4'],
@@ -460,7 +456,6 @@ describe('provider profiles routes', () => {
           projectPath: projectDir,
           displayName: 'gemini-sponsor',
           authType: 'api_key',
-          protocol: 'google',
           baseUrl: 'https://generativelanguage.googleapis.com',
           apiKey: 'gsk-google',
           models: ['gemini-2.5-pro'],
