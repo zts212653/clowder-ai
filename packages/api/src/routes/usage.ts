@@ -2,19 +2,20 @@
  * Usage Routes — F051 daily consumption
  * GET /api/usage/daily — 按日 × 猫聚合 token 消耗报表
  *
- * Scope: workspace-global (same as /api/quota). Per-user isolation is F077 scope.
- * Current system is single-user; all dashboard routes share this pattern.
+ * Auth: requires X-Cat-Cafe-User identity header.
+ * Data is scoped to the requesting user's invocations.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type DailyUsageReport, aggregateUsageByDay } from '../domains/cats/services/usage-aggregator.js';
+import { resolveUserId } from '../utils/request-identity.js';
 
 export interface UsageRoutesOptions {
   invocationRecordStore: IInvocationRecordStore;
 }
 
-/** Simple in-memory response cache with TTL */
+/** Simple in-memory response cache with TTL, keyed by userId+days+catId */
 interface CacheEntry {
   key: string;
   report: DailyUsageReport;
@@ -22,11 +23,12 @@ interface CacheEntry {
 }
 
 const CACHE_TTL_MS = 60_000; // 60 seconds
-let cache: CacheEntry | null = null;
+const cacheMap = new Map<string, CacheEntry>();
+const MAX_CACHE_ENTRIES = 20;
 
 /** @internal — exposed for testing */
 export function clearUsageCache(): void {
-  cache = null;
+  cacheMap.clear();
 }
 
 export const usageRoutes: FastifyPluginAsync<UsageRoutesOptions> = async (app, opts) => {
@@ -41,21 +43,34 @@ export const usageRoutes: FastifyPluginAsync<UsageRoutesOptions> = async (app, o
       });
     }
 
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    if (!userId) {
+      return reply.status(401).send({ error: 'Missing user identity' });
+    }
+
     const daysParam = request.query.days;
     const days = daysParam ? Math.min(Math.max(1, parseInt(daysParam, 10) || 7), 7) : 7;
     const catId = request.query.catId || undefined;
     const forceRefresh = request.query.refresh === '1';
-    const cacheKey = `${days}:${catId ?? ''}`;
+    const cacheKey = `${userId}:${days}:${catId ?? ''}`;
 
     // Return cached response if valid (unless force refresh)
-    if (!forceRefresh && cache && cache.key === cacheKey && cache.expiresAt > Date.now()) {
-      return cache.report;
+    const cached = cacheMap.get(cacheKey);
+    if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+      return cached.report;
     }
 
-    const records = await store.scanAll();
-    const report = aggregateUsageByDay(records, { days, catId });
+    const allRecords = await store.scanAll();
+    // Filter to requesting user's invocations only
+    const userRecords = allRecords.filter((r) => r.userId === userId);
+    const report = aggregateUsageByDay(userRecords, { days, catId });
 
-    cache = { key: cacheKey, report, expiresAt: Date.now() + CACHE_TTL_MS };
+    // Evict oldest if cache is full
+    if (cacheMap.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = cacheMap.keys().next().value as string;
+      cacheMap.delete(oldestKey);
+    }
+    cacheMap.set(cacheKey, { key: cacheKey, report, expiresAt: Date.now() + CACHE_TTL_MS });
 
     return report;
   });

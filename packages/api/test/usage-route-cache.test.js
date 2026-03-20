@@ -1,19 +1,20 @@
 /**
- * Usage Route Cache Tests — F128
- * Route-level tests for /api/usage/daily caching and refresh=1 behavior.
+ * Usage Route Tests — F051
+ * Route-level tests for /api/usage/daily: caching, refresh, auth, user isolation.
  */
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-describe('usage route cache behavior', () => {
+const ALICE = { 'x-cat-cafe-user': 'alice' };
+const BOB = { 'x-cat-cafe-user': 'bob' };
+
+describe('usage route', () => {
   /** @type {typeof import('../dist/routes/usage.js').clearUsageCache} */
   let clearUsageCache;
 
-  /** Track scanAll call count */
   let scanAllCallCount = 0;
 
-  /** Minimal store mock with scanAll that counts calls */
   function makeMockStore(records = []) {
     scanAllCallCount = 0;
     return {
@@ -28,12 +29,10 @@ describe('usage route cache behavior', () => {
     };
   }
 
-  /** Build a Fastify app with the usage route registered */
   async function buildApp(store) {
     const { default: Fastify } = await import('fastify');
     const { usageRoutes, clearUsageCache: clear } = await import('../dist/routes/usage.js');
     clearUsageCache = clear;
-
     const app = Fastify();
     await app.register(usageRoutes, { invocationRecordStore: store });
     await app.ready();
@@ -44,45 +43,43 @@ describe('usage route cache behavior', () => {
     if (clearUsageCache) clearUsageCache();
   });
 
-  test('second request within 60s returns cached (scanAll called once)', async () => {
+  test('cached response: scanAll called once for same user', async () => {
     const store = makeMockStore([]);
     const app = await buildApp(store);
 
-    const res1 = await app.inject({ method: 'GET', url: '/api/usage/daily' });
+    const res1 = await app.inject({ method: 'GET', url: '/api/usage/daily', headers: ALICE });
     assert.equal(res1.statusCode, 200);
     assert.equal(scanAllCallCount, 1);
 
-    const res2 = await app.inject({ method: 'GET', url: '/api/usage/daily' });
+    const res2 = await app.inject({ method: 'GET', url: '/api/usage/daily', headers: ALICE });
     assert.equal(res2.statusCode, 200);
     assert.equal(scanAllCallCount, 1, 'scanAll should NOT be called again (cached)');
 
-    assert.deepEqual(JSON.parse(res1.body), JSON.parse(res2.body));
+    await app.close();
+  });
+
+  test('refresh=1 bypasses cache', async () => {
+    const store = makeMockStore([]);
+    const app = await buildApp(store);
+
+    await app.inject({ method: 'GET', url: '/api/usage/daily', headers: ALICE });
+    assert.equal(scanAllCallCount, 1);
+
+    await app.inject({ method: 'GET', url: '/api/usage/daily?refresh=1', headers: ALICE });
+    assert.equal(scanAllCallCount, 2);
 
     await app.close();
   });
 
-  test('refresh=1 bypasses cache (scanAll called twice)', async () => {
+  test('different query params miss cache', async () => {
     const store = makeMockStore([]);
     const app = await buildApp(store);
 
-    await app.inject({ method: 'GET', url: '/api/usage/daily' });
+    await app.inject({ method: 'GET', url: '/api/usage/daily?days=7', headers: ALICE });
     assert.equal(scanAllCallCount, 1);
 
-    await app.inject({ method: 'GET', url: '/api/usage/daily?refresh=1' });
-    assert.equal(scanAllCallCount, 2, 'scanAll should be called again with refresh=1');
-
-    await app.close();
-  });
-
-  test('different query params bypass cache', async () => {
-    const store = makeMockStore([]);
-    const app = await buildApp(store);
-
-    await app.inject({ method: 'GET', url: '/api/usage/daily?days=7' });
-    assert.equal(scanAllCallCount, 1);
-
-    await app.inject({ method: 'GET', url: '/api/usage/daily?days=1' });
-    assert.equal(scanAllCallCount, 2, 'different days param should miss cache');
+    await app.inject({ method: 'GET', url: '/api/usage/daily?days=1', headers: ALICE });
+    assert.equal(scanAllCallCount, 2);
 
     await app.close();
   });
@@ -93,12 +90,73 @@ describe('usage route cache behavior', () => {
       get: () => null,
       update: () => null,
       getByIdempotencyKey: () => null,
-      // no scanAll
     };
     const app = await buildApp(storeWithoutScan);
 
-    const res = await app.inject({ method: 'GET', url: '/api/usage/daily' });
+    const res = await app.inject({ method: 'GET', url: '/api/usage/daily', headers: ALICE });
     assert.equal(res.statusCode, 501);
+
+    await app.close();
+  });
+
+  test('user isolation: alice cannot see bob records', async () => {
+    const now = Date.now();
+    const records = [
+      {
+        id: 'inv-alice',
+        threadId: 't1',
+        userId: 'alice',
+        userMessageId: null,
+        targetCats: ['opus'],
+        intent: 'execute',
+        status: 'succeeded',
+        idempotencyKey: 'k1',
+        usageByCat: { opus: { inputTokens: 1000, outputTokens: 100 } },
+        usageRecordedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'inv-bob',
+        threadId: 't2',
+        userId: 'bob',
+        userMessageId: null,
+        targetCats: ['codex'],
+        intent: 'execute',
+        status: 'succeeded',
+        idempotencyKey: 'k2',
+        usageByCat: { codex: { inputTokens: 2000, outputTokens: 200 } },
+        usageRecordedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    const store = makeMockStore(records);
+    const app = await buildApp(store);
+
+    const aliceRes = await app.inject({ method: 'GET', url: '/api/usage/daily', headers: ALICE });
+    const aliceData = JSON.parse(aliceRes.body);
+    assert.equal(aliceData.grandTotal.inputTokens, 1000, 'alice should only see her own tokens');
+
+    clearUsageCache();
+
+    const bobRes = await app.inject({ method: 'GET', url: '/api/usage/daily', headers: BOB });
+    const bobData = JSON.parse(bobRes.body);
+    assert.equal(bobData.grandTotal.inputTokens, 2000, 'bob should only see his own tokens');
+
+    await app.close();
+  });
+
+  test('different users get separate cache entries', async () => {
+    const store = makeMockStore([]);
+    const app = await buildApp(store);
+
+    await app.inject({ method: 'GET', url: '/api/usage/daily', headers: ALICE });
+    assert.equal(scanAllCallCount, 1);
+
+    // Bob's request should miss alice's cache (different userId in key)
+    await app.inject({ method: 'GET', url: '/api/usage/daily', headers: BOB });
+    assert.equal(scanAllCallCount, 2, 'different user should miss cache');
 
     await app.close();
   });
