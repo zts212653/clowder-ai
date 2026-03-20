@@ -342,7 +342,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
 
       result[catId] = {
         id: createCatId(catId),
-        name: catId,
+        name: variant.displayName ?? breed.name,
         displayName: variant.displayName ?? breed.displayName,
         ...(breed.nickname != null ? { nickname: breed.nickname } : {}),
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override

@@ -49,11 +49,10 @@ export function IdentitySection({
       {!cat ? (
         <div className="space-y-2">
           <TextField label="Cat ID" value={form.catId} onChange={(value) => onChange({ catId: value })} />
-          <TextField label="Name" value={form.name} onChange={(value) => onChange({ name: value })} />
           <TextField
-            label="Display Name"
-            value={form.displayName}
-            onChange={(value) => onChange({ displayName: value })}
+            label="Name"
+            value={form.name}
+            onChange={(value) => onChange({ name: value, displayName: value })}
           />
         </div>
       ) : (
@@ -108,30 +107,22 @@ export function IdentitySection({
       <div className="flex items-center gap-3">
         <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Background Color</span>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1">
-            <span
-              className="h-6 w-6 rounded border border-white shadow-sm"
-              style={{ backgroundColor: form.colorPrimary }}
-            />
+          <label title="Primary">
             <input
               type="color"
               aria-label="Background Color Primary"
               value={form.colorPrimary}
               onChange={(event) => onChange({ colorPrimary: event.target.value })}
-              className="h-6 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
             />
           </label>
-          <label className="flex items-center gap-1">
-            <span
-              className="h-6 w-6 rounded border border-white shadow-sm"
-              style={{ backgroundColor: form.colorSecondary }}
-            />
+          <label title="Secondary">
             <input
               type="color"
               aria-label="Background Color Secondary"
               value={form.colorSecondary}
               onChange={(event) => onChange({ colorSecondary: event.target.value })}
-              className="h-6 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
             />
           </label>
         </div>
@@ -142,11 +133,7 @@ export function IdentitySection({
         value={form.teamStrengths}
         onChange={(value) => onChange({ teamStrengths: value })}
       />
-      <TextField
-        label="Personality"
-        value={form.personality}
-        onChange={(value) => onChange({ personality: value })}
-      />
+      <TextField label="Personality" value={form.personality} onChange={(value) => onChange({ personality: value })} />
       <TextField
         label="Caution"
         value={form.caution}

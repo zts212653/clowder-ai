@@ -83,7 +83,7 @@ export interface CatState {
 export const CAT_CONFIGS: Record<string, CatConfig> = {
   opus: {
     id: createCatId('opus'),
-    name: 'opus',
+    name: '布偶猫',
     displayName: '布偶猫',
     nickname: '宪宪',
     avatar: '/avatars/opus.png',
@@ -101,7 +101,7 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
   },
   codex: {
     id: createCatId('codex'),
-    name: 'codex',
+    name: '缅因猫',
     displayName: '缅因猫',
     nickname: '砚砚',
     avatar: '/avatars/codex.png',
@@ -119,7 +119,7 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
   },
   gemini: {
     id: createCatId('gemini'),
-    name: 'gemini',
+    name: '暹罗猫',
     displayName: '暹罗猫',
     avatar: '/avatars/gemini.png',
     color: {
