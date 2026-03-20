@@ -83,9 +83,9 @@ export function aggregateUsageByDay(records: InvocationRecord[], options: Aggreg
   for (const record of records) {
     if (!record.usageByCat) continue;
 
-    // Bucket by updatedAt: usageByCat is written on invocation completion,
-    // which updates updatedAt. Using createdAt would misattribute cross-midnight calls.
-    const date = toDateString(record.updatedAt);
+    // Bucket by usageRecordedAt (stable, set once when usageByCat is first written).
+    // Falls back to updatedAt for records created before F128 added this field.
+    const date = toDateString(record.usageRecordedAt ?? record.updatedAt);
 
     // Skip records outside the requested date window
     if (date < from || date > to) continue;

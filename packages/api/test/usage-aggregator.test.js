@@ -22,11 +22,13 @@ describe('aggregateUsageByDay', () => {
   }
 
   /**
-   * Build a minimal InvocationRecord. Both createdAt and updatedAt default
-   * to the given timestamp (aggregator buckets by updatedAt).
+   * Build a minimal InvocationRecord. usageRecordedAt defaults to the given
+   * timestamp (aggregator prefers usageRecordedAt > updatedAt > createdAt).
+   * Pass opts.createdAt / opts.updatedAt to simulate cross-midnight scenarios.
    */
-  function makeRecord(id, ts, usageByCat, status = 'succeeded') {
+  function makeRecord(id, ts, usageByCat, statusOrOpts = 'succeeded') {
     const epoch = typeof ts === 'number' ? ts : new Date(ts).getTime();
+    const opts = typeof statusOrOpts === 'string' ? { status: statusOrOpts } : statusOrOpts;
     return {
       id,
       threadId: 'thread-1',
@@ -34,11 +36,12 @@ describe('aggregateUsageByDay', () => {
       userMessageId: null,
       targetCats: Object.keys(usageByCat),
       intent: 'execute',
-      status,
+      status: opts.status ?? 'succeeded',
       idempotencyKey: `key-${id}`,
       usageByCat,
-      createdAt: epoch,
-      updatedAt: epoch,
+      createdAt: opts.createdAt ?? epoch,
+      updatedAt: opts.updatedAt ?? epoch,
+      usageRecordedAt: opts.usageRecordedAt ?? epoch,
     };
   }
 
@@ -282,5 +285,55 @@ describe('aggregateUsageByDay', () => {
     assert.equal(result.daily[0].cats.opus.outputTokens, 0);
     assert.equal(result.daily[0].cats.opus.cacheReadTokens, 0);
     assert.equal(result.daily[0].cats.opus.costUsd, 0);
+  });
+
+  test('cross-midnight: usageRecordedAt on next day overrides createdAt/updatedAt', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
+    // Invocation created before midnight, usage recorded after midnight (next day)
+    const beforeMidnight = anchor - ONE_DAY + 1000; // yesterday 12:00:01
+    const afterMidnight = anchor; // today 12:00:00
+    const records = [
+      makeRecord('inv-cross', afterMidnight, {
+        opus: { inputTokens: 500, outputTokens: 100 },
+      }, {
+        createdAt: beforeMidnight,
+        updatedAt: afterMidnight,
+        usageRecordedAt: afterMidnight,
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 7 });
+
+    // Should be bucketed by usageRecordedAt (today), not createdAt (yesterday)
+    assert.equal(result.daily.length, 1);
+    assert.equal(result.daily[0].date, dateOf(afterMidnight));
+  });
+
+  test('legacy record without usageRecordedAt falls back to updatedAt', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
+    const records = [
+      {
+        id: 'inv-legacy',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        userMessageId: null,
+        targetCats: ['opus'],
+        intent: 'execute',
+        status: 'succeeded',
+        idempotencyKey: 'key-legacy',
+        usageByCat: { opus: { inputTokens: 400, outputTokens: 80 } },
+        createdAt: anchor - ONE_DAY, // yesterday
+        updatedAt: anchor, // today
+        // no usageRecordedAt — legacy record
+      },
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 7 });
+
+    // Falls back to updatedAt (today)
+    assert.equal(result.daily.length, 1);
+    assert.equal(result.daily[0].date, dateOf(anchor));
   });
 });

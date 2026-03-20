@@ -169,6 +169,12 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) pairs.push('usageByCat', JSON.stringify(input.usageByCat));
 
+    // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
+    if (input.usageByCat !== undefined) {
+      const existing = await this.redis.hget(key, 'usageRecordedAt');
+      if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
+    }
+
     // All updates go through ATOMIC_UPDATE_LUA for consistent guard behavior.
     // The Lua script handles CAS check + state machine validation atomically.
     const result = (await this.redis.eval(
@@ -267,6 +273,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       idempotencyKey: data.idempotencyKey!,
       ...(hasError ? { error: errorValue } : {}),
       ...(usageByCat ? { usageByCat } : {}),
+      ...(data.usageRecordedAt ? { usageRecordedAt: parseInt(data.usageRecordedAt, 10) } : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),
     };
