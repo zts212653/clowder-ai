@@ -910,6 +910,12 @@ async function main(): Promise<void> {
     );
   }
 
+  // F101: register onClose hook BEFORE listen (Fastify forbids addHook after listen).
+  let f101RecoveryPlayer: { stopAllLoops(): void } | null = null;
+  app.addHook('onClose', async () => {
+    f101RecoveryPlayer?.stopAllLoops();
+  });
+
   // Start listening
   let address: string;
   try {
@@ -1003,9 +1009,7 @@ async function main(): Promise<void> {
     const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
     const recoveryOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager });
     const recoveryPlayer = new GameAutoPlayer({ gameStore: f101GameStore, orchestrator: recoveryOrchestrator });
-    app.addHook('onClose', async () => {
-      recoveryPlayer.stopAllLoops();
-    });
+    f101RecoveryPlayer = recoveryPlayer;
     try {
       const recovered = await recoveryPlayer.recoverActiveGames();
       if (recovered > 0) {
