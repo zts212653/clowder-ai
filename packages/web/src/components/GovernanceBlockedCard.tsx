@@ -5,7 +5,7 @@
  * unregistered external project. Provides a one-click bootstrap button
  * that calls POST /api/governance/confirm then retries the invocation.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 interface GovernanceBlockedCardProps {
@@ -25,6 +25,15 @@ type CardState = 'idle' | 'confirming' | 'retrying' | 'done' | 'error';
 export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }: GovernanceBlockedCardProps) {
   const [state, setState] = useState<CardState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  // Reset state when invocationId changes (e.g. patchMessage updates from inv-A to inv-B)
+  const prevInvIdRef = useRef(invocationId);
+  useEffect(() => {
+    if (prevInvIdRef.current !== invocationId) {
+      prevInvIdRef.current = invocationId;
+      setState('idle');
+      setErrorMsg('');
+    }
+  }, [invocationId]);
 
   const handleBootstrap = useCallback(async () => {
     setState('confirming');

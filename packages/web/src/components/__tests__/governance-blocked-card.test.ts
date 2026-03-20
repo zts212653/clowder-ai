@@ -187,4 +187,44 @@ describe('GovernanceBlockedCard', () => {
       method: 'POST',
     });
   });
+
+  it('resets to idle state when invocationId prop changes', async () => {
+    mockApiFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }) // confirm
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }); // retry
+
+    // Render and complete bootstrap with inv-A
+    act(() => {
+      root.render(
+        React.createElement(GovernanceBlockedCard, {
+          projectPath: '/test/proj',
+          reasonKind: 'needs_bootstrap',
+          invocationId: 'inv-A',
+        }),
+      );
+    });
+
+    const button = container.querySelector('button')!;
+    await act(async () => {
+      button.click();
+    });
+
+    expect(container.textContent).toContain('治理初始化完成');
+
+    // Now invocationId changes to inv-B (patchMessage updates props)
+    act(() => {
+      root.render(
+        React.createElement(GovernanceBlockedCard, {
+          projectPath: '/test/proj',
+          reasonKind: 'needs_bootstrap',
+          invocationId: 'inv-B',
+        }),
+      );
+    });
+
+    // Card should reset to idle — show bootstrap button again
+    const newButton = container.querySelector('button');
+    expect(newButton).toBeTruthy();
+    expect(newButton?.textContent).toContain('初始化治理并继续');
+  });
 });

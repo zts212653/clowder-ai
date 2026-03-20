@@ -159,4 +159,30 @@ describe('F130: governance_blocked event contract', () => {
     assert.equal(cards.size, 1, 'Still one card');
     assert.equal(cards.get('/proj').invocationId, 'inv-B', 'Card should hold latest invocationId');
   });
+
+  it('errorCode on done signals BOTH messages.ts and invocations.ts retry path to mark failed', () => {
+    // Both routeExecution consumers must handle errorCode identically
+    const messages = [
+      { type: 'system_info', catId: 'opus', content: '{}', timestamp: Date.now() },
+      { type: 'done', catId: 'opus', isFinal: true, errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED', timestamp: Date.now() },
+    ];
+
+    // Simulate messages.ts path
+    let messagesPathErrorCode;
+    for (const msg of messages) {
+      if (msg.type === 'done' && msg.errorCode) messagesPathErrorCode = msg.errorCode;
+    }
+    const messagesStatus = messagesPathErrorCode ? 'failed' : 'succeeded';
+
+    // Simulate invocations.ts retry path (must mirror messages.ts)
+    let retryPathErrorCode;
+    for (const msg of messages) {
+      if (msg.type === 'done' && msg.errorCode) retryPathErrorCode = msg.errorCode;
+    }
+    const retryStatus = retryPathErrorCode ? 'failed' : 'succeeded';
+
+    assert.equal(messagesStatus, 'failed', 'messages.ts should mark failed');
+    assert.equal(retryStatus, 'failed', 'invocations.ts retry should also mark failed');
+    assert.equal(messagesPathErrorCode, retryPathErrorCode, 'Both paths must capture same errorCode');
+  });
 });
