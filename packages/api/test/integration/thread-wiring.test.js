@@ -23,6 +23,7 @@ const { MessageStore } = await import('../../dist/domains/cats/services/stores/p
 const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { threadsRoutes } = await import('../../dist/routes/threads.js');
 const { messagesRoutes } = await import('../../dist/routes/messages.js');
+const { findMonorepoRoot } = await import('../../dist/utils/monorepo-root.js');
 
 // --- Helpers ---
 
@@ -41,7 +42,7 @@ function createMockProcess() {
   const proc = {
     stdout,
     stderr,
-    pid: 12345,
+    pid: process.pid,
     exitCode: null,
     kill: () => {
       process.nextTick(() => {
@@ -312,8 +313,9 @@ describe('AgentRouter passes workingDirectory from thread.projectPath', () => {
     const messageStore = new MessageStore();
     const registry = new InvocationRegistry();
 
-    // Create thread with a project path (must be under allowed root for isUnderAllowedRoot)
-    const thread = threadStore.create('alice', 'Project thread', '/tmp/test-project');
+    // Create thread with a project path under the monorepo root so isSameProject() returns true
+    // and the governance gate is skipped (otherwise checkGovernancePreflight fails for external paths)
+    const thread = threadStore.create('alice', 'Project thread', findMonorepoRoot());
 
     let receivedOptions = null;
     const mockClaudeService = {
@@ -338,7 +340,7 @@ describe('AgentRouter passes workingDirectory from thread.projectPath', () => {
     await collect(router.route('alice', '@opus hello', thread.id));
 
     assert.ok(receivedOptions);
-    assert.equal(receivedOptions.workingDirectory, '/tmp/test-project');
+    assert.equal(receivedOptions.workingDirectory, findMonorepoRoot());
   });
 });
 

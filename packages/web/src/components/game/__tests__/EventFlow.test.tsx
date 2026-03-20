@@ -18,8 +18,8 @@ function makeEvent(overrides: Partial<GameEvent> & { eventId: string }): GameEve
   };
 }
 
-function render(events: GameEvent[]): string {
-  return renderToStaticMarkup(React.createElement(EventFlow, { events }));
+function render(events: GameEvent[], catDisplayNames?: Record<string, string>): string {
+  return renderToStaticMarkup(React.createElement(EventFlow, { events, catDisplayNames }));
 }
 
 describe('EventFlow', () => {
@@ -35,7 +35,7 @@ describe('EventFlow', () => {
     const events = [
       makeEvent({ eventId: 'e2', type: 'speech', payload: { senderName: 'P2 宪宪', content: '我觉得P3很可疑' } }),
     ];
-    const html = render(events);
+    const html = render(events, { 'P2 宪宪': 'P2 宪宪' });
     expect(html).toContain('data-testid="chat-bubble"');
     expect(html).toContain('P2 宪宪');
     expect(html).toContain('我觉得P3很可疑');

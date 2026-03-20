@@ -20,12 +20,32 @@ triggers:
 
 ## 核心知识
 
-### 门禁 4 硬条件（全部满足才能开 PR）
+### 门禁 5 硬条件（全部满足才能开 PR）
 
 1. Reviewer 有**明确放行信号**（"放行"/"LGTM"/"通过"/"可以合入"）
 2. **所有 P1/P2** 已修复且经 reviewer 确认
 3. Review 针对**当前分支/当前工作**（不是历史 review）
 4. BACKLOG 涉及条目已在 feature branch 上标 `[x]`
+5. **`pnpm gate` 全绿**（基于最新 `origin/main` rebase 后的全量 build + test + lint + check）
+
+### `pnpm gate` — Latest Main 全量门禁（Step 0，开 PR 前必跑）
+
+```bash
+pnpm gate
+# 等价于 bash scripts/pre-merge-check.sh
+# 自动执行：fetch origin/main → rebase → build → test → lint → check
+# 全绿才能继续开 PR。任一步骤失败 → 修复后重跑
+```
+
+**为什么需要这一步**：quality-gate 和 request-review 跑的测试基于旧 base SHA。
+并行开发中，其他猫的 PR 合入 main 后可能改变共享契约（类型/接口/store 结构），
+导致你的代码在新 main 上 break。`pnpm gate` 在最终合流点做一次全量验证，
+堵住"每只猫都说绿，合流后一堆红"的系统性漏洞。
+
+**"UT 全绿"三件套证据**（`pnpm gate` 通过后自动打印）：
+1. 命令：`pnpm gate`（全量，不是 `--filter`）
+2. SHA：基于最新 `origin/main` rebase 后的 HEAD SHA
+3. 状态：已 rebase 到最新 `origin/main`
 
 ### 合入方式（唯一正确做法）
 

@@ -66,6 +66,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     viewMode,
     setViewMode,
     clearUnread,
+    confirmUnreadAck,
+    armUnreadSuppression,
     rightPanelMode,
   } = useChatStore();
   const uiThinkingExpandedByDefault = useChatStore((s) => s.uiThinkingExpandedByDefault);
@@ -379,12 +381,22 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _messageCount = messages.length;
   useEffect(() => {
+    // Re-arm suppression before each ack. /read/latest is idempotent — any
+    // successful POST means server cursor is at latest, so any successful ack
+    // can safely clear suppression (no generation tracking needed).
+    armUnreadSuppression(threadId);
     apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
       method: 'POST',
-    }).catch((err) => {
-      console.debug('[F069] read ack failed:', err);
-    });
-  }, [threadId, _messageCount]);
+    })
+      .then((res) => {
+        if (res.ok) {
+          confirmUnreadAck(threadId);
+        }
+      })
+      .catch((err) => {
+        console.debug('[F069] read ack failed:', err);
+      });
+  }, [threadId, _messageCount, confirmUnreadAck, armUnreadSuppression]);
 
   const handleStop = useCallback(
     (overrideThreadId?: unknown) => {

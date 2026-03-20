@@ -3,6 +3,7 @@ import { useCatData } from '@/hooks/useCatData';
 import type { ThreadState } from '@/stores/chat-types';
 import { API_URL } from '@/utils/api-client';
 import { CatAvatar } from '../CatAvatar';
+import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
 import { ThreadCatStatus } from '../ThreadCatStatus';
 import { ThreadCatSettings } from './ThreadCatSettings';
@@ -25,6 +26,7 @@ export interface ThreadItemProps {
   threadState?: ThreadState;
   indented?: boolean;
   preferredCats?: string[];
+  isHubThread?: boolean;
 }
 
 export function ThreadItem({
@@ -44,6 +46,7 @@ export function ThreadItem({
   threadState,
   indented,
   preferredCats,
+  isHubThread,
 }: ThreadItemProps) {
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
@@ -140,6 +143,7 @@ export function ThreadItem({
           <span
             className={`text-sm leading-snug line-clamp-2 flex-1 min-w-0 ${isActive ? 'font-semibold text-cafe-black' : 'text-gray-700'}`}
           >
+            {isHubThread && <HubIcon className="w-3.5 h-3.5 inline-block mr-1 text-owner-primary align-text-bottom" />}
             {title ?? (id === 'default' ? '大厅' : '未命名对话')}
           </span>
         )}

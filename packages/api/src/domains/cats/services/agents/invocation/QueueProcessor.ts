@@ -48,6 +48,32 @@ interface LoggerLike {
   error(obj: unknown, msg?: string): void;
 }
 
+/** Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
+export interface OutboundDeliveryHookLike {
+  deliver(
+    threadId: string,
+    content: string,
+    catId: string,
+    richBlocks?: ReadonlyArray<{ kind: string; [key: string]: unknown }>,
+    threadMeta?: { threadShortId?: string; threadTitle?: string; deepLinkUrl?: string },
+  ): Promise<void>;
+}
+
+/** Minimal streaming outbound interface — avoids importing full StreamingOutboundHook. */
+export interface StreamingOutboundHookLike {
+  onStreamStart(threadId: string, catId: string, invocationId: string): Promise<void>;
+  onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
+  onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
+  cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
+}
+
+/** Thread metadata for outbound delivery (deep link, title, etc.) */
+interface ThreadMetaLike {
+  threadShortId?: string;
+  threadTitle?: string;
+  deepLinkUrl?: string;
+}
+
 export interface QueueProcessorDeps {
   queue: InvocationQueue;
   invocationTracker: TrackerLike;
@@ -56,6 +82,12 @@ export interface QueueProcessorDeps {
   socketManager: SocketManagerLike;
   messageStore: IMessageStore;
   log: LoggerLike;
+  /** F088 fix: optional outbound delivery hook (late-bound after gateway bootstrap). */
+  outboundHook?: OutboundDeliveryHookLike;
+  /** F088 fix: optional streaming outbound hook (late-bound after gateway bootstrap). */
+  streamingHook?: StreamingOutboundHookLike;
+  /** F088 fix: optional thread metadata lookup for outbound delivery. */
+  threadMetaLookup?: (threadId: string) => ThreadMetaLike | undefined | Promise<ThreadMetaLike | undefined>;
 }
 
 /** F122B B6: Completion hook — called when a queue entry finishes execution. */
@@ -76,6 +108,23 @@ export class QueueProcessor {
 
   constructor(deps: QueueProcessorDeps) {
     this.deps = deps;
+  }
+
+  /** F088 fix: Late-bind outbound hook (set after gateway bootstrap). */
+  setOutboundHook(hook: OutboundDeliveryHookLike): void {
+    (this.deps as { outboundHook?: OutboundDeliveryHookLike }).outboundHook = hook;
+  }
+
+  /** F088 fix: Late-bind streaming hook (set after gateway bootstrap). */
+  setStreamingHook(hook: StreamingOutboundHookLike): void {
+    (this.deps as { streamingHook?: StreamingOutboundHookLike }).streamingHook = hook;
+  }
+
+  /** F088 fix: Late-bind threadMetaLookup (set after gateway bootstrap). */
+  setThreadMetaLookup(
+    lookup: (threadId: string) => ThreadMetaLike | undefined | Promise<ThreadMetaLike | undefined>,
+  ): void {
+    (this.deps as { threadMetaLookup?: typeof lookup }).threadMetaLookup = lookup;
   }
 
   /**
@@ -210,10 +259,11 @@ export class QueueProcessor {
   /**
    * F122B: Try to auto-execute any queued autoExecute entries whose target cat slot is free.
    * Called immediately after enqueuing an agent entry.
-   * Scans past busy-slot entries to find the first executable one.
+   * Scans all entries and starts every one whose cat slot is free (parallel multi-cat).
+   * Per-cat slot mutex (processingSlots + invocationTracker) prevents conflicts.
    */
   async tryAutoExecute(threadId: string): Promise<void> {
-    const entries = this.deps.queue.listAutoExecute?.(threadId) ?? [];
+    const entries = (this.deps.queue.listAutoExecute?.(threadId) ?? []).sort((a, b) => a.createdAt - b.createdAt);
 
     for (const entry of entries) {
       const entryCat = entry.targetCats[0] ?? 'unknown';
@@ -222,8 +272,8 @@ export class QueueProcessor {
       if (this.processingSlots.has(sk)) continue;
       if (this.deps.invocationTracker.has(threadId, entryCat)) continue;
 
-      // Mark processing and execute
-      this.deps.queue.markProcessingById(threadId, entry.id);
+      // Guard: markProcessingById may fail if entry was consumed between snapshot and now
+      if (!this.deps.queue.markProcessingById(threadId, entry.id)) continue;
       this.processingSlots.add(sk);
       void this.executeEntry(entry).then(
         (status) => {
@@ -235,7 +285,7 @@ export class QueueProcessor {
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
         },
       );
-      return; // One per call — chained via onInvocationComplete
+      // Continue scanning — start all entries with free cat slots (parallel dispatch)
     }
   }
 
@@ -436,6 +486,16 @@ export class QueueProcessor {
 
       // 7. Route execution
       const cursorBoundaries = new Map<string, string>();
+      const persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> } = {};
+      const collectedTextParts: string[] = [];
+
+      // F088 fix: Track per-turn content for outbound delivery (same pattern as ConnectorInvokeTrigger)
+      const outboundTurns: Array<{
+        catId: string;
+        textParts: string[];
+        richBlocks?: Array<{ kind: string; [key: string]: unknown }>;
+      }> = [];
+      let currentTurnCatId: string | undefined;
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
@@ -458,6 +518,14 @@ export class QueueProcessor {
       // F122B B6: Collect response text for completion hook (multi-mention aggregation).
       const hook = this.entryCompleteHooks.get(entry.id);
 
+      // F088 fix: start streaming placeholder on external platforms
+      let streamStartPromise: Promise<void> | undefined;
+      if (this.deps.streamingHook) {
+        streamStartPromise = this.deps.streamingHook.onStreamStart(threadId, primaryCat, invocationId).catch((err) => {
+          log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamStart failed');
+        });
+      }
+
       for await (const msg of router.routeExecution(
         userId,
         content,
@@ -470,12 +538,45 @@ export class QueueProcessor {
           ...(controller.signal ? { signal: controller.signal } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedForThread(tid),
           cursorBoundaries,
+          persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
         },
       )) {
         if (hook && msg.catId === primaryCat && msg.type === 'text' && (msg as { content?: string }).content) {
           responseText += (msg as { content?: string }).content;
         }
+
+        // F088 fix: collect per-turn content for outbound delivery
+        if (msg.type === 'done' && msg.catId) {
+          if (persistenceContext.richBlocks) {
+            const turn = outboundTurns[outboundTurns.length - 1];
+            if (turn && turn.catId === msg.catId && currentTurnCatId === msg.catId) {
+              turn.richBlocks = [...persistenceContext.richBlocks];
+            } else {
+              outboundTurns.push({ catId: msg.catId, textParts: [], richBlocks: [...persistenceContext.richBlocks] });
+            }
+            persistenceContext.richBlocks = undefined;
+          }
+          currentTurnCatId = undefined;
+        }
+        if (msg.type === 'text' && typeof (msg as Record<string, unknown>).content === 'string') {
+          const textContent = (msg as Record<string, unknown>).content as string;
+          collectedTextParts.push(textContent);
+          if (msg.catId) {
+            if (msg.catId !== currentTurnCatId) {
+              outboundTurns.push({ catId: msg.catId, textParts: [] });
+              currentTurnCatId = msg.catId;
+            }
+            outboundTurns[outboundTurns.length - 1].textParts.push(textContent);
+          }
+          if (this.deps.streamingHook) {
+            const accumulated = collectedTextParts.join('');
+            this.deps.streamingHook.onStreamChunk(threadId, accumulated, invocationId).catch((err) => {
+              log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamChunk failed');
+            });
+          }
+        }
+
         socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
       }
 
@@ -494,6 +595,19 @@ export class QueueProcessor {
       });
 
       finalStatus = 'succeeded';
+
+      // 10. Outbound delivery: send per-turn content to bound external chats (Feishu/Telegram)
+      await this.deliverOutbound(
+        threadId,
+        primaryCat,
+        invocationId!,
+        collectedTextParts,
+        outboundTurns,
+        persistenceContext,
+        streamStartPromise,
+        log,
+      );
+
       return 'succeeded';
     } catch (err) {
       log.error({ threadId, entryId: entry.id, err }, '[QueueProcessor] executeEntry failed');
@@ -537,6 +651,157 @@ export class QueueProcessor {
       }
       // Chain auto-dequeue is handled by tryExecuteNext* (calls onInvocationComplete
       // AFTER releasing processingThreads mutex to avoid self-blocking).
+    }
+  }
+
+  /**
+   * F088 fix: Deliver collected outbound turns to bound external chats.
+   * Mirrors ConnectorInvokeTrigger ⑥ logic: per-turn delivery, streaming cleanup, late-success fallback.
+   */
+  private async deliverOutbound(
+    threadId: string,
+    primaryCat: string,
+    invocationId: string,
+    collectedTextParts: string[],
+    outboundTurns: Array<{
+      catId: string;
+      textParts: string[];
+      richBlocks?: Array<{ kind: string; [key: string]: unknown }>;
+    }>,
+    persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> },
+    streamStartPromise: Promise<void> | undefined,
+    log: LoggerLike,
+  ): Promise<void> {
+    const finalContent = collectedTextParts.join('');
+
+    // Finalize streaming — ensure start completed before ending
+    if (this.deps.streamingHook) {
+      if (streamStartPromise) {
+        const STREAM_START_TIMEOUT_MS = 5000;
+        await Promise.race([
+          streamStartPromise,
+          new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
+        ]);
+      }
+      await this.deps.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
+        log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamEnd failed');
+      });
+    }
+
+    const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+    if (this.deps.outboundHook && hasContent) {
+      let threadMeta: ThreadMetaLike | undefined;
+      try {
+        const LOOKUP_TIMEOUT_MS = 2000;
+        const rawResult = this.deps.threadMetaLookup?.(threadId);
+        if (rawResult) {
+          const lookupPromise = Promise.resolve(rawResult).catch((err: unknown) => {
+            log.warn({ err, threadId }, '[QueueProcessor] threadMetaLookup late rejection');
+            return undefined;
+          });
+          const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS));
+          threadMeta = await Promise.race([lookupPromise, timeout]);
+        }
+      } catch (lookupErr) {
+        log.warn({ err: lookupErr, threadId }, '[QueueProcessor] threadMetaLookup failed');
+      }
+
+      const DELIVER_TIMEOUT_MS = 10_000;
+      const nonEmptyTurns = outboundTurns.filter(
+        (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
+      );
+
+      let deliveryFailed = false;
+      const inflightDeliverPromises: Promise<void>[] = [];
+
+      if (nonEmptyTurns.length > 1) {
+        for (const turn of nonEmptyTurns) {
+          const turnContent = turn.textParts.join('');
+          const deliverPromise = this.deps.outboundHook.deliver(
+            threadId,
+            turnContent,
+            turn.catId,
+            turn.richBlocks,
+            threadMeta,
+          );
+          inflightDeliverPromises.push(deliverPromise);
+          try {
+            await Promise.race([
+              deliverPromise,
+              new Promise<void>((_, reject) =>
+                setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+              ),
+            ]);
+          } catch (err) {
+            deliveryFailed = true;
+            log.error({ err, threadId, catId: turn.catId }, '[QueueProcessor] Outbound delivery error');
+          }
+        }
+      } else if (nonEmptyTurns.length === 1) {
+        const turn = nonEmptyTurns[0];
+        const richBlocks = persistenceContext.richBlocks ?? turn.richBlocks;
+        const deliverPromise = this.deps.outboundHook.deliver(
+          threadId,
+          finalContent,
+          turn.catId,
+          richBlocks,
+          threadMeta,
+        );
+        inflightDeliverPromises.push(deliverPromise);
+        try {
+          await Promise.race([
+            deliverPromise,
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+            ),
+          ]);
+        } catch (err) {
+          deliveryFailed = true;
+          log.error({ err, threadId }, '[QueueProcessor] Outbound delivery error');
+        }
+      } else {
+        const richBlocks = persistenceContext.richBlocks;
+        if (richBlocks) {
+          const deliverPromise = this.deps.outboundHook.deliver(
+            threadId,
+            finalContent,
+            primaryCat,
+            richBlocks,
+            threadMeta,
+          );
+          inflightDeliverPromises.push(deliverPromise);
+          try {
+            await Promise.race([
+              deliverPromise,
+              new Promise<void>((_, reject) =>
+                setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+              ),
+            ]);
+          } catch (err) {
+            deliveryFailed = true;
+            log.error({ err, threadId }, '[QueueProcessor] Outbound delivery error');
+          }
+        }
+      }
+
+      if (!deliveryFailed && this.deps.streamingHook?.cleanupPlaceholders) {
+        await this.deps.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
+          log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.cleanupPlaceholders failed');
+        });
+      } else if (deliveryFailed && this.deps.streamingHook?.cleanupPlaceholders) {
+        const cleanupFn = this.deps.streamingHook.cleanupPlaceholders.bind(this.deps.streamingHook);
+        Promise.allSettled(inflightDeliverPromises).then((results) => {
+          if (results.every((r) => r.status === 'fulfilled')) {
+            cleanupFn(threadId, invocationId).catch((err) => {
+              log.warn({ err, threadId }, '[QueueProcessor] Late-success placeholder cleanup failed');
+            });
+          }
+        });
+      }
+    } else if (this.deps.streamingHook?.cleanupPlaceholders) {
+      await this.deps.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
+        log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.cleanupPlaceholders failed (silent)');
+      });
     }
   }
 

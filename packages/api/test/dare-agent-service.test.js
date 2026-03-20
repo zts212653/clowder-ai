@@ -271,6 +271,8 @@ describe('DareAgentService', () => {
     const spawnFn = mock.fn(() => proc);
     // Temporarily set env for test
     const originalKey = process.env.OPENROUTER_API_KEY;
+    const originalDareKey = process.env.DARE_API_KEY;
+    delete process.env.DARE_API_KEY;
     process.env.OPENROUTER_API_KEY = 'sk-test-secret-key';
     try {
       const service = new DareAgentService({
@@ -293,6 +295,8 @@ describe('DareAgentService', () => {
     } finally {
       if (originalKey !== undefined) process.env.OPENROUTER_API_KEY = originalKey;
       else delete process.env.OPENROUTER_API_KEY;
+      if (originalDareKey !== undefined) process.env.DARE_API_KEY = originalDareKey;
+      else delete process.env.DARE_API_KEY;
     }
   });
 
@@ -301,6 +305,8 @@ describe('DareAgentService', () => {
     const spawnFn = mock.fn(() => proc);
     const oldAnthropicKey = process.env.ANTHROPIC_API_KEY;
     const oldDareEndpoint = process.env.DARE_ENDPOINT;
+    const oldDareKey2 = process.env.DARE_API_KEY;
+    delete process.env.DARE_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'sk-ant-secret';
     process.env.DARE_ENDPOINT = 'https://anthropic-proxy.example/v1';
 
@@ -330,6 +336,8 @@ describe('DareAgentService', () => {
       else delete process.env.ANTHROPIC_API_KEY;
       if (oldDareEndpoint !== undefined) process.env.DARE_ENDPOINT = oldDareEndpoint;
       else delete process.env.DARE_ENDPOINT;
+      if (oldDareKey2 !== undefined) process.env.DARE_API_KEY = oldDareKey2;
+      else delete process.env.DARE_API_KEY;
     }
   });
 

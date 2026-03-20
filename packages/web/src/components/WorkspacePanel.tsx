@@ -238,6 +238,8 @@ export function WorkspacePanel() {
 
   const [editMode, setEditMode] = useState(false);
   const [markdownRendered, setMarkdownRendered] = useState(true);
+  const [mdHasSelection, setMdHasSelection] = useState(false);
+  const mdContainerRef = useRef<HTMLDivElement>(null);
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [jsxPreview, setJsxPreview] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -356,6 +358,44 @@ export function WorkspacePanel() {
     },
     [setPendingChatInsert, currentThreadId, currentWorktree, worktreeId],
   );
+
+  // Markdown rendered mode: detect native text selection for Add to Chat.
+  // Deps include editMode so the listener re-binds after edit→rendered toggle (P1 fix).
+  useEffect(() => {
+    const container = mdContainerRef.current;
+    if (!container) {
+      setMdHasSelection(false);
+      return;
+    }
+    const onSelectionChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) {
+        setMdHasSelection(false);
+        return;
+      }
+      // Check both anchor and focus are inside the container (P2 fix: cross-boundary drag).
+      if (!container.contains(sel.anchorNode) || !container.contains(sel.focusNode)) {
+        setMdHasSelection(false);
+        return;
+      }
+      setMdHasSelection(!!sel.toString().trim());
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, [markdownRendered, openFilePath, editMode]);
+
+  const handleMdAddToChat = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const container = mdContainerRef.current;
+    if (!container || !container.contains(sel.anchorNode) || !container.contains(sel.focusNode)) return;
+    const text = sel.toString().trim();
+    if (!text || !openFilePath) return;
+    const branch = currentWorktree?.branch;
+    const suffix = branch ? ` (🌿 ${branch})` : '';
+    const ref = `\`${openFilePath}\`${suffix}\n\`\`\`markdown\n${text}\n\`\`\``;
+    setPendingChatInsert({ threadId: currentThreadId, text: ref });
+  }, [openFilePath, currentWorktree, setPendingChatInsert, currentThreadId]);
 
   // File management callbacks for WorkspaceTree
   const treeCallbacks = useMemo(
@@ -961,12 +1001,26 @@ export function WorkspacePanel() {
                         </div>
                       )
                     ) : isMarkdown && markdownRendered && !editMode ? (
-                      <div className="flex-1 overflow-auto bg-cafe-white p-4">
+                      <div className="relative flex-1 overflow-auto bg-cafe-white p-4" ref={mdContainerRef}>
                         <MarkdownContent
                           content={file.content}
                           disableCommandPrefix
                           basePath={openFilePath ? openFilePath.split('/').slice(0, -1).join('/') : undefined}
                         />
+                        {mdHasSelection && (
+                          <button
+                            type="button"
+                            onClick={handleMdAddToChat}
+                            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-owner-primary text-white text-[11px] font-medium shadow-lg hover:bg-owner-dark transition-colors z-10 animate-fade-in"
+                            title="引用到聊天"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                              <path d="M1.5 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H5L2.5 11.5V9h-1a1 1 0 0 1-1-1V2.5Z" />
+                              <path d="M13.5 5v4a1 1 0 0 1-1 1H12v2.5L9.5 10H7a1 1 0 0 1-1-1" opacity="0.5" />
+                            </svg>
+                            Add to chat
+                          </button>
+                        )}
                       </div>
                     ) : isHtml && htmlPreview && !editMode ? (
                       <div className="flex-1 min-h-0 flex flex-col">

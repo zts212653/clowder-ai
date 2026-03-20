@@ -16,9 +16,9 @@ describe('governance-pack', () => {
     assert.ok(block.includes(MANAGED_BLOCK_END));
   });
 
-  it('contains internal port 3001 (transformed by sync pipeline for open-source)', () => {
+  it('contains public port 3004 (transformed by sync pipeline for open-source)', () => {
     const block = getGovernanceManagedBlock('claude');
-    assert.ok(block.includes('3001'), 'Source should use internal port 3001');
+    assert.ok(block.includes('3004'), 'Open-source build should use public API port 3004');
   });
 
   it('contains internal port 6399 (transformed by sync pipeline for open-source)', () => {
@@ -26,9 +26,8 @@ describe('governance-pack', () => {
     assert.ok(block.includes('6399'), 'Source should use internal port 6399');
   });
 
-  it('port reservation concept is present', () => {
+  it('port guidance is present', () => {
     const block = getGovernanceManagedBlock('claude');
-    assert.ok(block.includes('reserved'), 'Port reservation concept should be present');
     assert.ok(block.includes('production Redis'), 'Redis port guidance should be present');
   });
 

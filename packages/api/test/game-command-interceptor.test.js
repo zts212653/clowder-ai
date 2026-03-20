@@ -165,7 +165,7 @@ describe('sanitizeCatIds', () => {
 });
 
 describe('buildGameSeats', () => {
-  const catIds = ['opus', 'sonnet', 'codex', 'gpt52', 'gemini'];
+  const catIds = ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'dare', 'spark'];
 
   it('builds 7-player seats with human P1 for player mode', () => {
     const seats = buildGameSeats({
@@ -205,17 +205,16 @@ describe('buildGameSeats', () => {
     }
   });
 
-  it('cycles cats when playerCount exceeds catIds length', () => {
-    const seats = buildGameSeats({
-      humanRole: 'god-view',
-      userId: 'owner',
-      catIds: ['opus', 'sonnet'],
-      playerCount: 7,
-    });
-    assert.equal(seats.length, 7);
-    // Should cycle through available cats
-    assert.equal(seats[0].actorId, 'opus');
-    assert.equal(seats[1].actorId, 'sonnet');
-    assert.equal(seats[2].actorId, 'opus');
+  it('rejects when playerCount exceeds catIds length (no seat duplication)', () => {
+    assert.throws(
+      () =>
+        buildGameSeats({
+          humanRole: 'god-view',
+          userId: 'owner',
+          catIds: ['opus', 'sonnet'],
+          playerCount: 7,
+        }),
+      /Not enough cats/,
+    );
   });
 });

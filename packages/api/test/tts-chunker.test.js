@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { chunkText } from '../src/domains/cats/services/tts/TtsChunker.js';
+import { chunkText } from '../dist/domains/cats/services/tts/TtsChunker.js';
 
 describe('TtsChunker', () => {
   describe('hard breakpoints', () => {

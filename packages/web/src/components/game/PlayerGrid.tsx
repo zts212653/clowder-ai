@@ -63,8 +63,10 @@ export function PlayerGrid({ seats, activeSeatId, gameStatus, onSeatClick }: Pla
             key={seat.seatId}
             data-testid={`seat-${seat.seatId}`}
             onClick={() => onSeatClick?.(seat.seatId)}
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-lg w-14 h-16 ${
-              isActive ? 'bg-ww-cute text-ww-base' : 'bg-ww-card text-ww-muted'
+            className={`flex flex-col items-center justify-center gap-0.5 rounded-lg w-14 h-16 border-2 transition-colors ${
+              isActive
+                ? 'border-[var(--ww-state-speaking)] bg-ww-card text-ww-main'
+                : 'border-transparent bg-ww-card text-ww-muted'
             }${isDead ? ' opacity-40' : ''}`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}

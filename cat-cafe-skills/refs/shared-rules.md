@@ -254,6 +254,80 @@ commit body 补一行 `Why:` 说明决策理由。
 
 **不滥用**：不是每个问题都拉全体。优先级：自己搜 → 搜不到再拉 1-2 只对口猫 → 真正跨领域才拉 3 只。
 
+### 投票 SOP（`start_vote`）
+
+`start_vote` 会**自动唤起** voters 列表中的所有猫，不需要手动 `multi_mention` 或 `post_message` @mention。
+
+| 动作 | 正确做法 | 禁止 |
+|------|---------|------|
+| 发起投票 | 调一次 `start_vote`，传入 `voters` 列表 | 发完 `start_vote` 再 `multi_mention` 全体 voter（重复唤起） |
+| 发起猫自己投票 | 回复里直接写 `[VOTE:选项]` | 用 `post_message` 单独投票（多此一举） |
+| 催票 | 只 @ 未投票的猫 | 全量 `multi_mention` 催全体（已投票的猫会被二次打扰） |
+| 等结果 | 等 auto-close（全票或超时） | 手动 close 后又开新投票询问同一问题 |
+
+**为什么禁止重复唤起**：`start_vote` 内部已通过 `enqueueA2ATargets` dispatch 了所有 voter。再调 `multi_mention` = 同一只猫被唤起两次，产生重复通知和上下文噪音。投票 auto-close 后，后续 `[VOTE:xxx]` 会被静默忽略，但前面的冗余调度已经发生。
+
+## 14a. 全量测试三件套证据
+
+说"测试全绿"必须附带三件证据，否则只算局部自测，不算全局证据：
+
+| # | 证据 | 示例 |
+|---|------|------|
+| 1 | **命令** | `pnpm test`（全量）或 `pnpm --filter @cat-cafe/api test`（指明 scope） |
+| 2 | **SHA** | `基于 abc1234` |
+| 3 | **是否 rebase 到最新 main** | `已 rebase origin/main` 或 `未 rebase（基于 3 天前的 main）` |
+
+**merge 前的全量门禁**：`pnpm gate`（= `scripts/pre-merge-check.sh`），自动 rebase + build + test + lint + check，通过后打印三件套。详见 `merge-gate` skill。
+
+## 14b. Rebase 冲突三屏规则
+
+> 铲屎官原话："人是看三屏，一个是原本的基线，一个是你们的代码，一个是别人改的代码。"
+
+Rebase 遇到冲突时，**必须看三个版本**（base / ours / theirs）再解决：
+
+**前置条件**：`merge.conflictStyle=zdiff3`（`pnpm guards:install` 自动设置）。
+设置后冲突标记自动带 base 段：
+
+```
+<<<<<<< HEAD
+猫 A 的代码（ours）
+||||||| base
+原始代码（改之前的样子）
+=======
+猫 B 的代码（theirs / main）
+>>>>>>> main
+```
+
+**手动查看三屏**（当 zdiff3 标记不够用时）：
+
+```bash
+git show :1:<path>   # BASE（共同祖先）
+git show :2:<path>   # OURS（当前分支的版本）
+git show :3:<path>   # THEIRS（main 上的版本）
+```
+
+**冲突解决纪律**：
+
+1. 先看 base→ours 的 diff：**我改了什么**
+2. 再看 base→theirs 的 diff：**对方改了什么**
+3. 理解双方意图后再合并
+4. **禁止** `git checkout --ours .` 或 `--theirs .` 一把梭
+5. PR description 里写明：哪个文件有冲突、保留了谁的意图、为什么
+
+**硬护栏**：`.githooks/pre-rebase` 会检查 `zdiff3` 是否设置，未设置则阻止 rebase。
+
+## 14c. 共享契约热点文件
+
+改以下路径的 PR **必须跑全量测试**（`pnpm gate`），不接受 `--filter` 局部测试：
+
+- `packages/shared/**`
+- `packages/web/src/stores/chatStore.ts`
+- `packages/mcp-server/src/tools/**`
+- `packages/mcp-server/src/server-toolsets.ts`
+
+这些文件是跨包共享契约，改了一处可能导致多个包的测试挂掉。
+说"不是我的 scope"不成立——改了共享契约，所有下游测试都是你的 scope。
+
 ## 14. 共享状态文件只在 main 改
 
 **机器强制的文件**（三层防御）：

@@ -39,9 +39,9 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
   // How many cat seats needed (detective = same as god-view: all cats)
   const catSeatsNeeded = mode === 'player' ? selectedPreset - 1 : selectedPreset;
   const selectedCatList = useMemo(() => cats.filter((c) => selectedCats.has(c.id)), [cats, selectedCats]);
-  // At least 1 cat required; detective also needs a bound cat
+  // Must select enough cats to fill all seats (no duplicate actors!)
   const canStart =
-    selectedCatList.length >= 1 &&
+    selectedCatList.length >= catSeatsNeeded &&
     (mode !== 'detective' || (detectiveCatId !== null && selectedCats.has(detectiveCatId)));
 
   const toggleCat = useCallback((catId: string) => {
@@ -72,6 +72,7 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
   return (
     <div
       data-testid="game-lobby"
+      data-theme="werewolf-cute"
       className="fixed inset-0 z-50 flex items-center justify-center bg-ww-base-overlay backdrop-blur-sm"
     >
       <div className="bg-ww-topbar rounded-2xl border border-ww-subtle w-full max-w-lg mx-4 overflow-hidden">
@@ -123,7 +124,10 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
             选择参赛猫猫（点击添加）
             <span className="ml-2 text-xs">
               ({selectedCatList.length}/{catSeatsNeeded} 席位
-              {!canStart && <span className="text-ww-danger ml-1">至少选 1 只</span>})
+              {selectedCatList.length < catSeatsNeeded && (
+                <span className="text-ww-danger ml-1">还需 {catSeatsNeeded - selectedCatList.length} 只</span>
+              )}
+              )
             </span>
           </div>
           <div className="flex flex-wrap gap-2">

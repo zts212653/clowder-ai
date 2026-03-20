@@ -779,7 +779,19 @@
       "name": "猫猫管理重构 — 账户配置与猫猫实例分离，支持动态创建猫 + 自定义别名 @ 路由",
       "status": "spec | **Owner**: 待定 | **Priority**: P1",
       "file": "F127-cat-instance-management.md"
+    },
+    {
+      "id": "F128",
+      "name": "Cat-Initiated Thread Creation — 猫程序化创建 Thread",
+      "status": "spec | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
+      "file": "F128-cat-create-thread.md"
+    },
+    {
+      "id": "F129",
+      "name": "Pack System — Multi-Agent 共创世界的 Mod 生态",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F129-pack-system-multi-agent-mod.md"
     }
   ],
-  "generated_at": "2026-03-19T13:29:27.358Z"
+  "generated_at": "2026-03-20T13:28:55.153Z"
 }

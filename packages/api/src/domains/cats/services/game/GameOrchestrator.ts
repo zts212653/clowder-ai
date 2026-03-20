@@ -7,6 +7,7 @@
 
 import type { GameAction, GameConfig, GameDefinition, GameRuntime, PendingAction, Seat } from '@cat-cafe/shared';
 import type { IGameStore } from '../stores/ports/GameStore.js';
+import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import { GameEngine } from './GameEngine.js';
 import { GameViewBuilder } from './GameViewBuilder.js';
 import { WerewolfEngine } from './werewolf/WerewolfEngine.js';
@@ -19,6 +20,8 @@ interface SocketLike {
 export interface GameOrchestratorDeps {
   gameStore: IGameStore;
   socketManager: SocketLike;
+  /** Optional: when provided, game announce/speech events are dual-written to messageStore (Phase H) */
+  messageStore?: IMessageStore;
 }
 
 export interface StartGameInput {
@@ -31,10 +34,12 @@ export interface StartGameInput {
 export class GameOrchestrator {
   private readonly store: IGameStore;
   private readonly socket: SocketLike;
+  private readonly messageStore?: IMessageStore;
 
   constructor(deps: GameOrchestratorDeps) {
     this.store = deps.gameStore;
     this.socket = deps.socketManager;
+    this.messageStore = deps.messageStore;
   }
 
   /** Create and persist a new game, broadcast to thread */
@@ -110,6 +115,17 @@ export class GameOrchestrator {
       payload: { seatId, actionName: action.actionName, target: action.targetSeat },
       revealPolicy: 'live',
     });
+
+    // H2: Record speech + dual-write to messageStore when speak action has text
+    // Accept both speechText (AI path) and content (human frontend path)
+    const speechText = (action.params?.speechText ?? action.params?.content) as string | undefined;
+    if (action.actionName === 'speak' && speechText) {
+      const seat = runtime.seats.find((s) => s.seatId === seatId);
+      if (engine instanceof WerewolfEngine) {
+        (engine as WerewolfEngine).recordSpeech(seatId, speechText);
+      }
+      this.writeSpeech(runtime, seat?.actorId ?? seatId, speechText);
+    }
 
     // Emit real-time ballot.updated for day votes (KD-26: live transparency)
     if (action.actionName === 'vote' && action.targetSeat) {
@@ -256,6 +272,51 @@ export class GameOrchestrator {
 
   // --- Private helpers ---
 
+  /** H2: Write a cat speech message to messageStore (dual-write) */
+  private writeSpeech(runtime: GameRuntime, catId: string, content: string): void {
+    if (!this.messageStore) return;
+    const userId = runtime.config.observerUserId ?? 'system';
+    Promise.resolve(
+      this.messageStore.append({
+        userId,
+        catId: catId as import('@cat-cafe/shared').CatId,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: runtime.threadId,
+      }),
+    ).catch((err) => {
+      console.error('[GameOrchestrator] Failed to write speech to messageStore:', err);
+    });
+  }
+
+  private writeAnnounce(runtime: GameRuntime, content: string): void {
+    if (!this.messageStore) return;
+    const userId = runtime.config.observerUserId ?? 'system';
+    Promise.resolve(
+      this.messageStore.append({
+        userId,
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: runtime.threadId,
+      }),
+    ).catch((err) => {
+      console.error('[GameOrchestrator] Failed to write announce to messageStore:', err);
+    });
+  }
+
+  private formatDeaths(deaths: string[], runtime: GameRuntime): string {
+    return deaths
+      .map((seatId) => {
+        const seat = runtime.seats.find((s) => s.seatId === seatId);
+        const name = seat ? `${seatId}(${seat.actorId})` : seatId;
+        return name;
+      })
+      .join('、');
+  }
+
   /** Grace periods per cat breed (KD-28). Only applied on round 1. */
   private static readonly GRACE_MS: Record<string, number> = {
     opus: 6000,
@@ -400,6 +461,19 @@ export class GameOrchestrator {
       payload: isNewRound ? { round: runtime.round } : { from: fromPhase, to: targetPhase.name },
     });
 
+    // RB-8: Write round announce to messageStore
+    if (isNewRound) {
+      const roundText = `🌙 第 ${runtime.round} 个夜晚降临了。闭眼。`;
+      engine.appendEvent({
+        round: runtime.round,
+        phase: targetPhase.name,
+        type: 'round_announce',
+        scope: 'public',
+        payload: { round: runtime.round, text: roundText },
+      });
+      this.writeAnnounce(runtime, roundText);
+    }
+
     this.socket.broadcastToRoom(`thread:${runtime.threadId}`, 'game:phase_changed', {
       gameId: runtime.gameId,
       phase: targetPhase.name,
@@ -419,6 +493,11 @@ export class GameOrchestrator {
         scope: 'public',
         payload: { winner },
       });
+
+      const factionLabel = winner === 'wolf' ? '狼人阵营' : '好人阵营';
+      const endText = `🏆 游戏结束！${factionLabel}获胜！`;
+      this.writeAnnounce(runtime, endText);
+
       this.socket.broadcastToRoom(`thread:${runtime.threadId}`, 'game:finished', {
         gameId: runtime.gameId,
         winner,
@@ -429,6 +508,12 @@ export class GameOrchestrator {
 
     // Auto-skip if new phase has no actors (system-driven, not cat-driven)
     this.skipEmptyPhases(runtime);
+
+    // H2: Generate last words immediately on ENTERING day_last_words (not on leaving).
+    // Content must be visible during the phase, not appear only at phase end.
+    if (runtime.currentPhase === 'day_last_words' && engine instanceof WerewolfEngine) {
+      this.resolveLastWords(engine as WerewolfEngine, runtime);
+    }
   }
 
   /** Resolve current phase's actions into game state via WerewolfEngine */
@@ -474,6 +559,22 @@ export class GameOrchestrator {
       payload: { deaths: result.deaths, hunterCanShoot: result.hunterCanShoot },
       revealPolicy: 'phase_end',
     });
+
+    // RB-1 + RB-2: Write public dawn announce so players can see who died
+    const dawnText =
+      result.deaths.length > 0
+        ? `☀️ 天亮了。昨夜 ${this.formatDeaths(result.deaths, runtime)} 被袭击。`
+        : '☀️ 天亮了。昨夜是平安夜。';
+
+    werewolf.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'dawn_announce',
+      scope: 'public',
+      payload: { deaths: result.deaths, text: dawnText },
+    });
+
+    this.writeAnnounce(runtime, dawnText);
   }
 
   /** Feed pending day votes into engine and resolve.
@@ -498,10 +599,51 @@ export class GameOrchestrator {
       scope: 'public',
       payload: { exiled: result.exiled, tied: result.tied, pkCandidates: result.pkCandidates },
     });
+
+    // RB-5: Write public exile announce with vote tally
+    const exileText = result.exiled
+      ? `🗳️ 投票结果：${result.exiled}(${runtime.seats.find((s) => s.seatId === result.exiled)?.actorId ?? '?'}) 被放逐。`
+      : result.tied
+        ? '🗳️ 投票平局，无人被放逐。'
+        : '🗳️ 投票结束。';
+
+    werewolf.appendEvent({
+      round: runtime.round,
+      phase: runtime.currentPhase,
+      type: 'exile_announce',
+      scope: 'public',
+      payload: { exiled: result.exiled, tied: result.tied, text: exileText },
+    });
+
+    this.writeAnnounce(runtime, exileText);
+  }
+
+  /** H2/RB-4: Generate template last words for the exiled player.
+   *  Finds the most recently exiled seat and writes their farewell. */
+  private resolveLastWords(werewolf: WerewolfEngine, runtime: GameRuntime): void {
+    // Find the exiled seat — recently killed via exile (check vote_resolved in this round)
+    const voteResults = runtime.eventLog.filter((e) => e.round === runtime.round && e.type === 'vote_resolved');
+    const voteResult = voteResults[voteResults.length - 1];
+    const exiled = (voteResult?.payload as Record<string, unknown> | undefined)?.exiled as string | undefined;
+    if (!exiled) return;
+
+    const seat = runtime.seats.find((s) => s.seatId === exiled);
+    if (!seat) return;
+
+    const lastWordsText = `我是${seat.actorId}，我的遗言是：请大家相信我的判断，好人阵营加油。`;
+    werewolf.recordLastWords(exiled, lastWordsText);
+
+    // Announce + dual-write
+    const announceText = `📜 ${exiled}(${seat.actorId}) 发表遗言。`;
+    this.writeAnnounce(runtime, announceText);
+    this.writeSpeech(runtime, seat.actorId, lastWordsText);
   }
 
   /** Skip consecutive phases that have no alive actors for the acting role.
-   *  System (judge) handles this — cats should never wait for a non-existent role. */
+   *  System (judge) handles this — cats should never wait for a non-existent role.
+   *  Note: day_hunter death-trigger needs special architecture (dead seat can't
+   *  submit actions). Currently disabled — hunter shoot is auto-skipped.
+   *  TODO(H-next): implement hunter death-trigger as a special resolve phase. */
   private skipEmptyPhases(runtime: GameRuntime): void {
     const phases = runtime.definition.phases;
     let safety = phases.length; // prevent infinite loops
@@ -510,7 +652,10 @@ export class GameOrchestrator {
       if (!phase) break;
       const role = phase.actingRole;
       if (!role || role === '*') break; // wildcard phases always have actors
-      if (runtime.seats.some((s) => s.alive && s.role === role)) break; // has actors
+      // day_hunter is deferred (v1) — always skip, death-trigger needs special resolve phase
+      if (phase.name === 'day_hunter') {
+        /* fall through to skip logic */
+      } else if (runtime.seats.some((s) => s.alive && s.role === role)) break; // has actors
 
       // No alive seat for this role — skip
       const skipped = runtime.currentPhase;

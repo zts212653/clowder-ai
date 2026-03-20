@@ -33,12 +33,12 @@ describe('PlayerGrid', () => {
     expect(html).toContain('P6');
   });
 
-  it('highlights active speaker with cyan bg', () => {
+  it('highlights active speaker with gold border', () => {
     const html = render({ activeSeatId: 'P2' });
     expect(html).toContain('data-testid="seat-P2"');
-    // Check the button containing P2 has the active class
+    // H6: Active seat now uses gold border (--ww-state-speaking), not bg-ww-cute
     const p2Match = html.match(/data-testid="seat-P2"[^>]*class="([^"]+)"/);
-    expect(p2Match?.[1]).toContain('bg-ww-cute');
+    expect(p2Match?.[1]).toContain('border-[var(--ww-state-speaking)]');
   });
 
   it('dims dead seat with opacity-40', () => {

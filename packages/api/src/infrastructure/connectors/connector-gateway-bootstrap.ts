@@ -57,12 +57,32 @@ export interface ConnectorGatewayDeps {
   };
   readonly threadStore: {
     create(userId: string, title?: string): { id: string } | Promise<{ id: string }>;
-    get(
-      id: string,
-    ):
-      | { id: string; title?: string | null; createdAt?: number }
+    get(id: string):
+      | {
+          id: string;
+          title?: string | null;
+          createdAt?: number;
+          connectorHubState?: {
+            v: 1;
+            connectorId: string;
+            externalChatId: string;
+            createdAt: number;
+            lastCommandAt?: number;
+          };
+        }
       | null
-      | Promise<{ id: string; title?: string | null; createdAt?: number } | null>;
+      | Promise<{
+          id: string;
+          title?: string | null;
+          createdAt?: number;
+          connectorHubState?: {
+            v: 1;
+            connectorId: string;
+            externalChatId: string;
+            createdAt: number;
+            lastCommandAt?: number;
+          };
+        } | null>;
     list(
       userId: string,
     ):
@@ -70,7 +90,7 @@ export interface ConnectorGatewayDeps {
       | Promise<Array<{ id: string; title?: string | null; lastActiveAt?: number; backlogItemId?: string }>>;
     updateConnectorHubState(
       threadId: string,
-      state: { v: 1; connectorId: string; externalChatId: string; createdAt: number } | null,
+      state: { v: 1; connectorId: string; externalChatId: string; createdAt: number; lastCommandAt?: number } | null,
     ): void | Promise<void>;
   };
   /** Phase D: optional backlog store for feat-number matching in /use */

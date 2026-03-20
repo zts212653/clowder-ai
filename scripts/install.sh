@@ -427,7 +427,7 @@ default_frontend_url() {
     if [[ -f .env ]]; then
         frontend_port="$(read_env_key FRONTEND_PORT || true)"
     fi
-    frontend_port="${frontend_port:-${FRONTEND_PORT:-3001}}"
+    frontend_port="${frontend_port:-${FRONTEND_PORT:-3003}}"
     printf 'http://localhost:%s\n' "$frontend_port"
 }
 

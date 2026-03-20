@@ -36,6 +36,7 @@ function createMockMessageStore() {
       stored.push(msg);
       return { id: `msg-${stored.length}`, ...msg };
     },
+    getById: () => null,
     getRecent: () => [],
     getMentionsFor: () => [],
     getBefore: () => [],

@@ -43,6 +43,8 @@ vi.mock('@/stores/chatStore', () => {
     setSplitPaneThreadIds: vi.fn(),
     setSplitPaneTarget: vi.fn(),
     clearUnread: vi.fn(),
+    confirmUnreadAck: vi.fn(),
+    armUnreadSuppression: vi.fn(),
   };
   const hook = (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state);
   return { useChatStore: hook };

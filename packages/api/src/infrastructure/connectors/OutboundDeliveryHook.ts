@@ -1,3 +1,7 @@
+import { randomBytes } from 'node:crypto';
+import { unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { type CatId, catRegistry, type RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { ConnectorMessageFormatter, type MessageEnvelope } from './ConnectorMessageFormatter.js';
@@ -122,6 +126,10 @@ export class OutboundDeliveryHook {
             for (const block of richBlocks) {
               if (block.kind === 'audio' && 'url' in block && block.url) {
                 const absPath = resolve?.(block.url);
+                this.opts.log.info(
+                  { blockKind: block.kind, url: block.url, absPath: absPath ?? null, hasResolver: !!resolve },
+                  '[OutboundDeliveryHook] Phase 6: sending audio block',
+                );
                 await adapter.sendMedia(binding.externalChatId, {
                   type: 'audio',
                   url: block.url,
@@ -133,7 +141,19 @@ export class OutboundDeliveryHook {
                 const items = (block as { items?: Array<{ url?: string; type?: string }> }).items;
                 if (items) {
                   for (const item of items) {
-                    if (item.url && item.type === 'image') {
+                    if (!item.url) continue;
+                    const isImage = !item.type || item.type === 'image';
+                    if (!isImage) continue;
+                    if (item.url.startsWith('data:')) {
+                      const absPath = await this.writeDataUriToTempFile(item.url);
+                      if (absPath) {
+                        try {
+                          await adapter.sendMedia(binding.externalChatId, { type: 'image', absPath });
+                        } finally {
+                          await unlink(absPath).catch(() => {});
+                        }
+                      }
+                    } else {
                       const absPath = resolve?.(item.url);
                       await adapter.sendMedia(binding.externalChatId, {
                         type: 'image',
@@ -158,5 +178,15 @@ export class OutboundDeliveryHook {
         }
       }),
     );
+  }
+
+  private async writeDataUriToTempFile(dataUri: string): Promise<string | null> {
+    const match = dataUri.match(/^data:image\/(\w+);base64,(.+)$/s);
+    if (!match) return null;
+    const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+    const filePath = join(tmpdir(), `cat-cafe-img-${randomBytes(8).toString('hex')}.${ext}`);
+    await writeFile(filePath, buffer);
+    return filePath;
   }
 }

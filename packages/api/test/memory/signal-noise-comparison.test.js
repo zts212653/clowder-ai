@@ -12,7 +12,7 @@ describe('Signal-to-Noise: SQLite vs grep', () => {
   let SqliteEvidenceStore;
   let IndexBuilder;
   let store;
-  const docsRoot = join(process.cwd(), 'docs');
+  const docsRoot = join(import.meta.dirname, '../../../../docs');
 
   before(async () => {
     const storeMod = await import('../../dist/domains/memory/SqliteEvidenceStore.js');

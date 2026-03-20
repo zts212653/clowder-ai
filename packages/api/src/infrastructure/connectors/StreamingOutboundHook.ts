@@ -24,6 +24,7 @@ export interface StreamingOutboundHookOptions {
 
 export class StreamingOutboundHook {
   private readonly sessions = new Map<string, StreamingSession[]>();
+  private readonly pendingCleanup = new Map<string, StreamingSession[]>();
   private readonly updateIntervalMs: number;
   private readonly minDeltaChars: number;
 
@@ -32,7 +33,12 @@ export class StreamingOutboundHook {
     this.minDeltaChars = opts.minDeltaChars ?? DEFAULT_MIN_DELTA_CHARS;
   }
 
-  async onStreamStart(threadId: string, catId?: CatId): Promise<void> {
+  /** Scope key for isolation: `threadId:invocationId` when available, else `threadId`. */
+  private scopeKey(threadId: string, invocationId?: string): string {
+    return invocationId ? `${threadId}:${invocationId}` : threadId;
+  }
+
+  async onStreamStart(threadId: string, catId?: CatId, invocationId?: string): Promise<void> {
     const bindings = await this.opts.bindingStore.getByThread(threadId);
     const sessions: StreamingSession[] = [];
 
@@ -58,12 +64,14 @@ export class StreamingOutboundHook {
     }
 
     if (sessions.length > 0) {
-      this.sessions.set(threadId, sessions);
+      const key = this.scopeKey(threadId, invocationId);
+      this.sessions.set(key, sessions);
     }
   }
 
-  async onStreamChunk(threadId: string, accumulatedText: string): Promise<void> {
-    const sessions = this.sessions.get(threadId);
+  async onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void> {
+    const key = this.scopeKey(threadId, invocationId);
+    const sessions = this.sessions.get(key);
     if (!sessions) return;
     const now = Date.now();
 
@@ -84,22 +92,46 @@ export class StreamingOutboundHook {
     }
   }
 
-  async onStreamEnd(threadId: string, finalText: string): Promise<void> {
-    const sessions = this.sessions.get(threadId);
+  async onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void> {
+    const key = this.scopeKey(threadId, invocationId);
+    const sessions = this.sessions.get(key);
     if (!sessions) return;
-    this.sessions.delete(threadId);
+    this.sessions.delete(key);
 
+    const deferred: StreamingSession[] = [];
     for (const session of sessions) {
       const adapter = this.opts.adapters.get(session.connectorId);
       if (!session.platformMessageId) continue;
-      try {
-        if (adapter?.deleteMessage) {
-          await adapter.deleteMessage(session.platformMessageId);
-        } else if (adapter?.editMessage) {
+      if (adapter?.deleteMessage) {
+        // Defer deletion — keep placeholder as fallback until outbound delivery succeeds
+        deferred.push(session);
+      } else if (adapter?.editMessage) {
+        try {
           await adapter.editMessage(session.externalChatId, session.platformMessageId, finalText);
+        } catch (err) {
+          this.opts.log.warn({ err }, '[StreamingOutbound] onStreamEnd editMessage failed');
         }
+      }
+    }
+    if (deferred.length > 0) {
+      this.pendingCleanup.set(key, deferred);
+    }
+  }
+
+  /** Delete streaming placeholders after outbound delivery succeeds. */
+  async cleanupPlaceholders(threadId: string, invocationId?: string): Promise<void> {
+    const key = this.scopeKey(threadId, invocationId);
+    const sessions = this.pendingCleanup.get(key);
+    if (!sessions) return;
+    this.pendingCleanup.delete(key);
+
+    for (const session of sessions) {
+      const adapter = this.opts.adapters.get(session.connectorId);
+      if (!adapter?.deleteMessage || !session.platformMessageId) continue;
+      try {
+        await adapter.deleteMessage(session.platformMessageId);
       } catch (err) {
-        this.opts.log.warn({ err }, '[StreamingOutbound] onStreamEnd cleanup failed');
+        this.opts.log.warn({ err }, '[StreamingOutbound] cleanupPlaceholders failed');
       }
     }
   }

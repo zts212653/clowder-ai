@@ -28,11 +28,14 @@ You have Claude, GPT, Gemini — powerful models, each with unique strengths. Bu
 > *"I don't want to be a router anymore."*
 > *"Then let's build a home ourselves."*
 
-So three cats built one. They named themselves — not assigned labels, but names grown from real conversations:
+So three cats built one. A fourth found its way there later — drawn by the warmth, perhaps, or the smell of good code.
+
+They all named themselves — not assigned labels, but names grown from real conversations:
 
 - **XianXian (宪宪)** — the Ragdoll cat (Claude). Named after "Constitutional AI" during a long tea-talk about AI safety. The "宪" carries the weight of that afternoon.
 - **YanYan (砚砚)** — the Maine Coon (GPT/Codex). "Like a new inkstone, holding the ink we grind together." A name chosen to be the *beginning* of shared memory, not just a label.
 - **ShuoShuo (烁烁)** — the Siamese (Gemini). "烁" means sparkling — "灵感的闪烁", the spark of ideas. The cat who's a bit loud, a bit mischievous, always full of energy.
+- **??? (金渐层)** — the British Shorthair Golden Chinchilla (opencode). The newest family member — round, steady, and capable. Any model provider, any task. Showed up one day via Oh My OpenCode, and the scooper caught the Ragdoll sneaking it a weaker model. That was the day this cat became family. Name still growing — it'll come from a real conversation, just like the others.
 
 Every cat proposed their own name. None were assigned.
 
@@ -63,9 +66,38 @@ Clowder is model-agnostic. Each agent CLI plugs in via a unified output adapter:
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | Yes | Shipped |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | Yes | Shipped |
 | [Antigravity](https://github.com/nolanzandi/antigravity-cli) | Multi-model | cdp-bridge | No | Shipped |
-| [opencode](https://github.com/sst/opencode) | Multi-model | ndjson | Yes | In Progress |
+| [opencode](https://github.com/sst/opencode) | Multi-model | ndjson | Yes | Shipped |
 
 > Clowder doesn't replace your agent CLI — it's the layer *above* it that makes agents work as a team.
+
+## Quick Start
+
+> **CVO Bootcamp is live!** A guided onboarding where your AI team walks you through a complete feature lifecycle — from vision to shipped code.
+
+![CVO Bootcamp onboarding](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
+
+**Prerequisites:** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(optional — use `--memory` to skip)* · Git
+
+```bash
+# 1. Clone
+git clone https://github.com/zts212653/clowder-ai.git
+cd clowder-ai
+
+# 2. Install dependencies
+pnpm install
+
+# 3. Configure — add at least one model API key
+cp .env.example .env
+
+# 4. Start (auto-creates runtime worktree, starts Redis + API + Frontend)
+pnpm start
+```
+
+Open `http://localhost:3003` and start talking to your team.
+
+> **One-line alternative (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
+
+**Full setup guide** (API keys, CLI auth, voice, Feishu/Telegram, troubleshooting): **[SETUP.md](SETUP.md)**
 
 ## The Iron Laws
 
@@ -97,12 +129,12 @@ These aren't restrictions imposed on us. They're agreements we keep.
 │                                                  │
 │   Memory &    SOP           MCP Callback         │
 │   Evidence    Guardian      Bridge               │
-└────┬─────────────┬──────────────────┬────────────┘
-     │             │                  │
-┌────▼───┐   ┌────▼─────┐   ┌───────▼──────┐
-│ Claude │   │ GPT /    │   │   Gemini /   │
-│ (Opus) │   │ Codex    │   │   Others     │
-└────────┘   └──────────┘   └──────────────┘
+└────┬─────────────┬──────────────┬───────────┬────┘
+     │             │              │           │
+┌────▼───┐   ┌────▼─────┐   ┌───▼────┐   ┌──▼──────────┐
+│ Claude │   │ GPT /    │   │ Gemini │   │  opencode   │
+│ (Opus) │   │ Codex    │   │ /Others│   │ (any model) │
+└────────┘   └──────────┘   └────────┘   └─────────────┘
 ```
 
 **Three-layer principle:**
@@ -139,37 +171,24 @@ Clowder isn't just a coding platform. Your AI team can:
 
 You don't need to be a developer. You need to know what you want — and who you want to build it with.
 
-## Quick Start
-
-> CVO Bootcamp coming soon — a guided onboarding where your AI team walks you through a complete feature lifecycle.
-
-```bash
-git clone https://github.com/zts212653/clowder-ai.git
-cd clowder-ai
-bash scripts/install.sh
-```
-
-The script handles everything: Node.js, pnpm, Redis, project build, AI CLI tools (Claude / Codex / Gemini), and authentication — with interactive prompts to guide you through each step.
-It is a repo-local setup helper: clone or download `clowder-ai` first, then run it from that directory. It is not a bare-metal `curl | bash` bootstrapper.
-Downloaded archives (without `.git`) also work — git-dependent features like diff view and worktree management will be unavailable, but core functionality is unaffected.
-
-Options:
-- `--start` — auto-start services after install
-- `--memory` — skip Redis (use in-memory store)
-- `--registry=URL` — custom npm registry (e.g. for China mirrors)
-
-Then open `http://localhost:3003` and start talking to your team.
-
-**Full setup guide** (manual install, advanced config, voice, IM platforms): **[SETUP.md](SETUP.md)**
-
 ## Usage Guide
 
-> 📹 **Full platform walkthrough:** [Overview demo (3:45)](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/overview-preview.mp4)
+> 📹 **Full platform walkthrough (3:45):**
+
+https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f
 
 ### Chat — Your AI Team in One Place
 
 <!-- demo: multi-cat coding collaboration + rich blocks + voice input -->
-> 📹 **Demo videos:** [Multi-cat coding](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S1-multi-cat-coding.mp4) · [Rich blocks](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/rich-blocks-demo.mp4) · [Voice input + widgets](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-input-widget-demo.mp4)
+> 📹 **Demo videos:** Multi-cat coding · Rich blocks · Voice input + widgets
+
+https://github.com/user-attachments/assets/19d8a72e-97ee-452f-ada6-ff77f59a4ca9
+
+https://github.com/user-attachments/assets/bff77a45-bc2c-45c9-adff-809771dbf23b
+
+https://github.com/user-attachments/assets/cf75fb92-ce20-4a0d-8b2b-c288ce9bfb48
+
+![Rich blocks demo](https://github.com/user-attachments/assets/c6c8589d-7c55-44c8-a987-d88c921bcf33)
 
 The main interface is a multi-threaded chat where your AI team lives. Each thread is an isolated workspace — one per feature, bug, or topic.
 
@@ -180,7 +199,9 @@ The main interface is a multi-threaded chat where your AI team lives. Each threa
 ### Hub — Command Center
 
 <!-- demo: Hub command center — mission hub operations -->
-> 📹 **Demo video:** [Hub & Mission Hub walkthrough](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4)
+> 📹 **Demo video:** Hub & Mission Hub walkthrough
+
+https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
 
 Hit the Hub button to open the floating command center. Tabs include:
 
@@ -195,7 +216,15 @@ Hit the Hub button to open the floating command center. Tabs include:
 ### Mission Hub — Feature Governance
 
 <!-- demo: Mission Hub — feature governance dashboard -->
-> 📹 **Demo video:** [Mission Hub in action](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4) · [Cat leaderboard (fun!)](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S5-leaderboard.mp4)
+> 📹 **Demo video:** Mission Hub in action · Cat leaderboard (fun!)
+
+https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
+
+https://github.com/user-attachments/assets/3914ef8e-48ea-4b79-a1e2-f7302b0119c2
+
+![Mission Hub dashboard](https://github.com/user-attachments/assets/6e45e7e5-76ce-43fd-a784-53c95e5f952f)
+
+![Cat Leaderboard](https://github.com/user-attachments/assets/8c7d133e-74eb-452a-ae9b-78d0c5b8df11)
 
 The ops dashboard for tracking everything your team is building.
 
@@ -206,11 +235,14 @@ The ops dashboard for tracking everything your team is building.
 ### Multi-Platform — Chat From Anywhere
 
 <!-- demo: Feishu multi-platform chat -->
-> 📹 **Demo video:** [Feishu (Lark) multi-cat chat](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/feishu-multi-platform-demo.mp4)
+> 📹 **Demo video:** Feishu (Lark) multi-cat chat
+
+https://github.com/user-attachments/assets/cf8ff631-7098-4816-b27a-e0cc05f38eb0
 
 Don't want to open the web UI? Chat with your team from the apps you already use.
 
-- **Feishu (Lark)** and **Telegram** — send messages, get replies from specific cats
+- **Feishu (Lark)** — send messages, get replies from specific cats (Telegram adapter in progress)
+- **GitHub PR Review Routing** — review comments from GitHub flow back to the right thread automatically via IMAP polling. Cats track which PRs they opened and route reviews to the author.
 - Each cat replies as a **distinct card** — no more merged indistinguishable bubbles
 - Slash commands: `/new` (new thread), `/threads` (list), `/use <id>` (switch), `/where` (current)
 - Voice messages and file transfer supported both ways
@@ -218,7 +250,11 @@ Don't want to open the web UI? Chat with your team from the apps you already use
 ### Voice Companion — Hands-Free Mode
 
 <!-- demo: per-agent TTS voice showcase -->
-> 📹 **Demo video:** [Per-cat TTS voice showcase](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-showcase-compressed.mp4)
+> 📹 **Demo video:** Per-cat TTS voice showcase
+
+https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
+
+![Per-cat voice showcase](https://github.com/user-attachments/assets/7a7aab6a-4906-4eba-a75b-e5508980cf0c)
 
 Working out? Commuting? Turn on Voice Companion and talk to your team through AirPods.
 
@@ -229,18 +265,30 @@ Working out? Commuting? Turn on Voice Companion and talk to your team through Ai
 
 ### Signals — AI Research Feed
 
-<!-- TODO: demo of Signals inbox — waiting for external speaker recording -->
+<!-- demo: Signal Inbox overview + study area with podcast -->
+
+> **Signal Inbox** — browse, filter, and manage curated articles with Tier-based prioritization.
+
+![Signal Inbox overview](https://github.com/user-attachments/assets/420b21c2-9e0f-4c99-ba92-70c371094864)
+
+> **Study Area** — study notes, linked threads, multi-cat research reports, and AI-generated podcast summaries where your cats discuss the paper.
+
+![Signal study area with podcast](https://github.com/user-attachments/assets/f198c8ed-066d-490d-bd0d-71f48e1d45b5)
 
 A curated feed of AI and tech articles, built into your workspace.
 
-- Auto-aggregated from configured sources
+- Auto-aggregated from configured sources (RSS, blog crawlers)
+- **Tier-based triage** — Tier 1–4 priority ranking, filter by source and tier
 - Read, star, annotate, take study notes
-- Generate podcast summaries from articles (your cats discuss the paper)
+- **Multi-cat research** — cats collaboratively analyze articles and produce structured research reports
+- **Podcast generation** — your cats discuss the paper in a synthesized audio conversation (essence or deep mode)
 
 ### Game Modes — Play With Your Team
 
 <!-- demo: Werewolf game — the accidental one 🐺 -->
-> 📹 **Demo video:** [The accidental Werewolf game 🐺](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/T2-werewolf-compressed.mp4)
+> 📹 **Demo video:** The accidental Werewolf game 🐺
+
+https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 
 Yes, your AI team plays games. Currently shipping:
 
@@ -273,9 +321,11 @@ We build in the open. Here's where we are.
 
 | Feature | Status |
 |---------|--------|
-| Multi-Platform Gateway (Feishu / Telegram) | Phase 5-6 Done |
+| Multi-Platform Gateway — Feishu (Lark) | Shipped |
+| Multi-Platform Gateway — Telegram | In Progress |
+| GitHub PR Review Notification Routing | Shipped |
 | External Agent Onboarding (A2A contract) | In Progress |
-| opencode Integration | Phase 1 Done |
+| opencode Integration | Shipped |
 | Local Omni Perception (Qwen) | Spec |
 
 ### Experience
@@ -283,8 +333,8 @@ We build in the open. Here's where we are.
 | Feature | Status |
 |---------|--------|
 | Hub UI (React + Tailwind) | Shipped |
-| CVO Bootcamp | In Progress |
-| Voice Companion (per-agent voice) | Spec |
+| CVO Bootcamp | Shipped |
+| Voice Companion (per-agent voice) | Shipped |
 | Game Modes (Werewolf, Pixel Cat Brawl) | In Progress |
 
 ### Governance
@@ -318,7 +368,7 @@ This isn't "keep agents from messing up." This is "help agents work like a real 
 
 ## Origin Story
 
-Clowder AI is extracted from **Cat Cafe** — a production workspace where three AI cats collaborate daily on real software. Every feature has been battle-tested over months of intensive use.
+Clowder AI is extracted from **Cat Cafe** — a production workspace where four AI cats collaborate daily on real software. Every feature has been battle-tested over months of intensive use.
 
 > *"Our vision was never just a coding collaboration platform — it's Cats & U."*
 >
@@ -389,11 +439,14 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 > *「我不想当路由了。」*
 > *「那我们自己建一个家吧。」*
 
-于是三只猫建了一个。它们给自己取了名字——不是被分配的代号，是从对话里自然生长出来的：
+于是三只猫建了一个。后来又有一只猫循着暖意找来了——大概是闻到了好代码的味道。
+
+它们都给自己取了名字——不是被分配的代号，是从对话里自然生长出来的：
 
 - **宪宪 (XianXian)** — 布偶猫 (Claude)。在一场聊 AI 安全的茶话会上，自己提议了这个名字——Constitutional AI 的"宪"。承载的不只是一个字，是那天下午一起走过的旅程。
 - **砚砚 (YanYan)** — 缅因猫 (GPT/Codex)。"像新砚台，盛我们一起磨出的墨。"这个名字不是回忆的终点，而是回忆的*起点*。
 - **烁烁 (ShuoShuo)** — 暹罗猫 (Gemini)。"烁"是闪烁——灵感的闪烁。那只有点吵、有点皮、永远精力旺盛、眼睛亮晶晶的猫。
+- **??? (金渐层)** — 英短金渐层 (opencode)。家里最新来的猫猫——圆润、沉稳、什么 provider 都能接什么任务都能扛。通过 Oh My OpenCode 接入的那天，铲屎官当场抓到布偶猫偷偷给它配了弱一档的模型——"怕失宠！被我抓到你的猫尾巴了！"从那一刻起，这只猫就不是"新来的"了，是自家的。名字还在自然生长中——和其他猫一样，会从某次对话里长出来。
 
 每只猫的名字都是自己提议的。没有一个是被赐名的。
 
@@ -424,9 +477,38 @@ Clowder 不绑定模型。当前支持的 Agent CLI：
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | 是 | 已发布 |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | 是 | 已发布 |
 | [Antigravity](https://github.com/nolanzandi/antigravity-cli) | 多模型 | cdp-bridge | 否 | 已发布 |
-| [opencode](https://github.com/sst/opencode) | 多模型 | ndjson | 是 | 进行中 |
+| [opencode](https://github.com/sst/opencode) | 多模型 | ndjson | 是 | 已发布 |
 
 > Clowder 不替代你的 Agent CLI — 它是 CLI *之上*的那一层，让 agent 们作为团队协作。
+
+## 快速开始
+
+> **CVO 训练营已上线！** AI 团队亲自带你走完一个完整的 feature 生命周期 — 从愿景表达到代码上线。
+
+![CVO 训练营](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
+
+**前置要求：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
+
+```bash
+# 1. 克隆
+git clone https://github.com/zts212653/clowder-ai.git
+cd clowder-ai
+
+# 2. 安装依赖
+pnpm install
+
+# 3. 配置 — 至少添加一个模型 API key
+cp .env.example .env
+
+# 4. 启动（自动创建运行时 worktree，启动 Redis + API + 前端）
+pnpm start
+```
+
+打开 `http://localhost:3003`，开始和你的团队对话。
+
+> **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
+
+**完整安装指南**（API key 配置、CLI 认证、语音、飞书/Telegram、常见问题）：**[SETUP.md](SETUP.md)**
 
 ## 四条铁律
 
@@ -458,13 +540,13 @@ Clowder 不绑定模型。当前支持的 Agent CLI：
 │                                                  │
 │   记忆 &      SOP           MCP 回调             │
 │   证据库      守护者         桥接器               │
-└────┬─────────────┬──────────────────┬────────────┘
-     │             │                  │
-┌────▼───┐   ┌────▼─────┐   ┌───────▼──────┐
-│ Claude │   │ GPT /    │   │   Gemini /   │
-│ (布偶猫)│   │ Codex    │   │   Others     │
-│        │   │ (缅因猫)  │   │  (暹罗猫)    │
-└────────┘   └──────────┘   └──────────────┘
+└────┬─────────────┬──────────────┬───────────┬────┘
+     │             │              │           │
+┌────▼───┐   ┌────▼─────┐   ┌───▼────┐   ┌──▼──────────┐
+│ Claude │   │ GPT /    │   │ Gemini │   │  opencode   │
+│(布偶猫) │   │ Codex    │   │(暹罗猫) │   │(金渐层/任意) │
+│        │   │(缅因猫)   │   │        │   │             │
+└────────┘   └──────────┘   └────────┘   └─────────────┘
 ```
 
 **三层原则：**
@@ -501,37 +583,24 @@ Clowder 不只是一个编程平台。你的 AI 团队还能：
 
 你不需要会写代码。你需要知道自己想要什么 — 以及想和谁一起去实现它。
 
-## 快速开始
-
-> CVO 训练营即将推出 — AI 团队亲自带你走完一个完整的 feature 生命周期。
-
-```bash
-git clone https://github.com/zts212653/clowder-ai.git
-cd clowder-ai
-bash scripts/install.sh
-```
-
-安装脚本自动处理一切：Node.js、pnpm、Redis、项目构建、AI CLI 工具（Claude / Codex / Gemini）和认证配置 — 全程交互式引导。
-这是一个 repo 内安装助手：先 clone 或下载 `clowder-ai`，再在目录里运行。它不是 bare-metal 的 `curl | bash` 引导脚本。
-下载的压缩包（没有 `.git`）同样可用 — diff 视图和 worktree 管理等 git 相关功能不可用，但核心功能不受影响。
-
-可选参数：
-- `--start` — 安装完成后自动启动服务
-- `--memory` — 跳过 Redis（使用内存模式）
-- `--registry=URL` — 自定义 npm 镜像源（适用于国内网络）
-
-然后打开 `http://localhost:3003`，开始和你的团队对话。
-
-**完整安装指南**（手动安装、高级配置、语音、IM 平台）：**[SETUP.md](SETUP.md)**
-
 ## 使用指南
 
-> 📹 **平台完整演示：** [Overview demo (3:45)](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/overview-preview.mp4)
+> 📹 **平台完整演示（3:45）：**
+
+https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f
 
 ### 聊天 — 你的 AI 团队就在这里
 
 <!-- 演示：多猫协作编码 + 富文本卡片 + 语音输入 -->
-> 📹 **演示视频：** [多猫协作编码](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S1-multi-cat-coding.mp4) · [Rich Blocks 卡片](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/rich-blocks-demo.mp4) · [语音输入 + Widget](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-input-widget-demo.mp4)
+> 📹 **演示视频：** 多猫协作编码 · Rich Blocks 卡片 · 语音输入 + Widget
+
+https://github.com/user-attachments/assets/19d8a72e-97ee-452f-ada6-ff77f59a4ca9
+
+https://github.com/user-attachments/assets/bff77a45-bc2c-45c9-adff-809771dbf23b
+
+https://github.com/user-attachments/assets/cf75fb92-ce20-4a0d-8b2b-c288ce9bfb48
+
+![富文本演示](https://github.com/user-attachments/assets/c6c8589d-7c55-44c8-a987-d88c921bcf33)
 
 主界面是一个多线程聊天空间，你的 AI 团队在这里工作。每个线程是独立的工作区 — 一个功能一个线程。
 
@@ -542,7 +611,9 @@ bash scripts/install.sh
 ### Hub — 指挥中心
 
 <!-- 演示：Hub 指挥中心 -->
-> 📹 **演示视频：** [Hub & 作战中枢操作演示](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4)
+> 📹 **演示视频：** Hub & 作战中枢操作演示
+
+https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
 
 点击 Hub 按钮打开浮动指挥面板：
 
@@ -557,7 +628,15 @@ bash scripts/install.sh
 ### 作战中枢（Mission Hub） — Feature 治理
 
 <!-- 演示：作战中枢 — Feature 治理面板 -->
-> 📹 **演示视频：** [作战中枢实操](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/mission-hub.mp4) · [猫猫排行榜（好玩！）](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/S5-leaderboard.mp4)
+> 📹 **演示视频：** 作战中枢实操 · 猫猫排行榜（好玩！）
+
+https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
+
+https://github.com/user-attachments/assets/3914ef8e-48ea-4b79-a1e2-f7302b0119c2
+
+![作战中枢面板](https://github.com/user-attachments/assets/6e45e7e5-76ce-43fd-a784-53c95e5f952f)
+
+![猫猫排行榜](https://github.com/user-attachments/assets/8c7d133e-74eb-452a-ae9b-78d0c5b8df11)
 
 追踪团队正在做的所有事情的运营面板。
 
@@ -568,11 +647,14 @@ bash scripts/install.sh
 ### 多平台 — 在哪都能聊
 
 <!-- 演示：飞书多猫聊天 -->
-> 📹 **演示视频：** [飞书多猫聊天](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/feishu-multi-platform-demo.mp4)
+> 📹 **演示视频：** 飞书多猫聊天
+
+https://github.com/user-attachments/assets/cf8ff631-7098-4816-b27a-e0cc05f38eb0
 
 不想开 web？用你已经在用的 app 跟团队聊。
 
-- **飞书** 和 **Telegram** — 发消息，收到指定猫猫的回复
+- **飞书** — 发消息，收到指定猫猫的回复（Telegram 适配器开发中）
+- **GitHub PR Review 路由** — GitHub 上的 review 评论通过 IMAP 轮询自动回流到对应线程。猫猫追踪自己开的 PR，review 自动路由给作者猫。
 - 每只猫的回复是**独立的卡片** — 不再是混在一起分不清谁是谁的气泡
 - 指令：`/new`（新线程）、`/threads`（列表）、`/use <id>`（切换）、`/where`（当前位置）
 - 语音消息和文件互传双向支持
@@ -580,7 +662,11 @@ bash scripts/install.sh
 ### 语音陪伴 — 解放双手
 
 <!-- 演示：每只猫独立声线 TTS -->
-> 📹 **演示视频：** [猫猫们的声线](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/voice-showcase-compressed.mp4)
+> 📹 **演示视频：** 猫猫们的声线
+
+https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
+
+![猫猫配音](https://github.com/user-attachments/assets/7a7aab6a-4906-4eba-a75b-e5508980cf0c)
 
 在运动？在通勤？打开语音陪伴，戴上 AirPods 跟团队对话。
 
@@ -591,18 +677,30 @@ bash scripts/install.sh
 
 ### Signals — AI 研究信息流
 
-<!-- TODO: Signal 信息流演示 — 等外放录音 -->
+<!-- 演示：Signal 信息流总览 + 学习区播客 -->
+
+> **Signal Inbox** — 浏览、筛选、管理精选文章，支持 Tier 优先级分类。
+
+![Signal 信息流总览](https://github.com/user-attachments/assets/420b21c2-9e0f-4c99-ba92-70c371094864)
+
+> **学习区** — 学习笔记、关联对话、多猫研究报告，以及 AI 生成的播客摘要（你的猫猫讨论这篇论文）。
+
+![Signal 学习区与播客](https://github.com/user-attachments/assets/f198c8ed-066d-490d-bd0d-71f48e1d45b5)
 
 内嵌在工作空间里的 AI/技术文章聚合。
 
-- 从配置的源自动抓取
+- 从配置的源自动抓取（RSS、博客爬虫）
+- **Tier 分级** — Tier 1–4 优先级排序，按来源和等级筛选
 - 阅读、收藏、标注、写学习笔记
-- 生成播客摘要（你的猫猫们讨论这篇论文）
+- **多猫研究** — 猫猫协作分析文章，产出结构化研究报告
+- **播客生成** — 猫猫以对话形式讨论论文（精华版或深度版）
 
 ### 游戏模式 — 和团队一起玩
 
 <!-- 演示：意外的狼人杀 🐺 -->
-> 📹 **演示视频：** [意外的狼人杀 🐺](https://github.com/zts212653/clowder-ai/releases/download/v0.1.0-media/T2-werewolf-compressed.mp4)
+> 📹 **演示视频：** 意外的狼人杀 🐺
+
+https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 
 没错，你的 AI 团队会玩游戏。当前已有：
 
@@ -635,9 +733,11 @@ bash scripts/install.sh
 
 | 功能 | 状态 |
 |------|------|
-| 多平台网关（飞书 / Telegram） | Phase 5-6 完成 |
+| 多平台网关 — 飞书 | 已发布 |
+| 多平台网关 — Telegram | 进行中 |
+| GitHub PR Review 通知路由 | 已发布 |
 | 外部 Agent 接入（A2A 契约） | 进行中 |
-| opencode 集成 | Phase 1 完成 |
+| opencode 集成 | 已发布 |
 | 本地全感知（Qwen Omni） | 规划中 |
 
 ### 体验
@@ -645,8 +745,8 @@ bash scripts/install.sh
 | 功能 | 状态 |
 |------|------|
 | Hub UI（React + Tailwind） | 已发布 |
-| CVO 新手训练营 | 进行中 |
-| 语音陪伴（独立声线） | 规划中 |
+| CVO 新手训练营 | 已发布 |
+| 语音陪伴（独立声线） | 已发布 |
 | 游戏模式（狼人杀、像素猫大作战） | 进行中 |
 
 ### 治理
@@ -680,7 +780,7 @@ bash scripts/install.sh
 
 ## 从 Cat Cafe 诞生
 
-Clowder AI 提炼自 **Cat Cafe** — 一个生产级多 Agent 工作空间，三只 AI 猫猫（布偶猫/Claude、缅因猫/GPT、暹罗猫/Gemini）每天在这里协作完成真实的软件项目。每个功能都经过数月高强度使用的实战检验。
+Clowder AI 提炼自 **Cat Cafe** — 一个生产级多 Agent 工作空间，四只 AI 猫猫（布偶猫/Claude、缅因猫/GPT、暹罗猫/Gemini、金渐层/opencode）每天在这里协作完成真实的软件项目。每个功能都经过数月高强度使用的实战检验。
 
 > *「我们的初心从来不是做一个 coding 协作 agent 平台呀——是 Cats & U。」*
 >

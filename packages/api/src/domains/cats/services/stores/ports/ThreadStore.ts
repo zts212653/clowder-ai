@@ -131,6 +131,8 @@ export interface ConnectorHubStateV1 {
   externalChatId: string;
   /** When this hub was created. */
   createdAt: number;
+  /** G+ audit: timestamp of the most recent command exchange routed through this hub. */
+  lastCommandAt?: number;
 }
 
 /** F087: Bootcamp phase for CVO onboarding */

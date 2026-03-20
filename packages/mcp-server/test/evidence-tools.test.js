@@ -29,7 +29,7 @@ describe('MCP Evidence Tools', () => {
   // Note: `await import()` is cached by ESM — API_URL is evaluated once at module load.
   // Tests share the same CAT_CAFE_API_URL from beforeEach, so this works.
   // If future tests need different URLs, refactor to a factory or re-export a setter.
-  test('handleSearchEvidence expands comma-separated tags into repeated query params', async () => {
+  test('handleSearchEvidence encodes query and optional params into URL', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
 
     /** @type {string | URL | undefined} */
@@ -44,7 +44,8 @@ describe('MCP Evidence Tools', () => {
 
     const result = await handleSearchEvidence({
       query: 'hindsight',
-      tags: 'project:cat-cafe, kind:decision',
+      scope: 'docs',
+      mode: 'hybrid',
     });
 
     assert.equal(result.isError, undefined);
@@ -52,7 +53,9 @@ describe('MCP Evidence Tools', () => {
 
     const parsed = new URL(String(capturedUrl));
     assert.equal(parsed.pathname, '/api/evidence/search');
-    assert.deepEqual(parsed.searchParams.getAll('tags'), ['project:cat-cafe', 'kind:decision']);
+    assert.equal(parsed.searchParams.get('q'), 'hindsight');
+    assert.equal(parsed.searchParams.get('scope'), 'docs');
+    assert.equal(parsed.searchParams.get('mode'), 'hybrid');
   });
 
   test('handleSearchEvidence includes degraded header when API responds with degraded=true', async () => {
@@ -78,7 +81,7 @@ describe('MCP Evidence Tools', () => {
 
     assert.equal(result.isError, undefined);
     assert.ok(
-      result.content[0].text.includes('[DEGRADED] Results from local docs fallback'),
+      result.content[0].text.includes('[DEGRADED] Evidence store error — results may be incomplete'),
       'expected degraded header in response text',
     );
   });

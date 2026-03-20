@@ -1,7 +1,7 @@
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 
 export interface CommandResult {
-  readonly kind: 'new' | 'threads' | 'use' | 'where' | 'thread' | 'not-command';
+  readonly kind: 'new' | 'threads' | 'use' | 'where' | 'thread' | 'unbind' | 'not-command';
   readonly response?: string;
   readonly newActiveThreadId?: string;
   /** Thread context for storing command exchange in messageStore */
@@ -60,6 +60,8 @@ export class ConnectorCommandLayer {
         return this.handleUse(connectorId, externalChatId, userId, args.join(' '));
       case '/thread':
         return this.handleThread(connectorId, externalChatId, userId, args);
+      case '/unbind':
+        return this.handleUnbind(connectorId, externalChatId);
       default:
         return { kind: 'not-command' };
     }
@@ -194,6 +196,20 @@ export class ConnectorCommandLayer {
       contextThreadId: match.id,
       forwardContent: message,
       response: `📨 → ${title} [${match.id}]`,
+    };
+  }
+
+  private async handleUnbind(connectorId: string, externalChatId: string): Promise<CommandResult> {
+    const binding = await this.deps.bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) {
+      return { kind: 'unbind', response: '⚠️ 当前没有绑定。发送消息或用 /new 创建新 thread。' };
+    }
+    const thread = await this.deps.threadStore.get(binding.threadId);
+    const title = thread?.title ?? '(无标题)';
+    await this.deps.bindingStore.remove(connectorId, externalChatId);
+    return {
+      kind: 'unbind',
+      response: `🔓 已解绑: ${title} [${binding.threadId}]\n\n下一条消息会自动创建新 thread，或用 /use 切换到已有 thread。`,
     };
   }
 

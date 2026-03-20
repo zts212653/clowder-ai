@@ -452,6 +452,13 @@ export function useAgentMessages() {
               ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
               timestamp: Date.now(),
             });
+            // #586 Bug 1 (TD112): Callback created a new bubble because no stream
+            // placeholder existed yet. Mark the invocation as replaced so that
+            // late-arriving stream chunks for the same invocation are suppressed
+            // instead of spawning a second bubble.
+            if (invocationId) {
+              replacedInvocationsRef.current.set(msg.catId, invocationId);
+            }
           }
         } else {
           // CLI stream message (thinking): append to active stream bubble
@@ -560,6 +567,9 @@ export function useAgentMessages() {
         // can't match this finalized message when the next invocation starts.
         // Without this, a race (new text before invocation_created) appends to
         // the old bubble, causing messages to visually merge until page refresh.
+        // Cloud review P2: Do NOT clear taskProgress here — lines 552-559 already
+        // transition it to 'completed'/'interrupted'. Wiping it would remove the
+        // cat from PlanBoardPanel and defeat clearCatStatuses' snapshot preservation.
         setCatInvocation(msg.catId, { invocationId: undefined });
         if (msg.isFinal) {
           clearDoneTimeout();
@@ -580,6 +590,10 @@ export function useAgentMessages() {
           }
           setIntentMode(null);
           clearCatStatuses();
+          // Note: do NOT clear replacedInvocationsRef here. The suppression guard
+          // is designed to persist until a *different* invocationId is observed
+          // (F123 PR #465, symptom-fixture-matrix.md:23). Clearing on done(isFinal)
+          // would allow reordered stale chunks to recreate ghost bubbles.
           a2aGroupRef.current = null;
           // Bug C safety net: if done(isFinal) arrived but no streaming bubble
           // was ever created for this cat, text events were lost (socket transport

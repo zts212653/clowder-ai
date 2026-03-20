@@ -26,7 +26,7 @@ import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domain
 import type { IPrTrackingStore } from '../infrastructure/email/PrTrackingStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
-import { enqueueA2ATargets } from './callback-a2a-trigger.js';
+import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
 import { callbackAuthSchema } from './callback-auth-schema.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
@@ -889,7 +889,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       .min(1)
       .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
     prNumber: z.number().int().positive(),
-    catId: z.string().min(1),
+    catId: z.string().min(1).optional(), // ignored — server uses record.catId
   });
 
   app.post('/api/callbacks/register-pr-tracking', async (request, reply) => {
@@ -904,17 +904,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, repoFullName, prNumber, catId } = parsed.data;
+    const { invocationId, callbackToken, repoFullName, prNumber } = parsed.data;
     const record = registry.verify(invocationId, callbackToken);
     if (!record) {
       reply.status(401);
       return EXPIRED_CREDENTIALS_ERROR;
     }
 
-    if (!catRegistry.has(catId)) {
-      reply.status(400);
-      return { error: `Unknown catId: ${catId}` };
-    }
+    // Use authoritative catId from invocation record, not caller payload.
+    // LLMs may pass wrong catId (e.g. tool description examples bias).
+    const catId = record.catId;
 
     // Cloud Codex P1-2: ownership protection — reject cross-user overwrites
     const existing = await prTrackingStore.get(repoFullName, prNumber);
@@ -1075,8 +1074,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Send notification message to each voter (so they see the vote request in chat)
     const notificationContent = buildVoteNotification(question, options);
     const mentionCatIds = voters.map((v) => createCatId(v));
+    let notificationMsg: Awaited<ReturnType<typeof messageStore.append>> | undefined;
     try {
-      await messageStore.append({
+      notificationMsg = await messageStore.append({
         userId: record.userId,
         catId: record.catId,
         content: notificationContent,
@@ -1087,6 +1087,44 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       });
     } catch (err) {
       console.warn(`[callbacks/start-vote] Failed to persist vote notification:`, err);
+    }
+
+    // Dispatch voter cats so they receive the notification and can vote.
+    // Uses enqueueA2ATargets (standard A2A dispatch, NOT multi_mention depth guard).
+    // If queue overflows (>MAX_QUEUE_DEPTH), falls back to direct dispatch for remaining voters.
+    if (notificationMsg && router && invocationRecordStore) {
+      const a2aDeps = {
+        router,
+        invocationRecordStore,
+        socketManager,
+        invocationTracker,
+        deliveryCursorStore,
+        queueProcessor,
+        invocationQueue: opts.invocationQueue,
+        log: app.log,
+      };
+      const a2aOpts = {
+        targetCats: mentionCatIds,
+        content: notificationContent,
+        userId: record.userId,
+        threadId: record.threadId,
+        triggerMessage: notificationMsg,
+        callerCatId: record.catId as CatId,
+      };
+      try {
+        const { enqueued } = await enqueueA2ATargets(a2aDeps, a2aOpts);
+        // Fallback: voters that hit queue capacity limit → direct dispatch
+        const missed = mentionCatIds.filter((c) => !enqueued.includes(c));
+        if (missed.length > 0) {
+          app.log.info(
+            { threadId: record.threadId, missed, enqueued },
+            '[callbacks/start-vote] Queue overflow: falling back to direct dispatch for remaining voters',
+          );
+          await triggerA2AInvocation(a2aDeps, { ...a2aOpts, targetCats: missed });
+        }
+      } catch (err) {
+        app.log.warn(`[callbacks/start-vote] Failed to dispatch voter invocations: ${String(err)}`);
+      }
     }
 
     return { status: 'ok', threadId: record.threadId, votingState };

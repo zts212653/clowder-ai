@@ -116,12 +116,24 @@ build_project() {
     echo -e "${GREEN}✓ 项目构建完成${NC}"
 }
 
+# 安装 Git Guards（hooks + zdiff3）
+install_git_guards() {
+    echo ""
+    echo "安装 Git Guards..."
+    if [ -f "$PWD/scripts/install-git-guards.sh" ]; then
+        bash "$PWD/scripts/install-git-guards.sh"
+    else
+        echo -e "${YELLOW}警告: 未找到 install-git-guards.sh，跳过${NC}"
+    fi
+}
+
 # 主函数
 main() {
     check_requirements
     setup_data_dir
     check_env
     install_deps
+    install_git_guards
     build_project
 
     echo ""

@@ -222,7 +222,12 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
     }
 
     // P1-2 fix: enforce voters restriction
-    if (votingState.voters && votingState.voters.length > 0 && !votingState.voters.includes(userId)) {
+    if (
+      votingState.voters &&
+      votingState.voters.length > 0 &&
+      !votingState.voters.includes(userId) &&
+      userId !== votingState.initiatedByCat
+    ) {
       reply.status(403);
       return { error: '你不在投票人名单中', code: 'NOT_DESIGNATED_VOTER' };
     }

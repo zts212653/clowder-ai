@@ -303,6 +303,8 @@ interface ChatState {
   currentProjectPath: string;
   /** Transient: suppress initThreadUnread re-hydration for recently-cleared threads */
   _unreadSuppressedUntil: Record<string, number>;
+  /** #586: Count of in-flight ack requests per thread — suppression clears only when 0 */
+  _pendingAckCount: Record<string, number>;
   threads: Thread[];
   isLoadingThreads: boolean;
   /** UI: Whether Thinking blocks should be expanded by default (global preference). */
@@ -396,6 +398,10 @@ interface ChatState {
   clearUnread: (threadId: string) => void;
   /** F072: Clear unread badges for all threads at once */
   clearAllUnread: () => void;
+  /** #586: One ack resolved — decrement pending count; clear suppression when 0 */
+  confirmUnreadAck: (threadId: string) => void;
+  /** #586: Ack about to fire — increment pending count + set Infinity suppression */
+  armUnreadSuppression: (threadId: string) => void;
   /** F069: Initialize unread state from API (page load recovery) */
   initThreadUnread: (threadId: string, unreadCount: number, hasUserMention: boolean) => void;
   updateThreadCatStatus: (threadId: string, catId: string, status: CatStatusType) => void;
@@ -495,6 +501,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentThreadId: 'default',
   currentProjectPath: 'default',
   _unreadSuppressedUntil: {},
+  _pendingAckCount: {},
   threads: [],
   isLoadingThreads: false,
   uiThinkingExpandedByDefault: loadUiThinkingExpandedByDefault(),
@@ -847,7 +854,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { catStatuses: { ...state.catStatuses, [catId]: status } };
     }),
 
-  clearCatStatuses: () => set({ targetCats: [], catStatuses: {} }),
+  clearCatStatuses: () =>
+    set((state) => {
+      // #586 Bug 2: Mark stale catInvocations taskProgress as completed so
+      // RightStatusPanel stays consistent with catStatuses being cleared.
+      // Cloud review P1: Only touch 'running' snapshots — preserve 'interrupted'
+      // which is a distinct semantic state (user-initiated cancel, etc.).
+      const cleanedInvocations: Record<string, import('./chat-types').CatInvocationInfo> = {};
+      for (const [catId, info] of Object.entries(state.catInvocations)) {
+        if (info.taskProgress?.snapshotStatus === 'running') {
+          cleanedInvocations[catId] = {
+            ...info,
+            taskProgress: { ...info.taskProgress, snapshotStatus: 'completed' },
+          };
+        } else {
+          cleanedInvocations[catId] = info;
+        }
+      }
+      return { targetCats: [], catStatuses: {}, catInvocations: cleanedInvocations };
+    }),
 
   setCatInvocation: (catId, info) =>
     set((state) => ({
@@ -1401,8 +1426,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const ts = state.threadStates[threadId];
       if (!ts || (ts.unreadCount === 0 && !ts.hasUserMention)) return state;
-      // Suppress re-hydration from API for 10s to prevent ack race
-      const suppressUntil = Date.now() + 10_000;
+      // #586 Bug 3: Use Infinity instead of 10s timeout. Suppression persists
+      // until confirmUnreadAck() is called after POST /read/latest succeeds,
+      // preventing stale server unread counts from overwriting cleared state.
       return {
         threadStates: {
           ...state.threadStates,
@@ -1410,7 +1436,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         _unreadSuppressedUntil: {
           ...state._unreadSuppressedUntil,
-          [threadId]: suppressUntil,
+          [threadId]: Infinity,
         },
       };
     }),
@@ -1418,7 +1444,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearAllUnread: () =>
     set((state) => {
       const updated: Record<string, ThreadState> = {};
-      const suppressUntil = Date.now() + 10_000;
+      // #586 P1-1 fix: clearAllUnread is called AFTER POST /mark-all succeeds
+      // (server cursors already updated), so a short grace window suffices.
+      // Using Infinity here would permanently block initThreadUnread for threads
+      // the user never opens (no ChatContainer ack effect to release them).
+      const suppressUntil = Date.now() + 30_000;
       const suppressed: Record<string, number> = { ...state._unreadSuppressedUntil };
       let changed = false;
       for (const [tid, ts] of Object.entries(state.threadStates)) {
@@ -1432,6 +1462,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       return changed ? { threadStates: updated, _unreadSuppressedUntil: suppressed } : state;
     }),
+
+  confirmUnreadAck: (threadId) =>
+    set((state) => {
+      // #586 final: Decrement pending ack count. Only clear suppression when
+      // ALL in-flight acks have resolved — this prevents an early-resolving ack
+      // from clearing suppression while a newer ack is still in flight.
+      const count = Math.max(0, (state._pendingAckCount[threadId] ?? 1) - 1);
+      const newCounts = { ...state._pendingAckCount, [threadId]: count };
+      if (count > 0) {
+        // Still have pending acks — keep suppression, just update counter
+        return { _pendingAckCount: newCounts };
+      }
+      // All acks resolved — safe to clear suppression
+      if (!state._unreadSuppressedUntil[threadId]) return { _pendingAckCount: newCounts };
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _removed, ...rest } = state._unreadSuppressedUntil;
+      return { _unreadSuppressedUntil: rest, _pendingAckCount: newCounts };
+    }),
+
+  armUnreadSuppression: (threadId) =>
+    set((state) => ({
+      // #586 final: Increment pending ack count + set Infinity suppression.
+      // Each ack attempt increments; confirmUnreadAck decrements. Suppression
+      // only clears when counter reaches 0 (all in-flight acks resolved).
+      _unreadSuppressedUntil: {
+        ...state._unreadSuppressedUntil,
+        [threadId]: Infinity,
+      },
+      _pendingAckCount: {
+        ...state._pendingAckCount,
+        [threadId]: (state._pendingAckCount[threadId] ?? 0) + 1,
+      },
+    })),
 
   initThreadUnread: (threadId, unreadCount, hasUserMention) =>
     set((state) => {

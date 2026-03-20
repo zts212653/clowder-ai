@@ -288,9 +288,12 @@ describe('parseFeatureDocName', () => {
 describe('gitShowFile', () => {
   test('reads a file from origin/main', async () => {
     const { gitShowFile } = await import('../dist/routes/git-doc-reader.js');
-    const content = await gitShowFile('docs/BACKLOG.md');
+    const content = await gitShowFile('docs/ROADMAP.md');
     assert.ok(content, 'should return content');
-    assert.ok(content.includes('| ID |') || content.includes('backlog'), 'should contain expected content');
+    assert.ok(
+      content.includes('Roadmap') || content.includes('backlog') || content.includes('Feature'),
+      'should contain expected content',
+    );
   });
 
   test('returns null for non-existent path', async () => {
@@ -305,10 +308,10 @@ describe('fetch throttle (storm prevention)', () => {
     const { _resetFetchTimer, gitShowFile } = await import('../dist/routes/git-doc-reader.js');
     _resetFetchTimer();
     // First call triggers a real fetch (succeeds in CI/local)
-    await gitShowFile('docs/BACKLOG.md');
+    await gitShowFile('docs/ROADMAP.md');
     // Measure time for a second call — should be throttled (no new fetch)
     const start = Date.now();
-    await gitShowFile('docs/BACKLOG.md');
+    await gitShowFile('docs/ROADMAP.md');
     const elapsed = Date.now() - start;
     // Throttled call should be fast (<500ms), not a 10s timeout
     assert.ok(elapsed < 500, `second call should be throttled but took ${elapsed}ms`);

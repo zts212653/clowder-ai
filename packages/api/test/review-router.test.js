@@ -614,7 +614,7 @@ describe('ReviewRouter', () => {
       assert.ok(msg.source, 'message should have source field');
       assert.strictEqual(msg.source.connector, 'github-review');
       assert.strictEqual(msg.source.label, 'GitHub Review');
-      assert.strictEqual(msg.source.icon, '🔔');
+      assert.strictEqual(msg.source.icon, 'github');
       assert.strictEqual(msg.source.url, 'https://github.com/zts212653/cat-cafe/pull/42');
     });
 
@@ -637,7 +637,7 @@ describe('ReviewRouter', () => {
       const msg = messageMock.messages[0];
       assert.ok(msg.source, 'triage message should have source field');
       assert.strictEqual(msg.source.connector, 'github-review');
-      assert.strictEqual(msg.source.icon, '⚠️');
+      assert.strictEqual(msg.source.icon, 'github');
     });
   });
 
