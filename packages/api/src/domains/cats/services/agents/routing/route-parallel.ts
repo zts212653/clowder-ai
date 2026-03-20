@@ -585,15 +585,19 @@ export async function* routeParallel(
           }
         }
       } else if (!catHadError.has(msg.catId)) {
-        // No text content and no error — store empty message with any tool events
-        // F22: still attach any MCP-buffered rich blocks (cloud Codex P1: block-only responses)
+        // No text content and no error.
+        // Persist only when there is non-text payload (tool/thinking/rich).
+        // Purely empty turns should not create blank chat bubbles.
         const meta = catMeta.get(msg.catId);
         const catTools = catToolEvents.get(msg.catId);
         const thinking = catThinking.get(msg.catId);
+        const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
+        const hasRichBlocks = noTextBlocks.length > 0;
+        const shouldPersistNoTextMessage =
+          hasRichBlocks || (catTools?.length ?? 0) > 0 || Boolean(thinking?.trim().length ?? 0);
 
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
         // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
-        const hasRichBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])].length > 0;
         if (catTools && catTools.length > 0 && !hasRichBlocks) {
           yield {
             type: 'system_info' as AgentMessageType,
@@ -607,56 +611,70 @@ export async function* routeParallel(
           } as AgentMessage;
         }
 
-        try {
-          await deps.messageStore.append({
-            userId,
-            catId: msg.catId as CatId,
-            content: '',
-            mentions: [],
-            origin: 'stream',
-            timestamp: Date.now(),
-            threadId,
-            ...(thinking ? { thinking } : {}),
-            ...(meta ? { metadata: meta } : {}),
-            ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
-            extra: {
-              ...(() => {
-                const blocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
-                return blocks.length > 0 ? { rich: { v: 1 as const, blocks } } : {};
-              })(),
-              ...(ownInvId ? { stream: { invocationId: ownInvId } } : {}),
-            },
-          });
-          // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
-          if (options.persistenceContext) {
-            const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
-            if (noTextBlocks.length > 0) {
+        if (shouldPersistNoTextMessage) {
+          try {
+            await deps.messageStore.append({
+              userId,
+              catId: msg.catId as CatId,
+              content: '',
+              mentions: [],
+              origin: 'stream',
+              timestamp: Date.now(),
+              threadId,
+              ...(thinking ? { thinking } : {}),
+              ...(meta ? { metadata: meta } : {}),
+              ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
+              extra: {
+                ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
+                ...(ownInvId ? { stream: { invocationId: ownInvId } } : {}),
+              },
+            });
+            // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
+            if (options.persistenceContext && noTextBlocks.length > 0) {
               options.persistenceContext.richBlocks = [
                 ...(options.persistenceContext.richBlocks ?? []),
                 ...noTextBlocks,
               ];
             }
-          }
-          // #80: Clean up draft only after successful append
-          if (deps.draftStore && ownInvId) {
-            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
-          }
-          // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
-          if (deps.invocationDeps.threadStore) {
-            try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
-            } catch (activityErr) {
-              console.warn(`[routeParallel] updateParticipantActivity failed for ${msg.catId}, ignoring:`, activityErr);
+            // #80: Clean up draft only after successful append
+            if (deps.draftStore && ownInvId) {
+              deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+            }
+            // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
+            if (deps.invocationDeps.threadStore) {
+              try {
+                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
+              } catch (activityErr) {
+                console.warn(
+                  `[routeParallel] updateParticipantActivity failed for ${msg.catId}, ignoring:`,
+                  activityErr,
+                );
+              }
+            }
+          } catch (err) {
+            console.error(`[routeParallel] messageStore.append failed for ${msg.catId}, degrading:`, err);
+            if (options.persistenceContext) {
+              options.persistenceContext.failed = true;
+              options.persistenceContext.errors.push({
+                catId: msg.catId,
+                error: err instanceof Error ? err.message : String(err),
+              });
             }
           }
-        } catch (err) {
-          console.error(`[routeParallel] messageStore.append failed for ${msg.catId}, degrading:`, err);
-          if (options.persistenceContext) {
-            options.persistenceContext.failed = true;
-            options.persistenceContext.errors.push({
-              catId: msg.catId,
-              error: err instanceof Error ? err.message : String(err),
-            });
+        } else {
+          yield {
+            type: 'system_info' as AgentMessageType,
+            catId: msg.catId,
+            content: JSON.stringify({
+              type: 'silent_completion',
+              detail: `${msg.catId} completed without textual output.`,
+              toolCount: 0,
+            }),
+            timestamp: Date.now(),
+          } as AgentMessage;
+          // No persisted message for fully silent turns.
+          if (deps.draftStore && ownInvId) {
+            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
           }
         }
       } else {

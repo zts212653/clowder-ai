@@ -1331,8 +1331,8 @@ function createDoneOnlyService(catId) {
   };
 }
 
-describe('routeSerial: done-only (no text, no error) must tag origin:stream', () => {
-  it('persists empty message with origin:stream when cat yields only done', async () => {
+describe('routeSerial: done-only (no text, no error)', () => {
+  it('does not persist empty message when cat yields only done', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
     const deps = createMockDeps(
@@ -1348,13 +1348,10 @@ describe('routeSerial: done-only (no text, no error) must tag origin:stream', ()
     }
 
     const catAppends = appendCalls.filter((c) => c.catId === 'codex');
-    assert.equal(catAppends.length, 1, 'done-only cat should still persist a message');
-    assert.equal(catAppends[0].origin, 'stream', 'done-only append must have origin:stream');
+    assert.equal(catAppends.length, 0, 'done-only cat should not persist a blank message');
   });
 
-  it('done-only message is hidden from other cats in play mode thread-context', async () => {
-    // This validates the full chain: routeSerial tags origin:stream →
-    // play-mode filter hides it → legacy untagged remains visible.
+  it('still yields a final done event when cat is silent', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
     const deps = createMockDeps(
@@ -1364,19 +1361,42 @@ describe('routeSerial: done-only (no text, no error) must tag origin:stream', ()
       appendCalls,
     );
 
-    for await (const _ of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1', {
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1', {
       thinkingMode: 'play',
     })) {
+      messages.push(msg);
     }
 
-    const codexAppend = appendCalls.find((c) => c.catId === 'codex');
-    assert.ok(codexAppend, 'codex message should be persisted');
-    assert.equal(codexAppend.origin, 'stream');
+    const doneMsgs = messages.filter((m) => m.type === 'done');
+    assert.equal(doneMsgs.length, 1, 'silent cat should still produce one done event');
+    assert.equal(doneMsgs[0].isFinal, true, 'silent single-cat run should mark done as final');
+    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    assert.equal(catAppends.length, 0, 'silent cat should not persist blank content');
+  });
+});
 
-    // Simulate play-mode filter (same logic as callbacks.ts):
-    // For other-cat messages, only origin !== 'stream' is visible.
-    const isHiddenInPlay = codexAppend.catId !== 'opus' && codexAppend.origin === 'stream';
-    assert.ok(isHiddenInPlay, 'done-only codex message must be hidden from opus in play mode');
+describe('routeParallel: done-only (no text, no error)', () => {
+  it('does not persist empty message when cat yields only done', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: createDoneOnlyService('codex'),
+      },
+      appendCalls,
+    );
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['codex'], 'test', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const doneMsgs = messages.filter((m) => m.type === 'done');
+    assert.equal(doneMsgs.length, 1, 'silent parallel cat should still produce one done event');
+    assert.equal(doneMsgs[0].isFinal, true, 'silent parallel single-cat run should mark done as final');
+    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    assert.equal(catAppends.length, 0, 'silent parallel cat should not persist blank content');
   });
 });
 
