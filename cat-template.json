@@ -111,7 +111,7 @@
         {
           "id": "opus-default",
           "provider": "anthropic",
-          "defaultModel": "claude-opus-4-6[1m]",
+          "defaultModel": "claude-opus-4-6",
           "mcpSupport": true,
           "cli": {
             "command": "claude",
