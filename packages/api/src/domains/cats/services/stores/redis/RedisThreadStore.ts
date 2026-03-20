@@ -457,14 +457,28 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  /** F128: List child threads that have this thread as parentThreadId. */
+  /** F128: List child threads that have this thread as parentThreadId. Pipeline to avoid N+1. */
   async getChildThreads(parentThreadId: string): Promise<Thread[]> {
     const childIds = await this.redis.zrange(ThreadKeys.children(parentThreadId), 0, -1);
     if (!childIds.length) return [];
-    const children: Thread[] = [];
+    // Pipeline: fetch all thread hashes + participant sets in one round-trip
+    const pipeline = this.redis.multi();
     for (const id of childIds) {
-      const thread = await this.get(id);
-      if (thread && !thread.deletedAt) children.push(thread);
+      pipeline.hgetall(ThreadKeys.detail(id));
+      pipeline.smembers(ThreadKeys.participants(id));
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const children: Thread[] = [];
+    for (let i = 0; i < childIds.length; i++) {
+      const dataResult = results[i * 2];
+      const membersResult = results[i * 2 + 1];
+      if (!dataResult || dataResult[0]) continue; // error
+      const data = dataResult[1] as Record<string, string>;
+      if (!data || !data.id) continue;
+      const thread = this.hydrateThread(data);
+      thread.participants = ((membersResult?.[1] as string[]) ?? []) as import('@cat-cafe/shared').CatId[];
+      if (!thread.deletedAt) children.push(thread);
     }
     return children;
   }
@@ -479,6 +493,11 @@ export class RedisThreadStore implements IThreadStore {
     const existingDeletedAt = await this.redis.hget(key, 'deletedAt');
     if (existingDeletedAt && parseInt(existingDeletedAt, 10) > 0) return false;
     await this.redis.hset(key, 'deletedAt', String(Date.now()));
+    // P3-4: Remove from parent's children index
+    const parentId = await this.redis.hget(key, 'parentThreadId');
+    if (parentId) {
+      await this.redis.zrem(ThreadKeys.children(parentId), threadId);
+    }
     return true;
   }
 
