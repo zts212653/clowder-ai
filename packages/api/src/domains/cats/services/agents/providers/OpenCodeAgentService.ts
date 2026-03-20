@@ -56,7 +56,7 @@ export class OpenCodeAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     // P1-2: runtime model override takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE ?? this.model;
-    const args = this.buildArgs(prompt, options?.sessionId, effectiveModel);
+    const args = this.buildArgs(prompt, options?.sessionId, effectiveModel, options);
     const cwd = options?.workingDirectory;
     const childEnv = this.buildEnv(options?.callbackEnv);
     const metadata: MessageMetadata = { provider: 'opencode', model: effectiveModel };
@@ -151,7 +151,7 @@ export class OpenCodeAgentService implements AgentService {
     }
   }
 
-  private buildArgs(prompt: string, sessionId?: string, model?: string): string[] {
+  private buildArgs(prompt: string, sessionId?: string, model?: string, options?: AgentServiceOptions): string[] {
     const args = ['run'];
 
     // Session resume
@@ -159,9 +159,11 @@ export class OpenCodeAgentService implements AgentService {
       args.push('--session', sessionId);
     }
 
-    // Model: opencode expects provider/model format
+    // Model: opencode expects provider/model format (e.g. anthropic/claude-opus-4-6 or openai/gpt-4o)
+    // Use protocol hint from callbackEnv if available, otherwise default to anthropic
     const effectiveModel = model ?? this.model;
-    const modelStr = effectiveModel.includes('/') ? effectiveModel : `anthropic/${effectiveModel}`;
+    const protocolHint = options?.callbackEnv?.CAT_CAFE_EFFECTIVE_PROTOCOL ?? 'anthropic';
+    const modelStr = effectiveModel.includes('/') ? effectiveModel : `${protocolHint}/${effectiveModel}`;
     args.push('-m', modelStr);
 
     // JSON event stream output

@@ -41,26 +41,38 @@ export function ProviderProfilesSummaryCard({
   );
 }
 
+export type ApiProtocol = 'anthropic' | 'openai' | 'google';
+
+const PROTOCOL_OPTIONS: Array<{ value: ApiProtocol; label: string }> = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'google', label: 'Google' },
+];
+
 export function CreateApiKeyProfileSection({
   displayName,
   baseUrl,
   apiKey,
+  protocol,
   models,
   busy,
   onDisplayNameChange,
   onBaseUrlChange,
   onApiKeyChange,
+  onProtocolChange,
   onModelsChange,
   onCreate,
 }: {
   displayName: string;
   baseUrl: string;
   apiKey: string;
+  protocol: ApiProtocol;
   models: string[];
   busy: boolean;
   onDisplayNameChange: (value: string) => void;
   onBaseUrlChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
+  onProtocolChange: (protocol: ApiProtocol) => void;
   onModelsChange: (models: string[]) => void;
   onCreate: () => void;
 }) {
@@ -85,6 +97,15 @@ export function CreateApiKeyProfileSection({
             placeholder="账号显示名，如 my-glm"
             className="w-full rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
           />
+          <select
+            value={protocol}
+            onChange={(e) => onProtocolChange(e.target.value as ApiProtocol)}
+            className="w-full rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
+          >
+            {PROTOCOL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
           <input
             value={baseUrl}
             onChange={(e) => onBaseUrlChange(e.target.value)}

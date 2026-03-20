@@ -2758,7 +2758,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       protocol: 'openai',
       baseUrl: 'https://api.bound.example',
       apiKey: 'sk-bound-openai',
-      models: ['claude-sonnet-4-6'],
+      models: ['gpt-5.4', 'claude-sonnet-4-6'],
       setActive: false,
     });
 

@@ -27,6 +27,7 @@ export function HubProviderProfilesTab() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [createDisplayName, setCreateDisplayName] = useState('');
+  const [createProtocol, setCreateProtocol] = useState<'anthropic' | 'openai' | 'google'>('anthropic');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
   const [createModels, setCreateModels] = useState<string[]>([]);
@@ -104,12 +105,14 @@ export function HubProviderProfilesTab() {
           projectPath: mutationProjectPath ?? undefined,
           displayName: createDisplayName.trim(),
           authType: 'api_key',
+          protocol: createProtocol,
           baseUrl: createBaseUrl.trim(),
           apiKey: createApiKey.trim(),
           models: createModels,
         }),
       });
       setCreateDisplayName('');
+      setCreateProtocol('anthropic');
       setCreateBaseUrl('');
       setCreateApiKey('');
       setCreateModels([]);
@@ -125,6 +128,7 @@ export function HubProviderProfilesTab() {
     createBaseUrl,
     createDisplayName,
     createModels,
+    createProtocol,
     mutationProjectPath,
     refresh,
   ]);
@@ -213,11 +217,13 @@ export function HubProviderProfilesTab() {
 
       <CreateApiKeyProfileSection
         displayName={createDisplayName}
+        protocol={createProtocol}
         baseUrl={createBaseUrl}
         apiKey={createApiKey}
         models={createModels}
         busy={busyId === 'create'}
         onDisplayNameChange={setCreateDisplayName}
+        onProtocolChange={setCreateProtocol}
         onBaseUrlChange={setCreateBaseUrl}
         onApiKeyChange={setCreateApiKey}
         onModelsChange={setCreateModels}

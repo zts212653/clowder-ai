@@ -446,11 +446,12 @@ set_codex_api_key_mode() {
     [[ -n "$model" ]] && collect_env "CAT_CODEX_MODEL" "$model" || clear_env "CAT_CODEX_MODEL"
 }
 set_gemini_oauth_mode() {
-    clear_env "GEMINI_API_KEY"; clear_env "CAT_GEMINI_MODEL"
+    clear_env "GEMINI_API_KEY"; clear_env "GEMINI_BASE_URL"; clear_env "CAT_GEMINI_MODEL"
 }
 set_gemini_api_key_mode() {
-    local key="$1" model="$2"
+    local key="$1" base_url="$2" model="$3"
     collect_env "GEMINI_API_KEY" "$key"
+    [[ -n "$base_url" ]] && collect_env "GEMINI_BASE_URL" "$base_url" || clear_env "GEMINI_BASE_URL"
     [[ -n "$model" ]] && collect_env "CAT_GEMINI_MODEL" "$model" || clear_env "CAT_GEMINI_MODEL"
 }
 write_claude_profile() {
@@ -734,9 +735,10 @@ configure_agent_auth() {
             else warn "$name: no key provided, keeping OAuth"; set_codex_oauth_mode; fi
             ;;
         gemini)
+            tty_read "    Base URL (Enter = default): " base_url
             tty_read "    Model (Enter = default): " model
             if [[ -n "$key" ]]; then
-                set_gemini_api_key_mode "$key" "$model"
+                set_gemini_api_key_mode "$key" "$base_url" "$model"
                 ok "$name: API key collected (will write to .env)"
             else warn "$name: no key provided, keeping OAuth"; set_gemini_oauth_mode; fi
             ;;

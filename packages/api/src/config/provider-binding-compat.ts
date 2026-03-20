@@ -42,10 +42,8 @@ export function validateRuntimeProviderBinding(
   if (expectedClient && profile.kind === 'builtin' && profile.client && profile.client !== expectedClient) {
     return `bound provider profile "${profile.id}" is incompatible with client "${provider}"`;
   }
-  const expectedProtocol = resolveExpectedProtocolForProvider(provider);
-  if (profile.authType === 'api_key' && expectedProtocol && profile.protocol && profile.protocol !== expectedProtocol) {
-    return `bound provider profile "${profile.id}" is incompatible with client "${provider}"`;
-  }
+  // API Key accounts declare their own protocol — don't reject based on provider mismatch.
+  // The invocation chain uses account.protocol for env var injection.
 
   const trimmedModel = defaultModel?.trim();
   if (trimmedModel && profile.models?.length && !profile.models.includes(trimmedModel)) {

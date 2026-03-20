@@ -616,108 +616,93 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       err instanceof Error &&
       (/bound provider profile/i.test(err.message) || /model ".+" is not available on provider/i.test(err.message));
 
-    if (provider === 'anthropic' || provider === 'opencode') {
-      try {
-        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
-        if (account?.authType === 'api_key') {
-          callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
-          if (account.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = account.apiKey;
-          if (account.baseUrl) {
-            // Route through local proxy gateway if enabled (default: on).
-            // Proxy uses slug-based routing: /SLUG/v1/messages → upstream/v1/messages
-            const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
-            const proxyPortNum = parseInt(proxyPortStr, 10);
-            const proxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED !== '0';
-            if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
-              const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
-              if (proxyAlive) {
-                const slug = deriveProxySlug(account.id);
-                registerProxyUpstream(projectRoot, slug, account.baseUrl);
-                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
-              } else {
-                console.warn(
-                  `[invoke] proxy 127.0.0.1:${proxyPortStr} unreachable, falling back to direct upstream: ${account.baseUrl}`,
-                );
-                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = account.baseUrl;
-              }
+    // Resolve account first, then use its protocol for env injection.
+    // For API Key accounts, protocol is declared on the account itself.
+    // For builtin OAuth accounts, protocol comes from the provider mapping.
+    let resolvedAccount: Awaited<ReturnType<typeof resolveRuntimeAccount>> = null;
+    try {
+      resolvedAccount = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
+    } catch (err) {
+      if (isExplicitBindingCompatibilityError(err)) {
+        throw err;
+      }
+      if (boundAccountRef) {
+        throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
+      }
+    }
+
+    // Determine effective protocol: account.protocol > provider-based default
+    const defaultProtocolForProvider: Record<string, string> = {
+      anthropic: 'anthropic',
+      opencode: 'anthropic',
+      openai: 'openai',
+      google: 'google',
+      dare: 'openai',
+    };
+    const effectiveProtocol =
+      (resolvedAccount?.authType === 'api_key' && resolvedAccount.protocol)
+        ? resolvedAccount.protocol
+        : (provider ? defaultProtocolForProvider[provider] ?? null : null);
+
+    // Pass protocol hint to CLI via callbackEnv (used by OpenCode/Claude for model prefix)
+    if (effectiveProtocol) {
+      callbackEnv.CAT_CAFE_EFFECTIVE_PROTOCOL = effectiveProtocol;
+    }
+
+    if (effectiveProtocol === 'anthropic') {
+      if (resolvedAccount?.authType === 'api_key') {
+        callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
+        if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) {
+          const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
+          const proxyPortNum = parseInt(proxyPortStr, 10);
+          const proxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED !== '0';
+          if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
+            const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
+            if (proxyAlive) {
+              const slug = deriveProxySlug(resolvedAccount.id);
+              registerProxyUpstream(projectRoot, slug, resolvedAccount.baseUrl);
+              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
             } else {
-              if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
-                console.warn(
-                  `[invoke] invalid ANTHROPIC_PROXY_PORT="${proxyPortStr}", falling back to direct upstream`,
-                );
-              }
-              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = account.baseUrl;
+              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = resolvedAccount.baseUrl;
             }
+          } else {
+            callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = resolvedAccount.baseUrl;
           }
-        } else {
-          callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
         }
-      } catch (err) {
-        if (isExplicitBindingCompatibilityError(err)) {
-          throw err;
-        }
-        if (boundAccountRef) {
-          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
-        }
-        // Best-effort fallback: default to subscription mode when profile resolution fails.
+      } else {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
       }
-    } else if (provider === 'openai') {
-      try {
-        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
-        if (account?.authType === 'api_key') {
-          callbackEnv.CODEX_AUTH_MODE = 'api_key';
-          if (account.apiKey) {
-            callbackEnv.OPENAI_API_KEY = account.apiKey;
-          }
-          if (account.baseUrl) {
-            callbackEnv.OPENAI_BASE_URL = account.baseUrl;
-            callbackEnv.OPENAI_API_BASE = account.baseUrl;
-          }
-        } else if (boundAccountRef) {
-          callbackEnv.CODEX_AUTH_MODE = 'oauth';
+    } else if (effectiveProtocol === 'openai') {
+      if (resolvedAccount?.authType === 'api_key') {
+        callbackEnv.CODEX_AUTH_MODE = 'api_key';
+        if (resolvedAccount.apiKey) {
+          callbackEnv.OPENAI_API_KEY = resolvedAccount.apiKey;
         }
-      } catch (err) {
-        if (isExplicitBindingCompatibilityError(err)) {
-          throw err;
+        if (resolvedAccount.baseUrl) {
+          callbackEnv.OPENAI_BASE_URL = resolvedAccount.baseUrl;
+          callbackEnv.OPENAI_API_BASE = resolvedAccount.baseUrl;
         }
-        if (boundAccountRef) {
-          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
-        }
-        /* openai profile resolution is best-effort */
+      } else if (boundAccountRef) {
+        callbackEnv.CODEX_AUTH_MODE = 'oauth';
       }
-    } else if (provider === 'google') {
-      try {
-        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
-        if (account?.authType === 'api_key' && account.apiKey) {
-          callbackEnv.GEMINI_API_KEY = account.apiKey;
-          callbackEnv.GOOGLE_API_KEY = account.apiKey;
+    } else if (effectiveProtocol === 'google') {
+      if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
+        callbackEnv.GEMINI_API_KEY = resolvedAccount.apiKey;
+        callbackEnv.GOOGLE_API_KEY = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) {
+          callbackEnv.GEMINI_BASE_URL = resolvedAccount.baseUrl;
         }
-      } catch (err) {
-        if (isExplicitBindingCompatibilityError(err)) {
-          throw err;
-        }
-        if (boundAccountRef) {
-          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
-        }
-        /* google profile resolution is best-effort */
       }
-    } else if (provider === 'dare') {
-      try {
-        const account = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
-        if (account?.authType === 'api_key' && account.apiKey) {
-          callbackEnv.DARE_API_KEY = account.apiKey;
-          if (account.baseUrl) callbackEnv.DARE_ENDPOINT = account.baseUrl;
-        }
-      } catch (err) {
-        if (isExplicitBindingCompatibilityError(err)) {
-          throw err;
-        }
-        if (boundAccountRef) {
-          throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
-        }
-        /* dare profile resolution is best-effort */
-      }
+    } else if (provider === 'anthropic' || provider === 'opencode') {
+      // Fallback for unresolved accounts on anthropic/opencode providers
+      callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
+    }
+
+    // Dare has its own env vars regardless of protocol-based injection above
+    if (provider === 'dare' && resolvedAccount?.authType === 'api_key') {
+      if (resolvedAccount.apiKey) callbackEnv.DARE_API_KEY = resolvedAccount.apiKey;
+      if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
     }
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new sessions for cats
