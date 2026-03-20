@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
@@ -72,6 +72,12 @@ function createProjectRoot() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-'));
   tempDirs.push(projectRoot);
   writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
+  return projectRoot;
+}
+
+function createMonorepoProjectRoot() {
+  const projectRoot = createProjectRoot();
+  writeFileSync(join(projectRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n');
   return projectRoot;
 }
 
@@ -249,6 +255,51 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     const mentions = parseA2AMentions('@运行时火花 请跟进这个分支', createCatId('opus'));
     assert.ok(mentions.includes('runtime-spark'), 'new alias should route immediately');
+  });
+
+  it('POST /api/cats falls back to the readable active project root when CAT_TEMPLATE_PATH is stale', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    const staleRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-stale-'));
+    tempDirs.push(staleRoot);
+    const previousCwd = process.cwd();
+    process.chdir(projectRoot);
+    process.env.CAT_TEMPLATE_PATH = join(staleRoot, 'missing-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    try {
+      await app.register(catsRoutes);
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-fallback',
+          name: '回退猫',
+          displayName: '回退猫',
+          avatar: '/avatars/fallback.png',
+          color: { primary: '#2563eb', secondary: '#bfdbfe' },
+          mentionPatterns: ['@runtime-fallback'],
+          roleDescription: '验证 project root fallback',
+          client: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-5.4',
+        }),
+      });
+
+      assert.equal(createRes.statusCode, 201);
+      assert.equal(existsSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json')), true);
+      assert.equal(existsSync(join(staleRoot, '.cat-cafe', 'cat-catalog.json')), false);
+    } finally {
+      process.chdir(previousCwd);
+      await app.close();
+    }
   });
 
   it('POST /api/cats creates Antigravity members without requiring provider selection', async () => {

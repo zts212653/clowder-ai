@@ -72,6 +72,12 @@ describe('env-registry', () => {
     assert.equal(previewPort.runtimeEditable, true);
   });
 
+  it('marks NEXT_PUBLIC_API_URL as bootstrap-only in the hub env editor', () => {
+    const apiUrl = ENV_VARS.find((v) => v.name === 'NEXT_PUBLIC_API_URL');
+    assert.ok(apiUrl, 'NEXT_PUBLIC_API_URL should be in registry');
+    assert.equal(apiUrl.runtimeEditable, false);
+  });
+
   it('no HINDSIGHT_* vars remain after D-1 cleanup', () => {
     const hindsightVars = ENV_VARS.filter((v) => v.name.startsWith('HINDSIGHT_'));
     assert.equal(hindsightVars.length, 0, 'All HINDSIGHT_* vars should be removed');
@@ -320,6 +326,40 @@ describe('PATCH /api/config/env (route)', () => {
       const body = JSON.parse(res.payload);
       assert.match(body.error, /not editable/);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'OPENAI_API_KEY=sk-old\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects NEXT_PUBLIC_API_URL from hub writes because the browser bundle reads it at build time', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'NEXT_PUBLIC_API_URL=http://localhost:3004\n', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'NEXT_PUBLIC_API_URL', value: 'http://localhost:3999' }],
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      const body = JSON.parse(res.payload);
+      assert.match(body.error, /not editable/);
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'NEXT_PUBLIC_API_URL=http://localhost:3004\n');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

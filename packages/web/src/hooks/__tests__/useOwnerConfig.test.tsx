@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetOwnerConfigCacheForTest, useOwnerConfig } from '@/hooks/useOwnerConfig';
+import { getMentionRe, getMentionToCat, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 
 vi.mock('@/utils/api-client', () => ({
@@ -30,6 +31,7 @@ describe('useOwnerConfig', () => {
 
   beforeEach(() => {
     resetOwnerConfigCacheForTest();
+    resetMentionDataForTest();
     mockApiFetch.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -40,6 +42,7 @@ describe('useOwnerConfig', () => {
     act(() => root.unmount());
     container.remove();
     resetOwnerConfigCacheForTest();
+    resetMentionDataForTest();
   });
 
   afterAll(() => {
@@ -88,5 +91,37 @@ describe('useOwnerConfig', () => {
 
     expect(mockApiFetch).toHaveBeenCalledTimes(2);
     expect(container.textContent).toBe('Recovered Owner');
+  });
+
+  it('refreshes owner mention parsing when custom owner handles are loaded', async () => {
+    mockApiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        config: {
+          owner: {
+            name: 'Lang',
+            aliases: ['Co-worker'],
+            mentionPatterns: ['@lang', '@owner'],
+            color: {
+              primary: '#123456',
+              secondary: '#abcdef',
+            },
+          },
+        },
+      }),
+    } as unknown as Response);
+
+    act(() => {
+      root.render(React.createElement(OwnerProbe));
+    });
+    await act(async () => {
+      await flushEffects();
+    });
+
+    expect(container.textContent).toBe('Lang');
+    expect(getMentionToCat().lang).toBe('__owner__');
+    const re = getMentionRe();
+    re.lastIndex = 0;
+    expect(re.exec('请 @lang 看一下')).not.toBeNull();
   });
 });

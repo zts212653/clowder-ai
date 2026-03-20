@@ -16,6 +16,7 @@ import { resolveBuiltinClientForProvider, validateRuntimeProviderBinding } from 
 import { resolveRuntimeProviderProfileById, resolveRuntimeProviderProfileForClient } from '../config/provider-profiles.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
 import { deleteRuntimeOverride, getRuntimeOverride, setRuntimeOverride } from '../config/session-strategy-overrides.js';
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 
 const DEFAULT_TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../cat-template.json');
 
@@ -107,8 +108,7 @@ function resolveOperator(raw: unknown): string | null {
 }
 
 function resolveProjectRoot(): string {
-  const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_TEMPLATE_PATH;
-  return dirname(templatePath);
+  return resolveActiveProjectRoot();
 }
 
 type CatSource = 'seed' | 'runtime';

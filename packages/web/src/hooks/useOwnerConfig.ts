@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { refreshOwnerMentionData, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 import type { OwnerConfig } from '@/components/config-viewer-types';
 
@@ -20,6 +21,7 @@ const listeners = new Set<(owner: OwnerConfig) => void>();
 
 function publishOwner(nextOwner: OwnerConfig): void {
   cachedOwner = nextOwner;
+  refreshOwnerMentionData(nextOwner.mentionPatterns);
   for (const listener of listeners) listener(nextOwner);
 }
 
@@ -60,7 +62,10 @@ export function useOwnerConfig(): OwnerConfig {
         if (!cancelled) setOwner(nextOwner);
       })
       .catch(() => {
-        if (!cancelled) setOwner(DEFAULT_OWNER);
+        if (!cancelled) {
+          refreshOwnerMentionData(DEFAULT_OWNER.mentionPatterns);
+          setOwner(DEFAULT_OWNER);
+        }
       });
     return () => {
       cancelled = true;
@@ -75,6 +80,7 @@ export function resetOwnerConfigCacheForTest(): void {
   cachedOwner = null;
   fetchOwnerPromise = null;
   listeners.clear();
+  resetMentionDataForTest();
 }
 
 export function primeOwnerConfigCache(owner: OwnerConfig): void {

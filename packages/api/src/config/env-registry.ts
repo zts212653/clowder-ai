@@ -582,6 +582,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '前端连接的 API 地址',
     category: 'frontend',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'NEXT_PUBLIC_WHISPER_URL',

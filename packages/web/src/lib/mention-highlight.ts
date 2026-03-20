@@ -32,7 +32,7 @@ function buildMentionColor(cats: Array<{ id: string; color: { primary: string } 
 // ── Owner (铲屎官) ─────────────────────────────────────────
 const OWNER_ID = '__owner__';
 const OWNER_COLOR = '#F5A623'; // warm gold
-const OWNER_MENTIONS = ['owner', 'admin'];
+const DEFAULT_OWNER_MENTION_PATTERNS = ['@owner', '@user', '@铲屎官'];
 
 // ── Module-level cache (starts from static CAT_CONFIGS) ─
 
@@ -43,33 +43,47 @@ const staticCats = Object.entries(CAT_CONFIGS).map(([id, c]) => ({
 }));
 
 // Include owner as a pseudo-cat so @owner / @铲屎官 highlights gold
-const withOwner = [
-  ...staticCats,
-  {
-    id: OWNER_ID,
-    mentionPatterns: OWNER_MENTIONS.map((m) => `@${m}`),
-    color: { primary: OWNER_COLOR },
-  },
-];
-
-let _mentionToCat = buildMentionToCat(withOwner);
+let _cats = staticCats;
+let _ownerMentionPatterns = [...DEFAULT_OWNER_MENTION_PATTERNS];
+let _mentionToCat = buildMentionToCat([]);
 let _mentionRe = buildMentionRe(_mentionToCat);
-let _mentionColor = buildMentionColor(withOwner);
+let _mentionColor = buildMentionColor([]);
+
+function normalizeOwnerMentionPatterns(mentionPatterns: readonly string[]): string[] {
+  const normalized = mentionPatterns
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern.length > 0)
+    .map((pattern) => (pattern.startsWith('@') ? pattern : `@${pattern}`));
+  const unique = new Set(DEFAULT_OWNER_MENTION_PATTERNS);
+  for (const pattern of normalized) unique.add(pattern);
+  return [...unique];
+}
+
+function rebuildMentionCache(): void {
+  const ownerEntry = {
+    id: OWNER_ID,
+    mentionPatterns: _ownerMentionPatterns,
+    color: { primary: OWNER_COLOR },
+  };
+  const all = [..._cats, ownerEntry];
+  _mentionToCat = buildMentionToCat(all);
+  _mentionRe = buildMentionRe(_mentionToCat);
+  _mentionColor = buildMentionColor(all);
+}
+
+rebuildMentionCache();
 
 // ── Public API ──────────────────────────────────────────
 
 /** Called once by useCatData after API fetch succeeds */
 export function refreshMentionData(cats: CatData[]): void {
-  // Always include owner alongside dynamic cats
-  const ownerEntry = {
-    id: OWNER_ID,
-    mentionPatterns: OWNER_MENTIONS.map((m) => `@${m}`),
-    color: { primary: OWNER_COLOR },
-  };
-  const all = [...cats, ownerEntry];
-  _mentionToCat = buildMentionToCat(all);
-  _mentionRe = buildMentionRe(_mentionToCat);
-  _mentionColor = buildMentionColor(all);
+  _cats = cats;
+  rebuildMentionCache();
+}
+
+export function refreshOwnerMentionData(mentionPatterns: readonly string[]): void {
+  _ownerMentionPatterns = normalizeOwnerMentionPatterns(mentionPatterns);
+  rebuildMentionCache();
 }
 
 /** Get the current mention regex (refreshed after API load) */
@@ -85,4 +99,10 @@ export function getMentionToCat(): Record<string, string> {
 /** Map catId → primary color hex (e.g. "#9B7EBD") */
 export function getMentionColor(): Record<string, string> {
   return _mentionColor;
+}
+
+export function resetMentionDataForTest(): void {
+  _cats = staticCats;
+  _ownerMentionPatterns = [...DEFAULT_OWNER_MENTION_PATTERNS];
+  rebuildMentionCache();
 }
