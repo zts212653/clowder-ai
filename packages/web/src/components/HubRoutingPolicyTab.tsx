@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Thread, ThreadRoutingPolicyV1 } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { DailyUsageSection } from './DailyUsageSection';
 import { HubQuotaBoardTab } from './HubQuotaBoardTab';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -98,6 +99,7 @@ export function HubRoutingPolicyTab() {
   return (
     <div className="space-y-4">
       <HubQuotaBoardTab />
+      <DailyUsageSection />
 
       <Section title="路由策略（猫粮约束子模块）">
         <p className="text-[11px] text-gray-500 mb-3">

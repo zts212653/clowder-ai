@@ -111,6 +111,17 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     this.redis = redis;
   }
 
+  /** Resolve ioredis keyPrefix (SCAN doesn't auto-apply it) */
+  private get keyPrefix(): string {
+    return (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+  }
+
+  /** Strip keyPrefix from a raw SCAN key for use with normal commands (which auto-prefix) */
+  private stripPrefix(rawKey: string): string {
+    const p = this.keyPrefix;
+    return p && rawKey.startsWith(p) ? rawKey.slice(p.length) : rawKey;
+  }
+
   async create(input: CreateInvocationInput): Promise<CreateResult> {
     const { randomUUID } = await import('node:crypto');
     const id = randomUUID();
@@ -158,6 +169,12 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) pairs.push('usageByCat', JSON.stringify(input.usageByCat));
 
+    // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
+    if (input.usageByCat !== undefined) {
+      const existing = await this.redis.hget(key, 'usageRecordedAt');
+      if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
+    }
+
     // All updates go through ATOMIC_UPDATE_LUA for consistent guard behavior.
     // The Lua script handles CAS check + state machine validation atomically.
     const result = (await this.redis.eval(
@@ -190,8 +207,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
    * We must manually prepend the prefix for matching, then strip it from results.
    */
   async scanByStatus(status: InvocationStatus): Promise<string[]> {
-    const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
-    const matchPattern = `${prefix}${InvocationKeys.detail('*')}`;
+    const matchPattern = `${this.keyPrefix}${InvocationKeys.detail('*')}`;
     const ids: string[] = [];
     let cursor = '0';
     do {
@@ -200,22 +216,46 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       if (keys.length > 0) {
         const pipeline = this.redis.pipeline();
         for (const key of keys) {
-          // Strip prefix for HGET (ioredis auto-prefixes normal commands)
-          const bareKey = prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key;
-          pipeline.hget(bareKey, 'status');
+          pipeline.hget(this.stripPrefix(key), 'status');
         }
         const results = await pipeline.exec();
         for (let i = 0; i < keys.length; i++) {
           const [err, val] = results?.[i]!;
           if (!err && val === status) {
-            // Extract ID: strip prefix + "invoc:" prefix
-            const bareKey = prefix && keys[i]?.startsWith(prefix) ? keys[i]?.slice(prefix.length) : keys[i]!;
-            ids.push(bareKey.replace(/^invoc:/, ''));
+            ids.push(this.stripPrefix(keys[i]!).replace(/^invoc:/, ''));
           }
         }
       }
     } while (cursor !== '0');
     return ids;
+  }
+
+  /**
+   * F128: Scan ALL invocation records.
+   * Uses Redis SCAN (non-blocking cursor) + pipeline HGETALL for full hydration.
+   */
+  async scanAll(): Promise<InvocationRecord[]> {
+    const matchPattern = `${this.keyPrefix}${InvocationKeys.detail('*')}`;
+    const records: InvocationRecord[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.hgetall(this.stripPrefix(key));
+        }
+        const results = await pipeline.exec();
+        for (const entry of results ?? []) {
+          const [err, data] = entry!;
+          if (!err && data && typeof data === 'object' && (data as Record<string, string>).id) {
+            records.push(this.hydrateRecord(data as Record<string, string>));
+          }
+        }
+      }
+    } while (cursor !== '0');
+    return records;
   }
 
   private hydrateRecord(data: Record<string, string>): InvocationRecord {
@@ -233,6 +273,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       idempotencyKey: data.idempotencyKey!,
       ...(hasError ? { error: errorValue } : {}),
       ...(usageByCat ? { usageByCat } : {}),
+      ...(data.usageRecordedAt ? { usageRecordedAt: parseInt(data.usageRecordedAt, 10) } : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),
     };

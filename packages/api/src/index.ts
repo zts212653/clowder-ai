@@ -146,6 +146,7 @@ import {
   threadsRoutes,
   ttsRoutes,
   uploadsRoutes,
+  usageRoutes,
   workflowSopRoutes,
   workspaceEditRoutes,
   workspaceGitRoutes,
@@ -587,6 +588,8 @@ async function main(): Promise<void> {
   });
   await app.register(catsRoutes);
   await app.register(quotaRoutes);
+  // F128: Daily token usage aggregation
+  await app.register(usageRoutes, { invocationRecordStore });
   // F075 Phase B+C: Game + Achievement stores
   const { GameStore } = await import('./domains/leaderboard/game-store.js');
   const { AchievementStore } = await import('./domains/leaderboard/achievement-store.js');
