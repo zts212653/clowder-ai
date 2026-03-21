@@ -623,18 +623,22 @@ describe('F32-b: mentionPattern validation', () => {
     assert.throws(() => loadCatConfig(path), /Invalid cat config/);
   });
 
-  it('rejects breed mentionPatterns missing @catId handle', () => {
+  it('accepts breed mentionPatterns without canonical @catId (custom aliases allowed)', () => {
     const cfg = multiVariantConfig();
     cfg.breeds[0].mentionPatterns = ['@布偶猫', '@布偶'];
     const path = writeTempConfig(cfg);
-    assert.throws(() => loadCatConfig(path), /must include @opus/);
+    const config = loadCatConfig(path);
+    const allConfigs = toAllCatConfigs(config);
+    assert.deepEqual(allConfigs.opus.mentionPatterns, ['@布偶猫', '@布偶']);
   });
 
-  it('rejects variant mentionPatterns missing @catId handle', () => {
+  it('accepts variant mentionPatterns without canonical @catId (custom aliases allowed)', () => {
     const cfg = multiVariantConfig();
     cfg.breeds[0].variants[1].mentionPatterns = ['@布偶猫4.5'];
     const path = writeTempConfig(cfg);
-    assert.throws(() => loadCatConfig(path), /must include @opus-45/);
+    const config = loadCatConfig(path);
+    const allConfigs = toAllCatConfigs(config);
+    assert.deepEqual(allConfigs['opus-45'].mentionPatterns, ['@布偶猫4.5']);
   });
 });
 
