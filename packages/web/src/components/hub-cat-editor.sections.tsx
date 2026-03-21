@@ -21,6 +21,13 @@ function uniqueTags(tags: string[]): string[] {
   return Array.from(new Set(tags));
 }
 
+function safeAvatarSrc(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/avatars/')) return trimmed;
+  return null;
+}
+
 function autoSlug(name: string): string {
   return name
     .trim()
@@ -52,6 +59,7 @@ export function IdentitySection({
 }) {
   const strengthTags = splitStrengthTags(form.strengths);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarSrc = safeAvatarSrc(form.avatar);
 
   return (
     <SectionCard title="身份信息">
@@ -91,9 +99,9 @@ export function IdentitySection({
           className="flex items-center gap-2 rounded-lg border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-1.5 text-sm text-[#5C4B42] transition hover:border-[#D49266]"
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
-            {form.avatar ? (
+            {avatarSrc ? (
               // biome-ignore lint/performance/noImgElement: avatar path may be runtime upload URL
-              <img src={form.avatar} alt="Avatar preview" className="h-full w-full object-cover" />
+              <img src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
             ) : (
               '🐱'
             )}

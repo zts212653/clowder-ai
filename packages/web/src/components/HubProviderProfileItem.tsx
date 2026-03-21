@@ -89,6 +89,8 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
               />
               <div className="relative">
                 <input
+                  type="password"
+                  autoComplete="off"
                   value={editApiKey}
                   onChange={(e) => setEditApiKey(e.target.value)}
                   placeholder={profile.hasApiKey ? '已配置 sk-••••••••（留空保持不变）' : 'sk-xxxxxxxxxxxxxxxx'}
@@ -179,7 +181,11 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
             <button
               type="button"
               className="rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600"
-              onClick={() => onDelete(profile.id)}
+              onClick={() => {
+                const ok = window.confirm(`确认删除账号「${profile.displayName}」吗？该操作不可撤销。`);
+                if (!ok) return;
+                onDelete(profile.id);
+              }}
               disabled={busy}
             >
               删除

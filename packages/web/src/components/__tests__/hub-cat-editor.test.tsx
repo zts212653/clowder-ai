@@ -1232,7 +1232,7 @@ describe('HubCatEditor', () => {
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/cats', expect.objectContaining({ method: 'POST' }));
   });
 
-  it('deletes an existing member through the delete action', async () => {
+  it('deletes an existing member only after confirmation', async () => {
     const existingCat: CatData = {
       id: 'runtime-antigravity',
       name: '运行时桥接猫',
@@ -1267,6 +1267,21 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     const deleteButton = queryField<HTMLButtonElement>(container, 'button[aria-label="删除成员"]');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await act(async () => {
+      deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(mockApiFetch).not.toHaveBeenCalledWith(
+      '/api/cats/runtime-antigravity',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(onSaved).toHaveBeenCalledTimes(0);
+
+    confirmSpy.mockReturnValue(true);
     await act(async () => {
       deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1277,6 +1292,44 @@ describe('HubCatEditor', () => {
       expect.objectContaining({ method: 'DELETE' }),
     );
     expect(onSaved).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+  });
+
+  it('prompts before closing when there are unsaved edits', async () => {
+    const onClose = vi.fn();
+    mockApiFetch.mockResolvedValue(
+      jsonResponse({
+        projectPath: '/tmp/project',
+        activeProfileId: null,
+        providers: [],
+      }),
+    );
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose, onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '临时名字');
+
+    const cancelButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '取消');
+    await act(async () => {
+      cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    confirmSpy.mockReturnValue(true);
+    await act(async () => {
+      cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
   });
 
   it('hides delete action for seed members', async () => {

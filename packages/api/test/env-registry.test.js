@@ -317,6 +317,46 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
+  it('escapes CR/LF characters to avoid multiline env injection', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    const literal = 'line1\r\nline2\nline3';
+    writeFileSync(envFilePath, '', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'FRONTEND_URL', value: literal }],
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const persisted = readFileSync(envFilePath, 'utf8');
+      assert.match(persisted, /^FRONTEND_URL="line1\\\\r\\\\nline2\\\\nline3"$/m);
+      assert.equal(persisted.trimEnd().split('\n').length, 1);
+
+      const sourced = execFileSync('sh', ['-lc', `set -a; . "${envFilePath}"; printf '%s' "$FRONTEND_URL"`], {
+        encoding: 'utf8',
+      }).trim();
+      assert.equal(sourced, 'line1\\r\\nline2\\nline3');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects sensitive env vars from hub writes', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));

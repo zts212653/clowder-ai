@@ -72,8 +72,13 @@ function resolveOperator(raw: unknown): string | null {
 }
 
 function formatEnvFileValue(value: string): string {
-  if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value;
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`')}"`;
+  const escapedControlChars = value.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  if (/^[A-Za-z0-9_./:@-]+$/.test(escapedControlChars)) return escapedControlChars;
+  return `"${escapedControlChars
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/`/g, '\\`')}"`;
 }
 
 function applyEnvUpdatesToFile(contents: string, updates: Map<string, string | null>): string {

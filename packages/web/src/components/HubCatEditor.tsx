@@ -45,6 +45,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [strategyError, setStrategyError] = useState<string | null>(null);
   const [codexSettingsError, setCodexSettingsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [form, setForm] = useState<HubCatEditorFormState>(() => initialState(cat, draft));
   const [strategyForm, setStrategyForm] = useState<StrategyFormState | null>(null);
   const [strategyBaseline, setStrategyBaseline] = useState<StrategyFormState | null>(null);
@@ -72,6 +73,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     setCodexSettingsError(null);
     setStrategyBaselineHasOverride(false);
     setCodexSettingsBaseline(null);
+    setHasUnsavedChanges(false);
   }, [open, cat, draft]);
 
   useEffect(() => {
@@ -214,14 +216,30 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
 
   const saveBlockedByProfileBinding = false;
 
-  const patchForm = (patch: Partial<HubCatEditorFormState>) => setForm((prev) => ({ ...prev, ...patch }));
-  const patchStrategy = (patch: Partial<StrategyFormState>) =>
+  const patchForm = (patch: Partial<HubCatEditorFormState>) => {
+    setHasUnsavedChanges(true);
+    setForm((prev) => ({ ...prev, ...patch }));
+  };
+  const patchStrategy = (patch: Partial<StrategyFormState>) => {
+    setHasUnsavedChanges(true);
     setStrategyForm((prev) => (prev ? { ...prev, ...patch } : prev));
-  const patchCodex = (patch: Partial<CodexRuntimeSettings>) =>
+  };
+  const patchCodex = (patch: Partial<CodexRuntimeSettings>) => {
+    setHasUnsavedChanges(true);
     setCodexSettings((prev) => ({
       ...(prev ?? toCodexRuntimeSettings()),
       ...patch,
     }));
+  };
+
+  const requestClose = () => {
+    if (!hasUnsavedChanges) {
+      onClose();
+      return;
+    }
+    const ok = window.confirm('有未保存的修改，确定要关闭吗？');
+    if (ok) onClose();
+  };
 
   const handleAvatarUpload = async (file: File) => {
     setUploadingAvatar(true);
@@ -355,6 +373,8 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
 
   const handleDelete = async () => {
     if (!cat) return;
+    const ok = window.confirm(`确认删除成员「${cat.displayName}」吗？此操作不可撤销。`);
+    if (!ok) return;
     setSaving(true);
     setError(null);
     try {
@@ -374,7 +394,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={requestClose}>
       <div
         className="max-h-[88vh] w-full max-w-[560px] overflow-y-auto rounded-[32px] border border-[#F0DDCD] bg-[#FFF8F2] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
@@ -404,7 +424,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
                 </svg>
               </button>
             ) : null}
-            <button type="button" onClick={onClose} className="text-2xl leading-none text-[#B59A88]" aria-label="关闭">
+            <button type="button" onClick={requestClose} className="text-2xl leading-none text-[#B59A88]" aria-label="关闭">
               ×
             </button>
           </div>
@@ -452,7 +472,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded-full bg-[#F7F3F0] px-5 py-2.5 text-sm font-semibold text-[#8A776B] transition hover:bg-[#F7EEE6]"
             >
               取消

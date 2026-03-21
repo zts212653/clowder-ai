@@ -113,6 +113,8 @@ export function CreateApiKeyProfileSection({
             className="w-full rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
           />
           <input
+            type="password"
+            autoComplete="off"
             value={apiKey}
             onChange={(e) => onApiKeyChange(e.target.value)}
             placeholder="sk-xxxxxxxxxxxxxxxx"

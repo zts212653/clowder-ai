@@ -465,7 +465,10 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     expect(container.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
-    expect(container.querySelector('input[placeholder*="sk-"]')).toBeTruthy();
+    const createApiKeyInput = container.querySelector('input[placeholder*="sk-"]') as HTMLInputElement | null;
+    expect(createApiKeyInput).toBeTruthy();
+    expect(createApiKeyInput?.type).toBe('password');
+    expect(createApiKeyInput?.getAttribute('autocomplete')).toBe('off');
     expect(container.textContent).toContain('+ 添加模型');
 
     const profileList = container.querySelector('[aria-label="Provider Profile List"]');
@@ -530,6 +533,8 @@ describe('CatCafeHub provider profiles tab', () => {
     ) as HTMLInputElement;
     const baseUrlInput = container.querySelector('input[placeholder*="API 服务地址"]') as HTMLInputElement;
     const apiKeyInput = container.querySelector('input[placeholder*="sk-"]') as HTMLInputElement;
+    expect(apiKeyInput.type).toBe('password');
+    expect(apiKeyInput.getAttribute('autocomplete')).toBe('off');
     const createButton = queryButton(container, '创建');
 
     await changeField(displayNameInput, 'Sponsor Gemini');

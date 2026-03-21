@@ -528,7 +528,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 201, 'cross-protocol api_key binding should be allowed');
   });
 
-  it('POST /api/cats accepts opencode model without providerId/ prefix (soft validation)', async () => {
+  it('POST /api/cats rejects opencode model without providerId/ prefix', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -569,8 +569,54 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       }),
     });
 
-    // Model format is soft-validated in the UI only; server accepts bare model names.
-    assert.equal(createRes.statusCode, 201);
+    assert.equal(createRes.statusCode, 400);
+    const createBody = JSON.parse(createRes.body);
+    assert.match(createBody.error, /providerId\/modelId/i);
+  });
+
+  it('POST /api/cats rejects catId values that are not lowercase-safe identifiers', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: '__proto__',
+        name: '危险 ID',
+        displayName: '危险 ID',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@danger'],
+        roleDescription: '审查',
+        client: 'openai',
+        providerProfileId: 'codex',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400);
+    const createBody = JSON.parse(createRes.body);
+    assert.equal(createBody.error, 'Invalid request');
+    assert.ok(
+      createBody.details.some(
+        (issue) =>
+          Array.isArray(issue.path) &&
+          issue.path.includes('catId') &&
+          /catId must use lowercase letters/i.test(String(issue.message)),
+      ),
+      'expected catId validation issue in details',
+    );
   });
 
   it('POST /api/cats rejects builtin bindings from the wrong client family even when protocol matches', async () => {

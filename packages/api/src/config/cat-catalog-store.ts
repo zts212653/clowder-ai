@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, Roster } from '@cat-cafe/shared';
 import { builtinAccountIdForClient, readBootstrapBindingsSync } from './provider-profiles.js';
@@ -18,6 +18,21 @@ function safePath(projectRoot: string, ...segments: string[]): string {
     throw new Error(`Path escapes project root: ${normalized}`);
   }
   return normalized;
+}
+
+function writeFileAtomic(filePath: string, content: string): void {
+  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, content, 'utf-8');
+  try {
+    renameSync(tempPath, filePath);
+  } catch (error) {
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // Ignore cleanup failures.
+    }
+    throw error;
+  }
 }
 
 function providerToBootstrapClient(provider: unknown): BuiltinAccountClient | null {
@@ -327,7 +342,7 @@ export function readCatCatalogRaw(projectRoot: string): string | null {
     const migrated = migrateExistingCatalogBindings(projectRoot, parsed);
     if (migrated.dirty) {
       const nextRaw = `${JSON.stringify(migrated.catalog, null, 2)}\n`;
-      writeFileSync(catalogPath, nextRaw, 'utf-8');
+      writeFileAtomic(catalogPath, nextRaw);
       return nextRaw;
     }
   } catch {
@@ -352,13 +367,13 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
   const template = JSON.parse(readFileSync(templatePath, 'utf-8')) as CatCafeConfig;
   const runtimeCatalog = filterBootstrapCatalog(template, projectRoot);
   mkdirSync(dirname(catalogPath), { recursive: true });
-  writeFileSync(catalogPath, `${JSON.stringify(runtimeCatalog, null, 2)}\n`, 'utf-8');
+  writeFileAtomic(catalogPath, `${JSON.stringify(runtimeCatalog, null, 2)}\n`);
   return catalogPath;
 }
 
 export function writeCatCatalog(projectRoot: string, catalog: CatCafeConfig): string {
   const catalogPath = resolveCatCatalogPath(projectRoot);
   mkdirSync(dirname(catalogPath), { recursive: true });
-  writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8');
+  writeFileAtomic(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
   return catalogPath;
 }

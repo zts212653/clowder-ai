@@ -65,7 +65,7 @@ function getOptional(values, key, fallback = '') {
 }
 
 function envQuote(value) {
-  const stringValue = String(value);
+  const stringValue = String(value).replace(/\r/g, '\\r').replace(/\n/g, '\\n');
   if (!stringValue.includes("'")) {
     return `'${stringValue}'`;
   }

@@ -340,7 +340,7 @@ export function HubEnvFilesTab() {
             if (!update) return variable;
             return { ...variable, currentValue: update.value || null };
           });
-      setData({ ...data, variables: nextVariables });
+      setData((prev) => (prev ? { ...prev, variables: nextVariables } : prev));
       setDrafts(
         Object.fromEntries(
           nextVariables.filter(isEditableVariable).map((variable) => [variable.name, initialDraftValue(variable)]),

@@ -199,4 +199,60 @@ describe('HubProviderProfileItem', () => {
     expect(container.textContent).toContain('+ 添加');
     expect(container.textContent).toContain('OpenCode (client-auth)');
   });
+
+  it('uses password input for API key edits and requires delete confirmation', async () => {
+    const profile: ProfileItem = {
+      id: 'codex-sponsor',
+      provider: 'codex-sponsor',
+      displayName: 'Codex Sponsor',
+      name: 'Codex Sponsor',
+      authType: 'api_key',
+      protocol: 'openai',
+      builtin: false,
+      mode: 'api_key',
+      baseUrl: 'https://proxy.example',
+      models: ['gpt-5.4'],
+      hasApiKey: true,
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:00.000Z',
+    };
+    const onDelete = vi.fn();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    await act(async () => {
+      root.render(
+        <HubProviderProfileItem
+          profile={profile}
+          busy={false}
+          onSave={vi.fn(async () => {})}
+          onDelete={onDelete}
+        />,
+      );
+    });
+
+    await act(async () => {
+      queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const apiKeyInput = container.querySelector('input[type="password"]') as HTMLInputElement | null;
+    expect(apiKeyInput).not.toBeNull();
+    expect(apiKeyInput?.getAttribute('autocomplete')).toBe('off');
+
+    await act(async () => {
+      queryButton(container, '取消').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await act(async () => {
+      queryButton(container, '删除').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(onDelete).not.toHaveBeenCalled();
+
+    confirmSpy.mockReturnValue(true);
+    await act(async () => {
+      queryButton(container, '删除').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onDelete).toHaveBeenCalledWith('codex-sponsor');
+    confirmSpy.mockRestore();
+  });
 });

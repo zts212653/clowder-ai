@@ -1,6 +1,13 @@
 import type { CatData } from '@/hooks/useCatData';
 import type { CatConfig, OwnerConfig } from './config-viewer-types';
 
+function safeAvatarSrc(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/avatars/')) return trimmed;
+  return null;
+}
+
 function humanizeProvider(provider: string) {
   if (provider === 'openai') return 'OpenAI';
   if (provider === 'anthropic') return 'Anthropic';
@@ -64,6 +71,7 @@ function formatMentionPreview(patterns: string[], max = 3) {
 export function HubOwnerOverviewCard({ owner, onEdit }: { owner: OwnerConfig; onEdit?: () => void }) {
   const primary = owner.color?.primary ?? '#D4A76A';
   const secondary = owner.color?.secondary ?? '#FFF8F0';
+  const avatarSrc = safeAvatarSrc(owner.avatar);
 
   return (
     <section
@@ -86,9 +94,9 @@ export function HubOwnerOverviewCard({ owner, onEdit }: { owner: OwnerConfig; on
             className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-[11px] font-bold text-white"
             style={{ backgroundColor: primary }}
           >
-            {owner.avatar ? (
+            {avatarSrc ? (
               // biome-ignore lint/performance/noImgElement: owner avatar may be runtime upload URL
-              <img src={owner.avatar} alt={`${owner.name} avatar`} className="h-full w-full object-cover" />
+              <img src={avatarSrc} alt={`${owner.name} avatar`} className="h-full w-full object-cover" />
             ) : (
               'ME'
             )}

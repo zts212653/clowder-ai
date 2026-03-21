@@ -14,7 +14,7 @@ import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import {
   resolveBuiltinClientForProvider,
-
+  validateModelFormatForProvider,
   validateRuntimeProviderBinding,
 } from '../config/provider-binding-compat.js';
 import { resolveRuntimeProviderProfileById, resolveRuntimeProviderProfileForClient } from '../config/provider-profiles.js';
@@ -41,9 +41,14 @@ const cliSchema = z.object({
 });
 
 const clientSchema = z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode']);
+const catIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9_-]*$/, 'catId must use lowercase letters, numbers, "_" or "-" and start with a letter');
 
 const baseCatSchema = z.object({
-  catId: z.string().min(1),
+  catId: catIdSchema,
   name: z.string().min(1),
   displayName: z.string().min(1),
   nickname: z.string().optional(),
@@ -220,6 +225,10 @@ async function validateAccountBindingOrThrow(
   const compatibilityError = validateRuntimeProviderBinding(client, runtimeProfile, defaultModel);
   if (compatibilityError) {
     throw new Error(compatibilityError);
+  }
+  const modelFormatError = validateModelFormatForProvider(client, defaultModel);
+  if (modelFormatError) {
+    throw new Error(modelFormatError);
   }
 }
 
@@ -476,8 +485,6 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     if (providerConfigTouched) {
       try {
         await validateAccountBindingOrThrow(projectRoot, effectiveClient, effectiveAccountRef, effectiveDefaultModel);
-        // Model format for opencode is validated as a soft hint in the UI only;
-        // the server does not reject models missing the providerId/ prefix.
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         reply.status(400);

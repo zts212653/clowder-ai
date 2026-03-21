@@ -94,6 +94,26 @@ describe('provider profile store', () => {
     assert.ok(secretsRaw.includes('sk-generic-account'));
   });
 
+  it('serializes concurrent api_key account creation to avoid lost updates', async () => {
+    const created = await Promise.all(
+      Array.from({ length: 3 }, (_, index) =>
+        createProviderProfile(projectRoot, {
+          displayName: 'Concurrent Sponsor',
+          authType: 'api_key',
+          baseUrl: 'https://api.concurrent.dev',
+          apiKey: `sk-concurrent-${index + 1}`,
+        }),
+      ),
+    );
+
+    const ids = new Set(created.map((profile) => profile.id));
+    assert.equal(ids.size, 3);
+
+    const data = await readProviderProfiles(projectRoot);
+    const concurrentProfiles = data.providers.filter((profile) => profile.displayName === 'Concurrent Sponsor');
+    assert.equal(concurrentProfiles.length, 3);
+  });
+
   it('binds a generic api_key account to the selected client for bootstrap/runtime resolution', async () => {
     const created = await createProviderProfile(projectRoot, {
       displayName: 'Sponsor 1',

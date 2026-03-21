@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type {
   AnthropicRuntimeProfile,
@@ -102,6 +102,31 @@ const CLIENT_PROTOCOL_MAP: Partial<Record<BuiltinAccountClient, ProviderProfileP
 
 const DEFAULT_BOOTSTRAP_CLIENTS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google'];
 const ALL_BUILTIN_CLIENTS = BUILTIN_ACCOUNT_SPECS.map((spec) => spec.client) as BuiltinAccountClient[];
+const providerStoreLocks = new Map<string, Promise<void>>();
+
+async function withStorageRootLock<T>(storageRoot: string, action: () => Promise<T>): Promise<T> {
+  const previous = providerStoreLocks.get(storageRoot) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const running = previous.then(() => gate);
+  providerStoreLocks.set(storageRoot, running);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (providerStoreLocks.get(storageRoot) === running) {
+      providerStoreLocks.delete(storageRoot);
+    }
+  }
+}
+
+async function withProviderStoreLock<T>(projectRoot: string, action: (storageRoot: string) => Promise<T>): Promise<T> {
+  const storageRoot = await resolveProviderProfilesRoot(projectRoot);
+  return withStorageRootLock(storageRoot, () => action(storageRoot));
+}
 
 type LegacyProviderProfilesMetaFileV1 = {
   version: 1;
@@ -555,8 +580,15 @@ async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
   }
 }
 
-async function writeJson(filePath: string, value: unknown): Promise<void> {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
+async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
+  const tempPath = `${filePath}.tmp-${randomUUID()}`;
+  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
+  try {
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await unlink(tempPath).catch(() => {});
+    throw error;
+  }
 }
 
 async function readRaw(projectRoot: string): Promise<{
@@ -567,6 +599,16 @@ async function readRaw(projectRoot: string): Promise<{
   dirty: boolean;
 }> {
   const storageRoot = await resolveProviderProfilesRoot(projectRoot);
+  return readRawAtStorageRoot(storageRoot);
+}
+
+async function readRawAtStorageRoot(storageRoot: string): Promise<{
+  meta: ProviderProfilesMetaFile;
+  secrets: ProviderProfilesSecretsFile;
+  metaPath: string;
+  secretsPath: string;
+  dirty: boolean;
+}> {
   const dir = safePath(storageRoot, CAT_CAFE_DIR);
   const metaPath = safePath(storageRoot, CAT_CAFE_DIR, META_FILENAME);
   const secretsPath = safePath(storageRoot, CAT_CAFE_DIR, SECRETS_FILENAME);
@@ -596,7 +638,8 @@ async function writeRaw(
   meta: ProviderProfilesMetaFile,
   secrets: ProviderProfilesSecretsFile,
 ): Promise<void> {
-  await Promise.all([writeJson(metaPath, meta), writeJson(secretsPath, secrets)]);
+  await writeJsonAtomic(secretsPath, secrets);
+  await writeJsonAtomic(metaPath, meta);
 }
 
 function toViewProfile(profile: ProviderProfileMeta, secrets: ProviderProfilesSecretsFile): ProviderProfileView {
@@ -700,9 +743,11 @@ export function builtinAccountIdForClient(client: BuiltinAccountClient): string 
 }
 
 export async function readBootstrapBindings(projectRoot: string): Promise<BootstrapBindings> {
-  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
-  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
-  return meta.bootstrapBindings;
+  return withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath, dirty } = await readRawAtStorageRoot(storageRoot);
+    if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+    return meta.bootstrapBindings;
+  });
 }
 
 export function readBootstrapBindingsSync(projectRoot: string): BootstrapBindings {
@@ -722,81 +767,87 @@ export async function setBootstrapBinding(
   client: BuiltinAccountClient,
   binding: BootstrapBinding,
 ): Promise<BootstrapBindings> {
-  const { meta, secrets, metaPath, secretsPath } = await readRaw(projectRoot);
-  if (!isBuiltinClient(client)) {
-    throw new Error(`unsupported client "${client}"`);
-  }
-  if (binding.mode === 'skip' || !binding.enabled) {
-    meta.bootstrapBindings[client] = { enabled: false, mode: 'skip' };
-  } else if (binding.mode === 'api_key') {
-    const accountRef = binding.accountRef?.trim();
-    const profile = accountRef ? findProfile(meta, accountRef) : undefined;
-    if (!profile || profile.kind !== 'api_key') {
-      throw new Error(`bootstrap api_key binding for "${client}" requires an existing api_key account`);
+  return withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath } = await readRawAtStorageRoot(storageRoot);
+    if (!isBuiltinClient(client)) {
+      throw new Error(`unsupported client "${client}"`);
     }
-    meta.bootstrapBindings[client] = {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: profile.id,
-    };
-  } else {
-    meta.bootstrapBindings[client] = {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: builtinAccountIdForClient(client),
-    };
-  }
-  await writeRaw(metaPath, secretsPath, meta, secrets);
-  return meta.bootstrapBindings;
+    if (binding.mode === 'skip' || !binding.enabled) {
+      meta.bootstrapBindings[client] = { enabled: false, mode: 'skip' };
+    } else if (binding.mode === 'api_key') {
+      const accountRef = binding.accountRef?.trim();
+      const profile = accountRef ? findProfile(meta, accountRef) : undefined;
+      if (!profile || profile.kind !== 'api_key') {
+        throw new Error(`bootstrap api_key binding for "${client}" requires an existing api_key account`);
+      }
+      meta.bootstrapBindings[client] = {
+        enabled: true,
+        mode: 'api_key',
+        accountRef: profile.id,
+      };
+    } else {
+      meta.bootstrapBindings[client] = {
+        enabled: true,
+        mode: 'oauth',
+        accountRef: builtinAccountIdForClient(client),
+      };
+    }
+    await writeRaw(metaPath, secretsPath, meta, secrets);
+    return meta.bootstrapBindings;
+  });
 }
 
 export async function readProviderProfiles(projectRoot: string): Promise<ProviderProfilesView> {
-  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
-  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
-  return toView(meta, secrets);
+  return withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath, dirty } = await readRawAtStorageRoot(storageRoot);
+    if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+    return toView(meta, secrets);
+  });
 }
 
 export async function createProviderProfile(
   projectRoot: string,
   input: CreateProviderProfileInput,
 ): Promise<ProviderProfileView> {
-  const { meta, secrets, metaPath, secretsPath } = await readRaw(projectRoot);
-  const displayName = requireDisplayName(input);
-  const authType = input.authType ?? modeToAuthType(input.mode);
-  if (authType !== 'api_key') {
-    throw new Error('only api_key accounts can be created');
-  }
-  const apiKey = input.apiKey?.trim();
-  if (!apiKey) throw new Error('apiKey is required for api_key mode');
-
-  const profile: ProviderProfileMeta = {
-    id: createUniqueAccountId(meta.providers, displayName),
-    displayName,
-    kind: 'api_key',
-    authType: 'api_key',
-    builtin: false,
-    ...(normalizeProtocol(input.protocol) ? { protocol: normalizeProtocol(input.protocol) } : {}),
-    ...(normalizeBaseUrl(input.baseUrl) ? { baseUrl: normalizeBaseUrl(input.baseUrl) } : {}),
-    ...(normalizeModels(input.models) !== undefined ? { models: normalizeModels(input.models) } : {}),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  meta.providers.push(profile);
-  secrets.profiles[profile.id] = { apiKey };
-  if (input.setActive) {
-    const client = resolveClientFromSelector(input.provider ?? input.protocol, profile);
-    if (!client) {
-      throw new Error('client selector is required to bind an api_key account');
+  return withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath } = await readRawAtStorageRoot(storageRoot);
+    const displayName = requireDisplayName(input);
+    const authType = input.authType ?? modeToAuthType(input.mode);
+    if (authType !== 'api_key') {
+      throw new Error('only api_key accounts can be created');
     }
-    meta.bootstrapBindings[client] = {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: profile.id,
+    const apiKey = input.apiKey?.trim();
+    if (!apiKey) throw new Error('apiKey is required for api_key mode');
+
+    const profile: ProviderProfileMeta = {
+      id: createUniqueAccountId(meta.providers, displayName),
+      displayName,
+      kind: 'api_key',
+      authType: 'api_key',
+      builtin: false,
+      ...(normalizeProtocol(input.protocol) ? { protocol: normalizeProtocol(input.protocol) } : {}),
+      ...(normalizeBaseUrl(input.baseUrl) ? { baseUrl: normalizeBaseUrl(input.baseUrl) } : {}),
+      ...(normalizeModels(input.models) !== undefined ? { models: normalizeModels(input.models) } : {}),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-  }
-  await writeRaw(metaPath, secretsPath, meta, secrets);
-  return toViewProfile(profile, secrets);
+
+    meta.providers.push(profile);
+    secrets.profiles[profile.id] = { apiKey };
+    if (input.setActive) {
+      const client = resolveClientFromSelector(input.provider ?? input.protocol, profile);
+      if (!client) {
+        throw new Error('client selector is required to bind an api_key account');
+      }
+      meta.bootstrapBindings[client] = {
+        enabled: true,
+        mode: 'api_key',
+        accountRef: profile.id,
+      };
+    }
+    await writeRaw(metaPath, secretsPath, meta, secrets);
+    return toViewProfile(profile, secrets);
+  });
 }
 
 export async function updateProviderProfile(
@@ -805,57 +856,59 @@ export async function updateProviderProfile(
   profileId: string,
   input: UpdateProviderProfileInput,
 ): Promise<ProviderProfileView> {
-  const { meta, secrets, metaPath, secretsPath } = await readRaw(projectRoot);
-  const profile = findProfile(meta, profileId);
-  if (!profile) throw new Error('profile not found');
-  assertProviderSelector(profile, provider);
-  if (profile.kind === 'builtin') {
-    const hasNonModelUpdates =
-      input.name !== undefined ||
-      input.displayName !== undefined ||
-      input.mode !== undefined ||
-      input.authType !== undefined ||
-      input.protocol !== undefined ||
-      input.baseUrl !== undefined ||
-      input.apiKey !== undefined ||
-      input.modelOverride !== undefined;
-    if (hasNonModelUpdates) {
-      throw new Error('builtin accounts only support model updates');
+  return withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath } = await readRawAtStorageRoot(storageRoot);
+    const profile = findProfile(meta, profileId);
+    if (!profile) throw new Error('profile not found');
+    assertProviderSelector(profile, provider);
+    if (profile.kind === 'builtin') {
+      const hasNonModelUpdates =
+        input.name !== undefined ||
+        input.displayName !== undefined ||
+        input.mode !== undefined ||
+        input.authType !== undefined ||
+        input.protocol !== undefined ||
+        input.baseUrl !== undefined ||
+        input.apiKey !== undefined ||
+        input.modelOverride !== undefined;
+      if (hasNonModelUpdates) {
+        throw new Error('builtin accounts only support model updates');
+      }
+      if (input.models !== undefined) {
+        profile.models = normalizeModels(input.models);
+      }
+      profile.updatedAt = new Date().toISOString();
+      await writeRaw(metaPath, secretsPath, meta, secrets);
+      return toViewProfile(profile, secrets);
+    }
+
+    if (typeof input.name === 'string' || typeof input.displayName === 'string') {
+      profile.displayName = requireDisplayName(input);
+    }
+    const nextAuthType = input.authType ?? (input.mode ? modeToAuthType(input.mode) : profile.authType);
+    if (nextAuthType !== 'api_key') {
+      throw new Error('api key accounts cannot be converted to oauth');
+    }
+    if (typeof input.baseUrl === 'string') {
+      const normalizedBaseUrl = normalizeBaseUrl(input.baseUrl);
+      if (normalizedBaseUrl) profile.baseUrl = normalizedBaseUrl;
+      else delete profile.baseUrl;
+    }
+    if (input.protocol !== undefined) {
+      const normalizedProtocol = normalizeProtocol(input.protocol);
+      if (normalizedProtocol) profile.protocol = normalizedProtocol;
+      else delete profile.protocol;
     }
     if (input.models !== undefined) {
       profile.models = normalizeModels(input.models);
     }
+    if (typeof input.apiKey === 'string' && input.apiKey.trim()) {
+      secrets.profiles[profile.id] = { apiKey: input.apiKey.trim() };
+    }
     profile.updatedAt = new Date().toISOString();
     await writeRaw(metaPath, secretsPath, meta, secrets);
     return toViewProfile(profile, secrets);
-  }
-
-  if (typeof input.name === 'string' || typeof input.displayName === 'string') {
-    profile.displayName = requireDisplayName(input);
-  }
-  const nextAuthType = input.authType ?? (input.mode ? modeToAuthType(input.mode) : profile.authType);
-  if (nextAuthType !== 'api_key') {
-    throw new Error('api key accounts cannot be converted to oauth');
-  }
-  if (typeof input.baseUrl === 'string') {
-    const normalizedBaseUrl = normalizeBaseUrl(input.baseUrl);
-    if (normalizedBaseUrl) profile.baseUrl = normalizedBaseUrl;
-    else delete profile.baseUrl;
-  }
-  if (input.protocol !== undefined) {
-    const normalizedProtocol = normalizeProtocol(input.protocol);
-    if (normalizedProtocol) profile.protocol = normalizedProtocol;
-    else delete profile.protocol;
-  }
-  if (input.models !== undefined) {
-    profile.models = normalizeModels(input.models);
-  }
-  if (typeof input.apiKey === 'string' && input.apiKey.trim()) {
-    secrets.profiles[profile.id] = { apiKey: input.apiKey.trim() };
-  }
-  profile.updatedAt = new Date().toISOString();
-  await writeRaw(metaPath, secretsPath, meta, secrets);
-  return toViewProfile(profile, secrets);
+  });
 }
 
 export async function activateProviderProfile(
@@ -863,28 +916,30 @@ export async function activateProviderProfile(
   provider: ProviderProfileProvider,
   profileId: string,
 ): Promise<void> {
-  const { meta, secrets, metaPath, secretsPath } = await readRaw(projectRoot);
-  const profile = findProfile(meta, profileId);
-  if (!profile) throw new Error('profile not found');
-  assertProviderSelector(profile, provider);
-  const client = resolveClientFromSelector(provider, profile);
-  if (!client) {
-    throw new Error('client selector is required to bind an api_key account');
-  }
-  if (profile.kind === 'builtin') {
-    meta.bootstrapBindings[client] = {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: builtinAccountIdForClient(client),
-    };
-  } else {
-    meta.bootstrapBindings[client] = {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: profile.id,
-    };
-  }
-  await writeRaw(metaPath, secretsPath, meta, secrets);
+  await withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath } = await readRawAtStorageRoot(storageRoot);
+    const profile = findProfile(meta, profileId);
+    if (!profile) throw new Error('profile not found');
+    assertProviderSelector(profile, provider);
+    const client = resolveClientFromSelector(provider, profile);
+    if (!client) {
+      throw new Error('client selector is required to bind an api_key account');
+    }
+    if (profile.kind === 'builtin') {
+      meta.bootstrapBindings[client] = {
+        enabled: true,
+        mode: 'oauth',
+        accountRef: builtinAccountIdForClient(client),
+      };
+    } else {
+      meta.bootstrapBindings[client] = {
+        enabled: true,
+        mode: 'api_key',
+        accountRef: profile.id,
+      };
+    }
+    await writeRaw(metaPath, secretsPath, meta, secrets);
+  });
 }
 
 export async function deleteProviderProfile(
@@ -892,23 +947,25 @@ export async function deleteProviderProfile(
   provider: ProviderProfileProvider,
   profileId: string,
 ): Promise<void> {
-  const { meta, secrets, metaPath, secretsPath } = await readRaw(projectRoot);
-  const profile = findProfile(meta, profileId);
-  if (!profile) throw new Error('profile not found');
-  assertProviderSelector(profile, provider);
-  if (profile.kind === 'builtin') {
-    throw new Error('builtin provider cannot be deleted');
-  }
-  const boundCatIds = await collectRuntimeCatsBoundToProfileAcrossRoots(projectRoot, profileId);
-  if (boundCatIds.length > 0) {
-    throw new Error(`provider profile "${profileId}" is still referenced by runtime cats: ${boundCatIds.join(', ')}`);
-  }
-  if (isReferencedByBootstrapBindings(meta, profileId)) {
-    throw new Error(`provider profile "${profileId}" is still referenced by bootstrap bindings`);
-  }
-  meta.providers = meta.providers.filter((item) => item.id !== profileId);
-  delete secrets.profiles[profileId];
-  await writeRaw(metaPath, secretsPath, meta, secrets);
+  await withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath } = await readRawAtStorageRoot(storageRoot);
+    const profile = findProfile(meta, profileId);
+    if (!profile) throw new Error('profile not found');
+    assertProviderSelector(profile, provider);
+    if (profile.kind === 'builtin') {
+      throw new Error('builtin provider cannot be deleted');
+    }
+    const boundCatIds = await collectRuntimeCatsBoundToProfileAcrossRoots(projectRoot, profileId);
+    if (boundCatIds.length > 0) {
+      throw new Error(`provider profile "${profileId}" is still referenced by runtime cats: ${boundCatIds.join(', ')}`);
+    }
+    if (isReferencedByBootstrapBindings(meta, profileId)) {
+      throw new Error(`provider profile "${profileId}" is still referenced by bootstrap bindings`);
+    }
+    meta.providers = meta.providers.filter((item) => item.id !== profileId);
+    delete secrets.profiles[profileId];
+    await writeRaw(metaPath, secretsPath, meta, secrets);
+  });
 }
 
 export async function getProviderProfile(
@@ -916,12 +973,14 @@ export async function getProviderProfile(
   provider: ProviderProfileProvider,
   profileId: string,
 ): Promise<ProviderProfileView | null> {
-  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
-  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
-  const profile = findProfile(meta, profileId);
-  if (!profile) return null;
-  assertProviderSelector(profile, provider);
-  return toViewProfile(profile, secrets);
+  return withProviderStoreLock(projectRoot, async (storageRoot) => {
+    const { meta, secrets, metaPath, secretsPath, dirty } = await readRawAtStorageRoot(storageRoot);
+    if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+    const profile = findProfile(meta, profileId);
+    if (!profile) return null;
+    assertProviderSelector(profile, provider);
+    return toViewProfile(profile, secrets);
+  });
 }
 
 function toRuntimeProviderProfile(
@@ -983,8 +1042,15 @@ export async function resolveRuntimeProviderProfile(
   protocol: 'anthropic' | 'openai' | 'google',
   preferredProfileId?: string,
 ): Promise<RuntimeProviderProfile | null> {
-  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
-  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+  const { meta, secrets, dirty } = await readRaw(projectRoot);
+  if (dirty) {
+    await withProviderStoreLock(projectRoot, async (storageRoot) => {
+      const normalized = await readRawAtStorageRoot(storageRoot);
+      if (normalized.dirty) {
+        await writeRaw(normalized.metaPath, normalized.secretsPath, normalized.meta, normalized.secrets);
+      }
+    });
+  }
 
   const preferred = preferredProfileId ? findProfile(meta, preferredProfileId) : null;
   if (preferred) {
@@ -1011,8 +1077,15 @@ export async function resolveRuntimeProviderProfileForClient(
   client: BuiltinAccountClient,
   preferredProfileId?: string,
 ): Promise<RuntimeProviderProfile | null> {
-  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
-  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+  const { meta, secrets, dirty } = await readRaw(projectRoot);
+  if (dirty) {
+    await withProviderStoreLock(projectRoot, async (storageRoot) => {
+      const normalized = await readRawAtStorageRoot(storageRoot);
+      if (normalized.dirty) {
+        await writeRaw(normalized.metaPath, normalized.secretsPath, normalized.meta, normalized.secrets);
+      }
+    });
+  }
 
   const preferred = preferredProfileId ? findProfile(meta, preferredProfileId) : null;
   if (preferred) {
@@ -1038,8 +1111,15 @@ export async function resolveRuntimeProviderProfileById(
   projectRoot: string,
   profileId: string,
 ): Promise<RuntimeProviderProfile | null> {
-  const { meta, secrets, metaPath, secretsPath, dirty } = await readRaw(projectRoot);
-  if (dirty) await writeRaw(metaPath, secretsPath, meta, secrets);
+  const { meta, secrets, dirty } = await readRaw(projectRoot);
+  if (dirty) {
+    await withProviderStoreLock(projectRoot, async (storageRoot) => {
+      const normalized = await readRawAtStorageRoot(storageRoot);
+      if (normalized.dirty) {
+        await writeRaw(normalized.metaPath, normalized.secretsPath, normalized.meta, normalized.secrets);
+      }
+    });
+  }
   const profile = findProfile(meta, profileId);
   if (!profile) return null;
   return toRuntimeProviderProfile(profile, secrets);
