@@ -279,10 +279,10 @@ export function ThreadItem({
       </div>
       {/* Bottom row: remaining participant avatars + time + badge/handle + status */}
       <div className="flex items-center gap-1">
-        {/* Remaining participant avatars (first one is the big avatar on the left) */}
-        {participants.length > 1 && (
+        {/* Participant avatars — show all (matches original design) */}
+        {participants.length > 0 && (
           <div className="flex items-center -space-x-1">
-            {participants.slice(1).map((catId) => (
+            {participants.map((catId) => (
               <CatAvatar key={catId} catId={catId} size={14} />
             ))}
           </div>
