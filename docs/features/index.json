@@ -777,7 +777,7 @@
     {
       "id": "F127",
       "name": "猫猫管理重构 — 账户配置与猫猫实例分离，支持动态创建猫 + 自定义别名 @ 路由",
-      "status": "design-approved | **Owner**: Golden Chinchilla + Maine Coon(gpt52) | **Priority**: P1",
+      "status": "design-approved | **Owner**: 金渐层 + 缅因猫 GPT-5.4",
       "file": "F127-cat-instance-management.md"
     },
     {
@@ -805,5 +805,5 @@
       "file": "F131-workspace-navigator.md"
     }
   ],
-  "generated_at": "2026-03-21T08:34:18.916Z"
+  "generated_at": "2026-03-21T12:49:11.410Z"
 }

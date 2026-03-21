@@ -1313,7 +1313,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '临时名字');
 
-    const cancelButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '取消');
+    const cancelButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '取消',
+    );
     await act(async () => {
       cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

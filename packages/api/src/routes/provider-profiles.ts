@@ -142,8 +142,15 @@ function inferProbeProtocol(
     return 'openai';
   }
 
-  const normalizedHints = nameHints.map((hint) => hint?.trim().toLowerCase() ?? '').filter(Boolean).join(' ');
-  if (normalizedHints.includes('claude') || normalizedHints.includes('anthropic') || normalizedHints.includes('opencode')) {
+  const normalizedHints = nameHints
+    .map((hint) => hint?.trim().toLowerCase() ?? '')
+    .filter(Boolean)
+    .join(' ');
+  if (
+    normalizedHints.includes('claude') ||
+    normalizedHints.includes('anthropic') ||
+    normalizedHints.includes('opencode')
+  ) {
     return 'anthropic';
   }
   if (normalizedHints.includes('gemini') || normalizedHints.includes('google')) {

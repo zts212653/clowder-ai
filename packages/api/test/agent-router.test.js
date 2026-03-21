@@ -227,7 +227,10 @@ function createAvailabilityConfigProject(availabilityOverrides = {}) {
         provider,
         defaultModel,
         mcpSupport: true,
-        cli: { command: provider === 'anthropic' ? 'claude' : provider === 'google' ? 'gemini' : 'codex', outputFormat: 'json' },
+        cli: {
+          command: provider === 'anthropic' ? 'claude' : provider === 'google' ? 'gemini' : 'codex',
+          outputFormat: 'json',
+        },
       },
     ],
   });
@@ -2094,7 +2097,11 @@ describe('F078: Default to last replier', () => {
       );
 
       const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
-      assert.deepStrictEqual(targetCats, ['codex'], 'should skip unavailable default cat and pick an available fallback');
+      assert.deepStrictEqual(
+        targetCats,
+        ['codex'],
+        'should skip unavailable default cat and pick an available fallback',
+      );
     });
   });
 

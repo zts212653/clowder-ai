@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
@@ -179,7 +179,12 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const opencodeTemplate = makeCatalog('opencode', 'OpenCode', 'opencode', 'claude-opus-4-6');
     const template = {
       version: 1,
-      breeds: [...codexTemplate.breeds, ...dareTemplate.breeds, ...antigravityTemplate.breeds, ...opencodeTemplate.breeds],
+      breeds: [
+        ...codexTemplate.breeds,
+        ...dareTemplate.breeds,
+        ...antigravityTemplate.breeds,
+        ...opencodeTemplate.breeds,
+      ],
     };
     const projectRoot = createTemplateOnlyProject(template);
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -228,9 +233,15 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.body);
       const localTemplateCat = body.cats.find((cat) => cat.id === 'local-template');
-      assert.ok(localTemplateCat, 'GET /api/cats should read the local project template when CAT_TEMPLATE_PATH is stale');
+      assert.ok(
+        localTemplateCat,
+        'GET /api/cats should read the local project template when CAT_TEMPLATE_PATH is stale',
+      );
       assert.equal(localTemplateCat.source, 'seed');
-      assert.equal(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8').includes('local-template'), true);
+      assert.equal(
+        readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8').includes('local-template'),
+        true,
+      );
     } finally {
       process.chdir(previousCwd);
       await app.close();
@@ -272,7 +283,9 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
   });
 
   it('GET /api/cats/:id/status resolves runtime-only Antigravity cats', async () => {
-    const projectRoot = createRuntimeCatalogProject(makeCatalog('runtime-antigravity', '运行时桥接猫', 'antigravity', 'gemini-bridge'));
+    const projectRoot = createRuntimeCatalogProject(
+      makeCatalog('runtime-antigravity', '运行时桥接猫', 'antigravity', 'gemini-bridge'),
+    );
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
     const Fastify = (await import('fastify')).default;

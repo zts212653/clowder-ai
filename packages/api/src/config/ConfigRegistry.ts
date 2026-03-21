@@ -7,9 +7,9 @@
  */
 
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
-import { getOwnerConfig } from './cat-config-loader.js';
 import { DEFAULT_CLI_TIMEOUT_MS, readCliTimeoutMsFromEnv } from '../utils/cli-timeout.js';
 import { getAllCatBudgets } from './cat-budgets.js';
+import { getOwnerConfig } from './cat-config-loader.js';
 import { getCatModel } from './cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from './codex-cli.js';
 import type { CodexAuthMode, ConfigSnapshot } from './config-snapshot.js';

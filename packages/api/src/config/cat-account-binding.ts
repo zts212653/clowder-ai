@@ -17,7 +17,7 @@ function trimBinding(value: unknown): string | undefined {
 export function isSeedCat(projectRoot: string, catId: string): boolean {
   try {
     const seedCats = toAllCatConfigs(loadCatConfig(resolveProjectTemplatePath(projectRoot)));
-    return Object.prototype.hasOwnProperty.call(seedCats, catId);
+    return Object.hasOwn(seedCats, catId);
   } catch {
     return false;
   }
@@ -39,9 +39,7 @@ export function resolveBoundAccountRefForCat(
   const builtinClient = resolveBuiltinClientForProvider(catConfig.provider);
   const runtimeCatalogExists = existsSync(resolve(projectRoot, '.cat-cafe', 'cat-catalog.json'));
   const inheritedTemplateDefaultBinding =
-    !runtimeCatalogExists &&
-    !!builtinClient &&
-    explicitAccountRef === builtinAccountIdForClient(builtinClient);
+    !runtimeCatalogExists && !!builtinClient && explicitAccountRef === builtinAccountIdForClient(builtinClient);
   const inheritedSeedBootstrapBinding = runtimeCatalogExists && isSeedCat(projectRoot, catId);
 
   if (inheritedTemplateDefaultBinding || inheritedSeedBootstrapBinding) {

@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, Roster } from '@cat-cafe/shared';
+import { resolveProjectTemplatePath } from './project-template-path.js';
 import { builtinAccountIdForClient, readBootstrapBindingsSync } from './provider-profiles.js';
 import type { BootstrapBinding, BuiltinAccountClient } from './provider-profiles.types.js';
-import { resolveProjectTemplatePath } from './project-template-path.js';
 import { resolveProviderProfilesRootSync } from './provider-profiles-root.js';
 
 const CAT_CAFE_DIR = '.cat-cafe';
@@ -163,7 +163,8 @@ function readSeedMetadata(projectRoot: string): {
       for (const variant of variants) {
         const client = providerToBootstrapClient(variant.provider);
         if (!client) continue;
-        const catId = typeof variant.catId === 'string' ? variant.catId : typeof breed.catId === 'string' ? breed.catId : null;
+        const catId =
+          typeof variant.catId === 'string' ? variant.catId : typeof breed.catId === 'string' ? breed.catId : null;
         if (!catId) continue;
         const clientSeedCatIds = seedCatIdsByClient.get(client) ?? new Set<string>();
         clientSeedCatIds.add(catId);
@@ -195,7 +196,8 @@ function resolveLegacySeedBindingBackfill(
       const client = providerToBootstrapClient(variant.provider);
       if (!client) continue;
 
-      const catId = typeof variant.catId === 'string' ? variant.catId : typeof breed.catId === 'string' ? breed.catId : null;
+      const catId =
+        typeof variant.catId === 'string' ? variant.catId : typeof breed.catId === 'string' ? breed.catId : null;
       if (!catId) continue;
 
       const providerProfileId = trimBinding(variant.providerProfileId);
@@ -246,7 +248,8 @@ function migrateExistingCatalogBindings(
     for (const variant of variants) {
       const client = providerToBootstrapClient(variant.provider);
       if (!client) continue;
-      const catId = typeof variant.catId === 'string' ? variant.catId : typeof breed.catId === 'string' ? breed.catId : null;
+      const catId =
+        typeof variant.catId === 'string' ? variant.catId : typeof breed.catId === 'string' ? breed.catId : null;
       const explicitProviderProfileId = trimBinding(variant.providerProfileId);
       const existingAccountRef = typeof variant.accountRef === 'string' ? variant.accountRef.trim() : '';
       const legacyExplicitAccountRef = catId ? legacySeedBindingBackfill.get(catId) : undefined;

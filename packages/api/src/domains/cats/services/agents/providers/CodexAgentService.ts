@@ -259,11 +259,16 @@ export class CodexAgentService implements AgentService {
     const customBaseUrl = options?.callbackEnv?.OPENAI_BASE_URL ?? options?.callbackEnv?.OPENAI_API_BASE;
     const customProviderArgs: string[] = customBaseUrl
       ? [
-          '--config', 'model_provider="custom"',
-          '--config', `model_providers.custom.base_url=${toTomlString(customBaseUrl)}`,
-          '--config', 'model_providers.custom.name="Custom API Key"',
-          '--config', 'model_providers.custom.wire_api="responses"',
-          '--config', 'model_providers.custom.env_key="OPENAI_API_KEY"',
+          '--config',
+          'model_provider="custom"',
+          '--config',
+          `model_providers.custom.base_url=${toTomlString(customBaseUrl)}`,
+          '--config',
+          'model_providers.custom.name="Custom API Key"',
+          '--config',
+          'model_providers.custom.wire_api="responses"',
+          '--config',
+          'model_providers.custom.env_key="OPENAI_API_KEY"',
         ]
       : [];
 
@@ -336,7 +341,13 @@ export class CodexAgentService implements AgentService {
 
       const codexCommand = resolveCliCommand('codex');
       if (!codexCommand) {
-        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('codex'), metadata, timestamp: Date.now() };
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error: formatCliNotFoundError('codex'),
+          metadata,
+          timestamp: Date.now(),
+        };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
         return;
       }

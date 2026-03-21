@@ -15,10 +15,7 @@ import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import { bootstrapDefaultCatCatalog, getConfigSessionStrategy, toAllCatConfigs } from './config/cat-config-loader.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
-import {
-  resolveAnthropicRuntimeProfile,
-  resolveRuntimeProviderProfileForClient,
-} from './config/provider-profiles.js';
+import { resolveAnthropicRuntimeProfile, resolveRuntimeProviderProfileForClient } from './config/provider-profiles.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
@@ -312,7 +309,11 @@ async function main(): Promise<void> {
             catId,
             catConfig as CatConfig & { providerProfileId?: string },
           );
-          const runtime = await resolveRuntimeProviderProfileForClient(projectRoot, catConfig.provider, boundAccountRef);
+          const runtime = await resolveRuntimeProviderProfileForClient(
+            projectRoot,
+            catConfig.provider,
+            boundAccountRef,
+          );
           if (!runtime?.apiKey) return null;
           return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
         }

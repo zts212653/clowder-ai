@@ -16,7 +16,10 @@ function FieldShell({
   const labelColor = tone === 'success' ? 'text-[#5B7A5C]' : 'text-[#8A776B]';
   return (
     <label className="flex flex-col gap-1.5 text-[#5C4B42] sm:flex-row sm:items-center sm:gap-3">
-      <span className={`text-[13px] font-semibold ${labelColor} sm:w-[140px] sm:shrink-0`}>{label}{required && <span className="ml-0.5 text-[#E29578]">*</span>}</span>
+      <span className={`text-[13px] font-semibold ${labelColor} sm:w-[140px] sm:shrink-0`}>
+        {label}
+        {required && <span className="ml-0.5 text-[#E29578]">*</span>}
+      </span>
       <div className="min-w-0 flex-1">{children}</div>
     </label>
   );

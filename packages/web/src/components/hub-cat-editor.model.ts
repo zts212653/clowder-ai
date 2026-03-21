@@ -1,7 +1,7 @@
 import type { CatData } from '@/hooks/useCatData';
+import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 import type { BuiltinAccountClient, ProfileItem } from './hub-provider-profiles.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
-import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 
 export type ClientValue = 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode' | 'antigravity';
 export type SessionChainValue = 'true' | 'false';
@@ -175,7 +175,9 @@ export function splitStrengthTags(raw: string): string[] {
 }
 
 function isBuiltinClient(client: ClientValue): client is BuiltinAccountClient {
-  return client === 'anthropic' || client === 'openai' || client === 'google' || client === 'dare' || client === 'opencode';
+  return (
+    client === 'anthropic' || client === 'openai' || client === 'google' || client === 'dare' || client === 'opencode'
+  );
 }
 
 function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undefined {
@@ -248,11 +250,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     strengths: cat?.strengths?.join(', ') ?? '',
     client: (cat?.provider as ClientValue | undefined) ?? createDraft?.client ?? 'anthropic',
     accountRef:
-      cat?.accountRef ??
-      cat?.providerProfileId ??
-      createDraft?.accountRef ??
-      createDraft?.providerProfileId ??
-      '',
+      cat?.accountRef ?? cat?.providerProfileId ?? createDraft?.accountRef ?? createDraft?.providerProfileId ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
@@ -265,12 +263,9 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
 }
 
 export function buildContextBudget(form: HubCatEditorFormState) {
-  const values = [
-    form.maxPromptTokens,
-    form.maxContextTokens,
-    form.maxMessages,
-    form.maxContentLengthPerMsg,
-  ].map((value) => value.trim());
+  const values = [form.maxPromptTokens, form.maxContextTokens, form.maxMessages, form.maxContentLengthPerMsg].map(
+    (value) => value.trim(),
+  );
   const filledCount = values.filter((value) => value.length > 0).length;
   if (filledCount === 0) return undefined;
   if (filledCount !== values.length) {
@@ -371,18 +366,16 @@ export function validateModelFormatForClient(client: ClientValue, model: string)
 }
 
 function resolveFormAccountRef(form: HubCatEditorFormState): string {
-  return trimText(form.accountRef ?? (form as HubCatEditorFormState & { providerProfileId?: string }).providerProfileId);
+  return trimText(
+    form.accountRef ?? (form as HubCatEditorFormState & { providerProfileId?: string }).providerProfileId,
+  );
 }
 
 export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | null) {
   const contextBudget = buildContextBudget(form);
   const hasExistingBudget = Boolean(cat?.contextBudget);
   const contextBudgetPatch =
-    contextBudget !== undefined
-      ? { contextBudget }
-      : cat && hasExistingBudget
-        ? { contextBudget: null as null }
-        : {};
+    contextBudget !== undefined ? { contextBudget } : cat && hasExistingBudget ? { contextBudget: null as null } : {};
   const name = trimText(form.name);
   const displayName = trimText(form.displayName) || name;
   const createName = name || displayName;
@@ -405,11 +398,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
       secondary: trimText(form.colorSecondary),
     },
     mentionPatterns: Array.from(
-      new Set(
-        splitMentionPatterns(form.mentionPatterns)
-          .map(normalizeMentionPattern)
-          .filter(Boolean),
-      ),
+      new Set(splitMentionPatterns(form.mentionPatterns).map(normalizeMentionPattern).filter(Boolean)),
     ),
     roleDescription: trimText(form.roleDescription),
     personality: trimText(form.personality),

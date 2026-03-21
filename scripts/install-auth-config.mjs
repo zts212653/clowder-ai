@@ -4,7 +4,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import path from 'node:path';
 
 const BUILTIN_ACCOUNT_SPECS = [
-  { id: 'claude', displayName: 'Claude', client: 'anthropic', models: ['claude-opus-4-6[1m]', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'] },
+  {
+    id: 'claude',
+    displayName: 'Claude',
+    client: 'anthropic',
+    models: ['claude-opus-4-6[1m]', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'],
+  },
   { id: 'codex', displayName: 'Codex', client: 'openai', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'] },
   { id: 'gemini', displayName: 'Gemini', client: 'google', models: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'] },
   { id: 'dare', displayName: 'Dare', client: 'dare', models: ['z-ai/glm-4.7'] },

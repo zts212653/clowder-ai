@@ -173,8 +173,18 @@ function PathAction({
 
 function buildConfigFiles(projectRoot: string) {
   return [
-    { name: 'cat-template.json', path: `${projectRoot}/cat-template.json`, desc: '猫猫模板（只读 seed）', isDir: false },
-    { name: '.cat-cafe/cat-catalog.json', path: `${projectRoot}/.cat-cafe/cat-catalog.json`, desc: '运行时成员真相源', isDir: false },
+    {
+      name: 'cat-template.json',
+      path: `${projectRoot}/cat-template.json`,
+      desc: '猫猫模板（只读 seed）',
+      isDir: false,
+    },
+    {
+      name: '.cat-cafe/cat-catalog.json',
+      path: `${projectRoot}/.cat-cafe/cat-catalog.json`,
+      desc: '运行时成员真相源',
+      isDir: false,
+    },
     { name: '.env', path: `${projectRoot}/.env`, desc: '可编辑环境变量真相源（不含认证凭证）', isDir: false },
     { name: '.env.local', path: `${projectRoot}/.env.local`, desc: '本地环境变量覆盖', isDir: false },
     { name: 'start-dev.sh', path: `${projectRoot}/scripts/start-dev.sh`, desc: '开发启动脚本', isDir: false },
@@ -202,7 +212,9 @@ function isEditableVariable(variable: EnvVar): boolean {
 }
 
 function isMaskedUrlVariable(variable: EnvVar): boolean {
-  return variable.maskMode === 'url' && typeof variable.currentValue === 'string' && variable.currentValue.includes('***');
+  return (
+    variable.maskMode === 'url' && typeof variable.currentValue === 'string' && variable.currentValue.includes('***')
+  );
 }
 
 function initialDraftValue(variable: EnvVar): string {
@@ -228,8 +240,13 @@ function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
         {files.map((f) => {
           const cls = classifyPath(f.path, projectRoot, f.isDir);
           return (
-            <div key={f.name} className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2">
-              <code className="shrink-0 rounded bg-[#F7F3F0] px-1.5 py-0.5 font-mono text-xs text-[#6A5A50]">{f.name}</code>
+            <div
+              key={f.name}
+              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2"
+            >
+              <code className="shrink-0 rounded bg-[#F7F3F0] px-1.5 py-0.5 font-mono text-xs text-[#6A5A50]">
+                {f.name}
+              </code>
               <span className="text-xs text-[#8A776B]">{f.desc}</span>
               <PathAction classification={cls} absPath={f.path} />
             </div>
@@ -268,7 +285,8 @@ function EnvVarsSection({
   return (
     <Section title="环境变量">
       <div className="mb-3 rounded-[12px] border border-[#D7E9D7] bg-[#F6FBF6] px-3 py-2 text-xs leading-5 text-[#5B7A5C]">
-        变量值可直接编辑，保存后自动回填 `.env`。写回 .env 后需重启相关服务生效；URL 型连接串当前值已脱敏，修改时请填写完整值。
+        变量值可直接编辑，保存后自动回填 `.env`。写回 .env 后需重启相关服务生效；URL
+        型连接串当前值已脱敏，修改时请填写完整值。
       </div>
       <div className="space-y-3">
         {grouped.map((group) => (
@@ -340,7 +358,10 @@ function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projec
         {dirs.map((d) => {
           const cls = classifyPath(d.path, projectRoot, d.isDir);
           return (
-            <div key={d.name} className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2">
+            <div
+              key={d.name}
+              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2"
+            >
               <span className="shrink-0 text-xs font-medium text-[#6A5A50]">{d.name}</span>
               <span className="text-xs text-[#8A776B]">{d.desc}</span>
               <PathAction classification={cls} absPath={d.path} />

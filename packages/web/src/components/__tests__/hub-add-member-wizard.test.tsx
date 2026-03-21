@@ -276,7 +276,9 @@ describe('HubAddMemberWizard', () => {
     expect(queryField<HTMLInputElement>(container, 'input[aria-label="CLI Command"]').value).toBe(
       '. --remote-debugging-port=9010',
     );
-    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').value).toBe('template-antigravity-model');
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').value).toBe(
+      'template-antigravity-model',
+    );
   });
 
   it('uses seed antigravity defaults from /api/cats instead of runtime cat values', async () => {

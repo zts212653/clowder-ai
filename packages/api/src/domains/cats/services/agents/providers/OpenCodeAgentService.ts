@@ -66,7 +66,13 @@ export class OpenCodeAgentService implements AgentService {
     try {
       const opencodeCommand = resolveCliCommand('opencode');
       if (!opencodeCommand) {
-        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('opencode'), metadata, timestamp: Date.now() };
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error: formatCliNotFoundError('opencode'),
+          metadata,
+          timestamp: Date.now(),
+        };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
         return;
       }

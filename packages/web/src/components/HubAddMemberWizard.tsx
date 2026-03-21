@@ -7,16 +7,15 @@ import {
   CLIENT_ROW_1,
   CLIENT_ROW_2,
   clientLabel,
-  FALLBACK_ANTIGRAVITY_MODELS,
   FALLBACK_ANTIGRAVITY_ARGS,
+  FALLBACK_ANTIGRAVITY_MODELS,
   PillChoiceButton,
 } from './hub-add-member-wizard.parts';
 import {
   builtinAccountIdForClient,
-  filterAccounts,
   type ClientValue,
+  filterAccounts,
   type HubCatEditorDraft,
-
 } from './hub-cat-editor.model';
 import type { ProfileItem, ProviderProfilesResponse } from './hub-provider-profiles.types';
 
@@ -28,9 +27,9 @@ interface HubAddMemberWizardProps {
 
 export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWizardProps) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
-  const [seedCats, setSeedCats] = useState<Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }>>(
-    [],
-  );
+  const [seedCats, setSeedCats] = useState<
+    Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }>
+  >([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<ClientValue | null>(null);
@@ -43,9 +42,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
       (cat) => cat.provider === 'antigravity' && (cat.source === 'seed' || cat.source === undefined),
     );
     const command = templateAntigravity.find((cat) => (cat.commandArgs?.length ?? 0) > 0)?.commandArgs?.join(' ');
-    const models = templateAntigravity
-      .map((cat) => cat.defaultModel?.trim() ?? '')
-      .filter((value) => value.length > 0);
+    const models = templateAntigravity.map((cat) => cat.defaultModel?.trim() ?? '').filter((value) => value.length > 0);
     return {
       command: command?.trim() || FALLBACK_ANTIGRAVITY_ARGS,
       models: models.length > 0 ? Array.from(new Set(models)) : [...FALLBACK_ANTIGRAVITY_MODELS],
@@ -66,9 +63,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
     if (client === 'antigravity') return antigravityDefaults.models;
     const currentModel = defaultModel.trim();
     const profileModels =
-      selectedProfile?.models
-        ?.map((value) => value.trim())
-        .filter((value) => value.length > 0) ?? [];
+      selectedProfile?.models?.map((value) => value.trim()).filter((value) => value.length > 0) ?? [];
     if (currentModel && !profileModels.includes(currentModel)) {
       return [currentModel, ...profileModels];
     }
@@ -118,7 +113,9 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
     apiFetch('/api/cats')
       .then(async (res) => {
         if (!res.ok) throw new Error(`成员模板加载失败 (${res.status})`);
-        return (await res.json()) as { cats?: Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }> };
+        return (await res.json()) as {
+          cats?: Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }>;
+        };
       })
       .then((body) => {
         if (cancelled) return;
@@ -179,7 +176,8 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
       });
       return;
     }
-    const resolvedProfileId = availableProfiles.find((profile) => profile.id === selectedProfileId)?.id ?? selectedProfileId.trim();
+    const resolvedProfileId =
+      availableProfiles.find((profile) => profile.id === selectedProfileId)?.id ?? selectedProfileId.trim();
     if (!resolvedProfileId) return;
     onComplete({
       client,
@@ -205,10 +203,12 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
           <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 1: 选择 Client</h4>
-              <p className="mt-1 text-sm leading-6 text-[#7F7168]">选择要接入的 CLI 工具、Agent 平台或 Antigravity bridge</p>
+              <p className="mt-1 text-sm leading-6 text-[#7F7168]">
+                选择要接入的 CLI 工具、Agent 平台或 Antigravity bridge
+              </p>
             </div>
             {[CLIENT_ROW_1, CLIENT_ROW_2].map((row, index) => (
-              <div key={index} aria-label={`Client Row ${index + 1}`} className="flex flex-wrap gap-3">
+              <div key={index} role="group" aria-label={`Client Row ${index + 1}`} className="flex flex-wrap gap-3">
                 {row.map((value) => (
                   <PillChoiceButton
                     key={value}

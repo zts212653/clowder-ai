@@ -33,7 +33,13 @@ function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
 function accountSummary(cat: CatData) {
   const accountRef = cat.accountRef?.trim() ?? cat.providerProfileId?.trim() ?? '';
   if (!accountRef) return humanizeProvider(cat.provider);
-  if (accountRef === 'claude' || accountRef === 'codex' || accountRef === 'gemini' || accountRef === 'dare' || accountRef === 'opencode') {
+  if (
+    accountRef === 'claude' ||
+    accountRef === 'codex' ||
+    accountRef === 'gemini' ||
+    accountRef === 'dare' ||
+    accountRef === 'opencode'
+  ) {
     return '内置 OAuth 账号';
   }
   return `API Key · ${accountRef}`;
@@ -105,7 +111,9 @@ export function HubOwnerOverviewCard({ owner, onEdit }: { owner: OwnerConfig; on
         </div>
         <span className="rounded-full bg-[#FFF3E0] px-2.5 py-1 text-[11px] font-semibold text-[#E65100]">🔒 Owner</span>
       </div>
-      <p className="mt-2.5 text-[13px] text-[#8A776B]">别名: {owner.aliases.join(' · ') || '无'} · 只能编辑，不能新增或删除</p>
+      <p className="mt-2.5 text-[13px] text-[#8A776B]">
+        别名: {owner.aliases.join(' · ') || '无'} · 只能编辑，不能新增或删除
+      </p>
       <p className="mt-2 text-[13px]" style={{ color: primary }}>
         {formatMentionPreview(owner.mentionPatterns, 2)}
       </p>

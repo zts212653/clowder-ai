@@ -85,7 +85,10 @@ test('client-auth remove drops the installer api key account and restores oauth 
     runHelper(['client-auth', 'remove', '--project-dir', projectRoot, '--client', 'openai']);
 
     const { profiles, secrets } = readInstallerState(projectRoot);
-    assert.equal(profiles.providers.some((profile) => profile.id === 'installer-openai'), false);
+    assert.equal(
+      profiles.providers.some((profile) => profile.id === 'installer-openai'),
+      false,
+    );
     assert.deepEqual(profiles.bootstrapBindings.openai, {
       enabled: true,
       mode: 'oauth',
@@ -174,7 +177,10 @@ test('claude-profile create and remove keeps installer-managed account in sync',
     runHelper(['claude-profile', 'remove', '--project-dir', projectRoot]);
 
     const afterRemove = readInstallerState(projectRoot);
-    assert.equal(afterRemove.profiles.providers.some((profile) => profile.id === 'installer-managed'), false);
+    assert.equal(
+      afterRemove.profiles.providers.some((profile) => profile.id === 'installer-managed'),
+      false,
+    );
     assert.deepEqual(afterRemove.profiles.bootstrapBindings.anthropic, {
       enabled: true,
       mode: 'oauth',
@@ -249,7 +255,10 @@ test('client-auth remove fails when the installer-managed account is still refer
     assert.match(String(result.stderr), /still referenced by runtime cats: runtime-codex/i);
 
     const { profiles, secrets } = readInstallerState(projectRoot);
-    assert.equal(profiles.providers.some((profile) => profile.id === 'installer-openai'), true);
+    assert.equal(
+      profiles.providers.some((profile) => profile.id === 'installer-openai'),
+      true,
+    );
     assert.deepEqual(profiles.bootstrapBindings.openai, {
       enabled: true,
       mode: 'api_key',
@@ -463,13 +472,19 @@ test('claude-profile v2 migration preserves non-installer accounts and secrets o
     runHelper(['claude-profile', 'remove', '--project-dir', projectRoot]);
 
     const afterRemove = readInstallerState(projectRoot);
-    assert.equal(afterRemove.profiles.providers.some((profile) => profile.id === 'installer-managed'), false);
+    assert.equal(
+      afterRemove.profiles.providers.some((profile) => profile.id === 'installer-managed'),
+      false,
+    );
     assert.deepEqual(afterRemove.profiles.bootstrapBindings.anthropic, {
       enabled: true,
       mode: 'oauth',
       accountRef: 'claude',
     });
-    assert.equal(afterRemove.profiles.providers.some((profile) => profile.id === 'personal'), true);
+    assert.equal(
+      afterRemove.profiles.providers.some((profile) => profile.id === 'personal'),
+      true,
+    );
     assert.equal(afterRemove.secrets.profiles.personal.apiKey, 'personal-key');
     assert.equal('installer-managed' in (afterRemove.secrets.profiles ?? {}), false);
   } finally {

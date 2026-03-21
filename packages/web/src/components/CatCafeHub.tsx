@@ -5,29 +5,30 @@ import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { BrakeSettingsPanel } from './BrakeSettingsPanel';
-import { HubClaudeRescueSection } from './HubClaudeRescueSection';
+import {
+  AccordionSection,
+  ALL_TABS,
+  findGroupForTab,
+  HUB_GROUPS,
+  type HubTabId,
+  resolveRequestedHubTab,
+} from './cat-cafe-hub.navigation';
 import { CatOverviewTab, type ConfigData, SystemTab } from './config-viewer-tabs';
 import { HubCapabilityTab } from './HubCapabilityTab';
-import { HubCommandsTab } from './HubCommandsTab';
 import { HubCatEditor } from './HubCatEditor';
+import { HubClaudeRescueSection } from './HubClaudeRescueSection';
+import { HubCommandsTab } from './HubCommandsTab';
 import { HubEnvFilesTab } from './HubEnvFilesTab';
 import { HubGovernanceTab } from './HubGovernanceTab';
 import { HubLeaderboardTab } from './HubLeaderboardTab';
 import { HubOwnerEditor } from './HubOwnerEditor';
 import { HubProviderProfilesTab } from './HubProviderProfilesTab';
 import { HubRoutingPolicyTab } from './HubRoutingPolicyTab';
-import {
-  AccordionSection,
-  ALL_TABS,
-  findGroupForTab,
-  HUB_GROUPS,
-  resolveRequestedHubTab,
-  type HubTabId,
-} from './cat-cafe-hub.navigation';
 import { PushSettingsPanel } from './PushSettingsPanel';
 import { VoiceSettingsPanel } from './VoiceSettingsPanel';
-export { findGroupForTab, resolveRequestedHubTab } from './cat-cafe-hub.navigation';
+
 export type { HubTabId } from './cat-cafe-hub.navigation';
+export { findGroupForTab, resolveRequestedHubTab } from './cat-cafe-hub.navigation';
 
 /* ─── Main Hub modal ─── */
 export function CatCafeHub() {
@@ -248,7 +249,13 @@ export function CatCafeHub() {
             {tab === 'leaderboard' && <HubLeaderboardTab />}
           </div>
         </div>
-        <HubCatEditor open={editorOpen} cat={editingCat} draft={createDraft} onClose={closeEditor} onSaved={handleEditorSaved} />
+        <HubCatEditor
+          open={editorOpen}
+          cat={editingCat}
+          draft={createDraft}
+          onClose={closeEditor}
+          onSaved={handleEditorSaved}
+        />
         <HubOwnerEditor
           open={ownerEditorOpen}
           owner={config?.owner}

@@ -104,7 +104,13 @@ export class GeminiAgentService implements AgentService {
     try {
       const geminiCommand = resolveCliCommand('gemini');
       if (!geminiCommand) {
-        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('gemini'), metadata, timestamp: Date.now() };
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error: formatCliNotFoundError('gemini'),
+          metadata,
+          timestamp: Date.now(),
+        };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
         return;
       }

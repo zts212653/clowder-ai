@@ -17,7 +17,10 @@ import {
   validateModelFormatForProvider,
   validateRuntimeProviderBinding,
 } from '../config/provider-binding-compat.js';
-import { resolveRuntimeProviderProfileById, resolveRuntimeProviderProfileForClient } from '../config/provider-profiles.js';
+import {
+  resolveRuntimeProviderProfileById,
+  resolveRuntimeProviderProfileForClient,
+} from '../config/provider-profiles.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
 import { deleteRuntimeOverride, getRuntimeOverride, setRuntimeOverride } from '../config/session-strategy-overrides.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
@@ -52,7 +55,10 @@ const baseCatSchema = z.object({
   name: z.string().min(1),
   displayName: z.string().min(1),
   nickname: z.string().optional(),
-  avatar: z.preprocess((val) => (typeof val === 'string' && val.trim() === '' ? undefined : val), z.string().min(1).optional()),
+  avatar: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+    z.string().min(1).optional(),
+  ),
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
   accountRef: z.string().min(1).optional(),
@@ -481,7 +487,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const effectiveClient = body.client ?? currentCat.provider;
     const nextAccountRef = resolveAccountRef(body);
     const currentEffectiveAccountRef = await resolveEffectiveAccountRef(currentCat);
-    const effectiveAccountRef = nextAccountRef !== undefined ? (nextAccountRef ?? undefined) : currentEffectiveAccountRef;
+    const effectiveAccountRef =
+      nextAccountRef !== undefined ? (nextAccountRef ?? undefined) : currentEffectiveAccountRef;
     const effectiveDefaultModel = body.defaultModel !== undefined ? body.defaultModel : currentCat.defaultModel;
     const providerConfigTouched =
       body.client !== undefined || body.defaultModel !== undefined || nextAccountRef !== undefined;
