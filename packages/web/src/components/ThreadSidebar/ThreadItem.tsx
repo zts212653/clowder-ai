@@ -177,7 +177,7 @@ export function ThreadItem({
           />
         ) : (
           <span
-            className={`text-sm leading-snug line-clamp-2 flex-1 min-w-0 ${isActive ? 'font-semibold text-cafe-black' : 'text-gray-700'}`}
+            className={`text-sm leading-snug line-clamp-1 flex-1 min-w-0 ${isActive ? 'font-semibold text-cafe-black' : 'text-gray-700'}`}
           >
             {title ?? (id === 'default' ? '大厅' : '未命名对话')}
           </span>
@@ -279,10 +279,10 @@ export function ThreadItem({
       </div>
       {/* Bottom row: remaining participant avatars + time + badge/handle + status */}
       <div className="flex items-center gap-1">
-        {/* Participant avatars — all cats in the thread */}
-        {participants.length > 0 && (
+        {/* Remaining participant avatars (first one is the big avatar on the left) */}
+        {participants.length > 1 && (
           <div className="flex items-center -space-x-1">
-            {participants.map((catId) => (
+            {participants.slice(1).map((catId) => (
               <CatAvatar key={catId} catId={catId} size={14} />
             ))}
           </div>
