@@ -1,0 +1,354 @@
+'use client';
+
+import { useRef } from 'react';
+import type { CatData } from '@/hooks/useCatData';
+import {
+  CLIENT_OPTIONS,
+  type HubCatEditorFormState,
+  joinTags,
+  normalizeMentionPattern,
+  splitMentionPatterns,
+  splitStrengthTags,
+} from './hub-cat-editor.model';
+import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
+import type { ProfileItem } from './hub-provider-profiles.types';
+import { TagEditor } from './hub-tag-editor';
+
+type FormPatch = Partial<HubCatEditorFormState>;
+
+function safeAvatarSrc(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/avatars/')) return trimmed;
+  return null;
+}
+
+function autoSlug(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9\u4e00-\u9fff-]/g, '')
+    .slice(0, 40);
+}
+
+function currentAliasTags(form: HubCatEditorFormState): string[] {
+  return splitMentionPatterns(form.mentionPatterns).map(normalizeMentionPattern).filter(Boolean);
+}
+
+export function IdentitySection({
+  cat,
+  form,
+  avatarUploading,
+  onChange,
+  onAvatarUpload,
+}: {
+  cat?: CatData | null;
+  form: HubCatEditorFormState;
+  avatarUploading: boolean;
+  onChange: (patch: FormPatch) => void;
+  onAvatarUpload: (file: File) => Promise<void>;
+}) {
+  const strengthTags = splitStrengthTags(form.strengths);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarSrc = safeAvatarSrc(form.avatar);
+
+  return (
+    <SectionCard title="身份信息">
+      {!cat ? (
+        <>
+          <TextField
+            label="名称"
+            ariaLabel="Name"
+            value={form.name}
+            onChange={(value) => {
+              onChange({ name: value, displayName: value, catId: autoSlug(value) });
+            }}
+            required
+            placeholder="成员显示名称，如 我的助手"
+          />
+          <input type="hidden" aria-label="Cat ID" value={form.catId} />
+        </>
+      ) : (
+        <TextField label="名称" ariaLabel="Name" value={form.name} onChange={(value) => onChange({ name: value, displayName: value })} />
+      )}
+
+      <TextField label="昵称" ariaLabel="Nickname" value={form.nickname} onChange={(value) => onChange({ nickname: value })} placeholder="可选，铲屎官给的昵称" />
+      <TextField
+        label="角色描述"
+        ariaLabel="Description"
+        value={form.roleDescription}
+        onChange={(value) => onChange({ roleDescription: value })}
+        required
+        placeholder="角色定位，如 代码审查专家"
+      />
+
+      <div className="flex items-center gap-3">
+        <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Avatar</span>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-2 rounded-lg border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-1.5 text-sm text-[#5C4B42] transition hover:border-[#D49266]"
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
+            {avatarSrc ? (
+              // biome-ignore lint/performance/noImgElement: avatar path may be runtime upload URL
+              <img src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
+            ) : (
+              '🐱'
+            )}
+          </div>
+          <span>{avatarUploading ? '上传中…' : '点击上传'}</span>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            void onAvatarUpload(file).finally(() => {
+              if (fileInputRef.current) fileInputRef.current.value = '';
+            });
+          }}
+        />
+        <input
+          aria-label="Avatar"
+          value={form.avatar}
+          onChange={(event) => onChange({ avatar: event.target.value })}
+          className="sr-only"
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Background Color</span>
+        <div className="flex items-center gap-2">
+          <label title="Primary">
+            <input
+              type="color"
+              aria-label="Background Color Primary"
+              value={form.colorPrimary}
+              onChange={(event) => onChange({ colorPrimary: event.target.value })}
+              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+            />
+          </label>
+          <label title="Secondary">
+            <input
+              type="color"
+              aria-label="Background Color Secondary"
+              value={form.colorSecondary}
+              onChange={(event) => onChange({ colorSecondary: event.target.value })}
+              className="h-8 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
+            />
+          </label>
+        </div>
+      </div>
+
+      <TextField
+        label="擅长领域"
+        ariaLabel="Team Strengths"
+        value={form.teamStrengths}
+        onChange={(value) => onChange({ teamStrengths: value })}
+        placeholder="如 架构设计、安全分析"
+      />
+      <TextField label="性格特征" ariaLabel="Personality" value={form.personality} onChange={(value) => onChange({ personality: value })} placeholder="如 温柔但有主见" />
+      <TextField
+        label="注意事项"
+        ariaLabel="Caution"
+        value={form.caution}
+        onChange={(value) => onChange({ caution: value })}
+        placeholder="可选，留空表示无特殊注意"
+      />
+
+      <div className="flex items-start gap-3">
+        <span className="w-[140px] shrink-0 pt-1 text-[13px] font-medium text-[#5C4B42]">Strengths</span>
+        <div className="min-w-0 flex-1">
+          <TagEditor
+            tags={strengthTags}
+            onChange={(tags) => onChange({ strengths: joinTags(tags) })}
+            addLabel="+ 选择"
+            placeholder="输入标签，例如 security"
+            emptyLabel="(无)"
+          />
+        </div>
+        <input
+          aria-label="Strengths"
+          value={form.strengths}
+          onChange={(event) => onChange({ strengths: event.target.value })}
+          className="sr-only"
+        />
+      </div>
+
+      <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
+        <p className="text-[13px] font-semibold text-[#8A776B]">▸ Voice Config (点击展开)</p>
+        <p className="mt-0.5 text-[11px] leading-4 text-[#B59A88]">需对接和启用语音功能后才支持配置</p>
+      </div>
+    </SectionCard>
+  );
+}
+
+// Generate a hint showing what API endpoint the CLI will actually call
+function buildCallHint(client: string, profile: ProfileItem | undefined, model: string): string | null {
+  if (!profile || profile.builtin || !profile.baseUrl) return null;
+  const base = profile.baseUrl.replace(/\/+$/, '');
+  const hasV1Suffix = /\/v1$/i.test(base);
+
+  // Claude CLI internally adds /v1, so if user already has /v1 it will become /v1/v1
+  const cliEndpoints: Record<string, { cli: string; pathSuffix: string }> = {
+    anthropic: { cli: 'claude', pathSuffix: '/v1/messages' },
+    opencode: { cli: 'opencode', pathSuffix: '/messages' },
+    openai: { cli: 'codex', pathSuffix: '/responses' },
+    google: { cli: 'gemini', pathSuffix: `/models/${model || '...'}:generateContent` },
+    dare: { cli: 'dare', pathSuffix: '/chat/completions' },
+  };
+  const info = cliEndpoints[client];
+  if (!info) return null;
+
+  const fullUrl = `${base}${info.pathSuffix}`;
+  let warning = '';
+  if (client === 'anthropic' && hasV1Suffix) {
+    warning = `\n⚠️ base URL 末尾的 /v1 会导致路径重复（/v1/v1/messages），建议去掉 /v1 后缀`;
+  }
+  if (client === 'google') {
+    warning = `\n⚠️ Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client`;
+  }
+  return `${info.cli} CLI 实际调用: ${fullUrl}${warning}`;
+}
+
+export function AccountSection({
+  form,
+  modelOptions,
+  availableProfiles,
+  loadingProfiles,
+  onChange,
+}: {
+  form: HubCatEditorFormState;
+  modelOptions: string[];
+  availableProfiles: ProfileItem[];
+  loadingProfiles: boolean;
+  onChange: (patch: FormPatch) => void;
+}) {
+  const accountOptions = availableProfiles;
+  const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
+  const callHint = buildCallHint(form.client, selectedProfile, form.defaultModel);
+
+  return (
+    <SectionCard title="认证与模型">
+      <div className="space-y-2">
+        <SelectField
+          label="Client"
+          value={form.client}
+          options={CLIENT_OPTIONS}
+          onChange={(value) => onChange({ client: value as HubCatEditorFormState['client'] })}
+          required
+        />
+
+        {form.client === 'antigravity' ? (
+          <>
+            <TextField
+              label="CLI Command"
+              value={form.commandArgs}
+              onChange={(value) => onChange({ commandArgs: value })}
+              required
+              placeholder="启动命令参数"
+            />
+            <TextField
+              label="Model"
+              value={form.defaultModel}
+              onChange={(value) => onChange({ defaultModel: value })}
+              required
+              placeholder="模型标识符"
+            />
+          </>
+        ) : (
+          <>
+            <SelectField
+              label="Provider"
+              value={form.accountRef}
+              options={[
+                { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
+                ...accountOptions
+                  .filter((profile) => {
+                    // Gemini CLI doesn't support custom API endpoints — only show builtin
+                    if (form.client === 'google' && !profile.builtin) return false;
+                    return true;
+                  })
+                  .map((profile) => ({
+                    value: profile.id,
+                    label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
+                  })),
+              ]}
+              onChange={(value) => onChange({ accountRef: value, defaultModel: '' })}
+              disabled={loadingProfiles}
+              required
+            />
+            {callHint ? (
+              <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
+                <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">{callHint}</p>
+              </div>
+            ) : null}
+            {modelOptions.length > 0 ? (
+              <SelectField
+                label="Model"
+                value={form.defaultModel}
+                options={modelOptions.map((model) => ({ value: model, label: model }))}
+                onChange={(value) => onChange({ defaultModel: value })}
+                required
+              />
+            ) : (
+              <TextField
+                label="Model"
+                value={form.defaultModel}
+                onChange={(value) => onChange({ defaultModel: value })}
+                required
+                placeholder={
+                  form.client === 'opencode'
+                    ? '例如 openai/gpt-5.4 或 openrouter/google/gemini-3-flash-preview'
+                    : '模型标识符，如 claude-sonnet-4-5'
+                }
+              />
+            )}
+            {form.client === 'opencode' && form.defaultModel.trim() && !form.defaultModel.includes('/') ? (
+              <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
+                <p className="text-[11px] leading-4 text-[#8A776B]">
+                  建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。
+                </p>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+export function RoutingSection({
+  form,
+  onChange,
+}: {
+  cat?: CatData | null;
+  form: HubCatEditorFormState;
+  onChange: (patch: FormPatch) => void;
+}) {
+  const aliases = currentAliasTags(form);
+  return (
+    <SectionCard title="别名与 @ 路由">
+      <TagEditor
+        tags={aliases}
+        onChange={(tags) => onChange({ mentionPatterns: joinTags(tags) })}
+        addLabel="+ 添加"
+        placeholder="@砚砚"
+        emptyLabel="(至少添加 1 个别名，否则无法 @)"
+        minCount={1}
+      />
+      <textarea
+        aria-label="Aliases"
+        value={form.mentionPatterns}
+        onChange={(event) => onChange({ mentionPatterns: event.target.value })}
+        placeholder="@codex, @缅因猫"
+        className="sr-only"
+      />
+    </SectionCard>
+  );
+}

@@ -2,15 +2,11 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React must be in scope for SSR JSX runtime in tests.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import {
-  type CodexUsageItem,
-  groupCodexByPool,
-  QuotaPoolRow,
-  type QuotaResponse,
-  riskDotClass,
-  toUtilization,
-} from './quota-cards';
+import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
+import { type AccountQuotaPoolGroup, buildAccountQuotaGroups } from './hub-quota-pools';
+import { type CodexUsageItem, QuotaPoolRow, type QuotaResponse, riskDotClass, toUtilization } from './quota-cards';
 
 export const POLL_INTERVAL_MS = 30_000;
 export const QUOTA_ALERT_DEDUPE_WINDOW_MS = 30 * 60 * 1000;
@@ -57,7 +53,11 @@ export function shouldSendQuotaRiskNotification({
 // --- Component ---
 
 export function HubQuotaBoardTab() {
+  const { cats } = useCatData();
   const [quota, setQuota] = useState<QuotaResponse | null>(null);
+  const [quotaError, setQuotaError] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<ProviderProfilesResponse['providers']>([]);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const previousRiskRef = useRef<'ok' | 'warn' | 'high'>('ok');
@@ -68,9 +68,14 @@ export function HubQuotaBoardTab() {
   const fetchQuota = useCallback(async () => {
     try {
       const res = await apiFetch('/api/quota');
-      if (res.ok) setQuota((await res.json()) as QuotaResponse);
+      if (!res.ok) {
+        setQuotaError(`配额数据加载失败 (${res.status})，显示的可能是过期数据`);
+        return;
+      }
+      setQuota((await res.json()) as QuotaResponse);
+      setQuotaError(null);
     } catch {
-      /* silent */
+      setQuotaError('配额数据加载失败，显示的可能是过期数据');
     }
   }, []);
 
@@ -79,6 +84,31 @@ export function HubQuotaBoardTab() {
     const id = setInterval(fetchQuota, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [fetchQuota]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProfilesError(null);
+    apiFetch('/api/provider-profiles')
+      .then(async (res) => {
+        if (!res.ok) {
+          if (!cancelled) setProfilesError(`账号配置加载失败 (${res.status})，额度池成员归属可能不完整`);
+          return null;
+        }
+        return (await res.json()) as ProviderProfilesResponse;
+      })
+      .then((body) => {
+        if (!cancelled && body) {
+          setProfiles(body.providers ?? []);
+          setProfilesError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setProfilesError('账号配置加载失败，额度池成员归属可能不完整');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // System notification on risk transition
   useEffect(() => {
@@ -99,8 +129,8 @@ export function HubQuotaBoardTab() {
       .then((reg) => {
         if (!reg) return;
         lastAlertAtRef.current = now;
-        return reg.showNotification('猫粮高风险预警', {
-          body: '有额度池进入高风险，请检查猫粮看板。',
+        return reg.showNotification('配额高风险预警', {
+          body: '有额度池进入高风险，请检查配额看板。',
           tag: 'quota-alert',
         });
       })
@@ -128,85 +158,127 @@ export function HubQuotaBoardTab() {
     }
   }, [fetchQuota]);
 
-  const claudeItems = quota?.claude.usageItems ?? [];
-  const codexPools = groupCodexByPool(quota?.codex.usageItems ?? []);
-  const geminiItems = quota?.gemini?.usageItems ?? [];
-  const antigravityItems = quota?.antigravity?.usageItems ?? [];
+  const accountGroups = buildAccountQuotaGroups(quota, profiles, cats);
   const errors = [
     ...new Set(
-      [refreshError, quota?.codex?.error, quota?.claude?.error, quota?.gemini?.error, quota?.antigravity?.error].filter(
-        Boolean,
-      ) as string[],
+      [
+        quotaError,
+        profilesError,
+        refreshError,
+        quota?.codex?.error,
+        quota?.claude?.error,
+        quota?.gemini?.error,
+        quota?.antigravity?.error,
+      ].filter(Boolean) as string[],
     ),
   ];
 
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">猫粮看板</h3>
+    <section className="space-y-3 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-[17px] font-bold text-[#2D2118]">配额看板</h3>
         <div className="flex items-center gap-3">
-          {quota?.fetchedAt && (
-            <span className="text-xs text-gray-400">{new Date(quota.fetchedAt).toLocaleTimeString()}</span>
-          )}
+          {quota?.fetchedAt ? (
+            <span className="text-xs text-[#B59A88]">{new Date(quota.fetchedAt).toLocaleTimeString()}</span>
+          ) : null}
           <button
             type="button"
             onClick={onRefresh}
             disabled={refreshing}
-            className="px-3 py-1 text-xs rounded-md bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-50"
+            className="rounded-full bg-[#2D3947] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#24303D] disabled:opacity-50"
           >
             {refreshing ? '刷新中...' : '刷新全部'}
           </button>
         </div>
       </div>
 
-      {/* Errors */}
       {errors.length > 0 && (
-        <div className="rounded-md bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">
+        <div className="rounded-[16px] border border-[#F5C7C7] bg-[#FFF4F4] px-3 py-2 text-xs text-[#C74E4E]">
           {errors.map((e) => (
             <div key={e}>{e}</div>
           ))}
         </div>
       )}
 
-      {/* Claude section */}
-      <PoolSection title="布偶猫 Claude" items={claudeItems} emptyText="暂无数据，点击刷新获取" />
-
-      {/* Codex grouped sections */}
-      {codexPools.map((pool) => (
-        <PoolSection key={pool.poolId} title={pool.displayName} items={pool.items} />
+      {accountGroups.map((group) => (
+        <PoolGroupSection key={group.id} group={group} />
       ))}
 
-      {/* Codex empty state */}
-      {codexPools.length === 0 && !quota?.codex?.error && (
-        <PoolSection title="缅因猫 (OpenAI)" items={[]} emptyText="暂无数据，点击刷新获取" />
-      )}
-
-      {/* Gemini */}
-      <PoolSection title="暹罗猫 Gemini" items={geminiItems} emptyText="暂无数据（需 ClaudeBar 推送）" />
-
-      {/* Antigravity */}
-      <PoolSection title="Antigravity IDE" items={antigravityItems} emptyText="暂无数据（需 ClaudeBar 推送）" />
+      <section className="rounded-[16px] border border-[#E8C9AF] bg-[#FFF4EC] px-4 py-3">
+        <p className="text-[13px] font-bold text-[#C8946B]">F127 变化说明</p>
+        <p className="mt-1 text-[13px] leading-6 text-[#8A776B]">
+          1. 从猫粮看板改名为配额看板
+          <br />
+          2. 按账号配置维度（非 Provider）分组
+          <br />
+          3. 每个额度池反向显示关联成员标签
+          <br />
+          4. 风险阈值提示保留不变
+        </p>
+      </section>
     </section>
   );
 }
 
-function PoolSection({ title, items, emptyText }: { title: string; items: CodexUsageItem[]; emptyText?: string }) {
+function PoolGroupSection({ group }: { group: AccountQuotaPoolGroup }) {
+  return (
+    <section
+      className={`rounded-[20px] border px-4 py-4 ${group.tone === 'success' ? 'border-[#CFE5D5] bg-[#F2FAF4]' : 'border-[#F1E7DF] bg-[#FFFDFC]'}`}
+    >
+      <h4 className="text-[17px] font-bold text-[#2D2118]">{group.title}</h4>
+      <p className={`mt-1 text-[13px] leading-6 ${group.tone === 'success' ? 'text-[#6C7A6D]' : 'text-[#8A776B]'}`}>
+        {group.description}
+      </p>
+      <div className="mt-3 space-y-3">
+        {group.pools.length > 0 ? (
+          group.pools.map((pool) => (
+            <PoolSection
+              key={pool.id}
+              title={pool.title}
+              items={pool.items}
+              memberTags={pool.memberTags}
+              emptyText={pool.emptyText}
+            />
+          ))
+        ) : (
+          <div className="rounded-[14px] bg-white/80 px-4 py-3 text-xs text-[#8A776B]">暂无 API Key 账号</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PoolSection({
+  title,
+  items,
+  memberTags,
+  emptyText,
+}: {
+  title: string;
+  items: CodexUsageItem[];
+  memberTags: string[];
+  emptyText?: string;
+}) {
   // Compute worst utilization for group header dot
   const worstUtil = items.length > 0 ? Math.max(...items.map(toUtilization)) : -1;
   const dotClass = worstUtil >= 0 ? riskDotClass(worstUtil) : 'text-gray-300';
 
   return (
-    <div className="border-t border-gray-100 pt-2">
-      <div className="flex items-center gap-2 mb-1">
+    <div className="rounded-[16px] border border-[#F1E7DF] bg-[#FFFCF8] px-4 py-3">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className={`text-xs ${dotClass}`} aria-hidden="true">
           {'\u25CF'}
         </span>
-        <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{title}</span>
+        <span className="text-xs font-semibold tracking-wide text-[#6A5A50]">{title}</span>
+        {memberTags.map((tag) => (
+          <span key={tag} className="rounded-full bg-[#F3EDFA] px-2 py-0.5 text-[11px] font-medium text-[#8B68B7]">
+            {tag}
+          </span>
+        ))}
       </div>
       {items.length > 0
         ? items.map((item) => <QuotaPoolRow key={item.label} item={item} />)
-        : emptyText && <div className="ml-5 text-xs text-gray-400">{emptyText}</div>}
+        : emptyText && <div className="ml-5 text-xs text-[#B59A88]">{emptyText}</div>}
     </div>
   );
 }

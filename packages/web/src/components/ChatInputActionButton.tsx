@@ -61,20 +61,21 @@ export function ChatInputActionButton({
   }, [voice.transcript, onTranscript]);
 
   // Global keyboard shortcut: Option+V (Alt+V) toggles voice recording
+  const { state: voiceState, startRecording, stopRecording } = voice;
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.altKey && e.code === 'KeyV') {
         e.preventDefault();
-        if (voice.state === 'recording') {
-          voice.stopRecording();
-        } else if (voice.state === 'idle' && !disabled) {
-          voice.startRecording();
+        if (voiceState === 'recording') {
+          stopRecording();
+        } else if (voiceState === 'idle' && !disabled) {
+          startRecording();
         }
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [voice.state, voice.startRecording, voice.stopRecording, disabled]);
+  }, [voiceState, startRecording, stopRecording, disabled]);
 
   // F39: Whether we're in queue mode (cat running + user has typed)
   const isQueueMode = Boolean(hasActiveInvocation && hasText && !disabled);

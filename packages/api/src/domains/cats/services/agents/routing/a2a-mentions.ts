@@ -13,6 +13,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 
 /** Max A2A chain depth, configurable via env (read at call time for hot-reload) */
 export function getMaxA2ADepth(): number {
@@ -81,6 +82,7 @@ export function analyzeA2AMentions(
   const entries: MentionPatternEntry[] = [];
   for (const [id, config] of Object.entries(allConfigs)) {
     if (currentCatId && id === currentCatId) continue; // 4. Filter self (skip when cross-thread)
+    if (!isCatAvailable(id)) continue;
     for (const pattern of config.mentionPatterns) {
       entries.push({ catId: id as CatId, pattern: pattern.toLowerCase() });
     }

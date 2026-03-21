@@ -9,6 +9,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { before, describe, it, mock } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 
 async function collect(iterable) {
   const msgs = [];
@@ -2525,19 +2526,87 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
-  it('F062 P1: falls back to monorepo root profile when thread projectPath is absent', async () => {
+  it('F127 P1: falls back to CAT_TEMPLATE_PATH project when thread projectPath is absent', async () => {
     const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-    const root = await mkdtemp(join(tmpdir(), 'f062-root-'));
-    const apiDir = join(root, 'packages', 'api');
-    await mkdir(apiDir, { recursive: true });
-    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
-
-    await createProviderProfile(root, {
-      provider: 'anthropic',
-      name: 'root-sponsor',
+    const templateRoot = await mkdtemp(join(tmpdir(), 'f127-active-template-'));
+    await writeFile(join(templateRoot, 'cat-template.json'), '{}', 'utf-8');
+    const boundProfile = await createProviderProfile(templateRoot, {
+      provider: 'openai',
+      name: 'template-bound-openai',
       mode: 'api_key',
-      baseUrl: 'https://api.root.example',
-      apiKey: 'sk-root-profile',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.template.example',
+      apiKey: 'sk-template-openai',
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(originalConfig, 'codex config should exist in registry');
+    const boundCatId = 'codex-template-root-bound-profile';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'openai',
+      providerProfileId: boundProfile.id,
+      defaultModel: 'gpt-5.4',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    try {
+      process.env.CAT_TEMPLATE_PATH = join(templateRoot, 'cat-template.json');
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-f127-active-template-fallback',
+          threadId: 'thread-f127-active-template-fallback',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(templateRoot, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.OPENAI_BASE_URL, 'https://api.template.example');
+    assert.equal(callbackEnv.OPENAI_API_BASE, 'https://api.template.example');
+    assert.equal(callbackEnv.OPENAI_API_KEY, 'sk-template-openai');
+  });
+
+  it('F127 P2: ignores unreadable CAT_TEMPLATE_PATH before switching account roots', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const staleTemplateRoot = await mkdtemp(join(tmpdir(), 'f127-stale-template-'));
+    const isolatedRepoRoot = await mkdtemp(join(tmpdir(), 'f127-isolated-repo-'));
+    const isolatedApiDir = join(isolatedRepoRoot, 'packages', 'api');
+    await mkdir(isolatedApiDir, { recursive: true });
+    await writeFile(join(isolatedRepoRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    await createProviderProfile(staleTemplateRoot, {
+      provider: 'openai',
+      name: 'stale-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-stale-openai',
       setActive: true,
     });
 
@@ -2545,37 +2614,442 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       },
     };
 
     const deps = makeDeps();
+    const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
     const previousCwd = process.cwd();
-    const previousProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
     try {
-      process.env.ANTHROPIC_PROXY_ENABLED = '0';
-      process.chdir(apiDir);
+      process.chdir(isolatedApiDir);
+      process.env.CAT_TEMPLATE_PATH = join(staleTemplateRoot, 'missing-template.json');
       await collect(
         invokeSingleCat(deps, {
-          catId: 'opus',
+          catId: 'codex',
           service,
           prompt: 'test',
-          userId: 'user-f062-root-fallback',
-          threadId: 'thread-f062-root-fallback',
+          userId: 'user-f127-unreadable-template',
+          threadId: 'thread-f127-unreadable-template',
           isLastCat: true,
         }),
       );
     } finally {
       process.chdir(previousCwd);
-      if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
-      else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
+      if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+      await rm(staleTemplateRoot, { recursive: true, force: true });
+      await rm(isolatedRepoRoot, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.OPENAI_API_KEY, undefined);
+    assert.equal(callbackEnv.OPENAI_BASE_URL, undefined);
+    assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
+  });
+
+  it('F127 P2: bootstrapped seed cats follow the current bootstrap binding after activation', async () => {
+    const { bootstrapCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const root = await mkdtemp(join(tmpdir(), 'f127-seed-bootstrap-binding-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    const templateRaw = await readFile(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8');
+    await writeFile(join(root, 'cat-template.json'), templateRaw, 'utf-8');
+
+    const activatedProfile = await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'activated-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.activated.example',
+      apiKey: 'sk-activated-openai',
+      setActive: false,
+    });
+
+    bootstrapCatCatalog(root, join(root, 'cat-template.json'));
+    const catalogPath = resolveCatCatalogPath(root);
+    const runtimeCatalog = JSON.parse(await readFile(catalogPath, 'utf-8'));
+    const codexBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'codex');
+    assert.equal(codexBreed?.variants[0]?.accountRef, 'codex');
+
+    await activateProviderProfile(root, 'openai', activatedProfile.id);
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(catalogPath)))) {
+      catRegistry.register(id, config);
+    }
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'codex',
+          service,
+          prompt: 'test',
+          userId: 'user-f127-seed-bootstrap-binding',
+          threadId: 'thread-f127-seed-bootstrap-binding',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
       await rm(root, { recursive: true, force: true });
     }
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE, 'api_key');
-    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL, 'https://api.root.example');
-    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY, 'sk-root-profile');
+    assert.equal(callbackEnv.CODEX_AUTH_MODE, 'api_key');
+    assert.equal(callbackEnv.OPENAI_API_KEY, 'sk-activated-openai');
+    assert.equal(callbackEnv.OPENAI_BASE_URL, 'https://api.activated.example');
+    assert.equal(callbackEnv.OPENAI_API_BASE, 'https://api.activated.example');
+  });
+
+  it('F127 P1: prefers member-bound openai profile over protocol active profile', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const root = await mkdtemp(join(tmpdir(), 'f127-openai-profile-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'global-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.global.example',
+      apiKey: 'sk-global-openai',
+      setActive: true,
+    });
+    const boundProfile = await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'bound-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.bound.example',
+      apiKey: 'sk-bound-openai',
+      models: ['gpt-5.4', 'claude-sonnet-4-6'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(originalConfig, 'codex config should exist in registry');
+    const boundCatId = 'codex-bound-profile-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'openai',
+      providerProfileId: boundProfile.id,
+      defaultModel: 'gpt-5.4',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-f127-openai-bound',
+          threadId: 'thread-f127-openai-bound',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CODEX_AUTH_MODE, 'api_key');
+    assert.equal(callbackEnv.OPENAI_API_KEY, 'sk-bound-openai');
+    assert.equal(callbackEnv.OPENAI_BASE_URL, 'https://api.bound.example');
+    assert.equal(callbackEnv.OPENAI_API_BASE, 'https://api.bound.example');
+  });
+
+  it('F127 P1: explicit builtin codex bindings force oauth callback env', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'f127-openai-builtin-oauth-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const originalCodexAuthMode = process.env.CODEX_AUTH_MODE;
+    const originalOpenAIApiKey = process.env.OPENAI_API_KEY;
+    const originalOpenAIBaseUrl = process.env.OPENAI_BASE_URL;
+    const originalOpenAIApiBase = process.env.OPENAI_API_BASE;
+    process.env.CODEX_AUTH_MODE = 'api_key';
+    process.env.OPENAI_API_KEY = 'sk-global-openai';
+    process.env.OPENAI_BASE_URL = 'https://api.global.example';
+    process.env.OPENAI_API_BASE = 'https://api.global.example';
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(originalConfig, 'codex config should exist in registry');
+    const boundCatId = 'codex-builtin-oauth-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'openai',
+      providerProfileId: 'codex',
+      defaultModel: 'gpt-5.4',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-f127-openai-builtin-oauth',
+          threadId: 'thread-f127-openai-builtin-oauth',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      if (originalCodexAuthMode === undefined) delete process.env.CODEX_AUTH_MODE;
+      else process.env.CODEX_AUTH_MODE = originalCodexAuthMode;
+      if (originalOpenAIApiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAIApiKey;
+      if (originalOpenAIBaseUrl === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalOpenAIBaseUrl;
+      if (originalOpenAIApiBase === undefined) delete process.env.OPENAI_API_BASE;
+      else process.env.OPENAI_API_BASE = originalOpenAIApiBase;
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CODEX_AUTH_MODE, 'oauth');
+    assert.equal(callbackEnv.OPENAI_API_KEY, undefined);
+    assert.equal(callbackEnv.OPENAI_BASE_URL, undefined);
+    assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
+  });
+
+  it('F127 P1: keeps env-based codex auth untouched when no openai profile is explicitly configured', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'f127-openai-env-auth-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'codex',
+          service,
+          prompt: 'test',
+          userId: 'user-f127-openai-env-auth',
+          threadId: 'thread-f127-openai-env-auth',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(Object.hasOwn(callbackEnv, 'CODEX_AUTH_MODE'), false);
+    assert.equal(callbackEnv.OPENAI_API_KEY, undefined);
+    assert.equal(callbackEnv.OPENAI_BASE_URL, undefined);
+    assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
+  });
+
+  it('F127: ignores legacy api_key protocol metadata when the member explicitly selected the client', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const root = await mkdtemp(join(tmpdir(), 'f127-bound-mismatch-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const boundProfile = await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'bound-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.bound.example',
+      apiKey: 'sk-bound-openai',
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-bound-mismatch-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'opencode',
+      providerProfileId: boundProfile.id,
+      defaultModel: 'claude-sonnet-4-6',
+    });
+
+    let invokeCount = 0;
+    const service = {
+      async *invoke() {
+        invokeCount++;
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-f127-bound-mismatch',
+          threadId: 'thread-f127-bound-mismatch',
+          isLastCat: true,
+        }),
+      );
+      assert.equal(invokeCount, 1, 'service.invoke should run when api_key profile is member-bound');
+      assert.ok(messages.some((m) => m.type === 'done'));
+      assert.equal(messages.some((m) => m.type === 'error' && /bound provider profile/i.test(String(m.error))), false);
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('F127: injects OPENROUTER_API_KEY for opencode members bound to openai api_key profiles', async () => {
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const root = await mkdtemp(join(tmpdir(), 'f127-openrouter-key-injection-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const openrouterProfile = await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'openrouter-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-openrouter-key',
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-openrouter-bound-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'opencode',
+      providerProfileId: openrouterProfile.id,
+      defaultModel: 'openrouter/google/gemini-3-flash-preview',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-f127-openrouter-key-injection',
+          threadId: 'thread-f127-openrouter-key-injection',
+          isLastCat: true,
+        }),
+      );
+      assert.ok(messages.some((m) => m.type === 'done'));
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CAT_CAFE_EFFECTIVE_PROTOCOL, 'openai');
+    assert.equal(callbackEnv.OPENAI_BASE_URL, 'https://openrouter.ai/api/v1');
+    assert.equal(callbackEnv.OPENAI_API_KEY, 'sk-openrouter-key');
+    assert.equal(callbackEnv.OPENROUTER_API_KEY, 'sk-openrouter-key');
   });
 
   it('F062-fix: skips auto-seal for api_key mode when context health is approx', async () => {

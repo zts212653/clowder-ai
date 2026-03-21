@@ -7,8 +7,10 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { describe, mock, test } from 'node:test';
+import { after, describe, mock, test } from 'node:test';
 import { migrateRouterOpts } from './helpers/agent-registry-helpers.js';
 
 // Create mock dependencies for AgentRouter
@@ -203,6 +205,105 @@ function createMockAgentService(catId, responseText = 'Hello from mock') {
 
   return { invoke };
 }
+
+const tempProjectRoots = [];
+
+function createAvailabilityConfigProject(availabilityOverrides = {}) {
+  const projectRoot = mkdtempSync(resolve(tmpdir(), 'agent-router-availability-'));
+  tempProjectRoots.push(projectRoot);
+  const makeBreed = (id, family, displayName, provider, defaultModel) => ({
+    id: family,
+    catId: id,
+    name: displayName,
+    displayName,
+    avatar: `/avatars/${id}.png`,
+    color: { primary: '#334155', secondary: '#cbd5e1' },
+    mentionPatterns: [`@${id}`],
+    roleDescription: `${displayName} role`,
+    defaultVariantId: `${id}-default`,
+    variants: [
+      {
+        id: `${id}-default`,
+        provider,
+        defaultModel,
+        mcpSupport: true,
+        cli: { command: provider === 'anthropic' ? 'claude' : provider === 'google' ? 'gemini' : 'codex', outputFormat: 'json' },
+      },
+    ],
+  });
+  const templatePath = resolve(projectRoot, 'cat-template.json');
+  writeFileSync(
+    templatePath,
+    JSON.stringify(
+      {
+        version: 2,
+        breeds: [
+          makeBreed('opus', 'ragdoll', '布偶猫', 'anthropic', 'claude-opus-4-6'),
+          makeBreed('codex', 'maine-coon', '缅因猫', 'openai', 'gpt-5.4'),
+          makeBreed('gemini', 'siamese', '暹罗猫', 'google', 'gemini-3.1-pro'),
+        ],
+        roster: {
+          opus: {
+            family: 'ragdoll',
+            roles: ['assistant'],
+            lead: true,
+            available: availabilityOverrides.opus ?? true,
+            evaluation: 'opus',
+          },
+          codex: {
+            family: 'maine-coon',
+            roles: ['assistant'],
+            lead: false,
+            available: availabilityOverrides.codex ?? true,
+            evaluation: 'codex',
+          },
+          gemini: {
+            family: 'siamese',
+            roles: ['assistant'],
+            lead: false,
+            available: availabilityOverrides.gemini ?? true,
+            evaluation: 'gemini',
+          },
+        },
+        reviewPolicy: {
+          requireDifferentFamily: true,
+          preferActiveInThread: true,
+          preferLead: true,
+          excludeUnavailable: true,
+        },
+        owner: {
+          name: 'Co-worker',
+          aliases: ['共创伙伴'],
+          mentionPatterns: ['@co-worker', '@owner'],
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  return templatePath;
+}
+
+async function withAvailabilityConfig(availabilityOverrides, fn) {
+  const templatePath = createAvailabilityConfigProject(availabilityOverrides);
+  const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
+  const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+  process.env.CAT_TEMPLATE_PATH = templatePath;
+  _resetCachedConfig();
+  try {
+    return await fn();
+  } finally {
+    if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+    else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+    _resetCachedConfig();
+  }
+}
+
+after(() => {
+  for (const projectRoot of tempProjectRoots) {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
 
 describe('AgentRouter', () => {
   test('routingPolicy(review) avoids opus when default routing would pick opus', async () => {
@@ -1952,6 +2053,51 @@ describe('F078: Default to last replier', () => {
     assert.deepStrictEqual(targetCats, ['opus']);
   });
 
+  test('no @mention skips unavailable last replier and preferred cats', async () => {
+    await withAvailabilityConfig({ codex: false }, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+      const threadStore = createMockThreadStore({ t1: ['codex', 'gemini'] }, {}, {}, { t1: ['codex', 'gemini'] });
+      threadStore.updateParticipantActivity('t1', 'gemini');
+      threadStore.updateParticipantActivity('t1', 'codex');
+
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: createMockAgentService('opus'),
+          codexService: createMockAgentService('codex'),
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore,
+        }),
+      );
+
+      const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+      assert.deepStrictEqual(targetCats, ['gemini'], 'should skip unavailable last replier/preferred cats');
+    });
+  });
+
+  test('no participants falls back away from an unavailable default cat', async () => {
+    await withAvailabilityConfig({ opus: false }, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+      const threadStore = createMockThreadStore({});
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: createMockAgentService('opus'),
+          codexService: createMockAgentService('codex'),
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore,
+        }),
+      );
+
+      const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
+      assert.deepStrictEqual(targetCats, ['codex'], 'should skip unavailable default cat and pick an available fallback');
+    });
+  });
+
   test('explicit @mention still overrides last-replier default', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -1993,6 +2139,27 @@ describe('F078: Group mentions', () => {
     assert.ok(targetCats.includes('opus'));
     assert.ok(targetCats.includes('codex'));
     assert.ok(targetCats.includes('gemini'));
+  });
+
+  test('@all skips unavailable cats', async () => {
+    await withAvailabilityConfig({ codex: false }, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: createMockAgentService('opus'),
+          codexService: createMockAgentService('codex'),
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+        }),
+      );
+
+      const { targetCats } = await router.resolveTargetsAndIntent('@all 大家好');
+      assert.ok(targetCats.includes('opus'));
+      assert.ok(targetCats.includes('gemini'));
+      assert.ok(!targetCats.includes('codex'), 'unavailable cat should be excluded from @all routing');
+    });
   });
 
   test('@全体 routes to all registered cats', async () => {
@@ -2479,5 +2646,32 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
 
     const { targetCats } = await router.resolveTargetsAndIntent('just a normal message', 't1');
     assert.equal(targetCats.length, 1, 'without #ideate, should still route to single cat');
+  });
+
+  test('refreshFromRegistry updates routable service set after runtime catalog changes', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+    const { catRegistry } = await import('@cat-cafe/shared');
+
+    const threadStore = createMockThreadStore();
+    const agentRegistry = new AgentRegistry();
+    agentRegistry.register('opus', createMockAgentService('opus'));
+    const router = new AgentRouter({
+      agentRegistry,
+      registry: createMockRegistry(),
+      messageStore: createMockMessageStore(),
+      threadStore,
+    });
+
+    const before = await router.resolveTargetsAndIntent('@codex review this', 't1');
+    assert.notDeepEqual(before.targetCats, ['codex'], 'codex should not be routable before refresh');
+
+    const codexConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(codexConfig, 'codex config should exist');
+    agentRegistry.register('codex', createMockAgentService('codex'));
+    router.refreshFromRegistry(agentRegistry);
+
+    const after = await router.resolveTargetsAndIntent('@codex review this', 't1');
+    assert.deepEqual(after.targetCats, ['codex'], 'codex should be routable after refresh');
   });
 });

@@ -1,6 +1,6 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -20,8 +20,8 @@ const {
 
 /** Create a temp JSON file with given content, return path */
 function writeTempConfig(data) {
-  const dir = mkdtempSync(join(tmpdir(), 'cat-config-'));
-  const path = join(dir, 'cat-config.json');
+  const dir = mkdtempSync(join(tmpdir(), 'cat-template-'));
+  const path = join(dir, 'cat-template.json');
   writeFileSync(path, JSON.stringify(data));
   return path;
 }
@@ -66,9 +66,9 @@ describe('cat-config-loader', () => {
       assert.equal(config.breeds[0].id, 'ragdoll');
     });
 
-    it('loads default project cat-config.json when no path/env provided', () => {
-      const saved = process.env.CAT_CONFIG_PATH;
-      delete process.env.CAT_CONFIG_PATH;
+    it('loads default project cat-template.json when no path/env provided', () => {
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      delete process.env.CAT_TEMPLATE_PATH;
       try {
         const config = loadCatConfig();
         // F032: version can be 1 or 2 now
@@ -76,9 +76,33 @@ describe('cat-config-loader', () => {
         assert.ok(config.breeds.length >= 1);
       } finally {
         if (saved === undefined) {
-          delete process.env.CAT_CONFIG_PATH;
+          delete process.env.CAT_TEMPLATE_PATH;
         } else {
-          process.env.CAT_CONFIG_PATH = saved;
+          process.env.CAT_TEMPLATE_PATH = saved;
+        }
+      }
+    });
+
+    it('prefers .cat-cafe/cat-catalog.json over cat-template.json for default loads', () => {
+      const projectDir = mkdtempSync(join(tmpdir(), 'cat-template-project-'));
+      const templatePath = join(projectDir, 'cat-template.json');
+      writeFileSync(templatePath, JSON.stringify(validConfig()));
+      const runtimeDir = join(projectDir, '.cat-cafe');
+      mkdirSync(runtimeDir, { recursive: true });
+      const runtimeConfig = validConfig();
+      runtimeConfig.breeds[0].displayName = '运行时布偶猫';
+      writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(runtimeConfig));
+
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      process.env.CAT_TEMPLATE_PATH = templatePath;
+      try {
+        const config = loadCatConfig();
+        assert.equal(config.breeds[0].displayName, '运行时布偶猫');
+      } finally {
+        if (saved === undefined) {
+          delete process.env.CAT_TEMPLATE_PATH;
+        } else {
+          process.env.CAT_TEMPLATE_PATH = saved;
         }
       }
     });
@@ -97,7 +121,7 @@ describe('cat-config-loader', () => {
     });
 
     it('throws clear error when file not found', () => {
-      assert.throws(() => loadCatConfig('/nonexistent/cat-config.json'), /Failed to read cat config/);
+      assert.throws(() => loadCatConfig('/nonexistent/cat-template.json'), /Failed to read cat config/);
     });
 
     it('rejects empty variants array', () => {
@@ -293,6 +317,23 @@ describe('cat-config-loader', () => {
       assert.equal(isSessionChainEnabled('unknown-cat', config), true);
     });
 
+    it('prefers variant.sessionChain override over breed-level setting', () => {
+      const cfg = validConfig();
+      cfg.breeds[0].features = { sessionChain: true };
+      cfg.breeds[0].variants.push({
+        id: 'opus-sonnet',
+        catId: 'opus-sonnet',
+        provider: 'anthropic',
+        defaultModel: 'claude-sonnet-4-5-20250929',
+        mcpSupport: true,
+        cli: { command: 'claude', outputFormat: 'stream-json' },
+        sessionChain: false,
+      });
+      const config = loadCatConfig(writeTempConfig(cfg));
+      assert.equal(isSessionChainEnabled('opus', config), true);
+      assert.equal(isSessionChainEnabled('opus-sonnet', config), false);
+    });
+
     it('F053: loads project config for gemini (sessionChain: true after parity fix)', () => {
       // Uses the actual project cat-config.json
       const config = loadCatConfig();
@@ -309,8 +350,8 @@ describe('cat-config-loader', () => {
     });
 
     it('Cloud P1: gracefully returns true when config file is missing (no throw)', () => {
-      const saved = process.env.CAT_CONFIG_PATH;
-      process.env.CAT_CONFIG_PATH = '/tmp/nonexistent-cat-config-12345.json';
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      process.env.CAT_TEMPLATE_PATH = '/tmp/nonexistent-cat-template-12345.json';
       _resetCachedConfig();
       try {
         // Should NOT throw — should fallback to default (true)
@@ -318,9 +359,9 @@ describe('cat-config-loader', () => {
         assert.equal(result, true, 'should return true (default) when config is unreadable');
       } finally {
         if (saved === undefined) {
-          delete process.env.CAT_CONFIG_PATH;
+          delete process.env.CAT_TEMPLATE_PATH;
         } else {
-          process.env.CAT_CONFIG_PATH = saved;
+          process.env.CAT_TEMPLATE_PATH = saved;
         }
         _resetCachedConfig();
       }
@@ -528,18 +569,18 @@ describe('F32-b: isSessionChainEnabled (variant resolution)', () => {
 
 describe('F32-b: getDefaultCatId', () => {
   it('returns first breed default variant catId', () => {
-    const saved = process.env.CAT_CONFIG_PATH;
+    const saved = process.env.CAT_TEMPLATE_PATH;
     const path = writeTempConfig(multiVariantConfig());
-    process.env.CAT_CONFIG_PATH = path;
+    process.env.CAT_TEMPLATE_PATH = path;
     _resetCachedConfig();
     try {
       const id = getDefaultCatId();
       assert.equal(id, 'opus');
     } finally {
       if (saved === undefined) {
-        delete process.env.CAT_CONFIG_PATH;
+        delete process.env.CAT_TEMPLATE_PATH;
       } else {
-        process.env.CAT_CONFIG_PATH = saved;
+        process.env.CAT_TEMPLATE_PATH = saved;
       }
       _resetCachedConfig();
     }
@@ -549,18 +590,18 @@ describe('F32-b: getDefaultCatId', () => {
     const cfg = multiVariantConfig();
     // Make opus-45 the default and give it a custom catId
     cfg.breeds[0].defaultVariantId = 'opus-45';
-    const saved = process.env.CAT_CONFIG_PATH;
+    const saved = process.env.CAT_TEMPLATE_PATH;
     const path = writeTempConfig(cfg);
-    process.env.CAT_CONFIG_PATH = path;
+    process.env.CAT_TEMPLATE_PATH = path;
     _resetCachedConfig();
     try {
       const id = getDefaultCatId();
       assert.equal(id, 'opus-45');
     } finally {
       if (saved === undefined) {
-        delete process.env.CAT_CONFIG_PATH;
+        delete process.env.CAT_TEMPLATE_PATH;
       } else {
-        process.env.CAT_CONFIG_PATH = saved;
+        process.env.CAT_TEMPLATE_PATH = saved;
       }
       _resetCachedConfig();
     }
@@ -582,18 +623,22 @@ describe('F32-b: mentionPattern validation', () => {
     assert.throws(() => loadCatConfig(path), /Invalid cat config/);
   });
 
-  it('rejects breed mentionPatterns missing @catId handle', () => {
+  it('accepts breed mentionPatterns without canonical @catId (custom aliases allowed)', () => {
     const cfg = multiVariantConfig();
     cfg.breeds[0].mentionPatterns = ['@布偶猫', '@布偶'];
     const path = writeTempConfig(cfg);
-    assert.throws(() => loadCatConfig(path), /must include @opus/);
+    const config = loadCatConfig(path);
+    const allConfigs = toAllCatConfigs(config);
+    assert.deepEqual(allConfigs.opus.mentionPatterns, ['@布偶猫', '@布偶']);
   });
 
-  it('rejects variant mentionPatterns missing @catId handle', () => {
+  it('accepts variant mentionPatterns without canonical @catId (custom aliases allowed)', () => {
     const cfg = multiVariantConfig();
     cfg.breeds[0].variants[1].mentionPatterns = ['@布偶猫4.5'];
     const path = writeTempConfig(cfg);
-    assert.throws(() => loadCatConfig(path), /must include @opus-45/);
+    const config = loadCatConfig(path);
+    const allConfigs = toAllCatConfigs(config);
+    assert.deepEqual(allConfigs['opus-45'].mentionPatterns, ['@布偶猫4.5']);
   });
 });
 
@@ -657,7 +702,7 @@ describe('F32-b P4c: personality fallback to default variant', () => {
 });
 
 describe('F32-b P4c: Sonnet variant in project config', () => {
-  it('project cat-config.json loads with Sonnet variant', () => {
+  it('project cat-template.json loads with Sonnet variant', () => {
     const config = loadCatConfig();
     const ragdoll = config.breeds.find((b) => b.id === 'ragdoll');
     assert.ok(ragdoll, 'ragdoll breed exists');
@@ -705,6 +750,13 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all.antigravity); // F061: Bengal cat (Antigravity CDP bridge)
     assert.ok(all['antig-opus']); // F061: Bengal cat Claude variant
     assert.ok(all.opencode); // F105: OpenCode external agent
+  });
+
+  it('projects antigravity commandArgs from cli.defaultArgs when variant.commandArgs is absent', () => {
+    const config = loadCatConfig();
+    const all = toAllCatConfigs(config);
+    assert.deepEqual(all.antigravity.commandArgs, ['.', '--remote-debugging-port=9000']);
+    assert.deepEqual(all['antig-opus'].commandArgs, ['.', '--remote-debugging-port=9000']);
   });
 });
 

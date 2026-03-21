@@ -17,6 +17,8 @@ VENV_DIR="${HOME}/.cat-cafe/llm-venv"
 MODEL="${1:-mlx-community/Qwen3.5-35B-A3B-4bit}"
 PORT="${LLM_POSTPROCESS_PORT:-9878}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/download-source-overrides.sh"
+apply_manual_download_source_overrides
 
 # Create venv if missing, then activate
 if [ ! -d "$VENV_DIR" ]; then

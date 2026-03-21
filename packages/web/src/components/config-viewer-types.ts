@@ -1,3 +1,14 @@
+export interface OwnerConfig {
+  name: string;
+  aliases: string[];
+  mentionPatterns: string[];
+  avatar?: string;
+  color?: {
+    primary: string;
+    secondary: string;
+  };
+}
+
 export interface CatConfig {
   displayName: string;
   provider: string;
@@ -18,8 +29,13 @@ export interface Capabilities {
 }
 
 export interface ConfigData {
+  owner?: OwnerConfig;
   cats: Record<string, CatConfig>;
   perCatBudgets: Record<string, ContextBudget>;
+  cli?: {
+    codexSandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
+    codexApprovalPolicy: 'untrusted' | 'on-failure' | 'on-request' | 'never';
+  };
   a2a: { enabled: boolean; maxDepth: number };
   memory: { enabled: boolean; maxKeysPerThread: number };
   codexExecution?: {

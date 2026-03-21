@@ -60,10 +60,16 @@ export interface CatVariant {
   /** Independent mention patterns for this variant (F32-b).
    *  Default variant inherits breed mentionPatterns; non-default variants fallback to @catId when unspecified. */
   readonly mentionPatterns?: readonly string[];
+  /** F127: member-side binding to a concrete account config (built-in or API key). */
+  readonly accountRef?: string;
   readonly provider: CatProvider;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
   readonly cli: CliConfig;
+  /** F127: explicit CLI args for bridge-style members such as Antigravity. */
+  readonly commandArgs?: readonly string[];
+  /** Optional per-variant override for roleDescription; falls back to breed.roleDescription. */
+  readonly roleDescription?: string;
   readonly personality?: string;
   readonly strengths?: readonly string[];
   /** F32-b P4c: Override breed-level avatar for this variant */
@@ -72,12 +78,17 @@ export interface CatVariant {
   readonly color?: CatColor;
   /** Per-cat context budget (optional, falls back to defaults) */
   readonly contextBudget?: ContextBudget;
+  /** Optional per-variant override for sessionChain; falls back to breed.features.sessionChain. */
+  readonly sessionChain?: boolean;
   /** F34: Per-cat TTS voice (optional, falls back to defaults in cat-voices.ts) */
   readonly voiceConfig?: VoiceConfig;
   /** F-Ground-3: Human-readable strengths for teammate roster (overrides breed-level) */
   readonly teamStrengths?: string;
   /** F-Ground-3: Caution note. null = explicitly no caution (overrides breed). */
   readonly caution?: string | null;
+  /** F127: Extra CLI --config key=value pairs passed to the client at invocation time.
+   *  Each entry is a raw config string, e.g. 'model_reasoning_effort="low"'. */
+  readonly cliConfigArgs?: readonly string[];
 }
 
 /**
@@ -192,6 +203,10 @@ export interface OwnerConfig {
   readonly aliases: readonly string[];
   /** Line-start mention patterns for routing detection (e.g. ["@owner", "@owner-alias"]) */
   readonly mentionPatterns: readonly string[];
+  /** Optional owner avatar shown in Hub and chat surfaces. */
+  readonly avatar?: string;
+  /** Optional owner palette for Hub/chat surfaces. */
+  readonly color?: CatColor;
 }
 
 /**

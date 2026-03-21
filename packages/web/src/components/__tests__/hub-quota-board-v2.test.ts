@@ -4,12 +4,85 @@
  * Tests the rewritten quota board: flat pool list, one refresh button,
  * no ops UI. Each pool is a row with color dot + progress bar + percent.
  */
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QuotaResponse } from './quota-test-fixtures';
 
 // --- Fixtures ---
+
+const MOCK_CATS = [
+  {
+    id: 'opus',
+    displayName: '布偶猫',
+    nickname: '宪宪',
+    color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+    mentionPatterns: ['@opus'],
+    provider: 'anthropic',
+    providerProfileId: 'claude-oauth',
+    defaultModel: 'claude-opus-4-6',
+    avatar: '/avatars/opus.png',
+    roleDescription: '架构',
+    personality: '稳重',
+    source: 'seed',
+  },
+  {
+    id: 'codex',
+    displayName: '缅因猫',
+    nickname: '砚砚',
+    color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+    mentionPatterns: ['@codex'],
+    provider: 'openai',
+    providerProfileId: '',
+    defaultModel: 'gpt-5.4',
+    avatar: '/avatars/codex.png',
+    roleDescription: 'review',
+    personality: 'rigorous',
+    source: 'seed',
+  },
+  {
+    id: 'spark',
+    displayName: '缅因猫',
+    nickname: 'Spark',
+    color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+    mentionPatterns: ['@spark'],
+    provider: 'openai',
+    providerProfileId: 'codex-sponsor',
+    defaultModel: 'gpt-5.4-mini',
+    avatar: '/avatars/spark.png',
+    roleDescription: 'fast coding',
+    personality: 'sharp',
+    source: 'runtime',
+  },
+  {
+    id: 'gemini25',
+    displayName: '暹罗猫',
+    nickname: 'Gemini 2.5',
+    color: { primary: '#EAA54B', secondary: '#F8E7C7' },
+    mentionPatterns: ['@gemini25'],
+    provider: 'google',
+    providerProfileId: 'gemini-oauth',
+    defaultModel: 'gemini-2.5-pro',
+    avatar: '/avatars/gemini25.png',
+    roleDescription: 'design',
+    personality: 'bold',
+    source: 'seed',
+  },
+  {
+    id: 'antigravity',
+    displayName: '孟加拉猫',
+    nickname: '豹猫',
+    color: { primary: '#C97A35', secondary: '#F5E4D0' },
+    mentionPatterns: ['@antigravity'],
+    provider: 'antigravity',
+    defaultModel: 'gemini-3.1-pro',
+    avatar: '/avatars/antigravity.png',
+    roleDescription: 'bridge',
+    personality: 'curious',
+    source: 'seed',
+  },
+];
 
 const MOCK_QUOTA_RESPONSE: QuotaResponse = {
   claude: {
@@ -57,21 +130,123 @@ function jsonResponse(payload: unknown): Response {
   });
 }
 
+function defaultQuotaApiFetch(path: string) {
+  if (path === '/api/quota') return Promise.resolve(jsonResponse(MOCK_QUOTA_RESPONSE));
+  if (path === '/api/provider-profiles') {
+    return Promise.resolve(
+      jsonResponse({
+        projectPath: '/tmp/project',
+        activeProfileId: 'claude-oauth',
+        activeProfileIds: {
+          anthropic: 'claude-oauth',
+          openai: 'codex-sponsor',
+          google: 'gemini-oauth',
+        },
+        providers: [
+          {
+            id: 'claude-oauth',
+            provider: 'claude-oauth',
+            displayName: 'Claude (OAuth)',
+            name: 'Claude (OAuth)',
+            authType: 'oauth',
+            protocol: 'anthropic',
+            builtin: true,
+            mode: 'subscription',
+            models: ['claude-opus-4-6'],
+            hasApiKey: false,
+            createdAt: '2026-03-18T00:00:00.000Z',
+            updatedAt: '2026-03-18T00:00:00.000Z',
+          },
+          {
+            id: 'codex-oauth',
+            provider: 'codex-oauth',
+            displayName: 'Codex (OAuth)',
+            name: 'Codex (OAuth)',
+            authType: 'oauth',
+            protocol: 'openai',
+            builtin: true,
+            mode: 'subscription',
+            models: ['gpt-5.4'],
+            hasApiKey: false,
+            createdAt: '2026-03-18T00:00:00.000Z',
+            updatedAt: '2026-03-18T00:00:00.000Z',
+          },
+          {
+            id: 'gemini-oauth',
+            provider: 'gemini-oauth',
+            displayName: 'Gemini (OAuth)',
+            name: 'Gemini (OAuth)',
+            authType: 'oauth',
+            protocol: 'google',
+            builtin: true,
+            mode: 'subscription',
+            models: ['gemini-2.5-pro'],
+            hasApiKey: false,
+            createdAt: '2026-03-18T00:00:00.000Z',
+            updatedAt: '2026-03-18T00:00:00.000Z',
+          },
+          {
+            id: 'codex-sponsor',
+            provider: 'codex-sponsor',
+            displayName: 'Codex Sponsor',
+            name: 'Codex Sponsor',
+            authType: 'api_key',
+            protocol: 'openai',
+            builtin: false,
+            mode: 'api_key',
+            models: ['gpt-5.4-mini'],
+            hasApiKey: true,
+            createdAt: '2026-03-18T00:00:00.000Z',
+            updatedAt: '2026-03-18T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+  }
+  return Promise.resolve(new Response('{}', { status: 404 }));
+}
+
 // --- Mocks ---
 
 vi.mock('@/utils/api-client', () => ({
-  apiFetch: vi.fn((path: string) => {
-    if (path === '/api/quota') return Promise.resolve(jsonResponse(MOCK_QUOTA_RESPONSE));
-    return Promise.resolve(new Response('{}', { status: 404 }));
+  apiFetch: vi.fn(defaultQuotaApiFetch),
+}));
+
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    cats: MOCK_CATS,
+    isLoading: false,
+    getCatById: () => undefined,
+    getCatsByBreed: () => new Map(),
+    refresh: () => Promise.resolve(MOCK_CATS),
   }),
 }));
 
 import { HubQuotaBoardTab } from '@/components/HubQuotaBoardTab';
+import { apiFetch } from '@/utils/api-client';
+
+const mockApiFetch = vi.mocked(apiFetch);
+
+async function flushEffects() {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+beforeAll(() => {
+  (globalThis as { React?: typeof React }).React = React;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+afterAll(() => {
+  delete (globalThis as { React?: typeof React }).React;
+  delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+});
 
 describe('HubQuotaBoardTab v2 — glanceable quota board', () => {
-  it('renders the 猫粮看板 title', () => {
+  it('renders the 配额看板 title', () => {
     const html = renderToStaticMarkup(React.createElement(HubQuotaBoardTab));
-    expect(html).toContain('猫粮看板');
+    expect(html).toContain('配额看板');
   });
 
   it('renders 刷新全部 button (no confirm dialog)', () => {
@@ -79,21 +254,11 @@ describe('HubQuotaBoardTab v2 — glanceable quota board', () => {
     expect(html).toContain('刷新全部');
   });
 
-  it('renders Claude section', () => {
+  it('renders F127 group headings on static render', () => {
     const html = renderToStaticMarkup(React.createElement(HubQuotaBoardTab));
-    expect(html).toContain('布偶猫');
-  });
-
-  it('renders separated Codex pool groups when no data yet', () => {
-    const html = renderToStaticMarkup(React.createElement(HubQuotaBoardTab));
-    // Before data loads (SSR), shows OpenAI empty state
-    expect(html).toContain('缅因猫');
-  });
-
-  it('renders Gemini and Antigravity sections', () => {
-    const html = renderToStaticMarkup(React.createElement(HubQuotaBoardTab));
-    expect(html).toContain('暹罗猫 Gemini');
-    expect(html).toContain('Antigravity IDE');
+    expect(html).toContain('OAuth 订阅额度（按账号配置）');
+    expect(html).toContain('API Key 额度（按账号配置）');
+    expect(html).toContain('F127 变化说明');
   });
 
   it('does NOT contain old ops UI elements', () => {
@@ -106,6 +271,97 @@ describe('HubQuotaBoardTab v2 — glanceable quota board', () => {
     expect(html).not.toContain('探针');
     expect(html).not.toContain('CDP');
     expect(html).not.toContain('打开小组件视图');
+  });
+});
+
+describe('HubQuotaBoardTab — account pool grouping', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    mockApiFetch.mockImplementation(defaultQuotaApiFetch);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.clearAllMocks();
+  });
+
+  it('groups quota by account pool and shows reverse-linked member chips after data loads', async () => {
+    await act(async () => {
+      root.render(React.createElement(HubQuotaBoardTab));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('OAuth 订阅额度（按账号配置）');
+    expect(container.textContent).toContain('API Key 额度（按账号配置）');
+    expect(container.textContent).toContain('Claude (OAuth)');
+    expect(container.textContent).toContain('Codex (OAuth)');
+    expect(container.textContent).toContain('Gemini (OAuth)');
+    expect(container.textContent).toContain('Codex Sponsor');
+    expect(container.textContent).toContain('@opus');
+    expect(container.textContent).toContain('@codex');
+    expect(container.textContent).toContain('@spark');
+    expect(container.textContent).toContain('Antigravity Bridge（独立通道）');
+    expect(container.textContent).toContain('@antigravity');
+    expect(container.textContent).toContain('从猫粮看板改名为配额看板');
+    expect(container.textContent).not.toContain('Claude 订阅');
+    expect(container.textContent).not.toContain('Codex 订阅');
+    expect(container.textContent).not.toContain('Gemini 订阅');
+    expect(container.textContent).not.toContain('缅因猫 Codex + GPT-5.2');
+    expect(container.textContent).not.toContain('缅因猫 代码审查');
+  });
+
+  it('attributes unbound openai cats to the active openai profile pool', async () => {
+    await act(async () => {
+      root.render(React.createElement(HubQuotaBoardTab));
+    });
+    await flushEffects();
+
+    const sectionLabel = (title: string) =>
+      Array.from(container.querySelectorAll('span')).find((node) => node.textContent?.trim() === title);
+
+    const sponsorHeader = sectionLabel('Codex Sponsor');
+    const codexOauthHeader = sectionLabel('Codex (OAuth)');
+
+    expect(sponsorHeader).toBeTruthy();
+    expect(codexOauthHeader).toBeTruthy();
+    expect(sponsorHeader?.parentElement?.textContent ?? '').toContain('@codex');
+    expect(codexOauthHeader?.parentElement?.textContent ?? '').not.toContain('@codex');
+  });
+
+  it('shows a visible error banner when quota loading fails', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/quota') return Promise.resolve(new Response('{}', { status: 503 }));
+      return defaultQuotaApiFetch(path);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubQuotaBoardTab));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('配额数据加载失败 (503)');
+    expect(container.textContent).toContain('显示的可能是过期数据');
+  });
+
+  it('shows a visible error banner when provider profiles fail to load', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/provider-profiles') return Promise.resolve(new Response('{}', { status: 503 }));
+      return defaultQuotaApiFetch(path);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubQuotaBoardTab));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('账号配置加载失败 (503)');
+    expect(container.textContent).toContain('额度池成员归属可能不完整');
   });
 });
 

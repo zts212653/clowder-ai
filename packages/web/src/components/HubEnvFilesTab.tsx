@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
@@ -10,6 +10,8 @@ interface EnvVar {
   description: string;
   category: string;
   sensitive: boolean;
+  maskMode?: 'url';
+  runtimeEditable?: boolean;
   currentValue: string | null;
 }
 
@@ -31,6 +33,12 @@ interface EnvSummaryData {
   categories: Record<string, string>;
   variables: EnvVar[];
   paths: EnvPaths;
+}
+
+interface EnvSaveResponse {
+  ok: boolean;
+  envFilePath?: string;
+  summary?: EnvVar[];
 }
 
 // Must stay in sync with workspace-security.ts DENYLIST_PATTERNS
@@ -72,9 +80,20 @@ function classifyPath(absPath: string, projectRoot: string, isDir: boolean): { k
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
-      <h3 className="text-xs font-semibold text-gray-700 mb-2">{title}</h3>
-      {children}
+    <section className="rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+      <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function PageIntro() {
+  return (
+    <section className="rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+      <p className="text-[13px] font-semibold text-[#E29578]">系统配置 &gt; 环境 &amp; 文件</p>
+      <p className="mt-2 text-[14px] leading-6 text-[#8A776B]">
+        当前环境变量、配置文件、数据目录三段式不变。新增：变量值可直接编辑，保存后自动回填 .env。
+      </p>
     </section>
   );
 }
@@ -154,13 +173,41 @@ function PathAction({
 
 function buildConfigFiles(projectRoot: string) {
   return [
-    { name: 'cat-config.json', path: `${projectRoot}/cat-config.json`, desc: '猫猫配置（模型、适配器）', isDir: false },
+    { name: 'cat-template.json', path: `${projectRoot}/cat-template.json`, desc: '猫猫模板（只读 seed）', isDir: false },
+    { name: '.cat-cafe/cat-catalog.json', path: `${projectRoot}/.cat-cafe/cat-catalog.json`, desc: '运行时成员真相源', isDir: false },
+    { name: '.env', path: `${projectRoot}/.env`, desc: '可编辑环境变量真相源（不含认证凭证）', isDir: false },
     { name: '.env.local', path: `${projectRoot}/.env.local`, desc: '本地环境变量覆盖', isDir: false },
     { name: 'start-dev.sh', path: `${projectRoot}/scripts/start-dev.sh`, desc: '开发启动脚本', isDir: false },
     { name: 'CLAUDE.md', path: `${projectRoot}/CLAUDE.md`, desc: '布偶猫项目指引', isDir: false },
     { name: 'AGENTS.md', path: `${projectRoot}/AGENTS.md`, desc: '缅因猫项目指引', isDir: false },
     { name: 'GEMINI.md', path: `${projectRoot}/GEMINI.md`, desc: '暹罗猫项目指引', isDir: false },
   ];
+}
+
+const RESTART_REQUIRED_ENV_VARS = new Set(['API_SERVER_PORT', 'PREVIEW_GATEWAY_PORT']);
+
+function buildVariableHint(variable: EnvVar): string | null {
+  const hints: string[] = [];
+  if (RESTART_REQUIRED_ENV_VARS.has(variable.name)) {
+    hints.push('写回 .env 后需重启相关服务生效。');
+  }
+  if (variable.maskMode === 'url') {
+    hints.push('当前值已做凭证脱敏；修改时请填写完整连接串。');
+  }
+  return hints.length > 0 ? hints.join(' ') : null;
+}
+
+function isEditableVariable(variable: EnvVar): boolean {
+  return variable.runtimeEditable !== false && !variable.sensitive;
+}
+
+function isMaskedUrlVariable(variable: EnvVar): boolean {
+  return variable.maskMode === 'url' && typeof variable.currentValue === 'string' && variable.currentValue.includes('***');
+}
+
+function initialDraftValue(variable: EnvVar): string {
+  if (isMaskedUrlVariable(variable)) return '';
+  return variable.currentValue ?? '';
 }
 
 function buildDataDirs(dataDirs: DataDirs) {
@@ -181,11 +228,9 @@ function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
         {files.map((f) => {
           const cls = classifyPath(f.path, projectRoot, f.isDir);
           return (
-            <div key={f.name} className="flex items-baseline gap-2">
-              <code className="text-xs font-mono text-gray-700 bg-gray-200 px-1.5 py-0.5 rounded shrink-0">
-                {f.name}
-              </code>
-              <span className="text-xs text-gray-500">{f.desc}</span>
+            <div key={f.name} className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2">
+              <code className="shrink-0 rounded bg-[#F7F3F0] px-1.5 py-0.5 font-mono text-xs text-[#6A5A50]">{f.name}</code>
+              <span className="text-xs text-[#8A776B]">{f.desc}</span>
               <PathAction classification={cls} absPath={f.path} />
             </div>
           );
@@ -195,7 +240,23 @@ function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
   );
 }
 
-function EnvVarsSection({ categories, variables }: { categories: Record<string, string>; variables: EnvVar[] }) {
+function EnvVarsSection({
+  categories,
+  variables,
+  drafts,
+  isDirty,
+  saveState,
+  onDraftChange,
+  onSave,
+}: {
+  categories: Record<string, string>;
+  variables: EnvVar[];
+  drafts: Record<string, string>;
+  isDirty: boolean;
+  saveState: { saving: boolean; error: string | null; success: string | null };
+  onDraftChange: (name: string, value: string) => void;
+  onSave: () => void;
+}) {
   const grouped = Object.entries(categories)
     .map(([key, label]) => ({
       key,
@@ -206,26 +267,66 @@ function EnvVarsSection({ categories, variables }: { categories: Record<string, 
 
   return (
     <Section title="环境变量">
+      <div className="mb-3 rounded-[12px] border border-[#D7E9D7] bg-[#F6FBF6] px-3 py-2 text-xs leading-5 text-[#5B7A5C]">
+        变量值可直接编辑，保存后自动回填 `.env`。写回 .env 后需重启相关服务生效；URL 型连接串当前值已脱敏，修改时请填写完整值。
+      </div>
       <div className="space-y-3">
         {grouped.map((group) => (
           <div key={group.key}>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{group.label}</p>
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#77A777]">{group.label}</p>
             <div className="space-y-1">
               {group.vars.map((v) => (
-                <div key={v.name} className="grid grid-cols-[1fr_auto_auto] gap-x-3 items-baseline text-xs">
-                  <div className="flex items-baseline gap-1.5 min-w-0">
-                    <code className="font-mono text-gray-700 shrink-0">{v.name}</code>
-                    <span className="text-gray-400 truncate">{v.description}</span>
+                <div
+                  key={v.name}
+                  className="grid gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2 text-xs md:grid-cols-[minmax(0,1fr)_220px]"
+                >
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-baseline gap-1.5 min-w-0">
+                      <code className="shrink-0 font-mono text-[#6A5A50]">{v.name}</code>
+                      <span className="truncate text-[#B59A88]">{v.description}</span>
+                    </div>
+                    <div className="text-[11px] text-[#B59A88]">默认: {v.defaultValue}</div>
+                    {!isEditableVariable(v) && (
+                      <div className={`font-mono text-[11px] ${v.currentValue ? 'text-[#6A5A50]' : 'text-[#D4C5BA]'}`}>
+                        {v.currentValue ?? '未设置'}
+                      </div>
+                    )}
                   </div>
-                  <span className="text-gray-400 text-[11px]">默认: {v.defaultValue}</span>
-                  <span className={`font-mono text-[11px] ${v.currentValue ? 'text-green-600' : 'text-gray-300'}`}>
-                    {v.currentValue ?? '未设置'}
-                  </span>
+                  {isEditableVariable(v) ? (
+                    <div className="space-y-1">
+                      <input
+                        aria-label={v.name}
+                        value={drafts[v.name] ?? ''}
+                        onChange={(e) => onDraftChange(v.name, e.target.value)}
+                        placeholder={isMaskedUrlVariable(v) ? '保持当前值（已脱敏）' : v.defaultValue}
+                        className="rounded-[10px] border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 font-mono text-xs text-[#6A5A50]"
+                      />
+                      {buildVariableHint(v) ? (
+                        <div className="text-[11px] leading-5 text-[#B59A88]">{buildVariableHint(v)}</div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="rounded-[10px] border border-dashed border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-[11px] text-[#8A776B]">
+                      只读变量（认证凭证 / 仅启动期生效）
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           </div>
         ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!isDirty || saveState.saving}
+          className="rounded-full bg-[#D49266] px-4 py-2 text-xs font-semibold text-white hover:bg-[#c47f52] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saveState.saving ? '保存中...' : '保存到 .env'}
+        </button>
+        {saveState.error && <span className="text-xs text-red-600">{saveState.error}</span>}
+        {saveState.success && <span className="text-xs text-green-600">{saveState.success}</span>}
       </div>
     </Section>
   );
@@ -239,9 +340,9 @@ function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projec
         {dirs.map((d) => {
           const cls = classifyPath(d.path, projectRoot, d.isDir);
           return (
-            <div key={d.name} className="flex items-baseline gap-2">
-              <span className="text-xs text-gray-700 font-medium shrink-0">{d.name}</span>
-              <span className="text-xs text-gray-500">{d.desc}</span>
+            <div key={d.name} className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2">
+              <span className="shrink-0 text-xs font-medium text-[#6A5A50]">{d.name}</span>
+              <span className="text-xs text-[#8A776B]">{d.desc}</span>
               <PathAction classification={cls} absPath={d.path} />
             </div>
           );
@@ -254,12 +355,28 @@ function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projec
 export function HubEnvFilesTab() {
   const [data, setData] = useState<EnvSummaryData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const saveLockRef = useRef(false);
+  const [saveState, setSaveState] = useState<{ saving: boolean; error: string | null; success: string | null }>({
+    saving: false,
+    error: null,
+    success: null,
+  });
 
   useEffect(() => {
     apiFetch('/api/config/env-summary')
       .then(async (res) => {
-        if (res.ok) setData((await res.json()) as EnvSummaryData);
-        else setError('环境信息加载失败');
+        if (res.ok) {
+          const body = (await res.json()) as EnvSummaryData;
+          setData(body);
+          setDrafts(
+            Object.fromEntries(
+              body.variables.filter(isEditableVariable).map((variable) => [variable.name, initialDraftValue(variable)]),
+            ),
+          );
+        } else {
+          setError('环境信息加载失败');
+        }
       })
       .catch(() => setError('环境信息加载失败'));
   }, []);
@@ -267,11 +384,79 @@ export function HubEnvFilesTab() {
   if (error) return <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>;
   if (!data) return <p className="text-sm text-gray-400">加载中...</p>;
 
+  const editableVariables = data.variables.filter(isEditableVariable);
+  const changedUpdates = editableVariables
+    .map((variable) => ({
+      name: variable.name,
+      value: drafts[variable.name] ?? '',
+      baselineValue: initialDraftValue(variable),
+      maskedUrl: isMaskedUrlVariable(variable),
+    }))
+    .filter((variable) => variable.value !== variable.baselineValue)
+    .filter((variable) => !variable.maskedUrl || variable.value.trim().length > 0)
+    .map(({ name, value }) => ({ name, value }));
+
+  const isDirty = changedUpdates.length > 0;
+
+  const handleDraftChange = (name: string, value: string) => {
+    setDrafts((prev) => ({ ...prev, [name]: value }));
+    setSaveState((prev) => ({ ...prev, error: null, success: null }));
+  };
+
+  const handleSave = async () => {
+    if (saveLockRef.current) return;
+    if (!isDirty) {
+      setSaveState({ saving: false, error: null, success: '当前没有待写回的变更' });
+      return;
+    }
+    saveLockRef.current = true;
+    setSaveState({ saving: true, error: null, success: null });
+    try {
+      const res = await apiFetch('/api/config/env', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: changedUpdates }),
+      });
+      const body = (await res.json().catch(() => ({}))) as Partial<EnvSaveResponse> & { error?: string };
+      if (!res.ok) {
+        setSaveState({ saving: false, error: body.error ?? '保存失败', success: null });
+        return;
+      }
+      const nextVariables = Array.isArray(body.summary)
+        ? body.summary
+        : data.variables.map((variable) => {
+            const update = changedUpdates.find((item) => item.name === variable.name);
+            if (!update) return variable;
+            return { ...variable, currentValue: update.value || null };
+          });
+      setData((prev) => (prev ? { ...prev, variables: nextVariables } : prev));
+      setDrafts(
+        Object.fromEntries(
+          nextVariables.filter(isEditableVariable).map((variable) => [variable.name, initialDraftValue(variable)]),
+        ),
+      );
+      setSaveState({ saving: false, error: null, success: '已写回 .env 并刷新摘要；部分变量需重启相关服务生效' });
+    } catch {
+      setSaveState({ saving: false, error: '保存失败', success: null });
+    } finally {
+      saveLockRef.current = false;
+    }
+  };
+
   return (
-    <>
+    <div className="space-y-4">
+      <PageIntro />
+      <EnvVarsSection
+        categories={data.categories}
+        variables={data.variables}
+        drafts={drafts}
+        isDirty={isDirty}
+        saveState={saveState}
+        onDraftChange={handleDraftChange}
+        onSave={handleSave}
+      />
       <ConfigFilesSection projectRoot={data.paths.projectRoot} />
-      <EnvVarsSection categories={data.categories} variables={data.variables} />
       <DataDirsSection dataDirs={data.paths.dataDirs} projectRoot={data.paths.projectRoot} />
-    </>
+    </div>
   );
 }

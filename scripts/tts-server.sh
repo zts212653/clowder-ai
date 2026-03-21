@@ -23,6 +23,8 @@ MODEL="${1:-mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16}"
 PORT="${TTS_PORT:-9879}"
 PROVIDER="${TTS_PROVIDER:-qwen3-clone}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/download-source-overrides.sh"
+apply_manual_download_source_overrides
 
 # Create venv if missing, then activate
 if [ ! -d "$VENV_DIR" ]; then

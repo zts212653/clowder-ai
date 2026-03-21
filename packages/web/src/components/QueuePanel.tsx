@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import { useOwnerConfig } from '@/hooks/useOwnerConfig';
 import { type QueueEntry, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
@@ -16,7 +17,9 @@ interface QueuePanelProps {
  * controls, plus continue/clear actions when paused.
  */
 export function QueuePanel({ threadId }: QueuePanelProps) {
-  const queue = useChatStore((s) => s.queue) ?? [];
+  const owner = useOwnerConfig();
+  const rawQueue = useChatStore((s) => s.queue);
+  const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
   const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
   const queuePauseReason = useChatStore((s) => s.queuePauseReason);
   const messages = useChatStore((s) => s.messages);
@@ -205,6 +208,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
               isLast={idx === visibleEntries.length - 1}
               isPaused={queuePaused}
               imageCount={imageCount}
+              ownerName={owner.name}
               onRemove={handleRemove}
               onMove={handleMove}
               onSteer={handleSteerOpen}
@@ -233,6 +237,7 @@ function QueueEntryRow({
   isLast,
   isPaused,
   imageCount,
+  ownerName,
   onRemove,
   onMove,
   onSteer,
@@ -243,6 +248,7 @@ function QueueEntryRow({
   isLast: boolean;
   isPaused: boolean;
   imageCount: number;
+  ownerName: string;
   onRemove: (id: string) => void;
   onMove: (id: string, direction: 'up' | 'down') => void;
   onSteer: (id: string) => void;
@@ -252,7 +258,7 @@ function QueueEntryRow({
     ? `${entry.callerCatId ?? '猫猫'} → ${entry.targetCats[0] ?? '猫猫'}`
     : entry.source === 'connector'
       ? 'Connector'
-      : '铲屎官';
+      : ownerName;
 
   return (
     <div

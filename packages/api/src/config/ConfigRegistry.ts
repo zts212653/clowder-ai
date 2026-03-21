@@ -7,6 +7,7 @@
  */
 
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { getOwnerConfig } from './cat-config-loader.js';
 import { DEFAULT_CLI_TIMEOUT_MS, readCliTimeoutMsFromEnv } from '../utils/cli-timeout.js';
 import { getAllCatBudgets } from './cat-budgets.js';
 import { getCatModel } from './cat-models.js';
@@ -48,6 +49,7 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   const maxContentLength = Number(env.MAX_CONTEXT_MSG_CHARS) || 1500;
   const maxTotalChars = 8000;
   const maxPromptTokens = Number(env.MAX_PROMPT_TOKENS) || 32000;
+  const owner = getOwnerConfig();
 
   // CLI (from cli-spawn.ts defaults, configurable via CLI_TIMEOUT_MS, 0 = disable)
   const timeoutMs = readCliTimeoutMsFromEnv(env) ?? DEFAULT_CLI_TIMEOUT_MS;
@@ -91,6 +93,13 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   const codexExecutionPassModelArg = parseBoolean(env.CAT_CODEX_PASS_MODEL_ARG, true);
 
   return {
+    owner: {
+      name: owner.name,
+      aliases: [...owner.aliases],
+      mentionPatterns: [...owner.mentionPatterns],
+      ...(owner.avatar ? { avatar: owner.avatar } : {}),
+      ...(owner.color ? { color: owner.color } : {}),
+    },
     context: {
       maxMessages,
       maxContentLength,

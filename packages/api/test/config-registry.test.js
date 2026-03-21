@@ -113,6 +113,15 @@ describe('ConfigRegistry', () => {
     assert.equal(typeof snapshot.cats.opus.mcpSupport, 'boolean', 'opus has mcpSupport');
   });
 
+  it('surfaces owner metadata for the hub overview', async () => {
+    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
+    const snapshot = collectConfigSnapshot();
+
+    assert.ok(snapshot.owner, 'has owner metadata');
+    assert.equal(snapshot.owner.name, 'Co-worker');
+    assert.deepEqual(snapshot.owner.mentionPatterns, ['@co-worker', '@owner']);
+  });
+
   it('reads MAX_A2A_DEPTH from env', async () => {
     setEnv('MAX_A2A_DEPTH', '5');
 

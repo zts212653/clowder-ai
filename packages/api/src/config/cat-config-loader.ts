@@ -1,6 +1,6 @@
 /**
  * Cat Config Loader
- * 从 cat-config.json 加载 Breed+Variant 配置。
+ * 从 cat-template.json / .cat-cafe/cat-catalog.json 加载 Breed+Variant 配置。
  * Node-only — 前端继续用 shared 包的 CAT_CONFIGS 常量。
  */
 
@@ -14,6 +14,7 @@ import type {
   CatFeatures,
   CatId,
   CatVariant,
+  ContextBudget,
   MissionHubSelfClaimScope,
   OwnerConfig,
   ReviewPolicy,
@@ -22,17 +23,18 @@ import type {
 import { createCatId } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { bootstrapCatCatalog, readCatCatalogRaw, resolveCatCatalogPath } from './cat-catalog-store.js';
 
 const log = createModuleLogger('cat-config');
 
 /**
- * Default cat-config.json location (repo root).
+ * Default cat-template.json location (repo root).
  *
  * IMPORTANT: API dev scripts run with cwd=`packages/api`, so `process.cwd()` is
  * not the repo root. Resolve relative to this file instead to keep behavior
  * stable across different launch directories.
  */
-const DEFAULT_CAT_CONFIG_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..', 'cat-config.json');
+const DEFAULT_CAT_TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..', 'cat-template.json');
 
 const cliConfigSchema = z.object({
   command: z.string().min(1),
@@ -59,10 +61,16 @@ const catVariantSchema = z.object({
   displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
+  accountRef: z.string().min(1).optional(), // F127: concrete account binding
+  providerProfileId: z.string().min(1).optional(), // Legacy migration path
   provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a']),
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
   cli: cliConfigSchema,
+  commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
+  cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
+  roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
+  sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
   personality: z.string().optional(),
   strengths: z.array(z.string()).optional(),
   avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
@@ -82,6 +90,10 @@ const catVariantSchema = z.object({
   teamStrengths: z.string().optional(), // F-Ground-3: human-readable strengths
   caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
 });
+
+type LegacyAwareCatVariant = CatVariant & {
+  providerProfileId?: string;
+};
 
 /** F33 Phase 2: session strategy config (matches SessionStrategyConfig from shared).
  *  Exported for reuse by Phase 3 API route validation. */
@@ -172,6 +184,8 @@ const ownerConfigSchema = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string().min(1)),
   mentionPatterns: z.array(mentionPatternSchema).min(1),
+  avatar: z.string().min(1).optional(),
+  color: colorSchema.optional(),
 });
 
 /** Version 1: breeds only (legacy) */
@@ -193,18 +207,36 @@ const catCafeConfigSchemaV2 = z.object({
 const catCafeConfigSchema = z.union([catCafeConfigSchemaV1, catCafeConfigSchemaV2]);
 
 /**
- * Load and validate cat-config.json.
- * @param filePath - Explicit path or auto-resolved from env/project root
+ * Load and validate the resolved cat config source.
+ * Explicit filePath reads that file directly.
+ * Default resolution uses `.cat-cafe/cat-catalog.json` first, then falls back to repo-root `cat-template.json`.
  */
 export function loadCatConfig(filePath?: string): CatCafeConfig {
-  const resolvedPath = filePath ?? process.env.CAT_CONFIG_PATH ?? DEFAULT_CAT_CONFIG_PATH;
-
   let raw: string;
-  try {
-    raw = readFileSync(resolvedPath, 'utf-8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    throw new Error(`Failed to read cat config at ${resolvedPath}: ${code ?? 'unknown error'}`);
+  let resolvedPath = filePath;
+  if (filePath) {
+    try {
+      raw = readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      throw new Error(`Failed to read cat config at ${filePath}: ${code ?? 'unknown error'}`);
+    }
+  } else {
+    const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+    const projectRoot = dirname(templatePath);
+    const catalogRaw = readCatCatalogRaw(projectRoot);
+    if (catalogRaw !== null) {
+      raw = catalogRaw;
+      resolvedPath = resolveCatCatalogPath(projectRoot);
+    } else {
+      resolvedPath = templatePath;
+      try {
+        raw = readFileSync(templatePath, 'utf-8');
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        throw new Error(`Failed to read cat config at ${templatePath}: ${code ?? 'unknown error'}`);
+      }
+    }
   }
 
   const json: unknown = JSON.parse(raw);
@@ -222,26 +254,12 @@ export function loadCatConfig(filePath?: string): CatCafeConfig {
     }
   }
 
-  // Validate that configured mentionPatterns always include the canonical @catId handle.
-  //
-  // Why: system prompts may instruct users to disambiguate by using @catId. If a config
-  // supplies a custom mentionPatterns list but omits @catId, routing instructions can
-  // drift from the actually-routable handles.
+  // Validate that configured mentionPatterns are non-empty.
+  // The canonical @catId handle is no longer required — users may replace it
+  // with custom aliases via the Hub editor, as long as at least one alias exists.
   for (const breed of result.data.breeds) {
-    const requiredBreedHandle = `@${breed.catId}`;
-    if (!breed.mentionPatterns.includes(requiredBreedHandle)) {
-      throw new Error(`Breed "${breed.id}": mentionPatterns must include ${requiredBreedHandle}`);
-    }
-
-    for (const variant of breed.variants) {
-      if (!variant.mentionPatterns || variant.mentionPatterns.length === 0) continue;
-      const catId = variant.catId ?? breed.catId;
-      const requiredVariantHandle = `@${catId}`;
-      if (!variant.mentionPatterns.includes(requiredVariantHandle)) {
-        throw new Error(
-          `Breed "${breed.id}" variant "${variant.id}": mentionPatterns must include ${requiredVariantHandle}`,
-        );
-      }
+    if (breed.mentionPatterns.length === 0) {
+      throw new Error(`Breed "${breed.id}": mentionPatterns must have at least one entry`);
     }
   }
 
@@ -249,6 +267,13 @@ export function loadCatConfig(filePath?: string): CatCafeConfig {
   // CatCafeConfig has readonly arrays + branded CatId.
   // The shapes match at runtime after validation.
   return result.data as unknown as CatCafeConfig;
+}
+
+export function bootstrapDefaultCatCatalog(templatePath?: string): CatCafeConfig {
+  const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  const projectRoot = dirname(resolvedTemplatePath);
+  const catalogPath = bootstrapCatCatalog(projectRoot, resolvedTemplatePath);
+  return loadCatConfig(catalogPath);
 }
 
 /** Get the default variant for a breed */
@@ -265,7 +290,13 @@ export function getDefaultVariant(breed: CatBreed): CatVariant {
  * @throws Error on duplicate catId (fail-fast at startup)
  */
 export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig> {
-  const result: Record<string, CatConfig> = {};
+  const result: Record<
+    string,
+    CatConfig & {
+      contextBudget?: ContextBudget;
+      providerProfileId?: string;
+    }
+  > = {};
   for (const breed of config.breeds) {
     // F32-b P4c: resolve default variant personality for non-default fallback
     const defaultVariant = breed.variants.find((v) => v.id === breed.defaultVariantId);
@@ -291,19 +322,35 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // R1 fix: null = "explicitly no caution" (don't inherit breed).
       // undefined (omitted) = inherit from breed. ?? treats null as nullish, so use !== undefined.
       const caution = variant.caution !== undefined ? variant.caution : breed.caution;
+      const projectedCommandArgs =
+        variant.commandArgs ??
+        (variant.provider === 'antigravity' && variant.cli?.defaultArgs && variant.cli.defaultArgs.length > 0
+          ? variant.cli.defaultArgs
+          : undefined);
+
+      const legacyVariant = variant as LegacyAwareCatVariant;
 
       result[catId] = {
         id: createCatId(catId),
-        name: catId,
+        name: variant.displayName ?? breed.name,
         displayName: variant.displayName ?? breed.displayName,
         ...(breed.nickname != null ? { nickname: breed.nickname } : {}),
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
+        ...(variant.accountRef != null
+          ? { accountRef: variant.accountRef }
+          : legacyVariant.providerProfileId != null
+            ? { accountRef: legacyVariant.providerProfileId }
+            : {}),
+        ...(legacyVariant.providerProfileId != null ? { providerProfileId: legacyVariant.providerProfileId } : {}),
         provider: variant.provider,
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
-        roleDescription: breed.roleDescription,
+        ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
+        ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0 ? { cliConfigArgs: [...variant.cliConfigArgs] } : {}),
+        ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
+        roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
         breedId: breed.id,
         breedDisplayName: breed.displayName,
@@ -312,6 +359,12 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         ...(teamStrengths != null ? { teamStrengths } : {}),
         // R1 fix: preserve null (explicit no-caution) in CatConfig; only omit if undefined
         ...(caution !== undefined ? { caution } : {}),
+        ...(variant.strengths != null ? { strengths: variant.strengths } : {}),
+        ...(variant.sessionChain !== undefined
+          ? { sessionChain: variant.sessionChain }
+          : breed.features?.sessionChain !== undefined
+            ? { sessionChain: breed.features.sessionChain }
+            : {}),
       };
     }
   }
@@ -384,7 +437,7 @@ function getCachedConfig(): CatCafeConfig | null {
       _cachedConfig = loadCatConfig();
     } catch (err) {
       _configLoadFailed = true;
-      log.warn({ err }, 'Failed to load cat-config.json, F24 toggle will default to enabled');
+      log.warn({ err }, 'Failed to load runtime catalog/template config, F24 toggle will default to enabled');
       return null;
     }
   }
@@ -426,16 +479,16 @@ let _catIdToBreedSource: CatCafeConfig | null = null;
 export function isSessionChainEnabled(catId: CatId | string, config?: CatCafeConfig): boolean {
   const cfg = config ?? getCachedConfig();
   if (!cfg) return true; // Config unreadable → default enabled (Cloud P1 fix)
-
-  // Rebuild index if config reference changed (test injection)
-  if (!_catIdToBreed || _catIdToBreedSource !== cfg) {
-    _catIdToBreed = buildCatIdToBreedIndex(cfg);
-    _catIdToBreedSource = cfg;
+  const id = catId as string;
+  for (const breed of cfg.breeds) {
+    for (const variant of breed.variants) {
+      const resolvedCatId = variant.catId ?? breed.catId;
+      if (resolvedCatId !== id) continue;
+      if (variant.sessionChain !== undefined) return variant.sessionChain;
+      return breed.features?.sessionChain !== false;
+    }
   }
-
-  const breed = _catIdToBreed.get(catId as string);
-  if (!breed) return true; // Unknown cat → default enabled
-  return breed.features?.sessionChain !== false;
+  return true; // Unknown cat → default enabled
 }
 
 // ── F33 Phase 2: Session Strategy from config ─────────────────────────

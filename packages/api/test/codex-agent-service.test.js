@@ -650,6 +650,55 @@ test('api_key mode keeps OPENAI_API_KEY for codex child env', async () => {
   }
 });
 
+test('callbackEnv auth mode overrides process default when launching codex child env', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn });
+
+  const originalAuthMode = process.env.CODEX_AUTH_MODE;
+  try {
+    delete process.env.CODEX_AUTH_MODE;
+
+    const promise = collect(
+      service.invoke('callback auth test', {
+        callbackEnv: {
+          CODEX_AUTH_MODE: 'api_key',
+          OPENAI_API_KEY: 'sk-callback-key',
+        },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'callback-auth-thread' }]);
+    await promise;
+
+    const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+    assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-callback-key');
+  } finally {
+    if (originalAuthMode === undefined) delete process.env.CODEX_AUTH_MODE;
+    else process.env.CODEX_AUTH_MODE = originalAuthMode;
+  }
+});
+
+test('callbackEnv model override takes precedence over constructor model', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.4' });
+
+  const promise = collect(
+    service.invoke('model override test', {
+      callbackEnv: {
+        CAT_CAFE_OPENAI_MODEL_OVERRIDE: 'gpt-5.4-mini',
+      },
+    }),
+  );
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'model-override-thread' }]);
+  await promise;
+
+  const spawnArgs = spawnFn.mock.calls[0].arguments[1];
+  const modelFlagIndex = spawnArgs.indexOf('--model');
+  assert.ok(modelFlagIndex >= 0, 'codex args should include --model');
+  assert.equal(spawnArgs[modelFlagIndex + 1], 'gpt-5.4-mini');
+});
+
 test('all messages have catId codex', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

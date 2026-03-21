@@ -70,8 +70,22 @@ tty_read_secret() {
     local prompt="$1" var="$2"
     if [[ "$HAS_TTY" == true ]]; then
         printf '%s' "$prompt" >/dev/tty 2>/dev/null || true
-        read -rs -t 120 "$var" </dev/tty 2>/dev/null || printf -v "$var" '%s' ''
+        local input="" char
+        while IFS= read -rs -n1 -t 120 char </dev/tty 2>/dev/null; do
+            [[ -z "$char" ]] && break  # Enter pressed
+            if [[ "$char" == $'\x7f' || "$char" == $'\b' ]]; then
+                # Backspace
+                if [[ -n "$input" ]]; then
+                    input="${input%?}"
+                    printf '\b \b' >/dev/tty 2>/dev/null || true
+                fi
+            else
+                input+="$char"
+                printf '*' >/dev/tty 2>/dev/null || true
+            fi
+        done
         printf '\n' >/dev/tty 2>/dev/null || true
+        printf -v "$var" '%s' "$input"
     else
         printf -v "$var" '%s' ''
     fi
@@ -446,11 +460,12 @@ set_codex_api_key_mode() {
     [[ -n "$model" ]] && collect_env "CAT_CODEX_MODEL" "$model" || clear_env "CAT_CODEX_MODEL"
 }
 set_gemini_oauth_mode() {
-    clear_env "GEMINI_API_KEY"; clear_env "CAT_GEMINI_MODEL"
+    clear_env "GEMINI_API_KEY"; clear_env "GEMINI_BASE_URL"; clear_env "CAT_GEMINI_MODEL"
 }
 set_gemini_api_key_mode() {
-    local key="$1" model="$2"
+    local key="$1" base_url="$2" model="$3"
     collect_env "GEMINI_API_KEY" "$key"
+    [[ -n "$base_url" ]] && collect_env "GEMINI_BASE_URL" "$base_url" || clear_env "GEMINI_BASE_URL"
     [[ -n "$model" ]] && collect_env "CAT_GEMINI_MODEL" "$model" || clear_env "CAT_GEMINI_MODEL"
 }
 write_claude_profile() {
@@ -700,47 +715,62 @@ step "[7/9] Authentication setup / 认证配置..."
 configure_agent_auth() {
     local name="$1" cmd="$2"
     command -v "$cmd" &>/dev/null || return 0
+
+    # Gemini CLI doesn't support custom API endpoints — always use OAuth
+    if [[ "$cmd" == "gemini" ]]; then
+        node scripts/install-auth-config.mjs client-auth set \
+            --project-dir "$PROJECT_DIR" \
+            --client "$cmd" \
+            --mode oauth
+        ok "$name: OAuth mode (Gemini CLI only supports Google official API)"
+        return 0
+    fi
+
     local auth_sel
     tty_select auth_sel "  $name ($cmd) — auth mode:" \
         "OAuth / Subscription (recommended / 推荐)" \
         "API Key"
     if [[ "$auth_sel" != "1" ]]; then
-        [[ "$cmd" == "claude" ]] && remove_claude_installer_profile
-        [[ "$cmd" == "codex" ]] && set_codex_oauth_mode
-        [[ "$cmd" == "gemini" ]] && set_gemini_oauth_mode
+        # Remove stale installer API Key profile + set OAuth binding
+        node scripts/install-auth-config.mjs client-auth remove \
+            --project-dir "$PROJECT_DIR" \
+            --client "$cmd" 2>/dev/null || true
+        node scripts/install-auth-config.mjs client-auth set \
+            --project-dir "$PROJECT_DIR" \
+            --client "$cmd" \
+            --mode oauth
         ok "$name: OAuth mode (login on first use: run '$cmd')"
         return 0
     fi
     local key="" base_url="" model=""
     tty_read_secret "    API Key: " key
-    case "$cmd" in
-        claude)
-            tty_read "    Base URL (Enter = https://api.anthropic.com): " base_url
-            tty_read "    Model (Enter = default): " model
-            if [[ -n "$key" ]]; then
-                write_claude_profile "$key" "$base_url" "$model"
-                ok "$name: API key profile created in .cat-cafe/"
-            else
-                remove_claude_installer_profile
-                warn "$name: no key provided, removed stale installer profile if any"
-            fi
-            ;;
-        codex)
-            tty_read "    Base URL (Enter = default): " base_url
-            tty_read "    Model (Enter = default): " model
-            if [[ -n "$key" ]]; then
-                set_codex_api_key_mode "$key" "$base_url" "$model"
-                ok "$name: API key collected (will write to .env)"
-            else warn "$name: no key provided, keeping OAuth"; set_codex_oauth_mode; fi
-            ;;
-        gemini)
-            tty_read "    Model (Enter = default): " model
-            if [[ -n "$key" ]]; then
-                set_gemini_api_key_mode "$key" "$model"
-                ok "$name: API key collected (will write to .env)"
-            else warn "$name: no key provided, keeping OAuth"; set_gemini_oauth_mode; fi
-            ;;
-    esac
+    tty_read "    Base URL (Enter = default): " base_url
+    tty_read "    Model (Enter = default): " model
+
+    if [[ -n "$key" ]]; then
+        # All clients use the same install-auth-config.mjs to create provider profiles
+        local install_args=(
+            node scripts/install-auth-config.mjs client-auth set
+            --project-dir "$PROJECT_DIR"
+            --client "$cmd"
+            --mode api_key
+            --base-url "${base_url:-}"
+        )
+        [[ -n "$model" ]] && install_args+=(--model "$model")
+        _INSTALLER_API_KEY="$key" "${install_args[@]}"
+        ok "$name: API key profile created in .cat-cafe/"
+    else
+        # No key provided — set OAuth mode via unified path
+        # Also remove any stale installer API Key profile for this client
+        node scripts/install-auth-config.mjs client-auth remove \
+            --project-dir "$PROJECT_DIR" \
+            --client "$cmd" 2>/dev/null || true
+        node scripts/install-auth-config.mjs client-auth set \
+            --project-dir "$PROJECT_DIR" \
+            --client "$cmd" \
+            --mode oauth
+        warn "$name: no key provided, keeping OAuth"
+    fi
 }
 
 if [[ "$HAS_TTY" == true ]]; then

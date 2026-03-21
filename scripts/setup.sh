@@ -4,18 +4,10 @@
 # Cat Cafe / Clowder AI — Interactive Setup
 # 猫猫咖啡交互式安装向导
 #
-# Usage: ./scripts/setup.sh
+# Usage: ./scripts/setup.sh [--install-missing] [--npm-registry=URL] [--pip-index-url=URL] [--pip-extra-index-url=URL] [--hf-endpoint=URL]
 # ============================================================
 
 set -e
-
-# Parse args
-INSTALL_MISSING=false
-for arg in "$@"; do
-    case $arg in
-        --install-missing) INSTALL_MISSING=true ;;
-    esac
-done
 
 # Colors
 RED='\033[0;31m'
@@ -25,15 +17,30 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/download-source-overrides.sh"
 cd "$PROJECT_DIR"
+
+# Parse args
+INSTALL_MISSING=false
+for arg in "$@"; do
+    case $arg in
+        --install-missing) INSTALL_MISSING=true ;;
+        *)
+            parse_manual_download_source_arg "$arg" || true
+            ;;
+    esac
+done
+apply_manual_download_source_overrides
 
 echo ""
 echo -e "${BOLD}🐱 Cat Cafe — Interactive Setup${NC}"
 echo -e "${BOLD}猫猫咖啡 — 交互式安装向导${NC}"
 echo "=================================="
 echo ""
+print_manual_download_source_summary
+[ -n "${CAT_CAFE_NPM_REGISTRY:-}${CAT_CAFE_PIP_INDEX_URL:-}${CAT_CAFE_PIP_EXTRA_INDEX_URL:-}${CAT_CAFE_HF_ENDPOINT:-}" ] && echo ""
 
 # ── Step 1: Check prerequisites ─────────────────────────────
 

@@ -24,6 +24,7 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
+import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
@@ -61,14 +62,14 @@ interface CodexAgentServiceOptions {
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
-function getCodexAuthMode(): CodexAuthMode {
-  const raw = process.env.CODEX_AUTH_MODE?.trim().toLowerCase();
+function getCodexAuthMode(callbackEnv?: Record<string, string>): CodexAuthMode {
+  const raw = callbackEnv?.CODEX_AUTH_MODE?.trim().toLowerCase() ?? process.env.CODEX_AUTH_MODE?.trim().toLowerCase();
   if (raw === 'api_key' || raw === 'auto' || raw === 'oauth') return raw;
   return 'oauth';
 }
 
-function applyAuthMode(env: Record<string, string>): Record<string, string | null> {
-  if (getCodexAuthMode() !== 'oauth') return env;
+function applyAuthMode(env: Record<string, string>, authMode: CodexAuthMode): Record<string, string | null> {
+  if (authMode !== 'oauth') return env;
 
   // OAuth-first default: explicitly delete key-based credentials from child env.
   // spawnCli interprets `null` as "remove this key from inherited process.env".
@@ -233,17 +234,38 @@ export class CodexAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     // Codex CLI has no system prompt flag; prepend identity to prompt text
     const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+    const effectiveModel = options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? this.model;
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
 
     const sandboxMode = getCodexSandboxMode();
     const approvalPolicy = getCodexApprovalPolicy();
-    const modelArgs = ['--model', this.model];
+    const modelArgs = ['--model', effectiveModel];
     const effortLevel = getCatEffort(this.catId as string);
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
+    // User-defined CLI args from the member editor — passed as-is, no implicit wrapping.
+    // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").
+    const userConfigArgs = (options?.cliConfigArgs ?? []).flatMap((arg) => arg.trim().split(/\s+/));
+
+    // Codex CLI deprecated OPENAI_BASE_URL env var.
+    // Configure a custom model provider via --config model_providers.*
+    // Source: https://github.com/openai/codex codex-rs/core/src/model_provider_info.rs
+    //   - env_key: env var name for the API key
+    //   - base_url: API endpoint
+    //   - wire_api: "responses" (HTTP, the only supported value)
+    const customBaseUrl = options?.callbackEnv?.OPENAI_BASE_URL ?? options?.callbackEnv?.OPENAI_API_BASE;
+    const customProviderArgs: string[] = customBaseUrl
+      ? [
+          '--config', 'model_provider="custom"',
+          '--config', `model_providers.custom.base_url=${toTomlString(customBaseUrl)}`,
+          '--config', 'model_providers.custom.name="Custom API Key"',
+          '--config', 'model_providers.custom.wire_api="responses"',
+          '--config', 'model_providers.custom.env_key="OPENAI_API_KEY"',
+        ]
+      : [];
 
     // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
@@ -260,6 +282,8 @@ export class CodexAgentService implements AgentService {
           ...modelArgs,
           ...reasoningArgs,
           ...approvalArgs,
+          ...customProviderArgs,
+          ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
@@ -275,26 +299,50 @@ export class CodexAgentService implements AgentService {
           '--add-dir',
           '.git',
           ...approvalArgs,
+          ...customProviderArgs,
+          ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
           ...promptArgs,
         ];
 
-    const metadata: MessageMetadata = { provider: 'openai', model: this.model };
+    const metadata: MessageMetadata = { provider: 'openai', model: effectiveModel };
     const auditContext = options?.auditContext;
     const recentStreamErrors: string[] = [];
 
     try {
-      // Use real HOME — project-level AGENTS.md already overrides global ~/.codex/AGENTS.md.
-      // HOME isolation was removed because Codex CLI rebuilds ~/.codex/ on startup,
-      // overwriting pre-copied auth.json/config.toml/sessions (see bug-report/tea-coffee/).
-      const codexEnv = applyAuthMode(options?.callbackEnv ?? {});
+      // HOME isolation: only for API Key mode.
+      // OAuth mode needs real HOME (~/.codex/auth.json for token refresh).
+      // API Key mode must AVOID real HOME — stale OAuth token refresh will fail
+      // and abort the CLI before it reaches the custom provider config.
+      const authMode = getCodexAuthMode(options?.callbackEnv);
+      const rawEnv = { ...(options?.callbackEnv ?? {}) };
+      // Strip deprecated OPENAI_BASE_URL — now handled via --config model_providers
+      if (customBaseUrl) {
+        delete rawEnv.OPENAI_BASE_URL;
+        delete rawEnv.OPENAI_API_BASE;
+      }
+      // For API Key mode: use temp HOME to prevent OAuth token refresh interference
+      if (authMode === 'api_key' && customBaseUrl) {
+        const { mkdtempSync } = await import('node:fs');
+        const { tmpdir } = await import('node:os');
+        const isolatedHome = mkdtempSync(`${tmpdir()}/codex-apikey-`);
+        rawEnv.HOME = isolatedHome;
+      }
+      const codexEnv = applyAuthMode(rawEnv, authMode);
 
       const semanticCompletionController = new AbortController();
 
+      const codexCommand = resolveCliCommand('codex');
+      if (!codexCommand) {
+        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('codex'), metadata, timestamp: Date.now() };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+
       const cliOpts = {
-        command: 'codex' as const,
+        command: codexCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: codexEnv,

@@ -16,6 +16,8 @@ VENV_DIR="${HOME}/.cat-cafe/asr-venv"
 MODEL="${1:-mlx-community/Qwen3-ASR-1.7B-8bit}"
 PORT="${WHISPER_PORT:-9876}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/download-source-overrides.sh"
+apply_manual_download_source_overrides
 
 # Create venv if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then

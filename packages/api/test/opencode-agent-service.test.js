@@ -63,6 +63,12 @@ const TEXT_RESPONSE = {
   sessionID: 'ses_test123',
   part: { type: 'text', text: 'Hello from opencode!', time: { start: 1773304958493, end: 1773304958493 } },
 };
+const EMPTY_TEXT_RESPONSE = {
+  type: 'text',
+  timestamp: 1773304958495,
+  sessionID: 'ses_test123',
+  part: { type: 'text', text: '' },
+};
 
 const TOOL_USE = {
   type: 'tool_use',
@@ -122,6 +128,19 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(toolMsg.toolName, 'bash');
   });
 
+  test('drops empty text chunks (prevents blank assistant bubbles)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(service.invoke('Say hello'));
+    emitOpenCodeEvents(proc, [STEP_START, EMPTY_TEXT_RESPONSE, STEP_FINISH]);
+    const messages = await promise;
+
+    const textMsgs = messages.filter((m) => m.type === 'text');
+    assert.equal(textMsgs.length, 0, 'empty text chunk should be ignored');
+    assert.ok(messages.some((m) => m.type === 'done'), 'done should still be emitted');
+  });
+
   test('passes --format json and -m model in CLI args', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
@@ -136,7 +155,7 @@ describe('OpenCodeAgentService', () => {
     assert.ok(args.includes('--format') && args.includes('json'), `expected --format json in args: ${args}`);
     const mIdx = args.indexOf('-m');
     assert.ok(mIdx >= 0, `expected -m in args: ${args}`);
-    assert.strictEqual(args[mIdx + 1], 'anthropic/claude-sonnet-4-6');
+    assert.strictEqual(args[mIdx + 1], 'claude-sonnet-4-6');
   });
 
   test('API key is passed via ANTHROPIC_API_KEY env, not CLI args', async () => {
@@ -157,6 +176,53 @@ describe('OpenCodeAgentService', () => {
 
     const opts = spawnFn.mock.calls[0].arguments[2];
     assert.strictEqual(opts.env.ANTHROPIC_API_KEY, 'sk-test-secret');
+  });
+
+  test('subscription mode clears inherited anthropic credentials', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    const previousAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
+    const previousOpenCodeApiKey = process.env.OPENCODE_API_KEY;
+    const previousOpenCodeBaseUrl = process.env.OPENCODE_BASE_URL;
+    process.env.ANTHROPIC_API_KEY = 'sk-parent-anthropic';
+    process.env.ANTHROPIC_BASE_URL = 'https://parent.anthropic.example/v1';
+    process.env.OPENCODE_API_KEY = 'sk-parent-opencode';
+    process.env.OPENCODE_BASE_URL = 'https://parent.opencode.example';
+
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+      apiKey: 'sk-should-not-leak',
+      baseUrl: 'https://proxy.example/v1',
+    });
+    try {
+      const promise = collect(
+        service.invoke('Test', {
+          callbackEnv: {
+            CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription',
+          },
+        }),
+      );
+      emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+      await promise;
+
+      const opts = spawnFn.mock.calls[0].arguments[2];
+      assert.strictEqual(opts.env.ANTHROPIC_API_KEY, undefined);
+      assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, undefined);
+      assert.strictEqual(opts.env.OPENCODE_API_KEY, undefined);
+      assert.strictEqual(opts.env.OPENCODE_BASE_URL, undefined);
+    } finally {
+      if (previousAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousAnthropicApiKey;
+      if (previousAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
+      else process.env.ANTHROPIC_BASE_URL = previousAnthropicBaseUrl;
+      if (previousOpenCodeApiKey === undefined) delete process.env.OPENCODE_API_KEY;
+      else process.env.OPENCODE_API_KEY = previousOpenCodeApiKey;
+      if (previousOpenCodeBaseUrl === undefined) delete process.env.OPENCODE_BASE_URL;
+      else process.env.OPENCODE_BASE_URL = previousOpenCodeBaseUrl;
+    }
   });
 
   test('baseUrl passed via ANTHROPIC_BASE_URL env', async () => {
@@ -272,14 +338,14 @@ describe('OpenCodeAgentService', () => {
     const mIdx = args.indexOf('-m');
     assert.strictEqual(
       args[mIdx + 1],
-      'anthropic/claude-haiku-4-5',
+      'claude-haiku-4-5',
       `expected model override to be used, got: ${args[mIdx + 1]}`,
     );
   });
 
-  // ── P1-1: callbackEnv BASE_URL gets /v1 suffix for opencode ──
+  // ── Base URL passthrough: no /v1 auto-append ──
 
-  test('callbackEnv CAT_CAFE_ANTHROPIC_BASE_URL appends /v1 for opencode', async () => {
+  test('callbackEnv CAT_CAFE_ANTHROPIC_BASE_URL is passed through as-is', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
@@ -294,12 +360,12 @@ describe('OpenCodeAgentService', () => {
     const opts = spawnFn.mock.calls[0].arguments[2];
     assert.strictEqual(
       opts.env.ANTHROPIC_BASE_URL,
-      'http://127.0.0.1:9877/a247a834/v1',
-      'opencode needs /v1 suffix because its SDK calls {baseURL}/messages not {baseURL}/v1/messages',
+      'http://127.0.0.1:9877/a247a834',
+      'base URL should be passed through without modification',
     );
   });
 
-  test('callbackEnv BASE_URL with trailing /v1 is not double-suffixed', async () => {
+  test('callbackEnv BASE_URL with trailing /v1 is preserved as-is', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
@@ -312,7 +378,7 @@ describe('OpenCodeAgentService', () => {
     await promise;
 
     const opts = spawnFn.mock.calls[0].arguments[2];
-    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:9877/slug/v1', 'should not double-append /v1');
+    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:9877/slug/v1', 'explicit /v1 should be preserved');
   });
 
   // ── P2-1: multiple step_start should NOT produce multiple session_init ──

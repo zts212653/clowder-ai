@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { HubMemberOverviewCard, HubOverviewToolbar, HubOwnerOverviewCard } from './HubMemberOverviewCard';
 import type { ConfigData } from './config-viewer-types';
 
 export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './config-viewer-types';
@@ -23,33 +24,42 @@ function KV({ label, value }: { label: string; value: string | number | boolean 
   );
 }
 
-/** Unified cat overview — all cats' model & budget in one tab */
-export function CatOverviewTab({ config, cats }: { config: ConfigData; cats: CatData[] }) {
-  // One card per breed (default variant only)
-  const breeds = cats.filter((c) => c.isDefaultVariant !== false).slice(0, 3);
-
+/** Screen 2 summary overview — owner card plus member cards */
+export function CatOverviewTab({
+  config,
+  cats,
+  onAddMember,
+  onEditOwner,
+  onEditMember,
+  onToggleAvailability,
+  togglingCatId,
+}: {
+  config: ConfigData;
+  cats: CatData[];
+  onAddMember?: () => void;
+  onEditOwner?: () => void;
+  onEditMember?: (cat: CatData) => void;
+  onToggleAvailability?: (cat: CatData) => void;
+  togglingCatId?: string | null;
+}) {
   return (
-    <div className="space-y-3">
-      {breeds.map((catData) => {
-        const cat = config.cats[catData.id];
-        const budget = config.perCatBudgets[catData.id];
-        if (!cat || !budget) return null;
-        const name = catData.breedDisplayName ?? catData.displayName;
-        return (
-          <Section key={catData.id} title={name}>
-            <div className="space-y-1.5">
-              <KV label="Provider" value={cat.provider} />
-              <KV label="Model" value={cat.model} />
-              <KV label="MCP 交付" value={cat.mcpSupport ? '原生 (--mcp-config)' : 'HTTP 回调注入'} />
-              <KV label="Prompt 上限" value={`${(budget.maxPromptTokens / 1000).toFixed(0)}k tokens`} />
-              <KV label="上下文上限" value={`${(budget.maxContextTokens / 1000).toFixed(0)}k tokens`} />
-              <KV label="消息数上限" value={budget.maxMessages} />
-              <KV label="单消息上限" value={`${(budget.maxContentLengthPerMsg / 1000).toFixed(0)}k chars`} />
-            </div>
-          </Section>
-        );
-      })}
-      {breeds.length === 0 && <p className="text-sm text-gray-400">未找到猫猫配置数据</p>}
+    <div className="space-y-4">
+      <HubOverviewToolbar onAddMember={onAddMember} />
+      {config.owner ? <HubOwnerOverviewCard owner={config.owner} onEdit={onEditOwner} /> : null}
+      <div className="space-y-3">
+        {cats.map((catData) => (
+          <HubMemberOverviewCard
+            key={catData.id}
+            cat={catData}
+            configCat={config.cats[catData.id]}
+            onEdit={onEditMember}
+            onToggleAvailability={onToggleAvailability}
+            togglingAvailability={togglingCatId === catData.id}
+          />
+        ))}
+      </div>
+      <p className="text-[13px] text-[#B59A88]">点击任意卡片进入成员配置 →</p>
+      {cats.length === 0 && <p className="text-sm text-gray-400">未找到成员配置数据</p>}
     </div>
   );
 }

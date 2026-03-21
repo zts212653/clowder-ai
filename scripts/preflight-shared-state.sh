@@ -6,7 +6,7 @@
 #
 # 共享状态文件（与 .githooks/pre-commit 保持一致）：
 #   - docs/BACKLOG.md
-#   - cat-config.json
+#   - cat-template.json
 #
 # Exit codes:
 #   0 = clean
@@ -35,17 +35,17 @@ if [[ -z "$UPSTREAM" ]]; then
     if [[ -z "$MERGE_BASE" ]]; then
       exit 0
     fi
-    UNPUSHED_SHARED=$(git diff --name-only "$MERGE_BASE"..HEAD 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-config\.json)$' || true)
+    UNPUSHED_SHARED=$(git diff --name-only "$MERGE_BASE"..HEAD 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-template\.json)$' || true)
   else
-    UNPUSHED_SHARED=$(git diff --name-only "$REMOTE_REF"..HEAD 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-config\.json)$' || true)
+    UNPUSHED_SHARED=$(git diff --name-only "$REMOTE_REF"..HEAD 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-template\.json)$' || true)
   fi
 else
-  UNPUSHED_SHARED=$(git diff --name-only "$UPSTREAM"..HEAD 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-config\.json)$' || true)
+  UNPUSHED_SHARED=$(git diff --name-only "$UPSTREAM"..HEAD 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-template\.json)$' || true)
 fi
 
 # Also check uncommitted changes to shared state
-UNCOMMITTED_SHARED=$(git diff --name-only 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-config\.json)$' || true)
-STAGED_SHARED=$(git diff --cached --name-only 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-config\.json)$' || true)
+UNCOMMITTED_SHARED=$(git diff --name-only 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-template\.json)$' || true)
+STAGED_SHARED=$(git diff --cached --name-only 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-template\.json)$' || true)
 
 HAS_PROBLEM=false
 

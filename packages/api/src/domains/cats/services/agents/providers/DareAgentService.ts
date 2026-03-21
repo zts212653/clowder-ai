@@ -84,10 +84,11 @@ export class DareAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const effectiveModel = options?.callbackEnv?.CAT_CAFE_DARE_MODEL_OVERRIDE ?? this.model;
     // Runtime mode: require resolvable DARE module path to avoid opaque "No module named client".
     // Unit tests pass spawnFn and may not provide a real filesystem path; skip hard check there.
     if (!this.darePath && !this.spawnFn) {
-      const metadata: MessageMetadata = { provider: 'dare', model: this.model };
+      const metadata: MessageMetadata = { provider: 'dare', model: effectiveModel };
       yield {
         type: 'error',
         catId: this.catId,
@@ -99,7 +100,7 @@ export class DareAgentService implements AgentService {
       return;
     }
     if (this.darePath && !this.spawnFn && !existsSync(join(this.darePath, 'client', '__main__.py'))) {
-      const metadata: MessageMetadata = { provider: 'dare', model: this.model };
+      const metadata: MessageMetadata = { provider: 'dare', model: effectiveModel };
       yield {
         type: 'error',
         catId: this.catId,
@@ -112,13 +113,13 @@ export class DareAgentService implements AgentService {
     }
 
     const endpoint = this.resolveEndpoint(options?.callbackEnv);
-    const args = this.buildArgs(prompt, options?.workingDirectory, options?.sessionId, endpoint);
+    const args = this.buildArgs(prompt, options?.workingDirectory, options?.sessionId, endpoint, effectiveModel);
     // P1-1: cwd must ALWAYS be darePath (where `python -m client` can find the module).
     // Thread's workingDirectory goes to --workspace instead.
     const cwd = this.darePath;
     // P1-3: Pass API key via child env, not CLI args (avoids ps/audit leakage)
     const childEnv = this.buildEnv(options?.callbackEnv);
-    const metadata: MessageMetadata = { provider: 'dare', model: this.model };
+    const metadata: MessageMetadata = { provider: 'dare', model: effectiveModel };
 
     try {
       const cliOpts = {
@@ -205,11 +206,18 @@ export class DareAgentService implements AgentService {
     }
   }
 
-  private buildArgs(prompt: string, workspace?: string, sessionId?: string, endpoint?: string): string[] {
+  private buildArgs(
+    prompt: string,
+    workspace?: string,
+    sessionId?: string,
+    endpoint?: string,
+    model?: string,
+  ): string[] {
     const args = ['-m', 'client'];
+    const effectiveModel = model ?? this.model;
 
     args.push('--adapter', this.adapter);
-    args.push('--model', this.model);
+    args.push('--model', effectiveModel);
     if (endpoint) {
       args.push('--endpoint', endpoint);
     }

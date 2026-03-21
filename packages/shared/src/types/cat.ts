@@ -4,6 +4,7 @@
  */
 
 import type { CatId, SessionId } from './ids.js';
+import type { ContextBudget } from './cat-breed.js';
 import { createCatId } from './ids.js';
 
 /**
@@ -36,9 +37,12 @@ export interface CatConfig {
   readonly avatar: string;
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
+  readonly accountRef?: string;
   readonly provider: CatProvider;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
+  readonly commandArgs?: readonly string[];
+  readonly contextBudget?: ContextBudget;
   readonly roleDescription: string;
   readonly personality: string;
   /** F32-b: Which breed this cat belongs to (for frontend grouping) */
@@ -53,6 +57,12 @@ export interface CatConfig {
   readonly teamStrengths?: string;
   /** F-Ground-3: Caution note for teammate roster. null = explicitly no warning (overrides breed). */
   readonly caution?: string | null;
+  /** F127 Screen 3: editable strength tags */
+  readonly strengths?: readonly string[];
+  /** F127 Screen 3: whether session chain is enabled for this member */
+  readonly sessionChain?: boolean;
+  /** F127: Extra CLI --config key=value pairs passed to the client at invocation time. */
+  readonly cliConfigArgs?: readonly string[];
 }
 
 /**
@@ -75,7 +85,7 @@ export interface CatState {
 export const CAT_CONFIGS: Record<string, CatConfig> = {
   opus: {
     id: createCatId('opus'),
-    name: 'opus',
+    name: '布偶猫',
     displayName: '布偶猫',
     nickname: '宪宪',
     avatar: '/avatars/opus.png',
@@ -93,7 +103,7 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
   },
   codex: {
     id: createCatId('codex'),
-    name: 'codex',
+    name: '缅因猫',
     displayName: '缅因猫',
     nickname: '砚砚',
     avatar: '/avatars/codex.png',
@@ -111,7 +121,7 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
   },
   gemini: {
     id: createCatId('gemini'),
-    name: 'gemini',
+    name: '暹罗猫',
     displayName: '暹罗猫',
     avatar: '/avatars/gemini.png',
     color: {

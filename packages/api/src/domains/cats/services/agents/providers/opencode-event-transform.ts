@@ -63,13 +63,16 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
         timestamp: ts,
       };
 
-    case 'text':
+    case 'text': {
+      const text = event.part?.text;
+      if (typeof text !== 'string' || text.length === 0) return null;
       return {
         type: 'text',
         catId: catId as CatId,
-        content: event.part?.text ?? '',
+        content: text,
         timestamp: ts,
       };
+    }
 
     case 'tool_use': {
       const msg: AgentMessage = {

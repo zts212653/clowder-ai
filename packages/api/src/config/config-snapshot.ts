@@ -3,6 +3,16 @@ import type { ContextBudget } from '@cat-cafe/shared';
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 export interface ConfigSnapshot {
+  owner: {
+    name: string;
+    aliases: string[];
+    mentionPatterns: string[];
+    avatar?: string;
+    color?: {
+      primary: string;
+      secondary: string;
+    };
+  };
   context: {
     /** @deprecated Use perCatBudgets for actual limits. This is assembleContext default. */
     maxMessages: number;

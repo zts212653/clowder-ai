@@ -29,6 +29,24 @@ const MIXED_CATS: CatData[] = [
     roleDescription: '快速变体',
     personality: 'kind',
   },
+  {
+    id: 'spark',
+    displayName: '火花猫',
+    color: { primary: '#F59E0B', secondary: '#FDE68A' },
+    mentionPatterns: ['spark'],
+    provider: 'openai',
+    defaultModel: 'gpt-5.4-mini',
+    avatar: '/avatars/spark.png',
+    roleDescription: '精确点改',
+    personality: 'fast',
+    roster: {
+      family: 'maine-coon',
+      roles: ['coder'],
+      lead: false,
+      available: false,
+      evaluation: 'disabled for test',
+    },
+  },
 ];
 
 describe('chat input mention option labels', () => {
@@ -39,6 +57,13 @@ describe('chat input mention option labels', () => {
     expect(geminiOption?.label).toBe('@暹罗猫');
     expect(geminiOption?.insert).toBe('@暹罗 ');
   });
+
+  it('only uses the first mention pattern for autocomplete insert text', () => {
+    const options = buildCatOptions(FAKE_CATS);
+    expect(options[0]?.insert).toBe('@暹罗 ');
+    expect(options[0]?.insert).not.toBe('@暹罗猫 ');
+    expect(options[0]?.insert).not.toBe('@gemini ');
+  });
 });
 
 describe('buildCatOptions vs buildWhisperOptions split', () => {
@@ -48,6 +73,11 @@ describe('buildCatOptions vs buildWhisperOptions split', () => {
     expect(options[0].id).toBe('gemini');
   });
 
+  it('buildCatOptions filters out unavailable cats even when they have mention patterns', () => {
+    const options = buildCatOptions(MIXED_CATS);
+    expect(options.map((option) => option.id)).not.toContain('spark');
+  });
+
   it('buildWhisperOptions includes cats with empty mentionPatterns', () => {
     const options = buildWhisperOptions(MIXED_CATS);
     expect(options).toHaveLength(2);
@@ -55,5 +85,6 @@ describe('buildCatOptions vs buildWhisperOptions split', () => {
     expect(fast).toBeDefined();
     expect(fast?.label).toBe('@布偶猫(快)');
     expect(fast?.insert).toBe(''); // no mentionPatterns → empty insert
+    expect(options.map((option) => option.id)).not.toContain('spark');
   });
 });

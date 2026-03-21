@@ -4,18 +4,21 @@
  */
 
 import { join } from 'node:path';
-import { type CatId, catRegistry } from '@cat-cafe/shared';
+import { type CatConfig, type CatId, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
+import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
-import { getConfigSessionStrategy, loadCatConfig, toAllCatConfigs } from './config/cat-config-loader.js';
+import { bootstrapDefaultCatCatalog, getConfigSessionStrategy, toAllCatConfigs } from './config/cat-config-loader.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
-import { resolveAnthropicRuntimeProfile } from './config/provider-profiles.js';
-import { resolveProviderProfilesRoot } from './config/provider-profiles-root.js';
+import {
+  resolveAnthropicRuntimeProfile,
+  resolveRuntimeProviderProfileForClient,
+} from './config/provider-profiles.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
@@ -295,15 +298,26 @@ async function main(): Promise<void> {
   // F065 Phase C: HandoffConfig for LLM-generated digest on seal
   const handoffConfig: HandoffConfig = {
     getBootstrapDepth: (catId: string) => getConfigSessionStrategy(catId)?.handoff?.bootstrapDepth ?? 'extractive',
-    resolveProfile: async (threadId: string, _catId: string) => {
+    resolveProfile: async (threadId: string, catId: string) => {
       try {
         let projectRoot = findMonorepoRoot(process.cwd());
         const thread = await threadStore.get(threadId);
         if (thread?.projectPath && thread.projectPath !== 'default') {
           projectRoot = thread.projectPath;
         }
-        const profilesRoot = await resolveProviderProfilesRoot(projectRoot);
-        const runtime = await resolveAnthropicRuntimeProfile(profilesRoot);
+        const catConfig = catRegistry.tryGet(catId)?.config;
+        if (catConfig?.provider === 'anthropic' || catConfig?.provider === 'opencode') {
+          const boundAccountRef = resolveBoundAccountRefForCat(
+            projectRoot,
+            catId,
+            catConfig as CatConfig & { providerProfileId?: string },
+          );
+          const runtime = await resolveRuntimeProviderProfileForClient(projectRoot, catConfig.provider, boundAccountRef);
+          if (!runtime?.apiKey) return null;
+          return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
+        }
+
+        const runtime = await resolveAnthropicRuntimeProfile(projectRoot);
         if (!runtime.apiKey) return null;
         return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
       } catch {
@@ -472,17 +486,17 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── F32-b: Populate CatRegistry from cat-config.json (all variants) ──
+  // ── F32-b/F127: Bootstrap runtime catalog, then populate CatRegistry (all variants) ──
   // Must happen BEFORE AgentRouter construction (parseMentions reads catRegistry)
   try {
-    const catConfig = loadCatConfig();
+    const catConfig = bootstrapDefaultCatCatalog();
     const allConfigs = toAllCatConfigs(catConfig);
     for (const [id, config] of Object.entries(allConfigs)) {
       catRegistry.register(id, config);
     }
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
-    app.log.warn(`[api] Failed to load cat-config.json, falling back to built-in CAT_CONFIGS: ${String(err)}`);
+    app.log.warn(`[api] Failed to load cat template/catalog, falling back to built-in CAT_CONFIGS: ${String(err)}`);
     // Fallback: register from static CAT_CONFIGS
     const { CAT_CONFIGS } = await import('@cat-cafe/shared');
     for (const [id, config] of Object.entries(CAT_CONFIGS)) {
@@ -493,50 +507,56 @@ async function main(): Promise<void> {
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
   const agentRegistry = new AgentRegistry();
-  for (const id of catRegistry.getAllIds()) {
-    const entry = catRegistry.tryGet(id as string);
-    if (!entry) continue;
-    const { provider } = entry.config;
-    const catId = entry.config.id;
-    // F32-b P1 fix: do NOT pass model here — let constructors resolve via
-    // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
-    let service: AgentService;
-    switch (provider) {
-      case 'anthropic':
-        service = new ClaudeAgentService({ catId });
-        break;
-      case 'openai':
-        service = new CodexAgentService({ catId });
-        break;
-      case 'google':
-        service = new GeminiAgentService({ catId });
-        break;
-      case 'dare':
-        service = new DareAgentService({ catId });
-        break;
-      case 'antigravity':
-        service = new AntigravityAgentService({ catId });
-        break;
-      case 'opencode':
-        service = new OpenCodeAgentService({ catId });
-        break;
-      case 'a2a': {
-        const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
-        const envKey = `CAT_${(id as string).toUpperCase()}_A2A_URL`;
-        const a2aUrl = process.env[envKey] ?? '';
-        if (!a2aUrl) {
-          app.log.warn(`[api] A2A cat "${id as string}" missing ${envKey} env var. It will not be routable.`);
-          continue;
+  let router!: AgentRouter;
+  const syncAgentRegistry = async (configs: Record<string, CatConfig>) => {
+    agentRegistry.reset();
+    for (const [id, config] of Object.entries(configs)) {
+      const catId = config.id;
+      // F32-b P1 fix: do NOT pass model here — let constructors resolve via
+      // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
+      let service: AgentService;
+      switch (config.provider) {
+        case 'anthropic':
+          service = new ClaudeAgentService({ catId });
+          break;
+        case 'openai':
+          service = new CodexAgentService({ catId });
+          break;
+        case 'google':
+          service = new GeminiAgentService({ catId });
+          break;
+        case 'dare':
+          service = new DareAgentService({ catId });
+          break;
+        case 'antigravity':
+          service = new AntigravityAgentService({
+            catId,
+            commandArgs: config.commandArgs,
+          });
+          break;
+        case 'opencode':
+          service = new OpenCodeAgentService({ catId });
+          break;
+        case 'a2a': {
+          const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
+          const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
+          const a2aUrl = process.env[envKey] ?? '';
+          if (!a2aUrl) {
+            app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
+            continue;
+          }
+          service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+          break;
         }
-        service = new A2AAgentService({ catId, config: { url: a2aUrl } });
-        break;
+        default:
+          app.log.warn(`[api] Unknown provider "${config.provider}" for cat "${id}". It will not be routable.`);
+          continue;
       }
-      default:
-        app.log.warn(`[api] Unknown provider "${provider}" for cat "${id as string}". It will not be routable.`);
-        continue;
+      agentRegistry.register(id, service);
     }
-    agentRegistry.register(id as string, service);
-  }
+    if (router) router.refreshFromRegistry(agentRegistry);
+  };
+  await syncAgentRegistry(catRegistry.getAllConfigs());
 
   // F089 Phase 2: Shared instances for tmux agent pane execution (opt-in)
   const enableTmuxAgent = process.env.CAT_CAFE_TMUX_AGENT === '1';
@@ -552,15 +572,20 @@ async function main(): Promise<void> {
   const agentPaneRegistry = tmuxGateway ? new AgentPaneRegistry() : undefined;
 
   // F120: Preview Gateway (独立端口反向代理) + Port Discovery
+  const PREVIEW_GATEWAY_ENABLED = process.env.PREVIEW_GATEWAY_ENABLED !== '0';
   const PREVIEW_GATEWAY_PORT = Number.parseInt(process.env.PREVIEW_GATEWAY_PORT ?? '4100', 10);
   const runtimePorts = collectRuntimePorts();
   const previewGateway = new PreviewGateway({ port: PREVIEW_GATEWAY_PORT, runtimePorts });
   const portDiscovery = new PortDiscoveryService();
-  try {
-    await previewGateway.start();
-    app.log.info(`[preview] Gateway started on port ${previewGateway.actualPort}`);
-  } catch (err) {
-    app.log.warn(`[preview] Gateway failed to start: ${(err as Error).message}`);
+  if (PREVIEW_GATEWAY_ENABLED) {
+    try {
+      await previewGateway.start();
+      app.log.info(`[preview] Gateway started on port ${previewGateway.actualPort}`);
+    } catch (err) {
+      app.log.warn(`[preview] Gateway failed to start: ${(err as Error).message}`);
+    }
+  } else {
+    app.log.info('[preview] Gateway disabled (PREVIEW_GATEWAY_ENABLED=0)');
   }
   // Port discovery → Socket.IO push to worktree-scoped room
   portDiscovery.onDiscovered((port) => {
@@ -571,7 +596,7 @@ async function main(): Promise<void> {
   });
 
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
-  const router = new AgentRouter({
+  router = new AgentRouter({
     agentRegistry,
     registry,
     messageStore,
@@ -650,7 +675,7 @@ async function main(): Promise<void> {
     socketManager,
     threadStore,
   });
-  await app.register(catsRoutes);
+  await app.register(catsRoutes, { onCatalogChanged: syncAgentRegistry });
   await app.register(quotaRoutes);
   // F128: Daily token usage aggregation
   await app.register(usageRoutes, { invocationRecordStore });
@@ -798,7 +823,7 @@ async function main(): Promise<void> {
   });
   await app.register(previewRoutes, {
     portDiscovery,
-    gatewayPort: previewGateway.actualPort || PREVIEW_GATEWAY_PORT,
+    gatewayPort: PREVIEW_GATEWAY_ENABLED ? previewGateway.actualPort || PREVIEW_GATEWAY_PORT : 0,
     runtimePorts,
     socketEmit: (event, data, room) => {
       socketManager?.broadcastToRoom(room, event, data);

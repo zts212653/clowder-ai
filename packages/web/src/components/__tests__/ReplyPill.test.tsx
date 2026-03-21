@@ -1,10 +1,18 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
 import { ReplyPill } from '../ReplyPill';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
+
+vi.mock('@/hooks/useOwnerConfig', () => ({
+  useOwnerConfig: () => ({
+    name: '始皇帝',
+    aliases: ['秦始皇'],
+    mentionPatterns: ['@owner', '@me'],
+  }),
+}));
 
 const mockGetCatById = (id: string): CatData | undefined => {
   const cats: Record<string, Partial<CatData>> = {
@@ -29,7 +37,7 @@ describe('ReplyPill', () => {
     expect(html).toContain('#8B5CF6');
   });
 
-  it('renders user reply with 铲屎官 label', () => {
+  it('renders user reply with configured owner label', () => {
     const html = renderToStaticMarkup(
       <ReplyPill
         replyPreview={{ senderCatId: null, content: '用户消息' }}
@@ -37,7 +45,7 @@ describe('ReplyPill', () => {
         getCatById={mockGetCatById}
       />,
     );
-    expect(html).toContain('铲屎官');
+    expect(html).toContain('始皇帝');
     expect(html).toContain('用户消息');
   });
 

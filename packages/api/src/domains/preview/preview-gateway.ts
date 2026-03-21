@@ -242,7 +242,6 @@ export class PreviewGateway {
           reject(err);
           return;
         }
-
         resolve();
       });
     });

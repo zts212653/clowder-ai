@@ -22,6 +22,7 @@ import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
+import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
@@ -76,7 +77,8 @@ export class GeminiAgentService implements AgentService {
   }
 
   private async *invokeGeminiCLI(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
-    const metadata: MessageMetadata = { provider: 'google', model: this.model };
+    const effectiveModel = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE ?? this.model;
+    const metadata: MessageMetadata = { provider: 'google', model: effectiveModel };
 
     // Gemini CLI has no system prompt flag; prepend identity to prompt text
     let effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
@@ -91,7 +93,7 @@ export class GeminiAgentService implements AgentService {
     //   gemini --resume <sessionId> -p "<prompt>" -o stream-json
     // Prefer resume when sessionId is available so Gemini follows the same
     // session semantics as Claude/Codex (session-chain + self-heal).
-    const modelArgs = ['--model', this.model];
+    const modelArgs = ['--model', effectiveModel];
     const args: string[] = options?.sessionId
       ? ['--resume', options?.sessionId!, ...modelArgs, '-p', effectivePrompt, '-o', 'stream-json', '-y']
       : [...modelArgs, '-p', effectivePrompt, '-o', 'stream-json', '-y'];
@@ -100,11 +102,18 @@ export class GeminiAgentService implements AgentService {
     }
 
     try {
+      const geminiCommand = resolveCliCommand('gemini');
+      if (!geminiCommand) {
+        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('gemini'), metadata, timestamp: Date.now() };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+
       let sawResultError = false;
       let sawAssistantText = false;
       let suppressCliExitError = false;
       const cliOpts = {
-        command: 'gemini' as const,
+        command: geminiCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         ...(options?.callbackEnv ? { env: options.callbackEnv } : {}),

@@ -465,19 +465,26 @@ function Remove-ClaudeInstallerProfile {
 function Read-InstallerSecret {
     param([string]$Prompt)
 
-    $secureValue = Read-Host $Prompt -AsSecureString
-    if ($null -eq $secureValue) {
-        return ""
-    }
-
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureValue)
-    try {
-        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    } finally {
-        if ($bstr -ne [IntPtr]::Zero) {
-            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    Write-Host -NoNewline "$Prompt"
+    $input = ""
+    while ($true) {
+        $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        if ($key.VirtualKeyCode -eq 13) {
+            # Enter pressed
+            Write-Host ""
+            break
+        } elseif ($key.VirtualKeyCode -eq 8) {
+            # Backspace
+            if ($input.Length -gt 0) {
+                $input = $input.Substring(0, $input.Length - 1)
+                Write-Host -NoNewline "`b `b"
+            }
+        } elseif ($key.Character -ne [char]0) {
+            $input += $key.Character
+            Write-Host -NoNewline "*"
         }
     }
+    return $input
 }
 
 function Configure-InstallerAuth {

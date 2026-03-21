@@ -45,6 +45,10 @@ export interface EnvDefinition {
   sensitive: boolean;
   /** If 'url', credentials in URL are masked but host/port/db preserved */
   maskMode?: 'url';
+  /** If false, keep internal-only and do not surface in Hub env editor */
+  hubVisible?: boolean;
+  /** If false, value is bootstrap-only and cannot be edited at runtime from Hub */
+  runtimeEditable?: boolean;
 }
 
 export const ENV_CATEGORIES: Record<EnvCategory, string> = {
@@ -68,13 +72,21 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
 
 export const ENV_VARS: EnvDefinition[] = [
   // --- server ---
-  { name: 'API_SERVER_PORT', defaultValue: '3004', description: 'API 服务端口', category: 'server', sensitive: false },
+  {
+    name: 'API_SERVER_PORT',
+    defaultValue: '3004',
+    description: 'API 服务端口',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
   {
     name: 'PREVIEW_GATEWAY_PORT',
     defaultValue: '4100',
     description: 'Preview Gateway 端口（F120 独立 origin 反向代理）',
     category: 'server',
     sensitive: false,
+    runtimeEditable: true,
   },
   {
     name: 'API_SERVER_HOST',
@@ -164,6 +176,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'storage',
     sensitive: false,
     maskMode: 'url',
+    runtimeEditable: false,
   },
   {
     name: 'MEMORY_STORE',
@@ -229,6 +242,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '全局 prompt 字符上限',
     category: 'budget',
     sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'CAT_OPUS_MAX_PROMPT_CHARS',
@@ -236,6 +250,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '布偶猫 prompt 上限',
     category: 'budget',
     sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'CAT_CODEX_MAX_PROMPT_CHARS',
@@ -243,6 +258,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '缅因猫 prompt 上限',
     category: 'budget',
     sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'CAT_GEMINI_MAX_PROMPT_CHARS',
@@ -250,6 +266,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '暹罗猫 prompt 上限',
     category: 'budget',
     sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'MAX_CONTEXT_MSG_CHARS',
@@ -257,6 +274,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '单条消息上下文截断',
     category: 'budget',
     sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'MAX_A2A_DEPTH',
@@ -271,6 +289,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '全局 prompt token 上限',
     category: 'budget',
     sensitive: false,
+    hubVisible: false,
   },
   {
     name: 'WEB_PUSH_TIMEOUT_MS',
@@ -289,11 +308,12 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'CAT_CONFIG_PATH',
-    defaultValue: '(repo 根 cat-config.json)',
-    description: '猫猫配置文件路径',
+    name: 'CAT_TEMPLATE_PATH',
+    defaultValue: '(repo 根 cat-template.json)',
+    description: '猫猫模板文件路径',
     category: 'cli',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'CAT_CAFE_MCP_SERVER_PATH',
@@ -566,6 +586,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '前端连接的 API 地址',
     category: 'frontend',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'NEXT_PUBLIC_WHISPER_URL',
@@ -573,6 +594,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Whisper ASR 服务地址',
     category: 'frontend',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'NEXT_PUBLIC_LLM_POSTPROCESS_URL',
@@ -580,6 +602,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'LLM 后处理服务地址',
     category: 'frontend',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'NEXT_PUBLIC_PROJECT_ROOT',
@@ -587,6 +610,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '前端项目根路径',
     category: 'frontend',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'NEXT_PUBLIC_DEBUG_SKIP_FILE_CHANGE_UI',
@@ -594,6 +618,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '设为 1 跳过文件变更 UI',
     category: 'frontend',
     sensitive: false,
+    runtimeEditable: false,
   },
 
   // --- push ---
@@ -731,14 +756,26 @@ function maskValue(def: EnvDefinition, raw: string): string {
   return raw;
 }
 
+function isHubVisibleEnvVar(def: EnvDefinition): boolean {
+  return def.hubVisible !== false;
+}
+
 /**
  * Build env summary by reading current process.env values.
  * Sensitive values are masked. URL values have credentials masked.
  */
 export function buildEnvSummary(): Array<EnvDefinition & { currentValue: string | null }> {
-  return ENV_VARS.map((def) => {
+  return ENV_VARS.filter(isHubVisibleEnvVar).map((def) => {
     const raw = process.env[def.name];
     const currentValue = raw != null && raw !== '' ? maskValue(def, raw) : null;
     return { ...def, currentValue };
   });
+}
+
+export function isEditableEnvVar(def: EnvDefinition): boolean {
+  return def.runtimeEditable !== false && !def.sensitive;
+}
+
+export function isEditableEnvVarName(name: string): boolean {
+  return ENV_VARS.some((def) => def.name === name && isHubVisibleEnvVar(def) && isEditableEnvVar(def));
 }

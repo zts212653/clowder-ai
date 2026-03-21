@@ -8,17 +8,24 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 const {
   readProviderProfiles,
   createProviderProfile,
+  updateProviderProfile,
   activateProviderProfile,
   deleteProviderProfile,
   getProviderProfile,
   resolveAnthropicRuntimeProfile,
 } = await import('../dist/config/provider-profiles.js');
+const { createRuntimeCat, updateRuntimeCat } = await import('../dist/config/runtime-cat-catalog.js');
 
 /** @param {string} prefix */
 async function makeTmpDir(prefix) {
   const dir = join('/tmp', `provider-profile-store-${prefix}-${Date.now()}`);
   await mkdir(dir, { recursive: true });
   return dir;
+}
+
+async function seedTemplate(projectRoot) {
+  const templateRaw = await readFile(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8');
+  await writeFile(join(projectRoot, 'cat-template.json'), templateRaw, 'utf-8');
 }
 
 describe('provider profile store', () => {
@@ -32,110 +39,269 @@ describe('provider profile store', () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
-  it('bootstraps with a default subscription profile', async () => {
+  it('bootstraps with five builtin accounts and default oauth/skip bindings', async () => {
     const data = await readProviderProfiles(projectRoot);
-    assert.ok(data.anthropic.activeProfileId, 'should have active profile');
-    assert.equal(data.anthropic.profiles.length, 1);
-    assert.equal(data.anthropic.profiles[0]?.mode, 'subscription');
+    assert.equal(data.activeProfileId, null);
+    assert.deepEqual(
+      data.providers.map((profile) => ({
+        id: profile.id,
+        kind: profile.kind,
+        client: profile.client,
+        authType: profile.authType,
+        builtin: profile.builtin,
+      })),
+      [
+        { id: 'claude', kind: 'builtin', client: 'anthropic', authType: 'oauth', builtin: true },
+        { id: 'codex', kind: 'builtin', client: 'openai', authType: 'oauth', builtin: true },
+        { id: 'gemini', kind: 'builtin', client: 'google', authType: 'oauth', builtin: true },
+        { id: 'dare', kind: 'builtin', client: 'dare', authType: 'oauth', builtin: true },
+        { id: 'opencode', kind: 'builtin', client: 'opencode', authType: 'oauth', builtin: true },
+      ],
+    );
+    assert.deepEqual(data.bootstrapBindings, {
+      anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude' },
+      openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
+      google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
+      dare: { enabled: false, mode: 'skip' },
+      opencode: { enabled: false, mode: 'skip' },
+    });
   });
 
-  it('stores api_key secret in secrets file but not in meta file', async () => {
+  it('bootstraps the builtin Claude account with the canonical opus model id', async () => {
+    const data = await readProviderProfiles(projectRoot);
+    const claude = data.providers.find((profile) => profile.id === 'claude');
+    assert.ok(claude, 'builtin Claude account should exist');
+    assert.ok(claude.models.includes('claude-opus-4-6'));
+    assert.equal(claude.models.some((model) => model.includes('[1m]')), false);
+  });
+
+  it('creates a client-agnostic api_key account and keeps secrets out of meta', async () => {
     const created = await createProviderProfile(projectRoot, {
-      provider: 'anthropic',
-      name: 'sponsor',
-      mode: 'api_key',
-      baseUrl: 'https://api.example.com',
-      apiKey: 'sk-secret-test',
-      setActive: true,
+      displayName: 'API Key Account 1',
+      authType: 'api_key',
+      baseUrl: 'https://proxy.example.dev',
+      apiKey: 'sk-generic-account',
     });
-    assert.equal(created.mode, 'api_key');
+
+    assert.equal(created.kind, 'api_key');
+    assert.equal(created.client, undefined);
+    assert.equal(created.displayName, 'API Key Account 1');
 
     const metaPath = join(projectRoot, '.cat-cafe', 'provider-profiles.json');
     const secretsPath = join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json');
     const [metaRaw, secretsRaw] = await Promise.all([readFile(metaPath, 'utf-8'), readFile(secretsPath, 'utf-8')]);
-
-    assert.ok(!metaRaw.includes('sk-secret-test'), 'meta should not contain api key');
-    assert.ok(secretsRaw.includes('sk-secret-test'), 'secrets should contain api key');
+    assert.ok(!metaRaw.includes('sk-generic-account'));
+    assert.ok(secretsRaw.includes('sk-generic-account'));
   });
 
-  it('activate + resolve returns active api_key runtime payload', async () => {
+  it('serializes concurrent api_key account creation to avoid lost updates', async () => {
+    const created = await Promise.all(
+      Array.from({ length: 3 }, (_, index) =>
+        createProviderProfile(projectRoot, {
+          displayName: 'Concurrent Sponsor',
+          authType: 'api_key',
+          baseUrl: 'https://api.concurrent.dev',
+          apiKey: `sk-concurrent-${index + 1}`,
+        }),
+      ),
+    );
+
+    const ids = new Set(created.map((profile) => profile.id));
+    assert.equal(ids.size, 3);
+
+    const data = await readProviderProfiles(projectRoot);
+    const concurrentProfiles = data.providers.filter((profile) => profile.displayName === 'Concurrent Sponsor');
+    assert.equal(concurrentProfiles.length, 3);
+  });
+
+  it('binds a generic api_key account to the selected client for bootstrap/runtime resolution', async () => {
     const created = await createProviderProfile(projectRoot, {
-      provider: 'anthropic',
-      name: 'sponsor2',
-      mode: 'api_key',
+      displayName: 'Sponsor 1',
+      authType: 'api_key',
       baseUrl: 'https://api.sponsor.dev',
-      apiKey: 'sk-sponsor-2',
-      setActive: false,
+      apiKey: 'sk-sponsor-1',
     });
 
     await activateProviderProfile(projectRoot, 'anthropic', created.id);
+    const data = await readProviderProfiles(projectRoot);
+    assert.equal(data.activeProfileId, null);
+    assert.deepEqual(data.bootstrapBindings.anthropic, {
+      enabled: true,
+      mode: 'api_key',
+      accountRef: created.id,
+    });
+
     const runtime = await resolveAnthropicRuntimeProfile(projectRoot);
     assert.equal(runtime.mode, 'api_key');
     assert.equal(runtime.baseUrl, 'https://api.sponsor.dev');
-    assert.equal(runtime.apiKey, 'sk-sponsor-2');
+    assert.equal(runtime.apiKey, 'sk-sponsor-1');
   });
 
-  it('deleting active profile falls back to subscription profile', async () => {
-    const sponsor = await createProviderProfile(projectRoot, {
-      provider: 'anthropic',
-      name: 'to-delete',
-      mode: 'api_key',
-      baseUrl: 'https://api.sponsor.dev',
-      apiKey: 'sk-delete',
-      setActive: true,
+  it('preserves builtin Dare/OpenCode oauth bootstrap bindings across reads', async () => {
+    await readProviderProfiles(projectRoot);
+    await activateProviderProfile(projectRoot, 'dare', 'dare');
+    await activateProviderProfile(projectRoot, 'opencode', 'opencode');
+
+    const data = await readProviderProfiles(projectRoot);
+    assert.deepEqual(data.bootstrapBindings.dare, {
+      enabled: true,
+      mode: 'oauth',
+      accountRef: 'dare',
     });
-    await deleteProviderProfile(projectRoot, 'anthropic', sponsor.id);
-
-    const runtime = await resolveAnthropicRuntimeProfile(projectRoot);
-    assert.equal(runtime.mode, 'subscription');
-    assert.equal(runtime.apiKey, undefined);
+    assert.deepEqual(data.bootstrapBindings.opencode, {
+      enabled: true,
+      mode: 'oauth',
+      accountRef: 'opencode',
+    });
   });
 
-  it('readProviderProfiles does not rewrite files when state is already normalized', async () => {
-    await readProviderProfiles(projectRoot);
-    const metaPath = join(projectRoot, '.cat-cafe', 'provider-profiles.json');
-    const secretsPath = join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json');
-    const [metaBefore, secretsBefore] = await Promise.all([stat(metaPath), stat(secretsPath)]);
-
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    await readProviderProfiles(projectRoot);
-
-    const [metaAfter, secretsAfter] = await Promise.all([stat(metaPath), stat(secretsPath)]);
-    assert.equal(metaAfter.mtimeMs, metaBefore.mtimeMs);
-    assert.equal(secretsAfter.mtimeMs, secretsBefore.mtimeMs);
-  });
-
-  it('getProviderProfile does not rewrite files when state is already normalized', async () => {
+  it('rejects deleting an account that is still referenced by a runtime member', async () => {
+    await seedTemplate(projectRoot);
     const created = await createProviderProfile(projectRoot, {
-      provider: 'anthropic',
-      name: 'readonly-check',
-      mode: 'subscription',
+      displayName: 'Bound Account',
+      authType: 'api_key',
+      baseUrl: 'https://api.bound.dev',
+      apiKey: 'sk-bound',
     });
-    const metaPath = join(projectRoot, '.cat-cafe', 'provider-profiles.json');
-    const secretsPath = join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json');
-    const [metaBefore, secretsBefore] = await Promise.all([stat(metaPath), stat(secretsPath)]);
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const profile = await getProviderProfile(projectRoot, 'anthropic', created.id);
+    await createRuntimeCat(projectRoot, {
+      catId: 'bound-runtime-cat',
+      breedId: 'bound-runtime-cat',
+      name: '绑定猫',
+      displayName: '绑定猫',
+      avatar: '/avatars/bound.png',
+      color: { primary: '#64748b', secondary: '#cbd5e1' },
+      mentionPatterns: ['@bound-runtime-cat'],
+      accountRef: created.id,
+      roleDescription: '依赖专属账号',
+      personality: '稳定',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      mcpSupport: false,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
 
-    assert.ok(profile);
-    const [metaAfter, secretsAfter] = await Promise.all([stat(metaPath), stat(secretsPath)]);
-    assert.equal(metaAfter.mtimeMs, metaBefore.mtimeMs);
-    assert.equal(secretsAfter.mtimeMs, secretsBefore.mtimeMs);
-  });
-
-  it('rejects blank profile name', async () => {
     await assert.rejects(
-      createProviderProfile(projectRoot, {
-        provider: 'anthropic',
-        name: '   ',
-        mode: 'subscription',
-      }),
-      /name is required/,
+      deleteProviderProfile(projectRoot, created.id, created.id),
+      /still referenced by runtime cats: bound-runtime-cat/i,
     );
   });
 
-  it('shares profiles across worktrees of the same repo', async () => {
+  it('allows deleting an account after the runtime member clears accountRef', async () => {
+    await seedTemplate(projectRoot);
+    const created = await createProviderProfile(projectRoot, {
+      displayName: 'Unbind Account',
+      authType: 'api_key',
+      baseUrl: 'https://api.unbind.dev',
+      apiKey: 'sk-unbind',
+    });
+
+    await createRuntimeCat(projectRoot, {
+      catId: 'unbind-runtime-cat',
+      breedId: 'unbind-runtime-cat',
+      name: '解绑猫',
+      displayName: '解绑猫',
+      avatar: '/avatars/unbind.png',
+      color: { primary: '#64748b', secondary: '#cbd5e1' },
+      mentionPatterns: ['@unbind-runtime-cat'],
+      accountRef: created.id,
+      roleDescription: '先绑定再解绑',
+      personality: '稳定',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      mcpSupport: false,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+
+    updateRuntimeCat(projectRoot, 'unbind-runtime-cat', { accountRef: null });
+    await deleteProviderProfile(projectRoot, created.id, created.id);
+
+    const profiles = await readProviderProfiles(projectRoot);
+    assert.equal(
+      profiles.providers.some((profile) => profile.id === created.id),
+      false,
+    );
+  });
+
+  it('does not let sibling worktree runtime data block deleting a local account', async () => {
+    const repoRoot = await makeTmpDir('shared-delete-main');
+    const runtimeRoot = await makeTmpDir('shared-delete-runtime');
+    try {
+      const runtimeGitDir = join(repoRoot, '.git', 'worktrees', 'runtime');
+      await mkdir(runtimeGitDir, { recursive: true });
+      await writeFile(join(runtimeRoot, '.git'), `gitdir: ${runtimeGitDir}\n`, 'utf-8');
+      await writeFile(join(runtimeGitDir, 'gitdir'), `${join(runtimeRoot, '.git')}\n`, 'utf-8');
+      await writeFile(join(runtimeGitDir, 'commondir'), '../..\n', 'utf-8');
+      await Promise.all([seedTemplate(repoRoot), seedTemplate(runtimeRoot)]);
+
+      const created = await createProviderProfile(runtimeRoot, {
+        displayName: 'Shared Delete Account',
+        authType: 'api_key',
+        baseUrl: 'https://api.shared-delete.dev',
+        apiKey: 'sk-shared-delete',
+      });
+
+      await createRuntimeCat(repoRoot, {
+        catId: 'shared-root-bound-cat',
+        breedId: 'shared-root-bound-cat',
+        name: '共享绑定猫',
+        displayName: '共享绑定猫',
+        avatar: '/avatars/shared.png',
+        color: { primary: '#64748b', secondary: '#cbd5e1' },
+        mentionPatterns: ['@shared-root-bound-cat'],
+        accountRef: created.id,
+        roleDescription: '跨 worktree 绑定',
+        personality: '稳定',
+        provider: 'anthropic',
+        defaultModel: 'claude-opus-4-6',
+        mcpSupport: false,
+        cli: { command: 'claude', outputFormat: 'stream-json' },
+      });
+
+      await deleteProviderProfile(runtimeRoot, created.id, created.id);
+
+      const profiles = await readProviderProfiles(runtimeRoot);
+      assert.equal(
+        profiles.providers.some((profile) => profile.id === created.id),
+        false,
+      );
+    } finally {
+      await Promise.all([
+        rm(repoRoot, { recursive: true, force: true }),
+        rm(runtimeRoot, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  it('builtin accounts only allow model-list updates', async () => {
+    await assert.rejects(
+      updateProviderProfile(projectRoot, 'claude', 'claude', {
+        displayName: 'Nope',
+      }),
+      /builtin accounts only support model updates/i,
+    );
+  });
+
+  it('readProviderProfiles and getProviderProfile do not rewrite normalized files', async () => {
+    const created = await createProviderProfile(projectRoot, {
+      displayName: 'Readonly Check',
+      authType: 'api_key',
+      apiKey: 'sk-readonly',
+    });
+    const metaPath = join(projectRoot, '.cat-cafe', 'provider-profiles.json');
+    const secretsPath = join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json');
+    const [metaBefore, secretsBefore] = await Promise.all([stat(metaPath), stat(secretsPath)]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await readProviderProfiles(projectRoot);
+    await getProviderProfile(projectRoot, created.id, created.id);
+
+    const [metaAfter, secretsAfter] = await Promise.all([stat(metaPath), stat(secretsPath)]);
+    assert.equal(metaAfter.mtimeMs, metaBefore.mtimeMs);
+    assert.equal(secretsAfter.mtimeMs, secretsBefore.mtimeMs);
+  });
+
+  it('keeps provider account storage isolated to the current worktree', async () => {
     const repoRoot = await makeTmpDir('repo-main');
     const runtimeRoot = await makeTmpDir('repo-runtime');
     try {
@@ -146,19 +312,29 @@ describe('provider profile store', () => {
       await writeFile(join(runtimeGitDir, 'commondir'), '../..\n', 'utf-8');
 
       const created = await createProviderProfile(runtimeRoot, {
-        provider: 'anthropic',
-        name: 'sponsor-shared',
-        mode: 'api_key',
+        displayName: 'Shared Account',
+        authType: 'api_key',
         baseUrl: 'https://api.shared.dev',
         apiKey: 'sk-shared',
-        setActive: true,
       });
-      assert.equal(created.mode, 'api_key');
+      await activateProviderProfile(runtimeRoot, 'anthropic', created.id);
 
-      const runtime = await resolveAnthropicRuntimeProfile(repoRoot);
-      assert.equal(runtime.mode, 'api_key');
-      assert.equal(runtime.baseUrl, 'https://api.shared.dev');
-      assert.equal(runtime.apiKey, 'sk-shared');
+      const repoRuntime = await resolveAnthropicRuntimeProfile(repoRoot);
+      assert.equal(repoRuntime.mode, 'subscription');
+
+      const worktreeRuntime = await resolveAnthropicRuntimeProfile(runtimeRoot);
+      assert.equal(worktreeRuntime.mode, 'api_key');
+      assert.equal(worktreeRuntime.baseUrl, 'https://api.shared.dev');
+      assert.equal(worktreeRuntime.apiKey, 'sk-shared');
+
+      const repoMetaPath = join(repoRoot, '.cat-cafe', 'provider-profiles.json');
+      const worktreeMetaPath = join(runtimeRoot, '.cat-cafe', 'provider-profiles.json');
+      const [repoMetaRaw, worktreeMetaRaw] = await Promise.all([
+        readFile(repoMetaPath, 'utf-8'),
+        readFile(worktreeMetaPath, 'utf-8'),
+      ]);
+      assert.equal(repoMetaRaw.includes(created.id), false);
+      assert.equal(worktreeMetaRaw.includes(created.id), true);
     } finally {
       await Promise.all([
         rm(repoRoot, { recursive: true, force: true }),
@@ -167,7 +343,7 @@ describe('provider profile store', () => {
     }
   });
 
-  it('does not allow .git pointer to redirect storage when worktree metadata is incomplete', async () => {
+  it('does not allow incomplete .git pointers to redirect storage outside the project', async () => {
     const escapedRoot = await makeTmpDir('escaped-root');
     try {
       await mkdir(join(escapedRoot, '.git', 'worktrees', 'runtime'), { recursive: true });
@@ -178,14 +354,12 @@ describe('provider profile store', () => {
       );
 
       const created = await createProviderProfile(projectRoot, {
-        provider: 'anthropic',
-        name: 'sponsor-local',
-        mode: 'api_key',
+        displayName: 'Local Account',
+        authType: 'api_key',
         baseUrl: 'https://api.local.dev',
         apiKey: 'sk-local',
-        setActive: true,
       });
-      assert.equal(created.mode, 'api_key');
+      await activateProviderProfile(projectRoot, 'anthropic', created.id);
 
       const runtime = await resolveAnthropicRuntimeProfile(projectRoot);
       assert.equal(runtime.mode, 'api_key');
@@ -198,7 +372,7 @@ describe('provider profile store', () => {
         readFile(localMetaPath, 'utf-8'),
         readFile(localSecretsPath, 'utf-8'),
       ]);
-      assert.ok(localMetaRaw.includes('sponsor-local'));
+      assert.ok(localMetaRaw.includes('Local Account'));
       assert.ok(localSecretsRaw.includes('sk-local'));
 
       const escapedMetaPath = join(escapedRoot, '.cat-cafe', 'provider-profiles.json');

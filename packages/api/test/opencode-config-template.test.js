@@ -23,17 +23,17 @@ describe('opencode Config Template (AC-9 + AC-10)', () => {
       model: 'claude-sonnet-4-6',
     });
 
-    assert.strictEqual(config.model, 'anthropic/claude-sonnet-4-6');
+    assert.strictEqual(config.model, 'claude-sonnet-4-6');
   });
 
-  test('model without provider prefix gets anthropic/ prepended', () => {
+  test('model without provider prefix is preserved as-is', () => {
     const config = generateOpenCodeConfig({
       apiKey: 'sk-test',
       baseUrl: 'https://proxy.example/v1',
       model: 'claude-haiku-4-5',
     });
 
-    assert.strictEqual(config.model, 'anthropic/claude-haiku-4-5');
+    assert.strictEqual(config.model, 'claude-haiku-4-5');
   });
 
   test('model with existing provider prefix is preserved', () => {
@@ -101,14 +101,14 @@ describe('opencode Config Template (AC-9 + AC-10)', () => {
     assert.ok(!json.includes('sk-secret-key'), 'secret must not appear anywhere in serialized config');
   });
 
-  test('baseUrl gets /v1 normalized when missing', () => {
+  test('baseUrl without /v1 is preserved as-is', () => {
     const config = generateOpenCodeConfig({
       apiKey: 'sk-test',
       baseUrl: 'https://chat.nuoda.vip/claudecode',
       model: 'claude-sonnet-4-6',
     });
 
-    assert.strictEqual(config.provider.anthropic.options.baseURL, 'https://chat.nuoda.vip/claudecode/v1');
+    assert.strictEqual(config.provider.anthropic.options.baseURL, 'https://chat.nuoda.vip/claudecode');
   });
 
   test('baseUrl already ending in /v1 is preserved', () => {
@@ -131,14 +131,14 @@ describe('opencode Config Template (AC-9 + AC-10)', () => {
     assert.strictEqual(config.provider.anthropic.options.baseURL, 'https://proxy.example/v1/');
   });
 
-  test('baseUrl with trailing slash (non-v1) does not produce double slash', () => {
+  test('baseUrl with trailing slash (non-v1) is preserved as-is', () => {
     const config = generateOpenCodeConfig({
       apiKey: 'sk-test',
       baseUrl: 'https://proxy.example/',
       model: 'claude-sonnet-4-6',
     });
 
-    assert.strictEqual(config.provider.anthropic.options.baseURL, 'https://proxy.example/v1');
+    assert.strictEqual(config.provider.anthropic.options.baseURL, 'https://proxy.example/');
   });
 
   test('output is valid JSON (serializable)', () => {

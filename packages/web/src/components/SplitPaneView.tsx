@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { type Thread, useChatStore } from '@/stores/chatStore';
@@ -38,10 +38,13 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
   for (const t of threads) threadMap.set(t.id, t);
 
   // Ensure we always have exactly PANE_COUNT slots (pad with empty)
-  const paneSlots: (string | null)[] = [];
-  for (let i = 0; i < PANE_COUNT; i++) {
-    paneSlots.push(splitPaneThreadIds[i] ?? null);
-  }
+  const paneSlots = useMemo(() => {
+    const slots: (string | null)[] = [];
+    for (let i = 0; i < PANE_COUNT; i++) {
+      slots.push(splitPaneThreadIds[i] ?? null);
+    }
+    return slots;
+  }, [splitPaneThreadIds]);
 
   const handleSelectPane = useCallback((threadId: string) => setSplitPaneTarget(threadId), [setSplitPaneTarget]);
 

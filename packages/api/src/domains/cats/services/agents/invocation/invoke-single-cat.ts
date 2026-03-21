@@ -12,11 +12,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
+import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
-import { resolveAnthropicRuntimeProfile } from '../../../../../config/provider-profiles.js';
+import {
+  resolveBuiltinClientForProvider,
+  validateRuntimeProviderBinding,
+} from '../../../../../config/provider-binding-compat.js';
+import {
+  resolveAnthropicRuntimeProfile,
+  resolveRuntimeProviderProfileForClient,
+} from '../../../../../config/provider-profiles.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
@@ -571,53 +580,136 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // Provider profile injection (F062):
-    // Resolve active runtime profile from project-local `.cat-cafe` state and
-    // pass it to provider services via callback env.
-    // api_key profiles are automatically routed through the local anthropic-proxy
-    // gateway (started by start-dev.sh) for unified logging/fixing.
-    const provider = catRegistry.tryGet(catId as string)?.config.provider;
-    if (provider === 'anthropic' || provider === 'opencode') {
-      try {
-        const projectRoot = workingDirectory ?? findMonorepoRoot(process.cwd());
-        const profile = await resolveAnthropicRuntimeProfile(projectRoot);
-        callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = profile.mode;
-        if (profile.mode === 'api_key') {
-          if (profile.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = profile.apiKey;
-          if (profile.baseUrl) {
-            // Route through local proxy gateway if enabled (default: on).
-            // Proxy uses slug-based routing: /SLUG/v1/messages → upstream/v1/messages
-            const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
-            const proxyPortNum = parseInt(proxyPortStr, 10);
-            const proxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED !== '0';
-            if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
-              const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
-              if (proxyAlive) {
-                const slug = deriveProxySlug(profile.id);
-                registerProxyUpstream(projectRoot, slug, profile.baseUrl);
-                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
-              } else {
-                log.warn(
-                  { proxyPort: proxyPortStr, baseUrl: profile.baseUrl },
-                  'Proxy unreachable, falling back to direct upstream',
-                );
-                callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
-              }
+    // F127 account injection:
+    // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
+    // Legacy providerProfileId is still read as a migration fallback.
+    const catConfig = catRegistry.tryGet(catId as string)?.config;
+    const provider = catConfig?.provider;
+    const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
+    const defaultModel = catConfig?.defaultModel?.trim() || undefined;
+    const projectRoot = workingDirectory ? findMonorepoRoot(workingDirectory) : resolveActiveProjectRoot(process.cwd());
+    const boundAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
+    const resolveRuntimeAccount = async () => {
+      if (!builtinClient) return null;
+      const runtime = await resolveRuntimeProviderProfileForClient(projectRoot, builtinClient, boundAccountRef);
+      if (boundAccountRef && !runtime) {
+        throw new Error(`bound account "${boundAccountRef}" not found`);
+      }
+      return runtime;
+    };
+    const assertCompatibleRuntimeAccount = <T extends { id: string }>(
+      account: (T & Parameters<typeof validateRuntimeProviderBinding>[1]) | null,
+    ) => {
+      if (!provider || !account) return account;
+      const compatibilityError = validateRuntimeProviderBinding(provider, account, defaultModel);
+      if (compatibilityError) {
+        throw new Error(compatibilityError);
+      }
+      return account;
+    };
+    const isExplicitBindingCompatibilityError = (err: unknown): err is Error =>
+      err instanceof Error &&
+      (/bound provider profile/i.test(err.message) || /model ".+" is not available on provider/i.test(err.message));
+
+    // Resolve account first, then use its protocol for env injection.
+    // For API Key accounts, protocol is declared on the account itself.
+    // For builtin OAuth accounts, protocol comes from the provider mapping.
+    let resolvedAccount: Awaited<ReturnType<typeof resolveRuntimeAccount>> = null;
+    try {
+      resolvedAccount = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
+    } catch (err) {
+      if (isExplicitBindingCompatibilityError(err)) {
+        throw err;
+      }
+      if (boundAccountRef) {
+        throw new Error(`failed to resolve bound account "${boundAccountRef}"`);
+      }
+    }
+
+    // Determine effective protocol: account.protocol > provider-based default
+    const defaultProtocolForProvider: Record<string, string> = {
+      anthropic: 'anthropic',
+      opencode: 'anthropic',
+      openai: 'openai',
+      google: 'google',
+      dare: 'openai',
+    };
+    const effectiveProtocol =
+      (resolvedAccount?.authType === 'api_key' && resolvedAccount.protocol)
+        ? resolvedAccount.protocol
+        : (provider ? defaultProtocolForProvider[provider] ?? null : null);
+
+    // Pass protocol hint to CLI via callbackEnv (used by OpenCode/Claude for model prefix)
+    if (effectiveProtocol) {
+      callbackEnv.CAT_CAFE_EFFECTIVE_PROTOCOL = effectiveProtocol;
+    }
+
+    if (effectiveProtocol === 'anthropic') {
+      if (resolvedAccount?.authType === 'api_key') {
+        callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
+        if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) {
+          const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
+          const proxyPortNum = parseInt(proxyPortStr, 10);
+          const proxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED !== '0';
+          if (proxyEnabled && !Number.isNaN(proxyPortNum) && proxyPortNum > 0 && proxyPortNum <= 65535) {
+            const proxyAlive = await tcpProbe('127.0.0.1', proxyPortNum);
+            if (proxyAlive) {
+              const slug = deriveProxySlug(resolvedAccount.id);
+              registerProxyUpstream(projectRoot, slug, resolvedAccount.baseUrl);
+              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
             } else {
-              if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
-                log.warn({ proxyPort: proxyPortStr }, 'Invalid ANTHROPIC_PROXY_PORT, falling back to direct upstream');
-              }
-              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
+              log.warn(
+                { proxyPort: proxyPortStr, baseUrl: resolvedAccount.baseUrl },
+                'Proxy unreachable, falling back to direct upstream',
+              );
+              callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = resolvedAccount.baseUrl;
             }
+          } else {
+            if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
+              log.warn({ proxyPort: proxyPortStr }, 'Invalid ANTHROPIC_PROXY_PORT, falling back to direct upstream');
+            }
+            callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = resolvedAccount.baseUrl;
           }
         }
-        if (profile.modelOverride) {
-          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = profile.modelOverride;
-        }
-      } catch {
-        // Best-effort fallback: default to subscription mode when profile resolution fails.
+      } else {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
       }
+    } else if (effectiveProtocol === 'openai') {
+      if (resolvedAccount?.authType === 'api_key') {
+        callbackEnv.CODEX_AUTH_MODE = 'api_key';
+        if (resolvedAccount.apiKey) {
+          callbackEnv.OPENAI_API_KEY = resolvedAccount.apiKey;
+          // OpenCode selects provider by model prefix; `openrouter/...` models require this key name.
+          callbackEnv.OPENROUTER_API_KEY = resolvedAccount.apiKey;
+        }
+        if (resolvedAccount.baseUrl) {
+          callbackEnv.OPENAI_BASE_URL = resolvedAccount.baseUrl;
+          callbackEnv.OPENAI_API_BASE = resolvedAccount.baseUrl;
+        }
+      } else if (boundAccountRef) {
+        callbackEnv.CODEX_AUTH_MODE = 'oauth';
+      }
+    } else if (effectiveProtocol === 'google') {
+      if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
+        // Gemini CLI: native Google SDK, uses GEMINI_API_KEY
+        callbackEnv.GEMINI_API_KEY = resolvedAccount.apiKey;
+        callbackEnv.GOOGLE_API_KEY = resolvedAccount.apiKey;
+        // opencode CLI: OpenRouter provider uses OPENROUTER_API_KEY
+        callbackEnv.OPENROUTER_API_KEY = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) {
+          callbackEnv.GEMINI_BASE_URL = resolvedAccount.baseUrl;
+        }
+      }
+    } else if (provider === 'anthropic' || provider === 'opencode') {
+      // Fallback for unresolved accounts on anthropic/opencode providers
+      callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
+    }
+
+    // Dare has its own env vars regardless of protocol-based injection above
+    if (provider === 'dare' && resolvedAccount?.authType === 'api_key') {
+      if (resolvedAccount.apiKey) callbackEnv.DARE_API_KEY = resolvedAccount.apiKey;
+      if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
     }
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new sessions for cats
@@ -680,6 +772,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(sessionId ? { cliSessionId: sessionId } : {}),
       // F118 Phase B: Enable liveness probe with defaults for all CLI providers
       livenessProbe: {},
+      ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
     };
 
     let lastErrorMessage: string | undefined;

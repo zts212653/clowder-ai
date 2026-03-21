@@ -9,6 +9,14 @@ import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { QueuePanel } from '../QueuePanel';
 
+vi.mock('@/hooks/useOwnerConfig', () => ({
+  useOwnerConfig: () => ({
+    name: '始皇帝',
+    aliases: ['秦始皇'],
+    mentionPatterns: ['@owner', '@me'],
+  }),
+}));
+
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({}) })),
 }));
@@ -71,8 +79,8 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
     const text = container.textContent ?? '';
     // Agent entry should show handoff format
     expect(text).toContain('codex → opus');
-    // User entry should show 铲屎官
-    expect(text).toContain('铲屎官');
+    // User entry should show configured owner name
+    expect(text).toContain('始皇帝');
   });
 
   it('renders "自动" tag for autoExecute agent entries', () => {

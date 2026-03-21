@@ -184,6 +184,8 @@ export interface AgentServiceOptions {
     stallWarningMs?: number;
     boundedExtensionFactor?: number;
   };
+  /** F127: Extra --config key=value pairs to pass to the CLI. */
+  cliConfigArgs?: readonly string[];
 }
 
 /**

@@ -5,38 +5,52 @@
  * GET   /api/config/env-summary  — 返回用户可配的 env 变量及当前值 (F12)
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
 import { configStore } from '../config/ConfigStore.js';
 import type { ConfigSnapshot } from '../config/config-snapshot.js';
-import { buildEnvSummary, ENV_CATEGORIES } from '../config/env-registry.js';
+import { updateRuntimeOwner } from '../config/runtime-cat-catalog.js';
+import { buildEnvSummary, ENV_CATEGORIES, isEditableEnvVarName } from '../config/env-registry.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
-
-/** Walk up from CWD to find pnpm-workspace.yaml — the monorepo root. */
-function findMonorepoRoot(): string {
-  let dir = process.cwd();
-  while (dir !== dirname(dir)) {
-    if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) return dir;
-    dir = dirname(dir);
-  }
-  return process.cwd();
-}
-
-const MONOREPO_ROOT = findMonorepoRoot();
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 
 const patchSchema = z.object({
   key: z.string().min(1),
   value: z.union([z.string(), z.number(), z.boolean()]),
 });
 
+const envPatchSchema = z.object({
+  updates: z.array(z.object({ name: z.string().min(1), value: z.string().nullable() })).min(1),
+});
+
+const ownerPatchSchema = z.object({
+  name: z.string().trim().min(1),
+  aliases: z.array(z.string().trim().min(1)),
+  mentionPatterns: z.array(z.string().trim().min(1)).min(1),
+  avatar: z.string().trim().nullable().optional(),
+  color: z
+    .object({
+      primary: z.string().min(1),
+      secondary: z.string().min(1),
+    })
+    .nullable()
+    .optional(),
+});
+
+const runtimeStatusQuerySchema = z.object({
+  category: z.string().optional(),
+});
+
 interface ConfigRoutesOptions {
   auditLog?: {
     append(input: { type: string; threadId?: string; data: Record<string, unknown> }): Promise<unknown>;
   };
+  envFilePath?: string;
+  projectRoot?: string;
 }
 
 function getSnapshotValue(snapshot: ConfigSnapshot, key: string): unknown {
@@ -57,8 +71,54 @@ function resolveOperator(raw: unknown): string | null {
   return null;
 }
 
+function formatEnvFileValue(value: string): string {
+  const escapedControlChars = value.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  if (/^[A-Za-z0-9_./:@-]+$/.test(escapedControlChars)) return escapedControlChars;
+  return `"${escapedControlChars
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/`/g, '\\`')}"`;
+}
+
+function applyEnvUpdatesToFile(contents: string, updates: Map<string, string | null>): string {
+  const lines = contents === '' ? [] : contents.split(/\r?\n/);
+  const seen = new Set<string>();
+  const nextLines: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (!match) {
+      nextLines.push(line);
+      continue;
+    }
+    const name = match[1]!;
+    if (!updates.has(name)) {
+      nextLines.push(line);
+      continue;
+    }
+    seen.add(name);
+    const value = updates.get(name);
+    if (value == null || value === '') continue;
+    nextLines.push(`${name}=${formatEnvFileValue(value)}`);
+  }
+
+  for (const [name, value] of updates) {
+    if (seen.has(name) || value == null || value === '') continue;
+    nextLines.push(`${name}=${formatEnvFileValue(value)}`);
+  }
+
+  const normalized = nextLines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+  return normalized.length > 0 ? `${normalized}\n` : '';
+}
+
 export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptions = {}): Promise<void> {
   const auditLog = opts.auditLog ?? getEventAuditLog();
+  const projectRoot = opts.projectRoot ?? resolveActiveProjectRoot();
+  const envFilePath = opts.envFilePath ?? resolve(projectRoot, '.env');
 
   app.get('/api/config', async () => ({
     config: collectConfigSnapshot(),
@@ -117,6 +177,49 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     return { config: after };
   });
 
+  app.patch('/api/config/owner', async (request, reply) => {
+    const parsed = ownerPatchSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    if (!operator) {
+      reply.status(400);
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+
+    try {
+      updateRuntimeOwner(projectRoot, {
+        name: parsed.data.name,
+        aliases: parsed.data.aliases,
+        mentionPatterns: parsed.data.mentionPatterns,
+        ...(parsed.data.avatar !== undefined ? { avatar: parsed.data.avatar } : {}),
+        ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
+      });
+    } catch (err) {
+      reply.status(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const next = collectConfigSnapshot();
+    try {
+      await auditLog.append({
+        type: AuditEventTypes.CONFIG_UPDATED,
+        data: {
+          target: 'owner',
+          operator,
+          name: next.owner.name,
+          mentionPatterns: next.owner.mentionPatterns,
+        },
+      });
+    } catch (err) {
+      request.log.warn({ err }, 'owner config audit append failed');
+    }
+
+    return { config: next };
+  });
+
   app.get('/api/config/env-summary', async () => {
     const apiCwd = process.cwd();
     const home = os.homedir();
@@ -124,7 +227,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       categories: ENV_CATEGORIES,
       variables: buildEnvSummary(),
       paths: {
-        projectRoot: MONOREPO_ROOT,
+        projectRoot,
         homeDir: home,
         dataDirs: {
           auditLogs: resolve(apiCwd, process.env.AUDIT_LOG_DIR ?? './data/audit-logs'),
@@ -135,5 +238,51 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
         },
       },
     };
+  });
+
+  app.patch('/api/config/env', async (request, reply) => {
+    const parsed = envPatchSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    if (!operator) {
+      reply.status(400);
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+
+    const updates = new Map<string, string | null>();
+    for (const update of parsed.data.updates) {
+      if (!isEditableEnvVarName(update.name)) {
+        reply.status(400);
+        return { error: `Env var '${update.name}' is not editable from Hub` };
+      }
+      updates.set(update.name, update.value);
+    }
+
+    const current = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf8') : '';
+    const next = applyEnvUpdatesToFile(current, updates);
+    writeFileSync(envFilePath, next, 'utf8');
+
+    for (const [name, value] of updates) {
+      if (value == null || value === '') delete process.env[name];
+      else process.env[name] = value;
+    }
+
+    try {
+      await auditLog.append({
+        type: AuditEventTypes.CONFIG_UPDATED,
+        data: {
+          target: '.env',
+          keys: [...updates.keys()],
+          operator,
+        },
+      });
+    } catch (err) {
+      request.log.warn({ err, keys: [...updates.keys()] }, 'env config audit append failed');
+    }
+
+    return { ok: true, envFilePath, summary: buildEnvSummary() };
   });
 }

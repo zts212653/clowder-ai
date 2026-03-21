@@ -21,7 +21,7 @@
 import type { CatId, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
-import { getDefaultCatId } from '../../../../../config/cat-config-loader.js';
+import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, stripIntentTags } from '../../context/IntentParser.js';
@@ -202,17 +202,20 @@ export class AgentRouter {
     | undefined;
   private speechMentionRe: RegExp;
 
-  constructor(options: AgentRouterOptions) {
-    // Build services map from AgentRegistry (dynamic, not hardcoded)
+  private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
     this.services = {};
-    for (const [catId, service] of options.agentRegistry.getAllEntries()) {
+    for (const [catId, service] of agentRegistry.getAllEntries()) {
       this.services[catId] = service;
     }
-
-    // Build mention aliases at constructor time (catRegistry is populated by now)
     const allConfigs = catRegistry.getAllConfigs();
     const { speechMentionRe } = buildMentionData(allConfigs);
     this.speechMentionRe = speechMentionRe;
+  }
+
+  constructor(options: AgentRouterOptions) {
+    this.services = {};
+    this.speechMentionRe = /$^/;
+    this.rebuildRuntimeCaches(options.agentRegistry);
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
@@ -234,13 +237,33 @@ export class AgentRouter {
     this.signalArticleLookup = options.signalArticleLookup;
   }
 
+  refreshFromRegistry(agentRegistry: AgentRegistry): void {
+    this.rebuildRuntimeCaches(agentRegistry);
+  }
+
+  private isRoutableCat(catId: string | null | undefined): catId is CatId {
+    return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
+  }
+
+  private filterRoutableCats(catIds: Iterable<string | null | undefined>): CatId[] {
+    const filtered: CatId[] = [];
+    const seen = new Set<string>();
+    for (const catId of catIds) {
+      if (!this.isRoutableCat(catId)) continue;
+      if (seen.has(catId)) continue;
+      seen.add(catId);
+      filtered.push(catId);
+    }
+    return filtered;
+  }
+
   /** Pick a deterministic fallback cat when policy filters out all candidates. */
   private pickFallbackCat(exclude: Set<string>): CatId | null {
     const def = getDefaultCatId() as string;
-    if (!exclude.has(def) && Object.hasOwn(this.services, def)) return def as CatId;
+    if (!exclude.has(def) && this.isRoutableCat(def)) return def as CatId;
 
     for (const id of Object.keys(this.services).sort()) {
-      if (!exclude.has(id)) return id as CatId;
+      if (!exclude.has(id) && this.isRoutableCat(id)) return id as CatId;
     }
     return null;
   }
@@ -251,29 +274,45 @@ export class AgentRouter {
     message: string,
     candidates: CatId[],
   ): CatId[] {
+    const routableCandidates = this.filterRoutableCats(candidates);
     const scope = inferRoutingScope(message);
-    if (!scope) return candidates;
+    if (!scope) {
+      if (routableCandidates.length > 0) return routableCandidates;
+      const fallback = this.pickFallbackCat(new Set());
+      return fallback ? [fallback] : [];
+    }
 
     const policy = thread?.routingPolicy;
-    if (!policy || policy.v !== 1 || !policy.scopes) return candidates;
+    if (!policy || policy.v !== 1 || !policy.scopes) {
+      if (routableCandidates.length > 0) return routableCandidates;
+      const fallback = this.pickFallbackCat(new Set());
+      return fallback ? [fallback] : [];
+    }
 
     const rule = policy.scopes[scope];
-    if (!rule) return candidates;
-    if (typeof rule.expiresAt === 'number' && rule.expiresAt > 0 && rule.expiresAt < Date.now()) return candidates;
+    if (!rule) {
+      if (routableCandidates.length > 0) return routableCandidates;
+      const fallback = this.pickFallbackCat(new Set());
+      return fallback ? [fallback] : [];
+    }
+    if (typeof rule.expiresAt === 'number' && rule.expiresAt > 0 && rule.expiresAt < Date.now()) {
+      if (routableCandidates.length > 0) return routableCandidates;
+      const fallback = this.pickFallbackCat(new Set());
+      return fallback ? [fallback] : [];
+    }
 
     // Defensive guard: data might be malformed from external persistence.
     const avoidList = Array.isArray(rule.avoidCats) ? rule.avoidCats : [];
     const preferList = Array.isArray(rule.preferCats) ? rule.preferCats : [];
     const avoid = new Set(avoidList.map((id) => String(id)));
     const prefer = preferList.map((id) => String(id)).filter((id) => !avoid.has(id));
-    const isValid = (id: string) => Object.hasOwn(this.services, id);
 
-    const filtered = candidates.filter((id) => !avoid.has(id as string));
+    const filtered = routableCandidates.filter((id) => !avoid.has(id as string));
     const out: CatId[] = [];
     const seen = new Set<string>();
 
     for (const id of prefer) {
-      if (!isValid(id)) continue;
+      if (!this.isRoutableCat(id)) continue;
       if (seen.has(id)) continue;
       seen.add(id);
       out.push(id as CatId);
@@ -281,7 +320,6 @@ export class AgentRouter {
 
     for (const id of filtered) {
       const sid = id as string;
-      if (!isValid(sid)) continue;
       if (seen.has(sid)) continue;
       seen.add(sid);
       out.push(id);
@@ -290,7 +328,7 @@ export class AgentRouter {
     if (out.length > 0) return out;
 
     const fallback = this.pickFallbackCat(avoid);
-    return fallback ? [fallback] : candidates;
+    return fallback ? [fallback] : routableCandidates;
   }
 
   /** Normalize speech patterns like "at 布偶" → "@布偶" */
@@ -344,6 +382,10 @@ export class AgentRouter {
 
         if (isEndBoundary && !isConsumed) {
           consumed.push([pos, end]);
+          if (!isCatAvailable(catId as string)) {
+            searchFrom = pos + 1;
+            continue;
+          }
           if (!seenCats.has(catId as string)) {
             seenCats.add(catId as string);
             mentions.push({ catId, position: pos });
@@ -407,10 +449,11 @@ export class AgentRouter {
         resolve: async () => {
           if (this.threadStore) {
             const participants = await this.threadStore.getParticipants(threadId);
-            const valid = participants.filter((id: string) => Object.hasOwn(this.services, id));
+            const valid = this.filterRoutableCats(participants);
             if (valid.length > 0) return valid as CatId[];
           }
-          return [getDefaultCatId()];
+          const fallback = this.pickFallbackCat(new Set());
+          return fallback ? [fallback] : [];
         },
       });
     }
@@ -433,23 +476,27 @@ export class AgentRouter {
     }
     for (const [breedId, info] of breedMap) {
       const catIds = info.catIds;
-      patterns.push({ pattern: `@全体${info.displayName}`, resolve: async () => catIds });
-      patterns.push({ pattern: `@all-${breedId}`, resolve: async () => catIds });
+      patterns.push({ pattern: `@全体${info.displayName}`, resolve: async () => this.filterRoutableCats(catIds) });
+      patterns.push({ pattern: `@all-${breedId}`, resolve: async () => this.filterRoutableCats(catIds) });
     }
 
     // Global @all / @全体 (shortest — must be last)
     patterns.push({
       pattern: '@全体',
       resolve: async () => {
-        const allCats = Object.keys(this.services) as CatId[];
-        return allCats.length > 0 ? allCats : [getDefaultCatId()];
+        const allCats = this.filterRoutableCats(Object.keys(this.services));
+        if (allCats.length > 0) return allCats;
+        const fallback = this.pickFallbackCat(new Set());
+        return fallback ? [fallback] : [];
       },
     });
     patterns.push({
       pattern: '@all',
       resolve: async () => {
-        const allCats = Object.keys(this.services) as CatId[];
-        return allCats.length > 0 ? allCats : [getDefaultCatId()];
+        const allCats = this.filterRoutableCats(Object.keys(this.services));
+        if (allCats.length > 0) return allCats;
+        const fallback = this.pickFallbackCat(new Set());
+        return fallback ? [fallback] : [];
       },
     });
 
@@ -489,7 +536,7 @@ export class AgentRouter {
       // F32-b Phase 2 + #58: preferredCats = candidate scope, not dispatch list
       // R5: Object.hasOwn + dedupe; Cloud P1: Array.isArray guard for corrupted data
       const rawPref = Array.isArray(thread?.preferredCats) ? thread.preferredCats : [];
-      const validPreferred = [...new Set(rawPref.filter((id) => Object.hasOwn(this.services, id as string)))];
+      const validPreferred = this.filterRoutableCats(rawPref);
       const preferredSet = new Set(validPreferred.map(String));
 
       // #58: explicit #ideate with multiple preferred cats → dispatch all (user requested parallel)
@@ -502,7 +549,7 @@ export class AgentRouter {
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       if (participantsWithActivity.length > 0) {
         const lastReplier = participantsWithActivity[0]?.catId;
-        if (preferredSet.size === 0 || preferredSet.has(lastReplier as string)) {
+        if (this.isRoutableCat(lastReplier) && (preferredSet.size === 0 || preferredSet.has(lastReplier as string))) {
           return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
         }
       }
@@ -535,7 +582,7 @@ export class AgentRouter {
       // F32-b Phase 2 + #58: preferredCats = candidate scope, not dispatch list
       // R5: Object.hasOwn + dedupe; Cloud P1: Array.isArray guard for corrupted data
       const rawPref = Array.isArray(thread?.preferredCats) ? thread.preferredCats : [];
-      const validPreferred = [...new Set(rawPref.filter((id) => Object.hasOwn(this.services, id as string)))];
+      const validPreferred = this.filterRoutableCats(rawPref);
       const preferredSet = new Set(validPreferred.map(String));
 
       // #58: explicit #ideate with multiple preferred cats → dispatch all (user requested parallel)
@@ -548,7 +595,7 @@ export class AgentRouter {
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       if (participantsWithActivity.length > 0) {
         const lastReplier = participantsWithActivity[0]?.catId;
-        if (preferredSet.size === 0 || preferredSet.has(lastReplier as string)) {
+        if (this.isRoutableCat(lastReplier) && (preferredSet.size === 0 || preferredSet.has(lastReplier as string))) {
           return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
         }
       }
