@@ -72,6 +72,7 @@ export async function* routeSerial(
     modeSystemPrompt,
     modeSystemPromptByCat,
     queueHasQueuedMessages,
+    hasQueuedOrActiveAgentForCat,
   } = options;
   const previousResponses: { catId: CatId; content: string }[] = [];
   const thinkingMode = options.thinkingMode ?? 'play';
@@ -718,6 +719,14 @@ export async function* routeSerial(
           const pendingOriginalTargets = targetCats.slice(index + 1);
           for (const nextCat of a2aMentions) {
             if (worklistEntry.a2aCount >= maxDepth) break;
+            // A2A cross-path dedup: skip if this cat was already dispatched via callback (InvocationQueue)
+            if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
+              log.info(
+                { threadId, catId: nextCat, fromCat: catId },
+                'A2A text-scan dedup: cat already in InvocationQueue, skipping',
+              );
+              continue;
+            }
             if (pendingTail.includes(nextCat)) {
               // Keep original user-selected targets replying to user, not to another cat.
               if (!pendingOriginalTargets.includes(nextCat)) {

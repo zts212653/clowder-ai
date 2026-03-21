@@ -194,6 +194,8 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             ...(opts.queueProcessor
               ? {
                   queueHasQueuedMessages: (tid: string) => opts.queueProcessor?.hasQueuedForThread(tid) ?? false,
+                  hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
+                    opts.queueProcessor?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                 }
               : {}),
             cursorBoundaries,

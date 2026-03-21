@@ -59,6 +59,8 @@ export interface RouteOptions {
   maxA2ADepth?: number | undefined;
   /** Queue fairness hook: when true for current thread, routeSerial must stop extending A2A chain. */
   queueHasQueuedMessages?: ((threadId: string) => boolean) | undefined;
+  /** A2A dedup hook: skip text-scan @mention if cat already dispatched via callback path. */
+  hasQueuedOrActiveAgentForCat?: ((threadId: string, catId: string) => boolean) | undefined;
   /** ADR-008 S3: When provided, cursor boundaries are collected here instead of acking immediately.
    *  Caller acks after invocation succeeds. If absent, legacy immediate ack behavior. */
   cursorBoundaries?: Map<string, string>;
