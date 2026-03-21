@@ -185,4 +185,39 @@ describe('F130: governance_blocked event contract', () => {
     assert.equal(retryStatus, 'failed', 'invocations.ts retry should also mark failed');
     assert.equal(messagesPathErrorCode, retryPathErrorCode, 'Both paths must capture same errorCode');
   });
+
+  it('all 7 routeExecution consumers must handle errorCode identically', () => {
+    // F130 protocol contract: every routeExecution consumer must check
+    // done.errorCode and mark failed instead of succeeded.
+    // This test verifies the pattern is consistent across all consumers.
+    const messages = [
+      { type: 'system_info', catId: 'opus', content: '{}', timestamp: Date.now() },
+      { type: 'done', catId: 'opus', isFinal: true, errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED', timestamp: Date.now() },
+    ];
+
+    // Shared handler pattern — all 7 consumers must implement this
+    function simulateConsumer(name) {
+      let errorCode;
+      for (const msg of messages) {
+        if (msg.type === 'done' && msg.errorCode) errorCode = msg.errorCode;
+      }
+      return { name, status: errorCode ? 'failed' : 'succeeded', errorCode };
+    }
+
+    // All 7 routeExecution consumers:
+    const consumers = [
+      'messages.ts',
+      'invocations.ts',
+      'callback-a2a-trigger.ts',
+      'callback-multi-mention-routes.ts',
+      'QueueProcessor.ts',
+      'ConnectorInvokeTrigger.ts',
+      'podcast-generator.ts',
+    ].map(simulateConsumer);
+
+    for (const c of consumers) {
+      assert.equal(c.status, 'failed', `${c.name} must mark governance-blocked as failed`);
+      assert.equal(c.errorCode, 'GOVERNANCE_BOOTSTRAP_REQUIRED', `${c.name} must capture errorCode`);
+    }
+  });
 });

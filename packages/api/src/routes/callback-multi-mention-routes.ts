@@ -232,6 +232,8 @@ async function dispatchToTarget(
         invocationId: createResult.invocationId,
       });
 
+      // F130: track governance block errorCode
+      let governanceErrorCode: string | undefined;
       for await (const msg of router.routeExecution(
         userId,
         messageContent,
@@ -242,6 +244,7 @@ async function dispatchToTarget(
         { signal: controller.signal, parentInvocationId: invocationId },
       )) {
         if (controller.signal.aborted) break;
+        if (msg.type === 'done' && msg.errorCode) governanceErrorCode = msg.errorCode;
 
         // Capture text + tool usage for response aggregation
         if (msg.catId === targetCatId) {
@@ -255,8 +258,10 @@ async function dispatchToTarget(
         socketManager.broadcastAgentMessage({ ...msg, invocationId }, threadId);
       }
 
+      const finalStatus = governanceErrorCode ? 'failed' : controller.signal.aborted ? 'canceled' : 'succeeded';
       await invocationRecordStore.update(invocationId, {
-        status: controller.signal.aborted ? 'canceled' : 'succeeded',
+        status: finalStatus,
+        ...(governanceErrorCode ? { error: governanceErrorCode } : {}),
       });
     } finally {
       orch.unregisterDispatch(requestId, targetCatId);
