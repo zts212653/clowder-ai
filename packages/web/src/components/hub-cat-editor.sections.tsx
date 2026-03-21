@@ -4,7 +4,6 @@ import { useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import {
   CLIENT_OPTIONS,
-  canonicalMentionPattern,
   type HubCatEditorFormState,
   joinTags,
   normalizeMentionPattern,
@@ -16,10 +15,6 @@ import type { ProfileItem } from './hub-provider-profiles.types';
 import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
-
-function uniqueTags(tags: string[]): string[] {
-  return Array.from(new Set(tags));
-}
 
 function safeAvatarSrc(value: string): string | null {
   const trimmed = value.trim();
@@ -329,7 +324,6 @@ export function AccountSection({
 }
 
 export function RoutingSection({
-  cat,
   form,
   onChange,
 }: {
@@ -338,7 +332,6 @@ export function RoutingSection({
   onChange: (patch: FormPatch) => void;
 }) {
   const aliases = currentAliasTags(form);
-  const catId = cat?.id ?? form.catId.trim();
   return (
     <SectionCard title="别名与 @ 路由">
       <TagEditor
