@@ -52,3 +52,5 @@ created: 2026-02-26
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Cat Café Limb Control Plane | spec | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
 | F127 | 猫猫管理重构 — 账户配置与猫猫实例分离，动态创建猫 + 自定义别名 @ 路由 | spec | 待定 | community [#109](https://github.com/zts212653/clowder-ai/issues/109) | [F127](features/F127-cat-instance-management.md) |
+| F128 | Cat-Initiated Thread Creation — 猫程序化创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
+| F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | spec | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |

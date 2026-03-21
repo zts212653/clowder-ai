@@ -452,6 +452,13 @@ export function useAgentMessages() {
               ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
               timestamp: Date.now(),
             });
+            // #586 Bug 1 (TD112): Callback created a new bubble because no stream
+            // placeholder existed yet. Mark the invocation as replaced so that
+            // late-arriving stream chunks for the same invocation are suppressed
+            // instead of spawning a second bubble.
+            if (invocationId) {
+              replacedInvocationsRef.current.set(msg.catId, invocationId);
+            }
           }
         } else {
           // CLI stream message (thinking): append to active stream bubble
@@ -560,6 +567,9 @@ export function useAgentMessages() {
         // can't match this finalized message when the next invocation starts.
         // Without this, a race (new text before invocation_created) appends to
         // the old bubble, causing messages to visually merge until page refresh.
+        // Cloud review P2: Do NOT clear taskProgress here — lines 552-559 already
+        // transition it to 'completed'/'interrupted'. Wiping it would remove the
+        // cat from PlanBoardPanel and defeat clearCatStatuses' snapshot preservation.
         setCatInvocation(msg.catId, { invocationId: undefined });
         if (msg.isFinal) {
           clearDoneTimeout();
@@ -580,6 +590,10 @@ export function useAgentMessages() {
           }
           setIntentMode(null);
           clearCatStatuses();
+          // Note: do NOT clear replacedInvocationsRef here. The suppression guard
+          // is designed to persist until a *different* invocationId is observed
+          // (F123 PR #465, symptom-fixture-matrix.md:23). Clearing on done(isFinal)
+          // would allow reordered stale chunks to recreate ghost bubbles.
           a2aGroupRef.current = null;
           // Bug C safety net: if done(isFinal) arrived but no streaming bubble
           // was ever created for this cat, text events were lost (socket transport
@@ -645,6 +659,50 @@ export function useAgentMessages() {
               }
               consumed = true;
             }
+          } else if (parsed?.type === 'governance_blocked') {
+            // F130: Governance gate blocked — render actionable card instead of raw text
+            const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
+            const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';
+            // Use invocationId from backend payload — not guessing from store
+            const invId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+            // Deduplicate: multi-cat dispatch to same unbootstrapped project yields
+            // one governance_blocked per cat. Show first card; update invocationId
+            // on subsequent events so retry targets the latest blocked invocation.
+            const existingBlocked = useChatStore
+              .getState()
+              .messages.find(
+                (m) => m.variant === 'governance_blocked' && m.extra?.governanceBlocked?.projectPath === projectPath,
+              );
+            if (existingBlocked) {
+              // P2-1 fix: keep card but update invocationId to latest blocked call
+              if (invId) {
+                patchMessage(existingBlocked.id, {
+                  extra: {
+                    ...existingBlocked.extra,
+                    governanceBlocked: {
+                      ...existingBlocked.extra!.governanceBlocked!,
+                      invocationId: invId,
+                    },
+                  },
+                });
+              }
+            } else {
+              addMessage({
+                id: `gov-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type: 'system',
+                variant: 'governance_blocked',
+                content: `项目 ${projectPath} ${reasonKind === 'needs_bootstrap' ? '尚未初始化治理' : '治理状态异常'}`,
+                timestamp: Date.now(),
+                extra: {
+                  governanceBlocked: {
+                    projectPath,
+                    reasonKind: reasonKind as 'needs_bootstrap' | 'needs_confirmation' | 'files_missing',
+                    invocationId: invId,
+                  },
+                },
+              });
+            }
+            consumed = true;
           } else if (parsed?.type === 'invocation_metrics') {
             // Store metrics silently — don't show as system message
             if (parsed.kind === 'session_started') {

@@ -35,11 +35,16 @@ function clampToPreset(n: number): number {
 
 /**
  * Filter catIds to only include IDs present in the allowed whitelist.
- * Prevents injection of arbitrary actorIds into game seats.
+ * Deduplicates to prevent same cat filling multiple seats.
  */
 export function sanitizeCatIds(catIds: string[], allowedIds: readonly string[]): string[] {
   const allowed = new Set(allowedIds);
-  return catIds.filter((id) => allowed.has(id));
+  const seen = new Set<string>();
+  return catIds.filter((id) => {
+    if (!allowed.has(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 export interface ParsedGameCommand {
@@ -123,6 +128,15 @@ interface BuildSeatsInput {
  */
 export function buildGameSeats(input: BuildSeatsInput): Seat[] {
   const { humanRole, userId, catIds, playerCount } = input;
+
+  // Enforce minimum cat count — no seat duplication allowed
+  const catSlotsNeeded = humanRole === 'player' ? playerCount - 1 : playerCount;
+  if (catIds.length < catSlotsNeeded) {
+    throw new Error(
+      `Not enough cats: need ${catSlotsNeeded} but got ${catIds.length}. Each seat must have a unique actor.`,
+    );
+  }
+
   const seats: Seat[] = [];
 
   if (humanRole === 'player') {

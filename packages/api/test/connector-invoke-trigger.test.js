@@ -617,6 +617,78 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(trackerMock.completes.length, 1, 'Tracker must complete even if deliver hangs');
   });
 
+  it('cloud-R4-P2: late-success delivery triggers deferred placeholder cleanup', async () => {
+    /** @type {() => void} */
+    let resolveDeliver = () => {};
+    const deliverPromise = new Promise((r) => {
+      resolveDeliver = r;
+    });
+    const outboundHook = {
+      deliver: async () => {
+        await deliverPromise;
+      },
+    };
+    let cleanupCalled = false;
+    const streamingHook = {
+      async onStreamStart() {},
+      async onStreamChunk() {},
+      async onStreamEnd() {},
+      cleanupPlaceholders: async () => {
+        cleanupCalled = true;
+      },
+    };
+
+    const trigger = createTrigger({
+      outboundHook,
+      streamingHook,
+      deliverTimeoutMs: 50,
+    });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+
+    await new Promise((r) => setTimeout(r, 200));
+    assert.strictEqual(cleanupCalled, false, 'cleanup must NOT run immediately after timeout');
+
+    resolveDeliver();
+    await new Promise((r) => setTimeout(r, 100));
+    assert.strictEqual(cleanupCalled, true, 'cleanup must run after late-success delivery');
+  });
+
+  it('cloud-R4-P2: late-failure delivery does NOT trigger deferred cleanup', async () => {
+    /** @type {(err: Error) => void} */
+    let rejectDeliver = () => {};
+    const deliverPromise = new Promise((_, rej) => {
+      rejectDeliver = rej;
+    });
+    const outboundHook = {
+      deliver: async () => {
+        await deliverPromise;
+      },
+    };
+    let cleanupCalled = false;
+    const streamingHook = {
+      async onStreamStart() {},
+      async onStreamChunk() {},
+      async onStreamEnd() {},
+      cleanupPlaceholders: async () => {
+        cleanupCalled = true;
+      },
+    };
+
+    const trigger = createTrigger({
+      outboundHook,
+      streamingHook,
+      deliverTimeoutMs: 50,
+    });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+
+    await new Promise((r) => setTimeout(r, 200));
+    assert.strictEqual(cleanupCalled, false, 'cleanup must NOT run after timeout');
+
+    rejectDeliver(new Error('connector down'));
+    await new Promise((r) => setTimeout(r, 100));
+    assert.strictEqual(cleanupCalled, false, 'cleanup must NOT run when delivery truly failed');
+  });
+
   it('cloud-P1-4: A→B→A ping-pong delivers 3 separate turns (not merged by catId)', async () => {
     const pingPongRouter = /** @type {any} */ ({
       async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {

@@ -1982,7 +1982,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST register-pr-tracking rejects unknown catId', async () => {
+  test('POST register-pr-tracking ignores payload catId, uses invocation identity', async () => {
     const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
     const prTrackingStore = new MemoryPrTrackingStore();
 
@@ -1997,6 +1997,7 @@ describe('Callback Routes', () => {
       prTrackingStore,
     });
 
+    // Invocation is opus, payload sends bogus catId — server must ignore payload
     const { invocationId, callbackToken } = registry.create('user-1', 'opus');
 
     const response = await app.inject({
@@ -2007,13 +2008,13 @@ describe('Callback Routes', () => {
         callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 1,
-        catId: 'nonexistent-cat',
+        catId: 'nonexistent-cat', // bogus — should be ignored
       },
     });
 
-    assert.equal(response.statusCode, 400);
+    assert.equal(response.statusCode, 200, 'payload catId is ignored, so bogus value must not cause 400');
     const body = JSON.parse(response.body);
-    assert.ok(body.error.includes('Unknown catId'));
+    assert.equal(body.entry.catId, 'opus', 'must use invocation catId, not payload');
   });
 
   test('POST register-pr-tracking rejects overwrite from different user (P1-2 ownership)', async () => {
@@ -2135,6 +2136,46 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 503);
     const body = JSON.parse(response.body);
     assert.ok(body.error.includes('not configured'));
+  });
+
+  test('POST register-pr-tracking uses invocation catId, not payload catId (authority bug)', async () => {
+    const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
+    const prTrackingStore = new MemoryPrTrackingStore();
+
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      threadStore,
+      sharedBank: 'cat-cafe-shared',
+      prTrackingStore,
+    });
+
+    // Invocation is for opencode, but payload says opus
+    const { invocationId, callbackToken } = registry.create('user-1', 'opencode', 'thread-opencode');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      payload: {
+        invocationId,
+        callbackToken,
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 832,
+        catId: 'opus', // ← LLM passed wrong catId
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+
+    // Server must use the authoritative catId from invocation record, not the payload
+    assert.equal(body.entry.catId, 'opencode', 'must use invocation catId, not payload catId');
+
+    const stored = prTrackingStore.get('zts212653/cat-cafe', 832);
+    assert.equal(stored.catId, 'opencode', 'stored entry must have authoritative catId');
   });
 
   // ---- F052: cross-thread identity isolation ----

@@ -115,10 +115,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     ? new GameOrchestrator({
         gameStore: opts.gameStore,
         socketManager: opts.socketManager,
+        messageStore: opts.messageStore,
       })
     : null;
   const gameAutoPlayer = gameOrchestrator
-    ? (opts.autoPlayer ?? new GameAutoPlayer({ gameStore: opts.gameStore!, orchestrator: gameOrchestrator }))
+    ? (opts.autoPlayer ??
+      new GameAutoPlayer({
+        gameStore: opts.gameStore!,
+        orchestrator: gameOrchestrator,
+        messageStore: opts.messageStore,
+      }))
     : null;
 
   if (gameAutoPlayer) {
@@ -285,6 +291,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             voiceMode: parsedGame.voiceMode,
             humanRole: parsedGame.humanRole,
             ...(parsedGame.humanRole === 'player' ? { humanSeat: 'P1' } : {}),
+            observerUserId: userId, // H2 fix: messageStore dual-write needs userId for thread visibility
           },
         });
       } catch (err: unknown) {
@@ -651,6 +658,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const persistenceContext: PersistenceContext = { failed: false, errors: [] };
           // F8: collect per-cat token usage from done events
           const collectedUsage = new Map<string, TokenUsage>();
+          // F130: track governance block errorCode for recoverable failure marking
+          let governanceErrorCode: string | undefined;
           // Aggregate streamed assistant text for push summary/decision classification.
           let assistantReplyContent = '';
           for await (const msg of router.routeExecution(
@@ -681,6 +690,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
+            }
+            // F130: Capture governance block errorCode for post-loop failure marking
+            if (msg.type === 'done' && msg.errorCode) {
+              governanceErrorCode = msg.errorCode;
             }
             opts.socketManager.broadcastAgentMessage(
               { ...msg, invocationId: createResult.invocationId },
@@ -743,6 +756,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 })
                 .catch(() => {});
             }
+          } else if (governanceErrorCode) {
+            // F130: Governance gate blocked — mark as failed with errorCode for retry
+            await opts.invocationRecordStore?.update(createResult.invocationId, {
+              status: 'failed',
+              error: governanceErrorCode,
+            });
           } else {
             // ADR-008 S3: ack cursors before marking succeeded so that if ack
             // throws, the catch block sees running→failed (valid transition).

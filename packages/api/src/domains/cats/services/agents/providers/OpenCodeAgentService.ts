@@ -17,6 +17,7 @@
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
+import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
@@ -63,8 +64,15 @@ export class OpenCodeAgentService implements AgentService {
     let sessionInitEmitted = false;
 
     try {
+      const opencodeCommand = resolveCliCommand('opencode');
+      if (!opencodeCommand) {
+        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('opencode'), metadata, timestamp: Date.now() };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+
       const cliOpts = {
-        command: 'opencode' as const,
+        command: opencodeCommand,
         args,
         ...(cwd ? { cwd } : {}),
         env: childEnv,

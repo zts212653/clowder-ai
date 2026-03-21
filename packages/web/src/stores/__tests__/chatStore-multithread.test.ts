@@ -446,14 +446,21 @@ describe('chatStore multi-thread state', () => {
       expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(0);
     });
 
-    it('suppression expires after 10s', () => {
+    it('suppression persists until confirmUnreadAck (#586)', () => {
       useChatStore.getState().addMessageToThread('thread-b', makeMsg('s2'));
       useChatStore.getState().clearUnread('thread-b');
 
-      // Advance past suppression window
-      vi.advanceTimersByTime(11_000);
+      // Even after a long time, suppression holds (Infinity, not 10s)
+      vi.advanceTimersByTime(120_000);
 
-      // Now initThreadUnread should work
+      // Still suppressed — initThreadUnread is blocked
+      useChatStore.getState().initThreadUnread('thread-b', 2, false);
+      expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(0);
+
+      // Any successful ack clears suppression (/read/latest is idempotent)
+      useChatStore.getState().confirmUnreadAck('thread-b');
+
+      // Now initThreadUnread works
       useChatStore.getState().initThreadUnread('thread-b', 2, false);
       expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(2);
     });

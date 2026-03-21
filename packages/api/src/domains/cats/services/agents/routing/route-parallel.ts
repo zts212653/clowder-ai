@@ -472,7 +472,12 @@ export async function* routeParallel(
               // Parity with HTTP/routeSerial cast validations.
               if (Date.now() > voteState.deadline) {
                 console.log(`[routeParallel] F079: Vote expired in ${threadId}, ignoring [VOTE:${votedOption}]`);
-              } else if (voteState.voters && voteState.voters.length > 0 && !voteState.voters.includes(msg.catId)) {
+              } else if (
+                voteState.voters &&
+                voteState.voters.length > 0 &&
+                !voteState.voters.includes(msg.catId) &&
+                msg.catId !== voteState.initiatedByCat
+              ) {
                 console.log(`[routeParallel] F079: ${msg.catId} not in voters list, ignoring vote`);
               } else {
                 voteState.votes[msg.catId] = votedOption;

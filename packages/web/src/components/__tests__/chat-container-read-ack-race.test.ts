@@ -44,6 +44,8 @@ const baseStore = () => ({
   viewMode: 'single' as const,
   setViewMode: vi.fn(),
   clearUnread: vi.fn(),
+  confirmUnreadAck: vi.fn(),
+  armUnreadSuppression: vi.fn(),
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),

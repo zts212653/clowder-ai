@@ -724,4 +724,36 @@ describe('ConnectorCommandLayer', () => {
     assert.ok(result.response.includes('[F066'), 'Should show first feat badge in brackets');
     assert.ok(result.response.includes('F088]'), 'Should show second feat in badge');
   });
+
+  it('/unbind with no binding returns warning', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(null),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/unbind');
+    assert.equal(result.kind, 'unbind');
+    assert.ok(result.response.includes('没有绑定'));
+  });
+
+  it('/unbind removes active binding and returns thread info', async () => {
+    let removedKey = null;
+    const bindingStore = {
+      ...stubStore({ connectorId: 'feishu', externalChatId: 'chat1', threadId: 'thread-x', userId: 'user1' }),
+      remove: async (connectorId, externalChatId) => {
+        removedKey = `${connectorId}:${externalChatId}`;
+        return true;
+      },
+    };
+    const layer = new ConnectorCommandLayer({
+      bindingStore,
+      threadStore: stubThreadStore({ id: 'thread-x', title: 'My Thread' }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/unbind');
+    assert.equal(result.kind, 'unbind');
+    assert.ok(result.response.includes('已解绑'));
+    assert.ok(result.response.includes('My Thread'));
+    assert.equal(removedKey, 'feishu:chat1');
+  });
 });

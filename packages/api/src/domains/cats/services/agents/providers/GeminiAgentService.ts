@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
+import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
@@ -98,11 +99,18 @@ export class GeminiAgentService implements AgentService {
     }
 
     try {
+      const geminiCommand = resolveCliCommand('gemini');
+      if (!geminiCommand) {
+        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('gemini'), metadata, timestamp: Date.now() };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+
       let sawResultError = false;
       let sawAssistantText = false;
       let suppressCliExitError = false;
       const cliOpts = {
-        command: 'gemini' as const,
+        command: geminiCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         ...(options?.callbackEnv ? { env: options.callbackEnv } : {}),

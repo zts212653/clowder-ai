@@ -226,8 +226,20 @@ export function shouldTakeAction(
   const safetyMargin = strategy.safetyMargin ?? 4_000;
   const remaining = windowTokens - usedTokens;
 
-  // Budget exhausted → must seal regardless of strategy
+  // Budget exhausted — strategy-aware:
+  // - compress: CLI will free space by compressing, don't pre-emptively seal
+  // - hybrid: allow compress if compressions remain, seal only when max reached
+  // - handoff: seal immediately
   if (remaining < turnBudget + safetyMargin) {
+    if (strategy.strategy === 'compress') {
+      return { type: 'allow_compress' };
+    }
+    if (strategy.strategy === 'hybrid') {
+      const max = strategy.hybrid?.maxCompressions ?? 2;
+      if (compressionCount < max) {
+        return { type: 'allow_compress' };
+      }
+    }
     return { type: 'seal', reason: 'budget_exhausted' };
   }
 

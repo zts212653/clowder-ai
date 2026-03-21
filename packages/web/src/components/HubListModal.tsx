@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from './icons/HubIcon';
+import { formatRelativeTime } from './ThreadSidebar/thread-utils';
 
 const CONNECTOR_LABELS: Record<string, string> = {
   feishu: '飞书',
@@ -19,6 +20,7 @@ interface HubThreadSummary {
   connectorId?: string;
   externalChatId?: string;
   createdAt?: number;
+  lastCommandAt?: number;
 }
 
 interface HubListModalProps {
@@ -131,6 +133,11 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                         </div>
                         {t.externalChatId && (
                           <div className="text-xs text-gray-400 mt-1 truncate">{t.externalChatId}</div>
+                        )}
+                        {t.lastCommandAt && (
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            最近命令 {formatRelativeTime(t.lastCommandAt)}
+                          </div>
                         )}
                       </button>
                     );

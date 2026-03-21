@@ -47,8 +47,28 @@ export interface ConnectorRouterOptions {
     create(userId: string, title?: string): { id: string } | Promise<{ id: string }>;
     updateConnectorHubState(
       threadId: string,
-      state: { v: 1; connectorId: string; externalChatId: string; createdAt: number } | null,
+      state: { v: 1; connectorId: string; externalChatId: string; createdAt: number; lastCommandAt?: number } | null,
     ): void | Promise<void>;
+    get?(threadId: string):
+      | {
+          connectorHubState?: {
+            v: 1;
+            connectorId: string;
+            externalChatId: string;
+            createdAt: number;
+            lastCommandAt?: number;
+          };
+        }
+      | null
+      | Promise<{
+          connectorHubState?: {
+            v: 1;
+            connectorId: string;
+            externalChatId: string;
+            createdAt: number;
+            lastCommandAt?: number;
+          };
+        } | null>;
   };
   readonly invokeTrigger: {
     trigger(
@@ -387,6 +407,18 @@ export class ConnectorRouter {
       connectorId: 'system-command',
       content: responseText,
     });
+
+    // G+: Update lastCommandAt on the Hub thread for audit visibility
+    const { threadStore } = this.opts;
+    if (threadStore.get) {
+      const thread = await threadStore.get(threadId);
+      if (thread?.connectorHubState) {
+        await threadStore.updateConnectorHubState(threadId, {
+          ...thread.connectorHubState,
+          lastCommandAt: now,
+        });
+      }
+    }
 
     return { commandId: cmdMsg.id, responseId: resMsg.id };
   }

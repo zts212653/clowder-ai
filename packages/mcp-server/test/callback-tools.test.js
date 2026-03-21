@@ -964,4 +964,42 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.overrideReason, undefined);
     assert.equal(body.triggerType, undefined);
   });
+
+  // ---- handleRegisterPrTracking payload semantics ----
+
+  test('handleRegisterPrTracking omits catId from body when not provided', async () => {
+    const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
+
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    await handleRegisterPrTracking({ repoFullName: 'zts212653/cat-cafe', prNumber: 832 });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.repoFullName, 'zts212653/cat-cafe');
+    assert.equal(body.prNumber, 832);
+    assert.equal(body.catId, undefined, 'catId must not appear in body when omitted');
+    assert.equal(body.invocationId, 'test-invocation');
+    assert.equal(body.callbackToken, 'test-token');
+  });
+
+  test('handleRegisterPrTracking forwards catId when provided (backward compat)', async () => {
+    const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
+
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    await handleRegisterPrTracking({ repoFullName: 'zts212653/cat-cafe', prNumber: 100, catId: 'opus' });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.catId, 'opus', 'catId must be forwarded when caller provides it');
+    assert.equal(body.repoFullName, 'zts212653/cat-cafe');
+    assert.equal(body.prNumber, 100);
+  });
 });

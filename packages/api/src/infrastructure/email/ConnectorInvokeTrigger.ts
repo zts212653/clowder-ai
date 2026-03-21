@@ -313,13 +313,17 @@ export class ConnectorInvokeTrigger {
       // to prevent race (onStreamEnd before onStreamStart finishes registering sessions).
       let streamStartPromise: Promise<void> | undefined;
       if (this.opts.streamingHook) {
-        streamStartPromise = this.opts.streamingHook.onStreamStart(threadId, catId).catch((err) => {
-          log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamStart failed');
-        });
+        streamStartPromise = this.opts.streamingHook
+          .onStreamStart(threadId, catId, createResult.invocationId)
+          .catch((err) => {
+            log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamStart failed');
+          });
       }
 
       const intent = { intent: 'execute' as const, explicit: false, promptTags: [] as string[] };
 
+      // F130: track governance block errorCode
+      let governanceErrorCode: string | undefined;
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(controller?.signal ? { signal: controller.signal } : {}),
@@ -330,6 +334,7 @@ export class ConnectorInvokeTrigger {
       })) {
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
+        if (msg.type === 'done' && msg.errorCode) governanceErrorCode = msg.errorCode;
         if (msg.type === 'done' && msg.catId) {
           if (msg.metadata?.usage) {
             collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
@@ -363,7 +368,7 @@ export class ConnectorInvokeTrigger {
           // Phase 4: Stream accumulated text to external platforms
           if (this.opts.streamingHook) {
             const accumulated = collectedTextParts.join('');
-            this.opts.streamingHook.onStreamChunk(threadId, accumulated).catch((err) => {
+            this.opts.streamingHook.onStreamChunk(threadId, accumulated, createResult.invocationId).catch((err) => {
               log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamChunk failed');
             });
           }
@@ -386,6 +391,12 @@ export class ConnectorInvokeTrigger {
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'failed',
           error: `Connector invoke: message delivered but persistence failed: ${errorDetail}`,
+        });
+      } else if (governanceErrorCode) {
+        // F130: Governance gate blocked — mark as failed for retry
+        await invocationRecordStore.update(createResult.invocationId, {
+          status: 'failed',
+          error: governanceErrorCode,
         });
       } else {
         await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
@@ -411,7 +422,7 @@ export class ConnectorInvokeTrigger {
               new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
             ]);
           }
-          await this.opts.streamingHook.onStreamEnd(threadId, finalContent).catch((err) => {
+          await this.opts.streamingHook.onStreamEnd(threadId, finalContent, createResult.invocationId).catch((err) => {
             log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamEnd failed');
           });
         }
@@ -448,42 +459,104 @@ export class ConnectorInvokeTrigger {
             (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
           );
 
+          let deliveryFailed = false;
+          // Cloud-R4-P2: keep references to in-flight deliver promises so we can
+          // schedule late-success cleanup when a delivery times out but later succeeds.
+          const inflightDeliverPromises: Promise<void>[] = [];
+
           if (nonEmptyTurns.length > 1) {
             for (const turn of nonEmptyTurns) {
               const turnContent = turn.textParts.join('');
+              const deliverPromise = this.opts.outboundHook.deliver(
+                threadId,
+                turnContent,
+                turn.catId as CatId,
+                turn.richBlocks,
+                threadMeta,
+              );
+              inflightDeliverPromises.push(deliverPromise);
               try {
                 await Promise.race([
-                  this.opts.outboundHook.deliver(
-                    threadId,
-                    turnContent,
-                    turn.catId as CatId,
-                    turn.richBlocks,
-                    threadMeta,
-                  ),
+                  deliverPromise,
                   new Promise<void>((_, reject) =>
                     setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
                   ),
                 ]);
               } catch (err) {
+                deliveryFailed = true;
                 log.error({ err, threadId, catId: turn.catId }, '[ConnectorInvokeTrigger] Outbound delivery error');
               }
             }
           } else if (nonEmptyTurns.length === 1) {
-            // Single-turn path: use actual speaker catId
             const turn = nonEmptyTurns[0];
             const richBlocks = persistenceContext.richBlocks ?? turn.richBlocks;
-            this.opts.outboundHook
-              .deliver(threadId, finalContent, turn.catId as CatId, richBlocks, threadMeta)
-              .catch((err) => {
-                log.error({ err, threadId }, '[ConnectorInvokeTrigger] Outbound delivery error');
-              });
-          } else {
-            // No turns but hasContent — fallback to original catId (e.g. richBlocks only in persistenceContext)
-            const richBlocks = persistenceContext.richBlocks;
-            this.opts.outboundHook.deliver(threadId, finalContent, catId, richBlocks, threadMeta).catch((err) => {
+            const deliverPromise = this.opts.outboundHook.deliver(
+              threadId,
+              finalContent,
+              turn.catId as CatId,
+              richBlocks,
+              threadMeta,
+            );
+            inflightDeliverPromises.push(deliverPromise);
+            try {
+              await Promise.race([
+                deliverPromise,
+                new Promise<void>((_, reject) =>
+                  setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+                ),
+              ]);
+            } catch (err) {
+              deliveryFailed = true;
               log.error({ err, threadId }, '[ConnectorInvokeTrigger] Outbound delivery error');
+            }
+          } else {
+            const richBlocks = persistenceContext.richBlocks;
+            const deliverPromise = this.opts.outboundHook.deliver(
+              threadId,
+              finalContent,
+              catId,
+              richBlocks,
+              threadMeta,
+            );
+            inflightDeliverPromises.push(deliverPromise);
+            try {
+              await Promise.race([
+                deliverPromise,
+                new Promise<void>((_, reject) =>
+                  setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+                ),
+              ]);
+            } catch (err) {
+              deliveryFailed = true;
+              log.error({ err, threadId }, '[ConnectorInvokeTrigger] Outbound delivery error');
+            }
+          }
+
+          // Cloud-P1-R2: only cleanup placeholders if ALL deliveries succeeded
+          if (!deliveryFailed && this.opts.streamingHook?.cleanupPlaceholders) {
+            await this.opts.streamingHook.cleanupPlaceholders(threadId, createResult.invocationId).catch((err) => {
+              log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.cleanupPlaceholders failed');
+            });
+          } else if (deliveryFailed && this.opts.streamingHook?.cleanupPlaceholders) {
+            // Cloud-R4-P2: schedule late-success cleanup — if timed-out deliveries
+            // eventually succeed, clean up placeholder cards so the user doesn't see
+            // a stale "thinking…" card alongside the real response.
+            const cleanupHook = this.opts.streamingHook;
+            const scopedInvocationId = createResult.invocationId;
+            Promise.allSettled(inflightDeliverPromises).then((results) => {
+              const allSucceeded = results.every((r) => r.status === 'fulfilled');
+              if (allSucceeded) {
+                cleanupHook.cleanupPlaceholders(threadId, scopedInvocationId).catch((err) => {
+                  log.warn({ err, threadId }, '[ConnectorInvokeTrigger] Late-success placeholder cleanup failed');
+                });
+              }
             });
           }
+        } else if (this.opts.streamingHook?.cleanupPlaceholders) {
+          // Cloud-P1-R3: silent invocation (no content) — still clean up placeholder
+          await this.opts.streamingHook.cleanupPlaceholders(threadId, createResult.invocationId).catch((err) => {
+            log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.cleanupPlaceholders failed (silent)');
+          });
         }
       }
 

@@ -320,11 +320,14 @@ export async function triggerA2AInvocation(
 
       socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', { threadId, mode: intent.intent, targetCats });
 
+      // F130: track governance block errorCode
+      let governanceErrorCode: string | undefined;
       for await (const msg of router.routeExecution(userId, content, threadId, triggerMessage.id, targetCats, intent, {
         ...(controller?.signal ? { signal: controller.signal } : {}),
         parentInvocationId: createResult.invocationId,
       })) {
         if (controller?.signal.aborted) break;
+        if (msg.type === 'done' && msg.errorCode) governanceErrorCode = msg.errorCode;
         socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
       }
 
@@ -332,6 +335,11 @@ export async function triggerA2AInvocation(
         finalStatus = 'canceled';
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'canceled',
+        });
+      } else if (governanceErrorCode) {
+        await invocationRecordStore.update(createResult.invocationId, {
+          status: 'failed',
+          error: governanceErrorCode,
         });
       } else {
         await invocationRecordStore.update(createResult.invocationId, {

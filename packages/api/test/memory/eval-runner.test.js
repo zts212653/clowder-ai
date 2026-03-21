@@ -19,10 +19,10 @@ describe('Eval Corpus: Recall@5', () => {
     const builderMod = await import('../../dist/domains/memory/IndexBuilder.js');
     IndexBuilder = builderMod.IndexBuilder;
 
-    // Build real index from docs/
+    // Build real index from docs/ — resolve relative to repo root (not process.cwd() which is packages/api)
     store = new SqliteEvidenceStore(':memory:');
     await store.initialize();
-    const docsRoot = join(process.cwd(), 'docs');
+    const docsRoot = join(import.meta.dirname, '../../../../docs');
     const builder = new IndexBuilder(store, docsRoot);
     await builder.rebuild({ force: true });
   });

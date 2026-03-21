@@ -33,6 +33,9 @@ export interface InvocationRecord {
   error?: string;
   /** F8: Per-cat token usage collected on invocation completion */
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
+  /** F128: Epoch ms when usageByCat was first recorded. Stable for daily bucketing
+   *  (unlike updatedAt which any subsequent update can shift). */
+  usageRecordedAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -80,6 +83,9 @@ export interface IInvocationRecordStore {
     userId: string,
     key: string,
   ): InvocationRecord | null | Promise<InvocationRecord | null>;
+
+  /** F128: Scan all invocation records (optional — only Redis impl provides this) */
+  scanAll?(): Promise<InvocationRecord[]>;
 }
 
 /** Max records in memory store */
@@ -163,7 +169,11 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     if (input.status !== undefined) record.status = input.status;
     if (input.userMessageId !== undefined) record.userMessageId = input.userMessageId;
     if (input.error !== undefined) record.error = input.error;
-    if (input.usageByCat !== undefined) record.usageByCat = input.usageByCat;
+    if (input.usageByCat !== undefined) {
+      record.usageByCat = input.usageByCat;
+      // F128: stamp usageRecordedAt only on first write (stable for daily bucketing)
+      if (record.usageRecordedAt == null) record.usageRecordedAt = Date.now();
+    }
     record.updatedAt = Date.now();
 
     return record;

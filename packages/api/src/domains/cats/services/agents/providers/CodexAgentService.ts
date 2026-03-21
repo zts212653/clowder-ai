@@ -23,6 +23,7 @@ import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
+import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
@@ -325,8 +326,15 @@ export class CodexAgentService implements AgentService {
 
       const semanticCompletionController = new AbortController();
 
+      const codexCommand = resolveCliCommand('codex');
+      if (!codexCommand) {
+        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('codex'), metadata, timestamp: Date.now() };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+
       const cliOpts = {
-        command: 'codex' as const,
+        command: codexCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: codexEnv,

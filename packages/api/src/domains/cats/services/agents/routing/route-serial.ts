@@ -578,7 +578,8 @@ export async function* routeSerial(
               } else if (
                 voteState.voters &&
                 voteState.voters.length > 0 &&
-                !voteState.voters.includes(catId as string)
+                !voteState.voters.includes(catId as string) &&
+                (catId as string) !== voteState.initiatedByCat
               ) {
                 console.log(`[routeSerial] F079: ${catId as string} not in voters list, ignoring vote`);
               } else {

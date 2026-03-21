@@ -40,6 +40,7 @@ function mockThreadStore() {
     list() {
       return [...threads.values()];
     },
+    updateConnectorHubState() {},
   };
 }
 

@@ -174,6 +174,8 @@ export async function generateScriptViaThread(
   try {
     await deps.invocationRecordStore.update(createResult.invocationId, { status: 'running' });
 
+    // F130: track governance block errorCode
+    let governanceErrorCode: string | undefined;
     for await (const msg of deps.router.routeExecution(
       request.requestedBy,
       prompt,
@@ -183,11 +185,19 @@ export async function generateScriptViaThread(
       intent,
       { signal: controller.signal, parentInvocationId: createResult.invocationId },
     )) {
+      if (msg.type === 'done' && msg.errorCode) governanceErrorCode = msg.errorCode;
       if (msg.type === 'text' && msg.content) {
         fullText += msg.content;
       }
     }
 
+    if (governanceErrorCode) {
+      await deps.invocationRecordStore.update(createResult.invocationId, {
+        status: 'failed',
+        error: governanceErrorCode,
+      });
+      throw new Error(`Governance bootstrap required for thread project: ${governanceErrorCode}`);
+    }
     await deps.invocationRecordStore.update(createResult.invocationId, { status: 'succeeded' });
   } catch (err) {
     await deps.invocationRecordStore.update(createResult.invocationId, {
