@@ -70,10 +70,21 @@ export function IdentitySection({
           <input type="hidden" aria-label="Cat ID" value={form.catId} />
         </>
       ) : (
-        <TextField label="名称" ariaLabel="Name" value={form.name} onChange={(value) => onChange({ name: value, displayName: value })} />
+        <TextField
+          label="名称"
+          ariaLabel="Name"
+          value={form.name}
+          onChange={(value) => onChange({ name: value, displayName: value })}
+        />
       )}
 
-      <TextField label="昵称" ariaLabel="Nickname" value={form.nickname} onChange={(value) => onChange({ nickname: value })} placeholder="可选，铲屎官给的昵称" />
+      <TextField
+        label="昵称"
+        ariaLabel="Nickname"
+        value={form.nickname}
+        onChange={(value) => onChange({ nickname: value })}
+        placeholder="可选，铲屎官给的昵称"
+      />
       <TextField
         label="角色描述"
         ariaLabel="Description"
@@ -152,7 +163,13 @@ export function IdentitySection({
         onChange={(value) => onChange({ teamStrengths: value })}
         placeholder="如 架构设计、安全分析"
       />
-      <TextField label="性格特征" ariaLabel="Personality" value={form.personality} onChange={(value) => onChange({ personality: value })} placeholder="如 温柔但有主见" />
+      <TextField
+        label="性格特征"
+        ariaLabel="Personality"
+        value={form.personality}
+        onChange={(value) => onChange({ personality: value })}
+        placeholder="如 温柔但有主见"
+      />
       <TextField
         label="注意事项"
         ariaLabel="Caution"

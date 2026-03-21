@@ -348,7 +348,9 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
-        ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0 ? { cliConfigArgs: [...variant.cliConfigArgs] } : {}),
+        ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
+          ? { cliConfigArgs: [...variant.cliConfigArgs] }
+          : {}),
         ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',

@@ -458,10 +458,12 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).not.toContain('默认/覆盖模型');
 
     // Form is collapsed by default — expand it
-    const expandButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('新建 API Key 账号'),
+    const expandButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('新建 API Key 账号'),
     )!;
-    await act(async () => { expandButton.click(); });
+    await act(async () => {
+      expandButton.click();
+    });
     await flushEffects();
 
     expect(container.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
@@ -522,15 +524,15 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     // Expand the collapsed create form
-    const expandButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('新建 API Key 账号'),
+    const expandButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('新建 API Key 账号'),
     )!;
-    await act(async () => { expandButton.click(); });
+    await act(async () => {
+      expandButton.click();
+    });
     await flushEffects();
 
-    const displayNameInput = container.querySelector(
-      'input[placeholder*="账号显示名"]',
-    ) as HTMLInputElement;
+    const displayNameInput = container.querySelector('input[placeholder*="账号显示名"]') as HTMLInputElement;
     const baseUrlInput = container.querySelector('input[placeholder*="API 服务地址"]') as HTMLInputElement;
     const apiKeyInput = container.querySelector('input[placeholder*="sk-"]') as HTMLInputElement;
     expect(apiKeyInput.type).toBe('password');
@@ -600,15 +602,15 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     // Expand the collapsed create form
-    const expandButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('新建 API Key 账号'),
+    const expandButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('新建 API Key 账号'),
     )!;
-    await act(async () => { expandButton.click(); });
+    await act(async () => {
+      expandButton.click();
+    });
     await flushEffects();
 
-    const displayNameInput = container.querySelector(
-      'input[placeholder*="账号显示名"]',
-    ) as HTMLInputElement;
+    const displayNameInput = container.querySelector('input[placeholder*="账号显示名"]') as HTMLInputElement;
     const baseUrlInput = container.querySelector('input[placeholder*="API 服务地址"]') as HTMLInputElement;
     const apiKeyInput = container.querySelector('input[placeholder*="sk-"]') as HTMLInputElement;
 
@@ -787,7 +789,9 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(Array.from(container.querySelectorAll('button')).filter((button) => button.textContent?.trim() === '测试')).toHaveLength(0);
+    expect(
+      Array.from(container.querySelectorAll('button')).filter((button) => button.textContent?.trim() === '测试'),
+    ).toHaveLength(0);
     expect(container.textContent).toContain('Codex Sponsor');
   });
 

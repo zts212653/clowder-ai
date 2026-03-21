@@ -5,7 +5,9 @@ import { HubProviderProfileItem, type ProfileEditPayload } from '@/components/Hu
 import type { ProfileItem } from '@/components/hub-provider-profiles.types';
 
 function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent?.includes(text));
+  const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
+    candidate.textContent?.includes(text),
+  );
   if (!button) {
     throw new Error(`Missing button: ${text}`);
   }
@@ -58,14 +60,7 @@ describe('HubProviderProfileItem', () => {
     const onSave = vi.fn(async () => {});
 
     await act(async () => {
-      root.render(
-        <HubProviderProfileItem
-          profile={profile}
-          busy={false}
-          onSave={onSave}
-          onDelete={() => {}}
-        />,
-      );
+      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
     });
 
     await act(async () => {
@@ -82,7 +77,7 @@ describe('HubProviderProfileItem', () => {
       baseUrl: 'https://api.anthropic.com',
       models: ['claude-opus-4-1'],
     });
-    expect(Object.prototype.hasOwnProperty.call(payload, 'modelOverride')).toBe(false);
+    expect(Object.hasOwn(payload, 'modelOverride')).toBe(false);
   });
 
   it('sends empty baseUrl when clearing an API-key account base URL', async () => {
@@ -104,14 +99,7 @@ describe('HubProviderProfileItem', () => {
     const onSave = vi.fn(async () => {});
 
     await act(async () => {
-      root.render(
-        <HubProviderProfileItem
-          profile={profile}
-          busy={false}
-          onSave={onSave}
-          onDelete={() => {}}
-        />,
-      );
+      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
     });
 
     await act(async () => {
@@ -152,12 +140,7 @@ describe('HubProviderProfileItem', () => {
 
     await act(async () => {
       root.render(
-        <HubProviderProfileItem
-          profile={profile}
-          busy={false}
-          onSave={vi.fn(async () => {})}
-          onDelete={() => {}}
-        />,
+        <HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />,
       );
     });
 
@@ -186,12 +169,7 @@ describe('HubProviderProfileItem', () => {
 
     await act(async () => {
       root.render(
-        <HubProviderProfileItem
-          profile={profile}
-          busy={false}
-          onSave={vi.fn(async () => {})}
-          onDelete={() => {}}
-        />,
+        <HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />,
       );
     });
 
@@ -221,12 +199,7 @@ describe('HubProviderProfileItem', () => {
 
     await act(async () => {
       root.render(
-        <HubProviderProfileItem
-          profile={profile}
-          busy={false}
-          onSave={vi.fn(async () => {})}
-          onDelete={onDelete}
-        />,
+        <HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={onDelete} />,
       );
     });
 

@@ -12,9 +12,9 @@ import type {
 } from '@cat-cafe/shared';
 import { CAT_CONFIGS, createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
+import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { clearVoiceCache } from './cat-voices.js';
-import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 
 export interface RuntimeCatInput {
@@ -113,9 +113,9 @@ function isSeedCat(projectRoot: string, catId: string): boolean {
   try {
     const templatePath = resolveProjectTemplatePath(projectRoot);
     const seedCats = toAllCatConfigs(loadCatConfig(templatePath));
-    return Object.prototype.hasOwnProperty.call(seedCats, catId);
+    return Object.hasOwn(seedCats, catId);
   } catch {
-    return Object.prototype.hasOwnProperty.call(CAT_CONFIGS, catId);
+    return Object.hasOwn(CAT_CONFIGS, catId);
   }
 }
 
@@ -145,7 +145,7 @@ function assertUniqueMentionAliases(catalog: CatCafeConfig): void {
     }
   }
 
-  const ownerMentionPatterns = catalog.version === 2 ? catalog.owner?.mentionPatterns ?? [] : [];
+  const ownerMentionPatterns = catalog.version === 2 ? (catalog.owner?.mentionPatterns ?? []) : [];
   for (const mentionPattern of ownerMentionPatterns) {
     const trimmed = mentionPattern.trim();
     if (!trimmed) continue;
@@ -443,11 +443,7 @@ export function updateRuntimeOwner(projectRoot: string, patch: RuntimeOwnerUpdat
     ...(patch.name !== undefined ? { name: patch.name } : {}),
     ...(patch.aliases !== undefined
       ? {
-          aliases: Array.from(
-            new Set(
-              patch.aliases.map((alias) => alias.trim()).filter((alias) => alias.length > 0),
-            ),
-          ),
+          aliases: Array.from(new Set(patch.aliases.map((alias) => alias.trim()).filter((alias) => alias.length > 0))),
         }
       : {}),
     ...(patch.mentionPatterns !== undefined

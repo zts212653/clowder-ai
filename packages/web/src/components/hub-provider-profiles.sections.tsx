@@ -34,9 +34,7 @@ export function ProviderProfilesSummaryCard({
           </select>
         ) : null}
       </div>
-      <p className="mt-2 text-[13px] leading-6 text-[#8A776B]">
-        每个账号可添加或删除模型。
-      </p>
+      <p className="mt-2 text-[13px] leading-6 text-[#8A776B]">每个账号可添加或删除模型。</p>
     </div>
   );
 }
@@ -103,7 +101,9 @@ export function CreateApiKeyProfileSection({
             className="w-full rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
           >
             {PROTOCOL_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
             ))}
           </select>
           <input

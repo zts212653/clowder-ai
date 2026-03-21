@@ -2971,7 +2971,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
       assert.equal(invokeCount, 1, 'service.invoke should run when api_key profile is member-bound');
       assert.ok(messages.some((m) => m.type === 'done'));
-      assert.equal(messages.some((m) => m.type === 'error' && /bound provider profile/i.test(String(m.error))), false);
+      assert.equal(
+        messages.some((m) => m.type === 'error' && /bound provider profile/i.test(String(m.error))),
+        false,
+      );
     } finally {
       process.chdir(previousCwd);
       catRegistry.reset();

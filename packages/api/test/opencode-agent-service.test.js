@@ -138,7 +138,10 @@ describe('OpenCodeAgentService', () => {
 
     const textMsgs = messages.filter((m) => m.type === 'text');
     assert.equal(textMsgs.length, 0, 'empty text chunk should be ignored');
-    assert.ok(messages.some((m) => m.type === 'done'), 'done should still be emitted');
+    assert.ok(
+      messages.some((m) => m.type === 'done'),
+      'done should still be emitted',
+    );
   });
 
   test('passes --format json and -m model in CLI args', async () => {
@@ -378,7 +381,11 @@ describe('OpenCodeAgentService', () => {
     await promise;
 
     const opts = spawnFn.mock.calls[0].arguments[2];
-    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:9877/slug/v1', 'explicit /v1 should be preserved');
+    assert.strictEqual(
+      opts.env.ANTHROPIC_BASE_URL,
+      'http://127.0.0.1:9877/slug/v1',
+      'explicit /v1 should be preserved',
+    );
   });
 
   // ── P2-1: multiple step_start should NOT produce multiple session_init ──

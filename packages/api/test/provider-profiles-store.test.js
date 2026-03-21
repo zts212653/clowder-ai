@@ -72,7 +72,10 @@ describe('provider profile store', () => {
     const claude = data.providers.find((profile) => profile.id === 'claude');
     assert.ok(claude, 'builtin Claude account should exist');
     assert.ok(claude.models.includes('claude-opus-4-6'));
-    assert.equal(claude.models.some((model) => model.includes('[1m]')), false);
+    assert.equal(
+      claude.models.some((model) => model.includes('[1m]')),
+      false,
+    );
   });
 
   it('creates a client-agnostic api_key account and keeps secrets out of meta', async () => {

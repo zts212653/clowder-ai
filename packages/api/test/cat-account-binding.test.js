@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -52,7 +51,9 @@ describe('cat account binding', () => {
   });
 
   it('backfills legacy accountRef-only seed bindings before suppressing inherited bootstrap refs', async () => {
-    const { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
+    const { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } = await import(
+      '../dist/config/cat-catalog-store.js'
+    );
     const { toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const { resolveBoundAccountRefForCat } = await import('../dist/config/cat-account-binding.js');
     const projectRoot = await mkdtemp(join(tmpdir(), 'cat-account-binding-legacy-seed-'));
@@ -96,7 +97,9 @@ describe('cat account binding', () => {
   });
 
   it('keeps untouched seed siblings inherited after bootstrap switches to a new account', async () => {
-    const { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
+    const { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } = await import(
+      '../dist/config/cat-catalog-store.js'
+    );
     const { toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const { resolveBoundAccountRefForCat } = await import('../dist/config/cat-account-binding.js');
     const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');

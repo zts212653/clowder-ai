@@ -54,7 +54,6 @@ function formatThinkingSignatureRescueError(sessionId: string | undefined): stri
 
 const IS_WINDOWS = process.platform === 'win32';
 
-
 export { pickGitBashPathFromWhere } from './claude-agent-win.js';
 
 function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<string, string | null> {
@@ -216,7 +215,13 @@ export class ClaudeAgentService implements AgentService {
     try {
       const claudeCommand = resolveCliCommand('claude');
       if (!claudeCommand) {
-        yield { type: 'error' as const, catId: this.catId, error: formatCliNotFoundError('claude'), metadata, timestamp: Date.now() };
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error: formatCliNotFoundError('claude'),
+          metadata,
+          timestamp: Date.now(),
+        };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
         return;
       }

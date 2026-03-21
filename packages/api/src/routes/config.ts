@@ -13,8 +13,8 @@ import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
 import { configStore } from '../config/ConfigStore.js';
 import type { ConfigSnapshot } from '../config/config-snapshot.js';
-import { updateRuntimeOwner } from '../config/runtime-cat-catalog.js';
 import { buildEnvSummary, ENV_CATEGORIES, isEditableEnvVarName } from '../config/env-registry.js';
+import { updateRuntimeOwner } from '../config/runtime-cat-catalog.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 

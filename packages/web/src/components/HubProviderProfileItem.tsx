@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { TagEditor } from './hub-tag-editor';
 import type { ApiProtocol } from './hub-provider-profiles.sections';
 import type { ProfileItem } from './hub-provider-profiles.types';
+import { TagEditor } from './hub-tag-editor';
 
 const PROTOCOL_OPTIONS: Array<{ value: ApiProtocol; label: string }> = [
   { value: 'anthropic', label: 'Anthropic' },
@@ -78,7 +78,9 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
                 className="w-full rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
               >
                 {PROTOCOL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
               <input
@@ -142,7 +144,9 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
             <span className="text-base font-bold text-[#2D2118]">{profile.displayName}</span>
             {profile.builtin ? <span className="text-[11px] font-semibold text-[#8A776B]">🔒 内置</span> : null}
             {!profile.builtin ? (
-              <span className="rounded-full bg-[#F3E8FF] px-2.5 py-1 text-[11px] font-semibold text-[#9D7BC7]">api_key</span>
+              <span className="rounded-full bg-[#F3E8FF] px-2.5 py-1 text-[11px] font-semibold text-[#9D7BC7]">
+                api_key
+              </span>
             ) : null}
           </div>
           {summaryText(profile) ? <p className="text-sm text-[#8A776B]">{summaryText(profile)}</p> : null}

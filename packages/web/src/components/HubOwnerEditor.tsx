@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { apiFetch } from '@/utils/api-client';
 import { primeOwnerConfigCache } from '@/hooks/useOwnerConfig';
+import { apiFetch } from '@/utils/api-client';
 import type { OwnerConfig } from './config-viewer-types';
-import { PersistenceBanner, SectionCard, TextField } from './hub-cat-editor-fields';
 import { uploadAvatarAsset } from './hub-cat-editor.client';
+import { PersistenceBanner, SectionCard, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
 
 const DEFAULT_OWNER: OwnerConfig = {
@@ -149,7 +149,14 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
           <PersistenceBanner />
 
           <SectionCard title="身份信息">
-            <TextField label="名称" ariaLabel="Owner Name" value={name} onChange={setName} required placeholder="Owner 显示名称" />
+            <TextField
+              label="名称"
+              ariaLabel="Owner Name"
+              value={name}
+              onChange={setName}
+              required
+              placeholder="Owner 显示名称"
+            />
 
             <div className="flex items-center gap-3">
               <span className="w-[140px] shrink-0 text-[13px] font-medium text-[#5C4B42]">Avatar</span>

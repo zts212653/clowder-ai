@@ -3,8 +3,8 @@
  * 三只 AI 猫猫的类型定义和配置
  */
 
-import type { CatId, SessionId } from './ids.js';
 import type { ContextBudget } from './cat-breed.js';
+import type { CatId, SessionId } from './ids.js';
 import { createCatId } from './ids.js';
 
 /**

@@ -635,9 +635,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       dare: 'openai',
     };
     const effectiveProtocol =
-      (resolvedAccount?.authType === 'api_key' && resolvedAccount.protocol)
+      resolvedAccount?.authType === 'api_key' && resolvedAccount.protocol
         ? resolvedAccount.protocol
-        : (provider ? defaultProtocolForProvider[provider] ?? null : null);
+        : provider
+          ? (defaultProtocolForProvider[provider] ?? null)
+          : null;
 
     // Pass protocol hint to CLI via callbackEnv (used by OpenCode/Claude for model prefix)
     if (effectiveProtocol) {

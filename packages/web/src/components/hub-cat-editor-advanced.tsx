@@ -109,19 +109,21 @@ export function AdvancedRuntimeSection({
               onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
               addLabel="+ 添加参数"
               placeholder={
-                form.client === 'opencode'
-                  ? '例如 --variant low'
-                  : '例如 --config model_reasoning_effort="low"'
+                form.client === 'opencode' ? '例如 --variant low' : '例如 --config model_reasoning_effort="low"'
               }
               emptyLabel="无额外参数"
               tone="green"
             />
             <p className="text-[11px] leading-4 text-[#8A776B]">
-              每条直接追加到 CLI 命令，不做隐式转换。
-              参考：{form.client === 'opencode' ? (
-                <a href="https://opencode.ai/docs/cli" target="_blank" rel="noreferrer" className="underline">OpenCode CLI</a>
+              每条直接追加到 CLI 命令，不做隐式转换。 参考：
+              {form.client === 'opencode' ? (
+                <a href="https://opencode.ai/docs/cli" target="_blank" rel="noreferrer" className="underline">
+                  OpenCode CLI
+                </a>
               ) : (
-                <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="underline">Codex CLI</a>
+                <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="underline">
+                  Codex CLI
+                </a>
               )}
             </p>
           </div>

@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react';
 import type { CatData } from '@/hooks/useCatData';
-import { HubMemberOverviewCard, HubOverviewToolbar, HubOwnerOverviewCard } from './HubMemberOverviewCard';
 import type { ConfigData } from './config-viewer-types';
+import { HubMemberOverviewCard, HubOverviewToolbar, HubOwnerOverviewCard } from './HubMemberOverviewCard';
 
 export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './config-viewer-types';
 

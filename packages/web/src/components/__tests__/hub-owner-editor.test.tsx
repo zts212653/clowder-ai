@@ -25,7 +25,9 @@ async function flushEffects() {
 }
 
 function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent?.includes(text));
+  const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
+    candidate.textContent?.includes(text),
+  );
   if (!button) throw new Error(`Missing button: ${text}`);
   return button as HTMLButtonElement;
 }

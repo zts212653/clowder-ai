@@ -1,5 +1,9 @@
 import type { CatProvider } from '@cat-cafe/shared';
-import type { BuiltinAccountClient, ProviderProfileProtocol, RuntimeProviderProfile } from './provider-profiles.types.js';
+import type {
+  BuiltinAccountClient,
+  ProviderProfileProtocol,
+  RuntimeProviderProfile,
+} from './provider-profiles.types.js';
 
 export function resolveBuiltinClientForProvider(provider: CatProvider): BuiltinAccountClient | null {
   switch (provider) {

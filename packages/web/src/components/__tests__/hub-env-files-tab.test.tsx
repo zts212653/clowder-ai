@@ -155,13 +155,17 @@ describe('HubEnvFilesTab', () => {
     const frontendUrlInput = container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement;
     await changeField(frontendUrlInput, 'http://localhost:3200');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存到 .env');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存到 .env',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    const patchCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/config/env' && init?.method === 'PATCH');
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/config/env' && init?.method === 'PATCH',
+    );
     expect(patchCall).toBeTruthy();
     expect(String(patchCall?.[1]?.body)).not.toContain('API_SERVER_PORT');
     expect(String(patchCall?.[1]?.body)).not.toContain('PREVIEW_GATEWAY_PORT');
@@ -185,9 +189,14 @@ describe('HubEnvFilesTab', () => {
     });
     await flushEffects();
 
-    await changeField(container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement, 'http://localhost:3200');
+    await changeField(
+      container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement,
+      'http://localhost:3200',
+    );
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存到 .env');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存到 .env',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -214,8 +223,13 @@ describe('HubEnvFilesTab', () => {
     });
     await flushEffects();
 
-    await changeField(container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement, 'http://localhost:3200');
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存到 .env');
+    await changeField(
+      container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement,
+      'http://localhost:3200',
+    );
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存到 .env',
+    );
 
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

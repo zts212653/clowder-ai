@@ -10,8 +10,8 @@ import {
   buildCodexConfigPatches,
   buildStrategyPayload,
   builtinAccountIdForClient,
-  DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   type CodexRuntimeSettings,
+  DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterAccounts,
   type HubCatEditorDraft,
   type HubCatEditorFormState,
@@ -19,7 +19,6 @@ import {
   type StrategyFormState,
   toCodexRuntimeSettings,
   toStrategyForm,
-
 } from './hub-cat-editor.model';
 import { AccountSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
@@ -424,7 +423,12 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
                 </svg>
               </button>
             ) : null}
-            <button type="button" onClick={requestClose} className="text-2xl leading-none text-[#B59A88]" aria-label="关闭">
+            <button
+              type="button"
+              onClick={requestClose}
+              className="text-2xl leading-none text-[#B59A88]"
+              aria-label="关闭"
+            >
               ×
             </button>
           </div>

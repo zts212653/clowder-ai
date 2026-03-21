@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { OwnerConfig } from '@/components/config-viewer-types';
 import { refreshOwnerMentionData, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
-import type { OwnerConfig } from '@/components/config-viewer-types';
 
 const DEFAULT_OWNER: OwnerConfig = {
   name: 'ME',

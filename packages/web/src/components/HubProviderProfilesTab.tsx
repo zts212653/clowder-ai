@@ -4,15 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { HubProviderProfileItem, type ProfileEditPayload } from './HubProviderProfileItem';
-import {
-  CreateApiKeyProfileSection,
-  ProviderProfilesSummaryCard,
-} from './hub-provider-profiles.sections';
-import {
-  ensureBuiltinProviderProfiles,
-  resolveAccountActionId,
-} from './hub-provider-profiles.view';
+import { CreateApiKeyProfileSection, ProviderProfilesSummaryCard } from './hub-provider-profiles.sections';
 import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
+import { ensureBuiltinProviderProfiles, resolveAccountActionId } from './hub-provider-profiles.view';
 import { getProjectPaths, projectDisplayName } from './ThreadSidebar/thread-utils';
 
 export function HubProviderProfilesTab() {
@@ -63,7 +57,7 @@ export function HubProviderProfilesTab() {
     (nextPath: string | null) => {
       setProjectPath(nextPath);
       setLoading(true);
-      fetchProfiles((nextPath ?? threadProjectPath) ?? undefined);
+      fetchProfiles(nextPath ?? threadProjectPath ?? undefined);
     },
     [fetchProfiles, threadProjectPath],
   );
@@ -203,7 +197,7 @@ export function HubProviderProfilesTab() {
         onSwitchProject={switchProject}
       />
 
-      <div aria-label="Provider Profile List" className="space-y-4">
+      <div role="group" aria-label="Provider Profile List" className="space-y-4">
         {displayCards.map((profile) => (
           <HubProviderProfileItem
             key={profile.id}
