@@ -12,6 +12,7 @@ import {
   type StrategyFormState,
 } from './hub-cat-editor.model';
 import { RangeField, SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
+import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 
@@ -101,30 +102,29 @@ export function AdvancedRuntimeSection({
           tone="success"
         />
         {form.client === 'openai' || form.client === 'opencode' ? (
-          <>
-            <label className="block text-sm font-medium text-[#3D2E22]">
-              额外 CLI 参数
-              <textarea
-                value={form.cliConfigArgs}
-                onChange={(event) => onChange({ cliConfigArgs: event.target.value })}
-                rows={3}
-                className="mt-1 w-full rounded-xl border border-[#CFE5D5] bg-[#F5FBF6] px-3 py-2 font-mono text-xs text-[#2D2118] outline-none transition focus:border-[#6C7A6D] focus:ring-2 focus:ring-[#CFE5D5]"
-                placeholder={
-                  form.client === 'opencode'
-                    ? '每行一组 CLI 参数，直接透传，例如：\n--variant low\n--agent default'
-                    : '每行一组 CLI 参数，直接透传，例如：\n--config model_reasoning_effort="low"\n--config approval_policy="on-request"'
-                }
-              />
-            </label>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-[#3D2E22]">额外 CLI 参数</p>
+            <TagEditor
+              tags={form.cliConfigArgs}
+              onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
+              addLabel="+ 添加参数"
+              placeholder={
+                form.client === 'opencode'
+                  ? '例如 --variant low'
+                  : '例如 --config model_reasoning_effort="low"'
+              }
+              emptyLabel="无额外参数"
+              tone="green"
+            />
             <p className="text-[11px] leading-4 text-[#8A776B]">
-              每行按空格拆分后直接追加到 CLI 命令。不做任何隐式转换。
+              每条直接追加到 CLI 命令，不做隐式转换。
               参考：{form.client === 'opencode' ? (
                 <a href="https://opencode.ai/docs/cli" target="_blank" rel="noreferrer" className="underline">OpenCode CLI</a>
               ) : (
                 <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="underline">Codex CLI</a>
               )}
             </p>
-          </>
+          </div>
         ) : null}
       </div>
 
