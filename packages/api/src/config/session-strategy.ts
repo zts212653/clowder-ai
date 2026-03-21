@@ -15,9 +15,12 @@
 
 import type { ContextHealthConfig, SessionStrategyConfig, StrategyAction } from '@cat-cafe/shared';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import { resolveBreedId } from './breed-resolver.js';
 import { getConfigSessionStrategy } from './cat-config-loader.js';
 import { getRuntimeOverride } from './session-strategy-overrides.js';
+
+const log = createModuleLogger('session-strategy');
 
 // ── Default Configurations ──
 
@@ -196,10 +199,9 @@ function validateProviderCapability(config: SessionStrategyConfig, catName: stri
   const provider = entry?.config.provider;
 
   if (!provider || !HOOK_CAPABLE_PROVIDERS.has(provider)) {
-    console.warn(
-      `[session-strategy] hybrid strategy configured for "${catName}" ` +
-        `but provider "${provider ?? 'unknown'}" lacks compression signal hook. ` +
-        'Degrading to handoff.',
+    log.warn(
+      { catName, provider },
+      'hybrid strategy configured but provider lacks compression signal hook, degrading to handoff',
     );
     return { ...config, strategy: 'handoff' };
   }

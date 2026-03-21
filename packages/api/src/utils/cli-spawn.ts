@@ -4,11 +4,14 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import { escapeCmdArg, resolveWindowsShimSpawn } from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
 import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
+
+const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -220,7 +223,7 @@ export async function* spawnCli(
 
       if (isParseError(value)) {
         const parseErr = value as { line: string };
-        console.error(`[cli-spawn] JSON parse error from ${options.command}: ${parseErr.line}`);
+        log.error({ command: options.command, line: parseErr.line }, 'JSON parse error');
         pendingNext = ndjson.next();
         continue;
       }
@@ -262,7 +265,7 @@ export async function* spawnCli(
       const reasonCode = classifyKnownCliStderr(stderrBuffer);
       // Log stderr for debugging (never expose to users — may contain thinking/traces)
       if (stderrBuffer.trim()) {
-        console.error(`[cli-spawn] ${options.command} stderr (debug only):\n${stderrBuffer.trim().slice(-1000)}`);
+        log.error({ command: options.command, stderr: stderrBuffer.trim().slice(-1000) }, 'CLI stderr (debug only)');
       }
       yield {
         __cliError: true,
@@ -279,8 +282,9 @@ export async function* spawnCli(
     if (timedOut) {
       // Log stderr for debugging (never expose to users)
       if (stderrBuffer.trim()) {
-        console.error(
-          `[cli-spawn] ${options.command} stderr on timeout (debug only):\n${stderrBuffer.trim().slice(-1000)}`,
+        log.error(
+          { command: options.command, stderr: stderrBuffer.trim().slice(-1000) },
+          'CLI stderr on timeout (debug only)',
         );
       }
       yield {

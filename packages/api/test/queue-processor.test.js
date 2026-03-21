@@ -157,6 +157,24 @@ describe('QueueProcessor', () => {
     });
   });
 
+  it('emits queue_updated(action=completed) after entry is removed from queue', async () => {
+    const entry = enqueueEntry(deps.queue, { targetCats: ['codex'] });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    const result = await processor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const queueUpdates = deps.socketManager.emitToUser.mock.calls
+      .filter((c) => c.arguments[1] === 'queue_updated')
+      .map((c) => c.arguments[2]);
+    const completed = queueUpdates.find((u) => u.action === 'completed');
+    assert.ok(completed, 'should emit queue_updated completed after cleanup');
+    assert.equal(completed.threadId, 't1');
+    assert.deepEqual(completed.queue, [], 'queue snapshot should be empty after processed entry cleanup');
+  });
+
   it('processNext returns started=false when queue empty', async () => {
     const result = await processor.processNext('t1', 'u1');
     assert.equal(result.started, false);

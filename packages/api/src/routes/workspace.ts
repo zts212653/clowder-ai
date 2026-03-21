@@ -10,6 +10,7 @@
  * POST /api/workspace/linked-roots  — add a linked root (name + path)
  * DELETE /api/workspace/linked-roots — remove a linked root by id
  * POST /api/workspace/reveal         — open file in system file manager (Finder/Explorer)
+ * POST /api/workspace/navigate       — F131: cat-initiated workspace panel navigation
  *
  * Edit routes: see workspace-edit.ts
  */
@@ -123,7 +124,11 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
   return nodes;
 }
 
-export const workspaceRoutes: FastifyPluginAsync = async (app) => {
+interface WorkspaceRouteOpts {
+  socketEmit?: (event: string, data: unknown, room: string) => void;
+}
+
+export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
   // GET /api/workspace/worktrees (includes linked roots)
   app.get<{ Querystring: { repoRoot?: string } }>('/api/workspace/worktrees', async (request, reply) => {
     const { repoRoot } = request.query;
@@ -638,5 +643,43 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
       reply.status(500);
       return { error: 'Failed to reveal file' };
     }
+  });
+
+  // POST /api/workspace/navigate — F131: cat-initiated workspace panel navigation
+  app.post<{
+    Body: { worktreeId?: string; path?: string; action?: 'reveal' | 'open'; line?: number; threadId?: string };
+  }>('/api/workspace/navigate', async (request, reply) => {
+    const { worktreeId, path: filePath, action = 'reveal', line, threadId } = request.body ?? {};
+    if (!worktreeId || !filePath) {
+      reply.status(400);
+      return { error: 'worktreeId and path required' };
+    }
+
+    try {
+      const root = await getWorktreeRoot(worktreeId);
+      const resolved = await resolveWorkspacePath(root, filePath);
+      await stat(resolved);
+    } catch (e) {
+      if (e instanceof WorkspaceSecurityError) {
+        reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
+        return { error: e.message };
+      }
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        reply.status(404);
+        return { error: 'File not found' };
+      }
+      reply.status(500);
+      return { error: 'Internal error' };
+    }
+
+    const eventData = { path: filePath, worktreeId, action, line, threadId };
+    if (worktreeId) {
+      opts.socketEmit?.('workspace:navigate', eventData, `worktree:${worktreeId}`);
+      opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
+    } else {
+      opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
+    }
+
+    return { ok: true, path: filePath, action };
   });
 };

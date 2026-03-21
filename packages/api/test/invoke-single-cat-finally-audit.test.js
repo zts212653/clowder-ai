@@ -46,7 +46,7 @@ describe('F118 finally block audit fallback (AC-C5)', () => {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore: null,
-      apiUrl: 'your local Clowder API URL',
+      apiUrl: 'http://127.0.0.1:3004',
     };
   }
 

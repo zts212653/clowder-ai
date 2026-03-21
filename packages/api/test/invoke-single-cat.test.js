@@ -44,7 +44,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore: null,
-      apiUrl: 'your local Clowder API URL',
+      apiUrl: 'http://127.0.0.1:3004',
     };
   }
 
@@ -1660,60 +1660,49 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.counts.cli_exit, 1);
   });
 
-  it('logs gemini retry timing for transient resume bootstrap exit', async () => {
+  it('retries gemini invoke on transient resume bootstrap exit', async () => {
     let invokeCount = 0;
-    const infoMock = mock.method(console, 'info', () => {});
-    try {
-      const service = {
-        async *invoke() {
-          invokeCount++;
-          if (invokeCount === 1) {
-            yield {
-              type: 'error',
-              catId: 'gemini',
-              error: 'Gemini CLI: CLI 异常退出 (code: 1, signal: none)',
-              timestamp: Date.now(),
-            };
-            yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
-            return;
-          }
-          yield { type: 'text', catId: 'gemini', content: 'retry-ok', timestamp: Date.now() };
+    const service = {
+      async *invoke() {
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'gemini',
+            error: 'Gemini CLI: CLI 异常退出 (code: 1, signal: none)',
+            timestamp: Date.now(),
+          };
           yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
-        },
-      };
+          return;
+        }
+        yield { type: 'text', catId: 'gemini', content: 'retry-ok', timestamp: Date.now() };
+        yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
+      },
+    };
 
-      const deps = makeDeps();
-      deps.sessionManager = {
-        get: async () => 'sess-cli-exit-log',
-        store: async () => {},
-        delete: async () => {},
-      };
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'sess-cli-exit-log',
+      store: async () => {},
+      delete: async () => {},
+    };
 
-      await collect(
-        invokeSingleCat(deps, {
-          catId: 'gemini',
-          service,
-          prompt: 'test',
-          userId: 'user-gemini-cli-exit-log',
-          threadId: 'thread-gemini-cli-exit-log',
-          isLastCat: true,
-        }),
-      );
+    const results = await collect(
+      invokeSingleCat(deps, {
+        catId: 'gemini',
+        service,
+        prompt: 'test',
+        userId: 'user-gemini-cli-exit-log',
+        threadId: 'thread-gemini-cli-exit-log',
+        isLastCat: true,
+      }),
+    );
 
-      const retryLog = infoMock.mock.calls.find(
-        (call) => call.arguments[0] === '[diag/gemini-startup] retrying invoke',
-      );
-      assert.ok(retryLog, 'should emit Gemini retry timing log');
-      assert.equal(retryLog.arguments[1].catId, 'gemini');
-      assert.equal(retryLog.arguments[1].threadId, 'thread-gemini-cli-exit-log');
-      assert.equal(retryLog.arguments[1].reason, 'transient_cli_exit');
-      assert.equal(retryLog.arguments[1].attempt, 1);
-      assert.equal(retryLog.arguments[1].retryAttempt, 2);
-      assert.equal(retryLog.arguments[1].hadSessionId, true);
-      assert.ok(typeof retryLog.arguments[1].elapsedMs === 'number');
-    } finally {
-      infoMock.mock.restore();
-    }
+    assert.equal(invokeCount, 2, 'should retry invoke after transient CLI exit');
+    assert.ok(
+      results.some((m) => m.type === 'text' && m.content === 'retry-ok'),
+      'retry should yield successful text output',
+    );
   });
 
   it('R7 P1: seal clears sessionManager BEFORE finalize completes (no race window)', async () => {

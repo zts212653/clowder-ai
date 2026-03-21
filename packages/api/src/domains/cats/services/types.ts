@@ -139,7 +139,7 @@ export interface AgentMessage {
   mentionsUser?: boolean;
   /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations */
   invocationId?: string;
-  /** F130: Structured error code for recoverable failures (e.g. GOVERNANCE_BOOTSTRAP_REQUIRED) */
+  /** F070: Structured error code for recoverable failures (e.g. GOVERNANCE_BOOTSTRAP_REQUIRED) */
   errorCode?: string;
   /** When this message was created */
   timestamp: number;

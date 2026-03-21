@@ -50,7 +50,7 @@ describe('BacklogStore', () => {
     const created = store.create({
       userId: 'default-user',
       title: '[F049] Mission Hub',
-      summary: '来源 docs/BACKLOG.md | 状态：spec',
+      summary: '来源 docs/ROADMAP.md | 状态：spec',
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f049', 'status:spec'],
       createdBy: 'user',
@@ -58,7 +58,7 @@ describe('BacklogStore', () => {
 
     const refreshed = store.refreshMetadata(created.id, {
       title: '[F049] Mission Hub (updated)',
-      summary: '来源 docs/BACKLOG.md | 状态：in-progress',
+      summary: '来源 docs/ROADMAP.md | 状态：in-progress',
       priority: 'p1',
       tags: ['source:docs-backlog', 'feature:f049', 'status:in-progress'],
       refreshedBy: 'default-user',
@@ -76,7 +76,7 @@ describe('BacklogStore', () => {
     const created = store.create({
       userId: 'default-user',
       title: '[F010] Mobile',
-      summary: '来源 docs/BACKLOG.md | 状态：spec',
+      summary: '来源 docs/ROADMAP.md | 状态：spec',
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f010', 'status:spec'],
       createdBy: 'user',
@@ -86,7 +86,7 @@ describe('BacklogStore', () => {
     const beforeUpdatedAt = created.updatedAt;
     const refreshed = store.refreshMetadata(created.id, {
       title: '[F010] Mobile',
-      summary: '来源 docs/BACKLOG.md | 状态：spec',
+      summary: '来源 docs/ROADMAP.md | 状态：spec',
       priority: 'p2',
       tags: ['source:docs-backlog', 'feature:f010', 'status:spec'],
       refreshedBy: 'default-user',

@@ -52,7 +52,7 @@ function createMockDeps(services, threadStore = null) {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore,
-      apiUrl: 'your local Clowder API URL',
+      apiUrl: 'http://127.0.0.1:3004',
     },
     messageStore: {
       append: async () => ({

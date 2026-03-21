@@ -322,8 +322,6 @@ export class ConnectorInvokeTrigger {
 
       const intent = { intent: 'execute' as const, explicit: false, promptTags: [] as string[] };
 
-      // F130: track governance block errorCode
-      let governanceErrorCode: string | undefined;
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(controller?.signal ? { signal: controller.signal } : {}),
@@ -334,7 +332,6 @@ export class ConnectorInvokeTrigger {
       })) {
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
-        if (msg.type === 'done' && msg.errorCode) governanceErrorCode = msg.errorCode;
         if (msg.type === 'done' && msg.catId) {
           if (msg.metadata?.usage) {
             collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
@@ -391,12 +388,6 @@ export class ConnectorInvokeTrigger {
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'failed',
           error: `Connector invoke: message delivered but persistence failed: ${errorDetail}`,
-        });
-      } else if (governanceErrorCode) {
-        // F130: Governance gate blocked — mark as failed for retry
-        await invocationRecordStore.update(createResult.invocationId, {
-          status: 'failed',
-          error: governanceErrorCode,
         });
       } else {
         await router.ackCollectedCursors(userId, threadId, cursorBoundaries);

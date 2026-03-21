@@ -8,6 +8,9 @@
 
 import { readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
+
+const log = createModuleLogger('tts-cache');
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
@@ -99,12 +102,10 @@ export function startTtsCacheCleaner(cacheDir: string): void {
     try {
       const result = await cleanTtsCache(cacheDir);
       if (result.deleted > 0) {
-        console.info(
-          `[tts-cache] Cleaned ${result.deleted} files, freed ${(result.freedBytes / 1024 / 1024).toFixed(1)} MB`,
-        );
+        log.info({ deleted: result.deleted, freedMB: (result.freedBytes / 1024 / 1024).toFixed(1) }, 'Cache cleaned');
       }
     } catch (err) {
-      console.error('[tts-cache] Cleanup error:', err);
+      log.error({ error: err }, 'Cleanup error');
     }
   };
 

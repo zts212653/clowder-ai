@@ -7,8 +7,11 @@
  */
 
 import type { ThreadSummary } from '@cat-cafe/shared';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
+
+const log = createModuleLogger('auto-summarizer');
 
 const AUTO_CREATOR = 'system' as const;
 const MESSAGE_THRESHOLD = 20;
@@ -58,7 +61,7 @@ export class AutoSummarizer {
       }
       return null;
     } catch (err) {
-      console.warn('[auto-summary] Failed:', err);
+      log.warn({ err }, '[auto-summary] Failed');
       return null;
     } finally {
       this.inFlight.delete(threadId);

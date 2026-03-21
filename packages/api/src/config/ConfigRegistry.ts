@@ -106,6 +106,10 @@ export function collectConfigSnapshot(): ConfigSnapshot {
     cats,
     a2a: { enabled: true, maxDepth: a2aMaxDepth },
     memory: { enabled: true, maxKeysPerThread: 50 },
+    f102: {
+      embedMode: env.EMBED_MODE ?? 'off',
+      abstractiveEnabled: env.F102_ABSTRACTIVE === 'on',
+    },
     governance: {
       degradationEnabled: true,
       doneTimeoutMs: 5 * 60 * 1000,

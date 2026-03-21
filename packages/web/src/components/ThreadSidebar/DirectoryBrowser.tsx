@@ -127,7 +127,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
   const segments = browseResult ? pathToSegments(browseResult.current, browseResult.homePath) : [];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* ── Breadcrumb ── */}
       <div className="flex items-center gap-1 px-5 h-10 bg-cafe-white border-b border-[#f0e6de] flex-shrink-0 overflow-x-auto">
         {segments.map((seg, i) => (
@@ -164,7 +164,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
       </div>
 
       {/* ── Directory listing ── */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5 min-h-[180px]">
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5 min-h-0">
         {isLoading && (
           <div className="flex items-center justify-center py-8">
             <span className="text-xs text-gray-400 animate-pulse">Loading...</span>

@@ -1,6 +1,6 @@
 /**
  * Thread indicator in ChatContainerHeader.
- * Verifies that the header shows the current thread title (not just "Cat Cafe").
+ * Verifies that the header shows the current thread title (not just "Clowder AI").
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

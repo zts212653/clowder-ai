@@ -72,10 +72,6 @@ Clowder is model-agnostic. Each agent CLI plugs in via a unified output adapter:
 
 ## Quick Start
 
-> **CVO Bootcamp is live!** A guided onboarding where your AI team walks you through a complete feature lifecycle — from vision to shipped code.
-
-![CVO Bootcamp onboarding](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
-
 **Prerequisites:** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(optional — use `--memory` to skip)* · Git
 
 ```bash
@@ -98,6 +94,10 @@ Open `http://localhost:3003` and start talking to your team.
 > **One-line alternative (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
 
 **Full setup guide** (API keys, CLI auth, voice, Feishu/Telegram, troubleshooting): **[SETUP.md](SETUP.md)**
+
+> **CVO Bootcamp is live!** A guided onboarding where your AI team walks you through a complete feature lifecycle — from vision to shipped code.
+
+![CVO Bootcamp onboarding](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
 
 ## The Iron Laws
 
@@ -179,8 +179,13 @@ https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f
 
 ### Chat — Your AI Team in One Place
 
-<!-- demo: multi-cat coding collaboration + rich blocks + voice input -->
-> 📹 **Demo videos:** Multi-cat coding · Rich blocks · Voice input + widgets
+The main interface is a multi-threaded chat where your AI team lives. Each thread is an isolated workspace — one per feature, bug, or topic.
+
+- **@mention routing** — `@opus` for architecture, `@codex` for review, `@gemini` for design. Messages go to the right agent automatically.
+- **Thread isolation** — context stays clean. Your auth refactor doesn't leak into the landing page thread.
+- **Rich blocks** — agents reply with structured cards: code diffs, checklists, interactive decisions, not just walls of text.
+
+<details><summary>📹 Demo: Multi-cat coding · Rich blocks · Voice input + widgets</summary>
 
 https://github.com/user-attachments/assets/19d8a72e-97ee-452f-ada6-ff77f59a4ca9
 
@@ -190,18 +195,9 @@ https://github.com/user-attachments/assets/cf75fb92-ce20-4a0d-8b2b-c288ce9bfb48
 
 ![Rich blocks demo](https://github.com/user-attachments/assets/c6c8589d-7c55-44c8-a987-d88c921bcf33)
 
-The main interface is a multi-threaded chat where your AI team lives. Each thread is an isolated workspace — one per feature, bug, or topic.
-
-- **@mention routing** — `@opus` for architecture, `@codex` for review, `@gemini` for design. Messages go to the right agent automatically.
-- **Thread isolation** — context stays clean. Your auth refactor doesn't leak into the landing page thread.
-- **Rich blocks** — agents reply with structured cards: code diffs, checklists, interactive decisions, not just walls of text.
+</details>
 
 ### Hub — Command Center
-
-<!-- demo: Hub command center — mission hub operations -->
-> 📹 **Demo video:** Hub & Mission Hub walkthrough
-
-https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
 
 Hit the Hub button to open the floating command center. Tabs include:
 
@@ -213,10 +209,21 @@ Hit the Hub button to open the floating command center. Tabs include:
 | **Routing Policy** | How tasks get routed — which agent handles what |
 | **Provider Profiles** | Model configurations, API keys, output format per provider |
 
+<details><summary>📹 Demo: Hub & Mission Hub walkthrough</summary>
+
+https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
+
+</details>
+
 ### Mission Hub — Feature Governance
 
-<!-- demo: Mission Hub — feature governance dashboard -->
-> 📹 **Demo video:** Mission Hub in action · Cat leaderboard (fun!)
+The ops dashboard for tracking everything your team is building.
+
+- **Feature lifecycle** — every feature moves through: idea → spec → in-progress → review → done
+- **Need Audit** — paste a PRD, and the system auto-extracts intent cards, detects risks (empty verbs, missing actors, AI-fabricated specificity), and builds a prioritized slice plan
+- **Bulletin Board** — live SOP workflow status per feature: who holds the baton, what stage, what's blocking
+
+<details><summary>📹 Demo: Mission Hub in action · Cat leaderboard (fun!)</summary>
 
 https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
 
@@ -226,18 +233,9 @@ https://github.com/user-attachments/assets/3914ef8e-48ea-4b79-a1e2-f7302b0119c2
 
 ![Cat Leaderboard](https://github.com/user-attachments/assets/8c7d133e-74eb-452a-ae9b-78d0c5b8df11)
 
-The ops dashboard for tracking everything your team is building.
-
-- **Feature lifecycle** — every feature moves through: idea → spec → in-progress → review → done
-- **Need Audit** — paste a PRD, and the system auto-extracts intent cards, detects risks (empty verbs, missing actors, AI-fabricated specificity), and builds a prioritized slice plan
-- **Bulletin Board** — live SOP workflow status per feature: who holds the baton, what stage, what's blocking
+</details>
 
 ### Multi-Platform — Chat From Anywhere
-
-<!-- demo: Feishu multi-platform chat -->
-> 📹 **Demo video:** Feishu (Lark) multi-cat chat
-
-https://github.com/user-attachments/assets/cf8ff631-7098-4816-b27a-e0cc05f38eb0
 
 Don't want to open the web UI? Chat with your team from the apps you already use.
 
@@ -247,14 +245,13 @@ Don't want to open the web UI? Chat with your team from the apps you already use
 - Slash commands: `/new` (new thread), `/threads` (list), `/use <id>` (switch), `/where` (current)
 - Voice messages and file transfer supported both ways
 
+<details><summary>📹 Demo: Feishu (Lark) multi-cat chat</summary>
+
+https://github.com/user-attachments/assets/cf8ff631-7098-4816-b27a-e0cc05f38eb0
+
+</details>
+
 ### Voice Companion — Hands-Free Mode
-
-<!-- demo: per-agent TTS voice showcase -->
-> 📹 **Demo video:** Per-cat TTS voice showcase
-
-https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
-
-![Per-cat voice showcase](https://github.com/user-attachments/assets/7a7aab6a-4906-4eba-a75b-e5508980cf0c)
 
 Working out? Commuting? Turn on Voice Companion and talk to your team through AirPods.
 
@@ -263,17 +260,15 @@ Working out? Commuting? Turn on Voice Companion and talk to your team through Ai
 - Auto-play: replies queue and play in sequence, no tapping
 - Push-to-talk input via ASR (speech-to-text)
 
+<details><summary>📹 Demo: Per-cat TTS voice showcase</summary>
+
+https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
+
+![Per-cat voice showcase](https://github.com/user-attachments/assets/7a7aab6a-4906-4eba-a75b-e5508980cf0c)
+
+</details>
+
 ### Signals — AI Research Feed
-
-<!-- demo: Signal Inbox overview + study area with podcast -->
-
-> **Signal Inbox** — browse, filter, and manage curated articles with Tier-based prioritization.
-
-![Signal Inbox overview](https://github.com/user-attachments/assets/420b21c2-9e0f-4c99-ba92-70c371094864)
-
-> **Study Area** — study notes, linked threads, multi-cat research reports, and AI-generated podcast summaries where your cats discuss the paper.
-
-![Signal study area with podcast](https://github.com/user-attachments/assets/f198c8ed-066d-490d-bd0d-71f48e1d45b5)
 
 A curated feed of AI and tech articles, built into your workspace.
 
@@ -283,12 +278,19 @@ A curated feed of AI and tech articles, built into your workspace.
 - **Multi-cat research** — cats collaboratively analyze articles and produce structured research reports
 - **Podcast generation** — your cats discuss the paper in a synthesized audio conversation (essence or deep mode)
 
+<details><summary>🖼️ Screenshots: Signal Inbox + Study Area with podcast</summary>
+
+> **Signal Inbox** — browse, filter, and manage curated articles with Tier-based prioritization.
+
+![Signal Inbox overview](https://github.com/user-attachments/assets/420b21c2-9e0f-4c99-ba92-70c371094864)
+
+> **Study Area** — study notes, linked threads, multi-cat research reports, and AI-generated podcast summaries where your cats discuss the paper.
+
+![Signal study area with podcast](https://github.com/user-attachments/assets/f198c8ed-066d-490d-bd0d-71f48e1d45b5)
+
+</details>
+
 ### Game Modes — Play With Your Team
-
-<!-- demo: Werewolf game — the accidental one 🐺 -->
-> 📹 **Demo video:** The accidental Werewolf game 🐺
-
-https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 
 Yes, your AI team plays games. Currently shipping:
 
@@ -297,6 +299,12 @@ Yes, your AI team plays games. Currently shipping:
 - More game modes in development
 
 > Games aren't a gimmick — they stress-test the same A2A messaging, identity persistence, and turn-based coordination that powers the work features.
+
+<details><summary>📹 Demo: The accidental Werewolf game 🐺</summary>
+
+https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
+
+</details>
 
 ## Roadmap
 
@@ -484,10 +492,6 @@ Clowder 不绑定模型。当前支持的 Agent CLI：
 
 ## 快速开始
 
-> **CVO 训练营已上线！** AI 团队亲自带你走完一个完整的 feature 生命周期 — 从愿景表达到代码上线。
-
-![CVO 训练营](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
-
 **前置要求：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
 
 ```bash
@@ -510,6 +514,10 @@ pnpm start
 > **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
 **完整安装指南**（API key 配置、CLI 认证、语音、飞书/Telegram、常见问题）：**[SETUP.md](SETUP.md)**
+
+> **CVO 训练营已上线！** AI 团队亲自带你走完一个完整的 feature 生命周期 — 从愿景表达到代码上线。
+
+![CVO 训练营](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
 
 ## 四条铁律
 
@@ -592,8 +600,13 @@ https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f
 
 ### 聊天 — 你的 AI 团队就在这里
 
-<!-- 演示：多猫协作编码 + 富文本卡片 + 语音输入 -->
-> 📹 **演示视频：** 多猫协作编码 · Rich Blocks 卡片 · 语音输入 + Widget
+主界面是一个多线程聊天空间，你的 AI 团队在这里工作。每个线程是独立的工作区 — 一个功能一个线程。
+
+- **@mention 路由** — `@opus` 做架构、`@codex` 做 review、`@gemini` 做设计，消息自动路由到对的猫
+- **线程隔离** — 上下文不会串。登录重构的线程不会污染落地页的讨论
+- **Rich Blocks** — 猫猫用结构化卡片回复：代码 diff、checklist、交互式决策，不是一堵文字墙
+
+<details><summary>📹 演示：多猫协作编码 · Rich Blocks 卡片 · 语音输入 + Widget</summary>
 
 https://github.com/user-attachments/assets/19d8a72e-97ee-452f-ada6-ff77f59a4ca9
 
@@ -603,18 +616,9 @@ https://github.com/user-attachments/assets/cf75fb92-ce20-4a0d-8b2b-c288ce9bfb48
 
 ![富文本演示](https://github.com/user-attachments/assets/c6c8589d-7c55-44c8-a987-d88c921bcf33)
 
-主界面是一个多线程聊天空间，你的 AI 团队在这里工作。每个线程是独立的工作区 — 一个功能一个线程。
-
-- **@mention 路由** — `@opus` 做架构、`@codex` 做 review、`@gemini` 做设计，消息自动路由到对的猫
-- **线程隔离** — 上下文不会串。登录重构的线程不会污染落地页的讨论
-- **Rich Blocks** — 猫猫用结构化卡片回复：代码 diff、checklist、交互式决策，不是一堵文字墙
+</details>
 
 ### Hub — 指挥中心
-
-<!-- 演示：Hub 指挥中心 -->
-> 📹 **演示视频：** Hub & 作战中枢操作演示
-
-https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
 
 点击 Hub 按钮打开浮动指挥面板：
 
@@ -626,10 +630,21 @@ https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
 | **Routing Policy** | 任务路由策略 — 哪只猫处理什么类型的任务 |
 | **Provider Profiles** | 模型配置、API 密钥、每个 provider 的输出格式 |
 
+<details><summary>📹 演示：Hub & 作战中枢操作演示</summary>
+
+https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
+
+</details>
+
 ### 作战中枢（Mission Hub） — Feature 治理
 
-<!-- 演示：作战中枢 — Feature 治理面板 -->
-> 📹 **演示视频：** 作战中枢实操 · 猫猫排行榜（好玩！）
+追踪团队正在做的所有事情的运营面板。
+
+- **Feature 生命周期** — 每个功能经历：idea → spec → in-progress → review → done
+- **需求审计（Need Audit）** — 粘贴一份 PRD，系统自动拆解意图卡、检测风险（空洞动词、缺失执行者、AI 编造的具体性），生成优先级切片计划
+- **告示面板（Bulletin Board）** — 每个 Feature 的 SOP 工作流实时状态：谁在执行、什么阶段、什么在阻塞
+
+<details><summary>📹 演示：作战中枢实操 · 猫猫排行榜（好玩！）</summary>
 
 https://github.com/user-attachments/assets/6cd2fb10-4f8e-4342-9641-b2ad7c64d2bc
 
@@ -639,18 +654,9 @@ https://github.com/user-attachments/assets/3914ef8e-48ea-4b79-a1e2-f7302b0119c2
 
 ![猫猫排行榜](https://github.com/user-attachments/assets/8c7d133e-74eb-452a-ae9b-78d0c5b8df11)
 
-追踪团队正在做的所有事情的运营面板。
-
-- **Feature 生命周期** — 每个功能经历：idea → spec → in-progress → review → done
-- **需求审计（Need Audit）** — 粘贴一份 PRD，系统自动拆解意图卡、检测风险（空洞动词、缺失执行者、AI 编造的具体性），生成优先级切片计划
-- **告示面板（Bulletin Board）** — 每个 Feature 的 SOP 工作流实时状态：谁在执行、什么阶段、什么在阻塞
+</details>
 
 ### 多平台 — 在哪都能聊
-
-<!-- 演示：飞书多猫聊天 -->
-> 📹 **演示视频：** 飞书多猫聊天
-
-https://github.com/user-attachments/assets/cf8ff631-7098-4816-b27a-e0cc05f38eb0
 
 不想开 web？用你已经在用的 app 跟团队聊。
 
@@ -660,14 +666,13 @@ https://github.com/user-attachments/assets/cf8ff631-7098-4816-b27a-e0cc05f38eb0
 - 指令：`/new`（新线程）、`/threads`（列表）、`/use <id>`（切换）、`/where`（当前位置）
 - 语音消息和文件互传双向支持
 
+<details><summary>📹 演示：飞书多猫聊天</summary>
+
+https://github.com/user-attachments/assets/cf8ff631-7098-4816-b27a-e0cc05f38eb0
+
+</details>
+
 ### 语音陪伴 — 解放双手
-
-<!-- 演示：每只猫独立声线 TTS -->
-> 📹 **演示视频：** 猫猫们的声线
-
-https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
-
-![猫猫配音](https://github.com/user-attachments/assets/7a7aab6a-4906-4eba-a75b-e5508980cf0c)
 
 在运动？在通勤？打开语音陪伴，戴上 AirPods 跟团队对话。
 
@@ -676,17 +681,15 @@ https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
 - 自动播放：回复自动排队依次播放，不用点
 - 按住说话输入（ASR 语音转文字）
 
+<details><summary>📹 演示：猫猫们的声线</summary>
+
+https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
+
+![猫猫配音](https://github.com/user-attachments/assets/7a7aab6a-4906-4eba-a75b-e5508980cf0c)
+
+</details>
+
 ### Signals — AI 研究信息流
-
-<!-- 演示：Signal 信息流总览 + 学习区播客 -->
-
-> **Signal Inbox** — 浏览、筛选、管理精选文章，支持 Tier 优先级分类。
-
-![Signal 信息流总览](https://github.com/user-attachments/assets/420b21c2-9e0f-4c99-ba92-70c371094864)
-
-> **学习区** — 学习笔记、关联对话、多猫研究报告，以及 AI 生成的播客摘要（你的猫猫讨论这篇论文）。
-
-![Signal 学习区与播客](https://github.com/user-attachments/assets/f198c8ed-066d-490d-bd0d-71f48e1d45b5)
 
 内嵌在工作空间里的 AI/技术文章聚合。
 
@@ -696,12 +699,19 @@ https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
 - **多猫研究** — 猫猫协作分析文章，产出结构化研究报告
 - **播客生成** — 猫猫以对话形式讨论论文（精华版或深度版）
 
+<details><summary>🖼️ 截图：Signal 信息流总览 + 学习区与播客</summary>
+
+> **Signal Inbox** — 浏览、筛选、管理精选文章，支持 Tier 优先级分类。
+
+![Signal 信息流总览](https://github.com/user-attachments/assets/420b21c2-9e0f-4c99-ba92-70c371094864)
+
+> **学习区** — 学习笔记、关联对话、多猫研究报告，以及 AI 生成的播客摘要（你的猫猫讨论这篇论文）。
+
+![Signal 学习区与播客](https://github.com/user-attachments/assets/f198c8ed-066d-490d-bd0d-71f48e1d45b5)
+
+</details>
+
 ### 游戏模式 — 和团队一起玩
-
-<!-- 演示：意外的狼人杀 🐺 -->
-> 📹 **演示视频：** 意外的狼人杀 🐺
-
-https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 
 没错，你的 AI 团队会玩游戏。当前已有：
 
@@ -710,6 +720,12 @@ https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 - 更多游戏模式开发中
 
 > 游戏不是噱头 — 它压力测试的是同一套 A2A 消息、身份持久化和回合制协调机制，这些也是工作功能的基础设施。
+
+<details><summary>📹 演示：意外的狼人杀 🐺</summary>
+
+https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
+
+</details>
 
 ## 路线图
 

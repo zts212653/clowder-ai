@@ -151,5 +151,5 @@ curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/create-rich-block \
 ## Notes
 
 - 仅用于异步场景（mid-task progress）。正常回复直接输出文本。
-- `$CAT_CAFE_API_URL` 自动设置（通常 `your local Clowder API URL`）。
+- `$CAT_CAFE_API_URL` 自动设置（通常 `http://127.0.0.1:3004`）。
 - HTTP 不可用时可用 `cc_rich` 文本 fallback。

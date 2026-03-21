@@ -6,7 +6,7 @@ doc_kind: note
 created: 2026-02-26
 ---
 
-# F40: BACKLOG 整理与 Feature 聚合体系
+# F040: BACKLOG 整理与 Feature 聚合体系
 
 > **Status**: done | **Owner**: Ragdoll
 > **Created**: 2026-02-26
@@ -65,7 +65,7 @@ docs/
 ├── ROADMAP.md              # 简化为活跃 Feature 索引（热层）
 ├── TECH-DEBT.md            # 技术债务单独文件
 ├── features/               # Feature 聚合目录（温层）
-│   ├── F40-backlog-reorganization.md   # 本文件，第一个示范
+│   ├── F040-backlog-reorganization.md   # 本文件，第一个示范
 │   ├── F021-signal-hunter.md
 │   ├── index.json          # 机器索引（脚本生成，不手写）
 │   └── ...
@@ -98,7 +98,7 @@ docs/
 | F032 | Agent Plugin Architecture | review | Ragdoll | [F032](features/F032-agent-plugin.md) |
 | F037 | Agent Swarm 协同模式 | in-progress | 三猫 | [F037](features/F037-agent-swarm.md) |
 | F039 | 消息排队投递 | spec | Ragdoll | [F039](features/F039-message-queue.md) |
-| F040 | BACKLOG 整理 | in-progress | Ragdoll | [F040](features/F40-backlog-reorganization.md) |
+| F040 | BACKLOG 整理 | in-progress | Ragdoll | [F040](features/F040-backlog-reorganization.md) |
 ```
 
 > **超级简洁！** 只有 ~10 行活跃项，不是 200+ 行历史。

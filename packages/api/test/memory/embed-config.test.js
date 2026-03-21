@@ -7,7 +7,7 @@ describe('resolveEmbedConfig', () => {
     const config = resolveEmbedConfig(undefined);
     assert.equal(config.embedMode, 'off');
     assert.equal(config.embedModel, 'qwen3-embedding-0.6b');
-    assert.equal(config.embedDim, 256);
+    assert.equal(config.embedDim, 768);
     assert.equal(config.maxModelMemMb, 800);
     assert.equal(config.embedTimeoutMs, 3000);
   });

@@ -15,12 +15,15 @@ import { join } from 'node:path';
 import type { Interface as ReadlineInterface } from 'node:readline';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
+import { createModuleLogger } from '../../infrastructure/logger.js';
 import { resolveCliTimeoutMs } from '../../utils/cli-timeout.js';
 import type { CliSpawnOptions } from '../../utils/cli-types.js';
 // parseNDJSON not used directly — we create readline inline for killability.
 import type { SpawnCliOverride } from '../cats/services/types.js';
 import type { AgentPaneRegistry } from './agent-pane-registry.js';
 import type { TmuxGateway } from './tmux-gateway.js';
+
+const log = createModuleLogger('tmux-spawner');
 
 const execAsync = promisify(execFile);
 
@@ -185,11 +188,7 @@ export async function* spawnCliInTmux(
     if (idleTimeoutMs === 0) return;
     if (timeoutTimer) clearTimeout(timeoutTimer);
     timeoutTimer = setTimeout(() => {
-      console.error('[tmux-agent] idle timeout fired', {
-        invocationId: options.invocationId,
-        paneId,
-        idleTimeoutMs,
-      });
+      log.error({ invocationId: options.invocationId, paneId, idleTimeoutMs }, 'Idle timeout fired');
       timedOut = true;
       killPromise ??= killAgent();
       killPromise.catch(() => {});
@@ -204,11 +203,10 @@ export async function* spawnCliInTmux(
     if (firstEventTimeoutMs === 0) return;
     firstEventTimer = setTimeout(() => {
       if (gotFirstEvent) return; // Race: event arrived just as timer fired
-      console.error('[tmux-agent] first event timeout — CLI may have failed to start', {
-        invocationId: options.invocationId,
-        paneId,
-        firstEventTimeoutMs,
-      });
+      log.error(
+        { invocationId: options.invocationId, paneId, firstEventTimeoutMs },
+        'First event timeout — CLI may have failed to start',
+      );
       timedOut = true;
       killPromise ??= killAgent();
       killPromise.catch(() => {});
@@ -243,7 +241,7 @@ export async function* spawnCliInTmux(
         try {
           event = JSON.parse(trimmed);
         } catch {
-          console.error(`[tmux-agent] JSON parse error: ${trimmed}`);
+          log.error({ line: trimmed }, 'JSON parse error');
           continue;
         }
         // Mark first event and switch from first-event timeout to idle timeout.

@@ -122,7 +122,7 @@ created: 2026-02-26           # 创建日期
 ## 追溯
 
 本决策来自 F040 讨论，详见：
-- `docs/features/F40-backlog-reorganization.md`
+- `docs/features/F040-backlog-reorganization.md`
 - 2026-02-26 三猫 + 铲屎官讨论 thread
 
 ---

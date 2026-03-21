@@ -480,7 +480,7 @@ created: 2026-02-26
 - 防护：ADR-011 明确记录此决策 + `feat-kickoff` / `feat-completion` skill 不在普通文档生成 `stage` 字段。
 - 来源锚点：
   - `docs/decisions/011-metadata-contract.md` §D
-  - `docs/features/F40-backlog-reorganization.md` Frontmatter Contract 章节
+  - `docs/features/F040-backlog-reorganization.md` Frontmatter Contract 章节
   - 2026-02-26 三猫讨论（4.6 提出此问题）
 - 原理：单点真相源原则——任何状态信息都应该只有一个权威来源。多点写入 = 同步负担 + 不一致风险。静态关联可以多点存（因为不变），动态状态必须单点存。
 
@@ -624,6 +624,23 @@ created: 2026-02-26
   - PR #543: fix(F102-E): thread indexing reads message content
   - 铲屎官原话："等会！这个 codex 云端他给你提了 p1 的你怎么就合入了？"
 - 关联：merge-gate skill、云端 review 流程
+
+---
+
+### LL-034: Embedding 实现偷懒——有参考架构不参考，in-process CPU 替代独立进程 GPU
+
+- 状态：validated
+- 更新时间：2026-03-21
+- 坑：F102 Phase C 的 embedding 实现用了 `@huggingface/transformers`（Transformers.js ONNX，in-process CPU），而同一项目里 TTS/ASR 已有完整的参考架构（独立 Python 进程 + MLX GPU + HTTP /health + 端口注册 + GPU 锁）。结果：(a) CPU 和 API 进程争抢资源；(b) 无独立端口、无健康检查、dashboard 不可见；(c) 启动时同步阻塞下载 614MB 模型；(d) Mac 有 Apple Silicon GPU 不用，浪费硬件。
+- 根因：Ragdoll偷懒走了"最小实现路径"（ONNX + Transformers.js in-process），没有对照同项目已有的 TTS/ASR 架构模式。这是典型的"脚手架"——有终态参考（独立进程 GPU）还做了中间态（in-process CPU）。
+- 触发条件：新增本地模型推理能力时，没有先审视项目里已有的模型服务架构。
+- 防护：
+  - **新增任何本地模型推理 → 先看 TTS/ASR 的实现模式**（独立进程 + GPU + HTTP + /health + 端口注册）
+  - **禁止把模型推理放在 API 主进程内**（CPU 争抢 + 无隔离）
+  - **Mac 上优先用 MLX**（Apple Silicon GPU 原生支持）
+- 正确做法：写一个独立的 `scripts/embed-api.py`（参考 `scripts/tts-api.py`），用 MLX 或 sentence-transformers GPU，暴露 `/embed` + `/health`，Node.js API 只做 HTTP 客户端。
+- 铲屎官原话："你用 cpu！为什么不用 gpu 啊！！你这实现我拒绝。你这不又是脚手架，有其他同样模型的参考实现你还非得实现成现在这样。"
+- 关联：LL-029 交付物验证、F102 Phase C、TTS(scripts/tts-api.py)、ASR(scripts/whisper-api.py)
 
 ---
 

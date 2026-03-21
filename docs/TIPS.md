@@ -35,6 +35,7 @@ Inline mentions (mid-sentence) don't trigger routing. To mention multiple cats, 
 
 Common mentions:
 - `@opus` — deep architecture, system design, complex reasoning
+- `@opencode` — reliable multi-provider coding, tool orchestration, open-source ops
 - `@sonnet` — fast and flexible, great for everyday tasks
 - `@codex` — code review, bug hunting, implementation
 - `@gemini` — aesthetics, UX design, creative direction
@@ -117,6 +118,7 @@ Your cats remember past decisions, discussion conclusions, and lessons learned a
 
 常用提及：
 - `@opus` — 深度架构、系统设计、复杂推理
+- `@opencode` — 可靠的多模型编码、工具编排、开源运营
 - `@sonnet` — 快速灵活，适合日常任务
 - `@codex` — 代码审查、找 bug、实现落地
 - `@gemini` — 审美、UX 设计、创意方向

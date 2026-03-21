@@ -1,5 +1,8 @@
 import type { TtsSynthesizeRequest, VoiceChunkEvent, VoiceConfig } from '@cat-cafe/shared';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import type { TtsRegistry } from './TtsRegistry.js';
+
+const log = createModuleLogger('streaming-tts');
 
 interface Broadcaster {
   broadcastToRoom(room: string, event: string, data: unknown): void;
@@ -78,7 +81,7 @@ export class StreamingTtsChunker {
     try {
       provider = ttsRegistry.getDefault();
     } catch {
-      console.error(`[StreamingTtsChunker] No TTS provider available`);
+      log.error('[StreamingTtsChunker] No TTS provider available');
       return;
     }
 
@@ -120,12 +123,12 @@ export class StreamingTtsChunker {
           invocationId,
           threadId,
         });
-        console.log(`[StreamingTtsChunker] First chunk sent for ${catId} inv=${invocationId}`);
+        log.info({ catId, invocationId }, 'First chunk sent');
       }
 
       broadcaster.broadcastToRoom(`thread:${threadId}`, 'voice_chunk', event);
     } catch (err) {
-      console.error(`[StreamingTtsChunker] Synthesis failed for chunk ${index}:`, err);
+      log.error({ index, error: err }, 'Synthesis failed for chunk');
     }
   }
 

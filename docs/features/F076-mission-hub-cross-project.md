@@ -126,7 +126,7 @@ Intent Card 槽位（v2）：actor / context-trigger / goal / object-state / suc
 
 ### 案例参考：studio-flow
 
-`/home/user — 典型甲方项目：
+`/home/user/studio-flow` — 典型甲方项目：
 - 27+ features（SF-001 ~ SF-027），企业管理系统全模块
 - 甲方9点验收基线 → BACKLOG feature 映射
 - SF-025 Gap Fix Batch：6 个模块塞一个 feat（登录、工作台、客户、审核、团队、数据）

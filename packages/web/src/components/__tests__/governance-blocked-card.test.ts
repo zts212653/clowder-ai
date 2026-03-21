@@ -1,6 +1,3 @@
-/**
- * F130: GovernanceBlockedCard — rendering and interaction tests
- */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +8,6 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
-// Lazy import after mocks are set up
 const { GovernanceBlockedCard } = await import('@/components/GovernanceBlockedCard');
 
 describe('GovernanceBlockedCard', () => {
@@ -44,7 +40,7 @@ describe('GovernanceBlockedCard', () => {
     act(() => {
       root.render(
         React.createElement(GovernanceBlockedCard, {
-          projectPath: '/Users/test/workspace/my-project',
+          projectPath: '/home/user/my-project',
           reasonKind: 'needs_bootstrap',
           invocationId: 'inv-123',
         }),
@@ -64,7 +60,7 @@ describe('GovernanceBlockedCard', () => {
     act(() => {
       root.render(
         React.createElement(GovernanceBlockedCard, {
-          projectPath: '/Users/test/workspace/proj',
+          projectPath: '/home/user/proj',
           reasonKind: 'needs_confirmation',
         }),
       );
@@ -75,8 +71,8 @@ describe('GovernanceBlockedCard', () => {
 
   it('calls confirm then retry on button click', async () => {
     mockApiFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }) // confirm
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }); // retry
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
 
     act(() => {
       root.render(
@@ -93,14 +89,12 @@ describe('GovernanceBlockedCard', () => {
       button.click();
     });
 
-    // Step 1: confirm was called with correct projectPath
     expect(mockApiFetch).toHaveBeenCalledWith('/api/governance/confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectPath: '/test/proj' }),
     });
 
-    // Step 2: retry was called with correct invocationId
     expect(mockApiFetch).toHaveBeenCalledWith('/api/invocations/inv-456/retry', {
       method: 'POST',
     });
@@ -117,7 +111,6 @@ describe('GovernanceBlockedCard', () => {
         React.createElement(GovernanceBlockedCard, {
           projectPath: '/test/proj',
           reasonKind: 'needs_bootstrap',
-          // no invocationId
         }),
       );
     });
@@ -127,7 +120,7 @@ describe('GovernanceBlockedCard', () => {
       button.click();
     });
 
-    expect(mockApiFetch).toHaveBeenCalledTimes(1); // only confirm, no retry
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('治理初始化完成');
     expect(container.textContent).not.toContain('已自动重试');
   });
@@ -154,46 +147,16 @@ describe('GovernanceBlockedCard', () => {
     });
 
     expect(container.textContent).toContain('Path not allowed');
-    // Retry button should be available
     const retryButton = container.querySelector('button');
     expect(retryButton).toBeTruthy();
     expect(retryButton?.textContent).toContain('重试');
   });
 
-  it('P2-1: button uses latest invocationId after prop update', async () => {
-    // Simulate: card initially rendered with inv-A, then prop updates to inv-B
-    mockApiFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }) // confirm
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }); // retry
-
-    // Render with latest invocationId (frontend patches this on repeated events)
-    act(() => {
-      root.render(
-        React.createElement(GovernanceBlockedCard, {
-          projectPath: '/test/proj',
-          reasonKind: 'needs_bootstrap',
-          invocationId: 'inv-B', // This is the latest, updated from inv-A
-        }),
-      );
-    });
-
-    const button = container.querySelector('button')!;
-    await act(async () => {
-      button.click();
-    });
-
-    // Retry should target inv-B, not inv-A
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/invocations/inv-B/retry', {
-      method: 'POST',
-    });
-  });
-
   it('resets to idle state when invocationId prop changes', async () => {
     mockApiFetch
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }) // confirm
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) }); // retry
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
 
-    // Render and complete bootstrap with inv-A
     act(() => {
       root.render(
         React.createElement(GovernanceBlockedCard, {
@@ -211,7 +174,6 @@ describe('GovernanceBlockedCard', () => {
 
     expect(container.textContent).toContain('治理初始化完成');
 
-    // Now invocationId changes to inv-B (patchMessage updates props)
     act(() => {
       root.render(
         React.createElement(GovernanceBlockedCard, {
@@ -222,7 +184,6 @@ describe('GovernanceBlockedCard', () => {
       );
     });
 
-    // Card should reset to idle — show bootstrap button again
     const newButton = container.querySelector('button');
     expect(newButton).toBeTruthy();
     expect(newButton?.textContent).toContain('初始化治理并继续');

@@ -22,7 +22,7 @@ describe('ExternalProjectStore', () => {
     assert.equal(project.userId, 'user1');
     assert.equal(project.name, 'studio-flow');
     assert.equal(project.sourcePath, '/home/user/projects/studio-flow');
-    assert.equal(project.backlogPath, 'docs/BACKLOG.md');
+    assert.equal(project.backlogPath, 'docs/ROADMAP.md');
     assert.ok(project.createdAt > 0);
     assert.equal(project.createdAt, project.updatedAt);
   });

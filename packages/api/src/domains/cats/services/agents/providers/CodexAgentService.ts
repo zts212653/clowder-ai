@@ -22,6 +22,7 @@ import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
@@ -36,6 +37,8 @@ import {
   createCodexSessionContextSnapshotResolver,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractImagePaths } from '../providers/image-paths.js';
+
+const log = createModuleLogger('codex-agent');
 
 /**
  * Options for constructing CodexAgentService (dependency injection)
@@ -319,11 +322,14 @@ export class CodexAgentService implements AgentService {
 
         if (auditContext) {
           this.rawArchive.append(auditContext.invocationId, sanitizeRawEvent(event)).catch((err) => {
-            console.warn('[audit] Codex raw event archive write failed', {
-              threadId: auditContext.threadId,
-              invocationId: auditContext.invocationId,
-              err,
-            });
+            log.warn(
+              {
+                threadId: auditContext.threadId,
+                invocationId: auditContext.invocationId,
+                err,
+              },
+              '[audit] Codex raw event archive write failed',
+            );
           });
         }
 
@@ -369,7 +375,8 @@ export class CodexAgentService implements AgentService {
           // Suppress the error ONLY if we saw substantive output (item.completed).
           // thread.started alone is NOT enough — that just means session init.
           if (event.exitCode === 1 && event.signal === null && sawSubstantiveOutput) {
-            console.warn(
+            log.warn(
+              {},
               `[codex] Codex CLI exited with code 1 after substantive output (suppressing as Codex 0.98+ quirk)`,
             );
             continue;
@@ -414,11 +421,14 @@ export class CodexAgentService implements AgentService {
                 },
               })
               .catch((err) => {
-                console.warn('[audit] Codex CLI tool lifecycle write failed', {
-                  threadId: auditContext.threadId,
-                  invocationId: auditContext.invocationId,
-                  err,
-                });
+                log.warn(
+                  {
+                    threadId: auditContext.threadId,
+                    invocationId: auditContext.invocationId,
+                    err,
+                  },
+                  '[audit] Codex CLI tool lifecycle write failed',
+                );
               });
           }
         }
@@ -486,10 +496,13 @@ export class CodexAgentService implements AgentService {
             metadata.usage = usage;
           }
         } catch (err) {
-          console.warn('[codex] failed to resolve session context snapshot', {
-            sessionId: metadata.sessionId,
-            err,
-          });
+          log.warn(
+            {
+              sessionId: metadata.sessionId,
+              err,
+            },
+            '[codex] failed to resolve session context snapshot',
+          );
         }
       }
 

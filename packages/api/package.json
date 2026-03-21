@@ -39,6 +39,7 @@
     "js-tiktoken": "^1.0.21",
     "node-pty": "1.2.0-beta.12",
     "nodemailer": "^6.9.16",
+    "pino-roll": "^4.0.0",
     "puppeteer": "^24.37.2",
     "rss-parser": "^3.13.0",
     "sharp": "^0.34.5",

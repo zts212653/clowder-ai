@@ -391,6 +391,36 @@ skills:
     merged_from: null
     feature: "F066"
 
+  # ── Workspace 导航 (F131) ──
+  workspace-navigator:
+    description: >
+      猫猫可编程导航 Workspace 面板：铲屎官说模糊意图，猫猫找到路径，自动打开文件/目录。
+      Use when: 铲屎官说"打开日志""看看代码""打开设计图""帮我打开那个文档"等模糊指令。
+      Not for: 打开 localhost 前端页面（用 browser-preview）、纯代码编写（不涉及展示给铲屎官看）。
+      Output: Hub 右侧 Workspace 面板自动打开并导航到目标文件/目录。
+    triggers:
+      - "打开文件"
+      - "看看代码"
+      - "看日志"
+      - "帮我打开"
+      - "一起看看"
+      - "打开设计图"
+      - "看看这个文档"
+      - "打开 discussion"
+      - "看看 feature"
+      - "打开审计日志"
+      - "看看 spec"
+      - "帮我找到"
+      - "打开那个"
+    not_for:
+      - "打开 localhost 前端页面（用 browser-preview）"
+      - "纯代码编写不涉及展示"
+    output: "Hub Workspace panel auto-navigates to target file/directory"
+    next: []
+    sop_step: null
+    merged_from: null
+    feature: "F131"
+
   # ── 浏览器预览 (F120) ──
   browser-preview:
     description: >

@@ -9,6 +9,9 @@
 import type { CatId } from '@cat-cafe/shared';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+
+const log = createModuleLogger('delivery-cursor-store');
 
 const MAX_CURSORS = 5000;
 const FALLBACK_CATS: readonly CatId[] = [createCatId('opus'), createCatId('codex'), createCatId('gemini')];
@@ -46,7 +49,7 @@ export class DeliveryCursorStore {
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
-        console.warn('[DeliveryCursorStore] getDeliveryCursor failed, fallback to in-memory cursor:', err);
+        log.warn({ err }, 'getDeliveryCursor failed, fallback to in-memory cursor');
       }
     }
     return memValue;
@@ -88,7 +91,7 @@ export class DeliveryCursorStore {
         }
         return;
       } catch (err) {
-        console.warn('[DeliveryCursorStore] setDeliveryCursor failed, fallback to in-memory cursor:', err);
+        log.warn({ err }, 'setDeliveryCursor failed, fallback to in-memory cursor');
       }
     }
 
@@ -118,7 +121,7 @@ export class DeliveryCursorStore {
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
-        console.warn('[DeliveryCursorStore] getMentionAckCursor failed, fallback to in-memory:', err);
+        log.warn({ err }, 'getMentionAckCursor failed, fallback to in-memory');
       }
     }
     return memValue;
@@ -155,7 +158,7 @@ export class DeliveryCursorStore {
         }
         return;
       } catch (err) {
-        console.warn('[DeliveryCursorStore] setMentionAckCursor failed, fallback to in-memory:', err);
+        log.warn({ err }, 'setMentionAckCursor failed, fallback to in-memory');
       }
     }
 
@@ -197,12 +200,12 @@ export class DeliveryCursorStore {
         try {
           deleted += await this.sessionStore.deleteDeliveryCursor(userId, catId, threadId);
         } catch (err) {
-          console.warn('[DeliveryCursorStore] deleteDeliveryCursor failed, continue cleanup in-memory:', err);
+          log.warn({ err }, 'deleteDeliveryCursor failed, continue cleanup in-memory');
         }
         try {
           deleted += await this.sessionStore.deleteMentionAckCursor(userId, catId, threadId);
         } catch (err) {
-          console.warn('[DeliveryCursorStore] deleteMentionAckCursor failed, continue cleanup in-memory:', err);
+          log.warn({ err }, 'deleteMentionAckCursor failed, continue cleanup in-memory');
         }
       }
     }

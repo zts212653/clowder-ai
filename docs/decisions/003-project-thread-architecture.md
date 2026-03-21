@@ -20,12 +20,12 @@ Phase 3.2 实现了扁平的 Thread（对话）管理，但缺少 **Project 层*
 ```
 Codex App 侧栏:
 ├── cat-cafe (Project = 目录)
-│   ├── /home/user   (Thread)
+│   ├── /home/user/relay-st...   (Thread)
 │   ├── Study identity injection discussion    (Thread)
 │   ├── 调研 Claude Code Agent Teams ...       (Thread)
 │   └── 你看看这是一个怎么样的工程！...        (Thread)
 └── relay-station (Project = 目录)
-    └── /home/user   (Thread)
+    └── /home/user/antigravit...   (Thread)
 ```
 
 ## 决策
@@ -94,7 +94,7 @@ interface Thread {
     Study identity inject...  4h
     调研 Agent Teams ...      8h
 ▼ relay-station              2w
-    /home/user   2w
+    /home/user/anti...   2w
 ─────────────────────────────────
 ```
 

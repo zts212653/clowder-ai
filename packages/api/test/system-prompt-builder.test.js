@@ -576,9 +576,9 @@ describe('SystemPromptBuilder', () => {
   test('buildStaticIdentity includes configured owner name and mention handles', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    // Owner config has name: "Co-worker", mentionPatterns: ["@co-worker", "@owner"]
-    assert.ok(identity.includes('Co-worker'), 'Should include owner name from config');
-    assert.ok(identity.includes('@co-worker'), 'Should include @co-worker mention handle');
+    // Owner config has name: "Owner", mentionPatterns: ["@owner", "@owner", "@owner"]
+    assert.ok(identity.includes('Owner'), 'Should include owner name from config');
+    assert.ok(identity.includes('@owner'), 'Should include @owner mention handle');
     assert.ok(identity.includes('@owner'), 'Should include @owner mention handle');
     assert.ok(identity.includes('行首'), 'Should teach line-start rule for owner mentions');
   });

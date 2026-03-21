@@ -458,6 +458,9 @@ interface ChatState {
   restoreWorkspaceTabs: (tabs: string[], openFile: string | null) => void;
   setWorkspaceEditToken: (token: string | null, expiresIn?: number) => void;
 
+  workspaceRevealPath: string | null;
+  setWorkspaceRevealPath: (path: string | null) => void;
+
   // ── F120: Preview auto-open (always-mounted listener) ──
   pendingPreviewAutoOpen: { port: number; path: string } | null;
   setPendingPreviewAutoOpen: (data: { port: number; path: string }) => void;
@@ -691,6 +694,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       workspaceEditToken: token,
       workspaceEditTokenExpiry: token && expiresIn ? Date.now() + expiresIn * 1000 : null,
     }),
+
+  workspaceRevealPath: null,
+  setWorkspaceRevealPath: (path) => set({ workspaceRevealPath: path, rightPanelMode: 'workspace' }),
 
   // ── F120: Preview auto-open ──
   pendingPreviewAutoOpen: null,

@@ -7,6 +7,7 @@ import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
@@ -38,6 +39,8 @@ import {
   upsertMaxBoundary,
 } from './route-helpers.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
+
+const log = createModuleLogger('route-parallel');
 
 export async function* routeParallel(
   deps: RouteStrategyDeps,
@@ -298,7 +301,7 @@ export async function* routeParallel(
   let keepaliveStarted = false;
 
   for await (const msg of mergeStreams(streams, (idx, err) => {
-    console.error(`[routeParallel] Stream ${idx} error:`, err);
+    log.error({ streamIndex: idx, err }, 'Parallel stream error');
   })) {
     // F22 R2 P1-1: Capture invocationId from the initial system_info per cat.
     // Keep forwarding this boundary event so frontend can reset stale task progress.
@@ -453,7 +456,7 @@ export async function* routeParallel(
             try {
               allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, msg.catId as string);
             } catch (err) {
-              console.error(`[routeParallel] Voice block synthesis failed for ${msg.catId as string}:`, err);
+              log.error({ catId: msg.catId, err }, 'Voice block synthesis failed');
             }
           }
         }
@@ -471,18 +474,18 @@ export async function* routeParallel(
             if (voteState && voteState.status === 'active' && voteState.options.includes(votedOption)) {
               // Parity with HTTP/routeSerial cast validations.
               if (Date.now() > voteState.deadline) {
-                console.log(`[routeParallel] F079: Vote expired in ${threadId}, ignoring [VOTE:${votedOption}]`);
+                log.info({ threadId, votedOption }, 'Vote expired, ignoring');
               } else if (
                 voteState.voters &&
                 voteState.voters.length > 0 &&
                 !voteState.voters.includes(msg.catId) &&
                 msg.catId !== voteState.initiatedByCat
               ) {
-                console.log(`[routeParallel] F079: ${msg.catId} not in voters list, ignoring vote`);
+                log.info({ catId: msg.catId, threadId }, 'Not in voters list, ignoring vote');
               } else {
                 voteState.votes[msg.catId] = votedOption;
                 await deps.invocationDeps.threadStore.updateVotingState(threadId, voteState);
-                console.log(`[routeParallel] F079: ${msg.catId} voted [${votedOption}] in ${threadId}`);
+                log.info({ catId: msg.catId, votedOption, threadId }, 'Vote cast');
 
                 if (checkVoteCompletion(voteState)) {
                   const tally = buildVoteTally(voteState.options, voteState.votes);
@@ -531,14 +534,14 @@ export async function* routeParallel(
                       });
                     }
                   } catch (persistErr) {
-                    console.warn(`[routeParallel] Failed to persist vote connector message:`, persistErr);
+                    log.warn({ threadId, err: persistErr }, 'Failed to persist vote connector message');
                   }
-                  console.log(`[routeParallel] F079: Vote auto-closed in ${threadId}`);
+                  log.info({ threadId }, 'Vote auto-closed');
                 }
               }
             }
           } catch (voteErr) {
-            console.warn(`[routeParallel] F079: Vote interception failed for ${msg.catId}:`, voteErr);
+            log.warn({ catId: msg.catId, err: voteErr }, 'Vote interception failed');
           }
         }
 
@@ -576,11 +579,11 @@ export async function* routeParallel(
             try {
               await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
             } catch (activityErr) {
-              console.warn(`[routeParallel] updateParticipantActivity failed for ${msg.catId}, ignoring:`, activityErr);
+              log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
             }
           }
         } catch (err) {
-          console.error(`[routeParallel] messageStore.append failed for ${msg.catId}, degrading:`, err);
+          log.error({ catId: msg.catId, err }, 'messageStore.append failed, degrading');
           if (options.persistenceContext) {
             options.persistenceContext.failed = true;
             options.persistenceContext.errors.push({
@@ -651,11 +654,11 @@ export async function* routeParallel(
             try {
               await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
             } catch (activityErr) {
-              console.warn(`[routeParallel] updateParticipantActivity failed for ${msg.catId}, ignoring:`, activityErr);
+              log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
             }
           }
         } catch (err) {
-          console.error(`[routeParallel] messageStore.append failed for ${msg.catId}, degrading:`, err);
+          log.error({ catId: msg.catId, err }, 'messageStore.append failed, degrading');
           if (options.persistenceContext) {
             options.persistenceContext.failed = true;
             options.persistenceContext.errors.push({
@@ -693,14 +696,11 @@ export async function* routeParallel(
               try {
                 await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
               } catch (activityErr) {
-                console.warn(
-                  `[routeParallel] updateParticipantActivity failed for ${msg.catId}, ignoring:`,
-                  activityErr,
-                );
+                log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
               }
             }
           } catch (err) {
-            console.error(`[routeParallel] messageStore.append (error+tools) failed for ${msg.catId}, degrading:`, err);
+            log.error({ catId: msg.catId, err }, 'messageStore.append (error+tools) failed, degrading');
             if (options.persistenceContext) {
               options.persistenceContext.failed = true;
               options.persistenceContext.errors.push({
@@ -725,7 +725,7 @@ export async function* routeParallel(
             try {
               await deps.deliveryCursorStore.ackCursor(userId, msg.catId as CatId, threadId, boundaryId);
             } catch (err) {
-              console.error(`[routeParallel] ackCursor failed for ${msg.catId}:`, err);
+              log.error({ catId: msg.catId, err }, 'ackCursor failed');
             }
           }
         }

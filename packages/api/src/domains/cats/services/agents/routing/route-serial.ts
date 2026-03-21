@@ -15,6 +15,7 @@ import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
@@ -49,6 +50,8 @@ import {
   upsertMaxBoundary,
 } from './route-helpers.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
+
+const log = createModuleLogger('route-serial');
 
 export async function* routeSerial(
   deps: RouteStrategyDeps,
@@ -162,10 +165,7 @@ export async function* routeSerial(
         try {
           mentionRoutingFeedback = await deps.invocationDeps.threadStore.consumeMentionRoutingFeedback(threadId, catId);
         } catch (feedbackErr) {
-          console.warn(
-            `[routeSerial] consumeMentionRoutingFeedback failed for ${catId as string}, degrading:`,
-            feedbackErr,
-          );
+          log.warn({ catId: catId as string, err: feedbackErr }, 'consumeMentionRoutingFeedback failed');
         }
       }
       // MCP documentation: Claude's MCP_TOOLS_SECTION → staticIdentity (in -p content).
@@ -507,7 +507,7 @@ export async function* routeSerial(
         try {
           voiceTotalChunks = await voiceChunker.flush();
         } catch (err) {
-          console.error(`[routeSerial] Voice chunker flush failed:`, err);
+          log.error({ err }, 'Voice chunker flush failed');
         }
         if (deps.socketManager && voiceChunker.hasStarted()) {
           const aborted = signal?.aborted ?? false;
@@ -550,7 +550,7 @@ export async function* routeSerial(
             try {
               allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, catId as string);
             } catch (err) {
-              console.error(`[routeSerial] Voice block synthesis failed for ${catId as string}:`, err);
+              log.error({ catId: catId as string, err }, 'Voice block synthesis failed');
             }
           }
         }
@@ -574,18 +574,18 @@ export async function* routeSerial(
             if (voteState && voteState.status === 'active' && voteState.options.includes(votedOption)) {
               // Deadline enforcement (parity with HTTP cast path)
               if (Date.now() > voteState.deadline) {
-                console.log(`[routeSerial] F079: Vote expired in ${threadId}, ignoring [VOTE:${votedOption}]`);
+                log.info({ threadId, votedOption }, 'Vote expired, ignoring');
               } else if (
                 voteState.voters &&
                 voteState.voters.length > 0 &&
                 !voteState.voters.includes(catId as string) &&
                 (catId as string) !== voteState.initiatedByCat
               ) {
-                console.log(`[routeSerial] F079: ${catId as string} not in voters list, ignoring vote`);
+                log.info({ catId: catId as string, threadId }, 'Not in voters list, ignoring vote');
               } else {
                 voteState.votes[catId as string] = votedOption;
                 await deps.invocationDeps.threadStore.updateVotingState(threadId, voteState);
-                console.log(`[routeSerial] F079: ${catId as string} voted [${votedOption}] in ${threadId}`);
+                log.info({ catId: catId as string, votedOption, threadId }, 'Vote cast');
 
                 // Auto-close if all designated voters have voted
                 if (checkVoteCompletion(voteState)) {
@@ -635,14 +635,14 @@ export async function* routeSerial(
                       });
                     }
                   } catch (persistErr) {
-                    console.warn(`[routeSerial] Failed to persist vote connector message:`, persistErr);
+                    log.warn({ threadId, err: persistErr }, 'Failed to persist vote connector message');
                   }
-                  console.log(`[routeSerial] F079: Vote auto-closed in ${threadId}`);
+                  log.info({ threadId }, 'Vote auto-closed');
                 }
               }
             }
           } catch (voteErr) {
-            console.warn(`[routeSerial] F079: Vote interception failed for ${catId as string}:`, voteErr);
+            log.warn({ catId: catId as string, err: voteErr }, 'Vote interception failed');
           }
         }
 
@@ -687,14 +687,11 @@ export async function* routeSerial(
             try {
               await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
             } catch (activityErr) {
-              console.warn(
-                `[routeSerial] updateParticipantActivity failed for ${catId as string}, ignoring:`,
-                activityErr,
-              );
+              log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }
           }
         } catch (err) {
-          console.error(`[routeSerial] messageStore.append failed for ${catId as string}, degrading:`, err);
+          log.error({ catId: catId as string, err }, 'messageStore.append failed, degrading');
           if (options.persistenceContext) {
             options.persistenceContext.failed = true;
             options.persistenceContext.errors.push({
@@ -761,7 +758,7 @@ export async function* routeSerial(
               },
             })
             .catch((err) => {
-              console.warn('[audit] A2A_HANDOFF write failed', { threadId, fromCat: catId, toCat: pendingCat, err });
+              log.warn({ threadId, fromCat: catId, toCat: pendingCat, err }, 'A2A_HANDOFF audit write failed');
             });
 
           const nextConfig: CatConfig | undefined =
@@ -834,14 +831,11 @@ export async function* routeSerial(
             try {
               await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
             } catch (activityErr) {
-              console.warn(
-                `[routeSerial] updateParticipantActivity failed for ${catId as string}, ignoring:`,
-                activityErr,
-              );
+              log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }
           }
         } catch (err) {
-          console.error(`[routeSerial] messageStore.append failed for ${catId as string}, degrading:`, err);
+          log.error({ catId: catId as string, err }, 'messageStore.append failed, degrading');
           if (options.persistenceContext) {
             options.persistenceContext.failed = true;
             options.persistenceContext.errors.push({
@@ -876,17 +870,11 @@ export async function* routeSerial(
             try {
               await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
             } catch (activityErr) {
-              console.warn(
-                `[routeSerial] updateParticipantActivity failed for ${catId as string}, ignoring:`,
-                activityErr,
-              );
+              log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }
           }
         } catch (err) {
-          console.error(
-            `[routeSerial] messageStore.append (error+tools) failed for ${catId as string}, degrading:`,
-            err,
-          );
+          log.error({ catId: catId as string, err }, 'messageStore.append (error+tools) failed, degrading');
           if (options.persistenceContext) {
             options.persistenceContext.failed = true;
             options.persistenceContext.errors.push({
@@ -916,7 +904,7 @@ export async function* routeSerial(
           try {
             await deps.deliveryCursorStore.ackCursor(userId, catId, threadId, deliveryBoundaryId);
           } catch (err) {
-            console.error(`[routeSerial] ackCursor failed for ${catId as string}:`, err);
+            log.error({ catId: catId as string, err }, 'ackCursor failed');
           }
         }
       }

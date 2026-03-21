@@ -71,4 +71,9 @@ export interface ConfigSnapshot {
     authMode: CodexAuthMode;
     passModelArg: boolean;
   };
+  /** F102 evidence/summary feature flags (Phase G) */
+  f102: {
+    embedMode: string;
+    abstractiveEnabled: boolean;
+  };
 }

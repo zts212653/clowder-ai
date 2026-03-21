@@ -1,5 +1,8 @@
 import puppeteer, { type Browser } from 'puppeteer';
 import sharp from 'sharp';
+import { createModuleLogger } from '../infrastructure/logger.js';
+
+const log = createModuleLogger('image-exporter');
 
 /** Chunk height for scroll-and-stitch. 4000px is well under Chrome's ~16384 GPU limit. */
 const CHUNK_HEIGHT = 4000;
@@ -55,11 +58,9 @@ export class ImageExporter {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => ((globalThis as any).document.querySelectorAll('[data-message-id]') ?? []).length,
       );
-      console.log(
-        '[ImageExporter] pageHeight=%d messageCount=%d chunks=%d',
-        pageHeight,
-        messageCount,
-        Math.ceil(pageHeight / CHUNK_HEIGHT),
+      log.info(
+        { pageHeight, messageCount, chunks: Math.ceil(pageHeight / CHUNK_HEIGHT) },
+        'Page height and message count captured',
       );
 
       // Short page: single viewport screenshot (no stitching needed)
@@ -67,7 +68,7 @@ export class ImageExporter {
         await page.setViewport({ width: VIEWPORT_WIDTH, height: pageHeight });
         await this.waitForPaint(page);
         const screenshot = await page.screenshot({ type: 'png' });
-        console.log('[ImageExporter] captured %d bytes (single)', screenshot.length);
+        log.info({ bytes: screenshot.length }, 'Captured single screenshot');
         await page.close();
         return screenshot as Buffer;
       }
@@ -100,7 +101,7 @@ export class ImageExporter {
         chunks.push({ buffer: chunk, top: y, height: chunkH });
       }
 
-      console.log('[ImageExporter] captured %d chunks, stitching...', chunks.length);
+      log.info({ chunks: chunks.length }, 'Chunks captured, stitching...');
 
       // Stitch chunks vertically using Sharp
       const stitched = await sharp({
@@ -121,7 +122,7 @@ export class ImageExporter {
         .png()
         .toBuffer();
 
-      console.log('[ImageExporter] stitched %d bytes', stitched.length);
+      log.info({ bytes: stitched.length }, 'Stitched image ready');
       await page.close();
       return stitched;
     } catch (error) {

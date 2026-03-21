@@ -29,7 +29,8 @@ export type EnvCategory =
   | 'frontend'
   | 'push'
   | 'signal'
-  | 'github_review';
+  | 'github_review'
+  | 'evidence';
 
 export interface EnvDefinition {
   /** The env var name, e.g. 'REDIS_URL' */
@@ -62,6 +63,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   push: '推送通知',
   signal: 'Signal 信号源',
   github_review: 'GitHub Review 监控',
+  evidence: 'F102 记忆系统',
 };
 
 export const ENV_VARS: EnvDefinition[] = [
@@ -675,6 +677,36 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'GitHub Personal Access Token (MCP 用)',
     category: 'github_review',
     sensitive: true,
+  },
+
+  // --- evidence (F102 记忆系统) ---
+  {
+    name: 'EMBED_MODE',
+    defaultValue: 'off',
+    description: '向量检索模式 (off/shadow/on)，on = 开启 Qwen3 embedding rerank',
+    category: 'evidence',
+    sensitive: false,
+  },
+  {
+    name: 'F102_ABSTRACTIVE',
+    defaultValue: 'off',
+    description: 'Phase G 摘要调度器 (off/on)，on = 定时调用 Opus API 做 thread 摘要',
+    category: 'evidence',
+    sensitive: false,
+  },
+  {
+    name: 'EMBED_URL',
+    defaultValue: 'http://127.0.0.1:9880',
+    description: 'Embedding 服务地址（独立 Python GPU 进程 scripts/embed-api.py）',
+    category: 'evidence',
+    sensitive: false,
+  },
+  {
+    name: 'EVIDENCE_DB',
+    defaultValue: '{repoRoot}/evidence.sqlite',
+    description: 'F102 SQLite 数据库路径',
+    category: 'evidence',
+    sensitive: false,
   },
 ];
 

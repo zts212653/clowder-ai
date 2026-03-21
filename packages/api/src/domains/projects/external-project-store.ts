@@ -14,7 +14,7 @@ export class ExternalProjectStore {
       throw new Error('sourcePath is required');
     }
     // P2-1: Prevent path traversal — resolved backlogPath must stay within sourcePath
-    const backlogPath = input.backlogPath ?? 'docs/BACKLOG.md';
+    const backlogPath = input.backlogPath ?? 'docs/ROADMAP.md';
     const resolvedBacklog = resolve(input.sourcePath, backlogPath);
     const resolvedSource = resolve(input.sourcePath);
     if (!resolvedBacklog.startsWith(`${resolvedSource}/`) && resolvedBacklog !== resolvedSource) {

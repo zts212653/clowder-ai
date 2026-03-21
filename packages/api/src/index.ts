@@ -180,11 +180,8 @@ export function getSocketManager(): SocketManager {
 const PROCESS_START_AT = Date.now();
 
 async function main(): Promise<void> {
-  const app = Fastify({
-    logger: {
-      timestamp: () => `,"time":"${new Date().toISOString()}"`,
-    },
-  });
+  const { logger: customLogger } = await import('./infrastructure/logger.js');
+  const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
 
   // CORS for frontend
   await app.register(cors, {
@@ -266,7 +263,8 @@ async function main(): Promise<void> {
   app.log.info(`[api] Storage mode: ${storageResult.mode}`);
 
   // F102 KD-34: append listener placeholder (wired after memoryServices init)
-  let appendListener: ((msg: { id: string; threadId: string; timestamp: number }) => void) | null = null;
+  let appendListener: ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void) | null =
+    null;
 
   const messageStore = createMessageStore(redis, {
     onAppend: (msg) => {
@@ -338,6 +336,8 @@ async function main(): Promise<void> {
     sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
     docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
     transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
+    // Gap-1: expose EMBED_MODE env variable (Phase C infra ready, default off for open-source)
+    embed: process.env.EMBED_MODE ? { embedMode: process.env.EMBED_MODE as 'off' | 'shadow' | 'on' } : undefined,
     // Phase E-2: message passage indexing — provide a callback that reads thread messages
     messageListFn: async (threadId: string, limit?: number) => {
       const messages = await messageStore.getByThread(threadId, limit ?? 2000, 'default-user');
@@ -391,6 +391,9 @@ async function main(): Promise<void> {
       appendListener = (msg) => {
         if (msg.threadId) {
           ib.markThreadDirty(msg.threadId);
+          // G-3c P1 fix (砚砚 review): accumulate delta from actual new message,
+          // not from rebuilt summary snapshot in flushDirtyThreads
+          ib.accumulateSummaryDelta(msg.threadId, msg.content);
         }
       };
 
@@ -405,6 +408,67 @@ async function main(): Promise<void> {
         }
       }, DIRTY_THREAD_FLUSH_INTERVAL_MS);
       dirtyFlushTimer.unref();
+    }
+  }
+
+  // ── Phase G: Summary Compaction Scheduler ──
+  if (process.env.F102_ABSTRACTIVE === 'on' && memoryServices.indexBuilder) {
+    try {
+      const { TaskRunner } = await import('./infrastructure/scheduler/TaskRunner.js');
+      const { createSummaryCompactionTask } = await import('./domains/memory/SummaryCompactionTask.js');
+      const { createAbstractiveClient } = await import('./domains/memory/AbstractiveSummaryClient.js');
+
+      const taskRunner = new TaskRunner({ info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) });
+
+      const generateAbstractive = createAbstractiveClient(
+        async () => {
+          try {
+            const { resolveAnthropicRuntimeProfile } = await import('./config/provider-profiles.js');
+            const { findMonorepoRoot } = await import('./utils/monorepo-root.js');
+            const profile = await resolveAnthropicRuntimeProfile(findMonorepoRoot());
+            if (profile.mode !== 'api_key') return null;
+            return profile as { mode: 'api_key'; baseUrl: string; apiKey: string };
+          } catch {
+            return null;
+          }
+        },
+        { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
+      );
+
+      const db = memoryServices.store.getDb();
+      const summaryTask = createSummaryCompactionTask({
+        db,
+        enabled: () => process.env.F102_ABSTRACTIVE === 'on',
+        getThreadLastActivity: async (threadId) => {
+          const msgs = await messageStore.getByThread(threadId, 1, 'default-user');
+          if (msgs.length === 0) return null;
+          return { threadId, lastMessageAt: msgs[0]!.timestamp };
+        },
+        getMessagesAfterWatermark: async (threadId, afterMessageId, limit) => {
+          // P1 fix (砚砚 review): use getByThreadAfter for true "after watermark" semantics,
+          // not "latest N + slice" which would skip messages if delta > limit
+          const msgs = await messageStore.getByThreadAfter(
+            threadId,
+            afterMessageId ?? undefined,
+            limit,
+            'default-user',
+          );
+          return msgs.map((m) => ({
+            id: m.id,
+            content: m.content,
+            catId: m.catId ?? undefined,
+            timestamp: m.timestamp,
+          }));
+        },
+        generateAbstractive,
+        logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
+      });
+
+      taskRunner.register(summaryTask);
+      taskRunner.start();
+      app.log.info('[api] F102 Phase G: summary compaction scheduler started');
+    } catch (err) {
+      app.log.warn(`[api] F102 Phase G: scheduler init failed (non-fatal): ${err}`);
     }
   }
 
@@ -720,7 +784,11 @@ async function main(): Promise<void> {
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes);
-  await app.register(workspaceRoutes);
+  await app.register(workspaceRoutes, {
+    socketEmit: (event, data, room) => {
+      socketManager?.broadcastToRoom(room, event, data);
+    },
+  });
   await app.register(workspaceEditRoutes);
   await app.register(workspaceGitRoutes);
   await app.register(terminalRoutes, {

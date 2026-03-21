@@ -40,23 +40,23 @@ describe('parsePreviewUrl', () => {
     expect(result.valid).toBe(false);
   });
 
-  // P1: Detect Cat Café Hub URL patterns
+  // P1: Detect Clowder AI Hub URL patterns
   it('warns when path contains /thread/ (Hub page URL)', () => {
     const result = parsePreviewUrl('localhost:3203/thread/thread_mmrp2gfn62d90yap');
     expect(result.valid).toBe(true);
-    expect(result.warning).toMatch(/Cat Café Hub/i);
+    expect(result.warning).toMatch(/Clowder AI Hub/i);
   });
 
   it('warns when path starts with /api/ (Hub API URL)', () => {
     const result = parsePreviewUrl('localhost:3004/api/threads');
     expect(result.valid).toBe(true);
-    expect(result.warning).toMatch(/Cat Café/i);
+    expect(result.warning).toMatch(/Clowder AI/i);
   });
 
   it('warns when path starts with /api/preview (Hub preview endpoint)', () => {
     const result = parsePreviewUrl('http://localhost:3004/api/preview/status');
     expect(result.valid).toBe(true);
-    expect(result.warning).toMatch(/Cat Café/i);
+    expect(result.warning).toMatch(/Clowder AI/i);
   });
 
   it('does NOT warn for normal dev server paths', () => {

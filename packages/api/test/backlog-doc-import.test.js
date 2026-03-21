@@ -290,10 +290,7 @@ describe('gitShowFile', () => {
     const { gitShowFile } = await import('../dist/routes/git-doc-reader.js');
     const content = await gitShowFile('docs/ROADMAP.md');
     assert.ok(content, 'should return content');
-    assert.ok(
-      content.includes('Roadmap') || content.includes('backlog') || content.includes('Feature'),
-      'should contain expected content',
-    );
+    assert.ok(content.includes('| ID |') || content.includes('backlog'), 'should contain expected content');
   });
 
   test('returns null for non-existent path', async () => {

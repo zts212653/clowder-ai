@@ -8,7 +8,7 @@ const mockProject: ExternalProject = {
   name: 'studio-flow',
   description: 'Client project',
   sourcePath: '/tmp/sf',
-  backlogPath: 'docs/BACKLOG.md',
+  backlogPath: 'docs/ROADMAP.md',
   createdAt: 1000,
   updatedAt: 1000,
 };

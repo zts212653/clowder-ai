@@ -9,6 +9,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IndexBuilder } from '../domains/memory/IndexBuilder.js';
 import { SqliteEvidenceStore } from '../domains/memory/SqliteEvidenceStore.js';
+import { createModuleLogger } from '../infrastructure/logger.js';
+
+const log = createModuleLogger('rebuild-index');
 
 interface RebuildIndexArgs {
   force: boolean;
@@ -26,9 +29,7 @@ function parseArgs(argv: string[]): RebuildIndexArgs {
 export async function runRebuildIndexCli(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseArgs(argv);
 
-  console.log(`[rebuild-index] docs: ${args.docsRoot}`);
-  console.log(`[rebuild-index] db: ${args.dbPath}`);
-  console.log(`[rebuild-index] force: ${args.force}`);
+  log.info({ docs: args.docsRoot, db: args.dbPath, force: args.force }, 'Rebuild index starting');
 
   const store = new SqliteEvidenceStore(args.dbPath);
   await store.initialize();
@@ -37,16 +38,17 @@ export async function runRebuildIndexCli(argv: string[] = process.argv.slice(2))
 
   const result = await builder.rebuild({ force: args.force });
 
-  console.log(
-    `[rebuild-index] indexed: ${result.docsIndexed}, skipped: ${result.docsSkipped}, duration: ${result.durationMs}ms`,
+  log.info(
+    { docsIndexed: result.docsIndexed, docsSkipped: result.docsSkipped, durationMs: result.durationMs },
+    'Index rebuilt',
   );
 
   const consistency = await builder.checkConsistency();
   if (!consistency.ok) {
-    console.error(`[rebuild-index] CONSISTENCY ERROR: doc=${consistency.docCount} fts=${consistency.ftsCount}`);
+    log.error({ docCount: consistency.docCount, ftsCount: consistency.ftsCount }, 'CONSISTENCY ERROR');
     process.exitCode = 1;
   } else {
-    console.log(`[rebuild-index] consistency OK (${consistency.docCount} docs)`);
+    log.info({ docCount: consistency.docCount }, 'Consistency check passed');
   }
 
   store.close();
@@ -56,7 +58,7 @@ export async function runRebuildIndexCli(argv: string[] = process.argv.slice(2))
 const entryPath = process.argv[1];
 if (entryPath && entryPath === fileURLToPath(import.meta.url)) {
   runRebuildIndexCli().catch((err) => {
-    console.error('[rebuild-index] Fatal:', err);
+    log.error({ error: err }, 'Fatal error');
     process.exitCode = 1;
   });
 }

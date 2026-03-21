@@ -16,6 +16,7 @@ import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.j
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { resolveAnthropicRuntimeProfile } from '../../../../../config/provider-profiles.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
@@ -24,6 +25,9 @@ import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+
+const log = createModuleLogger('invoke');
+
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
@@ -207,12 +211,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     (cliTimeoutMs > 0 ? cliTimeoutMs : DEFAULT_CLI_TIMEOUT_MS) * INVOCATION_TIMEOUT_MULTIPLIER;
   const invocationAc = new AbortController();
   const invocationTimer = setTimeout(() => {
-    console.error('[invoke-single-cat] invocation hard timeout fired', {
-      invocationId,
-      catId,
-      threadId,
-      timeoutMs: invocationTimeoutMs,
-    });
+    log.error({ invocationId, catId, threadId, timeoutMs: invocationTimeoutMs }, 'Invocation hard timeout fired');
     invocationAc.abort(new Error('invocation_timeout'));
   }, invocationTimeoutMs);
   invocationTimer.unref();
@@ -222,13 +221,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     ? AbortSignal.any([callerSignal, invocationAc.signal])
     : invocationAc.signal;
 
-  // DIAG: ghost-thread bug — log invocation creation with thread binding
-  console.info('[DIAG/ghost-thread] invokeSingleCat: created invocation', {
-    invocationId,
-    catId,
-    threadId,
-    userId,
-  });
+  log.info({ invocationId, catId, threadId, userId }, 'Created invocation');
 
   // F22 R2 P1-1: Expose invocationId to caller (route-serial/parallel) so they can
   // use it for RichBlockBuffer.consume() instead of getLatestId() which is wrong
@@ -279,7 +272,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         const msg =
           `Shared-state files committed but not pushed: ${ssCheck.unpushedFiles.join(', ')}. ` +
           'Run `git push` before invoking any cat (shared-rules §14).';
-        console.warn(`[shared-state-preflight] ${catId}: BLOCKED — ${msg}`);
+        log.warn({ catId, unpushedFiles: ssCheck.unpushedFiles }, 'Shared-state preflight BLOCKED');
         yield {
           type: 'system_info' as const,
           catId,
@@ -293,7 +286,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Warn-only: uncommitted changes — cat can help fix this
       if (ssCheck.uncommittedFiles?.length) {
         const msg = `uncommitted shared-state files: ${ssCheck.uncommittedFiles.join(', ')}`;
-        console.warn(`[shared-state-preflight] ${catId}: ${msg} — shared-rules §14`);
+        log.warn({ catId, uncommittedFiles: ssCheck.uncommittedFiles }, 'Shared-state preflight: uncommitted files');
         yield {
           type: 'system_info' as const,
           catId,
@@ -321,7 +314,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     })
     .catch((err) => {
       // P2-2: 打印完整错误信息 + 上下文
-      console.warn('[audit] CAT_INVOKED write failed', { threadId, invocationId, err });
+      log.warn({ threadId, invocationId, err }, 'CAT_INVOKED audit write failed');
     });
 
   let hadStreamError = false;
@@ -367,12 +360,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         lastInvocationId: invocationId,
       });
     } catch (err) {
-      console.warn('[task_progress] persist running snapshot failed (degrading)', {
-        threadId,
-        catId,
-        invocationId,
-        err,
-      });
+      log.warn({ threadId, catId, invocationId, err }, 'Task progress persist running snapshot failed');
     }
   };
 
@@ -410,13 +398,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       });
       finalizedTaskProgressStatus = status;
     } catch (err) {
-      console.warn('[task_progress] persist final snapshot failed (degrading)', {
-        threadId,
-        catId,
-        invocationId,
-        status,
-        err,
-      });
+      log.warn({ threadId, catId, invocationId, status, err }, 'Task progress persist final snapshot failed');
     }
   };
 
@@ -545,7 +527,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           : preflight.needsConfirmation
             ? 'needs_confirmation'
             : 'files_missing';
-        // F130: Structured governance_blocked event — frontend renders actionable card
+        // F070: Structured governance_blocked event — frontend renders actionable card
         yield {
           type: 'system_info',
           catId,
@@ -558,7 +540,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }),
           timestamp: Date.now(),
         };
-        // F130: done with errorCode so messages.ts marks invocation as failed (retryable)
+        // F070: done with errorCode so routes mark invocation as failed (retryable)
         yield {
           type: 'done',
           catId,
@@ -615,16 +597,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 registerProxyUpstream(projectRoot, slug, profile.baseUrl);
                 callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPortStr}/${slug}`;
               } else {
-                console.warn(
-                  `[invoke] proxy 127.0.0.1:${proxyPortStr} unreachable, falling back to direct upstream: ${profile.baseUrl}`,
+                log.warn(
+                  { proxyPort: proxyPortStr, baseUrl: profile.baseUrl },
+                  'Proxy unreachable, falling back to direct upstream',
                 );
                 callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
               }
             } else {
               if (proxyEnabled && (Number.isNaN(proxyPortNum) || proxyPortNum <= 0 || proxyPortNum > 65535)) {
-                console.warn(
-                  `[invoke] invalid ANTHROPIC_PROXY_PORT="${proxyPortStr}", falling back to direct upstream`,
-                );
+                log.warn({ proxyPort: proxyPortStr }, 'Invalid ANTHROPIC_PROXY_PORT, falling back to direct upstream');
               }
               callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL = profile.baseUrl;
             }
@@ -678,9 +659,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           deps.agentPaneRegistry,
         );
       } catch {
-        console.warn(
-          `[invoke-single-cat] resolveWorktreeIdByPath failed for ${workingDirectory} — skipping tmux pane (agent runs without tmux)`,
-        );
+        log.warn({ workingDirectory }, 'resolveWorktreeIdByPath failed — skipping tmux pane');
       }
     }
 
@@ -714,14 +693,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
 
       if (msg.type === 'session_init' && msg.sessionId) {
-        // DIAG: ghost-thread bug — log session binding to verify threadId correctness
-        console.info('[DIAG/ghost-thread] session_init: binding session', {
-          cliSessionId: msg.sessionId,
-          threadId,
-          catId,
-          userId,
-          invocationId,
-        });
+        log.info(
+          { cliSessionId: msg.sessionId, threadId, catId, userId, invocationId },
+          'Session init: binding session',
+        );
         try {
           await sessionManager.store(userId, catId, threadId, msg.sessionId);
         } catch {
@@ -832,7 +807,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             },
           })
           .catch((err) => {
-            console.warn(`[audit] ${auditType} write failed`, { threadId, invocationId, err });
+            log.warn({ threadId, invocationId, err }, `${auditType} audit write failed`);
           });
 
         // Increment session messageCount (best-effort).
@@ -1231,16 +1206,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
         if (catId === 'gemini') {
-          console.info('[diag/gemini-startup] retrying invoke', {
-            catId,
-            threadId,
-            invocationId,
-            reason: 'missing_session',
-            attempt: attempt + 1,
-            retryAttempt: attempt + 2,
-            elapsedMs: Date.now() - attemptStartedAt,
-            hadSessionId: Boolean(options.sessionId),
-          });
+          log.info(
+            {
+              catId,
+              threadId,
+              invocationId,
+              reason: 'missing_session',
+              attempt: attempt + 1,
+              retryAttempt: attempt + 2,
+              elapsedMs: Date.now() - attemptStartedAt,
+              hadSessionId: Boolean(options.sessionId),
+            },
+            'Gemini retrying invoke',
+          );
         }
         try {
           await sessionManager.delete(userId, catId, threadId);
@@ -1275,16 +1253,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       if (shouldRetryOnTransientCliExit && attempt + 1 < maxAttempts) {
         if (catId === 'gemini') {
-          console.info('[diag/gemini-startup] retrying invoke', {
-            catId,
-            threadId,
-            invocationId,
-            reason: 'transient_cli_exit',
-            attempt: attempt + 1,
-            retryAttempt: attempt + 2,
-            elapsedMs: Date.now() - attemptStartedAt,
-            hadSessionId: Boolean(options.sessionId),
-          });
+          log.info(
+            {
+              catId,
+              threadId,
+              invocationId,
+              reason: 'transient_cli_exit',
+              attempt: attempt + 1,
+              retryAttempt: attempt + 2,
+              elapsedMs: Date.now() - attemptStartedAt,
+              hadSessionId: Boolean(options.sessionId),
+            },
+            'Gemini retrying invoke',
+          );
         }
         allowTransientRetry = false;
         continue;
@@ -1344,7 +1325,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         },
       })
       .catch((auditErr) => {
-        console.warn('[audit] CAT_ERROR write failed', { threadId, invocationId, err: auditErr });
+        log.warn({ threadId, invocationId, err: auditErr }, 'CAT_ERROR audit write failed');
       });
 
     hadError = true;
@@ -1382,7 +1363,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           },
         })
         .catch((auditErr) => {
-          console.warn('[audit] finally fallback CAT_ERROR write failed', { threadId, invocationId, err: auditErr });
+          log.warn({ threadId, invocationId, err: auditErr }, 'Finally fallback CAT_ERROR audit write failed');
         });
     }
 

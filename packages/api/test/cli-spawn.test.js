@@ -108,10 +108,6 @@ test('spawnCli skips parse errors in stdout', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
-  // Suppress console.error for this test
-  const originalError = console.error;
-  console.error = mock.fn();
-
   const promise = collect(spawnCli({ command: 'test-cli', args: [] }, { spawnFn }));
 
   proc.stdout.write('{"valid":true}\n');
@@ -122,14 +118,10 @@ test('spawnCli skips parse errors in stdout', async () => {
 
   const results = await promise;
 
+  // Behavioral assertion: parse errors are silently skipped, only valid JSON yielded
   assert.equal(results.length, 2);
   assert.deepEqual(results[0], { valid: true });
   assert.deepEqual(results[1], { also: 'valid' });
-
-  // Verify parse error was logged
-  assert.ok(console.error.mock.callCount() > 0);
-
-  console.error = originalError;
 });
 
 test('parse-error noise does not reset timeout forever', async () => {

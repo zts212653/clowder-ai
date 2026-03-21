@@ -8,9 +8,9 @@ created: 2026-03-10
 
 # F091: Signal Study Mode — 信号学习伴侣
 
-> **Status**: in-progress | **Owner**: Ragdoll
+> **Status**: done | **Owner**: Ragdoll
 > **Created**: 2026-03-10
-> **Completed**: 2026-03-10
+> **Completed**: 2026-03-17
 
 ## Why
 

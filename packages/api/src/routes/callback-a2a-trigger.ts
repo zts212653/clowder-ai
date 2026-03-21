@@ -40,7 +40,12 @@ export interface A2ATriggerDeps {
   /** F122B: InvocationQueue for agent-sourced entries */
   invocationQueue?: Pick<
     InvocationQueue,
-    'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'backfillMessageId' | 'appendMergedMessageId'
+    | 'enqueue'
+    | 'countAgentEntriesForThread'
+    | 'hasQueuedAgentForCat'
+    | 'backfillMessageId'
+    | 'appendMergedMessageId'
+    | 'list'
   >;
   log: FastifyBaseLogger;
 }
@@ -122,6 +127,13 @@ export async function enqueueA2ATargets(
       await Promise.allSettled(
         ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, threadId, triggerMessageId)),
       );
+    }
+    if (enqueued.length > 0) {
+      deps.socketManager.emitToUser(opts.userId, 'queue_updated', {
+        threadId,
+        queue: deps.invocationQueue.list(threadId, opts.userId),
+        action: 'enqueued',
+      });
     }
     // Trigger auto-execute for entries whose target slot is free
     await deps.queueProcessor?.tryAutoExecute?.(threadId);
@@ -320,14 +332,17 @@ export async function triggerA2AInvocation(
 
       socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', { threadId, mode: intent.intent, targetCats });
 
-      // F130: track governance block errorCode
+      // F070: track governance block errorCode for recoverable failure marking
       let governanceErrorCode: string | undefined;
+
       for await (const msg of router.routeExecution(userId, content, threadId, triggerMessage.id, targetCats, intent, {
         ...(controller?.signal ? { signal: controller.signal } : {}),
         parentInvocationId: createResult.invocationId,
       })) {
         if (controller?.signal.aborted) break;
-        if (msg.type === 'done' && msg.errorCode) governanceErrorCode = msg.errorCode;
+        if (msg.type === 'done' && msg.errorCode) {
+          governanceErrorCode = msg.errorCode;
+        }
         socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
       }
 
@@ -337,6 +352,8 @@ export async function triggerA2AInvocation(
           status: 'canceled',
         });
       } else if (governanceErrorCode) {
+        // F070: Governance gate blocked — mark as failed with errorCode for retry
+        finalStatus = 'failed';
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'failed',
           error: governanceErrorCode,

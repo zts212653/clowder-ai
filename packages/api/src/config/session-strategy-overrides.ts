@@ -15,7 +15,10 @@
 
 import type { SessionStrategyConfig } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import { SessionStrategyKeys } from './session-strategy-keys.js';
+
+const log = createModuleLogger('session-strategy-overrides');
 
 let _redis: RedisClient | undefined;
 const _cache = new Map<string, Partial<SessionStrategyConfig>>();
@@ -104,7 +107,7 @@ async function hydrateFromRedis(): Promise<void> {
         try {
           tempCache.set(catId, JSON.parse(raw) as Partial<SessionStrategyConfig>);
         } catch {
-          console.warn(`[session-strategy] invalid JSON in Redis key ${key}, skipping`);
+          log.warn({ key }, 'invalid JSON in Redis key, skipping');
         }
       }
     }

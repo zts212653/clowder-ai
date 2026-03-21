@@ -398,6 +398,136 @@ describe('Queue Integration (E2E scenarios)', () => {
     assert.ok(canceledUpdate, 'should mark connector invocation as canceled when aborted');
   });
 
+  // ── F122B bugfix: autoExecute retry on completion ──
+
+  it('bugfix: autoExecute entry orphaned when target cat busy at enqueue → recovered on completion', async () => {
+    // Scenario: gpt52 is executing via messages.ts path (tracked by invocationTracker).
+    // An autoExecute entry for gpt52 is enqueued. tryAutoExecute skips it because
+    // invocationTracker.has(thread, 'gpt52') = true.
+    // Later, gpt52's messages.ts execution completes and calls onInvocationComplete.
+    // The completion chain (tryExecuteNextAcrossUsers) should pick up the orphaned entry.
+    //
+    // This test verifies that even without our fix, the BASIC recovery works
+    // (when the completing cat IS the same as the orphaned entry's target cat).
+
+    // 1. gpt52 is actively executing via messages.ts (NOT via QueueProcessor)
+    trackerMock.setActive('thread-1');
+
+    // 2. autoExecute entry for gpt52 is enqueued
+    const enqResult = queue.enqueue({
+      threadId: 'thread-1',
+      userId: 'agent-user',
+      content: 'P1 修完，请 review',
+      source: 'agent',
+      targetCats: ['gpt52'],
+      intent: 'execute',
+      autoExecute: true,
+    });
+    assert.strictEqual(enqResult.outcome, 'enqueued');
+
+    // 3. tryAutoExecute is called (as enqueueA2ATargets does after enqueue)
+    await processor.tryAutoExecute('thread-1');
+
+    // 4. Entry should still be queued (not picked up because gpt52 slot busy)
+    const entries = queue.list('thread-1', 'agent-user');
+    assert.strictEqual(entries.length, 1, 'Entry should still be in queue');
+    assert.strictEqual(entries[0].status, 'queued', 'Entry should still be queued');
+
+    // 5. gpt52 completes via messages.ts path → onInvocationComplete
+    trackerMock.clearActive('thread-1');
+    await processor.onInvocationComplete('thread-1', 'gpt52', 'succeeded');
+    await settle();
+
+    // 6. The orphaned autoExecute entry should have been picked up and executed
+    assert.strictEqual(routerMock.calls.length, 1, 'Orphaned autoExecute entry should be recovered');
+    assert.strictEqual(routerMock.calls[0].message, 'P1 修完，请 review');
+    assert.deepStrictEqual(routerMock.calls[0].targetCats, ['gpt52']);
+  });
+
+  it('bugfix: multi-cat autoExecute — tryExecuteNextAcrossUsers only picks one, re-scan picks the rest', async () => {
+    // When gpt52 completes, tryExecuteNextAcrossUsers picks the oldest entry.
+    // If that entry is for a DIFFERENT free cat (codex), it starts codex's entry.
+    // But a SECOND free cat's entry (opus) would only be started via tryAutoExecute re-scan,
+    // since tryExecuteNextAcrossUsers returns after starting one entry.
+
+    const activeSlots = new Set();
+    /** @type {any} */
+    const perSlotTracker = {
+      start(threadId, catId) {
+        activeSlots.add(`${threadId}:${catId}`);
+        return new AbortController();
+      },
+      complete(threadId, catId, _controller) {
+        activeSlots.delete(`${threadId}:${catId}`);
+      },
+      has(threadId, catId) {
+        if (catId) return activeSlots.has(`${threadId}:${catId}`);
+        for (const key of activeSlots) {
+          if (key.startsWith(`${threadId}:`)) return true;
+        }
+        return false;
+      },
+    };
+
+    const localProcessor = new QueueProcessor({
+      queue,
+      invocationTracker: perSlotTracker,
+      invocationRecordStore: recordMock.store,
+      router: routerMock.router,
+      socketManager: socketMock.manager,
+      messageStore: /** @type {any} */ ({ getById: async () => null }),
+      log: noopLog(),
+    });
+
+    activeSlots.add('thread-1:gpt52');
+    activeSlots.add('thread-1:codex');
+    activeSlots.add('thread-1:opus');
+
+    queue.enqueue({
+      threadId: 'thread-1',
+      userId: 'agent-user',
+      content: 'review request for codex',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+    });
+    queue.enqueue({
+      threadId: 'thread-1',
+      userId: 'agent-user',
+      content: 'review request for opus',
+      source: 'agent',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: true,
+    });
+
+    await localProcessor.tryAutoExecute('thread-1');
+    assert.strictEqual(routerMock.calls.length, 0, 'All entries skipped — all cats busy');
+
+    // All three cats complete at once
+    activeSlots.clear();
+
+    // Capture call count before completion
+    const beforeCount = routerMock.calls.length;
+    await localProcessor.onInvocationComplete('thread-1', 'gpt52', 'succeeded');
+    // onInvocationComplete returned — fire-and-forget executeEntry calls are launched
+    // but haven't completed. Count starts within the same microtask frame:
+    const startedImmediately = routerMock.calls.length - beforeCount;
+
+    await settle(200);
+
+    assert.strictEqual(routerMock.calls.length, 2, 'Both entries should eventually execute');
+
+    // Without fix: tryExecuteNextAcrossUsers starts 1, the 2nd waits for completion chain
+    // With fix: tryAutoExecute re-scan starts the 2nd in parallel
+    assert.strictEqual(
+      startedImmediately,
+      2,
+      'Both free-slot entries should start in the same onInvocationComplete call',
+    );
+  });
+
   it('bugfix: clearPause + succeeded new invocation → auto-dequeue resumes', async () => {
     // 1. Active invocation + queued message
     trackerMock.setActive('thread-1');

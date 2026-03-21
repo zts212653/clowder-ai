@@ -146,7 +146,12 @@ describe('parseWorktreeHealth', () => {
   });
 
   test('handles detached HEAD worktrees', () => {
-    const output = ['worktree /home/user', 'HEAD abc1234567890123456789012345678901234567', 'detached', ''].join('\n');
+    const output = [
+      'worktree /home/user/detached',
+      'HEAD abc1234567890123456789012345678901234567',
+      'detached',
+      '',
+    ].join('\n');
     const result = parseWorktreeHealth(output, new Set());
     assert.equal(result.length, 1);
     assert.equal(result[0].branch, '(detached)');

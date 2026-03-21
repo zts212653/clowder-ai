@@ -224,8 +224,8 @@ async function dispatchToTarget(
 
     orch.registerDispatch(requestId, targetCatId, controller);
 
-    // F130: track governance block errorCode (scoped outside try for post-try guard)
     let governanceErrorCode: string | undefined;
+
     try {
       socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
         threadId,
@@ -244,7 +244,6 @@ async function dispatchToTarget(
         { signal: controller.signal, parentInvocationId: invocationId },
       )) {
         if (controller.signal.aborted) break;
-        if (msg.type === 'done' && msg.errorCode) governanceErrorCode = msg.errorCode;
 
         // Capture text + tool usage for response aggregation
         if (msg.catId === targetCatId) {
@@ -254,39 +253,33 @@ async function dispatchToTarget(
             toolsUsed.push(msg.toolName);
           }
         }
+        if (msg.type === 'done' && msg.errorCode) {
+          governanceErrorCode = msg.errorCode;
+        }
 
         socketManager.broadcastAgentMessage({ ...msg, invocationId }, threadId);
       }
 
-      const finalStatus = governanceErrorCode ? 'failed' : controller.signal.aborted ? 'canceled' : 'succeeded';
+      const finalInvocationStatus = controller.signal.aborted
+        ? 'canceled'
+        : governanceErrorCode
+          ? 'failed'
+          : 'succeeded';
       await invocationRecordStore.update(invocationId, {
-        status: finalStatus,
+        status: finalInvocationStatus,
         ...(governanceErrorCode ? { error: governanceErrorCode } : {}),
       });
     } finally {
       orch.unregisterDispatch(requestId, targetCatId);
     }
 
-    // If aborted (stop button / preempt / thread cancel), do NOT record response
+    // If aborted or governance-blocked, do NOT record response
     // or flush result — the partial/empty text would produce a misleading summary.
-    if (controller.signal.aborted) {
-      log.info({ requestId, targetCatId }, '[F086] Multi-mention dispatch aborted, skipping recordResponse');
-      return;
-    }
-
-    // F130: Governance blocked — record failure so orchestrator advances (not timeout)
-    if (governanceErrorCode) {
-      const govMsg = `[治理拦截] 项目需要初始化治理后才能派遣 (${governanceErrorCode})`;
-      const newStatus = orch.recordResponse(requestId, targetCatId, govMsg);
+    if (controller.signal.aborted || governanceErrorCode) {
       log.info(
-        { requestId, targetCatId, governanceErrorCode, newStatus },
-        '[F130] Multi-mention governance blocked, recorded failure response',
+        { requestId, targetCatId, governanceErrorCode },
+        '[F086] Multi-mention dispatch aborted/blocked, skipping recordResponse',
       );
-      // Mirror normal completion: if all targets responded, cancel timeout and flush
-      if (newStatus === 'done') {
-        cancelTimeout(requestId);
-        await flushResult(deps, requestId, threadId, userId, log);
-      }
       return;
     }
 
@@ -330,16 +323,12 @@ async function dispatchToTarget(
         );
       }
     }
-    // Record failure response in orchestrator + mirror done-path cleanup
-    const errStatus = orch.recordResponse(
+    // Record failure response in orchestrator
+    orch.recordResponse(
       requestId,
       targetCatId,
       `[dispatch error: ${err instanceof Error ? err.message : String(err)}]`,
     );
-    if (errStatus === 'done') {
-      cancelTimeout(requestId);
-      await flushResult(deps, requestId, threadId, userId, log);
-    }
   } finally {
     // F122 AC-A7: unconditional slot release — covers early return, registerDispatch
     // throw, routeExecution crash, and normal completion. InvocationTracker.complete()

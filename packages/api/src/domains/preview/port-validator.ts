@@ -3,17 +3,16 @@ import type { PortValidationOptions, PortValidationResult } from './types.js';
 /** Clowder AI 自身服务端口 — 硬编码保底 */
 export const DEFAULT_EXCLUDED_PORTS = [
   3001,
-  3002, // Hub frontend + API (internal defaults)
-  3003,
-  3004, // Hub frontend + API (public defaults)
+  3002, // Hub frontend + API
   6398,
   6399, // Redis dev + prod
   18888,
   19999, // MCP / API gateway
   9876,
   9878,
+  9877, // Anthropic proxy (default ANTHROPIC_PROXY_PORT)
   9879, // Whisper, LLM postprocess, TTS
-  9877, // Anthropic proxy
+  9880, // Embedding server (embed-api.py)
 ];
 
 /**
@@ -28,6 +27,8 @@ export function collectRuntimePorts(): number[] {
     'PREVIEW_GATEWAY_PORT',
     'REDIS_PORT',
     'VITE_PORT',
+    'ANTHROPIC_PROXY_PORT', // P1 fix (砚砚 review): proxy port must be excluded
+    'EMBED_PORT', // P1 fix: custom embed port
   ];
   const ports: number[] = [];
   for (const key of envKeys) {

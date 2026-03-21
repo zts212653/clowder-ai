@@ -222,7 +222,7 @@ export interface ChatMessage {
     targetCats?: string[];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
-    /** F130: Governance blocked data for actionable bootstrap card */
+    /** F070: Governance blocked data for actionable bootstrap card */
     governanceBlocked?: {
       projectPath: string;
       reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';

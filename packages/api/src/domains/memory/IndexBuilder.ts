@@ -12,6 +12,7 @@ import type {
   RebuildResult,
 } from './interfaces.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import { SIGNAL_FLAGS } from './summary-config.js';
 import type { VectorStore } from './VectorStore.js';
 
 const KIND_DIRS: Record<string, EvidenceKind> = {
@@ -659,6 +660,35 @@ export class IndexBuilder implements IIndexBuilder {
   /** Mark a thread as dirty (its summary has changed). Called externally after messageStore.append. */
   markThreadDirty(threadId: string): void {
     this.dirtyThreads.add(threadId);
+  }
+
+  /**
+   * G-3c: Accumulate pending delta into summary_state.
+   * Called at append time with actual new message content (not rebuilt summary).
+   * P1 fix (砚砚 review): accumulate from delta, not from flushed summary snapshot.
+   */
+  accumulateSummaryDelta(threadId: string, messageContent: string): void {
+    try {
+      const db = this.store.getDb();
+      const tokenEstimate = Math.ceil(messageContent.length / 4);
+
+      let signalFlags = 0;
+      const lower = messageContent.toLowerCase();
+      if (/(?:决定|agreed|kd-|decided|confirmed)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.DECISION;
+      if (/(?:\.ts|\.js|\.tsx|pr\s*#|commit|merge|diff)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.CODE;
+      if (/(?:fix|bug|error|修复|报错)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.ERROR_FIX;
+
+      db.prepare(`
+        INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+        VALUES (?, 1, ?, ?, 'concat')
+        ON CONFLICT(thread_id) DO UPDATE SET
+          pending_message_count = pending_message_count + 1,
+          pending_token_count = pending_token_count + ?,
+          pending_signal_flags = pending_signal_flags | ?
+      `).run(threadId, tokenEstimate, signalFlags, tokenEstimate, signalFlags);
+    } catch {
+      // fail-open
+    }
   }
 
   /** Flush dirty threads: re-index only the threads that have been marked dirty. */

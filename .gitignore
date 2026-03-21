@@ -136,3 +136,5 @@ evidence.sqlite-wal
 
 # Temporary data files (browser automation artifacts)
 forzadata-*.txt
+__pycache__/
+*.pyc

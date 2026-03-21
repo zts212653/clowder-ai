@@ -121,7 +121,7 @@ export async function readFeatureDocContent(
 /**
  * Read BACKLOG.md from origin/main, with local fallback.
  */
-export async function readBacklogContent(backlogRelPath = 'docs/BACKLOG.md', cwd?: string): Promise<string> {
+export async function readBacklogContent(backlogRelPath = 'docs/ROADMAP.md', cwd?: string): Promise<string> {
   const content = await gitShowFile(backlogRelPath, cwd);
   if (content !== null) return content;
   // Fallback: local

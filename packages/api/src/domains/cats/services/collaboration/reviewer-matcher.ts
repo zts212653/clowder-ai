@@ -15,6 +15,9 @@
 import type { CatId, ReviewPolicy, Roster } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import { getDefaultCatId, getReviewPolicy, getRoster } from '../../../../config/cat-config-loader.js';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
+
+const log = createModuleLogger('reviewer-matcher');
 
 export interface ReviewerMatchOptions {
   /** The author who needs a reviewer */
@@ -132,7 +135,7 @@ export async function resolveReviewer(options: ReviewerMatchOptions): Promise<Re
           ? 'No different-family reviewers available (all unavailable or no peer-reviewer role)'
           : 'Different-family reviewers filtered out by policy';
 
-      console.warn(`[resolveReviewer] Degraded to same-family for author "${authorId}": ${degradeReason}`);
+      log.warn({ authorId, degradeReason }, `[resolveReviewer] Degraded to same-family`);
 
       return {
         reviewer: createCatId(sorted[0]?.[0]),
@@ -144,7 +147,7 @@ export async function resolveReviewer(options: ReviewerMatchOptions): Promise<Re
   }
 
   // 7. Ultimate fallback: default cat
-  console.warn(`[resolveReviewer] No reviewers available for author "${authorId}". Using default cat.`);
+  log.warn({ authorId }, `[resolveReviewer] No reviewers available. Using default cat.`);
   return {
     reviewer: getDefaultCatId(),
     isDegraded: true,

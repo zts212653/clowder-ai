@@ -128,6 +128,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
         homeDir: home,
         dataDirs: {
           auditLogs: resolve(apiCwd, process.env.AUDIT_LOG_DIR ?? './data/audit-logs'),
+          runtimeLogs: resolve(apiCwd, './data/logs/api'),
           cliArchive: resolve(apiCwd, process.env.CLI_RAW_ARCHIVE_DIR ?? './data/cli-raw-archive'),
           redisDevSandbox: resolve(home, '.cat-cafe/redis-dev-sandbox'),
           uploads: resolve(apiCwd, process.env.UPLOAD_DIR ?? './uploads'),

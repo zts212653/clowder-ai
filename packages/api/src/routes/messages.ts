@@ -39,6 +39,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -74,6 +75,8 @@ export interface MessagesRoutesOptions {
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
   autoPlayer?: Pick<GameAutoPlayer, 'startLoop' | 'stopAllLoops'>;
 }
+
+const log = createModuleLogger('routes/messages');
 
 const getMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(10000).default(50),
@@ -658,7 +661,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const persistenceContext: PersistenceContext = { failed: false, errors: [] };
           // F8: collect per-cat token usage from done events
           const collectedUsage = new Map<string, TokenUsage>();
-          // F130: track governance block errorCode for recoverable failure marking
+          // F070: track governance block errorCode for recoverable failure marking
           let governanceErrorCode: string | undefined;
           // Aggregate streamed assistant text for push summary/decision classification.
           let assistantReplyContent = '';
@@ -691,7 +694,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
             }
-            // F130: Capture governance block errorCode for post-loop failure marking
             if (msg.type === 'done' && msg.errorCode) {
               governanceErrorCode = msg.errorCode;
             }
@@ -757,7 +759,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 .catch(() => {});
             }
           } else if (governanceErrorCode) {
-            // F130: Governance gate blocked — mark as failed with errorCode for retry
+            // F070: Governance gate blocked — mark as failed with errorCode for retry
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
               error: governanceErrorCode,
@@ -824,7 +826,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             });
             // Don't broadcast error for intentional cancel
           } else {
-            console.error('[messages] Background processing error:', err);
+            log.error({ err, invocationId: createResult.invocationId }, 'Background processing error');
             const errorMsg = normalizeErrorMessage(err);
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
@@ -914,7 +916,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             opts.socketManager.broadcastAgentMessage(msg, resolvedThreadId);
           }
         } catch (err) {
-          console.error('[messages] Background processing error:', err);
+          log.error({ err }, 'Background processing error');
           opts.socketManager.broadcastAgentMessage(
             {
               type: 'error',
