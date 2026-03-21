@@ -540,19 +540,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       const catEntry = catRegistry.tryGet(catId as string);
       const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.provider);
       if (!preflight.ready) {
-        const actionHint = preflight.bootstrapCommand ? `\nTo fix: ${preflight.bootstrapCommand}` : '';
-        const label = preflight.needsBootstrap
-          ? 'needs governance bootstrap'
+        const reasonKind = preflight.needsBootstrap
+          ? 'needs_bootstrap'
           : preflight.needsConfirmation
-            ? 'awaiting governance confirmation'
-            : 'governance files missing';
+            ? 'needs_confirmation'
+            : 'files_missing';
+        // F130: Structured governance_blocked event — frontend renders actionable card
         yield {
           type: 'system_info',
           catId,
-          content: `[F070] Project ${label}: ${preflight.reason}${actionHint}`,
+          content: JSON.stringify({
+            type: 'governance_blocked',
+            projectPath: workingDirectory,
+            reasonKind,
+            reason: preflight.reason,
+            invocationId: params.parentInvocationId,
+          }),
           timestamp: Date.now(),
         };
-        yield { type: 'done', catId, isFinal: params.isLastCat, timestamp: Date.now() };
+        // F130: done with errorCode so messages.ts marks invocation as failed (retryable)
+        yield {
+          type: 'done',
+          catId,
+          isFinal: params.isLastCat,
+          errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED',
+          timestamp: Date.now(),
+        };
         didComplete = true;
         return;
       }

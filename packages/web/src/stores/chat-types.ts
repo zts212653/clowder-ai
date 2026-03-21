@@ -192,7 +192,7 @@ export interface ChatMessage {
   id: string;
   type: 'user' | 'assistant' | 'system' | 'summary' | 'connector';
   /** Visual variant for system messages */
-  variant?: 'error' | 'info' | 'tool' | 'evidence' | 'a2a_followup';
+  variant?: 'error' | 'info' | 'tool' | 'evidence' | 'a2a_followup' | 'governance_blocked';
   catId?: string;
   content: string;
   /** F97: External connector source. Present when type='connector' */
@@ -222,6 +222,12 @@ export interface ChatMessage {
     targetCats?: string[];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
+    /** F130: Governance blocked data for actionable bootstrap card */
+    governanceBlocked?: {
+      projectPath: string;
+      reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';
+      invocationId?: string;
+    };
   };
   /** A2A chain group ID — messages in the same A2A chain share this ID */
   a2aGroupId?: string;

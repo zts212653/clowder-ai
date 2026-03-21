@@ -526,6 +526,8 @@ export class QueueProcessor {
         });
       }
 
+      // F130: track governance block errorCode
+      let governanceErrorCode: string | undefined;
       for await (const msg of router.routeExecution(
         userId,
         content,
@@ -542,6 +544,9 @@ export class QueueProcessor {
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
         },
       )) {
+        if (msg.type === 'done' && (msg as { errorCode?: string }).errorCode) {
+          governanceErrorCode = (msg as { errorCode?: string }).errorCode;
+        }
         if (hook && msg.catId === primaryCat && msg.type === 'text' && (msg as { content?: string }).content) {
           responseText += (msg as { content?: string }).content;
         }
@@ -586,6 +591,12 @@ export class QueueProcessor {
         await invocationRecordStore.update(invocationId, { status: 'canceled' });
         finalStatus = 'canceled';
         return 'canceled';
+      }
+
+      // F130: Governance gate blocked — mark as failed for retry
+      if (governanceErrorCode) {
+        await invocationRecordStore.update(invocationId, { status: 'failed', error: governanceErrorCode });
+        return 'failed';
       }
 
       // 9. Ack cursors + mark succeeded

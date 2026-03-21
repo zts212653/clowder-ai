@@ -15,6 +15,7 @@ import { CliOutputBlock } from './cli-output/CliOutputBlock';
 import { toCliEvents } from './cli-output/toCliEvents';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
+import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { Lightbox } from './Lightbox';
 import { MarkdownContent } from './MarkdownContent';
 import { MetadataBadge } from './MetadataBadge';
@@ -193,6 +194,12 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   if (isSystem) {
     if (message.variant === 'evidence' && message.evidence) {
       return <EvidencePanel data={message.evidence} />;
+    }
+
+    // F130: Governance blocked — render actionable bootstrap card
+    if (message.variant === 'governance_blocked' && message.extra?.governanceBlocked) {
+      const { projectPath, reasonKind, invocationId } = message.extra.governanceBlocked;
+      return <GovernanceBlockedCard projectPath={projectPath} reasonKind={reasonKind} invocationId={invocationId} />;
     }
 
     // F045: variant='thinking' is deprecated — thinking is now embedded in assistant bubbles.
