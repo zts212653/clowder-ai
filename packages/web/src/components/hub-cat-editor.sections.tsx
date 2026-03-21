@@ -342,13 +342,10 @@ export function RoutingSection({
 }) {
   const aliases = currentAliasTags(form, cat);
   const catId = cat?.id ?? form.catId.trim();
-  const lockedTags = catId ? [canonicalMentionPattern(catId)] : [];
-
   return (
     <SectionCard title="别名与 @ 路由">
       <TagEditor
         tags={aliases}
-        lockedTags={lockedTags}
         onChange={(tags) => onChange({ mentionPatterns: joinTags(tags) })}
         addLabel="+ 添加"
         placeholder="@砚砚"
