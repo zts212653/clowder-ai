@@ -1,9 +1,9 @@
 {
   "version": 2,
   "owner": {
-    "name": "Co-worker",
-    "aliases": ["共创伙伴"],
-    "mentionPatterns": ["@co-worker", "@owner"]
+    "name": "Owner",
+    "aliases": [],
+    "mentionPatterns": ["@owner"]
   },
   "roster": {
     "opus": {

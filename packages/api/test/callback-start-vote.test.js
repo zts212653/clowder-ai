@@ -46,6 +46,7 @@ describe('POST /api/callbacks/start-vote', () => {
       broadcastToRoom(room, event, data) {
         broadcasts.push({ room, event, data });
       },
+      emitToUser() {},
     };
   });
 

@@ -196,7 +196,6 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
       return <EvidencePanel data={message.evidence} />;
     }
 
-    // F130: Governance blocked — render actionable bootstrap card
     if (message.variant === 'governance_blocked' && message.extra?.governanceBlocked) {
       const { projectPath, reasonKind, invocationId } = message.extra.governanceBlocked;
       return <GovernanceBlockedCard projectPath={projectPath} reasonKind={reasonKind} invocationId={invocationId} />;

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 interface CatDailyUsage {
@@ -125,10 +125,14 @@ export function DailyUsageSection() {
         <div className="border-t-2 border-gray-200 pt-2 flex items-center justify-between text-xs text-gray-500">
           <span className="font-semibold text-gray-700">7 日合计 {grandTotal.invocations} 次</span>
           <span className="flex gap-3">
-            <span className="font-semibold text-gray-700">总 {formatTokens(grandTotal.inputTokens + grandTotal.outputTokens)}</span>
+            <span className="font-semibold text-gray-700">
+              总 {formatTokens(grandTotal.inputTokens + grandTotal.outputTokens)}
+            </span>
             <span>入 {formatTokens(grandTotal.inputTokens)}</span>
             <span>出 {formatTokens(grandTotal.outputTokens)}</span>
-            {grandTotal.costUsd > 0 && <span className="text-amber-600 font-semibold">${grandTotal.costUsd.toFixed(2)}</span>}
+            {grandTotal.costUsd > 0 && (
+              <span className="text-amber-600 font-semibold">${grandTotal.costUsd.toFixed(2)}</span>
+            )}
           </span>
         </div>
       )}

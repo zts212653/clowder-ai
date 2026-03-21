@@ -1,6 +1,6 @@
 /**
  * Skills route tests
- * GET /api/skills — Cat Café 共享 Skills 看板数据
+ * GET /api/skills — Clowder AI 共享 Skills 看板数据
  */
 
 import assert from 'node:assert/strict';

@@ -105,7 +105,7 @@ export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId'> & {
  */
 export interface IMessageStore {
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
-  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void;
+  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
   append(msg: AppendMessageInput): StoredMessage | Promise<StoredMessage>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
@@ -191,11 +191,11 @@ export class MessageStore {
   private readonly maxMessages: number;
   private readonly idempotencyIndex = new Map<string, string>();
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
-  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void;
+  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
 
   constructor(options?: {
     maxMessages?: number;
-    onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp'>) => void;
+    onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
   }) {
     this.maxMessages = options?.maxMessages ?? MAX_MESSAGES;
     this.onAppend = options?.onAppend;

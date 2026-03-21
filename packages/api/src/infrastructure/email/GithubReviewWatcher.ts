@@ -8,6 +8,7 @@
 
 import { EventEmitter } from 'node:events';
 import { ImapFlow } from 'imapflow';
+import { createModuleLogger } from '../logger.js';
 import {
   type CatTag,
   catTagToCatId,
@@ -15,6 +16,8 @@ import {
   isGithubNotification,
   parseGithubReviewFromSubjectAndSource,
 } from './GithubReviewMailParser.js';
+
+const log = createModuleLogger('github-review-watcher');
 
 export interface GithubReviewEvent {
   readonly prNumber: number;
@@ -44,9 +47,9 @@ export interface WatcherLogger {
 }
 
 const defaultLogger: WatcherLogger = {
-  info: (msg) => console.log(msg),
-  warn: (msg) => console.warn(msg),
-  error: (msg) => console.error(msg),
+  info: (msg) => log.info(msg),
+  warn: (msg) => log.warn(msg),
+  error: (msg) => log.error(msg),
 };
 
 /**

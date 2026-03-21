@@ -302,7 +302,7 @@ export const STORY_CARDS: StoryCard[] = [
       {
         speaker: 'gemini',
         content:
-          '`curl -X POST your local Clowder API URL/api/callbacks/post-message -H "Content-Type: application/json" -d \'{"invocationId": ...`',
+          '`curl -X POST http://127.0.0.1:3004/api/callbacks/post-message -H "Content-Type: application/json" -d \'{"invocationId": ...`',
         annotation: '暹罗猫 · 手写 curl · 写错了',
       },
       {

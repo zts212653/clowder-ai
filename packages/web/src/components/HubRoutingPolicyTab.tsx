@@ -99,7 +99,6 @@ export function HubRoutingPolicyTab() {
   return (
     <div className="space-y-4">
       <HubQuotaBoardTab />
-      <DailyUsageSection />
 
       <Section title="路由策略（猫粮约束子模块）">
         <p className="text-[11px] text-gray-500 mb-3">
@@ -150,6 +149,8 @@ export function HubRoutingPolicyTab() {
           </div>
         </div>
       </Section>
+
+      <DailyUsageSection />
     </div>
   );
 }

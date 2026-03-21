@@ -871,7 +871,7 @@ describe('Callback Routes', () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'opus');
 
-    await threadStore.create('user-1', 'Cat Café Design');
+    await threadStore.create('user-1', 'Clowder AI Design');
     await threadStore.create('user-1', 'Redis Debugging');
 
     const response = await app.inject({
@@ -882,7 +882,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.threads.length, 1);
-    assert.equal(body.threads[0].title, 'Cat Café Design');
+    assert.equal(body.threads[0].title, 'Clowder AI Design');
   });
 
   test('GET list-threads validates query params', async () => {

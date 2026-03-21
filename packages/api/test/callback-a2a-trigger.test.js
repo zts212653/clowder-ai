@@ -990,6 +990,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
 
     const enqueueCalls = [];
+    const emitCalls = [];
     const mockInvocationQueue = {
       enqueue(input) {
         enqueueCalls.push(input);
@@ -1003,6 +1004,9 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       },
       backfillMessageId() {},
       appendMergedMessageId() {},
+      list() {
+        return [{ id: 'q-1', status: 'queued' }];
+      },
     };
     const tryAutoExecuteCalls = [];
     const mockQueueProcessor = {
@@ -1012,12 +1016,19 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         return Promise.resolve();
       },
     };
+    const socketManager = {
+      broadcastAgentMessage() {},
+      broadcastToRoom() {},
+      emitToUser(userId, event, data) {
+        emitCalls.push({ userId, event, data });
+      },
+    };
 
     const result = await enqueueA2ATargets(
       {
         router: { async *routeExecution() {} },
         invocationRecordStore: { create() {}, update() {} },
-        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        socketManager,
         invocationTracker: {
           has() {
             return false;
@@ -1048,6 +1059,11 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.equal(enqueueCalls[0].callerCatId, 'codex');
     assert.equal(enqueueCalls[0].targetCats[0], 'opus');
     assert.equal(tryAutoExecuteCalls.length, 1, 'should trigger tryAutoExecute');
+    const queueUpdated = emitCalls.find((c) => c.event === 'queue_updated');
+    assert.ok(queueUpdated, 'should emit queue_updated after enqueue');
+    assert.equal(queueUpdated.userId, 'system');
+    assert.equal(queueUpdated.data.action, 'enqueued');
+    assert.equal(queueUpdated.data.threadId, 't1');
     assert.deepEqual(result.enqueued, ['opus']);
     assert.equal(result.fallback, false);
   });
@@ -1065,12 +1081,15 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       countAgentEntriesForThread(threadId) {
         return 10; // At depth limit
       },
+      list() {
+        return [];
+      },
     };
     const result = await enqueueA2ATargets(
       {
         router: { async *routeExecution() {} },
         invocationRecordStore: { create() {}, update() {} },
-        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
         invocationTracker: {
           has() {
             return false;
@@ -1121,12 +1140,15 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       },
       backfillMessageId() {},
       appendMergedMessageId() {},
+      list() {
+        return [];
+      },
     };
     const result = await enqueueA2ATargets(
       {
         router: { async *routeExecution() {} },
         invocationRecordStore: { create() {}, update() {} },
-        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
         invocationTracker: {
           has() {
             return false;
@@ -1180,12 +1202,15 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       },
       backfillMessageId() {},
       appendMergedMessageId() {},
+      list() {
+        return [];
+      },
     };
     const result = await enqueueA2ATargets(
       {
         router: { async *routeExecution() {} },
         invocationRecordStore: { create() {}, update() {} },
-        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
         invocationTracker: {
           has() {
             return false;
@@ -1238,12 +1263,15 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         backfillCalls.push({ threadId, userId, entryId, messageId });
       },
       appendMergedMessageId() {},
+      list() {
+        return [];
+      },
     };
     await enqueueA2ATargets(
       {
         router: { async *routeExecution() {} },
         invocationRecordStore: { create() {}, update() {} },
-        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
         invocationTracker: {
           has() {
             return false;

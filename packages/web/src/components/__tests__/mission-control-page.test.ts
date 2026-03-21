@@ -120,7 +120,7 @@ describe('MissionControlPage', () => {
             id: 'imported-f010',
             userId: 'u_test',
             title: 'F010 手机端猫猫',
-            summary: '来自 docs/BACKLOG.md',
+            summary: '来自 docs/ROADMAP.md',
             priority: 'p1',
             tags: ['source:docs-backlog', 'feature:f010'],
             status: 'open',

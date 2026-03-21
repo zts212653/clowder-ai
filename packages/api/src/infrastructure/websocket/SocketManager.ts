@@ -12,6 +12,9 @@ import type {
   InvocationTracker,
 } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { AgentMessage } from '../../domains/cats/services/types.js';
+import { createModuleLogger } from '../logger.js';
+
+const log = createModuleLogger('ws');
 
 /**
  * Build the sequence of AgentMessages to broadcast after a successful cancel.
@@ -71,7 +74,7 @@ export class SocketManager {
       const authUserId = typeof socket.handshake.auth?.userId === 'string' ? socket.handshake.auth.userId.trim() : '';
       const queryUserId = typeof socket.handshake.query.userId === 'string' ? socket.handshake.query.userId.trim() : '';
       const userId = authUserId || queryUserId || 'anonymous';
-      console.log(`[ws] Client connected: ${socket.id} (user: ${userId})`);
+      log.info({ socketId: socket.id, userId }, 'Client connected');
 
       // F39: Auto-join user-scoped room for emitToUser (multi-tab support)
       if (userId !== 'anonymous') {
@@ -79,22 +82,22 @@ export class SocketManager {
       }
 
       socket.on('disconnect', () => {
-        console.log(`[ws] Client disconnected: ${socket.id}`);
+        log.info({ socketId: socket.id }, 'Client disconnected');
       });
 
       socket.on('join_room', (room: string) => {
         // Validate room name format — only allow known prefixes
         if (!/^(thread:|worktree:|preview:global$|user:)/.test(room)) {
-          console.warn(`[ws] ${socket.id} attempted to join invalid room: ${room}`);
+          log.warn({ socketId: socket.id, room }, 'Attempted to join invalid room');
           return;
         }
         socket.join(room);
-        console.log(`[ws] ${socket.id} joined room: ${room}`);
+        log.info({ socketId: socket.id, room }, 'Joined room');
       });
 
       socket.on('leave_room', (room: string) => {
         socket.leave(room);
-        console.log(`[ws] ${socket.id} left room: ${room}`);
+        log.info({ socketId: socket.id, room }, 'Left room');
       });
 
       socket.on('cancel_invocation', (data: { threadId: string; catId?: string }) => {
@@ -102,7 +105,7 @@ export class SocketManager {
         // Only allow cancel if the socket is in the target thread's room
         const room = `thread:${data.threadId}`;
         if (!socket.rooms.has(room)) {
-          console.warn(`[ws] ${socket.id} tried to cancel thread ${data.threadId} without being in room`);
+          log.warn({ socketId: socket.id, threadId: data.threadId }, 'Cancel attempt without room membership');
           return;
         }
         if (data.catId) {
@@ -110,9 +113,7 @@ export class SocketManager {
           const result = this.invocationTracker.cancel(data.threadId, data.catId, userId);
           if (result.cancelled) {
             const catIds = result.catIds.length > 0 ? result.catIds : [data.catId];
-            console.log(
-              `[ws] Cancelled slot for thread: ${data.threadId} cat: ${data.catId} (cats: ${catIds.join(',')})`,
-            );
+            log.info({ threadId: data.threadId, catId: data.catId, cats: catIds }, 'Cancelled slot');
             for (const msg of buildCancelMessages(result)) {
               this.broadcastAgentMessage(msg, data.threadId);
             }
@@ -123,7 +124,7 @@ export class SocketManager {
           // Backward compat: cancel all slots in thread
           this.invocationTracker.cancelAll(data.threadId);
           this.multiMentionOrchestrator?.abortByThread(data.threadId);
-          console.log(`[ws] Cancelled all invocations for thread: ${data.threadId}`);
+          log.info({ threadId: data.threadId }, 'Cancelled all invocations');
         }
       });
     });

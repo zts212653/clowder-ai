@@ -21,6 +21,9 @@ import type {
 } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { createModuleLogger } from '../infrastructure/logger.js';
+
+const log = createModuleLogger('cat-config');
 
 /**
  * Default cat-config.json location (repo root).
@@ -381,7 +384,7 @@ function getCachedConfig(): CatCafeConfig | null {
       _cachedConfig = loadCatConfig();
     } catch (err) {
       _configLoadFailed = true;
-      console.warn('[cat-config] Failed to load cat-config.json, F24 toggle will default to enabled:', err);
+      log.warn({ err }, 'Failed to load cat-config.json, F24 toggle will default to enabled');
       return null;
     }
   }

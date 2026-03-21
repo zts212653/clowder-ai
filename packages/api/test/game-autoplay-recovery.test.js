@@ -161,12 +161,8 @@ describe('AC-G1: recoverActiveGames restores auto-play loops', () => {
   });
 });
 
-describe('AC-G2: GameAutoPlayer has runtime logging', () => {
-  it('logs loop start and actions', async () => {
-    const logs = [];
-    const origLog = console.log;
-    console.log = (...args) => logs.push(args.join(' '));
-
+describe('AC-G2: GameAutoPlayer loop lifecycle', () => {
+  it('startLoop activates loop and stopLoop deactivates it', async () => {
     const store = createStubGameStore();
     const socket = createStubSocket();
     const orchestrator = new GameOrchestrator({ gameStore: store, socketManager: socket });
@@ -175,13 +171,11 @@ describe('AC-G2: GameAutoPlayer has runtime logging', () => {
     await store.createGame(makePlayingGame('game-log', 'thread-log'));
     autoPlayer.startLoop('game-log');
 
-    // Wait for at least one tick
+    assert.ok(autoPlayer.isLoopActive('game-log'), 'loop should be active after startLoop');
+
     await new Promise((r) => setTimeout(r, 1200));
     autoPlayer.stopLoop('game-log');
 
-    console.log = origLog;
-
-    const startLog = logs.find((l) => l.includes('[GameAutoPlayer]') && l.includes('started'));
-    assert.ok(startLog, 'should log loop start with [GameAutoPlayer] tag');
+    assert.ok(!autoPlayer.isLoopActive('game-log'), 'loop should be inactive after stopLoop');
   });
 });

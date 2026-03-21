@@ -5,16 +5,19 @@
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { IThreadStore } from '../ports/ThreadStore.js';
 import { ThreadStore } from '../ports/ThreadStore.js';
 import { RedisThreadStore } from '../redis/RedisThreadStore.js';
+
+const log = createModuleLogger('thread-store-factory');
 
 function resolveThreadTtlSeconds(): number | undefined {
   const raw = process.env.THREAD_TTL_SECONDS;
   if (!raw) return undefined;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
-    console.warn(`[ThreadStoreFactory] Invalid THREAD_TTL_SECONDS='${raw}', using default`);
+    log.warn({ raw }, 'Invalid THREAD_TTL_SECONDS, using default');
     return undefined;
   }
   return Math.trunc(parsed);

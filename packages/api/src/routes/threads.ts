@@ -26,9 +26,12 @@ import type {
   IThreadStore,
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+
+const log = createModuleLogger('routes/threads');
 
 export interface ThreadsRoutesOptions {
   threadStore: IThreadStore;
@@ -467,7 +470,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
           },
         })
         .catch((err) => {
-          console.warn(`[threads] Audit log warning for ${id}:`, err);
+          log.warn({ err, threadId: id }, 'Audit log warning');
         });
 
       reply.status(204);

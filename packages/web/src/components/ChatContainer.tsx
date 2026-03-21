@@ -17,6 +17,7 @@ import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
 import { useVadInterrupt } from '@/hooks/useVadInterrupt';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
+import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useTaskStore } from '@/stores/taskStore';
@@ -99,6 +100,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { getCatById } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   usePreviewAutoOpen(workspaceWorktreeId);
+  useWorkspaceNavigate(workspaceWorktreeId, threadId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(true);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);

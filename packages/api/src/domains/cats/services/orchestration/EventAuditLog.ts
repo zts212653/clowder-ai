@@ -19,6 +19,9 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
+
+const log = createModuleLogger('audit');
 
 export interface AuditEvent {
   readonly id: string;
@@ -62,7 +65,6 @@ export class EventAuditLog {
 
     await appendFile(filepath, line, 'utf-8');
 
-    console.log(`[audit] ${new Date(event.timestamp).toISOString()} Event logged: ${event.type} (${event.id})`);
     return event;
   }
 
@@ -89,7 +91,7 @@ export class EventAuditLog {
       try {
         events.push(JSON.parse(line) as AuditEvent);
       } catch {
-        console.error(`[audit] Failed to parse line: ${line.slice(0, 100)}`);
+        log.error({ linePreview: line.slice(0, 100) }, 'Failed to parse audit line');
       }
     }
 
@@ -156,7 +158,7 @@ export class EventAuditLog {
 
     if (!existsSync(this.auditDir)) {
       await mkdir(this.auditDir, { recursive: true });
-      console.log(`[audit] Created audit log directory: ${this.auditDir}`);
+      log.info({ dir: this.auditDir }, 'Created audit log directory');
     }
 
     this.initialized = true;

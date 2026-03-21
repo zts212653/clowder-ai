@@ -1,12 +1,6 @@
-/**
- * F130: Governance Blocked Card
- *
- * Rendered in chat when F070 governance gate blocks dispatch to an
- * unregistered external project. Provides a one-click bootstrap button
- * that calls POST /api/governance/confirm then retries the invocation.
- */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { GovernanceShieldIcon } from './icons/GovernanceShieldIcon';
 
 interface GovernanceBlockedCardProps {
   projectPath: string;
@@ -25,7 +19,7 @@ type CardState = 'idle' | 'confirming' | 'retrying' | 'done' | 'error';
 export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }: GovernanceBlockedCardProps) {
   const [state, setState] = useState<CardState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
-  // Reset state when invocationId changes (e.g. patchMessage updates from inv-A to inv-B)
+
   const prevInvIdRef = useRef(invocationId);
   useEffect(() => {
     if (prevInvIdRef.current !== invocationId) {
@@ -40,7 +34,6 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
     setErrorMsg('');
 
     try {
-      // Step 1: Bootstrap governance
       const confirmRes = await apiFetch('/api/governance/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,7 +47,6 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
         return;
       }
 
-      // Step 2: Retry the blocked invocation
       if (invocationId) {
         setState('retrying');
         const retryRes = await apiFetch(`/api/invocations/${invocationId}/retry`, {
@@ -82,7 +74,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
     <div data-testid="governance-blocked-card" className="flex justify-center mb-3">
       <div className="max-w-[85%] w-full rounded-lg border border-amber-200 bg-amber-50 p-4">
         <div className="flex items-start gap-3">
-          <span className="text-xl flex-shrink-0">🔒</span>
+          <GovernanceShieldIcon className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-amber-800">
               项目 <code className="px-1 py-0.5 bg-amber-100 rounded text-xs">{dirName}</code>{' '}

@@ -22,6 +22,7 @@ import type { CatId, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { getDefaultCatId } from '../../../../../config/cat-config-loader.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, stripIntentTags } from '../../context/IntentParser.js';
 import { SessionManager } from '../../session/SessionManager.js';
@@ -43,6 +44,8 @@ import type { AgentRegistry } from '../registry/AgentRegistry.js';
 import type { PersistenceContext, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
+
+const log = createModuleLogger('agent-router');
 
 /** Parsed mention with position for ordering */
 interface ParsedMention {
@@ -735,7 +738,7 @@ export class AgentRouter {
       try {
         await this.deliveryCursorStore.ackCursor(userId, catId as CatId, threadId, boundaryId);
       } catch (err) {
-        console.error(`[ackCollectedCursors] failed for ${catId}:`, err);
+        log.error({ catId, err }, `[ackCollectedCursors] failed`);
       }
     }
   }

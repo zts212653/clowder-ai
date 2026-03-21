@@ -153,6 +153,8 @@ export function WorkspacePanel() {
 
   const pendingPreviewAutoOpen = useChatStore((s) => s.pendingPreviewAutoOpen);
   const consumePreviewAutoOpen = useChatStore((s) => s.consumePreviewAutoOpen);
+  const storeRevealPath = useChatStore((s) => s.workspaceRevealPath);
+  const setStoreRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
   const { createFile, createDir, deleteItem, renameItem, uploadFile } = useFileManagement();
 
   const [viewMode, setViewMode] = useState<'files' | 'changes' | 'git' | 'terminal' | 'browser'>('files');
@@ -175,6 +177,13 @@ export function WorkspacePanel() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   /** Progressive reveal: store target path, expand ancestors as tree loads deeper. */
   const [pendingRevealPath, setPendingRevealPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!storeRevealPath) return;
+    setPendingRevealPath(storeRevealPath);
+    setViewMode('files');
+    setStoreRevealPath(null);
+  }, [storeRevealPath, setStoreRevealPath]);
 
   // G7-2: Per-thread workspace state — save/restore expandedPaths on thread switch
   const threadStateCache = useRef<Map<string, { expanded: Set<string>; tabs: string[]; openFile: string | null }>>(

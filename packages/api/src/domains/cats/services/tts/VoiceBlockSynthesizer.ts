@@ -14,7 +14,10 @@ import { stat as fsStat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RichBlock } from '@cat-cafe/shared';
 import { getCatVoice } from '../../../../config/cat-voices.js';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import type { TtsRegistry } from './TtsRegistry.js';
+
+const log = createModuleLogger('voice-synthesizer');
 
 let instance: VoiceBlockSynthesizer | null = null;
 
@@ -121,7 +124,7 @@ export class VoiceBlockSynthesizer {
       } catch (err) {
         // F066 Phase 4: Classify the error for user-friendly display
         const errorCategory = classifyError(err);
-        console.error(`[VoiceBlockSynthesizer] Synthesis failed for cat ${catId}:`, err);
+        log.error({ catId, error: err }, 'Synthesis failed');
         resolved.push({
           id: block.id,
           kind: 'card' as const,
@@ -160,7 +163,7 @@ export class VoiceBlockSynthesizer {
     } catch (err) {
       if (!isRetryableError(err)) throw err;
 
-      console.warn(`[TTS-RETRY] Transient error, retrying in ${RETRY_DELAY_MS}ms:`, (err as Error).message);
+      log.warn({ retryDelayMs: RETRY_DELAY_MS, error: err }, 'Transient error, retrying');
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
       return await this.synthesizeToFile(text, catId);
     }

@@ -160,7 +160,13 @@ Chat with your team from Feishu. Requires a self-built Feishu app.
 Go to [Feishu Open Platform](https://open.feishu.cn/app) → Create Custom App (自建应用).
 
 **Step 2 — Enable permissions:**
-Under Permissions & Scopes (权限管理), add: `im:message`, `im:message:send_as_bot`, `im:resource`.
+Under Permissions & Scopes (权限管理), add:
+- `im:message` — read messages
+- `im:message:send_as_bot` — send messages as bot
+- `im:resource` — read media resources (images, files)
+- `im:resource:upload` — upload media (required for native voice bubbles and image display)
+
+> **Why `im:resource:upload`?** Without it, voice messages appear as text URLs and images are sent as links instead of native media. The bot automatically converts WAV audio to Opus format (via ffmpeg) and uploads it to Feishu for playback.
 
 **Step 3 — Configure event subscription:**
 Under Event Subscriptions (事件订阅):
@@ -529,7 +535,13 @@ ANTHROPIC_PROXY_PORT=9877          # 代理监听端口
 前往 [飞书开放平台](https://open.feishu.cn/app) → 创建自建应用。
 
 **第 2 步 — 开通权限：**
-在权限管理中，添加：`im:message`、`im:message:send_as_bot`、`im:resource`。
+在权限管理中，添加以下权限：
+- `im:message` — 读取消息
+- `im:message:send_as_bot` — 以机器人身份发消息
+- `im:resource` — 读取媒体资源（图片、文件）
+- `im:resource:upload` — 上传媒体（语音气泡和图片原生显示必需）
+
+> **为什么需要 `im:resource:upload`？** 如果不开通，语音消息会以文本链接形式显示，图片也只会发送 URL 而非原生媒体。机器人会自动将 WAV 音频通过 ffmpeg 转码为 Opus 格式，上传到飞书后以语音气泡播放。
 
 **第 3 步 — 配置事件订阅：**
 在事件订阅中：

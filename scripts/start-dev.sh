@@ -296,7 +296,7 @@ start_sidecar() {
 # Sidecar summary: ready → 地址, failed → 报告, disabled → 静默
 print_sidecar_summary_all() {
     local name state_var port state
-    for entry in "ASR:_STATE_ASR:${ASR_PORT:-9876}" "TTS:_STATE_TTS:${TTS_PORT_VAL:-9879}" "LLM后修:_STATE_LLM_PP:${LLM_PP_PORT:-9878}"; do
+    for entry in "ASR:_STATE_ASR:${ASR_PORT:-9876}" "TTS:_STATE_TTS:${TTS_PORT_VAL:-9879}" "LLM后修:_STATE_LLM_PP:${LLM_PP_PORT:-9878}" "Embedding:_STATE_EMBED:${EMBED_PORT:-9880}"; do
         name="${entry%%:*}"
         local rest="${entry#*:}"
         state_var="${rest%%:*}"
@@ -683,6 +683,7 @@ main() {
     _STATE_ASR=disabled
     _STATE_TTS=disabled
     _STATE_LLM_PP=disabled
+    _STATE_EMBED=disabled
 
     # Qwen3-ASR Server (语音输入 — 替代 Whisper，同端口 drop-in)
     if [ "${ASR_ENABLED:-0}" = "1" ]; then
@@ -729,9 +730,24 @@ main() {
         fi
     fi
 
+    # Embedding Server (F102 记忆系统 — Qwen3-Embedding MLX GPU)
+    if [ "${EMBED_ENABLED:-0}" = "1" ]; then
+        if ! check_sidecar_dep "Embedding" "python3"; then
+            _STATE_EMBED=failed
+        elif [ -f "scripts/embed-server.sh" ]; then
+            start_sidecar "Embedding" "_STATE_EMBED" "${EMBED_PORT:-9880}" "${EMBED_TIMEOUT:-30}" \
+                "EMBED_PORT=${EMBED_PORT:-9880} bash scripts/embed-server.sh"
+        else
+            echo -e "${RED}  ✗ Embedding 已启用，但脚本未找到${NC}"
+            echo "    请运行: ./scripts/setup.sh"
+            _STATE_EMBED=failed
+        fi
+    fi
+
     # API Server
     echo "  启动 API Server (端口 $API_PORT)..."
-    (cd packages/api && pnpm run dev) &
+    mkdir -p data/logs/process
+    (cd packages/api && pnpm run dev) 2>> "$PROJECT_DIR/data/logs/process/api-$(date +%Y-%m-%d).log" &
     sleep 2
 
     # Frontend

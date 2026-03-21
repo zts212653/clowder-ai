@@ -127,7 +127,7 @@ export function buildBacklogInputFromFeature(
 ): CreateBacklogItemInput {
   const title = truncate(`[${row.id}] ${row.name}`, 200);
   const summarySegments = [
-    '来源 docs/BACKLOG.md',
+    '来源 docs/ROADMAP.md',
     `状态：${row.status}`,
     `Owner：${row.owner}`,
     row.link ? `Link：${row.link}` : null,

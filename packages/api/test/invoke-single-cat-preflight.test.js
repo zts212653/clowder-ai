@@ -43,7 +43,7 @@ function makeDeps() {
       resolveWorkingDirectory: () => '/tmp/test',
     },
     threadStore: null,
-    apiUrl: 'your local Clowder API URL',
+    apiUrl: 'http://127.0.0.1:3004',
   };
 }
 
@@ -96,8 +96,8 @@ describe('invokeSingleCat shared-state preflight', () => {
 
     // Commit shared-state file but don't push
     mkdirSync(join(repo, 'docs'), { recursive: true });
-    writeFileSync(join(repo, 'docs/BACKLOG.md'), '# Backlog');
-    execSync('git add docs/BACKLOG.md && git commit -m "add backlog"', { cwd: repo, stdio: 'ignore' });
+    writeFileSync(join(repo, 'docs/ROADMAP.md'), '# Backlog');
+    execSync('git add docs/ROADMAP.md && git commit -m "add backlog"', { cwd: repo, stdio: 'ignore' });
 
     // chdir so findMonorepoRoot(process.cwd()) resolves to this repo
     process.chdir(repo);
@@ -144,7 +144,7 @@ describe('invokeSingleCat shared-state preflight', () => {
     // Find the 🚫 preflight message
     const blocked = msgs.find((m) => m.type === 'system_info' && m.content?.includes('🚫'));
     assert.ok(blocked, 'should have 🚫 blocked message');
-    assert.ok(blocked.content.includes('docs/BACKLOG.md'), 'blocked message should name the file');
+    assert.ok(blocked.content.includes('docs/ROADMAP.md'), 'blocked message should name the file');
     assert.ok(blocked.content.includes('git push'), 'blocked message should tell user to push');
 
     // Verify order: invocation_created before 🚫 before done

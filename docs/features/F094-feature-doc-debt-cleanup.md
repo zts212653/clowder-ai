@@ -178,7 +178,7 @@ team experience（2026-03-10）：
 - 最新审计：`97 份 = Green 57 / Yellow 40 / Red 0`
 
 ### Phase B 第四批执行结果（2026-03-10）
-- Yellow 第三批 14 份已完成：`F031 + F033~F046`（含 `F40-backlog-reorganization.md`）
+- Yellow 第三批 14 份已完成：`F031 + F033~F046`（含 `F040-backlog-reorganization.md`）
 - 本批策略：延续高频项修复（Status 行 + AC 格式 + Dependencies 标签 + Risk）
 - 最新审计：`97 份 = Green 71 / Yellow 26 / Red 0`
 

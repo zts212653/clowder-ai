@@ -82,6 +82,7 @@ export function useAgentMessages() {
     appendRichBlock,
     replaceMessageId,
     patchMessage,
+    removeMessage,
     setStreaming,
     setLoading,
     setHasActiveInvocation,
@@ -659,50 +660,6 @@ export function useAgentMessages() {
               }
               consumed = true;
             }
-          } else if (parsed?.type === 'governance_blocked') {
-            // F130: Governance gate blocked — render actionable card instead of raw text
-            const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
-            const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';
-            // Use invocationId from backend payload — not guessing from store
-            const invId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
-            // Deduplicate: multi-cat dispatch to same unbootstrapped project yields
-            // one governance_blocked per cat. Show first card; update invocationId
-            // on subsequent events so retry targets the latest blocked invocation.
-            const existingBlocked = useChatStore
-              .getState()
-              .messages.find(
-                (m) => m.variant === 'governance_blocked' && m.extra?.governanceBlocked?.projectPath === projectPath,
-              );
-            if (existingBlocked) {
-              // P2-1 fix: keep card but update invocationId to latest blocked call
-              if (invId) {
-                patchMessage(existingBlocked.id, {
-                  extra: {
-                    ...existingBlocked.extra,
-                    governanceBlocked: {
-                      ...existingBlocked.extra!.governanceBlocked!,
-                      invocationId: invId,
-                    },
-                  },
-                });
-              }
-            } else {
-              addMessage({
-                id: `gov-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                type: 'system',
-                variant: 'governance_blocked',
-                content: `项目 ${projectPath} ${reasonKind === 'needs_bootstrap' ? '尚未初始化治理' : '治理状态异常'}`,
-                timestamp: Date.now(),
-                extra: {
-                  governanceBlocked: {
-                    projectPath,
-                    reasonKind: reasonKind as 'needs_bootstrap' | 'needs_confirmation' | 'files_missing',
-                    invocationId: invId,
-                  },
-                },
-              });
-            }
-            consumed = true;
           } else if (parsed?.type === 'invocation_metrics') {
             // Store metrics silently — don't show as system message
             if (parsed.kind === 'session_started') {
@@ -827,6 +784,33 @@ export function useAgentMessages() {
             const warningText = typeof parsed.message === 'string' ? parsed.message : '';
             sysContent = warningText ? `⚠️ ${warningText}` : '⚠️ Warning';
             sysVariant = 'info';
+          } else if (parsed?.type === 'governance_blocked') {
+            const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
+            const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';
+            const invId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+            const existingBlocked = useChatStore
+              .getState()
+              .messages.find(
+                (m) => m.variant === 'governance_blocked' && m.extra?.governanceBlocked?.projectPath === projectPath,
+              );
+            if (existingBlocked) {
+              removeMessage(existingBlocked.id);
+            }
+            addMessage({
+              id: `gov-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              type: 'system',
+              variant: 'governance_blocked',
+              content: `项目 ${projectPath} ${reasonKind === 'needs_bootstrap' ? '尚未初始化治理' : '治理状态异常'}`,
+              timestamp: Date.now(),
+              extra: {
+                governanceBlocked: {
+                  projectPath,
+                  reasonKind: reasonKind as 'needs_bootstrap' | 'needs_confirmation' | 'files_missing',
+                  invocationId: invId,
+                },
+              },
+            });
+            consumed = true;
           } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
             // Internal telemetry — suppress to avoid raw JSON bubbles
             consumed = true;
@@ -1017,6 +1001,7 @@ export function useAgentMessages() {
       setHasActiveInvocation,
       setMessageUsage,
       requestStreamCatchUp,
+      removeMessage,
     ],
   );
 

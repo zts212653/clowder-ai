@@ -238,7 +238,7 @@
       "id": "F040",
       "name": "BACKLOG 整理与 Feature 聚合体系",
       "status": "done | **Owner**: Ragdoll",
-      "file": "F40-backlog-reorganization.md"
+      "file": "F040-backlog-reorganization.md"
     },
     {
       "id": "F041",
@@ -561,7 +561,7 @@
     {
       "id": "F091",
       "name": "Signal Study Mode — 信号学习伴侣",
-      "status": "in-progress | **Owner**: Ragdoll",
+      "status": "done | **Owner**: Ragdoll",
       "file": "F091-signal-study-mode.md"
     },
     {
@@ -791,7 +791,19 @@
       "name": "Pack System — Multi-Agent 共创世界的 Mod 生态",
       "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F129-pack-system-multi-agent-mod.md"
+    },
+    {
+      "id": "F130",
+      "name": "API 日志治理 — 四层分离 × 结构化落盘",
+      "status": "done | **Completed**: 2026-03-20 | **Owner**: 金渐层 | **Reviewer**: Maine Coon | **Priority**: P1",
+      "file": "F130-api-log-governance.md"
+    },
+    {
+      "id": "F131",
+      "name": "Workspace Navigator — 猫猫可编程导航 Workspace 面板",
+      "status": "in-progress | **Owner**: 金渐层 | **Priority**: P2",
+      "file": "F131-workspace-navigator.md"
     }
   ],
-  "generated_at": "2026-03-20T13:28:55.153Z"
+  "generated_at": "2026-03-21T08:34:18.916Z"
 }

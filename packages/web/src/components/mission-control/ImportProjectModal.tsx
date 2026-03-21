@@ -11,7 +11,7 @@ interface ImportProjectModalProps {
 export function ImportProjectModal({ onClose, onImported }: ImportProjectModalProps) {
   const [name, setName] = useState('');
   const [sourcePath, setSourcePath] = useState('');
-  const [backlogPath, setBacklogPath] = useState('docs/BACKLOG.md');
+  const [backlogPath, setBacklogPath] = useState('docs/ROADMAP.md');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +68,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               type="text"
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
-              placeholder="/home/user"
+              placeholder="/home/user/studio-flow"
               className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-white px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
             />
           </label>

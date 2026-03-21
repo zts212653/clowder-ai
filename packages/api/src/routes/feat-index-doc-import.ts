@@ -143,7 +143,7 @@ function toSortedEntries(entries: FeatIndexEntry[]): FeatIndexEntry[] {
 export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
   const root = findMonorepoRoot();
   const featuresDir = join(root, 'docs', 'features');
-  const backlogPath = join(root, 'docs', 'BACKLOG.md');
+  const backlogPath = join(root, 'docs', 'ROADMAP.md');
 
   const docEntries = await readFeatureDocEntries(featuresDir);
   const map = new Map<string, FeatureDocEntry>();

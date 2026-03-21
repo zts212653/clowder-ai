@@ -37,7 +37,6 @@ created: 2026-02-26
 | F088 | Multi-Platform Chat Gateway — 飞书/Telegram 多平台网关 | phase5-6-done | Ragdoll | internal | [F088](features/F088-multi-platform-chat-gateway.md) |
 | F089 | Hub Terminal & tmux Integration — 浏览器终端 + 猫猫可观测性 | spec | Ragdoll | internal | [F089](features/F089-hub-terminal-tmux.md) |
 | F090 | Pixel Cat Brawl — 像素猫猫大作战：即时格斗 demo game | phase-1-done | Ragdoll | internal | [F090](features/F090-pixel-cat-brawl.md) |
-| F091 | Signal Study Mode — 信号学习伴侣 | in-progress | Ragdoll | internal | [F091](features/F091-signal-study-mode.md) |
 | F093 | Cats & U 陪伴式共创世界引擎 — 万物有灵 | spec | Ragdoll | internal | [F093](features/F093-cats-and-u-world-engine.md) |
 | F100 | Self-Evolution — 猫猫自我进化机制（行为层 + 知识对象化） | in-progress | Ragdoll | internal | [F100](features/F100-self-evolution.md) |
 | F101 | Mode v2 — 游戏系统引擎 + 狼人杀 | in-progress | Ragdoll | internal | [F101](features/F101-mode-v2-game-engine.md) |
@@ -54,3 +53,4 @@ created: 2026-02-26
 | F127 | 猫猫管理重构 — 账户配置与猫猫实例分离，动态创建猫 + 自定义别名 @ 路由 | spec | 待定 | community [#109](https://github.com/zts212653/clowder-ai/issues/109) | [F127](features/F127-cat-instance-management.md) |
 | F128 | Cat-Initiated Thread Creation — 猫程序化创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | spec | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
+| F131 | Workspace Navigator — 猫猫可编程导航 Workspace 面板 | in-progress | 金渐层 | internal | [F131](features/F131-workspace-navigator.md) |

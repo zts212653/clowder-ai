@@ -24,6 +24,7 @@ import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import type { IPrTrackingStore } from '../infrastructure/email/PrTrackingStore.js';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
@@ -38,6 +39,8 @@ import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-route
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
 import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
+
+const log = createModuleLogger('routes/callbacks');
 
 export interface CallbackRoutesOptions {
   registry: InvocationRegistry;
@@ -1060,7 +1063,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     clearVoteTimer(record.threadId);
     const timer = setTimeout(() => {
       closeVoteInternal(record.threadId, threadStore, socketManager, messageStore).catch((err) => {
-        console.error(`[callbacks/start-vote] Timeout auto-close failed for ${record.threadId}:`, err);
+        log.error({ threadId: record.threadId, err }, 'Timeout auto-close failed');
       });
     }, timeoutSec * 1000);
     if (typeof timer === 'object' && 'unref' in timer) timer.unref();
@@ -1086,7 +1089,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: record.threadId,
       });
     } catch (err) {
-      console.warn(`[callbacks/start-vote] Failed to persist vote notification:`, err);
+      log.warn({ err }, 'Failed to persist vote notification');
     }
 
     // Dispatch voter cats so they receive the notification and can vote.

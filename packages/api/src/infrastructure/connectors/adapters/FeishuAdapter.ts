@@ -9,8 +9,16 @@
  * F088 Multi-Platform Chat Gateway
  */
 
+import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
+import { unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import type { RichBlock } from '@cat-cafe/shared';
+
+const execFileAsync = promisify(execFile);
+
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
 import type { MessageEnvelope } from '../ConnectorMessageFormatter.js';
@@ -229,7 +237,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
 
   /**
    * Phase 5: Send a media message (image, file, or audio) to a Feishu chat.
-   * Priority: platform key > upload via absPath > text link fallback.
+   * Priority: platform key > upload via absPath > download external URL + upload > text link fallback.
    */
   async sendMedia(externalChatId: string, payload: FeishuMediaPayload): Promise<void> {
     this.log.info(
@@ -257,6 +265,20 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
         '[FeishuAdapter] sendMedia: uploadToFeishu returned null, falling through to text fallback',
       );
     }
+    if (!payload.absPath && payload.url?.startsWith('https://') && this.tokenManager) {
+      const tempPath = await this.downloadToTempFile(payload.url);
+      if (tempPath) {
+        try {
+          const uploaded = await this.uploadToFeishu(tempPath, payload.type);
+          if (uploaded) {
+            await this.sendWithPlatformKey(externalChatId, { ...payload, ...uploaded });
+            return;
+          }
+        } finally {
+          await unlink(tempPath).catch(() => {});
+        }
+      }
+    }
     if (payload.url) {
       this.log.warn({ url: payload.url, type: payload.type }, '[FeishuAdapter] sendMedia: Path 3 text fallback');
       const label = payload.type === 'image' ? '🖼️' : payload.type === 'audio' ? '🔊' : '📎';
@@ -279,6 +301,9 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   /**
    * Upload a local file to Feishu and return the platform key.
    * Images → /im/v1/images, files/audio → /im/v1/files.
+   *
+   * Audio files: Feishu requires OPUS format for `msg_type: audio`.
+   * Non-opus audio (wav/mp3) is automatically converted via ffmpeg before upload.
    */
   private async uploadToFeishu(
     absPath: string,
@@ -289,6 +314,44 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
       this.log.warn({ absPath, type }, '[FeishuAdapter] uploadToFeishu: no tenant access token');
       return null;
     }
+
+    // For audio: convert to OPUS if needed (Feishu only accepts opus for audio messages)
+    let uploadPath = absPath;
+    let tempOpusPath: string | null = null;
+    if (type === 'audio') {
+      const ext = absPath.split('.').pop()?.toLowerCase();
+      if (ext && ext !== 'opus') {
+        const converted = await this.convertToOpus(absPath);
+        if (converted) {
+          tempOpusPath = converted;
+          uploadPath = converted;
+        } else {
+          this.log.warn(
+            { absPath, ext },
+            '[FeishuAdapter] uploadToFeishu: opus conversion failed, aborting audio upload',
+          );
+          return null;
+        }
+      }
+    }
+
+    const originalFileName = absPath.split('/').pop() ?? 'file';
+
+    try {
+      return await this.uploadToFeishuInner(uploadPath, type, token, originalFileName);
+    } finally {
+      if (tempOpusPath) {
+        await unlink(tempOpusPath).catch(() => {});
+      }
+    }
+  }
+
+  private async uploadToFeishuInner(
+    absPath: string,
+    type: 'image' | 'file' | 'audio',
+    token: string,
+    originalFileName?: string,
+  ): Promise<{ imageKey?: string; fileKey?: string } | null> {
     const fileStream = createReadStream(absPath);
     const form = new FormData();
 
@@ -310,16 +373,11 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
       return imageKey ? { imageKey } : null;
     }
 
-    const fileName = absPath.split('/').pop() ?? 'file';
-    let fileType: string;
-    if (type === 'audio') {
-      const ext = fileName.split('.').pop()?.toLowerCase();
-      fileType = ext === 'mp3' ? 'mp3' : ext === 'ogg' ? 'ogg' : ext === 'wav' ? 'wav' : 'opus';
-    } else {
-      fileType = 'stream';
-    }
+    const fileName = originalFileName ?? absPath.split('/').pop() ?? 'file';
+    const fileType = type === 'audio' ? 'opus' : 'stream';
+    const uploadFileName = type === 'audio' ? fileName.replace(/\.\w+$/, '.opus') : fileName;
     form.append('file_type', fileType);
-    form.append('file_name', fileName);
+    form.append('file_name', uploadFileName);
     form.append('file', new Blob([await streamToBuffer(fileStream)]));
     const res = await this.uploadFetchFn('https://open.feishu.cn/open-apis/im/v1/files', {
       method: 'POST',
@@ -337,6 +395,78 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     const data = (await res.json()) as { data?: { file_key?: string } };
     const fileKey = data.data?.file_key;
     return fileKey ? { fileKey } : null;
+  }
+
+  /**
+   * Convert an audio file to Opus format (mono, 16kHz) using ffmpeg.
+   * Returns the path to the temporary .opus file, or null if conversion fails.
+   * Feishu requires opus for msg_type: audio — wav/mp3/ogg are rejected.
+   */
+  private async convertToOpus(absPath: string): Promise<string | null> {
+    const baseName =
+      absPath
+        .split('/')
+        .pop()
+        ?.replace(/\.\w+$/, '') ?? 'audio';
+    const opusPath = join(tmpdir(), `cat-cafe-feishu-${baseName}-${Date.now()}.opus`);
+    try {
+      await execFileAsync('ffmpeg', ['-i', absPath, '-acodec', 'libopus', '-ac', '1', '-ar', '16000', '-y', opusPath], {
+        timeout: 30_000,
+      });
+      this.log.info({ absPath, opusPath }, '[FeishuAdapter] convertToOpus: success');
+      return opusPath;
+    } catch (err) {
+      this.log.warn({ err, absPath }, '[FeishuAdapter] convertToOpus: ffmpeg failed');
+      return null;
+    }
+  }
+
+  /**
+   * Reject URLs that could lead to SSRF — only allow https:// to public hosts.
+   */
+  private static isSafeExternalUrl(url: string): boolean {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return false;
+    }
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    // Block localhost / loopback
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') return false;
+    // Block private IPv4 ranges and metadata endpoints
+    if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(host)) return false;
+    // Block bare IPv4 (safeguard against other internal ranges)
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return false;
+    // Block IPv6 literals — private/link-local (fd, fe80, fc, ::1) and all bracketed forms
+    if (host.includes(':') || host.startsWith('[')) return false;
+    return true;
+  }
+
+  private async downloadToTempFile(url: string): Promise<string | null> {
+    if (!FeishuAdapter.isSafeExternalUrl(url)) {
+      this.log.warn({ url }, '[FeishuAdapter] downloadToTempFile: rejected unsafe URL');
+      return null;
+    }
+    try {
+      const res = await (this.uploadFetchFn ?? globalThis.fetch)(url, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) {
+        this.log.warn({ url, status: res.status }, '[FeishuAdapter] downloadToTempFile: fetch failed');
+        return null;
+      }
+      const contentType = res.headers.get('content-type') ?? '';
+      const ext = contentType.includes('png') ? 'png' : contentType.includes('gif') ? 'gif' : 'jpg';
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length === 0) return null;
+      const filePath = join(tmpdir(), `cat-cafe-feishu-dl-${Date.now()}.${ext}`);
+      await writeFile(filePath, buffer);
+      this.log.info({ url, filePath, bytes: buffer.length }, '[FeishuAdapter] downloadToTempFile: success');
+      return filePath;
+    } catch (err) {
+      this.log.warn({ err, url }, '[FeishuAdapter] downloadToTempFile: failed');
+      return null;
+    }
   }
 
   async sendReply(externalChatId: string, content: string): Promise<void> {

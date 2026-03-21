@@ -194,7 +194,7 @@ export function resolveEmbedConfig(partial?: Partial<EmbedConfig>): EmbedConfig 
   return {
     embedMode: mode as EmbedConfig['embedMode'],
     embedModel: model as EmbedConfig['embedModel'],
-    embedDim: partial?.embedDim ?? 256,
+    embedDim: partial?.embedDim ?? 768, // LL-034: 768 is sweet spot for CJK bilingual; 256 too low
     maxModelMemMb: partial?.maxModelMemMb ?? 800,
     embedTimeoutMs: partial?.embedTimeoutMs ?? 3000,
   };

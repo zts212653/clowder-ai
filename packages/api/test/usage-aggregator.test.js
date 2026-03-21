@@ -294,13 +294,18 @@ describe('aggregateUsageByDay', () => {
     const beforeMidnight = anchor - ONE_DAY + 1000; // yesterday 12:00:01
     const afterMidnight = anchor; // today 12:00:00
     const records = [
-      makeRecord('inv-cross', afterMidnight, {
-        opus: { inputTokens: 500, outputTokens: 100 },
-      }, {
-        createdAt: beforeMidnight,
-        updatedAt: afterMidnight,
-        usageRecordedAt: afterMidnight,
-      }),
+      makeRecord(
+        'inv-cross',
+        afterMidnight,
+        {
+          opus: { inputTokens: 500, outputTokens: 100 },
+        },
+        {
+          createdAt: beforeMidnight,
+          updatedAt: afterMidnight,
+          usageRecordedAt: afterMidnight,
+        },
+      ),
     ];
 
     const result = aggregateUsageByDay(records, { days: 7 });

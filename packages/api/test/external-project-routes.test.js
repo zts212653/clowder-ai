@@ -48,7 +48,7 @@ describe('External Project Routes', () => {
     const body = res.json();
     assert.ok(body.project.id.startsWith('ep-'));
     assert.equal(body.project.name, 'studio-flow');
-    assert.equal(body.project.backlogPath, 'docs/BACKLOG.md');
+    assert.equal(body.project.backlogPath, 'docs/ROADMAP.md');
   });
 
   test('POST /api/external-projects rejects missing sourcePath', async () => {

@@ -23,6 +23,8 @@ import { VectorStore } from './VectorStore.js';
 
 export interface MemoryServices {
   evidenceStore: IEvidenceStore;
+  /** Phase G: direct store access for summary compaction task (getDb()) */
+  store: SqliteEvidenceStore;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
   knowledgeResolver: IKnowledgeResolver;
@@ -110,6 +112,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   return {
     evidenceStore: store,
+    store,
     markerQueue,
     reflectionService,
     knowledgeResolver,

@@ -10,6 +10,10 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { createModuleLogger } from '../infrastructure/logger.js';
+
+const log = createModuleLogger('routes/votes');
+
 import {
   buildVoteTally,
   checkVoteCompletion,
@@ -109,7 +113,7 @@ export async function closeVoteInternal(
         },
       });
     } catch (err) {
-      console.warn(`[votes] Failed to persist vote result for ${threadId}:`, err);
+      log.warn({ threadId, err }, 'Failed to persist vote result');
     }
   }
 }
@@ -171,7 +175,7 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
     clearVoteTimer(threadId);
     const timer = setTimeout(() => {
       closeVoteInternal(threadId, threadStore, socketManager, messageStore).catch((err) => {
-        console.error(`[votes] Timeout auto-close failed for ${threadId}:`, err);
+        log.error({ threadId, err }, 'Timeout auto-close failed');
       });
     }, timeoutSec * 1000);
     // unref so timer doesn't keep process alive (important for tests)
@@ -307,7 +311,7 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
             },
           });
         } catch (err) {
-          console.warn(`[votes] Failed to persist vote result for ${threadId}:`, err);
+          log.warn({ threadId, err }, 'Failed to persist vote result');
         }
       }
 
@@ -416,7 +420,7 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
           },
         });
       } catch (err) {
-        console.warn(`[votes] Failed to persist vote result for ${threadId}:`, err);
+        log.warn({ threadId, err }, 'Failed to persist vote result');
       }
     }
 

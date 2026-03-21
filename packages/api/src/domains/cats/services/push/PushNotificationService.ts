@@ -6,7 +6,10 @@
  */
 
 import webpush from 'web-push';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import type { IPushSubscriptionStore, PushSubscriptionRecord } from '../stores/ports/PushSubscriptionStore.js';
+
+const log = createModuleLogger('push-notification');
 
 const DEFAULT_WEB_PUSH_TIMEOUT_MS = 10_000;
 
@@ -126,7 +129,7 @@ export class PushNotificationService {
         continue;
       }
       summary.failed += 1;
-      console.warn('[push] Push delivery failed:', r.reason);
+      log.warn({ error: r.reason }, 'Push delivery failed');
     }
 
     return summary;
@@ -151,7 +154,7 @@ export class PushNotificationService {
       const statusCode = (err as { statusCode?: number }).statusCode;
       // 410 Gone or 404 = subscription expired, auto-cleanup
       if (statusCode === 410 || statusCode === 404) {
-        console.log(`[push] Removing expired subscription: ${sub.endpoint.slice(0, 60)}...`);
+        log.info({ endpoint: sub.endpoint.slice(0, 60) }, 'Removing expired subscription');
         await this.store.remove(sub.endpoint);
         return 'removed';
       }

@@ -270,13 +270,14 @@ managed block 扩充协作方法论段落：
 | R18 | dry-run + 回滚清单 | AC-18 | done | 1 ✅ |
 | R19 | 跨 provider skills bootstrap | AC-19 | done | 1 ✅ |
 
-## Post-Closure Gap Fixes (PR #532)
+## Post-Closure Gap Fixes
 
 | Gap | Issue | Fix | PR |
 |-----|-------|-----|-----|
 | governance-pack.ts leaks internal ports (3001/6399) to open-source | clowder-ai#97 | Source keeps internal defaults; sync-to-opensource.sh transforms port lines to public defaults (Frontend=3003, API=3004). Redis ports stay as-is (6399/6398) — open-source uses same ports. Version bumped to 1.3.0. | #532 |
 | Preflight gate blocks new projects without guidance | clowder-ai#123 | `PreflightResult` extended with `needsBootstrap`/`needsConfirmation`/`bootstrapCommand`; invoke-single-cat emits actionable instructions | #532 |
 | setup.sh missing skills sync step | clowder-ai#21 | Added Step 5/6 to setup.sh: links cat-cafe-skills/* to ~/.{claude,codex,gemini}/skills (ADR-009 pattern) | #532 |
+| Governance blocked shows raw text, no actionable UX | clowder-ai#154 | Structured `governance_blocked` event + `GovernanceBlockedCard` with one-click bootstrap+retry button. All 4 routeExecution consumer paths capture `errorCode`. Inspired by community PR clowder-ai#154. | #602 |
 
 ## Key Decisions
 

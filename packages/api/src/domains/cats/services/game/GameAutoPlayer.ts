@@ -7,12 +7,15 @@
  */
 
 import type { GameAction, GameRuntime, GameView, Seat, SeatId } from '@cat-cafe/shared';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import type { IGameStore } from '../stores/ports/GameStore.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import type { GameOrchestrator } from './GameOrchestrator.js';
 import { GameViewBuilder } from './GameViewBuilder.js';
 import { LlmAIProvider } from './LlmAIProvider.js';
 import { WerewolfAIPlayer } from './werewolf/WerewolfAIPlayer.js';
+
+const log = createModuleLogger('game-auto-player');
 
 interface AutoPlayerDeps {
   gameStore: IGameStore;
@@ -71,14 +74,14 @@ export class GameAutoPlayer {
     if (this.activeLoops.has(gameId)) return;
     this.activeLoops.add(gameId);
     if (!this.stopController) this.stopController = new AbortController();
-    console.log(`[GameAutoPlayer] Loop started for ${gameId}`);
+    log.info({ gameId }, `[GameAutoPlayer] Loop started`);
     this.runLoop(gameId)
       .catch((err) => {
-        console.error(`[GameAutoPlayer] Loop error for ${gameId}:`, err);
+        log.error({ gameId, err }, `[GameAutoPlayer] Loop error`);
       })
       .finally(() => {
         this.activeLoops.delete(gameId);
-        console.log(`[GameAutoPlayer] Loop exited for ${gameId}`);
+        log.info({ gameId }, `[GameAutoPlayer] Loop exited`);
       });
   }
 
@@ -110,15 +113,16 @@ export class GameAutoPlayer {
     let recovered = 0;
     for (const game of activeGames) {
       if (game.status === 'playing') {
-        console.log(
-          `[GameAutoPlayer] Recovering loop for ${game.gameId} (phase=${game.currentPhase}, round=${game.round})`,
+        log.info(
+          { gameId: game.gameId, phase: game.currentPhase, round: game.round },
+          `[GameAutoPlayer] Recovering loop`,
         );
         this.startLoop(game.gameId);
         recovered++;
       }
     }
     if (recovered > 0) {
-      console.log(`[GameAutoPlayer] Recovered ${recovered} active game(s)`);
+      log.info({ count: recovered }, `[GameAutoPlayer] Recovered active game(s)`);
     }
     return recovered;
   }
@@ -134,8 +138,9 @@ export class GameAutoPlayer {
       if (!this.activeLoops.has(gameId)) return;
       if (signal?.aborted) return;
       if (Date.now() - loopStart > GameAutoPlayer.MAX_WALL_CLOCK_MS) {
-        console.warn(
-          `[GameAutoPlayer] ${gameId} wall-clock safety limit reached (${GameAutoPlayer.MAX_WALL_CLOCK_MS}ms), exiting loop`,
+        log.warn(
+          { gameId, maxMs: GameAutoPlayer.MAX_WALL_CLOCK_MS },
+          `[GameAutoPlayer] wall-clock safety limit reached, exiting loop`,
         );
         return;
       }
@@ -164,9 +169,7 @@ export class GameAutoPlayer {
 
       const acted = await this.actForPhase(runtime);
       if (acted) {
-        console.log(
-          `[GameAutoPlayer] ${gameId} phase=${runtime.currentPhase} round=${runtime.round} — actions submitted`,
-        );
+        log.info({ gameId, phase: runtime.currentPhase, round: runtime.round }, `[GameAutoPlayer] actions submitted`);
       }
 
       await sleep(acted ? GameAutoPlayer.TICK_MS : GameAutoPlayer.TICK_MS * 2, signal);
@@ -197,7 +200,7 @@ export class GameAutoPlayer {
         anySucceeded = true;
       } catch (err) {
         // Phase may have advanced, action invalid — that's fine
-        console.debug(`[GameAutoPlayer] Action failed for ${seat.seatId}:`, (err as Error).message);
+        log.debug({ seatId: seat.seatId, msg: (err as Error).message }, `[GameAutoPlayer] Action failed`);
       }
     }
 
@@ -226,7 +229,7 @@ export class GameAutoPlayer {
         const aiAction = await this.buildAIAction(runtime, seat, seatId, actionName);
         if (aiAction) return aiAction;
       } catch (err) {
-        console.warn(`[GameAutoPlayer] AI fallback for ${seatId} (${seat.actorId}): ${(err as Error).message}`);
+        log.warn({ seatId, actorId: seat.actorId, msg: (err as Error).message }, `[GameAutoPlayer] AI fallback`);
       }
     }
 
@@ -277,15 +280,19 @@ export class GameAutoPlayer {
     );
     const isAllowedAction = allowedActions.some((a) => a.name === action!.actionName);
     if (!isAllowedAction) {
-      console.warn(
-        `[GameAutoPlayer] AI returned actionName '${action.actionName}' not allowed in phase ${runtime.currentPhase} for role ${seat.role}, falling back`,
+      log.warn(
+        { actionName: action.actionName, phase: runtime.currentPhase, role: seat.role },
+        `[GameAutoPlayer] AI returned actionName not allowed in phase for role, falling back`,
       );
       return null;
     }
 
     // targetSeat must be an alive seat (if provided)
     if (action.targetSeat && !aliveSeatIds.has(action.targetSeat)) {
-      console.warn(`[GameAutoPlayer] AI returned invalid targetSeat ${action.targetSeat} for ${seatId}, falling back`);
+      log.warn(
+        { targetSeat: action.targetSeat, seatId },
+        `[GameAutoPlayer] AI returned invalid targetSeat, falling back`,
+      );
       return null;
     }
 

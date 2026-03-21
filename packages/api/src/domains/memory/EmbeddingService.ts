@@ -1,127 +1,129 @@
-// F102 Phase C: EmbeddingService — ONNX local inference with MRL truncation
-// AC-C2 (Qwen3 ONNX), AC-C4 (fail-open), AC-C5 (resource guards)
+// F102 Phase C/G: EmbeddingService — HTTP client to external GPU embedding server
+// Replaces in-process ONNX (LL-034: must not run model inference in API process)
+//
+// The actual model runs in scripts/embed-api.py (independent Python process on GPU).
+// This service is just an HTTP client, like MlxAudioTtsProvider / WhisperSttProvider.
 
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
-
-const MODEL_IDS: Record<string, string> = {
-  'qwen3-embedding-0.6b': 'onnx-community/Qwen3-Embedding-0.6B-ONNX',
-  'multilingual-e5-small': 'Xenova/multilingual-e5-small',
-};
 
 interface EmbeddingServiceConfig {
   embedModel: string;
   embedDim: number;
   embedTimeoutMs: number;
-  maxModelMemMb: number;
+  maxModelMemMb: number; // kept for interface compat, not used by HTTP client
 }
 
-type PipelineFn = (texts: string[], opts: Record<string, unknown>) => Promise<{ data: Float32Array; dims: number[] }>;
+interface EmbedApiResponse {
+  data: Array<{ embedding: number[]; index: number }>;
+  model: string;
+}
+
+interface HealthResponse {
+  status: string;
+  model: string;
+  backend: string;
+  device: string;
+  dim: number;
+}
 
 export class EmbeddingService implements IEmbeddingService {
-  private pipeline: PipelineFn | null = null;
   private config: EmbeddingServiceConfig;
-  private modelRev = 'unknown';
-  private loadPromise: Promise<void> | null = null; // P3: singleflight
+  private baseUrl: string;
+  private ready = false;
+  private modelId = '';
+  private modelRev = 'http-client';
   private loader: (() => Promise<void>) | null = null; // test hook
 
   constructor(config: EmbeddingServiceConfig) {
     this.config = config;
+    // P1 fix (砚砚 review): derive from EMBED_PORT if EMBED_URL not set,
+    // so custom sidecar port is respected without needing both env vars
+    const port = process.env.EMBED_PORT ?? '9880';
+    this.baseUrl = process.env.EMBED_URL ?? `http://127.0.0.1:${port}`;
   }
 
   async load(): Promise<void> {
-    // P3 singleflight: concurrent load() calls share the same promise
-    if (this.loadPromise) return this.loadPromise;
-
-    this.loadPromise = this._doLoad();
-    try {
-      await this.loadPromise;
-    } finally {
-      this.loadPromise = null;
-    }
-  }
-
-  private async _doLoad(): Promise<void> {
     if (this.loader) {
       await this.loader();
       return;
     }
 
-    // AC-C5: memory guard
-    const memUsageMb = process.memoryUsage().rss / 1024 / 1024;
-    if (memUsageMb > this.config.maxModelMemMb) {
-      throw new Error(
-        `Memory guard: RSS ${Math.round(memUsageMb)}MB exceeds max ${this.config.maxModelMemMb}MB — skipping model load`,
-      );
+    // Probe the external embed-api server via /health
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+      const health = (await res.json()) as HealthResponse;
+      if (health.status === 'ok') {
+        this.ready = true;
+        this.modelId = health.model || this.config.embedModel;
+      }
+    } catch {
+      // fail-open: server not running → isReady()=false → lexical-only degradation
+      this.ready = false;
     }
-
-    const { pipeline: createPipeline } = await import('@huggingface/transformers');
-    const hfModelId = MODEL_IDS[this.config.embedModel];
-    if (!hfModelId) throw new Error(`Unknown model: ${this.config.embedModel}`);
-    this.pipeline = (await createPipeline('feature-extraction', hfModelId, {
-      dtype: 'q8',
-    })) as unknown as PipelineFn;
   }
 
   isReady(): boolean {
-    return this.pipeline !== null;
+    return this.ready;
   }
 
   getModelInfo(): EmbedModelInfo {
     return {
-      modelId: this.config.embedModel,
+      modelId: this.modelId || this.config.embedModel,
       modelRev: this.modelRev,
       dim: this.config.embedDim,
     };
   }
 
   async embed(texts: string[]): Promise<Float32Array[]> {
-    if (!this.pipeline) throw new Error('EmbeddingService not ready — call load() first');
+    if (!this.ready) throw new Error('EmbeddingService not ready — embed-api server not available');
 
-    // AC-C5: timeout guard
     const timeoutMs = this.config.embedTimeoutMs;
-    const output = await Promise.race([
-      this.pipeline(texts, { pooling: 'mean', normalize: false }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Embed timeout: ${timeoutMs}ms exceeded`)), timeoutMs),
-      ),
-    ]);
+    const res = await fetch(`${this.baseUrl}/v1/embeddings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: texts }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
 
-    const fullDim = output.dims[1];
-    const targetDim = this.config.embedDim;
-    const results: Float32Array[] = [];
-    for (let i = 0; i < texts.length; i++) {
-      const offset = i * fullDim;
-      const slice = output.data.slice(offset, offset + targetDim);
-      // MRL: truncate to targetDim, then L2 normalize
-      let norm = 0;
-      for (let j = 0; j < slice.length; j++) norm += slice[j] * slice[j];
-      norm = Math.sqrt(norm);
-      const normalized = new Float32Array(targetDim);
-      if (norm > 0) {
-        for (let j = 0; j < targetDim; j++) normalized[j] = slice[j] / norm;
-      }
-      results.push(normalized);
+    if (!res.ok) {
+      throw new Error(`Embed API error: ${res.status} ${res.statusText}`);
     }
-    return results;
+
+    const body = (await res.json()) as EmbedApiResponse;
+
+    // Convert number[] to Float32Array with MRL dim check
+    const targetDim = this.config.embedDim;
+    return body.data
+      .sort((a, b) => a.index - b.index)
+      .map((d) => {
+        const emb = d.embedding;
+        // Server already does MRL truncation + L2 normalization,
+        // but guard against dim mismatch
+        const arr = new Float32Array(targetDim);
+        for (let i = 0; i < Math.min(emb.length, targetDim); i++) {
+          arr[i] = emb[i]!;
+        }
+        return arr;
+      });
   }
 
   dispose(): void {
-    this.pipeline = null;
+    this.ready = false;
   }
 
   // ── Test hooks (not part of IEmbeddingService interface) ──────────
 
-  /** @internal test-only: set mock pipeline */
-  _setPipelineForTest(fn: PipelineFn | string): void {
-    if (typeof fn === 'string') {
-      // sentinel value — mark as "loaded" with a dummy
-      this.pipeline = (async () => ({ data: new Float32Array(0), dims: [0, 0] })) as PipelineFn;
-    } else {
-      this.pipeline = fn;
-    }
+  /** @internal test-only: mark as ready with mock */
+  _setPipelineForTest(fn: unknown): void {
+    // Compat with existing tests — just mark as ready
+    this.ready = true;
+    this.modelId = 'test-mock';
   }
 
-  /** @internal test-only: set mock loader for singleflight test */
+  /** @internal test-only: set mock loader */
   _setLoaderForTest(fn: () => Promise<void>): void {
     this.loader = fn;
   }

@@ -480,7 +480,7 @@ search_evidence(query, {
 - 跨项目检索（在 dare 里搜 cat-cafe 的教训）
 - frontmatter 自动补全工具
 
-### Phase G: Abstractive Summary + Durable Memory Lifecycle（待实现）
+### Phase G: Abstractive Summary + Durable Memory Lifecycle（🚧 基础设施已合入，运行时验收中）
 
 > **触发**：team lead发起 Lossless Claw（LCM）调研，三猫（opus + opencode + gpt52）协作对比 LC 与 session chain / F102，收敛出可学习的改进点。
 > **核心学习**：从 LC 学到的不是 DAG 数据结构，是"压缩不等于丢弃，摘要必须可穿透"的理念。
@@ -731,6 +731,51 @@ interface EvidenceItemWithDrillDown extends EvidenceItem {
 
 此项不在 F102 内实现，作为独立 ADR 立项，link 回 F102 + F065 + F088。
 
+## 已知 Gap（待后续实现的猫猫注意！）
+
+> 以下问题由本线程（f102 记忆组件解耦 thread）在 runtime 测试中发现，记录在此供后续实现的猫猫参考。
+
+### Gap-1: Embedding 未开启（Phase C 代码就绪但默认 off）
+
+**现状**：`EMBED_MODE` 默认 `off`，runtime 跑的是纯 BM25 lexical 检索。Phase C 建的整套向量基础设施（EmbeddingService + VectorStore + SemanticReranker + 三态开关 + fail-open + 版本锚）全部空转。
+
+**影响**：中英混搜弱（搜 "cat naming" 找不到中文"猫名故事"），同义表达不匹配（搜 "标题太长" 找不到 "title truncated"）。
+
+**修法**：设 `EMBED_MODE=on`（或先 `shadow`）。模型 Qwen3-Embedding-0.6B ONNX ~614MB，首次加载下载，之后缓存。Mac 上内存占用 ~1GB，推理 <100ms/条。
+
+**注意**：直接跳 `on` 可能更合理——见 Gap-2。
+
+### Gap-2: Shadow 模式无日志（跑了白跑）
+
+**现状**：`EMBED_MODE=shadow` 时，代码确实跑了向量检索 + rerank，但结果存到 `_reranked` 变量后**直接丢弃**，没有任何日志或对比数据记录。
+
+**代码位置**：`SqliteEvidenceStore.ts` L216-219：
+```typescript
+} else if (this.embedDeps.mode === 'shadow') {
+  const _reranked = reranker.rerankWithDistances(lexicalResults, vecResults);
+  // Silent comparison — actual logging added in eval phase  ← 从没加过
+}
+```
+
+**修法选项**：
+- A: 补 shadow 日志（记录 lexical vs reranked 排序差异，用于 A/B 评估）
+- B: 直接跳过 shadow，上 `on`（Phase C eval corpus 已证明 embedding rerank 对 Recall 的提升）
+- **team lead倾向 B**（shadow 没实际产出，浪费 CPU）
+
+### Gap-3: Stories/Lessons 中英混搜需要 embedding
+
+**实测证据**（本线程测试 thread）：
+- 搜 "cat naming origin story"（英文）→ 0 命中。搜 "stories cat-names 名字"（中文+路径）→ 5 命中。
+- 根因：FTS5 unicode61 tokenizer 不做中文分词，中英之间无语义桥接。
+- **只有开启 embedding 才能真正解决**（向量空间里 "cat naming" 和 "猫名故事" 自然靠近）。
+- 临时补 frontmatter topics 能治标但不可持续——每个新文档都要手动加。
+
+### 建议实现顺序
+
+1. 先开 `EMBED_MODE=on`（改环境变量即可，零代码改动）
+2. 验证 Recall 提升（用本线程的 13 题考题 + 中英混搜 case）
+3. 如果要保留 shadow 模式，补上日志（否则直接废弃 shadow）
+
 ## Phase D 完成后的预期效果
 
 > team lead指示：做完后要讲清楚"team lead日常使用感受到什么优化"和"猫猫自己感受到什么优化"。跑一段时间才知道做得好不好。
@@ -912,7 +957,67 @@ interface EvidenceItemWithDrillDown extends EvidenceItem {
 | KD-42 | **LSM-style compaction + 双写（read model + append-only segment ledger）**——`evidence_docs.summary` 是 read model，`summary_segments` 是 append-only provenance。L2 凝结 deferred 但 segment ledger 让升级成本很低 | Maine Coon坚持 segment ledger 防漂移/不可审计/错误放大，架构师采纳——成本仅多一张表一次 INSERT，收益是完整可审计性 | 2026-03-20 |
 | KD-43 | **一次 delta batch 产出 1..N 个 topic segments**（Opus 按话题切分，最多 3 段，不确定退化 1 段）——跨时间窗只 link 不 merge，merge 留给 L2 | team lead提出动态语义窗口（一个增量可能混多个话题），Maine Coon约束：连续/覆盖/最多 3 段/不回改旧 segment/必须带 topicKey + boundaryReason | 2026-03-20 |
 
+## 实现路线图（F/G/Gap 整体规划）
+
+> **当前状态**：Phase A~E ✅ 完成 + Phase G foundation 🚧 已合入（PR #604）。Phase F + G 运行时验收 + Gap-1 待开。
+> **team lead指示**：开源同步时增强功能需要开关，默认 off。
+
+### 整体顺序
+
+```
+① 立即  Gap-1: EMBED_MODE=on（改 env，零代码）
+② 第一批  F-1 + F-2（通用扫描 + formatter）  ←─┐ 可并行
+          G-2 + G-3（schema + 定时任务调度器） ←─┘
+③ 第二批  G-1（Opus 调用 + topic segment 切分）← 依赖 G-2/G-3
+④ 第三批  G-4 + G-5（bootstrap + drillDown）  ← 依赖 G-1
+⑤ 最后   F-3 + F-4（全局知识层 + project-init）← 独立但较大
+```
+
+### Gap 处理
+
+| Gap | 处理方式 |
+|-----|---------|
+| Gap-1（embedding off） | 我们的 runtime env 加 `embed: { embedMode: 'on' }`。开源默认仍 `off`（不传即 off）。零代码改动 |
+| Gap-2（shadow 无日志） | 废弃 shadow 模式，直接 off → on。不修 shadow 日志 |
+| Gap-3（中英混搜） | 随 Gap-1 解决（embedding 开启后向量空间自然桥接中英） |
+
+### 开源开关策略
+
+代码级：已有的 `EMBED_MODE` 三态开关覆盖 embedding。Phase F/G 新增功能用 feature flag：
+
+```typescript
+// 在 createMemoryServices 调用处按 env 传参
+{
+  embed: { embedMode: process.env.EMBED_MODE ?? 'off' },           // 已有
+  abstractive: {                                                     // Phase G 新增
+    enabled: process.env.F102_ABSTRACTIVE === 'on',                 // 默认 off
+    topicSegments: process.env.F102_TOPIC_SEGMENTS === 'on',        // 默认 off
+    durableCandidates: process.env.F102_DURABLE_CANDIDATES === 'on', // 默认 off
+  },
+  multiProject: {                                                    // Phase F 新增
+    legacyScan: process.env.F102_LEGACY_SCAN === 'on',              // 默认 off
+    globalKnowledge: process.env.F102_GLOBAL_KNOWLEDGE === 'on',    // 默认 off
+  },
+}
+```
+
+**我们自己 = 全部 `on`。开源仓 = 全部 `off`（不设 env 即 off），README 说明开启条件。**
+
+开启前提：
+
+| Flag | 开启条件 |
+|------|---------|
+| `EMBED_MODE=on` | 首次下载 Qwen3 ONNX ~614MB，内存 ~1GB |
+| `F102_ABSTRACTIVE` | 需要 Anthropic API key（provider-profiles 配置） |
+| `F102_TOPIC_SEGMENTS` | 同上（abstractive 的子功能） |
+| `F102_DURABLE_CANDIDATES` | 同上 + marker/materialization 流水线 |
+| `F102_LEGACY_SCAN` | 无特殊前提（有 .md 就能跑） |
+| `F102_GLOBAL_KNOWLEDGE` | 需要 `~/.cat-cafe/` + Skills 体系 |
+
+**Phase A~E 的全部功能（FTS5 + 向量检索 + thread passages + session chain drill-down）在 flag off 时照常工作。增强功能是 additive，不影响基础能力。**
+
 ## Review Gate
 
 - Phase A: 跨 family review（Maine Coon优先）— 接口设计需要多方确认
 - Phase B: 同 family review（Ragdoll Sonnet 可）— 实现层面
+- Phase G foundation: Maine Coon(GPT-5.4) review 4 轮放行 — 8 findings 全部闭环（PR #604）

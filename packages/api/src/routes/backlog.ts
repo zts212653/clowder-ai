@@ -337,7 +337,7 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     } catch (error) {
       reply.status(500);
       return {
-        error: `Failed to read docs/BACKLOG.md: ${error instanceof Error ? error.message : String(error)}`,
+        error: `Failed to read docs/ROADMAP.md: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
 

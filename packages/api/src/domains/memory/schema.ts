@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 // Phase C: embedding metadata (model/dim version anchor)
 export const SCHEMA_V2 = `
@@ -108,6 +108,45 @@ END`,
 END`,
 ];
 
+// Phase G: summary_segments (append-only ledger) + summary_state (watermark)
+export const SCHEMA_V4 = `
+CREATE TABLE IF NOT EXISTS summary_segments (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL,
+  level INTEGER NOT NULL DEFAULT 1,
+  from_message_id TEXT NOT NULL,
+  to_message_id TEXT NOT NULL,
+  message_count INTEGER NOT NULL,
+  summary TEXT NOT NULL,
+  topic_key TEXT NOT NULL,
+  topic_label TEXT NOT NULL,
+  boundary_reason TEXT,
+  boundary_confidence TEXT DEFAULT 'medium',
+  related_segment_ids TEXT,
+  candidates TEXT,
+  supersedes_segment_ids TEXT,
+  model_id TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  generated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_segments_thread ON summary_segments(thread_id);
+CREATE INDEX IF NOT EXISTS idx_segments_thread_level ON summary_segments(thread_id, level);
+CREATE INDEX IF NOT EXISTS idx_segments_topic ON summary_segments(topic_key);
+
+CREATE TABLE IF NOT EXISTS summary_state (
+  thread_id TEXT PRIMARY KEY,
+  last_summarized_message_id TEXT,
+  pending_message_count INTEGER NOT NULL DEFAULT 0,
+  pending_token_count INTEGER NOT NULL DEFAULT 0,
+  pending_signal_flags INTEGER NOT NULL DEFAULT 0,
+  carry_over INTEGER NOT NULL DEFAULT 0,
+  summary_type TEXT NOT NULL DEFAULT 'concat',
+  last_abstractive_at TEXT,
+  abstractive_token_count INTEGER
+);
+`;
+
 /**
  * Apply all schema migrations up to CURRENT_SCHEMA_VERSION.
  * Safe to call on empty DB (creates schema_version table first).
@@ -139,6 +178,11 @@ export function applyMigrations(db: Database.Database): void {
     db.exec(SCHEMA_V3_FTS);
     for (const stmt of PASSAGE_FTS_TRIGGER_STATEMENTS) db.exec(stmt);
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(3, new Date().toISOString());
+  }
+
+  if (currentVersion < 4) {
+    db.exec(SCHEMA_V4);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(4, new Date().toISOString());
   }
 }
 

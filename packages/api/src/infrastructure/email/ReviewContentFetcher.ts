@@ -8,8 +8,10 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createModuleLogger } from '../logger.js';
 
 const execFileAsync = promisify(execFile);
+const log = createModuleLogger('review-content-fetcher');
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -152,8 +154,11 @@ interface FetcherLogger {
 export class GhCliReviewContentFetcher implements IReviewContentFetcher {
   private readonly log: FetcherLogger;
 
-  constructor(log?: FetcherLogger) {
-    this.log = log ?? { info: console.log, warn: console.warn };
+  constructor(customLog?: FetcherLogger) {
+    this.log = customLog ?? {
+      info: (msg: string) => log.info(msg),
+      warn: (msg: string) => log.warn(msg),
+    };
   }
 
   async fetch(repository: string, prNumber: number): Promise<ReviewContent> {

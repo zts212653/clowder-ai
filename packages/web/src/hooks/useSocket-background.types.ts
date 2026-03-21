@@ -51,6 +51,7 @@ export interface BackgroundToastInput {
 
 export interface BackgroundStoreLike {
   addMessageToThread: (threadId: string, msg: ChatMessage) => void;
+  removeThreadMessage: (threadId: string, messageId: string) => void;
   appendToThreadMessage: (threadId: string, messageId: string, content: string) => void;
   appendToolEventToThread: (threadId: string, messageId: string, event: ToolEvent) => void;
   /** F22: Append a rich block to a message in a specific thread */

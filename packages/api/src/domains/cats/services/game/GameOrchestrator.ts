@@ -6,11 +6,14 @@
  */
 
 import type { GameAction, GameConfig, GameDefinition, GameRuntime, PendingAction, Seat } from '@cat-cafe/shared';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import type { IGameStore } from '../stores/ports/GameStore.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import { GameEngine } from './GameEngine.js';
 import { GameViewBuilder } from './GameViewBuilder.js';
 import { WerewolfEngine } from './werewolf/WerewolfEngine.js';
+
+const log = createModuleLogger('game-orchestrator');
 
 interface SocketLike {
   broadcastToRoom(room: string, event: string, data: unknown): void;
@@ -286,7 +289,7 @@ export class GameOrchestrator {
         threadId: runtime.threadId,
       }),
     ).catch((err) => {
-      console.error('[GameOrchestrator] Failed to write speech to messageStore:', err);
+      log.error({ err }, '[GameOrchestrator] Failed to write speech to messageStore');
     });
   }
 
@@ -303,7 +306,7 @@ export class GameOrchestrator {
         threadId: runtime.threadId,
       }),
     ).catch((err) => {
-      console.error('[GameOrchestrator] Failed to write announce to messageStore:', err);
+      log.error({ err }, '[GameOrchestrator] Failed to write announce to messageStore');
     });
   }
 

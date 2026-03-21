@@ -4,6 +4,7 @@ import { consumeBackgroundSystemInfo } from '@/hooks/useSocket-background-system
 function createMockStore(overrides: Record<string, unknown> = {}) {
   return {
     addMessageToThread: vi.fn(),
+    removeThreadMessage: vi.fn(),
     appendToThreadMessage: vi.fn(),
     appendToolEventToThread: vi.fn(),
     appendRichBlockToThread: vi.fn(),
@@ -20,6 +21,8 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
     updateThreadCatStatus: vi.fn(),
     batchStreamChunkUpdate: vi.fn(),
     clearThreadActiveInvocation: vi.fn(),
+    replaceThreadMessageId: vi.fn(),
+    patchThreadMessage: vi.fn(),
     getThreadState: vi.fn(() => ({ messages: [], catStatuses: {}, catInvocations: {} })),
     ...overrides,
   };

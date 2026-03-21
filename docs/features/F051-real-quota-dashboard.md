@@ -4,7 +4,7 @@ related_features: [F042]
 topics: [quota, dashboard, usage, scheduling, degradation, claudebar, gemini, antigravity]
 doc_kind: spec
 created: 2026-03-02
-updated: 2026-03-05
+updated: 2026-03-20
 ---
 
 # F051 — 猫粮看板（Quota Board）
@@ -334,3 +334,9 @@ v1（Phase 1-5，Maine Coon实现）的核心问题：
 
 - **愿景守护重点**: 额度粒度是否正确？调度映射是否对？有没有把独立池又合并了？
 - **Reviewer**: Maine Coon (GPT-5.2) — 验证额度模型与官方页面一致
+
+## 2026-03-20 增量（社区 intake）
+
+- 吸收社区 PR `clowder-ai#145`，把按“日期 × 猫”聚合的日消耗能力带回家里
+- 后端新增 `GET /api/usage/daily`，支持 `days` / `catId` 过滤，`total.invocations` 按 record 计数，per-cat 用 `participations`
+- Hub 的猫粮看板新增“近 7 日猫粮消耗”区域，补齐 quota board 的日级钻取视角

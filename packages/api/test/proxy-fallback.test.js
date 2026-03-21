@@ -66,7 +66,7 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore: null,
-      apiUrl: 'your local Clowder API URL',
+      apiUrl: 'http://127.0.0.1:3004',
     };
 
     const previousCwd = process.cwd();
@@ -144,7 +144,7 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore: null,
-      apiUrl: 'your local Clowder API URL',
+      apiUrl: 'http://127.0.0.1:3004',
     };
 
     const previousCwd = process.cwd();

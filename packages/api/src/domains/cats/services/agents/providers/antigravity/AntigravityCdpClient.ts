@@ -1,5 +1,6 @@
 /** CDP bridge to Antigravity IDE (Electron). See also cdp-target-selection.ts, cdp-dom-scripts.ts. */
 
+import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import {
   CLICK_MODEL_SELECTOR_JS,
   DISPATCH_ENTER_JS,
@@ -11,6 +12,8 @@ import {
 } from './cdp-dom-scripts.js';
 import type { CdpTarget } from './cdp-target-selection.js';
 import { rankEditorTargets } from './cdp-target-selection.js';
+
+const log = createModuleLogger('antigravity-cdp');
 
 export type { CdpTarget, FindEditorTargetOptions } from './cdp-target-selection.js';
 export { findEditorTarget, normaliseHint, rankEditorTargets } from './cdp-target-selection.js';
@@ -71,7 +74,7 @@ export class AntigravityCdpClient {
   }
 
   private log(...args: unknown[]): void {
-    if (this.debug) console.log('[CDP]', ...args);
+    if (this.debug) log.debug({}, `[CDP] ${args.map(String).join(' ')}`);
   }
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;

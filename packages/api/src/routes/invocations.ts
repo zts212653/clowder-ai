@@ -9,6 +9,10 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
+import { createModuleLogger } from '../infrastructure/logger.js';
+
+const log = createModuleLogger('routes/invocations');
+
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { AgentRouter } from '../domains/cats/services/agents/routing/AgentRouter.js';
@@ -173,7 +177,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         const cursorBoundaries = new Map<string, string>();
         // P1-2: track persistence failures across generator boundary
         const persistenceContext: PersistenceContext = { failed: false, errors: [] };
-        // F130: track governance block errorCode (mirror messages.ts)
+        // F070: track governance block errorCode (mirror messages.ts)
         let governanceErrorCode: string | undefined;
 
         for await (const msg of opts.router.routeExecution(
@@ -197,7 +201,6 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             parentInvocationId: id,
           },
         )) {
-          // F130: Capture governance block errorCode for post-loop failure marking
           if (msg.type === 'done' && msg.errorCode) {
             governanceErrorCode = msg.errorCode;
           }
@@ -221,7 +224,6 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             record.threadId,
           );
         } else if (governanceErrorCode) {
-          // F130: Governance gate blocked — mark as failed with errorCode for retry
           await opts.invocationRecordStore.update(id, {
             status: 'failed',
             error: governanceErrorCode,
@@ -235,7 +237,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           finalStatus = 'succeeded';
         }
       } catch (err) {
-        console.error('[invocations] Retry execution error:', err);
+        log.error({ err }, 'Retry execution error');
         const errorMsg = err instanceof Error ? err.message : 'Unknown error';
         await opts.invocationRecordStore.update(id, {
           status: 'failed',

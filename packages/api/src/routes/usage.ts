@@ -8,14 +8,8 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { type DailyUsageReport, aggregateUsageByDay } from '../domains/cats/services/usage-aggregator.js';
-/** Header-only identity: no query param fallback, no default-user fallback */
-function resolveHeaderUserId(request: import('fastify').FastifyRequest): string | null {
-  const raw = request.headers['x-cat-cafe-user'];
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
+import { aggregateUsageByDay, type DailyUsageReport } from '../domains/cats/services/usage-aggregator.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface UsageRoutesOptions {
   invocationRecordStore: IInvocationRecordStore;

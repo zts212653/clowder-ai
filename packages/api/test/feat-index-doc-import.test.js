@@ -17,7 +17,7 @@ test('feature docs override backlog fields for same featId', async () => {
   try {
     await createRepoSkeleton(root);
     await writeFile(
-      join(root, 'docs', 'BACKLOG.md'),
+      join(root, 'docs', 'ROADMAP.md'),
       [
         '| ID | 名称 | Status | Owner | Link |',
         '|----|------|--------|-------|------|',
@@ -61,7 +61,7 @@ test('feature doc with non-padded filename still indexes by feature_ids frontmat
   try {
     await createRepoSkeleton(root);
     await writeFile(
-      join(root, 'docs', 'features', 'F40-backlog-reorganization.md'),
+      join(root, 'docs', 'features', 'F040-backlog-reorganization.md'),
       [
         '---',
         'feature_ids: [F040]',
@@ -93,7 +93,7 @@ test('directory entry matching Fxxx*.md does not crash importer', async () => {
   try {
     await createRepoSkeleton(root);
     await writeFile(
-      join(root, 'docs', 'BACKLOG.md'),
+      join(root, 'docs', 'ROADMAP.md'),
       [
         '| ID | 名称 | Status | Owner | Link |',
         '|----|------|--------|-------|------|',
@@ -125,7 +125,7 @@ test('unreadable BACKLOG.md does not crash importer', async () => {
       ['---', 'feature_ids: [F044]', 'name: Feature 044', 'status: spec', '---', '', '# F044: Example'].join('\n'),
       'utf8',
     );
-    await mkdir(join(root, 'docs', 'BACKLOG.md'), { recursive: true });
+    await mkdir(join(root, 'docs', 'ROADMAP.md'), { recursive: true });
 
     process.chdir(root);
     const entries = await readFeatIndexEntries();
