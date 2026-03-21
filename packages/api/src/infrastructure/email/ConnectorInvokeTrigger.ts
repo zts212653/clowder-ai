@@ -326,6 +326,8 @@ export class ConnectorInvokeTrigger {
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(controller?.signal ? { signal: controller.signal } : {}),
         queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedForThread(tid),
+        hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
+          invocationQueue.hasActiveOrQueuedAgentForCat(tid, catId),
         cursorBoundaries,
         persistenceContext,
         parentInvocationId: createResult.invocationId,

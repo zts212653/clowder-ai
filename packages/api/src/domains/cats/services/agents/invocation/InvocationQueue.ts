@@ -386,12 +386,31 @@ export class InvocationQueue {
     return count;
   }
 
-  /** F122B: Check if a specific cat already has a queued agent entry for this thread. */
+  /** F122B: Check if a specific cat already has a queued agent entry for this thread.
+   *  Used by callback-a2a-trigger for dedup — only checks 'queued' so that new handoffs
+   *  can still be enqueued while an earlier entry is processing. */
   hasQueuedAgentForCat(threadId: string, catId: string): boolean {
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
         if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Cross-path dedup: checks both queued AND processing agent entries.
+   *  Used by route-serial to prevent text-scan @mention when callback already dispatched. */
+  hasActiveOrQueuedAgentForCat(threadId: string, catId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      for (const e of q) {
+        if (
+          e.source === 'agent' &&
+          (e.status === 'queued' || e.status === 'processing') &&
+          e.targetCats.includes(catId)
+        )
+          return true;
       }
     }
     return false;

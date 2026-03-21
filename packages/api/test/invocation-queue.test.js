@@ -420,4 +420,112 @@ describe('InvocationQueue', () => {
     // Different userId (system vs u1) → different scope key → never merge
     assert.equal(r2.outcome, 'enqueued');
   });
+
+  // ── hasQueuedAgentForCat: only checks 'queued' (callback-path dedup) ──
+
+  it('hasQueuedAgentForCat returns true for queued agent entry', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'callback handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    assert.equal(queue.hasQueuedAgentForCat('t1', 'codex'), true);
+    assert.equal(queue.hasQueuedAgentForCat('t1', 'opus'), false);
+  });
+
+  it('hasQueuedAgentForCat returns false for processing entries (allows new handoffs to enqueue)', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'callback handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    queue.markProcessing('t1', 'system');
+    assert.equal(
+      queue.hasQueuedAgentForCat('t1', 'codex'),
+      false,
+      'processing entries must not block new callback handoffs (P1-1 fix)',
+    );
+  });
+
+  it('hasQueuedAgentForCat returns false for user-sourced entries', () => {
+    queue.enqueue(entry({ targetCats: ['opus'] }));
+    assert.equal(queue.hasQueuedAgentForCat('t1', 'opus'), false, 'user entries should not block A2A dedup');
+  });
+
+  it('hasQueuedAgentForCat returns false after entry completes', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    const e = queue.markProcessing('t1', 'system');
+    queue.removeProcessed('t1', 'system', e.id);
+    assert.equal(queue.hasQueuedAgentForCat('t1', 'codex'), false);
+  });
+
+  // ── hasActiveOrQueuedAgentForCat: checks both queued AND processing (route-serial dedup) ──
+
+  it('hasActiveOrQueuedAgentForCat returns true for queued entry', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    assert.equal(queue.hasActiveOrQueuedAgentForCat('t1', 'codex'), true);
+  });
+
+  it('hasActiveOrQueuedAgentForCat returns true for processing entry (prevents text-scan double-trigger)', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    queue.markProcessing('t1', 'system');
+    assert.equal(
+      queue.hasActiveOrQueuedAgentForCat('t1', 'codex'),
+      true,
+      'must detect processing entries to prevent text-scan double-trigger',
+    );
+  });
+
+  it('hasActiveOrQueuedAgentForCat returns false after entry completes', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    const e = queue.markProcessing('t1', 'system');
+    queue.removeProcessed('t1', 'system', e.id);
+    assert.equal(queue.hasActiveOrQueuedAgentForCat('t1', 'codex'), false);
+  });
 });

@@ -166,6 +166,15 @@ export class QueueProcessor {
     return this.deps.queue.hasQueuedForThread(threadId);
   }
 
+  /** A2A dedup: check if a specific cat already has a queued or processing entry for this thread. */
+  hasQueuedAgentForCat(threadId: string, catId: string): boolean {
+    return this.deps.queue.hasQueuedAgentForCat(threadId, catId);
+  }
+
+  hasActiveOrQueuedAgentForCat(threadId: string, catId: string): boolean {
+    return this.deps.queue.hasActiveOrQueuedAgentForCat(threadId, catId);
+  }
+
   /** Returns pause reason when paused; otherwise undefined. */
   getPauseReason(threadId: string, catId?: string): 'canceled' | 'failed' | undefined {
     if (!this.isPaused(threadId, catId)) return undefined;
@@ -537,6 +546,7 @@ export class QueueProcessor {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedForThread(tid),
+          hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
           cursorBoundaries,
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),

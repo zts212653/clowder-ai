@@ -734,6 +734,7 @@ export class AgentRouter {
       uploadDir?: string;
       signal?: AbortSignal;
       queueHasQueuedMessages?: (threadId: string) => boolean;
+      hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
       /** ADR-008 S3: pass a Map to collect cursor boundaries; caller acks after succeeded */
       cursorBoundaries?: Map<string, string>;
       /** P1-2: pass to track persistence failures across generator boundary */
@@ -761,6 +762,7 @@ export class AgentRouter {
       uploadDir: options?.uploadDir,
       signal: options?.signal,
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
+      hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
       thinkingMode,

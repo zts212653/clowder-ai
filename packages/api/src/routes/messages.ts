@@ -679,6 +679,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(opts.invocationQueue
                 ? {
                     queueHasQueuedMessages: (tid: string) => opts.invocationQueue?.hasQueuedForThread(tid) ?? false,
+                    hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
+                      opts.invocationQueue?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                   }
                 : {}),
               cursorBoundaries,

@@ -298,6 +298,27 @@ describe('routeSerial A2A worklist', () => {
     assert.equal(handoffs.length, 0, 'should not emit handoff when fairness guard blocks extension');
   });
 
+  it('skips A2A text-scan @mention when cat already dispatched via callback (cross-path dedup)', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({
+      opus: createMockService('opus', '代码完成\n@缅因猫 请 review'),
+      codex: createMockService('codex', 'should not be invoked via text-scan'),
+    });
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
+      hasQueuedOrActiveAgentForCat: (_tid, catId) => catId === 'codex',
+    })) {
+      messages.push(msg);
+    }
+
+    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
+    assert.equal(codexText.length, 0, 'codex must NOT be invoked when already in InvocationQueue');
+
+    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
+    assert.equal(handoffs.length, 0, 'should not emit handoff for deduped cat');
+  });
+
   it('self-mention does not trigger A2A', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({
