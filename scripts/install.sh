@@ -623,7 +623,14 @@ if node_needs_install; then
         darwin)
             # Prefer fnm for version management; fall back to Homebrew
             install_node_fnm && NODE_OK=true
-            [[ "$NODE_OK" == false ]] && brew install node@20 2>/dev/null && NODE_OK=true
+            if [[ "$NODE_OK" == false ]]; then
+                brew install node@20 2>/dev/null || true
+                # node@20 is keg-only — Homebrew does not link it into PATH by default.
+                # Add the keg bin to PATH so node/npm are discoverable this session.
+                local keg_bin; keg_bin="$(brew --prefix node@20 2>/dev/null)/bin"
+                [[ -d "$keg_bin" ]] && export PATH="$keg_bin:$PATH"
+                node_needs_install || NODE_OK=true
+            fi
             ;;
         debian)
             $SUDO mkdir -p /etc/apt/keyrings
@@ -668,8 +675,13 @@ fi
 install_redis_local() {
     case "$DISTRO_FAMILY" in
         darwin)
-            brew install redis 2>/dev/null || true
-            brew services start redis 2>/dev/null || true
+            if ! brew install redis 2>/dev/null; then
+                fail "brew install redis failed"; return 1
+            fi
+            if ! brew services start redis 2>/dev/null; then
+                warn "brew services start redis failed — trying direct launch"
+                redis-server --daemonize yes 2>/dev/null || { fail "Could not start Redis"; return 1; }
+            fi
             ;;
         debian) $SUDO $PKG_INSTALL redis-server ;;
         rhel) $SUDO $PKG_INSTALL redis ;;
@@ -677,6 +689,10 @@ install_redis_local() {
     if [[ "$DISTRO_FAMILY" != "darwin" ]]; then
         $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
         $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
+    fi
+    # Verify Redis is actually responding before claiming success
+    if ! redis-cli ping &>/dev/null 2>&1; then
+        fail "Redis installed but not responding to ping"; return 1
     fi
     ok "Redis installed and started"
 }
