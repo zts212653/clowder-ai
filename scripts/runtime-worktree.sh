@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-DEFAULT_RUNTIME_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-runtime"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+DEFAULT_RUNTIME_DIR="$(cd "$PROJECT_DIR/.." && pwd -P)/cat-cafe-runtime"
 
 RUNTIME_DIR="${CAT_CAFE_RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
 RUNTIME_BRANCH="${CAT_CAFE_RUNTIME_BRANCH:-runtime/main-sync}"
@@ -81,6 +81,48 @@ abs_path() {
   printf '%s/%s\n' "${dir%/}" "${base%/}"
 }
 
+normalize_runtime_dir() {
+  RUNTIME_DIR="$(abs_path "$RUNTIME_DIR")"
+}
+
+read_env_file_value() {
+  local env_file="$1"
+  local key="$2"
+  [ -f "$env_file" ] || return 1
+
+  env -i HOME="$HOME" PATH="$PATH" bash -c '
+    set -a
+    source "$1" >/dev/null 2>&1
+    eval "printf %s \"\${'"$2"':-}\""
+  ' _ "$env_file"
+}
+
+runtime_env_value() {
+  read_env_file_value "$RUNTIME_DIR/.env" "$1"
+}
+
+sync_runtime_env_files() {
+  [ -d "$RUNTIME_DIR" ] || return 0
+
+  local file source_file runtime_file
+  for file in .env .env.local; do
+    source_file="$PROJECT_DIR/$file"
+    runtime_file="$RUNTIME_DIR/$file"
+
+    if [ -f "$source_file" ]; then
+      if [ ! -f "$runtime_file" ] || ! cmp -s "$source_file" "$runtime_file"; then
+        cp "$source_file" "$runtime_file"
+        info "synced $file into runtime worktree"
+      fi
+    elif [ -f "$runtime_file" ]; then
+      rm -f "$runtime_file"
+      info "removed stale runtime $file (source file missing)"
+    fi
+  done
+}
+
+normalize_runtime_dir
+
 require_git_repo() {
   git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
     || die "project dir is not a git repository: $PROJECT_DIR"
@@ -105,7 +147,9 @@ ensure_remote_exists() {
 }
 
 is_api_running() {
-  local port="${API_SERVER_PORT:-3004}"
+  local port
+  port="$(runtime_env_value API_SERVER_PORT 2>/dev/null || true)"
+  port="${port:-${API_SERVER_PORT:-3004}}"
   lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
 }
 
@@ -245,6 +289,8 @@ init_runtime_worktree() {
     pnpm -C "$RUNTIME_DIR" install
   fi
 
+  sync_runtime_env_files
+
   info "runtime worktree ready at $RUNTIME_DIR"
 }
 
@@ -279,6 +325,8 @@ sync_runtime_worktree() {
       git -C "$RUNTIME_DIR" stash push -m "lock-drift-auto-stash" -- pnpm-lock.yaml
     fi
   fi
+
+  sync_runtime_env_files
 
   info "sync complete"
 }
@@ -322,6 +370,8 @@ start_runtime_worktree() {
     info "runtime worktree missing; initializing first"
     init_runtime_worktree
   fi
+
+  sync_runtime_env_files
 
   # Runtime is single-instance infra; restarting an active API requires
   # explicit opt-in so accidental `pnpm start` in runtime sessions cannot

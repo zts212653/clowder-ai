@@ -91,6 +91,8 @@ pnpm start
 
 Open `http://localhost:3003` and start talking to your team.
 
+`pnpm start` mirrors the root checkout's `.env` / `.env.local` into the sibling runtime worktree before launch. Edit the root checkout config, not `../cat-cafe-runtime`.
+
 > **One-line alternative (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
 
 **Full setup guide** (API keys, CLI auth, voice, Feishu/Telegram, troubleshooting): **[SETUP.md](SETUP.md)**
@@ -510,6 +512,8 @@ pnpm start
 ```
 
 打开 `http://localhost:3003`，开始和你的团队对话。
+
+`pnpm start` 会在启动前把根目录 checkout 的 `.env` / `.env.local` 镜像到 sibling runtime worktree。配置改根目录，不要去改 `../cat-cafe-runtime`。
 
 > **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
