@@ -65,7 +65,7 @@ export function validateRuntimeProviderBinding(
   // API Key accounts declare their own protocol — don't reject based on provider mismatch.
   // The invocation chain uses account.protocol for env var injection.
 
-  const trimmedModel = defaultModel?.trim();
+  const trimmedModel = defaultModel?.trim().replace(/\x1B\[[^m]*m|\[\d+m\]/g, '');
   if (trimmedModel && profile.models?.length && !profile.models.includes(trimmedModel)) {
     return `model "${trimmedModel}" is not available on provider "${profile.id}"`;
   }

@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import type { CatData } from '@/hooks/useCatData';
-import { useOwnerConfig } from '@/hooks/useOwnerConfig';
+import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useTts } from '@/hooks/useTts';
 import { hexToRgba, tintedLight } from '@/lib/color-utils';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
@@ -53,7 +53,7 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, getCatById }: ChatMessageProps) {
-  const owner = useOwnerConfig();
+  const coCreator = useCoCreatorConfig();
   const router = useRouter();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const threads = useChatStore((s) => s.threads);
@@ -163,8 +163,8 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   }
 
   if (isUser) {
-    const ownerPrimary = owner.color?.primary ?? '#E29578';
-    const ownerSecondary = owner.color?.secondary ?? '#FFDDD2';
+    const coCreatorPrimary = coCreator.color?.primary ?? '#815b5b';
+    const coCreatorSecondary = coCreator.color?.secondary ?? '#FFDDD2';
     return (
       <div data-message-id={message.id} className="flex justify-end gap-2 mb-4 items-start">
         <div className="max-w-[75%]">
@@ -180,8 +180,8 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
             )}
             <span className="text-xs text-gray-400">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
-            <span className="text-xs font-semibold" style={{ color: ownerPrimary }}>
-              {owner.name}
+            <span className="text-xs font-semibold" style={{ color: coCreatorPrimary }}>
+              {coCreator.name}
             </span>
           </div>
           <div
@@ -191,8 +191,8 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             style={
               !isWhisper || isRevealed
                 ? {
-                    backgroundColor: ownerSecondary,
-                    color: ownerPrimary,
+                    backgroundColor: coCreatorSecondary,
+                    color: coCreatorPrimary,
                   }
                 : undefined
             }
@@ -206,12 +206,12 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
         </div>
         <div
           className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-[11px] font-bold text-white"
-          style={{ backgroundColor: ownerPrimary, boxShadow: `0 0 0 2px ${ownerSecondary}` }}
+          style={{ backgroundColor: coCreatorPrimary, boxShadow: `0 0 0 2px ${coCreatorSecondary}` }}
         >
-          {owner.avatar ? (
+          {coCreator.avatar ? (
             <img
-              src={owner.avatar}
-              alt={owner.name}
+              src={coCreator.avatar}
+              alt={coCreator.name}
               width={32}
               height={32}
               className="object-cover w-full h-full"

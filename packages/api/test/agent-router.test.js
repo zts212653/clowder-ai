@@ -133,6 +133,7 @@ function createMockThreadStore(
         })
         .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
     },
+    consumeMentionRoutingFeedback: () => null,
     // F032 P1-2: Update participant activity on message
     updateParticipantActivity: (threadId, catId) => {
       if (!participants[threadId]) participants[threadId] = [];
@@ -175,6 +176,9 @@ function createDebugThinkingThreadStore() {
     listByProject: () => [],
     addParticipants: () => {},
     getParticipants: () => [],
+    getParticipantsWithActivity: () => [],
+    consumeMentionRoutingFeedback: () => null,
+    updateParticipantActivity: () => {},
     updateLastActive: () => {},
     delete: () => true,
   };
@@ -274,7 +278,7 @@ function createAvailabilityConfigProject(availabilityOverrides = {}) {
           preferLead: true,
           excludeUnavailable: true,
         },
-        owner: {
+        coCreator: {
           name: 'Co-worker',
           aliases: ['共创伙伴'],
           mentionPatterns: ['@co-worker', '@owner'],
@@ -2670,14 +2674,17 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
       threadStore,
     });
 
+    // Before refresh: codex is in catRegistry (mention parsing) but NOT in agentRegistry
+    // Mention resolution finds codex, but route() will fail to dispatch it
     const before = await router.resolveTargetsAndIntent('@codex review this', 't1');
-    assert.notDeepEqual(before.targetCats, ['codex'], 'codex should not be routable before refresh');
+    assert.deepEqual(before.targetCats, ['codex'], 'codex mention should be parsed from catRegistry');
 
     const codexConfig = catRegistry.tryGet('codex')?.config;
     assert.ok(codexConfig, 'codex config should exist');
     agentRegistry.register('codex', createMockAgentService('codex'));
     router.refreshFromRegistry(agentRegistry);
 
+    // After refresh: codex is both in catRegistry AND agentRegistry — fully routable
     const after = await router.resolveTargetsAndIntent('@codex review this', 't1');
     assert.deepEqual(after.targetCats, ['codex'], 'codex should be routable after refresh');
   });

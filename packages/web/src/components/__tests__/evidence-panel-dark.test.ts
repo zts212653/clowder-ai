@@ -45,7 +45,7 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
 
     const html = container.innerHTML;
     expect(html).toContain('bg-slate-800');
-    expect(html).not.toContain('--color-owner-bg');
+    expect(html).not.toContain('--color-cocreator-bg');
   });
 
   it('EvidenceCard uses dark card styling with high-contrast text', () => {

@@ -7,17 +7,23 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { clearTimeout as clearKeepAliveTimeout, setTimeout as setKeepAliveTimeout } from 'node:timers';
 
 const { spawnCli, isCliError, isCliTimeout, isLivenessWarning, KILL_GRACE_MS, SEMANTIC_COMPLETION_GRACE_MS } =
   await import('../dist/utils/cli-spawn.js');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
+  const keepAlive = setKeepAliveTimeout(() => {}, 15_000);
   const items = [];
-  for await (const item of iterable) {
-    items.push(item);
+  try {
+    for await (const item of iterable) {
+      items.push(item);
+    }
+    return items;
+  } finally {
+    clearKeepAliveTimeout(keepAlive);
   }
-  return items;
 }
 
 /**
@@ -551,7 +557,10 @@ test('timeout event includes firstEventAt/lastEventAt/lastEventType when events 
   proc.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'abc' }) + '\n');
 
   // Wait for timeout
-  await new Promise((r) => setTimeout(r, 100));
+  // End before silence exceeds the soft threshold: this test verifies that
+  // stderr activity resets probe silence, not that a later real quiet period
+  // suppresses warnings forever.
+  await new Promise((r) => setTimeout(r, 50));
   proc.stdout.end();
 
   const results = await promise;

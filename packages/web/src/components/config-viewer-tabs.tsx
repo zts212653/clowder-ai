@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import type { ConfigData } from './config-viewer-types';
-import { HubMemberOverviewCard, HubOverviewToolbar, HubOwnerOverviewCard } from './HubMemberOverviewCard';
+import { HubCoCreatorOverviewCard, HubMemberOverviewCard, HubOverviewToolbar } from './HubMemberOverviewCard';
 
 export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './config-viewer-types';
 
@@ -24,12 +24,12 @@ function KV({ label, value }: { label: string; value: string | number | boolean 
   );
 }
 
-/** Screen 2 summary overview — owner card plus member cards */
+/** Screen 2 summary overview — co-creator card plus member cards */
 export function CatOverviewTab({
   config,
   cats,
   onAddMember,
-  onEditOwner,
+  onEditCoCreator,
   onEditMember,
   onToggleAvailability,
   togglingCatId,
@@ -37,7 +37,7 @@ export function CatOverviewTab({
   config: ConfigData;
   cats: CatData[];
   onAddMember?: () => void;
-  onEditOwner?: () => void;
+  onEditCoCreator?: () => void;
   onEditMember?: (cat: CatData) => void;
   onToggleAvailability?: (cat: CatData) => void;
   togglingCatId?: string | null;
@@ -45,7 +45,7 @@ export function CatOverviewTab({
   return (
     <div className="space-y-4">
       <HubOverviewToolbar onAddMember={onAddMember} />
-      {config.owner ? <HubOwnerOverviewCard owner={config.owner} onEdit={onEditOwner} /> : null}
+      {config.coCreator ? <HubCoCreatorOverviewCard coCreator={config.coCreator} onEdit={onEditCoCreator} /> : null}
       <div className="space-y-3">
         {cats.map((catData) => (
           <HubMemberOverviewCard

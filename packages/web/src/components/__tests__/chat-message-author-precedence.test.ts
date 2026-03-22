@@ -8,8 +8,8 @@ vi.mock('@/hooks/useTts', () => ({
   useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
 }));
 
-vi.mock('@/hooks/useOwnerConfig', () => ({
-  useOwnerConfig: () => ({
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
     name: '始皇帝',
     aliases: ['秦始皇'],
     mentionPatterns: ['@owner', '@me'],
@@ -97,7 +97,7 @@ describe('ChatMessage author precedence', () => {
     expect(container.textContent).not.toContain('铲屎官');
   });
 
-  it('uses configured owner name and avatar for plain user messages', async () => {
+  it('uses configured co-creator name and avatar for plain user messages', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
     const msg = {
       id: 'm2',

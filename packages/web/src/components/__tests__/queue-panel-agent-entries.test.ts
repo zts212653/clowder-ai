@@ -9,8 +9,8 @@ import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { QueuePanel } from '../QueuePanel';
 
-vi.mock('@/hooks/useOwnerConfig', () => ({
-  useOwnerConfig: () => ({
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
     name: '始皇帝',
     aliases: ['秦始皇'],
     mentionPatterns: ['@owner', '@me'],
@@ -79,7 +79,7 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
     const text = container.textContent ?? '';
     // Agent entry should show handoff format
     expect(text).toContain('codex → opus');
-    // User entry should show configured owner name
+    // User entry should show configured co-creator name
     expect(text).toContain('始皇帝');
   });
 

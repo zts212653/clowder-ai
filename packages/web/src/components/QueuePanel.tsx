@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { useOwnerConfig } from '@/hooks/useOwnerConfig';
+import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { type QueueEntry, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
@@ -17,7 +17,7 @@ interface QueuePanelProps {
  * controls, plus continue/clear actions when paused.
  */
 export function QueuePanel({ threadId }: QueuePanelProps) {
-  const owner = useOwnerConfig();
+  const coCreator = useCoCreatorConfig();
   const rawQueue = useChatStore((s) => s.queue);
   const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
   const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
@@ -208,7 +208,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
               isLast={idx === visibleEntries.length - 1}
               isPaused={queuePaused}
               imageCount={imageCount}
-              ownerName={owner.name}
+              ownerName={coCreator.name}
               onRemove={handleRemove}
               onMove={handleMove}
               onSteer={handleSteerOpen}

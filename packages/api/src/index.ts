@@ -435,16 +435,38 @@ async function main(): Promise<void> {
 
       const taskRunner = new TaskRunner({ info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) });
 
+      // Abstractive summary API config resolution (priority order):
+      // 1. F102_API_BASE + F102_API_KEY (explicit override)
+      // 2. ANTHROPIC_API_KEY + local proxy (http://127.0.0.1:{ANTHROPIC_PROXY_PORT}/{first-slug})
+      // 3. null → skip abstractive
       const generateAbstractive = createAbstractiveClient(
         async () => {
+          // Priority 1: explicit F102 config
+          if (process.env.F102_API_BASE && process.env.F102_API_KEY) {
+            return { mode: 'api_key' as const, baseUrl: process.env.F102_API_BASE, apiKey: process.env.F102_API_KEY };
+          }
+          // Priority 2: use existing ANTHROPIC_API_KEY + local proxy
+          const apiKey = process.env.ANTHROPIC_API_KEY;
+          if (!apiKey) return null;
+          const proxyPort = process.env.ANTHROPIC_PROXY_PORT || '9877';
+          // Read first upstream slug from proxy-upstreams.json
           try {
-            const { resolveAnthropicRuntimeProfile } = await import('./config/provider-profiles.js');
-            const { findMonorepoRoot } = await import('./utils/monorepo-root.js');
-            const profile = await resolveAnthropicRuntimeProfile(findMonorepoRoot());
-            if (profile.mode !== 'api_key') return null;
-            return profile as { mode: 'api_key'; baseUrl: string; apiKey: string };
+            const { readFileSync } = await import('fs');
+            const { resolve: resolvePath } = await import('path');
+            const upstreamsPath =
+              process.env.ANTHROPIC_PROXY_UPSTREAMS_PATH ||
+              resolvePath(process.cwd(), '.cat-cafe', 'proxy-upstreams.json');
+            const upstreams = JSON.parse(readFileSync(upstreamsPath, 'utf-8'));
+            const firstSlug = Object.keys(upstreams)[0];
+            if (!firstSlug) return null;
+            return {
+              mode: 'api_key' as const,
+              baseUrl: `http://127.0.0.1:${proxyPort}/${firstSlug}`,
+              apiKey,
+            };
           } catch {
-            return null;
+            // No proxy config → try direct with API key
+            return { mode: 'api_key' as const, baseUrl: 'https://api.anthropic.com', apiKey };
           }
         },
         { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
@@ -719,7 +741,7 @@ async function main(): Promise<void> {
   const limbPairingStore = new LimbPairingStore();
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
-  await app.register(callbacksRoutes, {
+  const callbackOpts = {
     registry,
     messageStore,
     socketManager,
@@ -739,7 +761,8 @@ async function main(): Promise<void> {
     reflectionService: memoryServices.reflectionService,
     limbRegistry,
     limbPairingStore,
-  });
+  } as Parameters<typeof callbacksRoutes>[1];
+  await app.register(callbacksRoutes, callbackOpts);
 
   // Authorization system — 猫猫动态权限 (Redis-backed when available)
   const authRuleStore = createAuthorizationRuleStore(redis);
@@ -1180,6 +1203,9 @@ async function main(): Promise<void> {
       queueProcessor.setStreamingHook(
         connectorGatewayHandle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0],
       );
+      // Wire outbound delivery for proactive cat messages (post_message callback)
+      (callbackOpts as { outboundHook?: typeof connectorGatewayHandle.outboundHook }).outboundHook =
+        connectorGatewayHandle.outboundHook;
       queueProcessor.setThreadMetaLookup(async (threadId) => {
         const thread = await threadStore.get(threadId);
         if (!thread) return undefined;

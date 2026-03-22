@@ -11,11 +11,17 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { clearTimeout as clearKeepAliveTimeout, setTimeout as setKeepAliveTimeout } from 'node:timers';
 
 async function collect(iterable) {
+  const keepAlive = setKeepAliveTimeout(() => {}, 15_000);
   const msgs = [];
-  for await (const msg of iterable) msgs.push(msg);
-  return msgs;
+  try {
+    for await (const msg of iterable) msgs.push(msg);
+    return msgs;
+  } finally {
+    clearKeepAliveTimeout(keepAlive);
+  }
 }
 
 let invokeSingleCat;

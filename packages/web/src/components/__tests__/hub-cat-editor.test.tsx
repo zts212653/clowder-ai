@@ -1460,7 +1460,7 @@ describe('HubCatEditor', () => {
         return Promise.resolve(
           jsonResponse({
             config: {
-              owner: {
+              coCreator: {
                 name: 'Co-worker',
                 aliases: ['共创伙伴'],
                 mentionPatterns: ['@co-worker', '@owner'],

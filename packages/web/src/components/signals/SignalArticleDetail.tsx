@@ -209,7 +209,7 @@ export function SignalArticleDetail({
           href={article.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-md border border-owner-light px-3 py-1.5 text-xs text-owner-dark hover:bg-owner-bg"
+          className="rounded-md border border-cocreator-light px-3 py-1.5 text-xs text-cocreator-dark hover:bg-cocreator-bg"
         >
           打开原文 ↗
         </a>
@@ -223,8 +223,8 @@ export function SignalArticleDetail({
         </button>
       </div>
       {article.summary && (
-        <section className="mt-4 rounded-lg border border-owner-light bg-owner-bg p-3">
-          <h3 className="text-xs font-semibold text-owner-dark">AI 摘要</h3>
+        <section className="mt-4 rounded-lg border border-cocreator-light bg-cocreator-bg p-3">
+          <h3 className="text-xs font-semibold text-cocreator-dark">AI 摘要</h3>
           <p className="mt-1 whitespace-pre-wrap text-sm text-cafe-black">{article.summary}</p>
         </section>
       )}
@@ -333,7 +333,7 @@ export function SignalArticleDetail({
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'inbox')}
-          className="rounded-md border border-owner-light px-3 py-1.5 text-xs text-owner-dark hover:bg-owner-bg"
+          className="rounded-md border border-cocreator-light px-3 py-1.5 text-xs text-cocreator-dark hover:bg-cocreator-bg"
         >
           设为 Inbox
         </button>

@@ -14,6 +14,9 @@ import {
   buildSystemPrompt,
 } from '../dist/domains/cats/services/context/SystemPromptBuilder.js';
 import { parseMentions } from '../dist/infrastructure/connectors/mention-parser.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
+
+ensureFakeCliOnPath('opencode');
 
 // ── Shared fixtures ──────────────────────────────────────────────
 

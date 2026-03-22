@@ -18,6 +18,9 @@ export class MediaCleanupJob {
 
   start(): void {
     this.timer = setInterval(() => void this.sweep(), this.opts.intervalMs);
+    // unref() 让这个 housekeeping timer 不阻止进程退出。
+    // 防止测试失败跳过 stop() 时，残留 timer 把 node --test 挂住。
+    this.timer.unref();
   }
 
   stop(): void {

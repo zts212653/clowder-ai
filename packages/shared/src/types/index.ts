@@ -110,10 +110,10 @@ export type {
   CatFeatures,
   CatVariant,
   CliConfig,
+  // F067: Co-Creator config for @ mention routing
+  CoCreatorConfig,
   ContextBudget,
   MissionHubSelfClaimScope,
-  // F067: Owner config for @ mention routing
-  OwnerConfig,
   // F032: Roster types for collaboration rules
   ReviewPolicy,
   Roster,

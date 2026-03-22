@@ -529,7 +529,7 @@ export async function* routeSerial(
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
       const bufferedBlocks = getRichBlockBuffer().consume(threadId, catId as string, ownInvocationId);
 
-      // F061: Detect @owner mentions in agent response for browser notification
+      // F061: Detect @co-creator mentions in agent response for browser notification
       let mentionsUser = false;
 
       if (textContent) {
@@ -649,7 +649,7 @@ export async function* routeSerial(
 
         const storedTimestamp = Date.now();
 
-        // F061: Detect @owner mentions in agent response for browser notification
+        // F061: Detect @co-creator mentions in agent response for browser notification
         mentionsUser = storedContent ? detectUserMention(storedContent) : false;
 
         // Store with actual mentions — degrade on failure to ensure done reaches frontend

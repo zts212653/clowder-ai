@@ -78,6 +78,83 @@ describe('ConnectorMediaService', () => {
     await rm(tempDir, { recursive: true });
   });
 
+  it('passes messageId to feishu download function', async () => {
+    const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
+
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
+
+    const mockFeishuDownload = mock.fn(async () => Buffer.from('img-with-msgid'));
+    const service = new ConnectorMediaService({
+      mediaDir: tempDir,
+      feishuDownloadFn: mockFeishuDownload,
+    });
+
+    await service.download('feishu', {
+      type: 'image',
+      platformKey: 'img_v2_abc',
+      messageId: 'om_msg_789',
+    });
+
+    assert.equal(mockFeishuDownload.mock.calls.length, 1);
+    const callArgs = mockFeishuDownload.mock.calls[0].arguments;
+    assert.equal(callArgs[0], 'img_v2_abc');
+    assert.equal(callArgs[1], 'image');
+    assert.equal(callArgs[2], 'om_msg_789');
+
+    await rm(tempDir, { recursive: true });
+  });
+
+  it('setFeishuDownloadFn wires late-bound download function', async () => {
+    const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
+
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
+
+    const service = new ConnectorMediaService({ mediaDir: tempDir });
+
+    await assert.rejects(
+      () => service.download('feishu', { type: 'image', platformKey: 'key' }),
+      /No download function for connector/,
+    );
+
+    const lateFn = mock.fn(async () => Buffer.from('late-bound-data'));
+    service.setFeishuDownloadFn(lateFn);
+
+    const result = await service.download('feishu', {
+      type: 'image',
+      platformKey: 'img_late',
+      messageId: 'om_late_123',
+    });
+
+    assert.equal(lateFn.mock.calls.length, 1);
+    assert.ok(result.localUrl.startsWith('/api/connector-media/'));
+
+    const content = await readFile(result.absPath);
+    assert.deepEqual(content, Buffer.from('late-bound-data'));
+
+    await rm(tempDir, { recursive: true });
+  });
+
+  it('setTelegramDownloadFn wires late-bound download function', async () => {
+    const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
+
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
+
+    const service = new ConnectorMediaService({ mediaDir: tempDir });
+
+    const lateFn = mock.fn(async () => Buffer.from('tg-late'));
+    service.setTelegramDownloadFn(lateFn);
+
+    const result = await service.download('telegram', {
+      type: 'audio',
+      platformKey: 'tg-file-id',
+    });
+
+    assert.equal(lateFn.mock.calls.length, 1);
+    assert.ok(result.absPath.endsWith('.ogg'));
+
+    await rm(tempDir, { recursive: true });
+  });
+
   it('throws for unsupported connector', async () => {
     const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
 

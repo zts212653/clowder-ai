@@ -6,8 +6,8 @@ import { ReplyPill } from '../ReplyPill';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
-vi.mock('@/hooks/useOwnerConfig', () => ({
-  useOwnerConfig: () => ({
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
     name: '始皇帝',
     aliases: ['秦始皇'],
     mentionPatterns: ['@owner', '@me'],
@@ -37,7 +37,7 @@ describe('ReplyPill', () => {
     expect(html).toContain('#8B5CF6');
   });
 
-  it('renders user reply with configured owner label', () => {
+  it('renders user reply with configured co-creator label', () => {
     const html = renderToStaticMarkup(
       <ReplyPill
         replyPreview={{ senderCatId: null, content: '用户消息' }}

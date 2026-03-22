@@ -433,7 +433,7 @@ packages/web/public/avatars/*.png（静态文件服务）
 | gemini25 | `gemini25.png` | Siamese Gemini 2.5 |
 | dare | `dare.png` | 狸花猫 Dare |
 | antigravity | `antigravity.png` | 孟加拉猫（豹纹+棱镜吊坠） |
-| owner | `owner.jpg` | team lead（`Owner.png` 在 assets/avatars/ 也有一份海豚版） |
+| owner | `owner.jpg` | team lead（`You.png` 在 assets/avatars/ 也有一份海豚版） |
 
 ### 游戏集成方案
 

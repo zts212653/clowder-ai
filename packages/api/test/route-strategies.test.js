@@ -92,6 +92,7 @@ function degradationSystemInfos(messages) {
   return messages.filter((m) => {
     if (m.type !== 'system_info') return false;
     if (!m.content) return true;
+    if (m.content.startsWith('⚠️ Shared-state preflight:')) return false;
     try {
       const parsed = JSON.parse(m.content);
       // Invocation lifecycle telemetry is expected on every run and is not degradation.

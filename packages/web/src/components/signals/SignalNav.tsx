@@ -74,8 +74,8 @@ export function SignalNav({ active }: SignalNavProps) {
             className={[
               'inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
               isActive
-                ? 'border-owner-primary bg-owner-light text-owner-dark'
-                : 'border-gray-200 bg-white text-gray-600 hover:border-owner-light hover:text-owner-dark',
+                ? 'border-cocreator-primary bg-cocreator-light text-cocreator-dark'
+                : 'border-gray-200 bg-white text-gray-600 hover:border-cocreator-light hover:text-cocreator-dark',
             ].join(' ')}
           >
             {item.label}

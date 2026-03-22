@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 import { transformOpenCodeEvent } from '../dist/domains/cats/services/agents/providers/opencode-event-transform.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { collect, createMockProcess, emitOpenCodeEvents } from './helpers/opencode-test-helpers.js';
+
+ensureFakeCliOnPath('opencode');
 
 // ── Ralph Loop fixtures: multiple step cycles ──
 

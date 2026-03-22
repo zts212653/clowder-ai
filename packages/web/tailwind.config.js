@@ -28,11 +28,11 @@ module.exports = {
           dark: 'var(--color-dare-dark)',
           bg: 'var(--color-dare-bg)',
         },
-        owner: {
-          primary: 'var(--color-owner-primary)',
-          light: 'var(--color-owner-light)',
-          dark: 'var(--color-owner-dark)',
-          bg: 'var(--color-owner-bg)',
+        cocreator: {
+          primary: 'var(--color-cocreator-primary)',
+          light: 'var(--color-cocreator-light)',
+          dark: 'var(--color-cocreator-dark)',
+          bg: 'var(--color-cocreator-bg)',
         },
         cafe: {
           white: 'var(--color-base-white)',

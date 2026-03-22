@@ -29,10 +29,10 @@ function buildMentionColor(cats: Array<{ id: string; color: { primary: string } 
   return Object.fromEntries(cats.map((cat) => [cat.id, cat.color.primary]));
 }
 
-// ── Owner (铲屎官) ─────────────────────────────────────────
-const OWNER_ID = '__owner__';
-const OWNER_COLOR = '#F5A623'; // warm gold
-const DEFAULT_OWNER_MENTION_PATTERNS = ['@owner', '@user', '@铲屎官'];
+// ── Co-Creator (铲屎官) ───────────────────────────────────
+const CO_CREATOR_ID = '__co-creator__';
+const CO_CREATOR_COLOR = '#F5A623'; // warm gold
+const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@铲屎官'];
 
 // ── Module-level cache (starts from static CAT_CONFIGS) ─
 
@@ -42,28 +42,28 @@ const staticCats = Object.entries(CAT_CONFIGS).map(([id, c]) => ({
   color: { primary: c.color.primary },
 }));
 
-// Include owner as a pseudo-cat so @owner / @铲屎官 highlights gold
+// Include co-creator as pseudo-cat so @铲屎官 highlights gold
 let _cats = staticCats;
-let _ownerMentionPatterns = [...DEFAULT_OWNER_MENTION_PATTERNS];
+let _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
 let _mentionToCat = buildMentionToCat([]);
 let _mentionRe = buildMentionRe(_mentionToCat);
 let _mentionColor = buildMentionColor([]);
 
-function normalizeOwnerMentionPatterns(mentionPatterns: readonly string[]): string[] {
+function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): string[] {
   const normalized = mentionPatterns
     .map((pattern) => pattern.trim())
     .filter((pattern) => pattern.length > 0)
     .map((pattern) => (pattern.startsWith('@') ? pattern : `@${pattern}`));
-  const unique = new Set(DEFAULT_OWNER_MENTION_PATTERNS);
+  const unique = new Set(DEFAULT_CO_CREATOR_MENTION_PATTERNS);
   for (const pattern of normalized) unique.add(pattern);
   return [...unique];
 }
 
 function rebuildMentionCache(): void {
   const ownerEntry = {
-    id: OWNER_ID,
-    mentionPatterns: _ownerMentionPatterns,
-    color: { primary: OWNER_COLOR },
+    id: CO_CREATOR_ID,
+    mentionPatterns: _coCreatorMentionPatterns,
+    color: { primary: CO_CREATOR_COLOR },
   };
   const all = [..._cats, ownerEntry];
   _mentionToCat = buildMentionToCat(all);
@@ -81,8 +81,8 @@ export function refreshMentionData(cats: CatData[]): void {
   rebuildMentionCache();
 }
 
-export function refreshOwnerMentionData(mentionPatterns: readonly string[]): void {
-  _ownerMentionPatterns = normalizeOwnerMentionPatterns(mentionPatterns);
+export function refreshCoCreatorMentionData(mentionPatterns: readonly string[]): void {
+  _coCreatorMentionPatterns = normalizeCoCreatorMentionPatterns(mentionPatterns);
   rebuildMentionCache();
 }
 
@@ -103,6 +103,6 @@ export function getMentionColor(): Record<string, string> {
 
 export function resetMentionDataForTest(): void {
   _cats = staticCats;
-  _ownerMentionPatterns = [...DEFAULT_OWNER_MENTION_PATTERNS];
+  _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
   rebuildMentionCache();
 }

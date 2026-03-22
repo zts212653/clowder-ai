@@ -49,7 +49,7 @@ function validConfig() {
       preferLead: true,
       excludeUnavailable: true,
     },
-    owner: {
+    coCreator: {
       name: 'Co-worker',
       aliases: ['共创伙伴'],
       mentionPatterns: ['@co-worker', '@owner'],
@@ -197,7 +197,7 @@ function makeF127BootstrapTemplate() {
       preferLead: true,
       excludeUnavailable: true,
     },
-    owner: {
+    coCreator: {
       name: 'Co-worker',
       aliases: ['共创伙伴'],
       mentionPatterns: ['@co-worker', '@owner'],
@@ -369,7 +369,7 @@ describe('cat-catalog-store', () => {
 
     const catalog = readRuntimeCatCatalog(projectRoot);
     assert.equal(catalog.version, 2);
-    assert.equal(catalog.owner?.name, 'Co-worker');
+    assert.equal(catalog.coCreator?.name, 'Co-worker');
     assert.equal(catalog.reviewPolicy?.preferLead, true);
     assert.ok(catalog.roster?.opus, 'existing roster must be preserved');
     assert.deepEqual(catalog.roster?.['spark-lite'], {
@@ -406,7 +406,7 @@ describe('cat-catalog-store', () => {
     assert.deepEqual(updated.mentionPatterns, ['@opus', '@布偶猫', '@运行时布偶']);
     assert.equal(updated.variants[0]?.defaultModel, 'claude-opus-4-1');
     assert.equal(updated.variants[0]?.personality, '更严格');
-    assert.equal(catalog.owner?.mentionPatterns[0], '@co-worker');
+    assert.equal(catalog.coCreator?.mentionPatterns[0], '@co-worker');
   });
 
   it('keeps sessionChain updates scoped to non-default variants', async () => {

@@ -8,13 +8,13 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { resolve } from 'node:path';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
 import { configStore } from '../config/ConfigStore.js';
 import type { ConfigSnapshot } from '../config/config-snapshot.js';
 import { buildEnvSummary, ENV_CATEGORIES, isEditableEnvVarName } from '../config/env-registry.js';
-import { updateRuntimeOwner } from '../config/runtime-cat-catalog.js';
+import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 
@@ -27,7 +27,7 @@ const envPatchSchema = z.object({
   updates: z.array(z.object({ name: z.string().min(1), value: z.string().nullable() })).min(1),
 });
 
-const ownerPatchSchema = z.object({
+const coCreatorPatchSchema = z.object({
   name: z.string().trim().min(1),
   aliases: z.array(z.string().trim().min(1)),
   mentionPatterns: z.array(z.string().trim().min(1)).min(1),
@@ -177,8 +177,8 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     return { config: after };
   });
 
-  app.patch('/api/config/owner', async (request, reply) => {
-    const parsed = ownerPatchSchema.safeParse(request.body);
+  const handleCoCreatorPatch = async (request: FastifyRequest, reply: FastifyReply) => {
+    const parsed = coCreatorPatchSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request', details: parsed.error.issues };
@@ -190,7 +190,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     }
 
     try {
-      updateRuntimeOwner(projectRoot, {
+      updateRuntimeCoCreator(projectRoot, {
         name: parsed.data.name,
         aliases: parsed.data.aliases,
         mentionPatterns: parsed.data.mentionPatterns,
@@ -207,17 +207,25 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       await auditLog.append({
         type: AuditEventTypes.CONFIG_UPDATED,
         data: {
-          target: 'owner',
+          target: 'coCreator',
           operator,
-          name: next.owner.name,
-          mentionPatterns: next.owner.mentionPatterns,
+          name: next.coCreator.name,
+          mentionPatterns: next.coCreator.mentionPatterns,
         },
       });
     } catch (err) {
-      request.log.warn({ err }, 'owner config audit append failed');
+      request.log.warn({ err }, 'coCreator config audit append failed');
     }
 
     return { config: next };
+  };
+
+  app.patch('/api/config/co-creator', handleCoCreatorPatch);
+
+  // Backward-compat: old path delegates to same handler (deprecated)
+  app.patch('/api/config/owner', async (request, reply) => {
+    request.log.warn('DEPRECATED: /api/config/owner — use /api/config/co-creator');
+    return handleCoCreatorPatch(request, reply);
   });
 
   app.get('/api/config/env-summary', async () => {

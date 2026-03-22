@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CatId, catRegistry, type RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import { ConnectorMessageFormatter, type MessageEnvelope } from './ConnectorMessageFormatter.js';
+import { ConnectorMessageFormatter, type MessageEnvelope, type MessageOrigin } from './ConnectorMessageFormatter.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { renderAllRichBlocksPlaintext } from './rich-block-plaintext.js';
 
@@ -62,6 +62,7 @@ export class OutboundDeliveryHook {
     catId?: CatId,
     richBlocks?: RichBlock[],
     threadMeta?: ThreadMeta,
+    origin?: MessageOrigin,
   ): Promise<void> {
     const bindings = await this.opts.bindingStore.getByThread(threadId);
     if (bindings.length === 0) return;
@@ -96,11 +97,13 @@ export class OutboundDeliveryHook {
                   body: content,
                   deepLinkUrl: threadMeta.deepLinkUrl,
                   timestamp: new Date(),
+                  origin,
                 })
               : this.formatter.formatMinimal({
                   catDisplayName: catDisplayName || 'Cat',
                   catEmoji,
                   body: content,
+                  origin,
                 });
             await adapter.sendFormattedReply(binding.externalChatId, envelope);
           } else if (hasRichBlocks && adapter.sendRichMessage) {

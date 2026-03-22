@@ -7,7 +7,7 @@ export function HubButton() {
   return (
     <button
       onClick={() => openHub()}
-      className="p-1 rounded-lg hover:bg-owner-light transition-colors"
+      className="p-1 rounded-lg hover:bg-cocreator-light transition-colors"
       aria-label="Clowder AI Hub"
       title="Clowder AI Hub"
     >

@@ -1,4 +1,4 @@
-export interface OwnerConfig {
+export interface CoCreatorConfig {
   name: string;
   aliases: string[];
   mentionPatterns: string[];
@@ -29,7 +29,7 @@ export interface Capabilities {
 }
 
 export interface ConfigData {
-  owner?: OwnerConfig;
+  coCreator?: CoCreatorConfig;
   cats: Record<string, CatConfig>;
   perCatBudgets: Record<string, ContextBudget>;
   cli?: {

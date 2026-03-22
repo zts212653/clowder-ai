@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { MessageNavigator } from '@/components/MessageNavigator';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 
-vi.mock('@/hooks/useOwnerConfig', () => ({
-  useOwnerConfig: () => ({
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
     name: '始皇帝',
     aliases: ['秦始皇'],
     mentionPatterns: ['@owner', '@me'],
@@ -67,7 +67,7 @@ describe('MessageNavigator', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'opus'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('bg-owner-primary');
+    expect(html).toContain('bg-cocreator-primary');
     expect(html).toContain('#9B7EBD');
     expect(html).toContain('#5B8C5A');
   });

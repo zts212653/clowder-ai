@@ -11,7 +11,7 @@ interface StatCardProps {
 
 function StatCard({ label, value }: StatCardProps) {
   return (
-    <div className="rounded-xl border border-owner-light bg-white px-4 py-3 shadow-sm">
+    <div className="rounded-xl border border-cocreator-light bg-white px-4 py-3 shadow-sm">
       <p className="text-xs font-medium text-gray-500">{label}</p>
       <p className="mt-1 text-2xl font-bold text-cafe-black">{value}</p>
     </div>

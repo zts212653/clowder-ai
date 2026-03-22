@@ -126,6 +126,54 @@ describe('Callback Routes', () => {
     assert.equal(recent[0].content, 'Hello from cat!');
   });
 
+  test('POST post-message calls outboundHook.deliver when wired', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+
+    let deliverCalled = false;
+    let deliverArgs = null;
+    const outboundHook = {
+      async deliver(threadId, content, catId, richBlocks, threadMeta, origin) {
+        deliverCalled = true;
+        deliverArgs = { threadId, content, catId, richBlocks, threadMeta, origin };
+      },
+    };
+
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      outboundHook,
+    });
+
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      payload: {
+        invocationId,
+        callbackToken,
+        content: 'Outbound test message',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(deliverCalled, 'outboundHook.deliver should have been called');
+    assert.equal(deliverArgs.content, 'Outbound test message');
+    assert.equal(deliverArgs.catId, 'opus');
+    assert.equal(deliverArgs.richBlocks, undefined);
+    assert.ok(deliverArgs.threadMeta, 'threadMeta should be passed to deliver');
+    assert.ok(deliverArgs.threadMeta.threadShortId, 'threadMeta should have threadShortId');
+    assert.ok(deliverArgs.threadMeta.deepLinkUrl, 'threadMeta should have deepLinkUrl');
+    assert.equal(deliverArgs.origin, 'callback', 'origin should be callback for post-message');
+  });
+
   test('POST post-message returns 401 for invalid token', async () => {
     const app = await createApp();
     const { invocationId } = registry.create('user-1', 'opus');

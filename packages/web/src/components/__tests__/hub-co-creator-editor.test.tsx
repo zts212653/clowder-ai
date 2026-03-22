@@ -7,7 +7,7 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
-import { HubOwnerEditor } from '@/components/HubOwnerEditor';
+import { HubCoCreatorEditor } from '@/components/HubCoCreatorEditor';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -32,7 +32,7 @@ function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
-describe('HubOwnerEditor', () => {
+describe('HubCoCreatorEditor', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -66,9 +66,9 @@ describe('HubOwnerEditor', () => {
 
     await act(async () => {
       root.render(
-        React.createElement(HubOwnerEditor, {
+        React.createElement(HubCoCreatorEditor, {
           open: true,
-          owner: {
+          coCreator: {
             name: 'Co-worker',
             aliases: ['共创伙伴'],
             mentionPatterns: ['@co-worker', '@owner'],
@@ -86,11 +86,11 @@ describe('HubOwnerEditor', () => {
     expect(container.textContent).not.toContain('/uploads/owner-lang.png');
 
     await act(async () => {
-      queryButton(container, '保存 Owner').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    const patchCall = mockApiFetch.mock.calls.find(([path]) => path === '/api/config/owner');
+    const patchCall = mockApiFetch.mock.calls.find(([path]) => path === '/api/config/co-creator');
     expect(patchCall?.[1]?.method).toBe('PATCH');
     const payload = JSON.parse(String(patchCall?.[1]?.body));
     expect(payload.avatar).toBe('/uploads/owner-lang.png');

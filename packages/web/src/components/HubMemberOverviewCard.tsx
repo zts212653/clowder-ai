@@ -1,5 +1,5 @@
 import type { CatData } from '@/hooks/useCatData';
-import type { CatConfig, OwnerConfig } from './config-viewer-types';
+import type { CatConfig, CoCreatorConfig } from './config-viewer-types';
 
 function safeAvatarSrc(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -74,10 +74,10 @@ function formatMentionPreview(patterns: string[], max = 3) {
   return rest > 0 ? `${visible.join('  ')}  +${rest}` : visible.join('  ');
 }
 
-export function HubOwnerOverviewCard({ owner, onEdit }: { owner: OwnerConfig; onEdit?: () => void }) {
-  const primary = owner.color?.primary ?? '#D4A76A';
-  const secondary = owner.color?.secondary ?? '#FFF8F0';
-  const avatarSrc = safeAvatarSrc(owner.avatar);
+export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoCreatorConfig; onEdit?: () => void }) {
+  const primary = coCreator.color?.primary ?? '#D4A76A';
+  const secondary = coCreator.color?.secondary ?? '#FFF8F0';
+  const avatarSrc = safeAvatarSrc(coCreator.avatar);
 
   return (
     <section
@@ -101,21 +101,21 @@ export function HubOwnerOverviewCard({ owner, onEdit }: { owner: OwnerConfig; on
             style={{ backgroundColor: primary }}
           >
             {avatarSrc ? (
-              // biome-ignore lint/performance/noImgElement: owner avatar may be runtime upload URL
-              <img src={avatarSrc} alt={`${owner.name} avatar`} className="h-full w-full object-cover" />
+              // biome-ignore lint/performance/noImgElement: co-creator avatar may be runtime upload URL
+              <img src={avatarSrc} alt={`${coCreator.name} avatar`} className="h-full w-full object-cover" />
             ) : (
               'ME'
             )}
           </div>
-          <h3 className="text-base font-bold text-[#2D2118]">{owner.name}</h3>
+          <h3 className="text-base font-bold text-[#2D2118]">{coCreator.name}</h3>
         </div>
         <span className="rounded-full bg-[#FFF3E0] px-2.5 py-1 text-[11px] font-semibold text-[#E65100]">🔒 Owner</span>
       </div>
       <p className="mt-2.5 text-[13px] text-[#8A776B]">
-        别名: {owner.aliases.join(' · ') || '无'} · 只能编辑，不能新增或删除
+        别名: {coCreator.aliases.join(' · ') || '无'} · 只能编辑，不能新增或删除
       </p>
       <p className="mt-2 text-[13px]" style={{ color: primary }}>
-        {formatMentionPreview(owner.mentionPatterns, 2)}
+        {formatMentionPreview(coCreator.mentionPatterns, 2)}
       </p>
     </section>
   );

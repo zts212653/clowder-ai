@@ -3,6 +3,9 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
+
+ensureFakeCliOnPath('opencode');
 
 // ── Mock helpers (same pattern as dare-agent-service.test.js) ──
 
@@ -34,12 +37,20 @@ function createMockProcess(exitCode = 0) {
   return proc;
 }
 
+function emitProcessExit(proc, code, signal = null) {
+  process.nextTick(() => {
+    proc._emitter.emit('exit', code, signal);
+  });
+}
+
 function emitOpenCodeEvents(proc, events) {
   for (const event of events) {
     proc.stdout.write(`${JSON.stringify(event)}\n`);
   }
+  proc.stdout.once('finish', () => {
+    emitProcessExit(proc, 0, null);
+  });
   proc.stdout.end();
-  process.nextTick(() => proc._emitter.emit('exit', 0, null));
 }
 
 async function collect(iterable) {
@@ -263,7 +274,7 @@ describe('OpenCodeAgentService', () => {
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
     const promise = collect(service.invoke('Test'));
     proc.stdout.end();
-    process.nextTick(() => proc._emitter.emit('exit', 1, null));
+    emitProcessExit(proc, 1, null);
     const messages = await promise;
 
     const types = messages.map((m) => m.type);

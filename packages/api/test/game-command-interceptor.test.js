@@ -170,7 +170,7 @@ describe('buildGameSeats', () => {
   it('builds 7-player seats with human P1 for player mode', () => {
     const seats = buildGameSeats({
       humanRole: 'player',
-      userId: 'owner',
+      userId: 'you',
       catIds,
       playerCount: 7,
     });
@@ -178,7 +178,7 @@ describe('buildGameSeats', () => {
     // P1 is human
     assert.equal(seats[0].seatId, 'P1');
     assert.equal(seats[0].actorType, 'human');
-    assert.equal(seats[0].actorId, 'owner');
+    assert.equal(seats[0].actorId, 'you');
     // P2-P7 are cats
     for (let i = 1; i < 7; i++) {
       assert.equal(seats[i].seatId, `P${i + 1}`);
@@ -194,7 +194,7 @@ describe('buildGameSeats', () => {
   it('builds seats with no human seat for god-view mode', () => {
     const seats = buildGameSeats({
       humanRole: 'god-view',
-      userId: 'owner',
+      userId: 'you',
       catIds,
       playerCount: 7,
     });
@@ -210,7 +210,7 @@ describe('buildGameSeats', () => {
       () =>
         buildGameSeats({
           humanRole: 'god-view',
-          userId: 'owner',
+          userId: 'you',
           catIds: ['opus', 'sonnet'],
           playerCount: 7,
         }),

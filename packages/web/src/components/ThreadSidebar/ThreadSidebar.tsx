@@ -393,8 +393,8 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
 
   return (
     <>
-      <aside className={`${className ?? 'w-60'} border-r border-owner-light bg-white flex flex-col h-full`}>
-        <div className="p-3 border-b border-owner-light flex items-center justify-between">
+      <aside className={`${className ?? 'w-60'} border-r border-cocreator-light bg-white flex flex-col h-full`}>
+        <div className="p-3 border-b border-cocreator-light flex items-center justify-between">
           <span className="text-sm font-semibold text-cafe-black">对话</span>
           <div className="flex items-center gap-1.5">
             <button
@@ -422,14 +422,14 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               type="button"
               onClick={() => setShowPicker(true)}
               disabled={isCreating}
-              className="text-xs px-2 py-1 rounded-lg bg-owner-primary text-white hover:bg-owner-dark disabled:opacity-40 transition-colors"
+              className="text-xs px-2 py-1 rounded-lg bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40 transition-colors"
             >
               {isCreating ? '...' : '+ 新对话'}
             </button>
           </div>
         </div>
 
-        <div className="px-3 py-2 border-b border-owner-light">
+        <div className="px-3 py-2 border-b border-cocreator-light">
           <button
             type="button"
             onClick={() => {
@@ -466,19 +466,19 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
           </div>
         )}
 
-        <div className="px-3 py-2 border-b border-owner-light">
+        <div className="px-3 py-2 border-b border-cocreator-light">
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索对话、项目或 ID..."
-            className="w-full rounded-lg border border-owner-light px-2.5 py-1.5 text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-owner-primary"
+            className="w-full rounded-lg border border-cocreator-light px-2.5 py-1.5 text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-cocreator-primary"
           />
           {unreadIds.size > 0 && (
             <button
               type="button"
               onClick={handleMarkAllRead}
               disabled={isMarkingAllRead}
-              className="mt-1.5 text-[10px] text-gray-400 hover:text-owner-primary disabled:opacity-40 transition-colors"
+              className="mt-1.5 text-[10px] text-gray-400 hover:text-cocreator-primary disabled:opacity-40 transition-colors"
               data-testid="mark-all-read-btn"
             >
               {isMarkingAllRead ? '清理中...' : '全部已读'}
@@ -508,7 +508,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               <button
                 type="button"
                 onClick={expandAll}
-                className="text-[10px] text-gray-400 hover:text-owner-primary transition-colors"
+                className="text-[10px] text-gray-400 hover:text-cocreator-primary transition-colors"
                 data-testid="expand-all-btn"
               >
                 全部展开
@@ -517,7 +517,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               <button
                 type="button"
                 onClick={collapseAll}
-                className="text-[10px] text-gray-400 hover:text-owner-primary transition-colors"
+                className="text-[10px] text-gray-400 hover:text-cocreator-primary transition-colors"
                 data-testid="collapse-all-btn"
               >
                 全部折叠
@@ -639,7 +639,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
         </div>
 
         {/* F095 Phase D: Trash bin section */}
-        <div className="border-t border-owner-light">
+        <div className="border-t border-cocreator-light">
           <button
             type="button"
             onClick={handleToggleTrash}
@@ -675,7 +675,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
                   <button
                     type="button"
                     onClick={() => handleRestore(t.id)}
-                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-owner-primary hover:text-owner-dark transition-all shrink-0"
+                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-cocreator-primary hover:text-cocreator-dark transition-all shrink-0"
                     data-testid={`restore-btn-${t.id}`}
                   >
                     恢复

@@ -154,7 +154,7 @@ describe('ConnectorGateway Bootstrap', () => {
     await handle.stop();
   });
 
-  it('uses ownerUserId from config for thread creation instead of deps.defaultUserId', async () => {
+  it('uses coCreatorUserId from config for thread creation instead of deps.defaultUserId', async () => {
     const createdThreads = [];
     const deps = {
       ...baseDeps,
@@ -172,7 +172,7 @@ describe('ConnectorGateway Bootstrap', () => {
       feishuAppId: 'test-app-id',
       feishuAppSecret: 'test-app-secret',
       feishuVerificationToken: 'test-token',
-      ownerUserId: 'owner-real-id',
+      coCreatorUserId: 'you-real-id',
     };
     const handle = await startConnectorGateway(config, deps);
     assert.ok(handle);
@@ -198,8 +198,8 @@ describe('ConnectorGateway Bootstrap', () => {
     assert.equal(createdThreads.length, 1);
     assert.equal(
       createdThreads[0].createdBy,
-      'owner-real-id',
-      'thread should be created with ownerUserId, not fallback',
+      'you-real-id',
+      'thread should be created with coCreatorUserId, not fallback',
     );
     await handle.stop();
   });
@@ -212,7 +212,7 @@ describe('ConnectorGateway Bootstrap', () => {
     try {
       process.env.DEFAULT_OWNER_USER_ID = 'env-owner-123';
       const config = loadConnectorGatewayConfig();
-      assert.equal(config.ownerUserId, 'env-owner-123');
+      assert.equal(config.coCreatorUserId, 'env-owner-123');
     } finally {
       if (originalEnv === undefined) {
         delete process.env.DEFAULT_OWNER_USER_ID;

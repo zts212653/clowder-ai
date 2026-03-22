@@ -115,7 +115,7 @@ export function SignalSourcesView() {
           <button
             type="button"
             onClick={() => void reloadSources()}
-            className="rounded-lg border border-owner-light px-3 py-2 text-sm text-owner-dark hover:bg-owner-bg"
+            className="rounded-lg border border-cocreator-light px-3 py-2 text-sm text-cocreator-dark hover:bg-cocreator-bg"
           >
             刷新
           </button>

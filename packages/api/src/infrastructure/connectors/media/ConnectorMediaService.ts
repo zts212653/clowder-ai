@@ -7,6 +7,8 @@ export interface MediaAttachment {
   platformKey: string;
   fileName?: string;
   duration?: number;
+  /** Feishu requires the original message_id to download message resources. */
+  messageId?: string;
 }
 
 export interface DownloadedMedia {
@@ -18,7 +20,7 @@ export interface DownloadedMedia {
 
 export interface ConnectorMediaServiceOptions {
   mediaDir: string;
-  feishuDownloadFn?: (key: string, type: string) => Promise<Buffer>;
+  feishuDownloadFn?: (key: string, type: string, messageId?: string) => Promise<Buffer>;
   telegramDownloadFn?: (fileId: string) => Promise<Buffer>;
 }
 
@@ -29,16 +31,30 @@ const TYPE_TO_EXT: Record<string, string> = {
 };
 
 export class ConnectorMediaService {
-  constructor(private readonly opts: ConnectorMediaServiceOptions) {}
+  private feishuDl: ConnectorMediaServiceOptions['feishuDownloadFn'];
+  private telegramDl: ConnectorMediaServiceOptions['telegramDownloadFn'];
+
+  constructor(private readonly opts: ConnectorMediaServiceOptions) {
+    this.feishuDl = opts.feishuDownloadFn;
+    this.telegramDl = opts.telegramDownloadFn;
+  }
+
+  setFeishuDownloadFn(fn: (key: string, type: string, messageId?: string) => Promise<Buffer>): void {
+    this.feishuDl = fn;
+  }
+
+  setTelegramDownloadFn(fn: (fileId: string) => Promise<Buffer>): void {
+    this.telegramDl = fn;
+  }
 
   async download(connectorId: string, attachment: MediaAttachment): Promise<DownloadedMedia> {
     await mkdir(this.opts.mediaDir, { recursive: true });
 
     let buffer: Buffer;
-    if (connectorId === 'feishu' && this.opts.feishuDownloadFn) {
-      buffer = await this.opts.feishuDownloadFn(attachment.platformKey, attachment.type);
-    } else if (connectorId === 'telegram' && this.opts.telegramDownloadFn) {
-      buffer = await this.opts.telegramDownloadFn(attachment.platformKey);
+    if (connectorId === 'feishu' && this.feishuDl) {
+      buffer = await this.feishuDl(attachment.platformKey, attachment.type, attachment.messageId);
+    } else if (connectorId === 'telegram' && this.telegramDl) {
+      buffer = await this.telegramDl(attachment.platformKey);
     } else {
       throw new Error(`No download function for connector: ${connectorId}`);
     }

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { GameAutoPlayer } from '../dist/domains/cats/services/game/GameAutoPlayer.js';
 
+const disableAiFactory = () => null;
+
 /** Minimal mock store */
 function createMockStore(runtime) {
   return {
@@ -60,7 +62,7 @@ describe('GameAutoPlayer lifecycle', () => {
     const runtime = createTestRuntime('paused');
     const store = createMockStore(runtime);
     const orchestrator = createMockOrchestrator();
-    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator });
+    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator, aiPlayerFactory: disableAiFactory });
 
     // startLoop runs async; give it a brief moment to attempt actions
     autoPlayer.startLoop('game-1');
@@ -76,7 +78,7 @@ describe('GameAutoPlayer lifecycle', () => {
     const runtime = createTestRuntime('finished');
     const store = createMockStore(runtime);
     const orchestrator = createMockOrchestrator();
-    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator });
+    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator, aiPlayerFactory: disableAiFactory });
 
     autoPlayer.startLoop('game-1');
     await new Promise((r) => setTimeout(r, 200));
@@ -113,7 +115,7 @@ describe('GameAutoPlayer lifecycle', () => {
       endGame: async () => {},
     };
     const orchestrator = createMockOrchestrator();
-    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator });
+    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator, aiPlayerFactory: disableAiFactory });
 
     autoPlayer.startLoop('game-1');
     await new Promise((r) => setTimeout(r, 2500));

@@ -29,6 +29,18 @@ const GIT_FETCH_INTERVAL_MS = 60_000;
 let lastFetchAttemptTime = 0;
 let lastFetchSucceeded = false;
 
+async function hasOriginMainRef(cwd: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--verify', 'origin/main^{commit}'], {
+      cwd,
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Run `git fetch origin main` at most once per minute (throttles both success and failure). */
 async function ensureFetched(cwd: string): Promise<boolean> {
   const now = Date.now();
@@ -42,8 +54,10 @@ async function ensureFetched(cwd: string): Promise<boolean> {
     lastFetchSucceeded = true;
     return true;
   } catch {
-    lastFetchSucceeded = false;
-    return false;
+    // If fetch flakes but we already have a local origin/main ref, keep using it.
+    const hasLocalOriginMain = await hasOriginMainRef(cwd);
+    lastFetchSucceeded = hasLocalOriginMain;
+    return hasLocalOriginMain;
   }
 }
 

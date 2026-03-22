@@ -230,9 +230,9 @@ export function SignalInboxView() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-owner-bg via-cafe-white to-cafe-white">
+    <div className="min-h-screen bg-gradient-to-b from-cocreator-bg via-cafe-white to-cafe-white">
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6">
-        <header className="rounded-2xl border border-owner-light bg-white p-4 shadow-sm">
+        <header className="rounded-2xl border border-cocreator-light bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-bold text-cafe-black">Signal Inbox</h1>
@@ -256,7 +256,7 @@ export function SignalInboxView() {
                 type="button"
                 onClick={() => handleStatusTab(key)}
                 className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                  filters.status === key ? 'bg-owner-primary text-white' : 'text-gray-600 hover:bg-gray-100'
+                  filters.status === key ? 'bg-cocreator-primary text-white' : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
                 {label}
@@ -299,7 +299,7 @@ export function SignalInboxView() {
             </select>
             <button
               type="submit"
-              className="rounded-lg bg-owner-primary px-3 py-2 text-sm font-semibold text-white hover:bg-owner-dark md:col-span-4"
+              className="rounded-lg bg-cocreator-primary px-3 py-2 text-sm font-semibold text-white hover:bg-cocreator-dark md:col-span-4"
             >
               搜索
             </button>

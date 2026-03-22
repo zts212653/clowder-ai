@@ -88,7 +88,7 @@ CAT_GEMINI_MODEL='gemini-old'
 cd "${envRoot}"
 reset_env_changes
 set_codex_api_key_mode "new-openai-key" "" ""
-set_gemini_api_key_mode "new-gemini-key" ""
+set_gemini_api_key_mode "new-gemini-key" "" ""
 for key in "\${ENV_DELETE_KEYS[@]}"; do delete_env_key "$key"; done
 for i in "\${!ENV_KEYS[@]}"; do write_env_key "\${ENV_KEYS[$i]}" "\${ENV_VALUES[$i]}"; done
 cat .env

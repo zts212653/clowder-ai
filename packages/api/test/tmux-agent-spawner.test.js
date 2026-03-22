@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, describe, it } from 'node:test';
+import { afterEach, before, describe, it } from 'node:test';
 import { spawnCliInTmux } from '../dist/domains/terminal/tmux-agent-spawner.js';
 import { TmuxGateway } from '../dist/domains/terminal/tmux-gateway.js';
 
@@ -11,7 +11,7 @@ describe('spawnCliInTmux', () => {
     gateway = new TmuxGateway();
   });
 
-  after(async () => {
+  afterEach(async () => {
     await gateway.destroyServer(WORKTREE);
   });
 
@@ -193,8 +193,8 @@ describe('spawnCliInTmux', () => {
     // Should have received the init event before timeout
     const initEvent = events.find((e) => e.type === 'init');
     assert.ok(initEvent, 'should have received the init event before idle timeout fired');
-    // killAgent's C-c + 3s grace + kill-pane adds overhead, especially when
-    // the tmux server has accumulated panes from previous tests. 15s is generous.
+    // killAgent's C-c + 3s grace + kill-pane adds overhead; we tear down the
+    // tmux server after each test to keep this bound stable across the suite.
     assert.ok(elapsed < 15000, `should converge via idleTimeout, took ${elapsed}ms`);
   });
 

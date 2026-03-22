@@ -10,10 +10,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 
 const { ClaudeAgentService, pickGitBashPathFromWhere, resolveDefaultClaudeMcpServerPath } = await import(
   '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
 );
+
+ensureFakeCliOnPath('claude');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -61,13 +64,21 @@ function createMockSpawnFn(proc) {
   return mock.fn(() => proc);
 }
 
+function emitProcessExit(proc, code, signal = null) {
+  process.nextTick(() => {
+    proc._emitter.emit('exit', code, signal);
+  });
+}
+
 /** Write NDJSON events to mock process stdout, then end with exit 0 */
 function emitClaudeEvents(proc, events) {
   for (const event of events) {
     proc.stdout.write(`${JSON.stringify(event)}\n`);
   }
+  proc.stdout.once('finish', () => {
+    emitProcessExit(proc, 0, null);
+  });
   proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
 }
 
 // --- Test cases ---
@@ -362,7 +373,7 @@ test('yields error on CLI non-zero exit', async () => {
 
   proc.stderr.write('Error: authentication failed\n');
   proc.stdout.end();
-  proc._emitter.emit('exit', 1, null);
+  emitProcessExit(proc, 1, null);
 
   const msgs = await promise;
   const errMsg = msgs.find((m) => m.type === 'error');
@@ -385,7 +396,7 @@ test('yields actionable rescue hint on invalid thinking signature resume failure
     'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block"}}\n',
   );
   proc.stdout.end();
-  proc._emitter.emit('exit', 1, null);
+  emitProcessExit(proc, 1, null);
 
   const msgs = await promise;
   const errMsg = msgs.find((m) => m.type === 'error');
@@ -413,7 +424,7 @@ test('does not duplicate error when result/error is followed by non-zero exit', 
   );
   proc.stderr.write('rate limited\n');
   proc.stdout.end();
-  proc._emitter.emit('exit', 1, null);
+  emitProcessExit(proc, 1, null);
 
   const msgs = await promise;
   const errors = msgs.filter((m) => m.type === 'error');
@@ -431,7 +442,7 @@ test('includes exit signal in CLI error message when no exit code (stderr saniti
 
   proc.stderr.write('killed by supervisor\n');
   proc.stdout.end();
-  proc._emitter.emit('exit', null, 'SIGKILL');
+  emitProcessExit(proc, null, 'SIGKILL');
 
   const msgs = await promise;
   const errMsg = msgs.find((m) => m.type === 'error');
@@ -455,7 +466,7 @@ test('yields error on spawn ENOENT', async () => {
     err.code = 'ENOENT';
     proc._emitter.emit('error', err);
     proc.stdout.end();
-    proc._emitter.emit('exit', null, null);
+    emitProcessExit(proc, null, null);
   });
 
   const msgs = await promise;

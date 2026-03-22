@@ -6,6 +6,9 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mock } from 'node:test';
+import { ensureFakeCliOnPath } from './fake-cli-path.js';
+
+ensureFakeCliOnPath('opencode');
 
 export function createMockProcess(exitCode = 0) {
   const stdout = new PassThrough();
@@ -35,12 +38,20 @@ export function createMockProcess(exitCode = 0) {
   return proc;
 }
 
+function emitProcessExit(proc, code, signal = null) {
+  process.nextTick(() => {
+    proc._emitter.emit('exit', code, signal);
+  });
+}
+
 export function emitOpenCodeEvents(proc, events) {
   for (const event of events) {
     proc.stdout.write(`${JSON.stringify(event)}\n`);
   }
+  proc.stdout.once('finish', () => {
+    emitProcessExit(proc, 0, null);
+  });
   proc.stdout.end();
-  process.nextTick(() => proc._emitter.emit('exit', 0, null));
 }
 
 export async function collect(iterable) {

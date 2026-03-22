@@ -15,8 +15,11 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { beforeEach, describe, mock, test } from 'node:test';
+import { after, before, beforeEach, describe, mock, test } from 'node:test';
 import Fastify from 'fastify';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
 
@@ -137,6 +140,29 @@ function createMockSocketManager() {
   };
 }
 
+function installFakeCliPath() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-wiring-cli-'));
+  const writeExecutable = (name, content) => {
+    const file = join(dir, name);
+    writeFileSync(file, content);
+    chmodSync(file, 0o755);
+  };
+
+  if (process.platform === 'win32') {
+    const content = '@echo off\r\nexit /b 0\r\n';
+    writeExecutable('claude.cmd', content);
+    writeExecutable('codex.cmd', content);
+    writeExecutable('gemini.cmd', content);
+  } else {
+    const content = '#!/bin/sh\nexit 0\n';
+    writeExecutable('claude', content);
+    writeExecutable('codex', content);
+    writeExecutable('gemini', content);
+  }
+
+  return dir;
+}
+
 // ===================================================================
 // Test Suite: AgentRouter + Services wiring
 // ===================================================================
@@ -144,10 +170,22 @@ function createMockSocketManager() {
 describe('AgentRouter + Services wiring', () => {
   let registry;
   let messageStore;
+  let fakeCliDir;
+  const originalPath = process.env.PATH ?? '';
+
+  before(() => {
+    fakeCliDir = installFakeCliPath();
+    process.env.PATH = `${fakeCliDir}${process.platform === 'win32' ? ';' : ':'}${originalPath}`;
+  });
 
   beforeEach(() => {
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
+  });
+
+  after(() => {
+    process.env.PATH = originalPath;
+    if (fakeCliDir) rmSync(fakeCliDir, { recursive: true, force: true });
   });
 
   // --- callbackEnv 传递验证 ---

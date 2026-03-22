@@ -11,9 +11,11 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
 
@@ -80,7 +82,43 @@ function createMockSpawnFn(events) {
   };
 }
 
+function installFakeCliPath() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-thread-cli-'));
+  const writeExecutable = (name, content) => {
+    const file = join(dir, name);
+    writeFileSync(file, content);
+    chmodSync(file, 0o755);
+  };
+
+  if (process.platform === 'win32') {
+    const content = '@echo off\r\nexit /b 0\r\n';
+    writeExecutable('claude.cmd', content);
+    writeExecutable('codex.cmd', content);
+    writeExecutable('gemini.cmd', content);
+  } else {
+    const content = '#!/bin/sh\nexit 0\n';
+    writeExecutable('claude', content);
+    writeExecutable('codex', content);
+    writeExecutable('gemini', content);
+  }
+
+  return dir;
+}
+
 // --- Tests ---
+
+let fakeCliDir;
+const originalPath = process.env.PATH ?? '';
+
+before(() => {
+  fakeCliDir = installFakeCliPath();
+  process.env.PATH = `${fakeCliDir}${process.platform === 'win32' ? ';' : ':'}${originalPath}`;
+});
+
+after(() => {
+  process.env.PATH = originalPath;
+  if (fakeCliDir) rmSync(fakeCliDir, { recursive: true, force: true });
+});
 
 describe('Thread isolation: messages stay in their thread', () => {
   let app;

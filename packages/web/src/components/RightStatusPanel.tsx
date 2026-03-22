@@ -251,7 +251,7 @@ export function RightStatusPanel({
 
   return (
     <aside
-      className="hidden lg:flex border-l border-owner-light bg-white/90 px-4 py-4 flex-col gap-4 overflow-y-auto"
+      className="hidden lg:flex border-l border-cocreator-light bg-white/90 px-4 py-4 flex-col gap-4 overflow-y-auto"
       style={{ width: width ?? 288, flexShrink: 0 }}
     >
       <div>

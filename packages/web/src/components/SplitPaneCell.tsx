@@ -24,7 +24,7 @@ function MiniMessage({ msg }: { msg: ChatMessage }) {
       {!isUser && msg.catId && <CatAvatar catId={msg.catId} size={16} />}
       <p
         className={`text-xs leading-relaxed truncate max-w-[90%] px-2 py-1 rounded-lg ${
-          isUser ? 'bg-owner-bg text-cafe-black' : 'bg-gray-50 text-gray-700'
+          isUser ? 'bg-cocreator-bg text-cafe-black' : 'bg-gray-50 text-gray-700'
         } ${msg.isStreaming ? 'opacity-70' : ''}`}
       >
         {msg.content.slice(0, 120)}
@@ -58,7 +58,7 @@ export function SplitPaneCell({
   return (
     <div
       className={`flex flex-col rounded-lg border-2 transition-colors cursor-pointer overflow-hidden ${
-        isSelected ? 'border-owner-primary shadow-sm' : 'border-gray-200 hover:border-gray-300'
+        isSelected ? 'border-cocreator-primary shadow-sm' : 'border-gray-200 hover:border-gray-300'
       }`}
       onClick={() => onSelect(threadId)}
       onDoubleClick={() => onDoubleClick(threadId)}

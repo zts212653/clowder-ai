@@ -7,8 +7,11 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 
 const { GeminiAgentService } = await import('../dist/domains/cats/services/agents/providers/GeminiAgentService.js');
+
+ensureFakeCliOnPath('gemini');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -56,13 +59,21 @@ function createMockSpawnFn(proc) {
   return mock.fn(() => proc);
 }
 
+function emitProcessExit(proc, code, signal = null) {
+  process.nextTick(() => {
+    proc._emitter.emit('exit', code, signal);
+  });
+}
+
 /** Write NDJSON events to mock process stdout, then end with exit 0 */
 function emitGeminiEvents(proc, events) {
   for (const event of events) {
     proc.stdout.write(`${JSON.stringify(event)}\n`);
   }
+  proc.stdout.once('finish', () => {
+    emitProcessExit(proc, 0, null);
+  });
   proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
 }
 
 // ===== gemini-cli adapter tests =====
@@ -225,7 +236,7 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
 
     proc.stderr.write('Error: authentication failed\n');
     proc.stdout.end();
-    proc._emitter.emit('exit', 1, null);
+    emitProcessExit(proc, 1, null);
 
     const msgs = await promise;
     const errMsg = msgs.find((m) => m.type === 'error');
@@ -249,7 +260,7 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
     proc.stdout.write(`${JSON.stringify({ type: 'init', session_id: 's1', model: 'auto' })}\n`);
     proc.stdout.write(`${JSON.stringify({ type: 'result', status: 'error' })}\n`);
     proc.stdout.end();
-    proc._emitter.emit('exit', 2, null);
+    emitProcessExit(proc, 2, null);
 
     const msgs = await promise;
     const errMsgs = msgs.filter((m) => m.type === 'error');
@@ -270,7 +281,7 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
       err.code = 'ENOENT';
       proc._emitter.emit('error', err);
       proc.stdout.end();
-      proc._emitter.emit('exit', null, null);
+      emitProcessExit(proc, null, null);
     });
 
     const msgs = await promise;
@@ -360,7 +371,7 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
       })}\n`,
     );
     proc.stdout.end();
-    proc._emitter.emit('exit', 1, null);
+    emitProcessExit(proc, 1, null);
 
     const msgs = await promise;
     const errMsgs = msgs.filter((m) => m.type === 'error');
@@ -591,7 +602,11 @@ describe('GeminiAgentService (adapter selection)', () => {
 
     // Verify gemini CLI was spawned (not antigravity)
     assert.equal(spawnFn.mock.callCount(), 1);
-    assert.equal(spawnFn.mock.calls[0].arguments[0], 'gemini');
+    const spawnedCommand = spawnFn.mock.calls[0].arguments[0];
+    assert.ok(
+      spawnedCommand === 'gemini' || spawnedCommand.endsWith('/gemini'),
+      `Expected gemini command, got: ${spawnedCommand}`,
+    );
   });
 
   test('selects antigravity via constructor option', async () => {

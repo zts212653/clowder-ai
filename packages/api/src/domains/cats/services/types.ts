@@ -135,7 +135,7 @@ export interface AgentMessage {
   replyTo?: string;
   /** F121: Hydrated preview of the replied-to message */
   replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
-  /** F061: Whether this message mentions the owner (@user/@铲屎官/configured patterns) */
+  /** F061: Whether this message mentions the co-creator (@user/@铲屎官/configured patterns) */
   mentionsUser?: boolean;
   /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations */
   invocationId?: string;

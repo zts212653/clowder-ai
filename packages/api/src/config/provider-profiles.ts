@@ -53,13 +53,13 @@ const BUILTIN_ACCOUNT_SPECS = [
     id: 'claude',
     displayName: 'Claude (OAuth)',
     client: 'anthropic',
-    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'],
+    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101', 'claude-sonnet-4-5-20250929'],
   },
   {
     id: 'codex',
     displayName: 'Codex (OAuth)',
     client: 'openai',
-    models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'],
+    models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark', 'codex'],
   },
   {
     id: 'gemini',
@@ -72,7 +72,7 @@ const BUILTIN_ACCOUNT_SPECS = [
     id: 'opencode',
     displayName: 'OpenCode (client-auth)',
     client: 'opencode',
-    models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
+    models: ['anthropic/claude-opus-4-6', 'anthropic/claude-sonnet-4-5'],
   },
 ] as const satisfies ReadonlyArray<{
   id: string;

@@ -381,7 +381,7 @@ describe('Game API Routes', () => {
       const res = await trackingApp.inject({
         method: 'POST',
         url: '/api/game/start',
-        headers: { 'x-cat-cafe-user': 'owner' },
+        headers: { 'x-cat-cafe-user': 'you' },
         payload: {
           gameType: 'werewolf',
           humanRole: 'player',
@@ -393,7 +393,7 @@ describe('Game API Routes', () => {
 
       assert.equal(res.statusCode, 200);
       assert.equal(trackingCalls.length, 1, 'should have called threadStore.create');
-      assert.equal(trackingCalls[0].userId, 'owner', 'userId should come from header, not hardcoded');
+      assert.equal(trackingCalls[0].userId, 'you', 'userId should come from header, not hardcoded');
 
       await trackingApp.close();
     });

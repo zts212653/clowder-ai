@@ -9,7 +9,7 @@ import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import {
   catHasRole,
-  getOwnerConfig,
+  getCoCreatorConfig,
   getReviewPolicy,
   getRoster,
   isCatAvailable,
@@ -378,12 +378,12 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   }
 
   // 铲屎官 reference (session-level, not per-message)
-  // F067: Use owner config for name + mention handles
+  // F067: Use co-creator config for name + mention handles
   // Note: "不冒充/不编造/身份契约" folded into GOVERNANCE_L0_DIGEST
-  const owner = getOwnerConfig();
-  const ownerName = owner.name;
-  const ownerHandles = owner.mentionPatterns.map((p) => `\`${p}\``).join(' / ');
-  lines.push(`${ownerName}（铲屎官/CVO）。重要决策由${ownerName}拍板。需要关注时行首写 ${ownerHandles}。`, '');
+  const coCreator = getCoCreatorConfig();
+  const ccName = coCreator.name;
+  const ccHandles = coCreator.mentionPatterns.map((p) => `\`${p}\``).join(' / ');
+  lines.push(`${ccName}（铲屎官/CVO）。重要决策由${ccName}拍板。需要关注时行首写 ${ccHandles}。`, '');
 
   // L0 Governance Digest — always-on principles from shared-rules.md (F086 post-completion fix)
   // Source of truth: cat-cafe-skills/refs/shared-rules.md

@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
-import { useOwnerConfig } from '@/hooks/useOwnerConfig';
+import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 
@@ -96,7 +96,7 @@ interface MessageNavigatorProps {
 
 export function MessageNavigator({ messages, scrollContainerRef }: MessageNavigatorProps) {
   const { getCatById } = useCatData();
-  const owner = useOwnerConfig();
+  const coCreator = useCoCreatorConfig();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [viewport, setViewport] = useState({ top: 0, height: 1 });
   const trackRef = useRef<HTMLDivElement>(null);
@@ -104,8 +104,8 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
   const resolveCat = useCallback((catId: string) => resolveCatById(getCatById, catId), [getCatById]);
 
   const getSenderName = useCallback(
-    (msg: ChatMessageData) => getSenderLabel(msg, resolveCat, owner.name),
-    [owner.name, resolveCat],
+    (msg: ChatMessageData) => getSenderLabel(msg, resolveCat, coCreator.name),
+    [coCreator.name, resolveCat],
   );
 
   // Filter to user + assistant only
@@ -192,7 +192,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
           const isAssistant = msg.type === 'assistant' || (msg.type === 'user' && !!msg.catId);
           const cat = isAssistant && msg.catId ? resolveCat(msg.catId) : undefined;
           const fallback = isAssistant && msg.catId ? resolveFallbackCatMeta(msg.catId) : undefined;
-          const className = isOwner ? 'bg-owner-primary' : cat || fallback ? '' : 'bg-gray-400';
+          const className = isOwner ? 'bg-cocreator-primary' : cat || fallback ? '' : 'bg-gray-400';
           const style = isOwner
             ? undefined
             : cat
@@ -219,7 +219,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
           <NavTooltip
             message={sampledItems[hoveredIdx].msg}
             topPercent={sampledItems.length <= 1 ? 50 : (hoveredIdx / (sampledItems.length - 1)) * 100}
-            ownerName={owner.name}
+            ownerName={coCreator.name}
           />
         )}
       </div>

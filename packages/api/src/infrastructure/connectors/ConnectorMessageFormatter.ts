@@ -10,6 +10,8 @@
  * F088 Multi-Platform Chat Gateway
  */
 
+export type MessageOrigin = 'callback' | 'agent' | 'system';
+
 export interface MessageEnvelope {
   /** Cat identity line, e.g. "🐱 布偶猫/宪宪" */
   readonly header: string;
@@ -19,6 +21,8 @@ export interface MessageEnvelope {
   readonly body: string;
   /** Deep link + timestamp, e.g. "📎 在前端查看 · 01:22" */
   readonly footer: string;
+  /** Where this message originated from — adapters can render differently */
+  readonly origin?: MessageOrigin | undefined;
 }
 
 export interface FormatInput {
@@ -30,6 +34,7 @@ export interface FormatInput {
   readonly body: string;
   readonly deepLinkUrl?: string | undefined;
   readonly timestamp: Date;
+  readonly origin?: MessageOrigin | undefined;
 }
 
 export class ConnectorMessageFormatter {
@@ -54,19 +59,25 @@ export class ConnectorMessageFormatter {
       footer = timeStr;
     }
 
-    return { header, subtitle, body: input.body, footer };
+    return { header, subtitle, body: input.body, footer, origin: input.origin };
   }
 
   /**
    * Format a minimal envelope with cat identity only (no thread metadata).
    * Phase E: ensures every message is a distinct card even without threadMeta.
    */
-  formatMinimal(input: { catDisplayName: string; catEmoji: string; body: string }): MessageEnvelope {
+  formatMinimal(input: {
+    catDisplayName: string;
+    catEmoji: string;
+    body: string;
+    origin?: MessageOrigin;
+  }): MessageEnvelope {
     return {
       header: `${input.catEmoji} ${input.catDisplayName}`,
       subtitle: '',
       body: input.body,
       footer: new Date().toISOString().slice(11, 16),
+      origin: input.origin,
     };
   }
 

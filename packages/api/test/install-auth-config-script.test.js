@@ -241,7 +241,7 @@ test('client-auth remove fails when the installer-managed account is still refer
           ],
           roster: {},
           reviewPolicy: {},
-          owner: { name: 'Co-worker', aliases: [], mentionPatterns: ['@co-worker'] },
+          coCreator: { name: 'Co-worker', aliases: [], mentionPatterns: ['@co-worker'] },
         },
         null,
         2,

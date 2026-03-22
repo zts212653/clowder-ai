@@ -7,6 +7,21 @@ import { test } from 'node:test';
 
 const { ProcessLivenessProbe } = await import('../dist/utils/ProcessLivenessProbe.js');
 
+async function waitForBusySilent(probe, { timeoutMs = 3_000, burnMs = 180, settleMs = 40 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const burnUntil = Date.now() + burnMs;
+    while (Date.now() < burnUntil) {
+      Math.random() * Math.random();
+    }
+    await new Promise((r) => setTimeout(r, settleMs));
+    if (probe.getState() === 'busy-silent') {
+      return true;
+    }
+  }
+  return false;
+}
+
 test('new probe starts in active state', () => {
   const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
   assert.equal(probe.getState(), 'active');
@@ -24,15 +39,9 @@ test('detects dead process (PID does not exist)', async () => {
 test('classifies as busy-silent when CPU grows but no output', async () => {
   const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
   probe.start();
-  // Burn CPU in intervals so ps samples see growth across separate readings
-  for (let i = 0; i < 5; i++) {
-    const burnUntil = Date.now() + 150;
-    while (Date.now() < burnUntil) {
-      Math.random() * Math.random();
-    }
-    await new Promise((r) => setTimeout(r, 50)); // let ps sample run
-  }
+  const reachedBusySilent = await waitForBusySilent(probe);
   const state = probe.getState();
+  assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${state}`);
   assert.equal(state, 'busy-silent');
   probe.stop();
 });
@@ -82,14 +91,8 @@ test('notifyActivity resets silence timer and clears warning state', async () =>
 test('shouldExtendTimeout returns true when busy-silent', async () => {
   const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
   probe.start();
-  // Burn CPU so probe classifies as busy-silent
-  for (let i = 0; i < 3; i++) {
-    const burnUntil = Date.now() + 150;
-    while (Date.now() < burnUntil) {
-      Math.random() * Math.random();
-    }
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  const reachedBusySilent = await waitForBusySilent(probe);
+  assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${probe.getState()}`);
   assert.equal(probe.shouldExtendTimeout(), true);
   probe.stop();
 });
