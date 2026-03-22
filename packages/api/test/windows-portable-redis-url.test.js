@@ -186,6 +186,11 @@ test('Windows startup preserves configured REDIS_URL with DB suffix after Redis 
   );
 });
 
+test('Windows Test-LocalRedisUrl treats IPv6 loopback [::1] as local', () => {
+  assert.match(helpersScript, /\[System\.Net\.IPAddress\]::TryParse\(\$uri\.Host, \[ref\]\$ipAddress\)/);
+  assert.match(helpersScript, /\[System\.Net\.IPAddress\]::IsLoopback\(\$ipAddress\)/);
+});
+
 test('Windows startup passes localhost REDIS_URL auth into redis-server auto-start and authenticated ping', () => {
   assert.match(helpersScript, /function Get-RedisServerAuthArgs/);
   assert.match(helpersScript, /\$utf8NoBom = New-Object System\.Text\.UTF8Encoding\(\$false\)/);
