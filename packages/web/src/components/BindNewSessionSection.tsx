@@ -82,7 +82,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound }: BindN
         <select
           value={selectedCat}
           onChange={(e) => setSelectedCat(e.target.value)}
-          className="w-full text-[11px] px-2 py-1 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-owner-primary"
+          className="w-full text-[11px] px-2 py-1 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
         >
           <option value="">选择猫猫...</option>
           {availableCats.map((cat) => (
@@ -100,7 +100,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound }: BindN
           }}
           placeholder="CLI Session ID"
           maxLength={500}
-          className="w-full text-[11px] font-mono px-2 py-1 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-owner-primary"
+          className="w-full text-[11px] font-mono px-2 py-1 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
         />
         <button
           type="button"

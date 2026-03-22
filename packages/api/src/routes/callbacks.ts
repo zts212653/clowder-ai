@@ -7,6 +7,7 @@ import type { CatId, RichBlock } from '@cat-cafe/shared';
 import { catRegistry, createCatId, normalizeRichBlock } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
@@ -82,6 +83,17 @@ export interface CallbackRoutesOptions {
   limbRegistry?: import('../domains/limb/LimbRegistry.js').LimbRegistry;
   /** F126 Phase C: Limb pairing store for remote device approval */
   limbPairingStore?: import('../domains/limb/LimbPairingStore.js').LimbPairingStore;
+  /** F088: Outbound delivery hook for connector-bound threads (late-bound after gateway bootstrap). */
+  outboundHook?: {
+    deliver(
+      threadId: string,
+      content: string,
+      catId?: string,
+      richBlocks?: RichBlock[],
+      threadMeta?: { threadShortId: string; threadTitle?: string; deepLinkUrl?: string },
+      origin?: 'callback' | 'agent' | 'system',
+    ): Promise<void>;
+  };
 }
 
 const postMessageSchema = callbackAuthSchema.extend({
@@ -506,6 +518,28 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           );
         }
       }
+    }
+
+    if (opts.outboundHook) {
+      const frontendBase = resolveFrontendBaseUrl(process.env);
+      const thread = await opts.threadStore?.get(effectiveThreadId);
+      const threadMeta = {
+        threadShortId: effectiveThreadId.slice(0, 15),
+        threadTitle: thread?.title ?? undefined,
+        deepLinkUrl: `${frontendBase}/threads/${effectiveThreadId}`,
+      };
+      opts.outboundHook
+        .deliver(
+          effectiveThreadId,
+          storedContent,
+          record.catId,
+          richBlocks.length > 0 ? richBlocks : undefined,
+          threadMeta,
+          'callback',
+        )
+        .catch((err: unknown) => {
+          app.log.error({ err, threadId: effectiveThreadId }, '[callbacks/post-message] Outbound delivery failed');
+        });
     }
 
     return {

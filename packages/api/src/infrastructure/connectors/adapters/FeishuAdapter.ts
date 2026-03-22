@@ -183,6 +183,38 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
           attachments: [{ type: 'audio', feishuKey: audioKey, ...(duration != null ? { duration } : {}) }],
         };
       }
+      case 'post': {
+        const locale =
+          (content as Record<string, unknown>).zh_cn ??
+          (content as Record<string, unknown>).en_us ??
+          (content as Record<string, unknown>).ja_jp;
+        if (!locale || typeof locale !== 'object') return null;
+        const loc = locale as { title?: string; content?: unknown[][] };
+        const textParts: string[] = [];
+        const attachments: FeishuAttachment[] = [];
+        if (loc.title) textParts.push(loc.title);
+        if (Array.isArray(loc.content)) {
+          for (const paragraph of loc.content) {
+            if (!Array.isArray(paragraph)) continue;
+            const paraTexts: string[] = [];
+            for (const node of paragraph) {
+              const n = node as Record<string, unknown>;
+              if (n.tag === 'text' || n.tag === 'a') {
+                if (typeof n.text === 'string') paraTexts.push(n.text);
+              } else if (n.tag === 'img' && typeof n.image_key === 'string') {
+                attachments.push({ type: 'image' as const, feishuKey: n.image_key as string });
+              }
+            }
+            if (paraTexts.length > 0) textParts.push(paraTexts.join(''));
+          }
+        }
+        const text = textParts.join('\n') || '[富文本]';
+        return {
+          ...base,
+          text,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        };
+      }
       default:
         return null;
     }
@@ -484,6 +516,10 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   }
 
   async sendFormattedReply(externalChatId: string, envelope: MessageEnvelope): Promise<void> {
+    const isCallback = envelope.origin === 'callback';
+    const headerTitle = isCallback ? `📨 ${envelope.header} · 传话` : envelope.header;
+    const headerTemplate = isCallback ? 'purple' : 'blue';
+
     const elements: Array<{ tag: string; content?: string }> = [];
     if (envelope.subtitle) {
       elements.push({ tag: 'markdown', content: `**${envelope.subtitle}**` });
@@ -495,8 +531,8 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     }
     const card = {
       header: {
-        title: { tag: 'plain_text' as const, content: envelope.header },
-        template: 'blue' as const,
+        title: { tag: 'plain_text' as const, content: headerTitle },
+        template: headerTemplate as 'blue' | 'purple',
       },
       elements,
     };

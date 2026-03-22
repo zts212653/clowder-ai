@@ -9,6 +9,8 @@ import { describe, it, mock } from 'node:test';
 
 import { GameAutoPlayer } from '../dist/domains/cats/services/game/GameAutoPlayer.js';
 
+const disableAiFactory = () => null;
+
 /** Build a minimal GameRuntime for testing */
 function buildRuntime(overrides = {}) {
   return {
@@ -86,6 +88,7 @@ describe('GameAutoPlayer', () => {
     const autoPlayer = new GameAutoPlayer({
       gameStore: mockStore,
       orchestrator: mockOrchestrator,
+      aiPlayerFactory: disableAiFactory,
     });
 
     // Run one tick manually via actForPhase (exposed via the constructor pattern)
@@ -127,6 +130,7 @@ describe('GameAutoPlayer', () => {
     const autoPlayer = new GameAutoPlayer({
       gameStore: mockStore,
       orchestrator: mockOrchestrator,
+      aiPlayerFactory: disableAiFactory,
     });
     autoPlayer.startLoop('game-test-1');
 
@@ -168,6 +172,7 @@ describe('GameAutoPlayer', () => {
     const autoPlayer = new GameAutoPlayer({
       gameStore: mockStore,
       orchestrator: mockOrchestrator,
+      aiPlayerFactory: disableAiFactory,
     });
     autoPlayer.startLoop('game-test-1');
 
@@ -193,6 +198,7 @@ describe('GameAutoPlayer', () => {
     const autoPlayer = new GameAutoPlayer({
       gameStore: mockStore,
       orchestrator: mockOrchestrator,
+      aiPlayerFactory: disableAiFactory,
     });
     autoPlayer.startLoop('game-test-1');
 
@@ -225,6 +231,7 @@ describe('GameAutoPlayer', () => {
     const autoPlayer = new GameAutoPlayer({
       gameStore: mockStore,
       orchestrator: mockOrchestrator,
+      aiPlayerFactory: disableAiFactory,
     });
     autoPlayer.startLoop('game-test-1');
 

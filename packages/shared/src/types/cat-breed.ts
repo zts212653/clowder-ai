@@ -194,18 +194,18 @@ export interface CatCafeConfigV1 {
 }
 
 /**
- * F067: Owner (铲屎官) configuration — configurable identity for @ mention routing.
+ * F067: Co-Creator (铲屎官) configuration — configurable identity for @ mention routing.
  */
-export interface OwnerConfig {
-  /** Primary display name (e.g. "Owner") */
+export interface CoCreatorConfig {
+  /** Primary display name (e.g. "You") */
   readonly name: string;
-  /** Alternative names cats may use (e.g. ["A.B.", "Owner"]) */
+  /** Alternative names cats may use (e.g. ["L.S.", "Lysander"]) */
   readonly aliases: readonly string[];
-  /** Line-start mention patterns for routing detection (e.g. ["@owner", "@owner-alias"]) */
+  /** Line-start mention patterns for routing detection (e.g. ["@co-creator", "@co-creator"]) */
   readonly mentionPatterns: readonly string[];
-  /** Optional owner avatar shown in Hub and chat surfaces. */
+  /** Optional co-creator avatar shown in Hub and chat surfaces. */
   readonly avatar?: string;
-  /** Optional owner palette for Hub/chat surfaces. */
+  /** Optional co-creator palette for Hub/chat surfaces. */
   readonly color?: CatColor;
 }
 
@@ -217,7 +217,7 @@ export interface CatCafeConfigV2 {
   readonly breeds: readonly CatBreed[];
   readonly roster: Roster;
   readonly reviewPolicy: ReviewPolicy;
-  readonly owner?: OwnerConfig;
+  readonly coCreator?: CoCreatorConfig;
 }
 
 /**

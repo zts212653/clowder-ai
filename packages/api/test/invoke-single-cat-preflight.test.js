@@ -21,6 +21,7 @@ import { after, before, describe, it } from 'node:test';
 let invokeSingleCat;
 const tempDirs = [];
 let originalCwd;
+let originalPreflightDisable;
 
 async function collect(iterable) {
   const msgs = [];
@@ -71,6 +72,8 @@ function addBareRemote(repoDir) {
 describe('invokeSingleCat shared-state preflight', () => {
   before(async () => {
     originalCwd = process.cwd();
+    originalPreflightDisable = process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT;
+    delete process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT;
     const auditDir = mkdtempSync(join(tmpdir(), 'cat-audit-'));
     tempDirs.push(auditDir);
     process.env.AUDIT_LOG_DIR = auditDir;
@@ -80,6 +83,11 @@ describe('invokeSingleCat shared-state preflight', () => {
 
   after(() => {
     process.chdir(originalCwd);
+    if (originalPreflightDisable === undefined) {
+      delete process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT;
+    } else {
+      process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT = originalPreflightDisable;
+    }
     for (const dir of tempDirs) {
       try {
         rmSync(dir, { recursive: true, force: true });

@@ -48,13 +48,13 @@ describe('computeWorkStats', () => {
       message: 'review: F070 code review feedback',
       coAuthors: '',
     },
-    { hash: '4', author: 'owner@local', date: '2026-03-08', message: 'docs: update readme', coAuthors: '' },
+    { hash: '4', author: 'you@local', date: '2026-03-08', message: 'docs: update readme', coAuthors: '' },
   ];
 
   const authorMap = {
     'noreply@anthropic.com': 'opus',
     'codex@openai.com': 'codex',
-    'owner@local': 'owner',
+    'you@local': 'owner',
   };
 
   it('counts total commits per cat', () => {

@@ -733,6 +733,20 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'evidence',
     sensitive: false,
   },
+  {
+    name: 'F102_API_BASE',
+    defaultValue: '(未设置 → 摘要调度器不启用)',
+    description: 'Phase G 摘要调度用的反代 API 地址（不是猫猫自己的 provider profile）',
+    category: 'evidence',
+    sensitive: false,
+  },
+  {
+    name: 'F102_API_KEY',
+    defaultValue: '(未设置)',
+    description: 'Phase G 摘要调度用的反代 API Key',
+    category: 'evidence',
+    sensitive: true,
+  },
 ];
 
 /** Mask credentials in a URL while preserving host/port/db for debugging. */

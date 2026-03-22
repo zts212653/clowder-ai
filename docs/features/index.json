@@ -777,7 +777,7 @@
     {
       "id": "F127",
       "name": "猫猫管理重构 — 账户配置与猫猫实例分离，支持动态创建猫 + 自定义别名 @ 路由",
-      "status": "design-approved | **Owner**: 金渐层 + 缅因猫 GPT-5.4",
+      "status": "in-progress (intake + fix done, AC 部分验收) | **Owner**: 金渐层 + Maine Coon | **Priority**: P1",
       "file": "F127-cat-instance-management.md"
     },
     {
@@ -801,9 +801,9 @@
     {
       "id": "F131",
       "name": "Workspace Navigator — 猫猫可编程导航 Workspace 面板",
-      "status": "in-progress | **Owner**: 金渐层 | **Priority**: P2",
+      "status": "done (pending AC-6 E2E 验收) | **Owner**: 金渐层 | **Priority**: P2",
       "file": "F131-workspace-navigator.md"
     }
   ],
-  "generated_at": "2026-03-21T12:49:11.410Z"
+  "generated_at": "2026-03-22T00:16:36.286Z"
 }

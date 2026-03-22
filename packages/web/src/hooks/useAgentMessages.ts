@@ -26,7 +26,7 @@ interface AgentMsg {
   origin?: 'stream' | 'callback';
   /** Backend stored-message ID (set for callback post-message, used for rich_block correlation) */
   messageId?: string;
-  /** F67: Whether this message @mentions the owner */
+  /** F67: Whether this message @mentions the co-creator */
   mentionsUser?: boolean;
   /** F52: Cross-thread origin metadata */
   extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };

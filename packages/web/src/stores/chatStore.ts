@@ -218,7 +218,7 @@ function patchMessageInList(messages: ChatMessage[], id: string, patch: ChatMess
   return changed ? nextMessages : messages;
 }
 
-/** F067 Phase 2: Fire macOS notification when a cat @mentions the owner */
+/** F067 Phase 2: Fire macOS notification when a cat @mentions the co-creator */
 function fireOwnerMentionNotification(msg: ChatMessage) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') {
@@ -231,7 +231,7 @@ function fireOwnerMentionNotification(msg: ChatMessage) {
   new Notification(`${catName} @ 了你`, {
     body: preview,
     icon: catConfig?.avatar ?? '/favicon.ico',
-    tag: `owner-mention-${msg.id}`,
+    tag: `cocreator-mention-${msg.id}`,
   });
 }
 
@@ -1028,7 +1028,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
       if (existing.messages.some((m) => m.id === msg.id)) return state;
 
-      // F067 Phase 2: Fire macOS notification for @owner mention
+      // F067 Phase 2: Fire macOS notification for @co-creator mention
       if (msg.mentionsUser) fireOwnerMentionNotification(msg);
 
       return {

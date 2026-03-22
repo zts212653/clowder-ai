@@ -57,7 +57,7 @@ export function parseDirection(message: MessageLike, getMentionData: () => Menti
   for (let match = re.exec(message.content); match !== null; match = re.exec(message.content)) {
     const alias = match[1].toLowerCase();
     const catId = toCat[alias];
-    if (catId && catId !== '__owner__') found.add(catId);
+    if (catId && catId !== '__co-creator__') found.add(catId);
   }
 
   if (found.size > 0) {

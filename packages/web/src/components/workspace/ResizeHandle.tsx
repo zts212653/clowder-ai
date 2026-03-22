@@ -53,16 +53,16 @@ export function ResizeHandle({ direction, onResize, onDoubleClick }: ResizeHandl
       onDoubleClick={onDoubleClick}
       className={`flex-shrink-0 group relative ${
         isH
-          ? 'w-1 cursor-col-resize hover:bg-owner-primary/20 active:bg-owner-primary/30'
-          : 'h-1 cursor-row-resize hover:bg-owner-primary/20 active:bg-owner-primary/30'
-      } ${dragging ? 'bg-owner-primary/30' : ''} transition-colors`}
+          ? 'w-1 cursor-col-resize hover:bg-cocreator-primary/20 active:bg-cocreator-primary/30'
+          : 'h-1 cursor-row-resize hover:bg-cocreator-primary/20 active:bg-cocreator-primary/30'
+      } ${dragging ? 'bg-cocreator-primary/30' : ''} transition-colors`}
     >
       <div
         className={`absolute ${
           isH
             ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full'
             : 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-0.5 w-8 rounded-full'
-        } bg-owner-dark/20 group-hover:bg-owner-primary/50 transition-colors ${dragging ? 'bg-owner-primary/50' : ''}`}
+        } bg-cocreator-dark/20 group-hover:bg-cocreator-primary/50 transition-colors ${dragging ? 'bg-cocreator-primary/50' : ''}`}
       />
     </div>
   );

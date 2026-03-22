@@ -17,11 +17,11 @@ import { CatOverviewTab, type ConfigData, SystemTab } from './config-viewer-tabs
 import { HubCapabilityTab } from './HubCapabilityTab';
 import { HubCatEditor } from './HubCatEditor';
 import { HubClaudeRescueSection } from './HubClaudeRescueSection';
+import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { HubCommandsTab } from './HubCommandsTab';
 import { HubEnvFilesTab } from './HubEnvFilesTab';
 import { HubGovernanceTab } from './HubGovernanceTab';
 import { HubLeaderboardTab } from './HubLeaderboardTab';
-import { HubOwnerEditor } from './HubOwnerEditor';
 import { HubProviderProfilesTab } from './HubProviderProfilesTab';
 import { HubRoutingPolicyTab } from './HubRoutingPolicyTab';
 import { PushSettingsPanel } from './PushSettingsPanel';
@@ -46,7 +46,7 @@ export function CatCafeHub() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [capTabEverOpened, setCapTabEverOpened] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [ownerEditorOpen, setOwnerEditorOpen] = useState(false);
+  const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
   const [editingCat, setEditingCat] = useState<(typeof cats)[number] | null>(null);
   const [createDraft, setCreateDraft] = useState<Parameters<typeof HubCatEditor>[0]['draft']>(null);
   const [togglingCatId, setTogglingCatId] = useState<string | null>(null);
@@ -95,8 +95,8 @@ export function CatCafeHub() {
     setEditorOpen(true);
   }, []);
 
-  const openOwnerEditor = useCallback(() => {
-    setOwnerEditorOpen(true);
+  const openCoCreatorEditor = useCallback(() => {
+    setCoCreatorEditorOpen(true);
   }, []);
 
   const closeEditor = useCallback(() => {
@@ -105,8 +105,8 @@ export function CatCafeHub() {
     setCreateDraft(null);
   }, []);
 
-  const closeOwnerEditor = useCallback(() => {
-    setOwnerEditorOpen(false);
+  const closeCoCreatorEditor = useCallback(() => {
+    setCoCreatorEditorOpen(false);
   }, []);
 
   useEffect(() => {
@@ -223,7 +223,7 @@ export function CatCafeHub() {
                   config={config}
                   cats={cats}
                   onAddMember={openAddMember}
-                  onEditOwner={openOwnerEditor}
+                  onEditCoCreator={openCoCreatorEditor}
                   onEditMember={openEditMember}
                   onToggleAvailability={handleToggleAvailability}
                   togglingCatId={togglingCatId}
@@ -256,10 +256,10 @@ export function CatCafeHub() {
           onClose={closeEditor}
           onSaved={handleEditorSaved}
         />
-        <HubOwnerEditor
-          open={ownerEditorOpen}
-          owner={config?.owner}
-          onClose={closeOwnerEditor}
+        <HubCoCreatorEditor
+          open={coCreatorEditorOpen}
+          coCreator={config?.coCreator}
+          onClose={closeCoCreatorEditor}
           onSaved={handleEditorSaved}
         />
       </div>

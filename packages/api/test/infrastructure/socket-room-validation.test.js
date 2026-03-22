@@ -23,7 +23,7 @@ describe('socket room name validation', () => {
   });
 
   it('allows user rooms', () => {
-    assert.ok(ROOM_PATTERN.test('user:owner'));
+    assert.ok(ROOM_PATTERN.test('user:you'));
     assert.ok(ROOM_PATTERN.test('user:anonymous'));
   });
 

@@ -133,6 +133,7 @@ function createMockThreadStore(
         })
         .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
     },
+    consumeMentionRoutingFeedback: () => null,
     // F032 P1-2: Update participant activity on message
     updateParticipantActivity: (threadId, catId) => {
       if (!participants[threadId]) participants[threadId] = [];
@@ -175,6 +176,9 @@ function createDebugThinkingThreadStore() {
     listByProject: () => [],
     addParticipants: () => {},
     getParticipants: () => [],
+    getParticipantsWithActivity: () => [],
+    consumeMentionRoutingFeedback: () => null,
+    updateParticipantActivity: () => {},
     updateLastActive: () => {},
     delete: () => true,
   };
@@ -274,7 +278,7 @@ function createAvailabilityConfigProject(availabilityOverrides = {}) {
           preferLead: true,
           excludeUnavailable: true,
         },
-        owner: {
+        coCreator: {
           name: 'Co-worker',
           aliases: ['共创伙伴'],
           mentionPatterns: ['@co-worker', '@owner'],

@@ -32,11 +32,11 @@
   --color-dare-dark: #8b6f47;
   --color-dare-bg: #fbf5ec;
 
-  /* Owner (Shit Shoveler) - Coffee/Latte */
-  --color-owner-primary: #e29578;
-  --color-owner-light: #ffddd2;
-  --color-owner-dark: #815b5b;
-  --color-owner-bg: #fff5f2;
+  /* Co-Creator (铲屎官) - Coffee/Latte */
+  --color-cocreator-primary: #e29578;
+  --color-cocreator-light: #ffddd2;
+  --color-cocreator-dark: #815b5b;
+  --color-cocreator-bg: #fff5f2;
 
   /* UI Tokens */
   --bg-app: var(--color-base-white);

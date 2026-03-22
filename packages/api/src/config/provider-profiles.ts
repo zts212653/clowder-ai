@@ -72,7 +72,7 @@ const BUILTIN_ACCOUNT_SPECS = [
     id: 'opencode',
     displayName: 'OpenCode (client-auth)',
     client: 'opencode',
-    models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
+    models: ['anthropic/claude-opus-4-6', 'anthropic/claude-sonnet-4-5'],
   },
 ] as const satisfies ReadonlyArray<{
   id: string;

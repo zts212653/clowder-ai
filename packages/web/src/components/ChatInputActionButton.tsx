@@ -180,7 +180,7 @@ export function ChatInputActionButton({
         <button
           onClick={onSend}
           disabled={isSendDisabled}
-          className="p-3 rounded-xl bg-owner-primary text-white hover:bg-owner-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="p-3 rounded-xl bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           title="发送消息"
           aria-label="Send message"
         >
@@ -190,7 +190,7 @@ export function ChatInputActionButton({
         <button
           onClick={voice.startRecording}
           disabled={disabled}
-          className="p-3 rounded-xl text-gray-400 hover:text-owner-primary hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="p-3 rounded-xl text-gray-400 hover:text-cocreator-primary hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           aria-label="Start voice input (⌥V)"
           title="语音输入 (⌥V)"
         >

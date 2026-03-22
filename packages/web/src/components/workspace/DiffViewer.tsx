@@ -237,7 +237,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
             onClick={() => setMode('unified')}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
               mode === 'unified'
-                ? 'bg-owner-primary/80 text-white'
+                ? 'bg-cocreator-primary/80 text-white'
                 : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
             }`}
           >
@@ -248,7 +248,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
             onClick={() => setMode('split')}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
               mode === 'split'
-                ? 'bg-owner-primary/80 text-white'
+                ? 'bg-cocreator-primary/80 text-white'
                 : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
             }`}
           >

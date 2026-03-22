@@ -45,7 +45,7 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
       <button
         type="button"
         onClick={() => setAdding(true)}
-        className="w-full text-left px-3 py-1.5 text-[10px] text-owner-dark/60 hover:text-owner-primary hover:bg-owner-bg/50 transition-colors"
+        className="w-full text-left px-3 py-1.5 text-[10px] text-cocreator-dark/60 hover:text-cocreator-primary hover:bg-cocreator-bg/50 transition-colors"
       >
         + Link external folder...
       </button>
@@ -53,21 +53,21 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
   }
 
   return (
-    <div className="px-3 py-2 border-t border-owner-light/40 space-y-1.5">
+    <div className="px-3 py-2 border-t border-cocreator-light/40 space-y-1.5">
       <div className="text-[10px] font-medium text-cafe-black">Link External Folder</div>
       <input
         type="text"
         placeholder="Name (e.g. studio-flow)"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="w-full text-[10px] border border-owner-light rounded px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-owner-primary"
+        className="w-full text-[10px] border border-cocreator-light rounded px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
       />
       <input
         type="text"
         placeholder="Absolute path (e.g. /home/user/projects/studio-flow)"
         value={path}
         onChange={(e) => setPath(e.target.value)}
-        className="w-full text-[10px] border border-owner-light rounded px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-owner-primary"
+        className="w-full text-[10px] border border-cocreator-light rounded px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
       />
       {error && <div className="text-[10px] text-red-500">{error}</div>}
       <div className="flex gap-1.5">
@@ -75,7 +75,7 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
           type="button"
           onClick={handleAdd}
           disabled={submitting || !name.trim() || !path.trim()}
-          className="px-2 py-0.5 rounded text-[10px] font-medium bg-owner-primary text-white hover:bg-owner-primary/80 disabled:opacity-50 transition-colors"
+          className="px-2 py-0.5 rounded text-[10px] font-medium bg-cocreator-primary text-white hover:bg-cocreator-primary/80 disabled:opacity-50 transition-colors"
         >
           {submitting ? 'Adding...' : 'Add'}
         </button>
@@ -85,7 +85,7 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
             setAdding(false);
             setError(null);
           }}
-          className="px-2 py-0.5 rounded text-[10px] font-medium text-owner-dark/60 hover:text-cafe-black transition-colors"
+          className="px-2 py-0.5 rounded text-[10px] font-medium text-cocreator-dark/60 hover:text-cafe-black transition-colors"
         >
           Cancel
         </button>

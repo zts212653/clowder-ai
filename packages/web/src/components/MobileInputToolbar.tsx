@@ -36,7 +36,7 @@ export function MobileInputToolbar({
           onClose();
         }}
         disabled={disabled || sendDisabled || maxImages}
-        className={`${btnBase} text-gray-600 bg-white border-gray-200 hover:border-owner-primary hover:text-owner-primary`}
+        className={`${btnBase} text-gray-600 bg-white border-gray-200 hover:border-cocreator-primary hover:text-cocreator-primary`}
       >
         <AttachIcon className="w-4 h-4" /> 附件
       </button>

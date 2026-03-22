@@ -49,7 +49,7 @@ function makeTemplate() {
       preferLead: true,
       excludeUnavailable: true,
     },
-    owner: {
+    coCreator: {
       name: 'Co-worker',
       aliases: ['共创伙伴'],
       mentionPatterns: ['@co-worker', '@owner'],
@@ -64,7 +64,7 @@ function createProjectRoot() {
   return projectRoot;
 }
 
-describe('PATCH /api/config/owner', () => {
+describe('PATCH /api/config/co-creator', () => {
   let app;
 
   afterEach(async () => {
@@ -93,7 +93,7 @@ describe('PATCH /api/config/owner', () => {
 
     const res = await app.inject({
       method: 'PATCH',
-      url: '/api/config/owner',
+      url: '/api/config/co-creator',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
@@ -109,11 +109,11 @@ describe('PATCH /api/config/owner', () => {
 
     assert.equal(res.statusCode, 200);
     const body = res.json();
-    assert.equal(body.config.owner.name, 'Lang');
-    assert.deepEqual(body.config.owner.aliases, ['共创伙伴', 'Lang']);
-    assert.deepEqual(body.config.owner.mentionPatterns, ['@co-worker', '@lang']);
-    assert.equal(body.config.owner.avatar, '/uploads/owner-lang.png');
-    assert.deepEqual(body.config.owner.color, { primary: '#D49266', secondary: '#FFE4D6' });
+    assert.equal(body.config.coCreator.name, 'Lang');
+    assert.deepEqual(body.config.coCreator.aliases, ['共创伙伴', 'Lang']);
+    assert.deepEqual(body.config.coCreator.mentionPatterns, ['@co-worker', '@lang']);
+    assert.equal(body.config.coCreator.avatar, '/uploads/owner-lang.png');
+    assert.deepEqual(body.config.coCreator.color, { primary: '#D49266', secondary: '#FFE4D6' });
   });
 
   it('rejects owner mention patterns that overlap cat aliases', async () => {
@@ -127,7 +127,7 @@ describe('PATCH /api/config/owner', () => {
 
     const res = await app.inject({
       method: 'PATCH',
-      url: '/api/config/owner',
+      url: '/api/config/co-creator',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
@@ -140,6 +140,6 @@ describe('PATCH /api/config/owner', () => {
     });
 
     assert.equal(res.statusCode, 400);
-    assert.match(res.json().error, /owner mention alias "@opus" conflicts with cat "opus"/);
+    assert.match(res.json().error, /co-creator mention alias "@opus" conflicts with cat "opus"/);
   });
 });

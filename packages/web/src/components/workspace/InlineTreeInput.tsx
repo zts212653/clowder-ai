@@ -52,7 +52,7 @@ export function InlineTreeInput({ depth, kind, defaultValue = '', onConfirm, onC
           if (value.trim()) onConfirm(value.trim());
           else onCancel();
         }}
-        className="flex-1 ml-1.5 text-xs bg-owner-light/40 border border-owner-primary/40 rounded px-1 py-0.5 outline-none focus:border-owner-primary"
+        className="flex-1 ml-1.5 text-xs bg-cocreator-light/40 border border-cocreator-primary/40 rounded px-1 py-0.5 outline-none focus:border-cocreator-primary"
         placeholder={kind === 'directory' ? '目录名...' : '文件名...'}
       />
     </div>

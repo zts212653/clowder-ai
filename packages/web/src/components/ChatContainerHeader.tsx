@@ -35,11 +35,11 @@ export function ChatContainerHeader({
   defaultCatId,
 }: ChatContainerHeaderProps) {
   return (
-    <header className="border-b border-owner-light bg-owner-bg safe-area-top">
+    <header className="border-b border-cocreator-light bg-cocreator-bg safe-area-top">
       <div className="px-5 py-3 flex items-center gap-2">
         <button
           onClick={onToggleSidebar}
-          className="p-1 rounded-lg hover:bg-owner-light transition-colors mr-1"
+          className="p-1 rounded-lg hover:bg-cocreator-light transition-colors mr-1"
           title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
           aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
@@ -60,7 +60,7 @@ export function ChatContainerHeader({
         <VoiceCompanionButton threadId={threadId} defaultCatId={defaultCatId} />
         <Link
           href={`/signals?from=${encodeURIComponent(threadId)}`}
-          className="p-1 rounded-lg hover:bg-owner-light transition-colors"
+          className="p-1 rounded-lg hover:bg-cocreator-light transition-colors"
           title="Signal Inbox"
           aria-label="Signal Inbox"
         >
@@ -85,7 +85,7 @@ export function ChatContainerHeader({
         {/* Mobile/tablet: status sheet trigger */}
         <button
           onClick={onOpenMobileStatus}
-          className="p-1 rounded-lg hover:bg-owner-light transition-colors ml-1 lg:hidden"
+          className="p-1 rounded-lg hover:bg-cocreator-light transition-colors ml-1 lg:hidden"
           title="打开状态面板"
           aria-label="打开状态面板"
         >
@@ -177,7 +177,7 @@ function RightPanelToggle({
   return (
     <button
       onClick={handleClick}
-      className={`p-1 rounded-lg hover:bg-owner-light transition-colors ml-1 hidden lg:block ${
+      className={`p-1 rounded-lg hover:bg-cocreator-light transition-colors ml-1 hidden lg:block ${
         statusPanelOpen ? (isWorkspace ? 'bg-blue-50 text-blue-600' : 'bg-gray-100') : ''
       }`}
       aria-label={label}

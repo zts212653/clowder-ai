@@ -7,23 +7,23 @@ describe('detectUserMention', () => {
     assert.equal(detectUserMention('请看这个\n@铲屎官\n帮忙确认'), true);
   });
 
-  it('detects @user at line start', () => {
-    assert.equal(detectUserMention('@user 请帮忙看看'), true);
+  it('detects @co-creator at line start', () => {
+    assert.equal(detectUserMention('@co-creator 请帮忙看看'), true);
   });
 
   it('ignores @铲屎官 in middle of line', () => {
     assert.equal(detectUserMention('告诉@铲屎官这件事'), false);
   });
 
-  it('ignores @user inside code block', () => {
-    assert.equal(detectUserMention('```\n@user\n```'), false);
+  it('ignores @co-creator inside code block', () => {
+    assert.equal(detectUserMention('```\n@co-creator\n```'), false);
   });
 
   it('returns false for no mention', () => {
     assert.equal(detectUserMention('普通消息没有 mention'), false);
   });
 
-  it('handles leading whitespace before @user', () => {
+  it('handles leading whitespace before @co-creator', () => {
     assert.equal(detectUserMention('  @铲屎官 看看'), true);
   });
 
@@ -31,70 +31,66 @@ describe('detectUserMention', () => {
     assert.equal(detectUserMention(''), false);
   });
 
-  it('detects @user case-insensitively', () => {
-    assert.equal(detectUserMention('@User 请看'), true);
-    assert.equal(detectUserMention('@USER 请看'), true);
+  it('detects @co-creator case-insensitively', () => {
+    assert.equal(detectUserMention('@Co-Creator 请看'), true);
+    assert.equal(detectUserMention('@CO-CREATOR 请看'), true);
   });
 
   it('handles multiple code blocks correctly', () => {
-    assert.equal(detectUserMention('```js\n@user\n```\n普通文本\n```\n@铲屎官\n```'), false);
+    assert.equal(detectUserMention('```js\n@co-creator\n```\n普通文本\n```\n@铲屎官\n```'), false);
   });
 
   it('detects @铲屎官 after code block', () => {
     assert.equal(detectUserMention('```\ncode\n```\n@铲屎官 看看'), true);
   });
 
-  it('OQ-1: rejects @user123 (token boundary)', () => {
-    assert.equal(detectUserMention('@user123 not a real mention'), false);
+  it('OQ-1: rejects @co-creator123 (token boundary)', () => {
+    assert.equal(detectUserMention('@co-creator123 not a real mention'), false);
   });
 
-  it('OQ-1: rejects @username', () => {
-    assert.equal(detectUserMention('@username please check'), false);
+  it('OQ-1: accepts @co-creator followed by CJK punctuation', () => {
+    assert.equal(detectUserMention('@co-creator，请看'), true);
   });
 
-  it('OQ-1: accepts @user followed by CJK punctuation', () => {
-    assert.equal(detectUserMention('@user，请看'), true);
-  });
-
-  it('OQ-1: accepts @user at end of line', () => {
-    assert.equal(detectUserMention('@user'), true);
+  it('OQ-1: accepts @co-creator at end of line', () => {
+    assert.equal(detectUserMention('@co-creator'), true);
   });
 
   it('OQ-1: accepts @铲屎官 followed by space', () => {
     assert.equal(detectUserMention('@铲屎官 检查一下'), true);
   });
 
-  it('R2-P2: accepts @user followed by CJK text (no space)', () => {
-    assert.equal(detectUserMention('@user请看'), true);
+  it('R2-P2: accepts @co-creator followed by CJK text (no space)', () => {
+    assert.equal(detectUserMention('@co-creator请看'), true);
   });
 
   it('R2-P2: accepts @铲屎官 followed by CJK text (no space)', () => {
     assert.equal(detectUserMention('@铲屎官请看'), true);
   });
 
-  it('R2-P2: still rejects @user followed by ASCII letter', () => {
-    assert.equal(detectUserMention('@userfoo'), false);
+  it('R2-P2: still rejects @co-creatorfoo (ASCII continuation)', () => {
+    assert.equal(detectUserMention('@co-creatorfoo'), false);
   });
 
-  // F067 owner-config: configured mention patterns
-  it('detects configured owner @owner at line start', () => {
-    assert.equal(detectUserMention('@owner 请看'), true);
-    assert.equal(detectUserMention('@owner 请看'), true);
+  // F067 co-creator config: configured mention patterns
+  it('detects configured co-creator @co-creator at line start', () => {
+    assert.equal(detectUserMention('@co-creator 请看'), true);
+    assert.equal(detectUserMention('@co-creator 请看'), true);
   });
 
-  it('detects configured owner @owner at line start', () => {
-    assert.equal(detectUserMention('@owner 帮忙确认'), true);
+  it('detects configured co-creator @co-creator at line start', () => {
+    assert.equal(detectUserMention('@co-creator 帮忙确认'), true);
   });
 
-  it('detects configured owner @owner at line start', () => {
-    assert.equal(detectUserMention('@owner 看看'), true);
+  it('detects configured co-creator @co-creator at line start', () => {
+    assert.equal(detectUserMention('@co-creator 看看'), true);
   });
 
-  it('rejects @owner continuation (e.g. @ownerFoo)', () => {
-    assert.equal(detectUserMention('@ownerFoo not a mention'), false);
+  it('rejects @co-creator continuation (e.g. @co-creatorFoo)', () => {
+    assert.equal(detectUserMention('@co-creatorFoo not a mention'), false);
   });
 
-  it('accepts @owner followed by CJK text', () => {
-    assert.equal(detectUserMention('@owner请看'), true);
+  it('accepts @co-creator followed by CJK text', () => {
+    assert.equal(detectUserMention('@co-creator请看'), true);
   });
 });

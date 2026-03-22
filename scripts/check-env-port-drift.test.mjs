@@ -650,3 +650,52 @@ describe(
     });
   },
 );
+
+describe(
+  'Sync runtime-safety guards stay source-side and shell-safe',
+  { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
+  () => {
+    it('resolves TARGET_DIR through a physical-path helper before safety checks', () => {
+      const content = readSyncScript();
+      assert.match(
+        content,
+        /resolve_physical_path\(\) \{[\s\S]*os\.path\.realpath\(sys\.argv\[1\]\)/,
+        'sync script should resolve TARGET_DIR through a realpath helper so symlink aliases cannot bypass the guard',
+      );
+      assert.match(
+        content,
+        /RESOLVED_TARGET="\$\(resolve_physical_path "\$TARGET_DIR"\)"/,
+        'sync script should guard on the resolved physical TARGET_DIR path',
+      );
+      assert.match(
+        content,
+        /list_source_worktree_realpaths \| grep -qFx "\$RESOLVED_TARGET"/,
+        'sync script should compare TARGET_DIR against source worktrees using resolved realpaths',
+      );
+    });
+
+    it('startup acceptance ports do not inherit runtime shell env', () => {
+      const content = readSyncScript();
+      assert.doesNotMatch(
+        content,
+        /ACCEPT_API_PORT=\$\{API_SERVER_PORT:-3004\}/,
+        'startup acceptance must not inherit API_SERVER_PORT from the parent shell',
+      );
+      assert.doesNotMatch(
+        content,
+        /ACCEPT_WEB_PORT=\$\{FRONTEND_PORT:-3003\}/,
+        'startup acceptance must not inherit FRONTEND_PORT from the parent shell',
+      );
+      assert.match(
+        content,
+        /ACCEPT_API_PORT="\$\(find_available_port 3004\)"/,
+        'startup acceptance should choose its API port from a script-owned helper',
+      );
+      assert.match(
+        content,
+        /ACCEPT_WEB_PORT="\$\(find_available_port 3003 "\$ACCEPT_API_PORT"\)"/,
+        'startup acceptance should choose a distinct frontend port from a script-owned helper',
+      );
+    });
+  },
+);

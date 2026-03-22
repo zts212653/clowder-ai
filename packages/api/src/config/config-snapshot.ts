@@ -3,7 +3,7 @@ import type { ContextBudget } from '@cat-cafe/shared';
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 export interface ConfigSnapshot {
-  owner: {
+  coCreator: {
     name: string;
     aliases: string[];
     mentionPatterns: string[];

@@ -74,7 +74,7 @@ export function BindSessionInput({
         }}
         placeholder="CLI session ID"
         maxLength={500}
-        className="flex-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-owner-primary"
+        className="flex-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
         // biome-ignore lint/a11y/noAutofocus: intentional UX — focus input immediately on open
         autoFocus
       />

@@ -112,7 +112,6 @@ describe('ConnectorMessageFormatter', () => {
     assert.equal(typeof envelope.subtitle, 'string');
     assert.equal(typeof envelope.body, 'string');
     assert.equal(typeof envelope.footer, 'string');
-    // Exactly 4 keys
-    assert.deepEqual(Object.keys(envelope).sort(), ['body', 'footer', 'header', 'subtitle']);
+    assert.deepEqual(Object.keys(envelope).sort(), ['body', 'footer', 'header', 'origin', 'subtitle']);
   });
 });

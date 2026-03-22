@@ -7,8 +7,8 @@ import type {
   CatProvider,
   CatVariant,
   CliConfig,
+  CoCreatorConfig,
   ContextBudget,
-  OwnerConfig,
 } from '@cat-cafe/shared';
 import { CAT_CONFIGS, createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
@@ -66,7 +66,7 @@ export interface RuntimeCatUpdate {
   available?: boolean;
 }
 
-export interface RuntimeOwnerUpdate {
+export interface RuntimeCoCreatorUpdate {
   name?: string;
   aliases?: string[];
   mentionPatterns?: string[];
@@ -91,7 +91,7 @@ function normalizeMentionPatterns(_catId: string, mentionPatterns: readonly stri
   return Array.from(new Set(values));
 }
 
-function normalizeOwnerMentionPatterns(mentionPatterns: readonly string[]): string[] {
+function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): string[] {
   const values = mentionPatterns
     .map((pattern) => pattern.trim())
     .filter((pattern) => pattern.length > 0)
@@ -131,27 +131,27 @@ function validatePersistedCatalog(projectRoot: string): CatCafeConfig {
 }
 
 function assertUniqueMentionAliases(catalog: CatCafeConfig): void {
-  const aliasOwners = new Map<string, string>();
+  const aliasHolders = new Map<string, string>();
   for (const [catId, config] of Object.entries(toAllCatConfigs(catalog))) {
     for (const mentionPattern of config.mentionPatterns) {
       const trimmed = mentionPattern.trim();
       if (!trimmed) continue;
       const key = trimmed.toLowerCase();
-      const owner = aliasOwners.get(key);
-      if (owner && owner !== catId) {
-        throw new Error(`mention alias "${trimmed}" is already used by cat "${owner}"`);
+      const holder = aliasHolders.get(key);
+      if (holder && holder !== catId) {
+        throw new Error(`mention alias "${trimmed}" is already used by cat "${holder}"`);
       }
-      aliasOwners.set(key, catId);
+      aliasHolders.set(key, catId);
     }
   }
 
-  const ownerMentionPatterns = catalog.version === 2 ? (catalog.owner?.mentionPatterns ?? []) : [];
-  for (const mentionPattern of ownerMentionPatterns) {
+  const coCreatorMentionPatterns = catalog.version === 2 ? (catalog.coCreator?.mentionPatterns ?? []) : [];
+  for (const mentionPattern of coCreatorMentionPatterns) {
     const trimmed = mentionPattern.trim();
     if (!trimmed) continue;
-    const owner = aliasOwners.get(trimmed.toLowerCase());
-    if (owner) {
-      throw new Error(`owner mention alias "${trimmed}" conflicts with cat "${owner}"`);
+    const holder = aliasHolders.get(trimmed.toLowerCase());
+    if (holder) {
+      throw new Error(`co-creator mention alias "${trimmed}" conflicts with cat "${holder}"`);
     }
   }
 }
@@ -426,17 +426,17 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   return writeAndValidateCatalog(projectRoot, catalog);
 }
 
-export function updateRuntimeOwner(projectRoot: string, patch: RuntimeOwnerUpdate): CatCafeConfig {
+export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCreatorUpdate): CatCafeConfig {
   const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
   if (catalog.version !== 2) {
     throw new Error('Owner config requires a version 2 runtime catalog');
   }
 
-  const currentOwner = (catalog.owner ?? {
+  const currentOwner = (catalog.coCreator ?? {
     name: '铲屎官',
     aliases: [],
-    mentionPatterns: ['@user', '@铲屎官'],
-  }) as OwnerConfig;
+    mentionPatterns: ['@co-creator', '@铲屎官'],
+  }) as CoCreatorConfig;
 
   const nextOwner: Record<string, unknown> = {
     ...currentOwner,
@@ -448,7 +448,7 @@ export function updateRuntimeOwner(projectRoot: string, patch: RuntimeOwnerUpdat
       : {}),
     ...(patch.mentionPatterns !== undefined
       ? {
-          mentionPatterns: normalizeOwnerMentionPatterns(patch.mentionPatterns),
+          mentionPatterns: normalizeCoCreatorMentionPatterns(patch.mentionPatterns),
         }
       : {}),
   };
@@ -469,7 +469,7 @@ export function updateRuntimeOwner(projectRoot: string, patch: RuntimeOwnerUpdat
     }
   }
 
-  const normalizedOwner: OwnerConfig = {
+  const normalizedOwner: CoCreatorConfig = {
     name: String(nextOwner.name ?? currentOwner.name),
     aliases: Array.isArray(nextOwner.aliases) ? (nextOwner.aliases as string[]) : [...currentOwner.aliases],
     mentionPatterns: Array.isArray(nextOwner.mentionPatterns)
@@ -479,7 +479,7 @@ export function updateRuntimeOwner(projectRoot: string, patch: RuntimeOwnerUpdat
     ...(nextOwner.color ? { color: nextOwner.color as CatColor } : {}),
   };
 
-  catalog.owner = normalizedOwner;
+  catalog.coCreator = normalizedOwner;
   return writeAndValidateCatalog(projectRoot, catalog);
 }
 

@@ -10,6 +10,8 @@ import { beforeEach, describe, it } from 'node:test';
 import { GameAutoPlayer } from '../dist/domains/cats/services/game/GameAutoPlayer.js';
 import { GameOrchestrator } from '../dist/domains/cats/services/game/GameOrchestrator.js';
 
+const disableAiFactory = () => null;
+
 function createStubGameStore() {
   const games = new Map();
   const activeByThread = new Map();
@@ -128,7 +130,7 @@ describe('AC-G1: recoverActiveGames restores auto-play loops', () => {
     const store = createStubGameStore();
     const socket = createStubSocket();
     const orchestrator = new GameOrchestrator({ gameStore: store, socketManager: socket });
-    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator });
+    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator, aiPlayerFactory: disableAiFactory });
 
     // Simulate 2 playing games in Redis (as if API restarted)
     await store.createGame(makePlayingGame('game-a', 'thread-a'));
@@ -151,7 +153,7 @@ describe('AC-G1: recoverActiveGames restores auto-play loops', () => {
     const store = createStubGameStore();
     const socket = createStubSocket();
     const orchestrator = new GameOrchestrator({ gameStore: store, socketManager: socket });
-    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator });
+    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator, aiPlayerFactory: disableAiFactory });
 
     await store.createGame(makePlayingGame('game-c', 'thread-c'));
     await store.endGame('game-c', 'village');
@@ -166,7 +168,7 @@ describe('AC-G2: GameAutoPlayer loop lifecycle', () => {
     const store = createStubGameStore();
     const socket = createStubSocket();
     const orchestrator = new GameOrchestrator({ gameStore: store, socketManager: socket });
-    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator });
+    const autoPlayer = new GameAutoPlayer({ gameStore: store, orchestrator, aiPlayerFactory: disableAiFactory });
 
     await store.createGame(makePlayingGame('game-log', 'thread-log'));
     autoPlayer.startLoop('game-log');

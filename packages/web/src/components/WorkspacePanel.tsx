@@ -55,7 +55,9 @@ function SearchResultItem({
     return (
       <>
         {content.slice(0, idx)}
-        <mark className="bg-owner-light text-owner-dark rounded px-0.5">{content.slice(idx, idx + query.length)}</mark>
+        <mark className="bg-cocreator-light text-cocreator-dark rounded px-0.5">
+          {content.slice(idx, idx + query.length)}
+        </mark>
         {content.slice(idx + query.length)}
       </>
     );
@@ -65,12 +67,12 @@ function SearchResultItem({
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left px-3 py-1.5 hover:bg-owner-bg/60 transition-colors group"
+      className="w-full text-left px-3 py-1.5 hover:bg-cocreator-bg/60 transition-colors group"
     >
       <div className="flex items-center gap-1.5">
         <FileIcon name={fileName} />
         <span className="text-xs font-medium text-cafe-black truncate">{fileName}</span>
-        {line > 0 && <span className="text-[10px] text-owner-dark/50 font-mono">:{line}</span>}
+        {line > 0 && <span className="text-[10px] text-cocreator-dark/50 font-mono">:{line}</span>}
       </div>
       {dir && <div className="text-[10px] text-gray-400 truncate ml-5">{dir}</div>}
       {content && <div className="text-[10px] text-gray-500 truncate font-mono ml-5 mt-0.5">{highlighted}</div>}
@@ -95,7 +97,7 @@ const CloseIcon = () => (
 
 const SearchIcon = () => (
   <svg
-    className="w-3.5 h-3.5 text-owner-dark/40 flex-shrink-0"
+    className="w-3.5 h-3.5 text-cocreator-dark/40 flex-shrink-0"
     viewBox="0 0 16 16"
     fill="currentColor"
     aria-hidden="true"
@@ -109,7 +111,12 @@ const SearchIcon = () => (
 );
 
 const MenuIcon = () => (
-  <svg className="w-4 h-4 text-owner-primary flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+  <svg
+    className="w-4 h-4 text-cocreator-primary flex-shrink-0"
+    viewBox="0 0 20 20"
+    fill="currentColor"
+    aria-hidden="true"
+  >
     <path
       fillRule="evenodd"
       d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z"
@@ -542,10 +549,10 @@ export function WorkspacePanel() {
   return (
     <aside
       ref={panelRef}
-      className="hidden lg:flex flex-1 min-w-0 border-l border-owner-light bg-cafe-white/95 flex-col overflow-hidden animate-slide-in-right"
+      className="hidden lg:flex flex-1 min-w-0 border-l border-cocreator-light bg-cafe-white/95 flex-col overflow-hidden animate-slide-in-right"
     >
       {/* Header */}
-      <div className="px-3 py-2.5 border-b border-owner-light flex items-center justify-between bg-owner-bg/50">
+      <div className="px-3 py-2.5 border-b border-cocreator-light flex items-center justify-between bg-cocreator-bg/50">
         <div className="flex items-center gap-2 min-w-0">
           <MenuIcon />
           <span className="text-sm font-semibold text-cafe-black">Workspace</span>
@@ -553,7 +560,7 @@ export function WorkspacePanel() {
         <button
           type="button"
           onClick={() => setRightPanelMode('status')}
-          className="w-6 h-6 flex items-center justify-center rounded-md text-owner-dark/40 hover:text-owner-dark hover:bg-owner-light/60 transition-colors"
+          className="w-6 h-6 flex items-center justify-center rounded-md text-cocreator-dark/40 hover:text-cocreator-dark hover:bg-cocreator-light/60 transition-colors"
           title="切换到状态面板"
         >
           <CloseIcon />
@@ -562,18 +569,18 @@ export function WorkspacePanel() {
 
       {/* Worktree indicator */}
       {currentWorktree && (
-        <div className="px-3 py-2 border-b border-owner-light/60 bg-owner-bg/30">
+        <div className="px-3 py-2 border-b border-cocreator-light/60 bg-cocreator-bg/30">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
             <span className="text-xs font-medium text-cafe-black truncate">{currentWorktree.branch}</span>
-            <span className="text-[10px] font-mono text-owner-dark/50">{currentWorktree.head}</span>
+            <span className="text-[10px] font-mono text-cocreator-dark/50">{currentWorktree.head}</span>
           </div>
           {worktrees.length > 1 && (
             <div className="flex items-center gap-1 mt-1.5">
               <select
                 value={worktreeId ?? ''}
                 onChange={(e) => setWorktreeId(e.target.value || null)}
-                className="flex-1 text-[10px] border border-owner-light rounded-md px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-owner-primary"
+                className="flex-1 text-[10px] border border-cocreator-light rounded-md px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
               >
                 {worktrees.map((w) => (
                   <option key={w.id} value={w.id}>
@@ -589,8 +596,8 @@ export function WorkspacePanel() {
       )}
 
       {/* Search bar */}
-      <form onSubmit={handleSearchSubmit} className="px-3 py-2 border-b border-owner-light/40">
-        <div className="flex items-center gap-1.5 bg-white/80 border border-owner-light rounded-lg px-2.5 py-1.5 focus-within:border-owner-primary focus-within:ring-1 focus-within:ring-owner-primary/20 transition-all">
+      <form onSubmit={handleSearchSubmit} className="px-3 py-2 border-b border-cocreator-light/40">
+        <div className="flex items-center gap-1.5 bg-white/80 border border-cocreator-light rounded-lg px-2.5 py-1.5 focus-within:border-cocreator-primary focus-within:ring-1 focus-within:ring-cocreator-primary/20 transition-all">
           <SearchIcon />
           <input
             type="text"
@@ -603,17 +610,17 @@ export function WorkspacePanel() {
                   ? '搜索文件名/路径...'
                   : '搜索全部...'
             }
-            className="flex-1 text-xs bg-transparent text-cafe-black placeholder:text-owner-dark/30 focus:outline-none"
+            className="flex-1 text-xs bg-transparent text-cafe-black placeholder:text-cocreator-dark/30 focus:outline-none"
           />
           <button
             type="button"
             onClick={() => setSearchMode((m) => (m === 'all' ? 'filename' : m === 'filename' ? 'content' : 'all'))}
             className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium transition-colors ${
               searchMode === 'all'
-                ? 'bg-owner-primary/15 text-owner-primary'
+                ? 'bg-cocreator-primary/15 text-cocreator-primary'
                 : searchMode === 'filename'
-                  ? 'bg-owner-light text-owner-dark'
-                  : 'text-owner-dark/40 hover:text-owner-dark/60'
+                  ? 'bg-cocreator-light text-cocreator-dark'
+                  : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
             }`}
             title={
               searchMode === 'all'
@@ -629,7 +636,7 @@ export function WorkspacePanel() {
       </form>
 
       {/* Files / Changes toggle */}
-      <div className="flex border-b border-owner-light/40">
+      <div className="flex border-b border-cocreator-light/40">
         {(['files', 'changes', 'git', 'terminal', 'browser'] as const).map((mode) => {
           const labels: Record<typeof mode, string> = {
             files: 'Files',
@@ -645,8 +652,8 @@ export function WorkspacePanel() {
               onClick={() => setViewMode(mode)}
               className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
                 viewMode === mode
-                  ? 'text-owner-primary border-b-2 border-owner-primary'
-                  : 'text-owner-dark/40 hover:text-owner-dark/60'
+                  ? 'text-cocreator-primary border-b-2 border-cocreator-primary'
+                  : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
               }`}
             >
               {labels[mode]}
@@ -709,7 +716,7 @@ export function WorkspacePanel() {
         worktreeId ? (
           <TerminalTab worktreeId={worktreeId} />
         ) : (
-          <div className="flex items-center justify-center h-full text-sm text-owner-dark/50">
+          <div className="flex items-center justify-center h-full text-sm text-cocreator-dark/50">
             请先选择一个 Worktree
           </div>
         )
@@ -726,10 +733,10 @@ export function WorkspacePanel() {
               const contentHits = searchResults.filter((r) => r.matchType === 'content');
               const isGrouped = fileHits.length > 0 || contentHits.length > 0;
               return (
-                <div className="border-b border-owner-light/40 max-h-64 overflow-y-auto">
+                <div className="border-b border-cocreator-light/40 max-h-64 overflow-y-auto">
                   {isGrouped && fileHits.length > 0 && (
                     <>
-                      <div className="px-3 py-1.5 text-[10px] text-owner-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                      <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
                         文件名匹配 ({fileHits.length})
                       </div>
                       {fileHits.map((r, i) => (
@@ -746,7 +753,7 @@ export function WorkspacePanel() {
                   )}
                   {isGrouped && contentHits.length > 0 && (
                     <>
-                      <div className="px-3 py-1.5 text-[10px] text-owner-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                      <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
                         内容匹配 ({contentHits.length})
                       </div>
                       {contentHits.map((r, i) => (
@@ -763,7 +770,7 @@ export function WorkspacePanel() {
                   )}
                   {!isGrouped && (
                     <>
-                      <div className="px-3 py-1.5 text-[10px] text-owner-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                      <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
                         {searchResults.length} 个结果
                       </div>
                       {searchResults.map((r, i) => (
@@ -857,7 +864,7 @@ export function WorkspacePanel() {
                             onClick={() => setMarkdownRendered((p) => !p)}
                             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                               markdownRendered
-                                ? 'bg-owner-primary/80 text-white hover:bg-owner-primary'
+                                ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
                                 : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
                             }`}
                             title={markdownRendered ? '切换到源码' : '切换到渲染'}
@@ -871,7 +878,7 @@ export function WorkspacePanel() {
                             onClick={() => setHtmlPreview((p) => !p)}
                             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                               htmlPreview
-                                ? 'bg-owner-primary/80 text-white hover:bg-owner-primary'
+                                ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
                                 : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
                             }`}
                             title={htmlPreview ? '切换到源码' : '预览 HTML'}
@@ -1003,7 +1010,7 @@ export function WorkspacePanel() {
                           <button
                             type="button"
                             onClick={() => void revealInFinder(file.path)}
-                            className="mt-2 px-3 py-1 rounded bg-owner-light/20 text-owner-dark/60 hover:bg-owner-light/40 transition-colors text-[10px]"
+                            className="mt-2 px-3 py-1 rounded bg-cocreator-light/20 text-cocreator-dark/60 hover:bg-cocreator-light/40 transition-colors text-[10px]"
                           >
                             在 Finder 中打开
                           </button>
@@ -1020,7 +1027,7 @@ export function WorkspacePanel() {
                           <button
                             type="button"
                             onClick={handleMdAddToChat}
-                            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-owner-primary text-white text-[11px] font-medium shadow-lg hover:bg-owner-dark transition-colors z-10 animate-fade-in"
+                            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cocreator-primary text-white text-[11px] font-medium shadow-lg hover:bg-cocreator-dark transition-colors z-10 animate-fade-in"
                             title="引用到聊天"
                           >
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

@@ -53,7 +53,7 @@ export function SectionGroup({
         {icon === 'pin' && (
           <svg
             aria-hidden="true"
-            className="w-3 h-3 text-owner-primary flex-shrink-0"
+            className="w-3 h-3 text-cocreator-primary flex-shrink-0"
             viewBox="0 0 16 16"
             fill="currentColor"
           >
@@ -111,7 +111,7 @@ export function SectionGroup({
                 onToggleProjectPin();
               }
             }}
-            className={`ml-1 flex-shrink-0 cursor-pointer transition-colors ${isProjectPinned ? 'text-owner-primary' : 'text-gray-300 hover:text-gray-400'}`}
+            className={`ml-1 flex-shrink-0 cursor-pointer transition-colors ${isProjectPinned ? 'text-cocreator-primary' : 'text-gray-300 hover:text-gray-400'}`}
             title={isProjectPinned ? '取消固定项目' : '固定项目到活跃区'}
             data-testid="project-pin-btn"
           >

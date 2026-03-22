@@ -178,7 +178,7 @@ export function CodeViewer({
         <button
           type="button"
           onClick={handleAddToChat}
-          className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-owner-primary text-white text-[11px] font-medium shadow-lg hover:bg-owner-dark transition-colors z-10 animate-fade-in"
+          className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cocreator-primary text-white text-[11px] font-medium shadow-lg hover:bg-cocreator-dark transition-colors z-10 animate-fade-in"
           title="引用到聊天"
         >
           <AddToChatIcon />

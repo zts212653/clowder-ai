@@ -39,7 +39,7 @@ export function FileIcon({ name }: { name: string }) {
 export function DirIcon({ expanded }: { expanded: boolean }) {
   return (
     <span
-      className={`w-4 h-4 flex items-center justify-center flex-shrink-0 transition-transform duration-150 ${expanded ? 'text-owner-primary' : 'text-owner-dark/60'}`}
+      className={`w-4 h-4 flex items-center justify-center flex-shrink-0 transition-transform duration-150 ${expanded ? 'text-cocreator-primary' : 'text-cocreator-dark/60'}`}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         {expanded ? (

@@ -60,7 +60,7 @@ export function ExportButton({ threadId }: { threadId: string }) {
       <button
         onClick={() => setMenuOpen((v) => !v)}
         disabled={loading}
-        className="p-1 rounded-lg hover:bg-owner-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="p-1 rounded-lg hover:bg-cocreator-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         title="导出对话"
         aria-label="导出对话"
       >
@@ -81,12 +81,12 @@ export function ExportButton({ threadId }: { threadId: string }) {
       </button>
 
       {menuOpen && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-cafe-white border border-owner-light rounded-lg shadow-lg z-50 py-1">
+        <div className="absolute right-0 top-full mt-1 w-52 bg-cafe-white border border-cocreator-light rounded-lg shadow-lg z-50 py-1">
           {EXPORT_OPTIONS.map((opt) => (
             <button
               key={opt.format}
               onClick={() => handleExport(opt.format)}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-owner-light transition-colors flex items-center justify-between"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-cocreator-light transition-colors flex items-center justify-between"
             >
               <span className="text-cafe-black">{opt.label}</span>
               <span className="text-xs text-gray-400">{opt.description}</span>

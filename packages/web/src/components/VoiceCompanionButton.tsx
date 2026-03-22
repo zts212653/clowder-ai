@@ -174,7 +174,7 @@ export function VoiceCompanionButton({ threadId, defaultCatId }: VoiceCompanionB
           ${
             isActive
               ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'
-              : 'text-gray-500 hover:bg-owner-light'
+              : 'text-gray-500 hover:bg-cocreator-light'
           }
         `}
         aria-label={isActive ? '停止语音陪伴' : '语音陪伴'}

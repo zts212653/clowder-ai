@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetOwnerConfigCacheForTest, useOwnerConfig } from '@/hooks/useOwnerConfig';
+import { resetCoCreatorConfigCacheForTest, useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { getMentionRe, getMentionToCat, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 
@@ -11,9 +11,9 @@ vi.mock('@/utils/api-client', () => ({
 
 const mockApiFetch = vi.mocked(apiFetch);
 
-function OwnerProbe() {
-  const owner = useOwnerConfig();
-  return React.createElement('span', null, owner.name);
+function CoCreatorProbe() {
+  const coCreator = useCoCreatorConfig();
+  return React.createElement('span', null, coCreator.name);
 }
 
 async function flushEffects(): Promise<void> {
@@ -21,7 +21,7 @@ async function flushEffects(): Promise<void> {
   await Promise.resolve();
 }
 
-describe('useOwnerConfig', () => {
+describe('useCoCreatorConfig', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -30,7 +30,7 @@ describe('useOwnerConfig', () => {
   });
 
   beforeEach(() => {
-    resetOwnerConfigCacheForTest();
+    resetCoCreatorConfigCacheForTest();
     resetMentionDataForTest();
     mockApiFetch.mockReset();
     container = document.createElement('div');
@@ -41,7 +41,7 @@ describe('useOwnerConfig', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
-    resetOwnerConfigCacheForTest();
+    resetCoCreatorConfigCacheForTest();
     resetMentionDataForTest();
   });
 
@@ -49,11 +49,11 @@ describe('useOwnerConfig', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('retries fetching owner config after a transient /api/config failure on the next mount', async () => {
+  it('retries fetching co-creator config after a transient /api/config failure on the next mount', async () => {
     mockApiFetch.mockResolvedValueOnce({ ok: false } as Response);
 
     act(() => {
-      root.render(React.createElement(OwnerProbe));
+      root.render(React.createElement(CoCreatorProbe));
     });
     await act(async () => {
       await flushEffects();
@@ -69,7 +69,7 @@ describe('useOwnerConfig', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         config: {
-          owner: {
+          coCreator: {
             name: 'Recovered Owner',
             aliases: ['Co-worker'],
             mentionPatterns: ['@owner'],
@@ -83,7 +83,7 @@ describe('useOwnerConfig', () => {
     } as unknown as Response);
 
     act(() => {
-      root.render(React.createElement(OwnerProbe));
+      root.render(React.createElement(CoCreatorProbe));
     });
     await act(async () => {
       await flushEffects();
@@ -98,7 +98,7 @@ describe('useOwnerConfig', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         config: {
-          owner: {
+          coCreator: {
             name: 'Lang',
             aliases: ['Co-worker'],
             mentionPatterns: ['@lang', '@owner'],
@@ -112,14 +112,14 @@ describe('useOwnerConfig', () => {
     } as unknown as Response);
 
     act(() => {
-      root.render(React.createElement(OwnerProbe));
+      root.render(React.createElement(CoCreatorProbe));
     });
     await act(async () => {
       await flushEffects();
     });
 
     expect(container.textContent).toBe('Lang');
-    expect(getMentionToCat().lang).toBe('__owner__');
+    expect(getMentionToCat().lang).toBe('__co-creator__');
     const re = getMentionRe();
     re.lastIndex = 0;
     expect(re.exec('请 @lang 看一下')).not.toBeNull();

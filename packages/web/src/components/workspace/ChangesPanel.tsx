@@ -70,18 +70,18 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
     <div className="flex flex-col min-h-0 flex-1">
       {/* Changed files list */}
       <div
-        className="flex-shrink-0 overflow-y-auto border-b border-owner-light/40"
+        className="flex-shrink-0 overflow-y-auto border-b border-cocreator-light/40"
         style={{ maxHeight: `${basisPct}%` }}
       >
         <div className="px-3 py-1.5 flex items-center justify-between sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-          <span className="text-[10px] text-owner-dark/50 font-semibold uppercase tracking-wider">
+          <span className="text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider">
             {data ? `${data.changedFiles.length} changed` : 'Changes'}
           </span>
           <button
             type="button"
             onClick={fetchDiff}
             disabled={loading}
-            className="text-[10px] text-owner-dark/40 hover:text-owner-dark transition-colors disabled:opacity-50"
+            className="text-[10px] text-cocreator-dark/40 hover:text-cocreator-dark transition-colors disabled:opacity-50"
             title="Refresh"
           >
             {loading ? '...' : '↻'}
@@ -95,8 +95,8 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
               key={f.path}
               type="button"
               onClick={() => setSelectedFile(selectedFile === f.path ? null : f.path)}
-              className={`w-full text-left px-3 py-1 flex items-center gap-1.5 hover:bg-owner-bg/60 transition-colors ${
-                selectedFile === f.path ? 'bg-owner-bg/80' : ''
+              className={`w-full text-left px-3 py-1 flex items-center gap-1.5 hover:bg-cocreator-bg/60 transition-colors ${
+                selectedFile === f.path ? 'bg-cocreator-bg/80' : ''
               }`}
             >
               <span className={`text-[10px] font-mono font-bold w-3 ${info.color}`}>{info.label}</span>

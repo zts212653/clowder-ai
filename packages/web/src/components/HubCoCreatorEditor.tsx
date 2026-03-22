@@ -1,17 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { primeOwnerConfigCache } from '@/hooks/useOwnerConfig';
+import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import { apiFetch } from '@/utils/api-client';
-import type { OwnerConfig } from './config-viewer-types';
+import type { CoCreatorConfig } from './config-viewer-types';
 import { uploadAvatarAsset } from './hub-cat-editor.client';
 import { PersistenceBanner, SectionCard, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
 
-const DEFAULT_OWNER: OwnerConfig = {
+const DEFAULT_CO_CREATOR: CoCreatorConfig = {
   name: 'ME',
   aliases: [],
-  mentionPatterns: ['@owner'],
+  mentionPatterns: ['@co-creator'],
   avatar: '',
   color: {
     primary: '#D4A76A',
@@ -29,21 +29,21 @@ function uniqueTags(tags: string[]): string[] {
   return Array.from(new Set(tags.filter(Boolean)));
 }
 
-interface HubOwnerEditorProps {
+interface HubCoCreatorEditorProps {
   open: boolean;
-  owner?: OwnerConfig | null;
+  coCreator?: CoCreatorConfig | null;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }
 
-export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditorProps) {
-  const currentOwner = owner ?? DEFAULT_OWNER;
-  const [name, setName] = useState(currentOwner.name);
-  const [avatar, setAvatar] = useState(currentOwner.avatar ?? '');
-  const [colorPrimary, setColorPrimary] = useState(currentOwner.color?.primary ?? DEFAULT_OWNER.color!.primary);
-  const [colorSecondary, setColorSecondary] = useState(currentOwner.color?.secondary ?? DEFAULT_OWNER.color!.secondary);
-  const [aliases, setAliases] = useState<string[]>(currentOwner.aliases);
-  const [mentionPatterns, setMentionPatterns] = useState<string[]>(currentOwner.mentionPatterns);
+export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoCreatorEditorProps) {
+  const current = coCreator ?? DEFAULT_CO_CREATOR;
+  const [name, setName] = useState(current.name);
+  const [avatar, setAvatar] = useState(current.avatar ?? '');
+  const [colorPrimary, setColorPrimary] = useState(current.color?.primary ?? DEFAULT_CO_CREATOR.color!.primary);
+  const [colorSecondary, setColorSecondary] = useState(current.color?.secondary ?? DEFAULT_CO_CREATOR.color!.secondary);
+  const [aliases, setAliases] = useState<string[]>(current.aliases);
+  const [mentionPatterns, setMentionPatterns] = useState<string[]>(current.mentionPatterns);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -51,15 +51,15 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
 
   useEffect(() => {
     if (!open) return;
-    const nextOwner = owner ?? DEFAULT_OWNER;
-    setName(nextOwner.name);
-    setAvatar(nextOwner.avatar ?? '');
-    setColorPrimary(nextOwner.color?.primary ?? DEFAULT_OWNER.color!.primary);
-    setColorSecondary(nextOwner.color?.secondary ?? DEFAULT_OWNER.color!.secondary);
-    setAliases(nextOwner.aliases);
-    setMentionPatterns(nextOwner.mentionPatterns);
+    const next = coCreator ?? DEFAULT_CO_CREATOR;
+    setName(next.name);
+    setAvatar(next.avatar ?? '');
+    setColorPrimary(next.color?.primary ?? DEFAULT_CO_CREATOR.color!.primary);
+    setColorSecondary(next.color?.secondary ?? DEFAULT_CO_CREATOR.color!.secondary);
+    setAliases(next.aliases);
+    setMentionPatterns(next.mentionPatterns);
     setError(null);
-  }, [open, owner]);
+  }, [open, coCreator]);
 
   if (!open) return null;
 
@@ -79,7 +79,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
     const cleanedName = name.trim();
     const cleanedMentions = uniqueTags(mentionPatterns.map(normalizeMentionTag));
     if (!cleanedName) {
-      setError('Owner 名称不能为空');
+      setError('Co-Creator 名称不能为空');
       return;
     }
     if (cleanedMentions.length === 0) {
@@ -90,7 +90,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
     setSaving(true);
     setError(null);
     try {
-      const res = await apiFetch('/api/config/owner', {
+      const res = await apiFetch('/api/config/co-creator', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -109,7 +109,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
         setError((payload.error as string) ?? `保存失败 (${res.status})`);
         return;
       }
-      primeOwnerConfigCache({
+      primeCoCreatorConfigCache({
         name: cleanedName,
         aliases: uniqueTags(aliases.map((alias) => alias.trim())),
         mentionPatterns: cleanedMentions,
@@ -136,8 +136,8 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
       >
         <div className="flex items-start justify-between border-b border-[#F0DDCD] px-6 py-5">
           <div>
-            <p className="text-xs font-semibold text-[#D18A61]">成员协作 &gt; 总览 &gt; {currentOwner.name}</p>
-            <h3 className="mt-2 text-2xl font-bold text-[#2D2118]">编辑 {currentOwner.name}</h3>
+            <p className="text-xs font-semibold text-[#D18A61]">成员协作 &gt; 总览 &gt; {current.name}</p>
+            <h3 className="mt-2 text-2xl font-bold text-[#2D2118]">编辑 {current.name}</h3>
             <p className="mt-1 text-sm text-[#8A776B]">可维护头像、别名、被 @ 标签与卡片背景色。</p>
           </div>
           <button type="button" onClick={onClose} className="text-2xl leading-none text-[#B59A88]" aria-label="关闭">
@@ -167,7 +167,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
               >
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
                   {avatar ? (
-                    // biome-ignore lint/performance/noImgElement: owner avatar may be runtime upload URL
+                    // biome-ignore lint/performance/noImgElement: co-creator avatar may be runtime upload URL
                     <img src={avatar} alt="Owner avatar preview" className="h-full w-full object-cover" />
                   ) : (
                     'ME'
@@ -246,7 +246,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
                   tags={mentionPatterns}
                   onChange={(next) => setMentionPatterns(next.map(normalizeMentionTag).filter(Boolean))}
                   addLabel="+ 添加"
-                  placeholder="@owner"
+                  placeholder="@co-creator"
                   emptyLabel="(至少保留 1 个，否则无法 @)"
                   tone="green"
                   normalize={normalizeMentionTag}
@@ -273,7 +273,7 @@ export function HubOwnerEditor({ open, owner, onClose, onSaved }: HubOwnerEditor
             disabled={saving}
             className="rounded-xl bg-[#D49266] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
           >
-            {saving ? '保存中...' : '保存 Owner'}
+            {saving ? '保存中...' : '保存'}
           </button>
         </div>
       </div>

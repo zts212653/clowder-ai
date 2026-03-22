@@ -266,46 +266,51 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   //   L2 this check = see below
   //   L3 CI guard = hard block (prevents merging PRs with shared-state changes)
   //
-  // L2 behavior splits by issue type:
-  //   unpushedFiles → FAIL-CLOSED (stop invocation). These are committed but not
-  //     pushed — L1 can't catch them (already committed), L3 can't see them (not
-  //     pushed). L2 is the only layer that can enforce. The cat must push first.
-  //   uncommittedFiles → WARN-ONLY. Cat can still be invoked to help commit+push.
-  try {
-    const { checkSharedStatePreflight } = await import('../../../../../config/shared-state-preflight.js');
-    const projectRoot = findMonorepoRoot(process.cwd());
-    const ssCheck = checkSharedStatePreflight(projectRoot);
-    if (!ssCheck.ok) {
-      // Fail-closed: unpushed shared-state commits must be pushed before any cat runs
-      if (ssCheck.unpushedFiles?.length) {
-        const msg =
-          `Shared-state files committed but not pushed: ${ssCheck.unpushedFiles.join(', ')}. ` +
-          'Run `git push` before invoking any cat (shared-rules §14).';
-        log.warn({ catId, unpushedFiles: ssCheck.unpushedFiles }, 'Shared-state preflight BLOCKED');
-        yield {
-          type: 'system_info' as const,
-          catId,
-          content: `🚫 ${msg}`,
-          timestamp: Date.now(),
-        };
-        yield { type: 'done', catId, isFinal: params.isLastCat, timestamp: Date.now() };
-        didComplete = true; // F118 AC-C5: Normal early exit (governance block), not force-return
-        return;
+  // Tests run on feature branches with intentionally unpushed commits. Those suites
+  // need to exercise routing/invocation behavior without having local git state turn
+  // every invocation into a governance block, so test runners can opt out explicitly.
+  if (process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT !== '1') {
+    // L2 behavior splits by issue type:
+    //   unpushedFiles → FAIL-CLOSED (stop invocation). These are committed but not
+    //     pushed — L1 can't catch them (already committed), L3 can't see them (not
+    //     pushed). L2 is the only layer that can enforce. The cat must push first.
+    //   uncommittedFiles → WARN-ONLY. Cat can still be invoked to help commit+push.
+    try {
+      const { checkSharedStatePreflight } = await import('../../../../../config/shared-state-preflight.js');
+      const projectRoot = findMonorepoRoot(process.cwd());
+      const ssCheck = checkSharedStatePreflight(projectRoot);
+      if (!ssCheck.ok) {
+        // Fail-closed: unpushed shared-state commits must be pushed before any cat runs
+        if (ssCheck.unpushedFiles?.length) {
+          const msg =
+            `Shared-state files committed but not pushed: ${ssCheck.unpushedFiles.join(', ')}. ` +
+            'Run `git push` before invoking any cat (shared-rules §14).';
+          log.warn({ catId, unpushedFiles: ssCheck.unpushedFiles }, 'Shared-state preflight BLOCKED');
+          yield {
+            type: 'system_info' as const,
+            catId,
+            content: `🚫 ${msg}`,
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId, isFinal: params.isLastCat, timestamp: Date.now() };
+          didComplete = true; // F118 AC-C5: Normal early exit (governance block), not force-return
+          return;
+        }
+        // Warn-only: uncommitted changes — cat can help fix this
+        if (ssCheck.uncommittedFiles?.length) {
+          const msg = `uncommitted shared-state files: ${ssCheck.uncommittedFiles.join(', ')}`;
+          log.warn({ catId, uncommittedFiles: ssCheck.uncommittedFiles }, 'Shared-state preflight: uncommitted files');
+          yield {
+            type: 'system_info' as const,
+            catId,
+            content: `⚠️ Shared-state preflight: ${msg}. Please commit+push before continuing (shared-rules §14).`,
+            timestamp: Date.now(),
+          };
+        }
       }
-      // Warn-only: uncommitted changes — cat can help fix this
-      if (ssCheck.uncommittedFiles?.length) {
-        const msg = `uncommitted shared-state files: ${ssCheck.uncommittedFiles.join(', ')}`;
-        log.warn({ catId, uncommittedFiles: ssCheck.uncommittedFiles }, 'Shared-state preflight: uncommitted files');
-        yield {
-          type: 'system_info' as const,
-          catId,
-          content: `⚠️ Shared-state preflight: ${msg}. Please commit+push before continuing (shared-rules §14).`,
-          timestamp: Date.now(),
-        };
-      }
+    } catch {
+      // Don't block on preflight errors
     }
-  } catch {
-    // Don't block on preflight errors
   }
 
   // === CAT_INVOKED 审计 (fire-and-forget, 缅因猫 review P2-3) ===

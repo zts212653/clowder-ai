@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { primeOwnerConfigCache, resetOwnerConfigCacheForTest } from '@/hooks/useOwnerConfig';
+import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -47,7 +47,7 @@ describe('ChatMessage owner live update', () => {
   });
 
   beforeEach(() => {
-    resetOwnerConfigCacheForTest();
+    resetCoCreatorConfigCacheForTest();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -56,11 +56,11 @@ describe('ChatMessage owner live update', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
-    resetOwnerConfigCacheForTest();
+    resetCoCreatorConfigCacheForTest();
   });
 
-  it('updates already-rendered user bubbles when owner config changes', () => {
-    primeOwnerConfigCache({
+  it('updates already-rendered user bubbles when co-creator config changes', () => {
+    primeCoCreatorConfigCache({
       name: '始皇帝',
       aliases: ['秦始皇'],
       mentionPatterns: ['@owner', '@me'],
@@ -87,7 +87,7 @@ describe('ChatMessage owner live update', () => {
     expect(container.querySelector('img[alt="始皇帝"]')?.getAttribute('src')).toBe('/uploads/qin-owner.png');
 
     act(() => {
-      primeOwnerConfigCache({
+      primeCoCreatorConfigCache({
         name: '嬴政',
         aliases: ['秦始皇'],
         mentionPatterns: ['@owner', '@me'],

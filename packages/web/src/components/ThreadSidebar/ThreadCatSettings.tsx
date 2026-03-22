@@ -77,8 +77,8 @@ export function ThreadCatSettings({ threadId, currentCats, onSave }: ThreadCatSe
         }}
         className={`p-0.5 rounded transition-all ${
           currentCats.length > 0
-            ? 'text-owner-primary'
-            : 'opacity-0 group-hover:opacity-100 text-gray-300 hover:text-owner-primary'
+            ? 'text-cocreator-primary'
+            : 'opacity-0 group-hover:opacity-100 text-gray-300 hover:text-cocreator-primary'
         }`}
         title="设置默认猫猫"
       >
@@ -113,7 +113,7 @@ export function ThreadCatSettings({ threadId, currentCats, onSave }: ThreadCatSe
               <button
                 onClick={() => void handleSave()}
                 disabled={!hasChanged || isSaving}
-                className="text-xs px-2 py-0.5 rounded bg-owner-primary text-white hover:bg-owner-dark disabled:opacity-40"
+                className="text-xs px-2 py-0.5 rounded bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40"
               >
                 {isSaving ? '...' : '保存'}
               </button>

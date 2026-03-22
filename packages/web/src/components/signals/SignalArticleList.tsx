@@ -11,7 +11,7 @@ interface SignalArticleListProps {
 }
 
 const statusClassMap: Record<SignalArticleStatus, string> = {
-  inbox: 'text-owner-dark bg-owner-bg',
+  inbox: 'text-cocreator-dark bg-cocreator-bg',
   read: 'text-gray-600 bg-gray-100',
   archived: 'text-gray-600 bg-gray-100',
   starred: 'text-amber-800 bg-amber-100',
@@ -66,8 +66,8 @@ export function SignalArticleList({
               className={[
                 'w-full rounded-xl border bg-white p-4 text-left shadow-sm transition-colors',
                 selected
-                  ? 'border-owner-primary ring-1 ring-owner-primary/40'
-                  : 'border-gray-200 hover:border-owner-light',
+                  ? 'border-cocreator-primary ring-1 ring-cocreator-primary/40'
+                  : 'border-gray-200 hover:border-cocreator-light',
               ].join(' ')}
             >
               <div className="flex items-start gap-3">

@@ -133,6 +133,7 @@ export class ConnectorRouter {
       platformKey: string;
       fileName?: string;
       duration?: number;
+      messageId?: string;
     }>,
   ): Promise<RouteResult> {
     const { bindingStore, dedup, messageStore, threadStore, invokeTrigger, socketManager, log } = this.opts;
@@ -285,7 +286,13 @@ export class ConnectorRouter {
   private async processAttachments(
     connectorId: string,
     originalText: string,
-    attachments: Array<{ type: 'image' | 'file' | 'audio'; platformKey: string; fileName?: string; duration?: number }>,
+    attachments: Array<{
+      type: 'image' | 'file' | 'audio';
+      platformKey: string;
+      fileName?: string;
+      duration?: number;
+      messageId?: string;
+    }>,
   ): Promise<{ text: string; contentBlocks: MessageContent[] }> {
     const parts: string[] = [];
     const contentBlocks: MessageContent[] = [];

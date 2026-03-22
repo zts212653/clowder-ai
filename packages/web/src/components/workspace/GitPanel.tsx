@@ -30,14 +30,14 @@ function StatusSection({
   if (items.length === 0) return null;
   return (
     <div className="mb-2">
-      <div className="text-[10px] font-semibold text-owner-dark/50 uppercase tracking-wider mb-1">
+      <div className="text-[10px] font-semibold text-cocreator-dark/50 uppercase tracking-wider mb-1">
         {title} ({items.length})
       </div>
       <div className="space-y-0.5">
         {items.map((item) => (
           <div
             key={item.path}
-            className="flex items-center gap-1.5 text-xs font-mono text-cafe-black/80 py-0.5 px-1 rounded hover:bg-owner-light/30"
+            className="flex items-center gap-1.5 text-xs font-mono text-cafe-black/80 py-0.5 px-1 rounded hover:bg-cocreator-light/30"
           >
             <StatusBadge status={item.status} variant={variant} />
             <span className="truncate">{item.path}</span>
@@ -54,14 +54,14 @@ function CommitRow({ commit, isExpanded, onToggle }: { commit: GitCommit; isExpa
     <button
       type="button"
       onClick={onToggle}
-      className={`w-full text-left px-2 py-1.5 text-xs hover:bg-owner-light/30 transition-colors border-b border-owner-light/20 ${isExpanded ? 'bg-owner-light/20' : ''}`}
+      className={`w-full text-left px-2 py-1.5 text-xs hover:bg-cocreator-light/30 transition-colors border-b border-cocreator-light/20 ${isExpanded ? 'bg-cocreator-light/20' : ''}`}
     >
       <div className="flex items-center gap-2">
-        <span className="font-mono text-owner-primary/70 text-[10px] shrink-0">{commit.short}</span>
+        <span className="font-mono text-cocreator-primary/70 text-[10px] shrink-0">{commit.short}</span>
         <span className="truncate text-cafe-black/80 flex-1">{commit.subject}</span>
-        <span className="text-[10px] text-owner-dark/40 shrink-0">{relDate}</span>
+        <span className="text-[10px] text-cocreator-dark/40 shrink-0">{relDate}</span>
       </div>
-      <div className="text-[10px] text-owner-dark/40 mt-0.5">{commit.author}</div>
+      <div className="text-[10px] text-cocreator-dark/40 mt-0.5">{commit.author}</div>
     </button>
   );
 }
@@ -101,15 +101,15 @@ export function GitPanel() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Refresh button */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-owner-light/40">
-        <span className="text-[10px] font-semibold text-owner-dark/50 uppercase tracking-wider">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-cocreator-light/40">
+        <span className="text-[10px] font-semibold text-cocreator-dark/50 uppercase tracking-wider">
           {status?.branch ? `Branch: ${status.branch}` : 'Git'}
         </span>
         <button
           type="button"
           onClick={refresh}
           disabled={loading}
-          className="text-[10px] text-owner-primary hover:text-owner-primary/80 disabled:opacity-50"
+          className="text-[10px] text-cocreator-primary hover:text-cocreator-primary/80 disabled:opacity-50"
         >
           {loading ? '...' : 'Refresh'}
         </button>
@@ -120,16 +120,16 @@ export function GitPanel() {
       <div className="flex-1 overflow-y-auto">
         {/* Git Status Section */}
         {status && totalChanges > 0 && (
-          <div className="border-b border-owner-light/40">
+          <div className="border-b border-cocreator-light/40">
             <button
               type="button"
               onClick={() => setStatusCollapsed(!statusCollapsed)}
-              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-owner-light/20"
+              className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-cocreator-light/20"
             >
-              <span className="text-[10px] font-semibold text-owner-dark/60 uppercase tracking-wider">
+              <span className="text-[10px] font-semibold text-cocreator-dark/60 uppercase tracking-wider">
                 Status ({totalChanges} changes)
               </span>
-              <span className="text-[10px] text-owner-dark/40">{statusCollapsed ? '▸' : '▾'}</span>
+              <span className="text-[10px] text-cocreator-dark/40">{statusCollapsed ? '▸' : '▾'}</span>
             </button>
             {!statusCollapsed && (
               <div className="px-3 pb-2">
@@ -142,7 +142,7 @@ export function GitPanel() {
         )}
 
         {status && totalChanges === 0 && (
-          <div className="px-3 py-2 text-xs text-green-600 border-b border-owner-light/40">Working tree clean</div>
+          <div className="px-3 py-2 text-xs text-green-600 border-b border-cocreator-light/40">Working tree clean</div>
         )}
 
         {/* Health Dashboard (Phase 2) */}
@@ -150,7 +150,7 @@ export function GitPanel() {
 
         {/* Git Log Section */}
         <div>
-          <div className="px-3 py-1.5 text-[10px] font-semibold text-owner-dark/50 uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm border-b border-owner-light/20">
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-cocreator-dark/50 uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm border-b border-cocreator-light/20">
             Commits ({commits.length})
           </div>
           {commits.map((commit) => (
@@ -161,15 +161,15 @@ export function GitPanel() {
                 onToggle={() => handleToggleCommit(commit.hash)}
               />
               {expandedHash === commit.hash && commitDetail && commitDetail.hash === commit.hash && (
-                <div className="bg-owner-light/10 px-3 py-2 border-b border-owner-light/30">
+                <div className="bg-cocreator-light/10 px-3 py-2 border-b border-cocreator-light/30">
                   {commitDetail.files.length === 0 ? (
-                    <div className="text-[10px] text-owner-dark/40">No file changes</div>
+                    <div className="text-[10px] text-cocreator-dark/40">No file changes</div>
                   ) : (
                     <div className="space-y-0.5">
                       {commitDetail.files.map((f) => (
                         <div key={f.path} className="flex items-center justify-between text-[10px] font-mono">
                           <span className="text-cafe-black/70 truncate">{f.path}</span>
-                          <span className="text-owner-dark/40 shrink-0 ml-2">{f.summary}</span>
+                          <span className="text-cocreator-dark/40 shrink-0 ml-2">{f.summary}</span>
                         </div>
                       ))}
                     </div>
@@ -179,7 +179,7 @@ export function GitPanel() {
             </div>
           ))}
           {commits.length === 0 && !loading && (
-            <div className="px-3 py-4 text-xs text-owner-dark/40 text-center">No commits found</div>
+            <div className="px-3 py-4 text-xs text-cocreator-dark/40 text-center">No commits found</div>
           )}
         </div>
       </div>

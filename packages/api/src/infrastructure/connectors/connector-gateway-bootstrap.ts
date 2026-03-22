@@ -37,8 +37,8 @@ export interface ConnectorGatewayConfig {
   feishuAppId?: string | undefined;
   feishuAppSecret?: string | undefined;
   feishuVerificationToken?: string | undefined;
-  /** Override owner userId for connector threads. Read from DEFAULT_OWNER_USER_ID env. */
-  ownerUserId?: string | undefined;
+  /** Override co-creator userId for connector threads. Read from DEFAULT_OWNER_USER_ID env. */
+  coCreatorUserId?: string | undefined;
   whisperUrl?: string | undefined;
   connectorMediaDir?: string | undefined;
 }
@@ -128,7 +128,7 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     feishuAppId: process.env.FEISHU_APP_ID,
     feishuAppSecret: process.env.FEISHU_APP_SECRET,
     feishuVerificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
-    ownerUserId: process.env.DEFAULT_OWNER_USER_ID,
+    coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID,
     whisperUrl: process.env.WHISPER_URL,
     connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR,
   };
@@ -159,11 +159,11 @@ export async function startConnectorGateway(
   const webhookHandlers = new Map<string, ConnectorWebhookHandler>();
   const stopFns: Array<() => Promise<void>> = [];
 
-  // Use ownerUserId from config (DEFAULT_OWNER_USER_ID env) if set,
+  // Use coCreatorUserId from config (DEFAULT_OWNER_USER_ID env) if set,
   // otherwise fall back to deps.defaultUserId.
   // This ensures connector threads are created with the real owner's userId,
   // making them visible in the frontend thread list. (F088 ISSUE-1 fix)
-  const effectiveUserId = config.ownerUserId || deps.defaultUserId;
+  const effectiveUserId = config.coCreatorUserId || deps.defaultUserId;
 
   const commandLayer = new ConnectorCommandLayer({
     bindingStore,
@@ -176,7 +176,6 @@ export async function startConnectorGateway(
   const mediaDir = config.connectorMediaDir ?? './data/connector-media';
   const mediaService = new ConnectorMediaService({
     mediaDir,
-    // Platform download functions will be wired after adapters are created
   });
 
   let sttProvider:
@@ -235,10 +234,37 @@ export async function startConnectorGateway(
     feishu._injectTokenManager(feishuTokenManager);
     adapters.set('feishu', feishu);
 
+    mediaService.setFeishuDownloadFn(async (fileKey: string, type: string, messageId?: string) => {
+      if (!messageId) throw new Error('Feishu download requires messageId');
+      const token = await feishuTokenManager.getTenantAccessToken();
+      const resourceType = type === 'image' ? 'image' : 'file';
+      const url = `https://open.feishu.cn/open-apis/im/v1/messages/${messageId}/resources/${fileKey}?type=${resourceType}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(`Feishu resource download failed: ${res.status} ${res.statusText}`);
+      }
+      return Buffer.from(await res.arrayBuffer());
+    });
+
     // Register webhook handler for the route
     webhookHandlers.set('feishu', {
       connectorId: 'feishu',
       async handleWebhook(body, _headers): Promise<WebhookHandleResult> {
+        const eventHeader = (body as Record<string, unknown>)?.header as Record<string, unknown> | undefined;
+        const msgType = ((body as Record<string, unknown>)?.event as Record<string, unknown> | undefined)?.message as
+          | Record<string, unknown>
+          | undefined;
+        log.info(
+          {
+            eventType: eventHeader?.event_type,
+            msgType: msgType?.message_type,
+            chatType: msgType?.chat_type,
+          },
+          '[Feishu] Webhook received',
+        );
+
         // Handle verification challenge (no token check — challenge is pre-auth)
         const challenge = feishu.isVerificationChallenge(body);
         if (challenge) {
@@ -247,6 +273,7 @@ export async function startConnectorGateway(
 
         // Verify event token (AC-4: webhook authentication)
         if (!feishu.verifyEventToken(body)) {
+          log.warn('[Feishu] Webhook rejected: invalid verification token');
           return { kind: 'error', status: 403, message: 'Invalid verification token' };
         }
 
@@ -269,12 +296,17 @@ export async function startConnectorGateway(
         // Parse event
         const parsed = feishu.parseEvent(body);
         if (!parsed) {
+          log.warn(
+            { eventType: eventHeader?.event_type, msgType: msgType?.message_type },
+            '[Feishu] Event skipped: parseEvent returned null (unsupported_event)',
+          );
           return { kind: 'skipped', reason: 'unsupported_event' };
         }
 
         const attachments = parsed.attachments?.map((a) => ({
           type: a.type,
           platformKey: a.feishuKey,
+          messageId: parsed.messageId,
           ...(a.fileName ? { fileName: a.fileName } : {}),
           ...(a.duration != null ? { duration: a.duration } : {}),
         }));

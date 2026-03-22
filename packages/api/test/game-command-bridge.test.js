@@ -189,7 +189,7 @@ describe('/game command bridge in POST /api/messages', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner' },
+      headers: { 'x-cat-cafe-user': 'you' },
       payload: {
         content: '/game werewolf god-view voice',
         threadId: 'thread-test-1',
@@ -230,7 +230,7 @@ describe('/game command bridge in POST /api/messages', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner' },
+      headers: { 'x-cat-cafe-user': 'you' },
       payload: {
         content: 'hello world',
         threadId: 'thread-test-2',
@@ -248,7 +248,7 @@ describe('/game command bridge in POST /api/messages', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner' },
+      headers: { 'x-cat-cafe-user': 'you' },
       payload: {
         content: '/game werewolf player voice',
         threadId: 'thread-test-3',
@@ -264,7 +264,7 @@ describe('/game command bridge in POST /api/messages', () => {
     assert.equal(threadCreatedEvents[0].room, 'thread:thread-test-3');
     assert.equal(
       threadCreatedEvents[0].data.initiatorUserId,
-      'owner',
+      'you',
       'should include initiatorUserId for frontend guard',
     );
 
@@ -282,7 +282,7 @@ describe('/game command bridge in POST /api/messages', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner' },
+      headers: { 'x-cat-cafe-user': 'you' },
       payload: {
         content: '/game werewolf player',
         threadId: 'thread-test-4',
@@ -300,7 +300,7 @@ describe('/game command bridge in POST /api/messages', () => {
     assert.equal(game.config.voiceMode, false);
     // P1 should be human
     assert.equal(game.seats[0].actorType, 'human');
-    assert.equal(game.seats[0].actorId, 'owner');
+    assert.equal(game.seats[0].actorId, 'you');
   });
 
   it('each /game command creates a separate game thread (no 409 conflict)', async () => {
@@ -308,7 +308,7 @@ describe('/game command bridge in POST /api/messages', () => {
     const res1 = await app.inject({
       method: 'POST',
       url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner' },
+      headers: { 'x-cat-cafe-user': 'you' },
       payload: {
         content: '/game werewolf player',
         threadId: 'thread-test-multi',
@@ -321,7 +321,7 @@ describe('/game command bridge in POST /api/messages', () => {
     const res2 = await app.inject({
       method: 'POST',
       url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner' },
+      headers: { 'x-cat-cafe-user': 'you' },
       payload: {
         content: '/game werewolf god-view',
         threadId: 'thread-test-multi',
@@ -361,7 +361,7 @@ describe('/game command bridge in POST /api/messages', () => {
     const res = await localApp.inject({
       method: 'POST',
       url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'owner' },
+      headers: { 'x-cat-cafe-user': 'you' },
       payload: {
         content: '/game werewolf player',
         threadId: 'thread-test-close',

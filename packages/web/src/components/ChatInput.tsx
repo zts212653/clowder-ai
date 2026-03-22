@@ -524,7 +524,7 @@ export function ChatInput({
   }, [activeMenu, closeMenus]);
 
   return (
-    <div className="border-t border-owner-light bg-owner-bg relative safe-area-bottom">
+    <div className="border-t border-cocreator-light bg-cocreator-bg relative safe-area-bottom">
       {/* F39: Queue status bar — visible when cat is running */}
       {hasActiveInvocation && (
         <div className="px-4 pt-2 flex items-center gap-2">
@@ -646,8 +646,8 @@ export function ChatInput({
           onClick={() => setMobileToolbar((v) => !v)}
           className={`p-3 rounded-xl transition-all md:hidden ${
             mobileToolbar
-              ? 'text-owner-primary bg-owner-light rotate-45'
-              : 'text-gray-400 hover:text-owner-primary hover:bg-white'
+              ? 'text-cocreator-primary bg-cocreator-light rotate-45'
+              : 'text-gray-400 hover:text-cocreator-primary hover:bg-white'
           }`}
           aria-label="展开工具栏"
         >
@@ -664,7 +664,7 @@ export function ChatInput({
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
-          className="hidden md:block p-3 rounded-xl text-gray-400 hover:text-owner-primary hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="hidden md:block p-3 rounded-xl text-gray-400 hover:text-cocreator-primary hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           aria-label="Attach images"
         >
           <AttachIcon className="w-5 h-5" />
@@ -716,7 +716,7 @@ export function ChatInput({
             className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-gray-400 ${
               whisperMode
                 ? 'border-amber-300 bg-amber-50/50 focus:ring-amber-400'
-                : 'border-owner-light bg-white focus:ring-owner-primary'
+                : 'border-cocreator-light bg-white focus:ring-cocreator-primary'
             }`}
             rows={1}
             disabled={disabled}

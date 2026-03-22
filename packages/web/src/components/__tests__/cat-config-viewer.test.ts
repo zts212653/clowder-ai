@@ -5,13 +5,13 @@ import { CatOverviewTab, type ConfigData, SystemTab } from '@/components/config-
 import type { CatData } from '@/hooks/useCatData';
 
 const CONFIG: ConfigData & {
-  owner: {
+  coCreator: {
     name: string;
     aliases: string[];
     mentionPatterns: string[];
   };
 } = {
-  owner: {
+  coCreator: {
     name: 'Co-worker',
     aliases: ['共创伙伴'],
     mentionPatterns: ['@co-worker', '@owner'],

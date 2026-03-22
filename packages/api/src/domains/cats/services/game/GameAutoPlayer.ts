@@ -22,6 +22,8 @@ interface AutoPlayerDeps {
   orchestrator: GameOrchestrator;
   /** Optional: when provided, AI speech context is assembled from messageStore (H4) */
   messageStore?: IMessageStore;
+  /** Optional: inject a deterministic AI player in tests instead of hitting live providers. */
+  aiPlayerFactory?: (catId: string) => WerewolfAIPlayer | null;
 }
 
 /** Phase → action mapping for werewolf */
@@ -45,26 +47,34 @@ export class GameAutoPlayer {
   private readonly store: IGameStore;
   private readonly orchestrator: GameOrchestrator;
   private readonly messageStore?: IMessageStore;
+  private readonly aiPlayerFactory?: (catId: string) => WerewolfAIPlayer | null;
   private readonly activeLoops = new Set<string>();
   private stopController: AbortController | null = null;
-  /** Per-cat AI player cache (keyed by actorId) */
-  private readonly aiPlayers = new Map<string, WerewolfAIPlayer>();
+  /** Per-cat AI player cache (keyed by actorId). null means "use random fallback only". */
+  private readonly aiPlayers = new Map<string, WerewolfAIPlayer | null>();
 
   constructor(deps: AutoPlayerDeps) {
     this.store = deps.gameStore;
     this.orchestrator = deps.orchestrator;
     this.messageStore = deps.messageStore;
+    this.aiPlayerFactory = deps.aiPlayerFactory;
   }
 
   /** Get or create a WerewolfAIPlayer for a cat. Returns null if model not configured. */
   private getAIPlayer(catId: string): WerewolfAIPlayer | null {
     if (this.aiPlayers.has(catId)) return this.aiPlayers.get(catId) ?? null;
     try {
+      if (this.aiPlayerFactory) {
+        const player = this.aiPlayerFactory(catId);
+        this.aiPlayers.set(catId, player);
+        return player;
+      }
       const player = new WerewolfAIPlayer(new LlmAIProvider(catId));
       this.aiPlayers.set(catId, player);
       return player;
     } catch {
       // Model not configured for this cat — cache miss, skip LLM
+      this.aiPlayers.set(catId, null);
       return null;
     }
   }

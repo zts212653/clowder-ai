@@ -79,8 +79,8 @@ describe('F061: detectUserMention in route-serial integration', () => {
   // These tests verify the function works correctly for the patterns
   // that route-serial will call it with (agent response content)
 
-  it('detects @owner in agent response', () => {
-    const agentResponse = '好的，我来帮你看看。\n@owner 这个改动已经完成了，请确认。';
+  it('detects @co-creator in agent response', () => {
+    const agentResponse = '好的，我来帮你看看。\n@co-creator 这个改动已经完成了，请确认。';
     assert.equal(detectUserMention(agentResponse), true);
   });
 
@@ -89,8 +89,8 @@ describe('F061: detectUserMention in route-serial integration', () => {
     assert.equal(detectUserMention(agentResponse), true);
   });
 
-  it('detects @user in agent response', () => {
-    const agentResponse = '@user 任务已完成。';
+  it('detects @co-creator in agent response', () => {
+    const agentResponse = '@co-creator 任务已完成。';
     assert.equal(detectUserMention(agentResponse), true);
   });
 
@@ -99,8 +99,8 @@ describe('F061: detectUserMention in route-serial integration', () => {
     assert.equal(detectUserMention(agentResponse), false);
   });
 
-  it('does not false-positive on @owner inside code block', () => {
-    const agentResponse = '```\n@owner mentioned in code\n```\n代码已修改。';
+  it('does not false-positive on @co-creator inside code block', () => {
+    const agentResponse = '```\n@co-creator mentioned in code\n```\n代码已修改。';
     assert.equal(detectUserMention(agentResponse), false);
   });
 

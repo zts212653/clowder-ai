@@ -139,23 +139,23 @@ describe('parseDirection', () => {
     expect(result?.targets).toEqual(['gpt52']);
   });
 
-  it('filters out __owner__ pseudo-cat from @mention results (P1-2)', () => {
-    // getMentionToCat maps @owner/@铲屎官 to __owner__ — must not leak into UI
+  it('filters out __co-creator__ pseudo-cat from @mention results (P1-2)', () => {
+    // getMentionToCat maps @co-creator/@铲屎官 to __co-creator__ — must not leak into UI
     const ownerToCat: Record<string, string> = {
       ...mockToCat,
-      landy: '__owner__',
-      铲屎官: '__owner__',
+      landy: '__co-creator__',
+      铲屎官: '__co-creator__',
     };
     const ownerAliases = Object.keys(ownerToCat).sort((a, b) => b.length - a.length);
     const ownerRe = new RegExp(`@(${ownerAliases.join('|')})(?=$|\\s|[,.:;!?])`, 'gi');
     const getOwnerMocks = () => ({ toCat: ownerToCat, re: ownerRe });
 
-    // Only @owner → should return null (owner filtered out)
-    const msg1 = { origin: 'callback' as const, content: '通知铲屎官\n@owner' };
+    // Only @co-creator → should return null (owner filtered out)
+    const msg1 = { origin: 'callback' as const, content: '通知铲屎官\n@co-creator' };
     expect(parseDirection(msg1, getOwnerMocks)).toBeNull();
 
-    // @owner + @codex → only codex in targets
-    const msg2 = { origin: 'callback' as const, content: '@owner @codex' };
+    // @co-creator + @codex → only codex in targets
+    const msg2 = { origin: 'callback' as const, content: '@co-creator @codex' };
     const result = parseDirection(msg2, getOwnerMocks);
     expect(result?.targets).toEqual(['codex']);
   });

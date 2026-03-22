@@ -1,7 +1,7 @@
 'use client';
 
 import { useCatData } from '@/hooks/useCatData';
-import { useOwnerConfig } from '@/hooks/useOwnerConfig';
+import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { CatAvatar } from './CatAvatar';
 
 interface SummaryCardProps {
@@ -23,10 +23,10 @@ function formatTime(ts: number): string {
 export function SummaryCard({ topic, conclusions, openQuestions, createdBy, timestamp }: SummaryCardProps) {
   // F032 P2: Use dynamic cat data instead of hardcoded CAT_NAMES
   const { getCatById } = useCatData();
-  const owner = useOwnerConfig();
+  const coCreator = useCoCreatorConfig();
   const catData = getCatById(createdBy);
-  // Special case: 'system' createdBy → '系统纪要', otherwise use cat displayName or configured owner name
-  const creatorLabel = createdBy === 'system' ? '系统纪要' : (catData?.displayName ?? owner.name);
+  // Special case: 'system' createdBy → '系统纪要', otherwise use cat displayName or configured co-creator name
+  const creatorLabel = createdBy === 'system' ? '系统纪要' : (catData?.displayName ?? coCreator.name);
 
   return (
     <div className="flex justify-center mb-4">
