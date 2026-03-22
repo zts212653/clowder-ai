@@ -12,6 +12,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
+
+ensureFakeCliOnPath('claude');
+ensureFakeCliOnPath('codex');
+ensureFakeCliOnPath('gemini');
 
 describe('saveUploadedImages', () => {
   let uploadDir;
