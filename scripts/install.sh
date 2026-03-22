@@ -627,8 +627,10 @@ if node_needs_install; then
                 brew install node@20 2>/dev/null || true
                 # node@20 is keg-only — Homebrew does not link it into PATH by default.
                 # Add the keg bin to PATH so node/npm are discoverable this session.
-                local keg_bin; keg_bin="$(brew --prefix node@20 2>/dev/null)/bin"
-                [[ -d "$keg_bin" ]] && export PATH="$keg_bin:$PATH"
+                # NB: no `local` here — this runs at top-level, not inside a function.
+                _keg_bin="$(brew --prefix node@20 2>/dev/null)/bin"
+                [[ -d "$_keg_bin" ]] && export PATH="$_keg_bin:$PATH"
+                unset _keg_bin
                 node_needs_install || NODE_OK=true
             fi
             ;;

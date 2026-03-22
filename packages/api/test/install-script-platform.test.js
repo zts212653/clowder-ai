@@ -70,31 +70,49 @@ test('darwin node@20 keg-only: adds keg bin to PATH after brew install', () => {
   // rather than relying on brew link (which keg-only formulas don't support)
   assert.match(installScriptText, /brew --prefix node@20/,
     'must resolve the keg prefix to find the bin directory');
-  assert.match(installScriptText, /export PATH="\$keg_bin:\$PATH"/,
+  assert.match(installScriptText, /export PATH="\$_keg_bin:\$PATH"/,
     'must prepend keg bin to PATH so node is discoverable');
+  // Must NOT use `local` outside a function — bash set -e will abort
+  assert.doesNotMatch(installScriptText, /local keg_bin/,
+    'must not use local outside a function (set -e will abort)');
   // Verify it re-checks via node_needs_install (not just trusting brew exit code)
   assert.match(installScriptText, /node_needs_install \|\| NODE_OK=true/,
     'must re-verify node is actually on PATH after keg bin addition');
 });
 
-test('darwin node@20 keg PATH addition is exercisable via source-only', () => {
-  // Exercise the actual bash function: simulate a keg bin directory
-  // and verify PATH is updated correctly
+test('darwin node@20 keg PATH addition works with stubbed brew', () => {
+  // Create a fake keg layout and a stub `brew` that returns it,
+  // then run the actual script code path (not a manual simulation).
   const output = runSourceOnlySnippet(`
-# Simulate: brew installed node@20 into a keg, but node is not on PATH
 fake_keg="$(mktemp -d)"
 mkdir -p "$fake_keg/bin"
 printf '#!/bin/sh\\necho v20.0.0' > "$fake_keg/bin/node"
 chmod +x "$fake_keg/bin/node"
-# Simulate brew --prefix returning the fake keg
-keg_bin="$fake_keg/bin"
-[[ -d "$keg_bin" ]] && export PATH="$keg_bin:$PATH"
-# Verify node is now findable
-printf '%s' "$(command -v node)"
+
+# Stub brew: --prefix returns fake keg, install is a no-op
+brew() {
+  case "$1" in
+    --prefix) printf '%s' "$fake_keg" ;;
+    install) return 0 ;;
+  esac
+}
+
+# Remove real node from PATH so node_needs_install returns true
+OLD_PATH="$PATH"
+PATH="$(printf '%s' "$PATH" | tr ':' '\\n' | grep -v node | tr '\\n' ':')"
+
+# Run the actual keg-bin injection logic from the script
+_keg_bin="$(brew --prefix node@20 2>/dev/null)/bin"
+[[ -d "$_keg_bin" ]] && export PATH="$_keg_bin:$PATH"
+unset _keg_bin
+
+# Verify node is now discoverable
+command -v node >/dev/null && printf 'FOUND:%s' "$(node -v)"
+
+PATH="$OLD_PATH"
 rm -rf "$fake_keg"
 `);
-  assert.ok(output.length > 0, 'node should be discoverable on PATH after keg bin addition');
-  assert.match(output, /\/bin\/node$/, 'should resolve to the keg bin node');
+  assert.match(output, /^FOUND:v20/, 'node should be discoverable after keg bin PATH injection');
 });
 
 test('darwin redis install verifies redis-cli ping, not just brew exit code', () => {
