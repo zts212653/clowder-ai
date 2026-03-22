@@ -1298,15 +1298,111 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(msgs.some((m) => m.type === 'error' && String(m.error).includes('upstream timeout')));
   });
 
+  async function withSanitizedOpencodeConfig(run) {
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const baselineConfigs = toAllCatConfigs(loadCatConfig());
+    const baselineOpencodeConfig = baselineConfigs.opencode;
+    assert.ok(baselineOpencodeConfig, 'opencode config should exist in baseline catalog');
+
+    const {
+      accountRef: _ignoredAccountRef,
+      providerProfileId: _ignoredProviderProfileId,
+      ...sanitizedOpencodeConfig
+    } = baselineOpencodeConfig;
+
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(baselineConfigs)) {
+      if (id === 'opencode') {
+        catRegistry.register(id, sanitizedOpencodeConfig);
+      } else {
+        catRegistry.register(id, config);
+      }
+    }
+
+    try {
+      return await run();
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+    }
+  }
+
   it('opencode self-heal: retries once without --resume when resumed session hits prompt token limit', async () => {
-    let invokeCount = 0;
-    const sessionDeletes = [];
-    const optionsSeen = [];
-    const service = {
-      async *invoke(_prompt, options) {
-        optionsSeen.push(options);
-        invokeCount++;
-        if (invokeCount === 1) {
+    await withSanitizedOpencodeConfig(async () => {
+      let invokeCount = 0;
+      const sessionDeletes = [];
+      const optionsSeen = [];
+      const service = {
+        async *invoke(_prompt, options) {
+          optionsSeen.push(options);
+          invokeCount++;
+          if (invokeCount === 1) {
+            yield {
+              type: 'error',
+              catId: 'opencode',
+              error: 'prompt token count of 128625 exceeds the limit of 128000',
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+            return;
+          }
+          yield { type: 'session_init', catId: 'opencode', sessionId: 'fresh-opencode-sess', timestamp: Date.now() };
+          yield { type: 'text', catId: 'opencode', content: 'recovered', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+        },
+      };
+
+      const deps = makeDeps();
+      deps.sessionManager = {
+        get: async () => 'poisoned-opencode-sess',
+        store: async () => {},
+        delete: async (u, c, t) => {
+          sessionDeletes.push(`${u}:${c}:${t}`);
+        },
+      };
+
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'test',
+          userId: 'user-opencode-retry',
+          threadId: 'thread-opencode-retry',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(invokeCount, 2, 'should re-invoke service once after poisoned opencode session error');
+      assert.equal(optionsSeen[0].sessionId, 'poisoned-opencode-sess', 'first attempt should include stored session');
+      assert.equal(optionsSeen[1].sessionId, undefined, 'retry attempt should drop --resume session');
+      assert.deepEqual(
+        sessionDeletes,
+        ['user-opencode-retry:opencode:thread-opencode-retry'],
+        'should delete poisoned session before retry',
+      );
+      assert.ok(
+        msgs.some((m) => m.type === 'text' && m.content === 'recovered'),
+        'should recover and stream retry result',
+      );
+      assert.equal(
+        msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
+        false,
+        'poisoned-session overflow error should be suppressed when retry succeeds',
+      );
+    });
+  });
+
+  it('opencode self-heal: does not retry prompt limit after content already streamed', async () => {
+    await withSanitizedOpencodeConfig(async () => {
+      let invokeCount = 0;
+      const sessionDeletes = [];
+      const service = {
+        async *invoke() {
+          invokeCount++;
+          yield { type: 'text', catId: 'opencode', content: 'partial-output', timestamp: Date.now() };
           yield {
             type: 'error',
             catId: 'opencode',
@@ -1314,143 +1410,85 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             timestamp: Date.now(),
           };
           yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
-          return;
-        }
-        yield { type: 'session_init', catId: 'opencode', sessionId: 'fresh-opencode-sess', timestamp: Date.now() };
-        yield { type: 'text', catId: 'opencode', content: 'recovered', timestamp: Date.now() };
-        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
-      },
-    };
+        },
+      };
 
-    const deps = makeDeps();
-    deps.sessionManager = {
-      get: async () => 'poisoned-opencode-sess',
-      store: async () => {},
-      delete: async (u, c, t) => {
-        sessionDeletes.push(`${u}:${c}:${t}`);
-      },
-    };
+      const deps = makeDeps();
+      deps.sessionManager = {
+        get: async () => 'poisoned-opencode-sess',
+        store: async () => {},
+        delete: async (u, c, t) => {
+          sessionDeletes.push(`${u}:${c}:${t}`);
+        },
+      };
 
-    const msgs = await collect(
-      invokeSingleCat(deps, {
-        catId: 'opencode',
-        service,
-        prompt: 'test',
-        userId: 'user-opencode-retry',
-        threadId: 'thread-opencode-retry',
-        isLastCat: true,
-      }),
-    );
-
-    assert.equal(invokeCount, 2, 'should re-invoke service once after poisoned opencode session error');
-    assert.equal(optionsSeen[0].sessionId, 'poisoned-opencode-sess', 'first attempt should include stored session');
-    assert.equal(optionsSeen[1].sessionId, undefined, 'retry attempt should drop --resume session');
-    assert.deepEqual(
-      sessionDeletes,
-      ['user-opencode-retry:opencode:thread-opencode-retry'],
-      'should delete poisoned session before retry',
-    );
-    assert.ok(
-      msgs.some((m) => m.type === 'text' && m.content === 'recovered'),
-      'should recover and stream retry result',
-    );
-    assert.equal(
-      msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
-      false,
-      'poisoned-session overflow error should be suppressed when retry succeeds',
-    );
-  });
-
-  it('opencode self-heal: does not retry prompt limit after content already streamed', async () => {
-    let invokeCount = 0;
-    const sessionDeletes = [];
-    const service = {
-      async *invoke() {
-        invokeCount++;
-        yield { type: 'text', catId: 'opencode', content: 'partial-output', timestamp: Date.now() };
-        yield {
-          type: 'error',
+      const msgs = await collect(
+        invokeSingleCat(deps, {
           catId: 'opencode',
-          error: 'prompt token count of 128625 exceeds the limit of 128000',
-          timestamp: Date.now(),
-        };
-        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
-      },
-    };
+          service,
+          prompt: 'test',
+          userId: 'user-opencode-no-retry-after-output',
+          threadId: 'thread-opencode-no-retry-after-output',
+          isLastCat: true,
+        }),
+      );
 
-    const deps = makeDeps();
-    deps.sessionManager = {
-      get: async () => 'poisoned-opencode-sess',
-      store: async () => {},
-      delete: async (u, c, t) => {
-        sessionDeletes.push(`${u}:${c}:${t}`);
-      },
-    };
-
-    const msgs = await collect(
-      invokeSingleCat(deps, {
-        catId: 'opencode',
-        service,
-        prompt: 'test',
-        userId: 'user-opencode-no-retry-after-output',
-        threadId: 'thread-opencode-no-retry-after-output',
-        isLastCat: true,
-      }),
-    );
-
-    assert.equal(invokeCount, 1, 'must not retry after partial output to avoid duplicate side effects');
-    assert.deepEqual(sessionDeletes, [], 'must not delete session when prompt-limit happens after content output');
-    assert.ok(
-      msgs.some((m) => m.type === 'text' && m.content === 'partial-output'),
-      'already-streamed content should be preserved',
-    );
-    assert.ok(
-      msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
-      'prompt-limit error should surface when retry is unsafe',
-    );
+      assert.equal(invokeCount, 1, 'must not retry after partial output to avoid duplicate side effects');
+      assert.deepEqual(sessionDeletes, [], 'must not delete session when prompt-limit happens after content output');
+      assert.ok(
+        msgs.some((m) => m.type === 'text' && m.content === 'partial-output'),
+        'already-streamed content should be preserved',
+      );
+      assert.ok(
+        msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
+        'prompt-limit error should surface when retry is unsafe',
+      );
+    });
   });
 
   it('opencode self-heal: flushes prompt limit error when invoke ends without done', async () => {
-    let invokeCount = 0;
-    const sessionDeletes = [];
-    const service = {
-      async *invoke() {
-        invokeCount++;
-        yield {
-          type: 'error',
+    await withSanitizedOpencodeConfig(async () => {
+      let invokeCount = 0;
+      const sessionDeletes = [];
+      const service = {
+        async *invoke() {
+          invokeCount++;
+          yield {
+            type: 'error',
+            catId: 'opencode',
+            error: 'prompt token count of 128625 exceeds the limit of 128000',
+            timestamp: Date.now(),
+          };
+        },
+      };
+
+      const deps = makeDeps();
+      deps.sessionManager = {
+        get: async () => 'poisoned-opencode-sess',
+        store: async () => {},
+        delete: async (u, c, t) => {
+          sessionDeletes.push(`${u}:${c}:${t}`);
+        },
+      };
+
+      const msgs = await collect(
+        invokeSingleCat(deps, {
           catId: 'opencode',
-          error: 'prompt token count of 128625 exceeds the limit of 128000',
-          timestamp: Date.now(),
-        };
-      },
-    };
+          service,
+          prompt: 'test',
+          userId: 'user-opencode-no-done',
+          threadId: 'thread-opencode-no-done',
+          isLastCat: true,
+        }),
+      );
 
-    const deps = makeDeps();
-    deps.sessionManager = {
-      get: async () => 'poisoned-opencode-sess',
-      store: async () => {},
-      delete: async (u, c, t) => {
-        sessionDeletes.push(`${u}:${c}:${t}`);
-      },
-    };
-
-    const msgs = await collect(
-      invokeSingleCat(deps, {
-        catId: 'opencode',
-        service,
-        prompt: 'test',
-        userId: 'user-opencode-no-done',
-        threadId: 'thread-opencode-no-done',
-        isLastCat: true,
-      }),
-    );
-
-    assert.equal(invokeCount, 1, 'should not retry when the prompt-limit path never reaches done');
-    assert.deepEqual(sessionDeletes, [], 'must not delete session when retry precondition was never met');
-    assert.ok(
-      msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
-      'prompt-limit error must be surfaced instead of being swallowed',
-    );
+      assert.equal(invokeCount, 1, 'should not retry when the prompt-limit path never reaches done');
+      assert.deepEqual(sessionDeletes, [], 'must not delete session when retry precondition was never met');
+      assert.ok(
+        msgs.some((m) => m.type === 'error' && String(m.error).includes('prompt token count')),
+        'prompt-limit error must be surfaced instead of being swallowed',
+      );
+    });
   });
 
   it('transient CLI self-heal: retries once when Claude exits code 1 before any stream output', async () => {
