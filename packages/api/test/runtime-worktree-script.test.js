@@ -282,10 +282,11 @@ describe('runtime-worktree.sh', () => {
     assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     assert.match(
       result.stdout,
-      new RegExp(
-        `STARTED:${escapeRegExp(runtimeDirPhysical)}\\|API:7314\\|PREVIEW:7410\\|OPENAI:test-openai-key`,
-      ),
+      new RegExp(`STARTED:${escapeRegExp(runtimeDirPhysical)}\\|API:7314\\|PREVIEW:7410\\|OPENAI:test-openai-key`),
     );
-    assert.equal(readFileSync(join(runtimeDirPhysical, '.env'), 'utf8'), readFileSync(join(projectDir, '.env'), 'utf8'));
+    assert.equal(
+      readFileSync(join(runtimeDirPhysical, '.env'), 'utf8'),
+      readFileSync(join(projectDir, '.env'), 'utf8'),
+    );
   });
 });
