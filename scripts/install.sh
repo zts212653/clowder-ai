@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Clowder AI — Linux Repo-Local Install Helper (F113)
+# Clowder AI — Repo-Local Install Helper (F113)
 # Usage: bash scripts/install.sh [--start] [--memory] [--registry=URL]
-# Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
+# Supported: macOS (Homebrew), Debian/Ubuntu, CentOS/RHEL/Fedora
 
 set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -35,10 +35,11 @@ info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
 step() { echo ""; echo -e "${BOLD}$*${NC}"; }
 USED_FNM=false
+resolve_realpath() { realpath "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || echo "$1"; }
 persist_user_bin() {
     local bin="$1" path=""; path="$(command -v "$bin" 2>/dev/null || true)"
     [[ -n "$path" ]] || return 0; $SUDO mkdir -p /usr/local/bin
-    $SUDO ln -sfn "$(readlink -f "$path" 2>/dev/null || echo "$path")" "/usr/local/bin/$bin"
+    $SUDO ln -sfn "$(resolve_realpath "$path")" "/usr/local/bin/$bin"
 }
 
 # TTY-safe read + pnpm install with registry fallback
@@ -500,33 +501,47 @@ fs.writeFileSync(pf, JSON.stringify(profiles)); if (secrets) fs.writeFileSync(sf
 EONODE
 }
 
+PLATFORM="$(uname -s)"
+
 if [[ "$SOURCE_ONLY" == true ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
-
-if [[ "$(uname -s)" != "Linux" ]]; then
-    fail "This script is for Linux only. Detected: $(uname -s)"; exit 1
-fi
-
 DISTRO_FAMILY=""; DISTRO_NAME=""; PKG_INSTALL=""; PKG_UPDATE=""
-if [[ -f /etc/os-release ]]; then
-    . /etc/os-release; DISTRO_NAME="${ID:-unknown}"
-    case "$DISTRO_NAME" in
-        ubuntu|debian|linuxmint|pop) DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
-            PKG_INSTALL="apt-get install -y"; export DEBIAN_FRONTEND=noninteractive ;;
-        centos|rhel|rocky|almalinux|fedora) DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
-            if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y"; else PKG_INSTALL="yum install -y"; fi ;;
-    esac
-fi
+case "$PLATFORM" in
+    Darwin)
+        DISTRO_FAMILY="darwin"; DISTRO_NAME="macOS"
+        if ! command -v brew &>/dev/null; then
+            info "  Homebrew not found — installing..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+            # Add Homebrew to PATH for Apple Silicon and Intel Macs
+            [[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
+            [[ -x /usr/local/bin/brew ]] && eval "$(/usr/local/bin/brew shellenv)"
+            command -v brew &>/dev/null || { fail "Homebrew install failed. Install manually: https://brew.sh"; exit 1; }
+        fi
+        PKG_INSTALL="brew install"; PKG_UPDATE="brew update"
+        ;;
+    Linux)
+        if [[ -f /etc/os-release ]]; then
+            . /etc/os-release; DISTRO_NAME="${ID:-unknown}"
+            case "$DISTRO_NAME" in
+                ubuntu|debian|linuxmint|pop) DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
+                    PKG_INSTALL="apt-get install -y"; export DEBIAN_FRONTEND=noninteractive ;;
+                centos|rhel|rocky|almalinux|fedora) DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
+                    if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y"; else PKG_INSTALL="yum install -y"; fi ;;
+            esac
+        fi
+        ;;
+    *) fail "Unsupported platform: $PLATFORM. Need: macOS or Linux"; exit 1 ;;
+esac
 
-if [[ -z "$DISTRO_FAMILY" ]]; then fail "Unsupported: ${DISTRO_NAME:-unknown}. Need: Ubuntu/Debian or CentOS/RHEL/Fedora"; exit 1; fi
+if [[ -z "$DISTRO_FAMILY" ]]; then fail "Unsupported: ${DISTRO_NAME:-unknown}. Need: macOS, Ubuntu/Debian, or CentOS/RHEL/Fedora"; exit 1; fi
 ok "OS: ${PRETTY_NAME:-$DISTRO_NAME} ($DISTRO_FAMILY)"
 
 SUDO=""
-if [[ $EUID -ne 0 ]]; then
+if [[ "$DISTRO_FAMILY" != "darwin" && $EUID -ne 0 ]]; then
     command -v sudo &>/dev/null || { fail "Not root and sudo not found / 请以 root 运行或安装 sudo"; exit 1; }
     SUDO="sudo"
 fi
@@ -543,15 +558,27 @@ for cmd in git curl; do
         NEED_PKGS+=("$cmd")
     fi
 done
-if ! command -v gcc &>/dev/null || ! command -v g++ &>/dev/null || ! command -v make &>/dev/null; then
-    warn "C/C++ build toolchain incomplete — will install"
-    case "$DISTRO_FAMILY" in debian) NEED_PKGS+=(build-essential) ;; rhel) NEED_PKGS+=(gcc gcc-c++ make) ;; esac
+if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+    # Xcode CLT provides git, make, clang — install if missing
+    if ! xcode-select -p &>/dev/null; then
+        warn "Xcode Command Line Tools not found — installing..."
+        xcode-select --install 2>/dev/null || true
+        # Wait for the installer to finish (user-interactive on macOS)
+        until xcode-select -p &>/dev/null; do sleep 5; done
+        ok "Xcode Command Line Tools installed"
+    else ok "Xcode Command Line Tools present"
+    fi
+else
+    if ! command -v gcc &>/dev/null || ! command -v g++ &>/dev/null || ! command -v make &>/dev/null; then
+        warn "C/C++ build toolchain incomplete — will install"
+        case "$DISTRO_FAMILY" in debian) NEED_PKGS+=(build-essential) ;; rhel) NEED_PKGS+=(gcc gcc-c++ make) ;; esac
+    fi
+    # Ensure HTTPS/GPG deps exist (needed for NodeSource)
+    case "$DISTRO_FAMILY" in
+        debian) for p in ca-certificates gnupg; do dpkg -s "$p" &>/dev/null || NEED_PKGS+=("$p"); done ;;
+        rhel) rpm -q ca-certificates &>/dev/null || NEED_PKGS+=(ca-certificates); rpm -q gnupg2 &>/dev/null || NEED_PKGS+=(gnupg2) ;;
+    esac
 fi
-# Ensure HTTPS/GPG deps exist (needed for NodeSource)
-case "$DISTRO_FAMILY" in
-    debian) for p in ca-certificates gnupg; do dpkg -s "$p" &>/dev/null || NEED_PKGS+=("$p"); done ;;
-    rhel) rpm -q ca-certificates &>/dev/null || NEED_PKGS+=(ca-certificates); rpm -q gnupg2 &>/dev/null || NEED_PKGS+=(gnupg2) ;;
-esac
 if [[ ${#NEED_PKGS[@]} -gt 0 ]]; then
     info "  Installing: ${NEED_PKGS[*]}..."
     $SUDO $PKG_UPDATE 2>/dev/null || true
@@ -593,6 +620,11 @@ install_node_fnm() {
 if node_needs_install; then
     NODE_OK=false
     case "$DISTRO_FAMILY" in
+        darwin)
+            # Prefer fnm for version management; fall back to Homebrew
+            install_node_fnm && NODE_OK=true
+            [[ "$NODE_OK" == false ]] && brew install node@20 2>/dev/null && NODE_OK=true
+            ;;
         debian)
             $SUDO mkdir -p /etc/apt/keyrings
             if timeout 15 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -634,15 +666,30 @@ else ok "pnpm $(pnpm -v) already installed"
 fi
 # Redis: detect → already running / --memory skip / ask user
 install_redis_local() {
-    case "$DISTRO_FAMILY" in debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;; esac
-    $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
-    $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; ok "Redis installed and started"
+    case "$DISTRO_FAMILY" in
+        darwin)
+            brew install redis 2>/dev/null || true
+            brew services start redis 2>/dev/null || true
+            ;;
+        debian) $SUDO $PKG_INSTALL redis-server ;;
+        rhel) $SUDO $PKG_INSTALL redis ;;
+    esac
+    if [[ "$DISTRO_FAMILY" != "darwin" ]]; then
+        $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
+        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
+    fi
+    ok "Redis installed and started"
+}
+start_redis_if_stopped() {
+    if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+        brew services start redis 2>/dev/null || true
+    else
+        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
+    fi
 }
 if [[ "$MEMORY_MODE" == true ]]; then warn "Memory mode (--memory) — skipping Redis"
 elif command -v redis-server &>/dev/null; then ok "Redis already installed"
-    redis-cli ping &>/dev/null 2>&1 || {
-        warn "Redis not running — starting..."
-        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; }
+    redis-cli ping &>/dev/null 2>&1 || { warn "Redis not running — starting..."; start_redis_if_stopped; }
 else
     warn "Redis not found — installing locally"
     install_redis_local
