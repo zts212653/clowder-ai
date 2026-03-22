@@ -591,7 +591,11 @@ describe('GeminiAgentService (adapter selection)', () => {
 
     // Verify gemini CLI was spawned (not antigravity)
     assert.equal(spawnFn.mock.callCount(), 1);
-    assert.equal(spawnFn.mock.calls[0].arguments[0], 'gemini');
+    const spawnedCommand = spawnFn.mock.calls[0].arguments[0];
+    assert.ok(
+      spawnedCommand === 'gemini' || spawnedCommand.endsWith('/gemini'),
+      `Expected gemini command, got: ${spawnedCommand}`,
+    );
   });
 
   test('selects antigravity via constructor option', async () => {

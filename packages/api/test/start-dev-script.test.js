@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -191,26 +191,49 @@ test('explicit PREVIEW_GATEWAY_PORT override survives project .env during direct
 
 test('direct command mode can prefer current .env ports over ambient shell ports', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
-  const result = spawnSync(
-    'bash',
-    [
-      '-lc',
-      `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s|%s' "$FRONTEND_PORT" "$API_SERVER_PORT" "$NEXT_PUBLIC_API_URL"`,
-    ],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
-        FRONTEND_PORT: '3004',
-        API_SERVER_PORT: '3003',
-        NEXT_PUBLIC_API_URL: 'http://localhost:3003',
-      },
-    },
-  );
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-dotenv-ports-'));
+  const tempScriptPath = join(tempRoot, 'scripts', 'start-dev.sh');
+  const tempOverridesPath = join(tempRoot, 'scripts', 'download-source-overrides.sh');
+  const baseEnv = {
+    PATH: process.env.PATH ?? '',
+    HOME: process.env.HOME ?? '',
+    TERM: process.env.TERM ?? 'xterm-256color',
+    CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
+  };
 
-  assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  assert.equal(result.stdout.trim(), '3013|3014|http://localhost:3014');
+  try {
+    mkdirSync(join(tempRoot, 'scripts'), { recursive: true });
+    cpSync(scriptPath, tempScriptPath);
+    cpSync(resolve(process.cwd(), '../../scripts/download-source-overrides.sh'), tempOverridesPath);
+    writeFileSync(
+      join(tempRoot, '.env'),
+      'FRONTEND_PORT=3003\nAPI_SERVER_PORT=3004\nNEXT_PUBLIC_API_URL=http://localhost:3004\n',
+      'utf8',
+    );
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${tempScriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s|%s' "$FRONTEND_PORT" "$API_SERVER_PORT" "$NEXT_PUBLIC_API_URL"`,
+      ],
+      {
+        cwd: tempRoot,
+        encoding: 'utf8',
+        env: {
+          ...baseEnv,
+          FRONTEND_PORT: '3002',
+          API_SERVER_PORT: '3000',
+          NEXT_PUBLIC_API_URL: 'http://localhost:3000',
+        },
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '3003|3004|http://localhost:3004');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('redis port override also recomputes isolated redis dirs', () => {
