@@ -34,6 +34,7 @@ pnpm start
 ```
 
 `pnpm start` uses the **runtime worktree** architecture: it creates an isolated `../cat-cafe-runtime` worktree (on first run), syncs it to `origin/main`, builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). This keeps your development checkout clean.
+Before each launch, the root checkout's `.env` / `.env.local` is mirrored into the runtime worktree. Edit the root checkout config, not `../cat-cafe-runtime`.
 
 Open `http://localhost:3003` and start talking to your team.
 
@@ -59,7 +60,7 @@ your-projects/
 | `pnpm runtime:sync` | Only sync worktree to origin/main (no start) |
 | `pnpm runtime:status` | Show worktree path, branch, HEAD, ahead/behind |
 
-First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast-forward sync then start.
+First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast-forward sync then start. The root checkout remains the source of truth for `.env` / `.env.local`; `pnpm start` and `pnpm runtime:sync` mirror those files into the runtime worktree before launch.
 
 ## Configuration
 
@@ -409,6 +410,7 @@ pnpm start
 ```
 
 `pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
+每次启动前，根目录 checkout 里的 `.env` / `.env.local` 会镜像到 runtime worktree。配置改根目录，不要去改 `../cat-cafe-runtime`。
 
 打开 `http://localhost:3003`，开始和你的团队对话。
 
@@ -434,7 +436,7 @@ your-projects/
 | `pnpm runtime:sync` | 只同步 worktree 到 origin/main（不启动） |
 | `pnpm runtime:status` | 显示 worktree 路径、分支、HEAD、ahead/behind |
 
-首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。
+首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。根目录 checkout 始终是 `.env` / `.env.local` 的真相源；`pnpm start` 和 `pnpm runtime:sync` 会在启动前把这些文件镜像到 runtime worktree。
 
 ## 配置
 
