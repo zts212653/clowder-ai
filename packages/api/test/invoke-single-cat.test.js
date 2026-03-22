@@ -1301,7 +1301,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   async function withSanitizedOpencodeConfig(run) {
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const registrySnapshot = catRegistry.getAllConfigs();
-    const baselineConfigs = toAllCatConfigs(loadCatConfig());
+    const baselineConfigs = toAllCatConfigs(loadCatConfig(join(process.cwd(), '..', '..', 'cat-template.json')));
     const baselineOpencodeConfig = baselineConfigs.opencode;
     assert.ok(baselineOpencodeConfig, 'opencode config should exist in baseline catalog');
 
@@ -1310,6 +1310,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       providerProfileId: _ignoredProviderProfileId,
       ...sanitizedOpencodeConfig
     } = baselineOpencodeConfig;
+    sanitizedOpencodeConfig.defaultModel = 'anthropic/claude-opus-4-6';
 
     catRegistry.reset();
     for (const [id, config] of Object.entries(baselineConfigs)) {
