@@ -363,7 +363,7 @@ start_runtime_worktree() {
     ensure_runtime_start_prereqs
     info "running in-place (deployment mode): $PROJECT_DIR"
     cd "$PROJECT_DIR"
-    exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
+    exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 CAT_CAFE_CONFIG_ROOT="${CAT_CAFE_CONFIG_ROOT:-$PROJECT_DIR}" ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
   if ! worktree_exists; then
@@ -392,8 +392,11 @@ start_runtime_worktree() {
   info "starting production stack from runtime worktree: $RUNTIME_DIR"
   cd "$RUNTIME_DIR"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
+  # CAT_CAFE_CONFIG_ROOT points back to the source repo so platform-level
+  # config (.cat-cafe/provider-profiles.json etc.) is read from one place,
+  # not from the runtime worktree's separate pnpm-workspace root (#176).
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
-  exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
+  exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 CAT_CAFE_CONFIG_ROOT="${CAT_CAFE_CONFIG_ROOT:-$PROJECT_DIR}" ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
 
 COMMAND="${1:-status}"
