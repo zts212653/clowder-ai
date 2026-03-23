@@ -22,6 +22,7 @@ import type {
   UpdateProviderProfileInput,
 } from './provider-profiles.types.js';
 import {
+  detectProjectLocalProfiles,
   listProviderProfilesProjectRoots,
   resolveProviderProfilesRoot,
   resolveProviderProfilesRootSync,
@@ -125,7 +126,13 @@ async function withStorageRootLock<T>(storageRoot: string, action: () => Promise
 
 async function withProviderStoreLock<T>(projectRoot: string, action: (storageRoot: string) => Promise<T>): Promise<T> {
   const storageRoot = await resolveProviderProfilesRoot(projectRoot);
-  return withStorageRootLock(storageRoot, () => action(storageRoot));
+  return withStorageRootLock(storageRoot, async () => {
+    const localRoot = detectProjectLocalProfiles(projectRoot);
+    if (localRoot) {
+      await migrateProjectLocalToGlobal(localRoot, storageRoot);
+    }
+    return action(storageRoot);
+  });
 }
 
 type LegacyProviderProfilesMetaFileV1 = {
@@ -589,6 +596,15 @@ async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> 
     await unlink(tempPath).catch(() => {});
     throw error;
   }
+}
+
+async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: string): Promise<void> {
+  const localResult = await readRawAtStorageRoot(projectRoot);
+  const globalDir = safePath(globalRoot, CAT_CAFE_DIR);
+  await mkdir(globalDir, { recursive: true });
+  const globalMetaPath = safePath(globalRoot, CAT_CAFE_DIR, META_FILENAME);
+  const globalSecretsPath = safePath(globalRoot, CAT_CAFE_DIR, SECRETS_FILENAME);
+  await writeRaw(globalMetaPath, globalSecretsPath, localResult.meta, localResult.secrets);
 }
 
 async function readRaw(projectRoot: string): Promise<{

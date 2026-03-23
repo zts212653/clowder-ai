@@ -30,12 +30,17 @@ async function seedTemplate(projectRoot) {
 
 describe('provider profile store', () => {
   /** @type {string} */ let projectRoot;
+  /** @type {string | undefined} */ let savedGlobalRoot;
 
   beforeEach(async () => {
     projectRoot = await makeTmpDir('case');
+    savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
   });
 
   afterEach(async () => {
+    if (savedGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
     await rm(projectRoot, { recursive: true, force: true });
   });
 
@@ -304,44 +309,30 @@ describe('provider profile store', () => {
     assert.equal(secretsAfter.mtimeMs, secretsBefore.mtimeMs);
   });
 
-  it('keeps provider account storage isolated to the current worktree', async () => {
-    const repoRoot = await makeTmpDir('repo-main');
-    const runtimeRoot = await makeTmpDir('repo-runtime');
+  it('shares provider profiles globally across different project roots', async () => {
+    const projectA = await makeTmpDir('project-a');
+    const projectB = await makeTmpDir('project-b');
     try {
-      const runtimeGitDir = join(repoRoot, '.git', 'worktrees', 'runtime');
-      await mkdir(runtimeGitDir, { recursive: true });
-      await writeFile(join(runtimeRoot, '.git'), `gitdir: ${runtimeGitDir}\n`, 'utf-8');
-      await writeFile(join(runtimeGitDir, 'gitdir'), `${join(runtimeRoot, '.git')}\n`, 'utf-8');
-      await writeFile(join(runtimeGitDir, 'commondir'), '../..\n', 'utf-8');
-
-      const created = await createProviderProfile(runtimeRoot, {
+      const created = await createProviderProfile(projectA, {
         displayName: 'Shared Account',
         authType: 'api_key',
         baseUrl: 'https://api.shared.dev',
         apiKey: 'sk-shared',
       });
-      await activateProviderProfile(runtimeRoot, 'anthropic', created.id);
+      await activateProviderProfile(projectA, 'anthropic', created.id);
 
-      const repoRuntime = await resolveAnthropicRuntimeProfile(repoRoot);
-      assert.equal(repoRuntime.mode, 'subscription');
+      const profileFromA = await resolveAnthropicRuntimeProfile(projectA);
+      assert.equal(profileFromA.mode, 'api_key');
+      assert.equal(profileFromA.baseUrl, 'https://api.shared.dev');
 
-      const worktreeRuntime = await resolveAnthropicRuntimeProfile(runtimeRoot);
-      assert.equal(worktreeRuntime.mode, 'api_key');
-      assert.equal(worktreeRuntime.baseUrl, 'https://api.shared.dev');
-      assert.equal(worktreeRuntime.apiKey, 'sk-shared');
-
-      const repoMetaPath = join(repoRoot, '.cat-cafe', 'provider-profiles.json');
-      const worktreeMetaPath = join(runtimeRoot, '.cat-cafe', 'provider-profiles.json');
-      const [repoMetaRaw, worktreeMetaRaw] = await Promise.all([
-        readFile(repoMetaPath, 'utf-8'),
-        readFile(worktreeMetaPath, 'utf-8'),
-      ]);
-      assert.equal(repoMetaRaw.includes(created.id), false);
-      assert.equal(worktreeMetaRaw.includes(created.id), true);
+      const profileFromB = await resolveAnthropicRuntimeProfile(projectB);
+      assert.equal(profileFromB.mode, 'api_key');
+      assert.equal(profileFromB.baseUrl, 'https://api.shared.dev');
+      assert.equal(profileFromB.apiKey, 'sk-shared');
     } finally {
       await Promise.all([
-        rm(repoRoot, { recursive: true, force: true }),
-        rm(runtimeRoot, { recursive: true, force: true }),
+        rm(projectA, { recursive: true, force: true }),
+        rm(projectB, { recursive: true, force: true }),
       ]);
     }
   });
@@ -384,6 +375,56 @@ describe('provider profile store', () => {
       await assert.rejects(readFile(escapedSecretsPath, 'utf-8'));
     } finally {
       await rm(escapedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates project-local profiles to global storage on first read', async () => {
+    const localProject = await makeTmpDir('local-project');
+    const globalRoot = await makeTmpDir('global-root');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    try {
+      const localDir = join(localProject, '.cat-cafe');
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3,
+          activeProfileId: null,
+          providers: [
+            {
+              id: 'migrated-acct',
+              displayName: 'Migrated Account',
+              kind: 'api_key',
+              authType: 'api_key',
+              builtin: false,
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+            },
+          ],
+          bootstrapBindings: {},
+        }),
+      );
+      await writeFile(
+        join(localDir, 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ version: 3, profiles: { 'migrated-acct': { apiKey: 'sk-migrated' } } }),
+      );
+
+      const view = await readProviderProfiles(localProject);
+      const migrated = view.providers.find((p) => p.id === 'migrated-acct');
+      assert.ok(migrated, 'migrated profile should be visible from global storage');
+      assert.equal(migrated.hasApiKey, true);
+
+      const globalMeta = join(globalRoot, '.cat-cafe', 'provider-profiles.json');
+      const raw = await readFile(globalMeta, 'utf-8');
+      assert.ok(raw.includes('migrated-acct'), 'profile should exist in global storage');
+    } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      await Promise.all([
+        rm(localProject, { recursive: true, force: true }),
+        rm(globalRoot, { recursive: true, force: true }),
+      ]);
     }
   });
 });
