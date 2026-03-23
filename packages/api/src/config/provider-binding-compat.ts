@@ -1,6 +1,7 @@
 import type { CatProvider } from '@cat-cafe/shared';
 import type {
   BuiltinAccountClient,
+  ProviderProfileKind,
   ProviderProfileProtocol,
   RuntimeProviderProfile,
 } from './provider-profiles.types.js';
@@ -41,9 +42,16 @@ function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProf
  * Returns an error string when the model does not follow "providerId/modelId" convention for opencode.
  * The opencode CLI expects this format; bare models like "glm-5" become "glm-5/" at runtime.
  * Server-side callers MUST reject; frontend shows the same message as a pre-flight hint.
+ * Skipped when profileKind is "api_key" — API key auth uses credentials directly.
  */
-export function validateModelFormatForProvider(provider: CatProvider, defaultModel?: string | null): string | null {
+export function validateModelFormatForProvider(
+  provider: CatProvider,
+  defaultModel?: string | null,
+  profileKind?: ProviderProfileKind,
+): string | null {
   if (provider !== 'opencode') return null;
+  // API key auth uses credentials directly — provider/model format not required
+  if (profileKind === 'api_key') return null;
   const trimmedModel = defaultModel?.trim();
   if (!trimmedModel) return null;
   const slashIndex = trimmedModel.indexOf('/');

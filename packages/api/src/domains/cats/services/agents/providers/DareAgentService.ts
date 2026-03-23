@@ -242,8 +242,7 @@ export class DareAgentService implements AgentService {
     const env: Record<string, string | null> = { ...callbackEnv };
     // P1-3: Pass API key via env vars (not CLI args) to avoid ps/audit leakage
     const apiKeyEnvName = this.getAdapterApiKeyEnvName();
-    const apiKey =
-      callbackEnv?.[DARE_API_KEY_ENV] ?? callbackEnv?.[apiKeyEnvName] ?? this.apiKey;
+    const apiKey = callbackEnv?.[DARE_API_KEY_ENV] ?? callbackEnv?.[apiKeyEnvName] ?? this.apiKey;
     if (apiKey) {
       env[apiKeyEnvName] = apiKey;
     }

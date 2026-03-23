@@ -130,15 +130,20 @@ test('uses exec resume when sessionId is provided', async () => {
   assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
 });
 
-test('injects cat-cafe MCP config even when cwd is outside repo', async () => {
+test('injects cat-cafe MCP config when workingDirectory contains mcp-server', async () => {
+  const tmpRoot = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-mcp-test-'));
+  const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');
+  mkdirSync(mcpDistDir, { recursive: true });
+  writeFileSync(join(mcpDistDir, 'index.js'), '// stub');
+
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
-  const cwdMock = mock.method(process, 'cwd', () => '/tmp/not-cat-cafe');
 
   try {
     const promise = collect(
       service.invoke('hello from outside cwd', {
+        workingDirectory: tmpRoot,
         callbackEnv: {
           CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
           CAT_CAFE_INVOCATION_ID: 'inv-test-1',
@@ -163,7 +168,7 @@ test('injects cat-cafe MCP config even when cwd is outside repo', async () => {
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_USER_ID="user-test-1\\nline2"'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_SIGNAL_USER="codex"'));
   } finally {
-    cwdMock.mock.restore();
+    rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
 

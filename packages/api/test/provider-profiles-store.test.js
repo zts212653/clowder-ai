@@ -485,10 +485,7 @@ describe('provider profile store', () => {
       await activateProviderProfile(globalRoot, 'anthropic', created.id);
 
       const meta = await readFile(join(globalRoot, '.cat-cafe', 'provider-profiles.json'), 'utf-8');
-      const secrets = await readFile(
-        join(globalRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
-        'utf-8',
-      );
+      const secrets = await readFile(join(globalRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'), 'utf-8');
 
       await rm(join(globalRoot, '.cat-cafe'), { recursive: true, force: true });
       await mkdir(localDir, { recursive: true });
