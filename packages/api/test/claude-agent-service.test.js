@@ -83,6 +83,36 @@ function emitClaudeEvents(proc, events) {
 
 // --- Test cases ---
 
+test('F166: non-JSON CLI output is yielded as text instead of being silently discarded', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('Hello'));
+
+  // Write a mix of valid NDJSON and plain text (non-JSON) lines
+  proc.stdout.write(`${JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess-166' })}\n`);
+  proc.stdout.write('This is plain text output from the CLI\n');
+  proc.stdout.write(`${JSON.stringify({ type: 'result', subtype: 'success', session_id: 'sess-166' })}\n`);
+  proc.stdout.once('finish', () => {
+    emitProcessExit(proc, 0, null);
+  });
+  proc.stdout.end();
+
+  const msgs = await promise;
+
+  // Should contain: session_init, text (from non-JSON line), done
+  const textMsgs = msgs.filter((m) => m.type === 'text');
+  assert.equal(textMsgs.length, 1, 'non-JSON line should be yielded as a text message');
+  assert.equal(textMsgs[0].content, 'This is plain text output from the CLI');
+  assert.ok(textMsgs[0].catId, 'text message should have catId');
+  assert.ok(textMsgs[0].timestamp, 'text message should have timestamp');
+
+  // done should still be yielded
+  const done = msgs.find((m) => m.type === 'done');
+  assert.ok(done, 'done message should still be yielded');
+});
+
 test('yields session_init, text, and done on basic success', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

@@ -22,6 +22,7 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { isParseError } from '../../../../../utils/ndjson-parser.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { transformDareEvent } from './dare-event-transform.js';
 
@@ -183,6 +184,8 @@ export class DareAgentService implements AgentService {
           };
           continue;
         }
+        // F166: skip parse error sentinels — DARE CLI should always output NDJSON
+        if (isParseError(event)) continue;
 
         const result = transformDareEvent(event, this.catId);
         if (result !== null) {

@@ -27,6 +27,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { isParseError } from '../../../../../utils/ndjson-parser.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
@@ -450,6 +451,8 @@ export class CodexAgentService implements AgentService {
           };
           continue;
         }
+        // F166: skip parse error sentinels — Codex CLI should always output NDJSON
+        if (isParseError(event)) continue;
 
         // Track substantive events: item.completed produces text/tool_result/tool_use
         if (typeof event === 'object' && event !== null) {
