@@ -3,8 +3,8 @@
 # Cat Cafe 启动脚本（底层实现）
 # 用户入口:
 #   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
-#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + 非 watch API + 优先当前 .env 端口）
-#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，优先当前 .env 端口)
+#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=opensource + 非 watch API + 优先当前 .env 端口）
+#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=opensource)
 #
 # 直接调用脚本:
 #   ./scripts/start-dev.sh            — 开发模式 (next dev + Redis 持久化)
@@ -75,19 +75,6 @@ done
 
 # 加载环境变量 (放最前面，后续函数需要端口号)
 # 默认读取 .env；.env.local 仅用于 DARE 相关白名单键，避免全量覆盖引发配置漂移。
-clear_inherited_profile_env() {
-    [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
-    [ -n "$PROFILE" ] || return 0
-
-    # Public direct-launch wrappers may inherit a dev shell from another checkout.
-    # Clear only profile-controlled vars, then let .env re-apply explicit overrides.
-    unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED
-    unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
-    unset REDIS_PROFILE
-}
-
-clear_inherited_profile_env
-
 CLI_FRONTEND_PORT_OVERRIDE="${FRONTEND_PORT-}"
 CLI_API_SERVER_PORT_OVERRIDE="${API_SERVER_PORT-}"
 CLI_REDIS_PORT_OVERRIDE="${REDIS_PORT-}"
@@ -100,6 +87,19 @@ CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
 CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
 CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
 PREFER_DOTENV_PORTS="${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}"
+
+clear_inherited_profile_env() {
+    [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
+    [ -n "$PROFILE" ] || return 0
+
+    # Public direct-launch wrappers should honor the requested profile rather
+    # than ambient Cat Cafe shell exports leaked from another checkout.
+    unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED
+    unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
+    unset REDIS_PROFILE
+}
+
+clear_inherited_profile_env
 
 if [ -f .env ]; then
     set -a
@@ -138,7 +138,6 @@ load_dare_env_from_local() {
         DARE_ADAPTER \
         DARE_API_KEY \
         DARE_ENDPOINT \
-        CAT_DARE_MODEL \
         OPENROUTER_API_KEY \
         OPENROUTER_BASE_URL \
         OPENAI_API_KEY \
@@ -310,153 +309,27 @@ REDIS_DBFILE=${REDIS_DBFILE:-dump.rdb}
 REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
-CLEANUP_RUNNING=false
-MANAGED_PIDS=()
 
 export MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
-
-register_managed_pid() {
-    local pid="${1:-}"
-    local existing
-    [ -n "$pid" ] || return 0
-    for existing in "${MANAGED_PIDS[@]}"; do
-        [ "$existing" = "$pid" ] && return 0
-    done
-    MANAGED_PIDS+=("$pid")
-}
-
-probe_port_with_lsof() {
-    local port=$1
-    lsof -nP -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1
-}
-
-probe_port_with_ss() {
-    local port=$1
-    ss -ltn "( sport = :$port )" 2>/dev/null | awk 'NR > 1 { found = 1; exit } END { exit found ? 0 : 1 }'
-}
-
-probe_port_with_nc() {
-    local port=$1
-    nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
-}
-
-probe_port_with_dev_tcp() {
-    local port=$1
-    # Bash-only: requires net redirections support (enabled in most mainstream builds).
-    (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
-}
-
-port_listen_pids() {
-    local port=$1
-    local pids=""
-
-    if command -v lsof >/dev/null 2>&1; then
-        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-            printf '%s\n' "$pids"
-            return 0
-        fi
-    fi
-
-    if command -v ss >/dev/null 2>&1; then
-        pids=$(ss -ltnp "( sport = :$port )" 2>/dev/null | awk '
-            {
-                while (match($0, /pid=[0-9]+/)) {
-                    print substr($0, RSTART + 4, RLENGTH - 4)
-                    $0 = substr($0, RSTART + RLENGTH)
-                }
-            }
-        ' | sort -u || true)
-        if [ -n "$pids" ]; then
-            printf '%s\n' "$pids"
-            return 0
-        fi
-    fi
-
-    if command -v fuser >/dev/null 2>&1; then
-        pids=$(fuser -n tcp "$port" 2>&1 | sed 's#^[^:]*:##' | grep -oE '[0-9]+' | sort -u || true)
-        if [ -n "$pids" ]; then
-            printf '%s\n' "$pids"
-            return 0
-        fi
-    fi
-
-    return 1
-}
-
-port_is_listening() {
-    local port=$1
-
-    if command -v lsof >/dev/null 2>&1 && probe_port_with_lsof "$port"; then
-        return 0
-    fi
-    if command -v ss >/dev/null 2>&1 && probe_port_with_ss "$port"; then
-        return 0
-    fi
-    if command -v nc >/dev/null 2>&1 && probe_port_with_nc "$port"; then
-        return 0
-    fi
-    if probe_port_with_dev_tcp "$port"; then
-        return 0
-    fi
-
-    return 1
-}
-
-list_child_pids() {
-    local pid=$1
-    command -v pgrep >/dev/null 2>&1 || return 0
-    pgrep -P "$pid" 2>/dev/null || true
-}
-
-terminate_pid_tree_with_signal() {
-    local signal="$1"
-    local pid="$2"
-    local child
-
-    [ -n "$pid" ] || return 0
-    kill -0 "$pid" 2>/dev/null || return 0
-
-    while IFS= read -r child; do
-        [ -n "$child" ] || continue
-        terminate_pid_tree_with_signal "$signal" "$child"
-    done < <(list_child_pids "$pid")
-
-    kill "-$signal" "$pid" 2>/dev/null || true
-}
-
-terminate_managed_pids() {
-    local pid
-    for pid in "${MANAGED_PIDS[@]}"; do
-        terminate_pid_tree_with_signal TERM "$pid"
-    done
-    sleep 1
-    for pid in "${MANAGED_PIDS[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
-            terminate_pid_tree_with_signal KILL "$pid"
-        fi
-    done
-    MANAGED_PIDS=()
-}
 
 # 杀掉占用端口的进程
 kill_port() {
     local port=$1
     local name=$2
     local pids
-    pids=$(port_listen_pids "$port" || true)
+    pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
     if [ -n "$pids" ]; then
         echo -e "${YELLOW}  端口 $port ($name) 被占用，正在终止进程...${NC}"
         echo "$pids" | xargs kill 2>/dev/null || true
         sleep 1
         # 确认已死
-        pids=$(port_listen_pids "$port" || true)
+        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
         if [ -n "$pids" ]; then
             echo -e "${YELLOW}  强制终止...${NC}"
             echo "$pids" | xargs kill -9 2>/dev/null || true
             sleep 1
         fi
-        pids=$(port_listen_pids "$port" || true)
+        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
         if [ -n "$pids" ]; then
             echo -e "${RED}  ✗ 端口 $port 仍被占用，无法继续启动 $name${NC}"
             return 1
@@ -474,7 +347,7 @@ kill_managed_ports() {
         kill_port $preview_gateway_port "Preview Gateway"
     fi
     if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
-        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
+        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
     fi
     if [ "${ASR_ENABLED:-0}" = "1" ]; then
         kill_port ${WHISPER_PORT:-9876} "ASR"
@@ -495,7 +368,7 @@ wait_for_port() {
     local max_wait=${3:-15}
     local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
-        if port_is_listening "$port"; then
+        if lsof -nP -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
             echo -e "${GREEN}  ✓ $name 已启动 (端口 $port, ${elapsed}s)${NC}"
             return 0
         fi
@@ -514,7 +387,7 @@ wait_for_port_or_exit() {
     local elapsed=0
 
     while [ $elapsed -lt $max_wait ]; do
-        if port_is_listening "$port"; then
+        if lsof -nP -i ":$port" -sTCP:LISTEN >/dev/null 2>&1; then
             echo -e "${GREEN}  ✓ $name 已启动 (端口 $port, ${elapsed}s)${NC}"
             return 0
         fi
@@ -557,7 +430,6 @@ background_eval_with_null_stdin() {
         exec </dev/null
         eval "$launch_cmd"
     ) &
-    register_managed_pid "$!"
 }
 
 api_launch_command() {
@@ -837,19 +709,9 @@ setup_storage() {
 
 # 清理函数 — Ctrl+C 时杀所有子进程 + 关闭专属 Redis
 cleanup() {
-    [ "$CLEANUP_RUNNING" = true ] && return 0
-    CLEANUP_RUNNING=true
-
     echo ""
     echo "正在关闭服务..."
-
-    local job_pid
-    while IFS= read -r job_pid; do
-        register_managed_pid "$job_pid"
-    done <<< "$(jobs -p 2>/dev/null || true)"
-
-    terminate_managed_pids
-
+    kill $(jobs -p) 2>/dev/null || true
     # 关闭我们启动的专属 Redis (不影响其他 Redis 实例)
     if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ] && redis-cli -p "$REDIS_PORT" ping &> /dev/null 2>&1; then
         archive_redis_snapshot "pre-stop"
@@ -930,6 +792,14 @@ main() {
     # 2. 清理缓存
     clean_cache
     sanitize_lockfiles
+
+    # 2.5. 自动安装依赖（worktree 等场景 node_modules 可能不存在或不完整）
+    if [ ! -x "$PROJECT_DIR/node_modules/.bin/tsc" ]; then
+        echo ""
+        echo -e "${YELLOW}检测到依赖不完整，自动安装...${NC}"
+        run_logged_step "pnpm install" 5 pnpm install --frozen-lockfile
+        echo -e "${GREEN}  ✓ 依赖安装完成${NC}"
+    fi
 
     # 3. 构建 shared + API (除非 --quick)
     if [ "$QUICK_MODE" = false ]; then
