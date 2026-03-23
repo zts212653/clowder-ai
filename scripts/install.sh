@@ -658,6 +658,37 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
     done; ok "Skills linked"
 else fail "cat-cafe-skills/ not found"; exit 1; fi
 
+# F132: DARE CLI (狸花猫) — clone + venv setup
+DARE_VENDOR_DIR="$PROJECT_DIR/vendor/dare-cli"
+if [[ -f "$DARE_VENDOR_DIR/client/__main__.py" ]]; then
+    ok "DARE CLI already present at vendor/dare-cli"
+else
+    info "  Cloning DARE CLI to vendor/dare-cli..."
+    mkdir -p "$PROJECT_DIR/vendor"
+    git clone --depth 1 https://github.com/clowder-labs/Deterministic-Agent-Runtime-Engine.git \
+        "$DARE_VENDOR_DIR" 2>&1 || { warn "DARE clone failed — 狸花猫 will not be available"; DARE_VENDOR_DIR=""; }
+    [[ -n "$DARE_VENDOR_DIR" ]] && ok "DARE CLI cloned"
+fi
+if [[ -n "$DARE_VENDOR_DIR" && -f "$DARE_VENDOR_DIR/client/__main__.py" ]]; then
+    if [[ ! -f "$DARE_VENDOR_DIR/.venv/bin/python" ]]; then
+        info "  Setting up DARE Python venv..."
+        if command -v uv &>/dev/null; then
+            uv venv "$DARE_VENDOR_DIR/.venv" 2>&1
+            uv pip install --python "$DARE_VENDOR_DIR/.venv/bin/python" \
+                -r "$DARE_VENDOR_DIR/requirements.txt" "httpx[socks]" 2>&1 \
+                || warn "DARE pip install had errors — some adapters may not work"
+        else
+            python3 -m venv "$DARE_VENDOR_DIR/.venv" 2>&1
+            "$DARE_VENDOR_DIR/.venv/bin/pip" install \
+                -r "$DARE_VENDOR_DIR/requirements.txt" "httpx[socks]" 2>&1 \
+                || warn "DARE pip install had errors — some adapters may not work"
+        fi
+        ok "DARE venv ready"
+    else
+        ok "DARE venv already exists"
+    fi
+fi
+
 # ── [6/9] Install AI agent CLI tools ─────────────────────
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
@@ -773,10 +804,26 @@ configure_agent_auth() {
     fi
 }
 
+configure_dare_auth() {
+    # F132: DARE uses API key only (no OAuth / no CLI binary)
+    [[ -f "$DARE_VENDOR_DIR/client/__main__.py" ]] || return 0
+    local key=""
+    tty_read_secret "    Dare (狸花猫) — OpenRouter API Key (Enter = skip): " key
+    if [[ -n "$key" ]]; then
+        _INSTALLER_API_KEY="$key" node scripts/install-auth-config.mjs client-auth set \
+            --project-dir "$PROJECT_DIR" \
+            --client dare \
+            --mode api_key
+        ok "Dare (狸花猫): API key configured"
+    else
+        warn "Dare (狸花猫): no key — set OPENROUTER_API_KEY in .env to enable later"
+    fi
+}
+
 if [[ "$HAS_TTY" == true ]]; then
     info "  Configure each agent / 逐个配置每只猫的认证方式："
     configure_agent_auth "Claude (布偶猫)" "claude"; configure_agent_auth "Codex (缅因猫)" "codex"
-    configure_agent_auth "Gemini (暹罗猫)" "gemini"
+    configure_agent_auth "Gemini (暹罗猫)" "gemini"; configure_dare_auth
 else
     info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini"
 fi
