@@ -793,8 +793,8 @@ main() {
     clean_cache
     sanitize_lockfiles
 
-    # 2.5. 自动安装依赖（worktree 等场景 node_modules 可能不存在）
-    if [ ! -d "$PROJECT_DIR/node_modules" ]; then
+    # 2.5. 自动安装依赖（worktree 等场景 node_modules 可能不存在或为空）
+    if [ ! -d "$PROJECT_DIR/node_modules/.pnpm" ]; then
         echo ""
         echo -e "${YELLOW}检测到 node_modules 缺失，自动安装依赖...${NC}"
         run_logged_step "pnpm install" 5 pnpm install --frozen-lockfile
