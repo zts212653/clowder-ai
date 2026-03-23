@@ -64,11 +64,15 @@ export async function* spawnCli(
   // Default timeout is configurable via CLI_TIMEOUT_MS env var; 0 disables timeout.
   const timeoutMs = resolveCliTimeoutMs(options.timeoutMs);
 
+  log.debug({ command: options.command, args: options.args, cwd: options.cwd, timeoutMs }, 'Spawning CLI process');
+
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
     env: buildChildEnv(options.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+  log.debug({ pid: child.pid, command: options.command }, 'CLI process spawned');
 
   // Buffer stderr for error reporting (handler attached after resetTimeout is defined)
   let stderrBuffer = '';
@@ -83,6 +87,7 @@ export async function* spawnCli(
       childExited = true;
       exitCode = code;
       exitSignal = signal;
+      log.debug({ pid: child.pid, command: options.command, exitCode: code, signal }, 'CLI process exited');
       resolve();
     });
   });
@@ -394,12 +399,14 @@ function defaultSpawn(
   if (IS_WINDOWS) {
     const shimSpawn = resolveWindowsShimSpawn(command, args);
     if (shimSpawn) {
+      log.debug({ original: command, resolved: shimSpawn.command, args: shimSpawn.args }, 'Windows shim resolved');
       return nodeSpawn(shimSpawn.command, shimSpawn.args, {
         cwd: options.cwd,
         env: options.env,
         stdio: options.stdio,
       });
     }
+    log.debug({ command, shell: true }, 'Windows shim unresolved, falling back to shell');
     return nodeSpawn(command, args.map(escapeCmdArg), {
       cwd: options.cwd,
       env: options.env,
