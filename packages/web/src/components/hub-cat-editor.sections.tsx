@@ -342,15 +342,17 @@ export function AccountSection({
 
 export function RoutingSection({
   form,
+  hasError,
   onChange,
 }: {
   cat?: CatData | null;
   form: HubCatEditorFormState;
+  hasError?: boolean;
   onChange: (patch: FormPatch) => void;
 }) {
   const aliases = currentAliasTags(form);
   return (
-    <SectionCard title="别名与 @ 路由">
+    <SectionCard title="别名与 @ 路由" tone={hasError ? 'error' : 'neutral'}>
       <TagEditor
         tags={aliases}
         onChange={(tags) => onChange({ mentionPatterns: joinTags(tags) })}

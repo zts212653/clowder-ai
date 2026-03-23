@@ -17,6 +17,7 @@ import {
   type HubCatEditorFormState,
   initialState,
   type StrategyFormState,
+  splitMentionPatterns,
   toCodexRuntimeSettings,
   toStrategyForm,
 } from './hub-cat-editor.model';
@@ -45,6 +46,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [codexSettingsError, setCodexSettingsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
   const [form, setForm] = useState<HubCatEditorFormState>(() => initialState(cat, draft));
   const [strategyForm, setStrategyForm] = useState<StrategyFormState | null>(null);
   const [strategyBaseline, setStrategyBaseline] = useState<StrategyFormState | null>(null);
@@ -218,6 +220,9 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const patchForm = (patch: Partial<HubCatEditorFormState>) => {
     setHasUnsavedChanges(true);
     setForm((prev) => ({ ...prev, ...patch }));
+    if (patch.mentionPatterns !== undefined) {
+      setFieldErrors((prev) => ({ ...prev, routing: false }));
+    }
   };
   const patchStrategy = (patch: Partial<StrategyFormState>) => {
     setHasUnsavedChanges(true);
@@ -253,6 +258,16 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   };
 
   const handleSave = async () => {
+    const errors: Record<string, boolean> = {};
+    if (splitMentionPatterns(form.mentionPatterns).length === 0) {
+      errors.routing = true;
+    }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      setError('请填写必填字段');
+      return;
+    }
+    setFieldErrors({});
     setSaving(true);
     setError(null);
     const rollbackSteps: Array<() => Promise<void>> = [];
@@ -449,7 +464,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             loadingProfiles={loadingProfiles}
             onChange={patchForm}
           />
-          <RoutingSection form={form} onChange={patchForm} />
+          <RoutingSection form={form} hasError={fieldErrors.routing} onChange={patchForm} />
           <AdvancedRuntimeSection
             cat={cat}
             form={form}
