@@ -75,9 +75,10 @@ rebuildMentionCache();
 
 // ── Public API ──────────────────────────────────────────
 
-/** Called once by useCatData after API fetch succeeds */
+/** Called once by useCatData after API fetch succeeds.
+ *  Filters out disabled members (roster.available === false) so they don't highlight. */
 export function refreshMentionData(cats: CatData[]): void {
-  _cats = cats;
+  _cats = cats.filter((cat) => cat.roster?.available !== false);
   rebuildMentionCache();
 }
 

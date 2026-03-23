@@ -183,7 +183,7 @@ export function transformClaudeEvent(
       if (typeof block !== 'object' || block === null) continue;
       const b = block as Record<string, unknown>;
 
-      if (b.type === 'text' && typeof b.text === 'string') {
+      if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
         if (skipFinalText) continue;
         messages.push({
           type: 'text',

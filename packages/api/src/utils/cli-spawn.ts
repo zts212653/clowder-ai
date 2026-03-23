@@ -223,8 +223,7 @@ export async function* spawnCli(
 
       if (isParseError(value)) {
         const parseErr = value as { line: string };
-        log.warn({ command: options.command, line: parseErr.line }, 'CLI non-JSON output');
-        yield value;
+        log.error({ command: options.command, line: parseErr.line }, 'JSON parse error');
         pendingNext = ndjson.next();
         continue;
       }

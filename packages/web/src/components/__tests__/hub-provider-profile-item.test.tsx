@@ -4,6 +4,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { HubProviderProfileItem, type ProfileEditPayload } from '@/components/HubProviderProfileItem';
 import type { ProfileItem } from '@/components/hub-provider-profiles.types';
 
+const mockConfirm = vi.fn().mockResolvedValue(true);
+vi.mock('@/components/useConfirm', () => ({
+  useConfirm: () => mockConfirm,
+}));
+
 function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
     candidate.textContent?.includes(text),
@@ -195,7 +200,7 @@ describe('HubProviderProfileItem', () => {
       updatedAt: '2026-03-18T00:00:00.000Z',
     };
     const onDelete = vi.fn();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockConfirm.mockResolvedValue(false);
 
     await act(async () => {
       root.render(
@@ -218,14 +223,14 @@ describe('HubProviderProfileItem', () => {
     await act(async () => {
       queryButton(container, '删除').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(mockConfirm).toHaveBeenCalledTimes(1);
     expect(onDelete).not.toHaveBeenCalled();
 
-    confirmSpy.mockReturnValue(true);
+    mockConfirm.mockResolvedValue(true);
     await act(async () => {
       queryButton(container, '删除').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onDelete).toHaveBeenCalledWith('codex-sponsor');
-    confirmSpy.mockRestore();
+    mockConfirm.mockReset().mockResolvedValue(true);
   });
 });

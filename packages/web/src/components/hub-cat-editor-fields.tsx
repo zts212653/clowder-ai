@@ -33,12 +33,17 @@ export function SectionCard({
 }: {
   title: string;
   description?: string;
-  tone?: 'neutral' | 'success';
+  tone?: 'neutral' | 'success' | 'error';
   children: ReactNode;
 }) {
-  const toneClass = tone === 'success' ? 'border-[#CFE5D5] bg-[#F2FAF4]' : 'border-[#F1E7DF] bg-[#FFFDFC]';
+  const toneClasses: Record<string, string> = {
+    neutral: 'border-[#F1E7DF] bg-[#FFFDFC]',
+    success: 'border-[#CFE5D5] bg-[#F2FAF4]',
+    error: 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]',
+  };
+  const toneClass = toneClasses[tone] ?? toneClasses.neutral;
   return (
-    <section className={`rounded-[20px] border p-[18px] ${toneClass}`}>
+    <section className={`rounded-[20px] border p-[18px] transition-colors ${toneClass}`}>
       <div className="space-y-1">
         <h4 className="text-[17px] font-bold text-[#2D2118]">{title}</h4>
         {description ? <p className="text-[14px] leading-6 text-[#7F7168]">{description}</p> : null}

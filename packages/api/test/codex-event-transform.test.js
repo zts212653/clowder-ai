@@ -485,6 +485,24 @@ test('mcp_tool_call image at exactly 5MB → accepted', () => {
   assert.equal(payload.block.items.length, 1);
 });
 
+// ── Empty text suppression (empty bubble fix) ──
+
+test('item.completed agent_message with empty text → null', () => {
+  const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: '' } }, CAT);
+  assert.equal(msg, null, 'empty text should be suppressed to avoid empty bubbles');
+});
+
+test('item.completed agent_message with whitespace-only text → null', () => {
+  const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: '   \n\n  ' } }, CAT);
+  assert.equal(msg, null, 'whitespace-only text should be suppressed');
+});
+
+test('item.completed agent_message with empty text after prior turn → null (not newlines)', () => {
+  const state = { hadPriorTextTurn: true };
+  const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: '' } }, CAT, state);
+  assert.equal(msg, null, 'empty text after prior turn should not produce newline content');
+});
+
 test('mcp_tool_call mixed valid/invalid images → only valid included', () => {
   const event = {
     type: 'item.completed',

@@ -31,6 +31,11 @@ if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localSto
   } as Storage;
 }
 
+// useConfirm hook: provide a no-op confirm globally so components can render without <ConfirmProvider>
+vi.mock('@/components/useConfirm', () => ({
+  useConfirm: () => vi.fn().mockResolvedValue(true),
+}));
+
 // Next.js App Router: mock useRouter globally for test environment
 vi.mock('next/navigation', () => ({
   useRouter: () => ({

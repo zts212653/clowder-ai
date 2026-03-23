@@ -313,3 +313,36 @@ test('rate_limit_event → system_info(rate_limit) with utilization and resetsAt
   assert.equal(parsed.utilization, 0.87);
   assert.equal(parsed.resetsAt, '2026-02-27T12:00:00Z');
 });
+
+// ── Empty text suppression in assistant events (empty bubble fix) ──
+
+test('assistant event with only empty text block → null (no empty bubble)', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-empty',
+      content: [{ type: 'text', text: '' }],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.equal(result, null, 'assistant event with only empty text block should return null');
+});
+
+test('assistant event with empty text block alongside tool_use → only tool_use returned', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-mix',
+      content: [
+        { type: 'text', text: '' },
+        { type: 'tool_use', name: 'bash', input: { command: 'ls' } },
+      ],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(Array.isArray(result), 'should return array');
+  assert.equal(result.length, 1, 'only tool_use, empty text filtered out');
+  assert.equal(result[0].type, 'tool_use');
+});

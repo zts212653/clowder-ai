@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { reconnectGame } from '@/hooks/useGameReconnect';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
@@ -484,7 +484,10 @@ export function ChatInput({
   }, [whisperOptions, activeCatIds]);
 
   // Sync input text to module-level draft map (covers all sources: typing, voice, mentions)
-  useEffect(() => {
+  // useLayoutEffect runs synchronously before browser paint and before unmount,
+  // ensuring the draft is written to the Map before the component is destroyed
+  // on thread switch (key={threadId}). useEffect would lose the final keystroke.
+  useLayoutEffect(() => {
     if (!threadId) return;
     if (input) threadDrafts.set(threadId, input);
     else threadDrafts.delete(threadId);

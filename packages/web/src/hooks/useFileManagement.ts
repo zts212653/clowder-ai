@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useConfirm } from '@/components/useConfirm';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
@@ -28,6 +29,7 @@ async function ensureToken(
 }
 
 export function useFileManagement() {
+  const confirm = useConfirm();
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const editToken = useChatStore((s) => s.workspaceEditToken);
   const editTokenExpiry = useChatStore((s) => s.workspaceEditTokenExpiry);
@@ -112,7 +114,7 @@ export function useFileManagement() {
       const res = await doUpload(false);
       if (res.status === 409) {
         const name = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
-        if (!window.confirm(`"${name}" 已存在，是否覆盖？`)) return null;
+        if (!(await confirm({ title: '覆盖确认', message: `"${name}" 已存在，是否覆盖？` }))) return null;
         const retry = await doUpload(true);
         if (!retry.ok) return null;
         return retry.json();
@@ -120,7 +122,7 @@ export function useFileManagement() {
       if (!res.ok) return null;
       return res.json();
     },
-    [worktreeId, editToken, editTokenExpiry, setEditToken],
+    [worktreeId, editToken, editTokenExpiry, setEditToken, confirm],
   );
 
   return { createFile, createDir, deleteItem, renameItem, uploadFile };

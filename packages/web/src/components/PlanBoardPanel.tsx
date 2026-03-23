@@ -5,6 +5,7 @@ import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import type { CatInvocationInfo } from '@/stores/chatStore';
 import { buildContinueMessage } from '@/utils/taskProgressContinue';
+import { useConfirm } from './useConfirm';
 
 export interface PlanBoardPanelProps {
   threadId: string;
@@ -55,6 +56,7 @@ function taskStatusA11yText(status: 'completed' | 'in_progress' | 'pending'): st
 /* ── Per-cat plan card ────────────────────────────────────── */
 
 function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; inv: CatInvocationInfo }) {
+  const confirm = useConfirm();
   const { getCatById } = useCatData();
   const { handleSend } = useSendMessage(threadId);
   const cat = getCatById(catId);
@@ -92,10 +94,10 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
         {status === 'interrupted' && (
           <button
             className="text-[10px] px-2 py-0.5 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-100 transition-colors"
-            onClick={() => {
-              const ok = window.confirm('确认继续上次任务？');
-              if (!ok) return;
-              void handleSend(buildContinueMessage(catId, tp), undefined, threadId);
+            onClick={async () => {
+              if (await confirm({ title: '继续任务', message: '确认继续上次任务？' })) {
+                void handleSend(buildContinueMessage(catId, tp), undefined, threadId);
+              }
             }}
           >
             继续

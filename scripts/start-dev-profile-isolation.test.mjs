@@ -117,12 +117,11 @@ describe('start-dev direct profile isolation', () => {
     assert.match(pkg.scripts['start:direct'], /--profile=opensource/);
   });
 
-  it('runtime-worktree start injects opensource profile and strict env isolation', () => {
+  it('runtime-worktree start injects opensource profile, strict env isolation, and config root', () => {
     const runtimeScript = readFileSync(resolve(ROOT, 'scripts/runtime-worktree.sh'), 'utf8');
 
-    assert.match(
-      runtimeScript,
-      /exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 \.\/scripts\/start-dev\.sh --prod-web --profile=opensource/,
-    );
+    assert.match(runtimeScript, /exec env\b.*CAT_CAFE_STRICT_PROFILE_DEFAULTS=1\b/);
+    assert.match(runtimeScript, /exec env\b.*CAT_CAFE_CONFIG_ROOT=/);
+    assert.match(runtimeScript, /\.\/scripts\/start-dev\.sh --prod-web --profile=opensource/);
   });
 });

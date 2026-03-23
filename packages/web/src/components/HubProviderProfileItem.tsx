@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import type { ApiProtocol } from './hub-provider-profiles.sections';
 import type { ProfileItem } from './hub-provider-profiles.types';
 import { TagEditor } from './hub-tag-editor';
+import { useConfirm } from './useConfirm';
 
 const PROTOCOL_OPTIONS: Array<{ value: ApiProtocol; label: string }> = [
   { value: 'anthropic', label: 'Anthropic' },
@@ -34,6 +35,7 @@ function summaryText(profile: ProfileItem): string | null {
 }
 
 export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubProviderProfileItemProps) {
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState(profile.displayName);
   const [editProtocol, setEditProtocol] = useState<ApiProtocol>((profile.protocol as ApiProtocol) ?? 'anthropic');
@@ -185,10 +187,17 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
             <button
               type="button"
               className="rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600"
-              onClick={() => {
-                const ok = window.confirm(`确认删除账号「${profile.displayName}」吗？该操作不可撤销。`);
-                if (!ok) return;
-                onDelete(profile.id);
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: '删除确认',
+                    message: `确认删除账号「${profile.displayName}」吗？该操作不可撤销。`,
+                    variant: 'danger',
+                    confirmLabel: '删除',
+                  })
+                ) {
+                  onDelete(profile.id);
+                }
               }}
               disabled={busy}
             >

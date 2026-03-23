@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 
 /** Sentinel object for JSON parse errors */
-export interface ParseError {
+interface ParseError {
   readonly __parseError: true;
   readonly line: string;
   readonly error: string;

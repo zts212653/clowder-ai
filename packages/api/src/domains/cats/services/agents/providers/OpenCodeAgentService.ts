@@ -20,7 +20,6 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
-import { isParseError } from '../../../../../utils/ndjson-parser.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
 
@@ -139,8 +138,6 @@ export class OpenCodeAgentService implements AgentService {
           };
           continue;
         }
-        // F166: skip parse error sentinels — opencode CLI should always output NDJSON
-        if (isParseError(event)) continue;
 
         const result = transformOpenCodeEvent(event, this.catId);
         if (result !== null) {

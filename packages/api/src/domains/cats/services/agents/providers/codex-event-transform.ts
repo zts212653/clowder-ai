@@ -125,7 +125,7 @@ export function transformCodexEvent(
 
   const item = e.item as Record<string, unknown> | undefined;
 
-  if (item?.type === 'agent_message' && typeof item.text === 'string') {
+  if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim().length > 0) {
     const prefix = state?.hadPriorTextTurn ? '\n\n' : '';
     if (state) state.hadPriorTextTurn = true;
     return {
