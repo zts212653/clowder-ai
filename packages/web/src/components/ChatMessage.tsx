@@ -229,7 +229,15 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
 
   // Don't render completely empty non-streaming assistant messages.
   // This can happen when a cat responds with only internal tool use and no text output.
-  if (!message.isStreaming && !hasTextContent && !hasCliBlock && !hasBlocks && !message.extra?.rich?.blocks?.length) {
+  // Keep messages that have thinking content — they should still show as collapsible bubbles.
+  if (
+    !message.isStreaming &&
+    !hasTextContent &&
+    !hasCliBlock &&
+    !hasBlocks &&
+    !message.extra?.rich?.blocks?.length &&
+    !message.thinking
+  ) {
     return null;
   }
 

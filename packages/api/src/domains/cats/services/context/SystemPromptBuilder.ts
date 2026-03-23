@@ -536,10 +536,7 @@ export function buildInvocationContext(context: InvocationContext): string {
       '',
     );
   } else {
-    lines.push(
-      'Voice Mode OFF: 不要发 audio rich block。用文字回复即可。',
-      '',
-    );
+    lines.push('Voice Mode OFF: 不要发 audio rich block。用文字回复即可。', '');
   }
 
   // F087: Bootcamp mode — inject phase context so cats know to guide the new CVO

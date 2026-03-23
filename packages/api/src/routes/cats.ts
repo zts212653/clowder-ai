@@ -13,8 +13,8 @@ import { bootstrapCatCatalog, resolveCatCatalogPath } from '../config/cat-catalo
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import {
-  resolveBuiltinClientForProvider,
   hintModelFormatForProvider,
+  resolveBuiltinClientForProvider,
   validateRuntimeProviderBinding,
 } from '../config/provider-binding-compat.js';
 import {

@@ -289,7 +289,7 @@ describe('HubCatEditor', () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it('allows creating opencode member with bare model (soft validation, no block)', async () => {
+  it('allows creating opencode member with provider/model format', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/provider-profiles') {
@@ -329,7 +329,7 @@ describe('HubCatEditor', () => {
           draft: {
             client: 'opencode',
             accountRef: 'opencode',
-            defaultModel: 'gpt-5.4',
+            defaultModel: 'openai/gpt-5.4',
           },
           onClose: vi.fn(),
           onSaved: onSaved,
@@ -340,6 +340,7 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '运行时金渐层');
     await changeField(queryField(container, 'input[aria-label="Description"]'), '审查');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-jinjianceng');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
@@ -347,7 +348,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    // Save should proceed even with bare model name — validation is soft hint only.
+    // Save should proceed — model uses provider/model format as required for new opencode cats.
     const postCall = mockApiFetch.mock.calls.find(
       ([path, init]: [string, RequestInit | undefined]) => path === '/api/cats' && init?.method === 'POST',
     );

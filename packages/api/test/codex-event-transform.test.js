@@ -499,11 +499,7 @@ test('item.completed agent_message with whitespace-only text → null', () => {
 
 test('item.completed agent_message with empty text after prior turn → null (not newlines)', () => {
   const state = { hadPriorTextTurn: true };
-  const msg = transformCodexEvent(
-    { type: 'item.completed', item: { type: 'agent_message', text: '' } },
-    CAT,
-    state,
-  );
+  const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: '' } }, CAT, state);
   assert.equal(msg, null, 'empty text after prior turn should not produce newline content');
 });
 
