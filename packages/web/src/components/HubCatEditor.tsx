@@ -281,9 +281,6 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       if (!form.defaultModel.trim()) {
         errors.account = true;
         errorMessages.push('Model');
-      } else if (form.client === 'opencode' && !form.defaultModel.includes('/')) {
-        errors.account = true;
-        errorMessages.push('OpenCode Model 需要 providerId/modelId 格式');
       }
       if (splitMentionPatterns(form.mentionPatterns).length === 0) {
         errors.routing = true;
