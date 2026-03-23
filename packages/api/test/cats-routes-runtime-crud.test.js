@@ -528,7 +528,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 201, 'cross-protocol api_key binding should be allowed');
   });
 
-  it('POST /api/cats rejects opencode model without providerId/ prefix', async () => {
+  it('POST /api/cats allows opencode model without providerId/ prefix (soft hint only)', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -569,9 +569,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       }),
     });
 
-    assert.equal(createRes.statusCode, 400);
-    const createBody = JSON.parse(createRes.body);
-    assert.match(createBody.error, /providerId\/modelId/i);
+    // Bare model is accepted with a soft hint (console.warn), not rejected.
+    assert.equal(createRes.statusCode, 201);
   });
 
   it('POST /api/cats rejects catId values that are not lowercase-safe identifiers', async () => {
