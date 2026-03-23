@@ -234,7 +234,7 @@ async function validateAccountBindingOrThrow(
   if (compatibilityError) {
     throw new Error(compatibilityError);
   }
-  const modelFormatError = validateModelFormatForProvider(client, defaultModel);
+  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.kind);
   if (modelFormatError) {
     throw new Error(modelFormatError);
   }
