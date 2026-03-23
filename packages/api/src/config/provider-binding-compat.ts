@@ -38,10 +38,11 @@ function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProf
 }
 
 /**
- * Returns an error string when the model does not follow "providerId/modelId" convention for opencode.
- * Server-side callers should reject the request; frontend callers may use this for pre-flight validation.
+ * Returns an advisory hint when the model does not follow "providerId/modelId" convention for opencode.
+ * This is a soft hint — callers should log/display but NOT reject the request.
+ * The opencode CLI itself expects provider/model format; bare models like "glm-5" become "glm-5/" at runtime.
  */
-export function validateModelFormatForProvider(provider: CatProvider, defaultModel?: string | null): string | null {
+export function hintModelFormatForProvider(provider: CatProvider, defaultModel?: string | null): string | null {
   if (provider !== 'opencode') return null;
   const trimmedModel = defaultModel?.trim();
   if (!trimmedModel) return null;

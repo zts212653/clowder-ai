@@ -13,8 +13,8 @@ import { bootstrapCatCatalog, resolveCatCatalogPath } from '../config/cat-catalo
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import {
+  hintModelFormatForProvider,
   resolveBuiltinClientForProvider,
-  validateModelFormatForProvider,
   validateRuntimeProviderBinding,
 } from '../config/provider-binding-compat.js';
 import {
@@ -234,9 +234,9 @@ async function validateAccountBindingOrThrow(
   if (compatibilityError) {
     throw new Error(compatibilityError);
   }
-  const modelFormatError = validateModelFormatForProvider(client, defaultModel);
-  if (modelFormatError) {
-    throw new Error(modelFormatError);
+  const modelFormatHint = hintModelFormatForProvider(client, defaultModel);
+  if (modelFormatHint) {
+    console.warn(`[cats] ${modelFormatHint} (model=${defaultModel})`);
   }
 }
 

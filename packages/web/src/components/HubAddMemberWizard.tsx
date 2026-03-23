@@ -150,8 +150,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   const canFinish = Boolean(
     client &&
       defaultModel.trim() &&
-      (client === 'antigravity' ? commandArgs.trim().length > 0 : Boolean(selectedProfile)) &&
-      !(client === 'opencode' && !defaultModel.includes('/')),
+      (client === 'antigravity' ? commandArgs.trim().length > 0 : Boolean(selectedProfile)),
   );
 
   const handleClientSelect = (nextClient: ClientValue) => {
