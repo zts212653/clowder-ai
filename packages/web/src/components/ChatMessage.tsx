@@ -227,6 +227,12 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
     );
   }
 
+  // Don't render completely empty non-streaming assistant messages.
+  // This can happen when a cat responds with only internal tool use and no text output.
+  if (!message.isStreaming && !hasTextContent && !hasCliBlock && !hasBlocks && !message.extra?.rich?.blocks?.length) {
+    return null;
+  }
+
   return (
     <div data-message-id={message.id} className="group flex gap-2 mb-4 items-start">
       {catData && <CatAvatar catId={message.catId!} size={32} status={message.isStreaming ? 'streaming' : undefined} />}
