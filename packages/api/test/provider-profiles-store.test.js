@@ -427,4 +427,85 @@ describe('provider profile store', () => {
       ]);
     }
   });
+
+  it('migration triggers from resolveAnthropicRuntimeProfile (readRaw path)', async () => {
+    const localProject = await makeTmpDir('readraw-local');
+    const globalRoot = await makeTmpDir('readraw-global');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    try {
+      const localDir = join(localProject, '.cat-cafe');
+      await mkdir(localDir, { recursive: true });
+      const created = await createProviderProfile(globalRoot, {
+        displayName: 'Runtime Account',
+        authType: 'api_key',
+        baseUrl: 'https://api.runtime.dev',
+        apiKey: 'sk-runtime',
+      });
+      await activateProviderProfile(globalRoot, 'anthropic', created.id);
+
+      const meta = JSON.parse(await readFile(join(globalRoot, '.cat-cafe', 'provider-profiles.json'), 'utf-8'));
+      const secrets = JSON.parse(
+        await readFile(join(globalRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'), 'utf-8'),
+      );
+
+      await rm(join(globalRoot, '.cat-cafe'), { recursive: true, force: true });
+      await mkdir(localDir, { recursive: true });
+      await writeFile(join(localDir, 'provider-profiles.json'), JSON.stringify(meta));
+      await writeFile(join(localDir, 'provider-profiles.secrets.local.json'), JSON.stringify(secrets));
+
+      const runtime = await resolveAnthropicRuntimeProfile(localProject);
+      assert.equal(runtime.mode, 'api_key');
+      assert.equal(runtime.apiKey, 'sk-runtime');
+    } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      await Promise.all([
+        rm(localProject, { recursive: true, force: true }),
+        rm(globalRoot, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  it('migration triggers from readBootstrapBindingsSync', async () => {
+    const { readBootstrapBindings } = await import('../dist/config/provider-profiles.js');
+    const localProject = await makeTmpDir('sync-local');
+    const globalRoot = await makeTmpDir('sync-global');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    try {
+      const localDir = join(localProject, '.cat-cafe');
+      await mkdir(localDir, { recursive: true });
+      const created = await createProviderProfile(globalRoot, {
+        displayName: 'Sync Account',
+        authType: 'api_key',
+        baseUrl: 'https://api.sync.dev',
+        apiKey: 'sk-sync',
+      });
+      await activateProviderProfile(globalRoot, 'anthropic', created.id);
+
+      const meta = await readFile(join(globalRoot, '.cat-cafe', 'provider-profiles.json'), 'utf-8');
+      const secrets = await readFile(
+        join(globalRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        'utf-8',
+      );
+
+      await rm(join(globalRoot, '.cat-cafe'), { recursive: true, force: true });
+      await mkdir(localDir, { recursive: true });
+      await writeFile(join(localDir, 'provider-profiles.json'), meta);
+      await writeFile(join(localDir, 'provider-profiles.secrets.local.json'), secrets);
+
+      const { readBootstrapBindingsSync } = await import('../dist/config/provider-profiles.js');
+      const bindings = readBootstrapBindingsSync(localProject);
+      assert.equal(bindings.anthropic?.mode, 'api_key');
+      assert.equal(bindings.anthropic?.accountRef, created.id);
+    } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      await Promise.all([
+        rm(localProject, { recursive: true, force: true }),
+        rm(globalRoot, { recursive: true, force: true }),
+      ]);
+    }
+  });
 });

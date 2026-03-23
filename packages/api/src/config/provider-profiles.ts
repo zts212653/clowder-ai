@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type {
@@ -607,6 +607,18 @@ async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: stri
   await writeRaw(globalMetaPath, globalSecretsPath, localResult.meta, localResult.secrets);
 }
 
+function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string): void {
+  const localDir = safePath(projectRoot, CAT_CAFE_DIR);
+  const globalDir = safePath(globalRoot, CAT_CAFE_DIR);
+  mkdirSync(globalDir, { recursive: true });
+  const localMetaPath = safePath(localDir, META_FILENAME);
+  const localSecretsPath = safePath(localDir, SECRETS_FILENAME);
+  const globalMetaPath = safePath(globalDir, META_FILENAME);
+  const globalSecretsPath = safePath(globalDir, SECRETS_FILENAME);
+  if (existsSync(localMetaPath)) copyFileSync(localMetaPath, globalMetaPath);
+  if (existsSync(localSecretsPath)) copyFileSync(localSecretsPath, globalSecretsPath);
+}
+
 async function readRaw(projectRoot: string): Promise<{
   meta: ProviderProfilesMetaFile;
   secrets: ProviderProfilesSecretsFile;
@@ -615,6 +627,10 @@ async function readRaw(projectRoot: string): Promise<{
   dirty: boolean;
 }> {
   const storageRoot = await resolveProviderProfilesRoot(projectRoot);
+  const localRoot = detectProjectLocalProfiles(projectRoot);
+  if (localRoot) {
+    await migrateProjectLocalToGlobal(localRoot, storageRoot);
+  }
   return readRawAtStorageRoot(storageRoot);
 }
 
@@ -768,6 +784,10 @@ export async function readBootstrapBindings(projectRoot: string): Promise<Bootst
 
 export function readBootstrapBindingsSync(projectRoot: string): BootstrapBindings {
   const storageRoot = resolveProviderProfilesRootSync(projectRoot);
+  const localRoot = detectProjectLocalProfiles(projectRoot);
+  if (localRoot) {
+    migrateProjectLocalToGlobalSync(localRoot, storageRoot);
+  }
   const metaPath = safePath(storageRoot, CAT_CAFE_DIR, META_FILENAME);
   const raw = existsSync(metaPath)
     ? (JSON.parse(readFileSync(metaPath, 'utf-8')) as
