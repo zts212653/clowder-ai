@@ -39,12 +39,14 @@ function currentAliasTags(form: HubCatEditorFormState): string[] {
 export function IdentitySection({
   cat,
   form,
+  hasError,
   avatarUploading,
   onChange,
   onAvatarUpload,
 }: {
   cat?: CatData | null;
   form: HubCatEditorFormState;
+  hasError?: boolean;
   avatarUploading: boolean;
   onChange: (patch: FormPatch) => void;
   onAvatarUpload: (file: File) => Promise<void>;
@@ -54,7 +56,7 @@ export function IdentitySection({
   const avatarSrc = safeAvatarSrc(form.avatar);
 
   return (
-    <SectionCard title="身份信息">
+    <SectionCard title="身份信息" tone={hasError ? 'error' : 'neutral'}>
       {!cat ? (
         <>
           <TextField
@@ -235,12 +237,14 @@ function buildCallHint(client: string, profile: ProfileItem | undefined, model: 
 
 export function AccountSection({
   form,
+  hasError,
   modelOptions,
   availableProfiles,
   loadingProfiles,
   onChange,
 }: {
   form: HubCatEditorFormState;
+  hasError?: boolean;
   modelOptions: string[];
   availableProfiles: ProfileItem[];
   loadingProfiles: boolean;
@@ -251,7 +255,7 @@ export function AccountSection({
   const callHint = buildCallHint(form.client, selectedProfile, form.defaultModel);
 
   return (
-    <SectionCard title="认证与模型">
+    <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'}>
       <div className="space-y-2">
         <SelectField
           label="Client"

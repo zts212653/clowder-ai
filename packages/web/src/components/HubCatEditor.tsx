@@ -223,6 +223,12 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     if (patch.mentionPatterns !== undefined) {
       setFieldErrors((prev) => ({ ...prev, routing: false }));
     }
+    if (patch.name !== undefined || patch.roleDescription !== undefined) {
+      setFieldErrors((prev) => ({ ...prev, identity: false }));
+    }
+    if (patch.defaultModel !== undefined || patch.client !== undefined) {
+      setFieldErrors((prev) => ({ ...prev, account: false }));
+    }
   };
   const patchStrategy = (patch: Partial<StrategyFormState>) => {
     setHasUnsavedChanges(true);
@@ -259,12 +265,32 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
 
   const handleSave = async () => {
     const errors: Record<string, boolean> = {};
+    const errorMessages: string[] = [];
+    // Identity section: name + roleDescription required for create
+    if (!cat && !form.name.trim()) {
+      errors.identity = true;
+      errorMessages.push('名称');
+    }
+    if (!form.roleDescription.trim()) {
+      errors.identity = true;
+      errorMessages.push('角色描述');
+    }
+    // Account section: model required; opencode model must contain /
+    if (!form.defaultModel.trim()) {
+      errors.account = true;
+      errorMessages.push('Model');
+    } else if (form.client === 'opencode' && !form.defaultModel.includes('/')) {
+      errors.account = true;
+      errorMessages.push('OpenCode Model 需要 providerId/modelId 格式');
+    }
+    // Routing section: at least 1 alias
     if (splitMentionPatterns(form.mentionPatterns).length === 0) {
       errors.routing = true;
+      errorMessages.push('别名');
     }
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      setError('请填写必填字段');
+      setError(`请填写必填字段：${errorMessages.join('、')}`);
       return;
     }
     setFieldErrors({});
@@ -453,12 +479,14 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
           <IdentitySection
             cat={cat}
             form={form}
+            hasError={fieldErrors.identity}
             avatarUploading={uploadingAvatar}
             onChange={patchForm}
             onAvatarUpload={handleAvatarUpload}
           />
           <AccountSection
             form={form}
+            hasError={fieldErrors.account}
             modelOptions={modelOptions}
             availableProfiles={availableProfiles}
             loadingProfiles={loadingProfiles}
