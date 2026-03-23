@@ -37,13 +37,17 @@ function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProf
   }
 }
 
-export function validateModelFormatForProvider(provider: CatProvider, defaultModel?: string | null): string | null {
+/**
+ * Returns a hint string when the model does not follow "providerId/modelId" convention for opencode.
+ * This is advisory only — callers should log/display the hint but NOT reject the request.
+ */
+export function hintModelFormatForProvider(provider: CatProvider, defaultModel?: string | null): string | null {
   if (provider !== 'opencode') return null;
   const trimmedModel = defaultModel?.trim();
   if (!trimmedModel) return null;
   const slashIndex = trimmedModel.indexOf('/');
   if (slashIndex > 0 && slashIndex < trimmedModel.length - 1) return null;
-  return 'client "opencode" requires model format "providerId/modelId" (e.g. openai/gpt-5.4)';
+  return 'client "opencode" recommends model format "providerId/modelId" (e.g. openai/gpt-5.4)';
 }
 
 export function validateRuntimeProviderBinding(

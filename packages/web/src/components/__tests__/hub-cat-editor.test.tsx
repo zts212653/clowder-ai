@@ -202,7 +202,7 @@ describe('HubCatEditor', () => {
     ]);
   });
 
-  it('validateModelFormatForClient enforces providerId/modelId for opencode only', () => {
+  it('hintModelFormatForClient returns advisory hint for opencode without slash format', () => {
     expect(validateModelFormatForClient('opencode', 'gpt-5.4')).toMatch(/providerId\/modelId/i);
     expect(validateModelFormatForClient('opencode', 'openai/gpt-5.4')).toBeNull();
     expect(validateModelFormatForClient('openai', 'gpt-5.4')).toBeNull();

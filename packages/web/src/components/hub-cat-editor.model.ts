@@ -357,13 +357,20 @@ function trimText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function validateModelFormatForClient(client: ClientValue, model: string): string | null {
+/**
+ * Returns a hint string when the model does not follow "providerId/modelId" convention for opencode.
+ * Advisory only — callers should display as a warning, not block submission.
+ */
+export function hintModelFormatForClient(client: ClientValue, model: string): string | null {
   if (client !== 'opencode') return null;
   const trimmed = model.trim();
   const slashIndex = trimmed.indexOf('/');
   if (slashIndex > 0 && slashIndex < trimmed.length - 1) return null;
-  return 'OpenCode 的 Model 必须使用 providerId/modelId 格式（例如 openai/gpt-5.4）';
+  return 'OpenCode 建议使用 providerId/modelId 格式（例如 openai/gpt-5.4）';
 }
+
+/** @deprecated Use {@link hintModelFormatForClient} — kept for backward compatibility. */
+export const validateModelFormatForClient = hintModelFormatForClient;
 
 function resolveFormAccountRef(form: HubCatEditorFormState): string {
   return trimText(
