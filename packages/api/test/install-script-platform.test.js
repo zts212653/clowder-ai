@@ -1,9 +1,8 @@
-import test from 'node:test';
-
-import { assert, runSourceOnlySnippet, spawnSync } from './install-script-test-helpers.js';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { assert, runSourceOnlySnippet, spawnSync } from './install-script-test-helpers.js';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, '..', '..', '..');
@@ -68,16 +67,20 @@ printf '%s' "$PLATFORM"
 test('darwin node@20 keg-only: adds keg bin to PATH after brew install', () => {
   // Verify the install script explicitly adds the keg bin to PATH
   // rather than relying on brew link (which keg-only formulas don't support)
-  assert.match(installScriptText, /brew --prefix node@20/,
-    'must resolve the keg prefix to find the bin directory');
-  assert.match(installScriptText, /export PATH="\$_keg_bin:\$PATH"/,
-    'must prepend keg bin to PATH so node is discoverable');
+  assert.match(installScriptText, /brew --prefix node@20/, 'must resolve the keg prefix to find the bin directory');
+  assert.match(
+    installScriptText,
+    /export PATH="\$_keg_bin:\$PATH"/,
+    'must prepend keg bin to PATH so node is discoverable',
+  );
   // Must NOT use `local` outside a function — bash set -e will abort
-  assert.doesNotMatch(installScriptText, /local keg_bin/,
-    'must not use local outside a function (set -e will abort)');
+  assert.doesNotMatch(installScriptText, /local keg_bin/, 'must not use local outside a function (set -e will abort)');
   // Verify it re-checks via node_needs_install (not just trusting brew exit code)
-  assert.match(installScriptText, /node_needs_install \|\| NODE_OK=true/,
-    'must re-verify node is actually on PATH after keg bin addition');
+  assert.match(
+    installScriptText,
+    /node_needs_install \|\| NODE_OK=true/,
+    'must re-verify node is actually on PATH after keg bin addition',
+  );
 });
 
 test('darwin node@20 keg PATH addition works with stubbed brew', () => {
@@ -117,18 +120,21 @@ rm -rf "$fake_keg"
 
 test('darwin redis install verifies redis-cli ping, not just brew exit code', () => {
   // The install_redis_local function must verify Redis is actually responding
-  assert.match(installScriptText, /redis-cli ping/,
-    'must verify Redis responds to ping after install');
-  assert.match(installScriptText, /fail "Redis installed but not responding to ping"/,
-    'must report failure when Redis is installed but not responding');
-  assert.match(installScriptText, /return 1/,
-    'must return non-zero on Redis verification failure');
+  assert.match(installScriptText, /redis-cli ping/, 'must verify Redis responds to ping after install');
+  assert.match(
+    installScriptText,
+    /fail "Redis installed but not responding to ping"/,
+    'must report failure when Redis is installed but not responding',
+  );
+  assert.match(installScriptText, /return 1/, 'must return non-zero on Redis verification failure');
 });
 
 test('darwin redis install reports brew install failure instead of swallowing', () => {
   // brew install must NOT have || true — failure must be caught
-  assert.match(installScriptText, /if ! brew install redis/,
-    'brew install redis must be guarded by conditional, not swallowed with || true');
-  assert.match(installScriptText, /fail "brew install redis failed"/,
-    'must report brew install failure explicitly');
+  assert.match(
+    installScriptText,
+    /if ! brew install redis/,
+    'brew install redis must be guarded by conditional, not swallowed with || true',
+  );
+  assert.match(installScriptText, /fail "brew install redis failed"/, 'must report brew install failure explicitly');
 });
