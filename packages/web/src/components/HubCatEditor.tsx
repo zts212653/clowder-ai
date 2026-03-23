@@ -26,6 +26,7 @@ import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
 import type { ProfileItem, ProviderProfilesResponse } from './hub-provider-profiles.types';
 import type { CatStrategyEntry } from './hub-strategy-types';
+import { useConfirm } from './useConfirm';
 
 interface HubCatEditorProps {
   cat?: CatData | null;
@@ -36,6 +37,7 @@ interface HubCatEditorProps {
 }
 
 export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEditorProps) {
+  const confirm = useConfirm();
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [loadingStrategy, setLoadingStrategy] = useState(false);
@@ -242,13 +244,12 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     }));
   };
 
-  const requestClose = () => {
+  const requestClose = async () => {
     if (!hasUnsavedChanges) {
       onClose();
       return;
     }
-    const ok = window.confirm('有未保存的修改，确定要关闭吗？');
-    if (ok) onClose();
+    if (await confirm({ title: '关闭确认', message: '有未保存的修改，确定要关闭吗？' })) onClose();
   };
 
   const handleAvatarUpload = async (file: File) => {
@@ -410,7 +411,12 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
 
   const handleDelete = async () => {
     if (!cat) return;
-    const ok = window.confirm(`确认删除成员「${cat.displayName}」吗？此操作不可撤销。`);
+    const ok = await confirm({
+      title: '删除确认',
+      message: `确认删除成员「${cat.displayName}」吗？此操作不可撤销。`,
+      variant: 'danger',
+      confirmLabel: '删除',
+    });
     if (!ok) return;
     setSaving(true);
     setError(null);

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { BrakeModal } from '@/components/BrakeModal';
 import { ToastContainer } from '@/components/ToastContainer';
+import { ConfirmProvider } from '@/components/useConfirm';
 import './globals.css';
 
 export const viewport: Viewport = {
@@ -28,7 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN">
       <body className="min-h-screen">
-        {children}
+        <ConfirmProvider>{children}</ConfirmProvider>
         <BrakeModal />
         <ToastContainer />
       </body>

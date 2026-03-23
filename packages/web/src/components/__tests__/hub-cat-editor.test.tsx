@@ -8,6 +8,11 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
+const mockConfirm = vi.fn(() => Promise.resolve(true));
+vi.mock('@/components/useConfirm', () => ({
+  useConfirm: () => mockConfirm,
+}));
+
 import { HubCatEditor } from '@/components/HubCatEditor';
 import {
   buildCatPayload,
@@ -72,6 +77,7 @@ describe('HubCatEditor', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mockApiFetch.mockReset();
+    mockConfirm.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -1268,21 +1274,21 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     const deleteButton = queryField<HTMLButtonElement>(container, 'button[aria-label="删除成员"]');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockConfirm.mockResolvedValueOnce(false);
 
     await act(async () => {
       deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(mockConfirm).toHaveBeenCalledTimes(1);
     expect(mockApiFetch).not.toHaveBeenCalledWith(
       '/api/cats/runtime-antigravity',
       expect.objectContaining({ method: 'DELETE' }),
     );
     expect(onSaved).toHaveBeenCalledTimes(0);
 
-    confirmSpy.mockReturnValue(true);
+    mockConfirm.mockResolvedValueOnce(true);
     await act(async () => {
       deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1293,7 +1299,6 @@ describe('HubCatEditor', () => {
       expect.objectContaining({ method: 'DELETE' }),
     );
     expect(onSaved).toHaveBeenCalledTimes(1);
-    confirmSpy.mockRestore();
   });
 
   it('prompts before closing when there are unsaved edits', async () => {
@@ -1306,7 +1311,7 @@ describe('HubCatEditor', () => {
       }),
     );
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockConfirm.mockResolvedValue(false);
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose, onSaved: vi.fn() }));
     });
@@ -1322,17 +1327,17 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(mockConfirm).toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
 
-    confirmSpy.mockReturnValue(true);
+    mockConfirm.mockResolvedValue(true);
     await act(async () => {
       cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
     expect(onClose).toHaveBeenCalledTimes(1);
-    confirmSpy.mockRestore();
+    mockConfirm.mockResolvedValue(true);
   });
 
   it('hides delete action for seed members', async () => {

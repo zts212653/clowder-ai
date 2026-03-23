@@ -7,6 +7,10 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
+vi.mock('@/components/useConfirm', () => ({
+  useConfirm: () => () => Promise.resolve(true),
+}));
+
 import { HubAddMemberWizard } from '@/components/HubAddMemberWizard';
 import { HubCatEditor } from '@/components/HubCatEditor';
 
