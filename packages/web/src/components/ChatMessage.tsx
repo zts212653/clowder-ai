@@ -236,6 +236,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
     !hasCliBlock &&
     !hasBlocks &&
     !message.extra?.rich?.blocks?.length &&
+    !message.extra?.crossPost &&
     !message.thinking
   ) {
     return null;

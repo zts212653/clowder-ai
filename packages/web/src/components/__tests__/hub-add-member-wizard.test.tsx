@@ -230,7 +230,7 @@ describe('HubAddMemberWizard', () => {
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('gpt-5.4-mini');
   });
 
-  it('allows creating opencode member with bare model (soft hint only)', async () => {
+  it('blocks creating opencode member with bare model (requires providerId/modelId)', async () => {
     const onComplete = vi.fn();
 
     await act(async () => {
@@ -247,14 +247,15 @@ describe('HubAddMemberWizard', () => {
     await click(queryButton(container, 'OpenCode'));
     await click(queryButton(container, 'Codex Sponsor'));
 
-    // Soft hint shown because pre-filled model lacks a `/` prefix.
-    expect(container.textContent).toContain('建议使用');
+    // Finish button should be disabled — bare model without providerId/ prefix is rejected.
+    const finishButton = queryButton(container, '创建后继续编辑');
+    expect(finishButton.disabled).toBe(true);
 
-    await click(queryButton(container, '创建后继续编辑'));
+    await click(finishButton);
     await flushEffects();
 
-    // Wizard does not block — bare model is accepted (soft validation hint only).
-    expect(onComplete).toHaveBeenCalled();
+    // Wizard blocks — bare model is not accepted.
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it('walks the Antigravity flow with default CLI args and lands in the editor', async () => {
