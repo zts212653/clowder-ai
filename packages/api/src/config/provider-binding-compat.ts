@@ -38,10 +38,10 @@ function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProf
 }
 
 /**
- * Returns a hint string when the model does not follow "providerId/modelId" convention for opencode.
- * This is advisory only — callers should log/display the hint but NOT reject the request.
+ * Returns an error string when the model does not follow "providerId/modelId" convention for opencode.
+ * Server-side callers should reject the request; frontend callers may use this for pre-flight validation.
  */
-export function hintModelFormatForProvider(provider: CatProvider, defaultModel?: string | null): string | null {
+export function validateModelFormatForProvider(provider: CatProvider, defaultModel?: string | null): string | null {
   if (provider !== 'opencode') return null;
   const trimmedModel = defaultModel?.trim();
   if (!trimmedModel) return null;
