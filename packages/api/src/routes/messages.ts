@@ -354,6 +354,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     }
 
     // ADR-008 S1: Pre-resolve targets + intent, persisting @mentions as participants
+    log.debug({ threadId: resolvedThreadId, content: content.slice(0, 200) }, 'Resolving targets and intent');
     const { targetCats: resolvedTargetCats, intent } = await router.resolveTargetsAndIntent(content, resolvedThreadId, {
       persist: true,
     });
@@ -374,6 +375,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // concurrent execution when different cats are active (regression fix).
     const hasActive = opts.invocationTracker?.has(resolvedThreadId) ?? false;
     const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
+    log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');
 
     if (mode === 'queue' && hasActive && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point

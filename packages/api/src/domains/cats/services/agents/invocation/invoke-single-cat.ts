@@ -1223,6 +1223,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
+      log.debug(
+        { invocationId, catId, promptLength: effectivePrompt.length, sessionId: options.sessionId, attempt },
+        'Dispatching to agent service',
+      );
       const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
       for (;;) {
         const iterResult = await abortableNext(serviceIter, signal);
