@@ -24,7 +24,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
-import { isParseError } from '../../../../../utils/ndjson-parser.js';
+import { isParseError, type ParseError } from '../../../../../utils/ndjson-parser.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
@@ -299,11 +299,10 @@ export class ClaudeAgentService implements AgentService {
         }
         // F166: Forward non-JSON CLI output as text instead of silently discarding
         if (isParseError(event)) {
-          const rawLine = (event as { line: string }).line;
           yield {
             type: 'text' as const,
             catId: this.catId,
-            content: rawLine,
+            content: (event as ParseError).line,
             metadata,
             timestamp: Date.now(),
           };

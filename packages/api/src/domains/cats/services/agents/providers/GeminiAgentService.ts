@@ -25,6 +25,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { isParseError } from '../../../../../utils/ndjson-parser.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
@@ -180,6 +181,8 @@ export class GeminiAgentService implements AgentService {
           };
           continue;
         }
+        // F166: skip parse error sentinels — Gemini CLI should always output NDJSON
+        if (isParseError(event)) continue;
 
         // F8: Capture usage from result/success events before transform drops them
         if (typeof event === 'object' && event !== null) {

@@ -110,7 +110,7 @@ test('spawnCli does not yield stderr data', async () => {
   assert.deepEqual(results[0], { type: 'ok' });
 });
 
-test('spawnCli skips parse errors in stdout', async () => {
+test('spawnCli yields parse errors alongside valid JSON', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
@@ -124,10 +124,12 @@ test('spawnCli skips parse errors in stdout', async () => {
 
   const results = await promise;
 
-  // Behavioral assertion: parse errors are silently skipped, only valid JSON yielded
-  assert.equal(results.length, 2);
+  // F166: parse errors are now yielded so consumers can decide how to handle them
+  assert.equal(results.length, 3);
   assert.deepEqual(results[0], { valid: true });
-  assert.deepEqual(results[1], { also: 'valid' });
+  assert.equal(results[1].__parseError, true);
+  assert.equal(results[1].line, 'not-json-line');
+  assert.deepEqual(results[2], { also: 'valid' });
 });
 
 test('parse-error noise does not reset timeout forever', async () => {
