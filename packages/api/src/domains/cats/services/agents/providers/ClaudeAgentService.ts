@@ -20,6 +20,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -29,6 +30,8 @@ import { appendLocalImagePathHints, collectImageAccessDirectories } from '../pro
 import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
+
+const log = createModuleLogger('claude-agent');
 
 const PERMISSION_MODE = 'bypassPermissions';
 
@@ -214,7 +217,9 @@ export class ClaudeAgentService implements AgentService {
 
     try {
       const claudeCommand = resolveCliCommand('claude');
+      log.debug({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
       if (!claudeCommand) {
+        log.warn({ catId: this.catId }, 'Claude CLI not found');
         yield {
           type: 'error' as const,
           catId: this.catId,
@@ -228,6 +233,31 @@ export class ClaudeAgentService implements AgentService {
 
       let sawResultError = false;
       const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv);
+
+      // Debug: log full invocation details (env values redacted by pino redact paths)
+      const safeEnvSummary: Record<string, string> = {};
+      for (const [k, v] of Object.entries(envOverrides)) {
+        if (v === null) {
+          safeEnvSummary[k] = '(cleared)';
+        } else if (/key|secret|token|password/i.test(k)) {
+          safeEnvSummary[k] = v.slice(0, 6) + '***';
+        } else {
+          safeEnvSummary[k] = v;
+        }
+      }
+      log.debug(
+        {
+          catId: this.catId,
+          command: claudeCommand,
+          model: effectiveModel,
+          sessionId: options?.sessionId,
+          invocationId: options?.invocationId,
+          cwd: options?.workingDirectory,
+          envOverrides: safeEnvSummary,
+          argCount: args.length,
+        },
+        'Invoking Claude CLI',
+      );
 
       const cliOpts = {
         command: claudeCommand,
@@ -243,7 +273,15 @@ export class ClaudeAgentService implements AgentService {
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
 
+      let eventCount = 0;
+      let textEventCount = 0;
       for await (const event of events) {
+        eventCount++;
+        const evtType =
+          typeof event === 'object' && event !== null && 'type' in event
+            ? String((event as Record<string, unknown>).type)
+            : '__unknown';
+        log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
         if (isCliTimeout(event)) {
           // F118 AC-C3: Forward timeout diagnostics before error
           yield {
@@ -309,10 +347,14 @@ export class ClaudeAgentService implements AgentService {
 
         const fromResultError = isResultErrorEvent(event);
         let result = transformClaudeEvent(event, this.catId, streamState);
-        if (result === null) continue;
+        if (result === null) {
+          log.debug({ catId: this.catId, eventIndex: eventCount, rawType: evtType }, 'Event dropped by transform');
+          continue;
+        }
 
         if (Array.isArray(result)) {
           for (const msg of result) {
+            if (msg.type === 'text') textEventCount++;
             // Capture sessionId into metadata
             if (msg.type === 'session_init' && msg.sessionId) {
               metadata.sessionId = msg.sessionId;
@@ -332,10 +374,21 @@ export class ClaudeAgentService implements AgentService {
             }
             sawResultError = true;
           }
+          if (result.type === 'text') textEventCount++;
           yield { ...result, metadata };
         }
       }
 
+      log.debug(
+        { catId: this.catId, totalEvents: eventCount, textEvents: textEventCount, sessionId: metadata.sessionId },
+        'Claude CLI invocation completed',
+      );
+      if (textEventCount === 0) {
+        log.warn(
+          { catId: this.catId, totalEvents: eventCount },
+          'Claude CLI produced 0 text events — will show as silent_completion',
+        );
+      }
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
       yield {
