@@ -60,12 +60,14 @@ NC='\033[0m' # No Color
 QUICK_MODE=false
 USE_REDIS=true
 PROD_WEB=false
+DEBUG_MODE=false
 PROFILE=""
 for arg in "$@"; do
     case $arg in
         --quick|-q) QUICK_MODE=true ;;
         --memory|--no-redis) USE_REDIS=false ;;
         --prod-web) PROD_WEB=true ;;
+        --debug) DEBUG_MODE=true ;;
         --profile=*) PROFILE="${arg#*=}" ;;
         *)
             parse_manual_download_source_arg "$arg" || true
@@ -433,10 +435,14 @@ background_eval_with_null_stdin() {
 }
 
 api_launch_command() {
+    local env_prefix=""
+    if [ "$DEBUG_MODE" = true ]; then
+        env_prefix="LOG_LEVEL=debug "
+    fi
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
-        printf '%s' "cd packages/api && exec pnpm run start"
+        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run start"
     else
-        printf '%s' "cd packages/api && exec pnpm run dev"
+        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run dev"
     fi
 }
 
