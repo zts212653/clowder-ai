@@ -471,7 +471,7 @@ export function WorkspacePanel() {
         fetchTree();
       },
     }),
-    [createFile, createDir, deleteItem, renameItem, uploadFile, fetchTree, setOpenFile, closeTab],
+    [createFile, createDir, deleteItem, renameItem, uploadFile, fetchTree, setOpenFile, closeTab, confirm],
   );
 
   const isTokenValid = editToken && editTokenExpiry && editTokenExpiry > Date.now();
