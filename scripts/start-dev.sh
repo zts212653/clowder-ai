@@ -793,6 +793,14 @@ main() {
     clean_cache
     sanitize_lockfiles
 
+    # 2.5. 自动安装依赖（worktree 等场景 node_modules 可能不存在）
+    if [ ! -d "$PROJECT_DIR/node_modules" ]; then
+        echo ""
+        echo -e "${YELLOW}检测到 node_modules 缺失，自动安装依赖...${NC}"
+        run_logged_step "pnpm install" 5 pnpm install --frozen-lockfile
+        echo -e "${GREEN}  ✓ 依赖安装完成${NC}"
+    fi
+
     # 3. 构建 shared + API (除非 --quick)
     if [ "$QUICK_MODE" = false ]; then
         build_packages
