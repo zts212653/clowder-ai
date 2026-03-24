@@ -62,7 +62,7 @@ describe('provider profile store', () => {
       anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude' },
       openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
       google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
-      dare: { enabled: false, mode: 'skip' },
+      dare: { enabled: true, mode: 'oauth', accountRef: 'dare' },
       opencode: { enabled: false, mode: 'skip' },
     });
   });

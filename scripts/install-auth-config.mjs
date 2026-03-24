@@ -16,7 +16,7 @@ const BUILTIN_ACCOUNT_SPECS = [
   { id: 'opencode', displayName: 'OpenCode', client: 'opencode', models: ['claude-opus-4-6', 'claude-sonnet-4-5'] },
 ];
 
-const DEFAULT_OAUTH_CLIENTS = new Set(['anthropic', 'openai', 'google']);
+const DEFAULT_OAUTH_CLIENTS = new Set(['anthropic', 'openai', 'google', 'dare']);
 const LEGACY_BUILTIN_ID_MAP = {
   'claude-oauth': 'anthropic',
   'codex-oauth': 'openai',

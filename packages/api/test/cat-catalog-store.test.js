@@ -237,7 +237,7 @@ describe('cat-catalog-store', () => {
         ['ragdoll', ['claude', 'claude']],
         ['maine-coon', ['codex', 'codex']],
         ['siamese', ['gemini']],
-        ['dragon-li', [null]],
+        ['dragon-li', ['dare']],
         ['golden-chinchilla', [null]],
       ],
     );
@@ -282,7 +282,7 @@ describe('cat-catalog-store', () => {
         ['ragdoll', ['api-key-1']],
         ['maine-coon', ['codex', 'codex']],
         ['siamese', [null]],
-        ['dragon-li', [null]],
+        ['dragon-li', ['dare']],
         ['golden-chinchilla', [null]],
       ],
     );

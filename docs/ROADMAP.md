@@ -54,3 +54,4 @@ created: 2026-02-26
 | F128 | Cat-Initiated Thread Creation — 猫程序化创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | spec | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F131 | Workspace Navigator — 猫猫可编程导航 Workspace 面板 | in-progress | 金渐层 | internal | [F131](features/F131-workspace-navigator.md) |
+| F135 | 狸花猫开箱即用 — DARE Out-of-the-Box | spec | Ragdoll | internal | [F135](features/F135-dare-ootb.md) |

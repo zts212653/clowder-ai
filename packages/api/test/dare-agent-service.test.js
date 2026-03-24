@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
-import { DareAgentService } from '../dist/domains/cats/services/agents/providers/DareAgentService.js';
+import {
+  DareAgentService,
+  resolveVendorDarePath,
+  resolveVenvPython,
+} from '../dist/domains/cats/services/agents/providers/DareAgentService.js';
 
 // ── Mock helpers (same pattern as codex-agent-service.test.js) ──
 
@@ -141,6 +148,27 @@ describe('DareAgentService', () => {
     assert.ok(args.includes('--headless'), `expected --headless in args: ${args}`);
     assert.ok(args.includes('--auto-approve'), `expected --auto-approve in args: ${args}`);
     assert.ok(args.includes('-m') && args.includes('client'), `expected -m client in args: ${args}`);
+  });
+
+  test('passes --auto-approve-tool for high-risk DARE tools', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
+    const promise = collect(service.invoke('Write a file'));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    // DARE's --auto-approve only covers read_file/search_code by default.
+    // We must extend the whitelist for write_file, run_command, etc.
+    const approveToolArgs = args.reduce((acc, arg, i) => {
+      if (arg === '--auto-approve-tool') acc.push(args[i + 1]);
+      return acc;
+    }, []);
+    assert.ok(approveToolArgs.includes('write_file'), `expected write_file: ${approveToolArgs}`);
+    assert.ok(approveToolArgs.includes('run_command'), `expected run_command: ${approveToolArgs}`);
+    assert.ok(approveToolArgs.includes('write_code'), `expected write_code: ${approveToolArgs}`);
+    assert.ok(approveToolArgs.includes('run_cmd'), `expected run_cmd: ${approveToolArgs}`);
   });
 
   test('passes --adapter and --model', async () => {
@@ -399,5 +427,94 @@ describe('DareAgentService', () => {
     assert.ok(sidIdx >= 0, `expected --session-id in args: ${args}`);
     assert.strictEqual(args[sidIdx + 1], 'sess-42');
     assert.ok(!args.includes('--resume'), `did not expect --resume in args: ${args}`);
+  });
+
+  // F135: venv python — uses .venv/bin/python when available
+  test('uses venv python as command when .venv/bin/python exists (F135)', async () => {
+    const tmpDare = join(tmpdir(), `dare-test-venv-${Date.now()}`);
+    mkdirSync(join(tmpDare, '.venv', 'bin'), { recursive: true });
+    mkdirSync(join(tmpDare, 'client'), { recursive: true });
+    writeFileSync(join(tmpDare, '.venv', 'bin', 'python'), '#!/bin/sh\n');
+    writeFileSync(join(tmpDare, 'client', '__main__.py'), '');
+
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({
+      catId: 'dare',
+      spawnFn,
+      darePath: tmpDare,
+      model: 'test/model',
+    });
+    const promise = collect(service.invoke('Test'));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const command = spawnFn.mock.calls[0].arguments[0];
+    assert.strictEqual(command, join(tmpDare, '.venv', 'bin', 'python'));
+  });
+
+  test('falls back to bare python when no .venv exists (F135)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({
+      catId: 'dare',
+      spawnFn,
+      darePath: '/opt/dare',
+      model: 'test/model',
+    });
+    const promise = collect(service.invoke('Test'));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const command = spawnFn.mock.calls[0].arguments[0];
+    assert.strictEqual(command, 'python');
+  });
+});
+
+// F135: resolveVendorDarePath — project root resolution
+describe('resolveVendorDarePath (F135)', () => {
+  test('returns absolute path ending with vendor/dare-cli', () => {
+    const result = resolveVendorDarePath();
+    assert.ok(result.endsWith(join('vendor', 'dare-cli')), `expected vendor/dare-cli suffix, got: ${result}`);
+    assert.ok(result.startsWith('/'), `expected absolute path, got: ${result}`);
+  });
+
+  test('does not depend on process.cwd()', () => {
+    const originalCwd = process.cwd();
+    const result1 = resolveVendorDarePath();
+    // Change cwd and verify result is identical
+    process.chdir('/tmp');
+    try {
+      const result2 = resolveVendorDarePath();
+      assert.strictEqual(result1, result2, 'resolveVendorDarePath must not vary with cwd');
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  test('resolves to project root, not packages/ (P1 depth check)', () => {
+    const result = resolveVendorDarePath();
+    // Must NOT contain packages/ in the vendor path
+    assert.ok(
+      !result.includes(join('packages', 'vendor')),
+      `path should be at project root, not inside packages/: ${result}`,
+    );
+  });
+});
+
+// F135: resolveVenvPython helper
+describe('resolveVenvPython (F135)', () => {
+  test('returns .venv/bin/python when it exists', () => {
+    const tmpDare = join(tmpdir(), `dare-test-helper-${Date.now()}`);
+    mkdirSync(join(tmpDare, '.venv', 'bin'), { recursive: true });
+    writeFileSync(join(tmpDare, '.venv', 'bin', 'python'), '#!/bin/sh\n');
+
+    const result = resolveVenvPython(tmpDare);
+    assert.strictEqual(result, join(tmpDare, '.venv', 'bin', 'python'));
+  });
+
+  test('returns bare python when .venv does not exist', () => {
+    const result = resolveVenvPython('/nonexistent/path');
+    assert.strictEqual(result, 'python');
   });
 });
