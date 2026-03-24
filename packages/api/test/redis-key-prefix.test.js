@@ -108,6 +108,78 @@ describe('createRedisClient keyPrefix isolation', { skip: !REDIS_URL ? 'REDIS_UR
     await customClient.quit();
   });
 
+  it('reads REDIS_KEY_PREFIX from environment', async () => {
+    if (!connected) return;
+
+    // Use a subprocess to test env var behavior (ESM module cache makes
+    // in-process env changes ineffective for already-loaded modules)
+    const { spawn } = await import('node:child_process');
+    const { readFile, writeFile, unlink } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    // Create a temp test script in the api package directory (where modules are resolvable)
+    const apiDir = process.cwd();
+    const tempScript = join(apiDir, 'test-redis-env-prefix.mjs');
+    const scriptContent = `
+import { createRedisClient } from '@cat-cafe/shared/utils';
+
+const redis = createRedisClient({ url: '${REDIS_URL}' });
+console.log('PREFIX:', redis.options.keyPrefix);
+await redis.quit();
+`;
+
+    await writeFile(tempScript, scriptContent);
+
+    // Test 1: without env var (explicitly empty), should use default
+    const testDefault = new Promise((resolve, reject) => {
+      const env = { ...process.env };
+      delete env.REDIS_KEY_PREFIX;
+      const proc = spawn(process.execPath, [tempScript], {
+        cwd: apiDir,
+        env,
+      });
+      let output = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => { output += d.toString(); });
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('close', (code) => {
+        if (code !== 0) return reject(new Error(`Exit ${code}: ${stderr}`));
+        resolve(output);
+      });
+    });
+    const defaultResult = await testDefault;
+    assert.equal(
+      defaultResult.includes('PREFIX: cat-cafe:'),
+      true,
+      `Expected default prefix, got: ${defaultResult}`
+    );
+
+    // Test 2: with env var set, should use the env value
+    const testWithEnv = new Promise((resolve, reject) => {
+      const proc = spawn(process.execPath, [tempScript], {
+        cwd: apiDir,
+        env: { ...process.env, REDIS_KEY_PREFIX: 'env-test-prefix:' }
+      });
+      let output = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => { output += d.toString(); });
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('close', (code) => {
+        if (code !== 0) return reject(new Error(`Exit ${code}: ${stderr}`));
+        resolve(output);
+      });
+    });
+    const envResult = await testWithEnv;
+    assert.equal(
+      envResult.includes('PREFIX: env-test-prefix:'),
+      true,
+      `Expected env prefix, got: ${envResult}`
+    );
+
+    // Cleanup
+    await unlink(tempScript);
+  });
+
   it('uses cat-cafe: as default prefix when no config provided', async () => {
     if (!connected) return;
 
