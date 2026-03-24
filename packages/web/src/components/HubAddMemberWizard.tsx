@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import {
   ChoiceButton,
@@ -26,6 +27,8 @@ interface HubAddMemberWizardProps {
 }
 
 export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWizardProps) {
+  const currentProjectPath = useChatStore((state) => state.currentProjectPath);
+  const requestProjectPath = currentProjectPath && currentProjectPath !== 'default' ? currentProjectPath : null;
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [seedCats, setSeedCats] = useState<
     Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }>
@@ -88,7 +91,10 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
     if (!open) return;
     let cancelled = false;
     setLoadingProfiles(true);
-    apiFetch('/api/provider-profiles')
+    const query = new URLSearchParams();
+    if (requestProjectPath) query.set('projectPath', requestProjectPath);
+    const requestPath = query.size > 0 ? `/api/provider-profiles?${query.toString()}` : '/api/provider-profiles';
+    apiFetch(requestPath)
       .then(async (res) => {
         if (!res.ok) throw new Error(`账号配置加载失败 (${res.status})`);
         return (await res.json()) as ProviderProfilesResponse;
@@ -105,7 +111,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, requestProjectPath]);
 
   useEffect(() => {
     if (!open) return;
