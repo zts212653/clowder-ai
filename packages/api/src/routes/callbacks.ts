@@ -31,6 +31,7 @@ import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
 import { callbackAuthSchema } from './callback-auth-schema.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
+import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
@@ -92,6 +93,7 @@ export interface CallbackRoutesOptions {
       richBlocks?: RichBlock[],
       threadMeta?: { threadShortId: string; threadTitle?: string; deepLinkUrl?: string },
       origin?: 'callback' | 'agent' | 'system',
+      triggerMessageId?: string,
     ): Promise<void>;
   };
 }
@@ -205,6 +207,22 @@ const richBlockSchema = z.discriminatedUnion('kind', [
     disabled: z.boolean().optional(),
     selectedIds: z.array(z.string()).optional(),
     groupId: z.string().min(1).optional(),
+  }),
+  // F088 Phase J: file attachment block
+  z.object({
+    id: z.string().min(1),
+    kind: z.literal('file'),
+    v: z.literal(1),
+    url: z
+      .string()
+      .min(1)
+      .refine(
+        (u) => !u.includes('..') && (/^\/uploads\//.test(u) || /^\/api\//.test(u) || /^https:\/\//.test(u)),
+        'file url must start with /uploads/, /api/, or https://',
+      ),
+    fileName: z.string().min(1),
+    mimeType: z.string().optional(),
+    fileSize: z.number().int().min(0).optional(),
   }),
   // F120 Phase C: html_widget — inline sandboxed HTML/JS visualization
   z.object({
@@ -338,12 +356,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // #83: Extract cc_rich blocks from post_message content (Route B for callback path)
     const { cleanText: storedContent, blocks: extractedBlocks } = extractRichFromText(content);
 
+    // F088-J hotfix: Consume any buffered rich blocks (e.g. file blocks from generate_document).
+    // CLI agents don't go through route-serial, so the buffer must be consumed here.
+    // For route-serial agents, the buffer is already consumed before post_message — this is a no-op.
+    const bufferedBlocks = getRichBlockBuffer().consume(effectiveThreadId, record.catId as string, invocationId);
+
     // F34-b: Resolve voice blocks (audio with text, no url) before storing
     const synthesizer = getVoiceBlockSynthesizer();
-    let richBlocks = extractedBlocks;
-    if (synthesizer && extractedBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
+    let richBlocks = [...extractedBlocks, ...bufferedBlocks];
+    if (synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
       try {
-        richBlocks = await synthesizer.resolveVoiceBlocks(extractedBlocks, record.catId as string);
+        richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, record.catId as string);
       } catch (err) {
         app.log.error({ err }, '[callbacks/post-message] Voice block synthesis failed');
       }
@@ -536,6 +559,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           richBlocks.length > 0 ? richBlocks : undefined,
           threadMeta,
           'callback',
+          validatedReplyTo,
         )
         .catch((err: unknown) => {
           app.log.error({ err, threadId: effectiveThreadId }, '[callbacks/post-message] Outbound delivery failed');
@@ -1222,4 +1246,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       socketManager.setMultiMentionOrchestrator(getMultiMentionOrchestrator());
     }
   }
+
+  // F088 Phase J2: Document generation callback routes
+  registerCallbackDocumentRoutes(app, { registry, socketManager });
 };

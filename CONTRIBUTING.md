@@ -22,8 +22,9 @@ cd clowder-ai
 # 2. Create a feature branch
 git checkout -b feat/your-feature-name
 
-# 3. Install and verify
+# 3. Install, build, and verify
 pnpm install
+pnpm build
 pnpm check
 
 # 4. Make your changes, then run checks

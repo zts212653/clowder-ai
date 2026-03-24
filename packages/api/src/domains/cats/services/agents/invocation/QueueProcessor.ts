@@ -56,6 +56,8 @@ export interface OutboundDeliveryHookLike {
     catId: string,
     richBlocks?: ReadonlyArray<{ kind: string; [key: string]: unknown }>,
     threadMeta?: { threadShortId?: string; threadTitle?: string; deepLinkUrl?: string },
+    origin?: string,
+    triggerMessageId?: string,
   ): Promise<void>;
 }
 
@@ -616,6 +618,7 @@ export class QueueProcessor {
         persistenceContext,
         streamStartPromise,
         log,
+        messageId ?? undefined,
       );
 
       return 'succeeded';
@@ -686,6 +689,7 @@ export class QueueProcessor {
     persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> },
     streamStartPromise: Promise<void> | undefined,
     log: LoggerLike,
+    triggerMessageId?: string,
   ): Promise<void> {
     const finalContent = collectedTextParts.join('');
 
@@ -738,6 +742,8 @@ export class QueueProcessor {
             turn.catId,
             turn.richBlocks,
             threadMeta,
+            undefined,
+            triggerMessageId,
           );
           inflightDeliverPromises.push(deliverPromise);
           try {
@@ -761,6 +767,8 @@ export class QueueProcessor {
           turn.catId,
           richBlocks,
           threadMeta,
+          undefined,
+          triggerMessageId,
         );
         inflightDeliverPromises.push(deliverPromise);
         try {
@@ -783,6 +791,8 @@ export class QueueProcessor {
             primaryCat,
             richBlocks,
             threadMeta,
+            undefined,
+            triggerMessageId,
           );
           inflightDeliverPromises.push(deliverPromise);
           try {

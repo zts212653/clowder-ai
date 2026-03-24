@@ -174,6 +174,34 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 
 > 详见 Hotfix Lane 设计 (internal)
 
+### Full Sync Gate（Source-Owned）
+
+全量同步到 `clowder-ai` 时，**不能只看家里的 `pnpm gate` 绿不绿**。  
+`source gate green != target/public gate green`。
+
+硬规则：
+1. 先在 `cat-cafe` 导出同一份同步产物到 **temp target**
+2. 在 temp target 跑完整 public gate：`pnpm check`、`pnpm lint`、`build`、`pnpm --filter @cat-cafe/api run test:public`、startup acceptance
+3. **只有 temp target public gate 全绿，才允许碰真实 `clowder-ai`**
+4. 本机 README/macOS smoke 不属于 full sync 主路径；它必须是 sync 完成后的独立步骤，且必须显式隔离端口/Redis
+
+一句话：**不要再把真实 `clowder-ai` 当第一轮验收场，更不能把 runtime 当验收靶子。**
+
+### Release Provenance（三点映射）
+
+公开 release 不要求 `cat-cafe` 和 `clowder-ai` 同 SHA；我们要求的是**可追溯映射**。
+
+硬规则：
+1. release-intended full sync 必须从家里 source 侧显式传 `--release-tag=vX.Y.Z`
+2. `sync-to-opensource.sh` 在 temp target public gate 通过后，会自动打并 push `clowder-vX.Y.Z-source`
+3. `.sync-provenance.json` 必须记录：
+   - `source_commit_sha`
+   - `release_tag`
+   - `source_snapshot_tag`
+4. target 仓后续真正切 `vX.Y.Z` 时，release notes /后续 backport 必须引用这两个锚点，而不是口头约定
+
+一句话：**以后对齐 release，不靠“记得当时是哪次 sync”，靠 `source snapshot tag → target release tag → backport commit` 三点映射。**
+
 ### 规则
 
 - **社区和内部共用一套 F 编号**：不另起 P/CEP/社区专属编号系列（2026-03-13 决策，详见 F059 spec D6）

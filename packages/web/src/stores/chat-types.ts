@@ -62,7 +62,15 @@ export interface ToolEvent {
 }
 
 /** F22: Rich block types for frontend rendering */
-export type RichBlockKind = 'card' | 'diff' | 'checklist' | 'media_gallery' | 'audio' | 'interactive' | 'html_widget';
+export type RichBlockKind =
+  | 'card'
+  | 'diff'
+  | 'checklist'
+  | 'media_gallery'
+  | 'audio'
+  | 'interactive'
+  | 'html_widget'
+  | 'file';
 
 /** F066 Phase 4: Card action button */
 export interface CardAction {
@@ -156,6 +164,17 @@ export interface RichInteractiveBlock {
   groupId?: string;
 }
 
+/** F088 Phase J: File attachment block */
+export interface RichFileBlock {
+  id: string;
+  kind: 'file';
+  v: 1;
+  url: string;
+  fileName: string;
+  mimeType?: string;
+  fileSize?: number;
+}
+
 /** F120 Phase C: Inline HTML/JS widget rendered in sandboxed iframe (srcdoc) */
 export interface RichHtmlWidgetBlock {
   id: string;
@@ -176,7 +195,8 @@ export type RichBlock =
   | RichMediaGalleryBlock
   | RichAudioBlock
   | RichInteractiveBlock
-  | RichHtmlWidgetBlock;
+  | RichHtmlWidgetBlock
+  | RichFileBlock;
 
 /** F97: External connector source info (only when type='connector') */
 export interface ConnectorSourceData {
@@ -186,6 +206,8 @@ export interface ConnectorSourceData {
   url?: string;
   /** F098-C2: Connector-specific metadata (e.g. targets for multi-mention) */
   meta?: Record<string, unknown>;
+  /** F134: Group chat sender identity (message-level binding) */
+  sender?: { id: string; name?: string };
 }
 
 export interface ChatMessage {

@@ -51,6 +51,8 @@ export interface SummaryCompactionDeps {
       candidates?: unknown[];
     }>;
   } | null>;
+  /** Re-embed a thread after summary update (for semantic search). Optional — fail-open. */
+  reEmbed?: (anchor: string, text: string) => Promise<void>;
   /** Logger */
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
 }
@@ -70,15 +72,42 @@ export function createSummaryCompactionTask(deps: SummaryCompactionDeps): Schedu
     enabled: deps.enabled,
 
     async execute() {
-      // P1 fix (砚砚 review): get ALL threads with pending work, then filter by
-      // full eligibility (quiet/cooldown/signal) BEFORE applying budget.
-      // Old code truncated to budget first, starving eligible threads behind ineligible ones.
+      // Backfill: seed summary_state for historical threads that have never been seen.
+      // Only threads in evidence_docs but NOT in summary_state get a row.
+      // This ensures all 300+ threads can be scheduled, not just recently-active ones.
+      try {
+        deps.db
+          .prepare(
+            `INSERT OR IGNORE INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+           SELECT REPLACE(anchor, 'thread-', ''), 100, 5000, 7, 'concat'
+           FROM evidence_docs
+           WHERE kind = 'thread' AND anchor LIKE 'thread-%'
+             AND REPLACE(anchor, 'thread-', '') NOT IN (SELECT thread_id FROM summary_state)`,
+          )
+          .run();
+      } catch {
+        // fail-open
+      }
+
       const candidates = getEligibleThreads(deps.db, deps, config);
       if (candidates.length === 0) return;
 
+      // Cold-start detection: if most threads have never been summarized,
+      // remove per-tick budget to process all in one pass.
+      const neverSummarized = deps.db
+        .prepare("SELECT count(*) as n FROM summary_state WHERE summary_type = 'concat' AND pending_message_count > 0")
+        .get() as { n: number };
+      const isColdStart = neverSummarized.n > 20;
+      const budget = isColdStart ? candidates.length : config.perTickBudget;
+      if (isColdStart) {
+        deps.logger.info(
+          `[summary-compaction] cold-start detected: ${neverSummarized.n} threads pending, running full batch`,
+        );
+      }
+
       let processed = 0;
       for (const state of candidates) {
-        if (processed >= config.perTickBudget) break;
+        if (processed >= budget) break;
         try {
           const didProcess = await processThread(state, deps, config);
           if (didProcess) processed++;
@@ -176,6 +205,8 @@ async function processThread(
   // Dual-write: INSERT segments + UPDATE evidence_docs
   const lastMsg = messages[messages.length - 1]!;
   const now = new Date().toISOString();
+  const mergedSummary = result.segments.map((s) => s.summary).join('\n\n');
+  const totalTokens = mergedSummary.length / 4;
 
   const insertSegment = deps.db.prepare(`
     INSERT INTO summary_segments
@@ -209,10 +240,7 @@ async function processThread(
       );
     }
 
-    // 2. UPDATE evidence_docs.summary (read model = merged summary from all segments)
-    const mergedSummary = result.segments.map((s) => s.summary).join('\n\n');
-    const totalTokens = mergedSummary.length / 4; // rough estimate
-
+    // 2. UPDATE evidence_docs.summary (read model)
     deps.db
       .prepare(
         `UPDATE evidence_docs SET summary = ?, source_hash = ?, updated_at = ?
@@ -238,6 +266,21 @@ async function processThread(
   });
 
   tx();
+
+  // Re-embed this thread with new abstractive summary (for semantic search)
+  if (deps.reEmbed) {
+    try {
+      const title =
+        (
+          deps.db.prepare('SELECT title FROM evidence_docs WHERE anchor = ?').get(`thread-${state.thread_id}`) as
+            | { title: string }
+            | undefined
+        )?.title ?? '';
+      await deps.reEmbed(`thread-${state.thread_id}`, `${title} ${mergedSummary}`);
+    } catch {
+      // fail-open
+    }
+  }
 
   // P1 R2 fix (砚砚 review): after compaction, check if there are STILL more messages
   // beyond the new watermark. If so, re-populate pending signal so the thread stays

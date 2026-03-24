@@ -104,6 +104,11 @@ export function useAgentMessages() {
   /** Track callback-replaced invocations so delayed stream chunks do not recreate ghost bubbles. */
   const replacedInvocationsRef = useRef<Map<string, string>>(new Map());
 
+  /** #586 follow-up: Track just-finalized stream bubble per cat. Set on done when
+   *  activeRefs entry existed, consumed by callback replacement or next invocation start.
+   *  Prevents the greedy scan from matching arbitrary historical messages. */
+  const finalizedStreamRef = useRef<Map<string, string>>(new Map());
+
   /** Bug C P2: Track whether stream data was received per cat (avoids false catch-up on callback-only flows) */
   const sawStreamDataRef = useRef<Set<string>>(new Set());
 
@@ -288,6 +293,7 @@ export function useAgentMessages() {
       }
     }
 
+    // First pass: find actively-streaming invocationless bubble
     for (let i = currentMessages.length - 1; i >= 0; i -= 1) {
       const msg = currentMessages[i];
       if (
@@ -298,6 +304,19 @@ export function useAgentMessages() {
         !msg.extra?.stream?.invocationId
       ) {
         return { id: msg.id };
+      }
+    }
+
+    // #586 follow-up: Check finalizedStreamRef — the done handler records the
+    // exact message ID of the just-finalized stream bubble. This avoids the
+    // greedy scan that could match arbitrary historical messages (P1 from review).
+    const finalizedId = finalizedStreamRef.current.get(catId);
+    if (finalizedId) {
+      const finalized = currentMessages.find(
+        (m) => m.id === finalizedId && m.type === 'assistant' && m.catId === catId && m.origin === 'stream',
+      );
+      if (finalized) {
+        return { id: finalized.id };
       }
     }
 
@@ -433,6 +452,8 @@ export function useAgentMessages() {
               ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
             });
             activeRefs.current.delete(msg.catId);
+            // Consume the finalized ref — callback successfully replaced the bubble
+            finalizedStreamRef.current.delete(msg.catId);
             if (invocationId) {
               replacedInvocationsRef.current.set(msg.catId, invocationId);
             }
@@ -562,6 +583,10 @@ export function useAgentMessages() {
         const messageId = getOrRecoverActiveAssistantMessageId(msg.catId);
         if (messageId) {
           setStreaming(messageId, false);
+          // #586 follow-up: Record the finalized bubble so callback can find it
+          // even after isStreaming=false + activeRefs cleared. Unlike a greedy
+          // scan, this is scoped to the exact just-finalized message only.
+          finalizedStreamRef.current.set(msg.catId, messageId);
           activeRefs.current.delete(msg.catId);
         }
         // Bugfix: clear stale invocationId so findRecoverableAssistantMessage
@@ -640,8 +665,11 @@ export function useAgentMessages() {
             sysContent = mentions.map((m) => `${m.mentionedBy} @了 ${m.catId}`).join('、');
             sysVariant = 'a2a_followup';
           } else if (parsed?.type === 'invocation_created') {
-            // New invocation boundary: clear stale task snapshot for this cat.
+            // New invocation boundary: clear stale task snapshot + finalized ref for this cat.
+            // #586: Without clearing finalizedStreamRef here, a stale ref from the
+            // previous invocation could cause the next callback to overwrite the old message.
             const targetCatId = parsed.catId ?? msg.catId;
+            finalizedStreamRef.current.delete(targetCatId);
             const invocationId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
             if (targetCatId && invocationId) {
               setCatInvocation(targetCatId, {

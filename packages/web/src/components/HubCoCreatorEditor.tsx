@@ -131,10 +131,10 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <div
-        className="w-full max-w-3xl rounded-[28px] border border-[#EFDCCB] bg-[#FDF8F3] shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-[28px] border border-[#EFDCCB] bg-[#FDF8F3] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between border-b border-[#F0DDCD] px-6 py-5">
+        <div className="flex shrink-0 items-start justify-between border-b border-[#F0DDCD] px-6 py-5">
           <div>
             <p className="text-xs font-semibold text-[#D18A61]">成员协作 &gt; 总览 &gt; {current.name}</p>
             <h3 className="mt-2 text-2xl font-bold text-[#2D2118]">编辑 {current.name}</h3>
@@ -145,7 +145,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
           </button>
         </div>
 
-        <div className="max-h-[70vh] space-y-4 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
           <PersistenceBanner />
 
           <SectionCard title="身份信息">
@@ -259,7 +259,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
           {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p> : null}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-6 py-4">
           <button
             type="button"
             onClick={onClose}

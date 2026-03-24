@@ -81,13 +81,16 @@ import {
   startConnectorGateway,
 } from './infrastructure/connectors/connector-gateway-bootstrap.js';
 import {
+  CiCdRouter,
   ConnectorInvokeTrigger,
   GhCliReviewContentFetcher,
   MemoryProcessedEmailStore,
   MemoryPrTrackingStore,
   RedisPrTrackingStore,
   ReviewRouter,
+  startGithubCiPoller,
   startGithubReviewWatcher,
+  stopGithubCiPoller,
   stopGithubReviewWatcher,
 } from './infrastructure/email/index.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
@@ -369,14 +372,24 @@ async function main(): Promise<void> {
     // Phase E-1: thread summary indexing — provide a callback that lists all threads
     threadListFn: async () => {
       const threads = await threadStore.list('default-user');
-      return threads.map((t) => ({
-        id: t.id,
-        title: t.title,
-        participants: t.participants as string[],
-        threadMemory: t.threadMemory ? { summary: t.threadMemory.summary } : null,
-        lastActiveAt: t.lastActiveAt,
-        featureIds: t.backlogItemId ? [t.backlogItemId] : undefined,
-      }));
+      return threads
+        .filter((t) => !t.projectPath.startsWith('games/'))
+        .map((t) => ({
+          id: t.id,
+          title: t.title,
+          participants: t.participants as string[],
+          threadMemory: t.threadMemory ? { summary: t.threadMemory.summary } : null,
+          lastActiveAt: t.lastActiveAt,
+          featureIds: t.backlogItemId ? [t.backlogItemId] : undefined,
+        }));
+    },
+    excludeThreadIdsFn: async () => {
+      const allThreads = await threadStore.list('default-user');
+      const excluded = new Set<string>();
+      for (const t of allThreads) {
+        if (t.projectPath.startsWith('games/')) excluded.add(t.id);
+      }
+      return excluded;
     },
   });
   app.log.info('[api] F102: SQLite memory services initialized');
@@ -498,6 +511,13 @@ async function main(): Promise<void> {
           }));
         },
         generateAbstractive,
+        // Re-embed thread after abstractive summary update (semantic search uses vectors)
+        reEmbed: memoryServices.embeddingService?.isReady()
+          ? async (anchor: string, text: string) => {
+              const [vec] = await memoryServices.embeddingService!.embed([text]);
+              memoryServices.vectorStore?.upsert(anchor, vec);
+            }
+          : undefined,
         logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
       });
 
@@ -659,8 +679,46 @@ async function main(): Promise<void> {
   const { RedisGameStore } = await import('./domains/cats/services/stores/redis/RedisGameStore.js');
   const f101GameStore = redis ? new RedisGameStore(redis) : undefined;
 
+  // F101 Phase I: Shared ActionNotifier + game driver (narrator or legacy).
+  // Created early so both messagesRoutes and gameRoutes use the same driver instance.
+  const { EventEmitterActionNotifier } = await import('./domains/cats/services/game/EventEmitterActionNotifier.js');
+  const sharedActionNotifier = new EventEmitterActionNotifier();
+  let f101SharedDriver: import('./domains/cats/services/game/GameDriver.js').GameDriver | undefined;
+  if (f101GameStore) {
+    const gameNarratorEnabled = process.env.GAME_NARRATOR_ENABLED === 'true';
+    const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
+    const sharedOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager, messageStore });
+    const { createGameDriver } = await import('./domains/cats/services/game/createGameDriver.js');
+    if (gameNarratorEnabled) {
+      const { createWakeCatFn } = await import('./domains/cats/services/game/wakeCatImpl.js');
+      const wakeCat = createWakeCatFn({
+        threadStore,
+        invocationQueue,
+        queueProcessor,
+        log: app.log,
+      });
+      f101SharedDriver = createGameDriver({
+        gameNarratorEnabled: true,
+        legacyDeps: { gameStore: f101GameStore, orchestrator: sharedOrchestrator, messageStore },
+        narratorDeps: {
+          gameStore: f101GameStore,
+          wakeCat,
+          actionNotifier: sharedActionNotifier,
+          orchestrator: sharedOrchestrator,
+        },
+      });
+      app.log.info('[api] F101 game driver: GameNarratorDriver (agent-driven)');
+    } else {
+      f101SharedDriver = createGameDriver({
+        gameNarratorEnabled: false,
+        legacyDeps: { gameStore: f101GameStore, orchestrator: sharedOrchestrator, messageStore },
+      });
+      app.log.info('[api] F101 game driver: LegacyAutoDriver');
+    }
+  }
+
   // Register routes (socketManager injected, no circular import)
-  await app.register(messagesRoutes, {
+  const messagesOpts = {
     registry,
     messageStore,
     socketManager,
@@ -676,7 +734,9 @@ async function main(): Promise<void> {
     invocationQueue,
     queueProcessor,
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
-  });
+    ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
+  };
+  await app.register(messagesRoutes, messagesOpts);
   await app.register(queueRoutes, {
     threadStore,
     invocationQueue,
@@ -710,12 +770,35 @@ async function main(): Promise<void> {
   await app.register(leaderboardRoutes, { messageStore, gameStore, achievementStore });
   await app.register(leaderboardEventsRoutes, { gameStore, achievementStore });
   await app.register(bootcampRoutes, { threadStore });
-  await app.register(connectorHubRoutes, { threadStore });
+  const connectorHubOpts: Parameters<typeof connectorHubRoutes>[1] = { threadStore };
+  await app.register(connectorHubRoutes, connectorHubOpts);
   await app.register(brakeRoutes, { activityTracker });
 
   // F101: Game routes (store created earlier for /game command interception)
   if (f101GameStore) {
-    await app.register(gameRoutes, { gameStore: f101GameStore, socketManager, threadStore, messageStore });
+    await app.register(gameRoutes, {
+      gameStore: f101GameStore,
+      socketManager,
+      threadStore,
+      messageStore,
+      ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
+    });
+
+    const { gameActionRoutes, clearGameNonces } = await import('./routes/game-actions.js');
+    const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
+    const actionOrchestrator = new GameOrchestrator({
+      gameStore: f101GameStore,
+      socketManager,
+      messageStore,
+      onGameEnd: (gameId) => clearGameNonces(gameId),
+    });
+    await app.register(gameActionRoutes, {
+      gameStore: f101GameStore,
+      orchestrator: actionOrchestrator,
+      threadStore,
+      actionNotifier: sharedActionNotifier,
+    });
+
     app.log.info('[api] F101 game routes registered');
   }
 
@@ -1124,21 +1207,10 @@ async function main(): Promise<void> {
   }
 
   // F101 Phase G: Recover auto-play loops for active games after restart.
-  // Without this, games in Redis with status=playing have no driving loop.
-  if (f101GameStore && socketManager) {
-    const { GameAutoPlayer } = await import('./domains/cats/services/game/GameAutoPlayer.js');
-    const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
-    const recoveryOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager, messageStore });
-    const recoveryPlayer = new GameAutoPlayer({
-      gameStore: f101GameStore,
-      orchestrator: recoveryOrchestrator,
-      messageStore,
-    });
-    // NOTE: stopAllLoops is idempotent; safe to call even if no games were recovered.
-    // We keep a reference so the onClose hook (registered before listen) can access it.
-    f101RecoveryPlayer = recoveryPlayer;
+  if (f101GameStore && socketManager && f101SharedDriver) {
+    f101RecoveryPlayer = f101SharedDriver;
     try {
-      const recovered = await recoveryPlayer.recoverActiveGames();
+      const recovered = await f101SharedDriver.recoverActiveGames();
       if (recovered > 0) {
         app.log.info(`[api] F101 auto-play recovery: restored ${recovered} active game loop(s)`);
       }
@@ -1175,6 +1247,19 @@ async function main(): Promise<void> {
     invokeTrigger,
   });
 
+  // F133: Start CI/CD check poller (best-effort, after listen)
+  const cicdRouter = new CiCdRouter({
+    prTrackingStore,
+    deliveryDeps: { messageStore, socketManager },
+    log: app.log,
+  });
+  startGithubCiPoller({
+    prTrackingStore,
+    cicdRouter,
+    invokeTrigger,
+    log: app.log,
+  });
+
   // F088: Start connector gateway (best-effort, after listen)
   let connectorGatewayHandle: Awaited<ReturnType<typeof startConnectorGateway>> = null;
   try {
@@ -1184,6 +1269,12 @@ async function main(): Promise<void> {
         async append(input) {
           const result = await messageStore.append(input);
           return { id: result.id };
+        },
+        async getById(id: string) {
+          const msg = messageStore.getById?.(id);
+          if (!msg) return null;
+          const resolved = msg instanceof Promise ? await msg : msg;
+          return resolved ? { source: resolved.source } : null;
         },
       },
       threadStore,
@@ -1206,6 +1297,11 @@ async function main(): Promise<void> {
       // Wire outbound delivery for proactive cat messages (post_message callback)
       (callbackOpts as { outboundHook?: typeof connectorGatewayHandle.outboundHook }).outboundHook =
         connectorGatewayHandle.outboundHook;
+      // F088 ISSUE-15: Wire outbound delivery for web immediate path (messages route)
+      (messagesOpts as { outboundHook?: typeof connectorGatewayHandle.outboundHook }).outboundHook =
+        connectorGatewayHandle.outboundHook;
+      (messagesOpts as { streamingHook?: typeof connectorGatewayHandle.streamingHook }).streamingHook =
+        connectorGatewayHandle.streamingHook;
       queueProcessor.setThreadMetaLookup(async (threadId) => {
         const thread = await threadStore.get(threadId);
         if (!thread) return undefined;
@@ -1218,6 +1314,10 @@ async function main(): Promise<void> {
       for (const [id, handler] of connectorGatewayHandle.webhookHandlers) {
         connectorWebhookHandlers.set(id, handler);
       }
+      // F137: Wire WeChat adapter to hub routes for QR login
+      (connectorHubOpts as { weixinAdapter?: unknown }).weixinAdapter = connectorGatewayHandle.weixinAdapter;
+      (connectorHubOpts as { startWeixinPolling?: () => void }).startWeixinPolling =
+        connectorGatewayHandle.startWeixinPolling;
       app.log.info('[api] Connector gateway started');
     }
   } catch (err) {
@@ -1266,6 +1366,8 @@ async function main(): Promise<void> {
       } catch (err) {
         app.log.error(`[api] GithubReviewWatcher stop failed: ${String(err)}`);
       }
+
+      stopGithubCiPoller();
 
       // Stop connector gateway
       try {

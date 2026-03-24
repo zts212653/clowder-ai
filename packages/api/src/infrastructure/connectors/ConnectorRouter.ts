@@ -78,6 +78,8 @@ export interface ConnectorRouterOptions {
       message: string,
       messageId: string,
       contentBlocks?: readonly MessageContent[],
+      policy?: unknown,
+      sender?: { id: string; name?: string },
     ): void;
   };
   readonly socketManager?:
@@ -94,7 +96,12 @@ export interface ConnectorRouterOptions {
     | {
         download(
           connectorId: string,
-          attachment: { type: 'image' | 'file' | 'audio'; platformKey: string; fileName?: string; duration?: number },
+          attachment: {
+            type: 'image' | 'file' | 'audio';
+            platformKey: string;
+            fileName?: string;
+            duration?: number;
+          },
         ): Promise<{ localUrl: string; absPath: string; mimeType: string }>;
       }
     | undefined;
@@ -135,6 +142,9 @@ export class ConnectorRouter {
       duration?: number;
       messageId?: string;
     }>,
+    sender?: { id: string; name?: string },
+    chatType?: 'p2p' | 'group',
+    chatName?: string,
   ): Promise<RouteResult> {
     const { bindingStore, dedup, messageStore, threadStore, invokeTrigger, socketManager, log } = this.opts;
 
@@ -158,7 +168,8 @@ export class ConnectorRouter {
           }
         }
         // ISSUE-8 (8A): Store command exchange in Hub thread, not conversation thread
-        const hubThreadId = await this.resolveHubThread(connectorId, externalChatId);
+        const chatLabel = chatType === 'group' ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}` : undefined;
+        const hubThreadId = await this.resolveHubThread(connectorId, externalChatId, chatLabel);
         const stored = await this.storeCommandExchange(connectorId, hubThreadId, text, cmdResult.response);
         log.info(
           { connectorId, command: cmdResult.kind, hubThreadId },
@@ -217,7 +228,10 @@ export class ConnectorRouter {
     let binding = await bindingStore.getByExternal(connectorId, externalChatId);
     if (!binding) {
       const def = getConnectorDefinition(connectorId);
-      const title = `${def?.displayName ?? connectorId} DM`;
+      const title =
+        chatType === 'group'
+          ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}`
+          : `${def?.displayName ?? connectorId} DM`;
       const thread = await threadStore.create(this.opts.defaultUserId, title);
       binding = await bindingStore.bind(connectorId, externalChatId, thread.id, this.opts.defaultUserId);
       log.info(
@@ -230,8 +244,10 @@ export class ConnectorRouter {
     const def = getConnectorDefinition(connectorId);
     const source: ConnectorSource = {
       connector: connectorId,
-      label: def?.displayName ?? connectorId,
+      label:
+        chatType === 'group' ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}` : (def?.displayName ?? connectorId),
       icon: def?.icon ?? 'message',
+      ...(sender ? { sender } : {}),
     };
 
     // Parse @-mentions to determine target cat
@@ -264,6 +280,8 @@ export class ConnectorRouter {
       resolvedText,
       stored.id,
       contentBlocks,
+      undefined,
+      sender,
     );
 
     log.info(
@@ -327,7 +345,11 @@ export class ConnectorRouter {
     return { text: parts.length > 0 ? parts.join('\n') : originalText, contentBlocks };
   }
 
-  private async resolveHubThread(connectorId: string, externalChatId: string): Promise<string | undefined> {
+  private async resolveHubThread(
+    connectorId: string,
+    externalChatId: string,
+    chatLabel?: string,
+  ): Promise<string | undefined> {
     const key = `${connectorId}:${externalChatId}`;
     const inFlight = this.hubThreadResolvers.get(key);
     if (inFlight) return inFlight;
@@ -339,7 +361,7 @@ export class ConnectorRouter {
     const inFlightAfterRead = this.hubThreadResolvers.get(key);
     if (inFlightAfterRead) return inFlightAfterRead;
 
-    const creation = this.resolveHubThreadOnce(connectorId, externalChatId).finally(() => {
+    const creation = this.resolveHubThreadOnce(connectorId, externalChatId, chatLabel).finally(() => {
       if (this.hubThreadResolvers.get(key) === creation) {
         this.hubThreadResolvers.delete(key);
       }
@@ -348,7 +370,11 @@ export class ConnectorRouter {
     return creation;
   }
 
-  private async resolveHubThreadOnce(connectorId: string, externalChatId: string): Promise<string | undefined> {
+  private async resolveHubThreadOnce(
+    connectorId: string,
+    externalChatId: string,
+    chatLabel?: string,
+  ): Promise<string | undefined> {
     const { bindingStore, threadStore, log } = this.opts;
     const binding = await bindingStore.getByExternal(connectorId, externalChatId);
     if (!binding) return undefined;
@@ -356,7 +382,8 @@ export class ConnectorRouter {
 
     const def = getConnectorDefinition(connectorId);
     const label = def?.displayName ?? connectorId;
-    const hubThread = await threadStore.create(this.opts.defaultUserId, `${label} IM Hub`);
+    const hubTitle = chatLabel ? `${chatLabel} IM Hub` : `${label} IM Hub`;
+    const hubThread = await threadStore.create(this.opts.defaultUserId, hubTitle);
     await threadStore.updateConnectorHubState(hubThread.id, {
       v: 1,
       connectorId,

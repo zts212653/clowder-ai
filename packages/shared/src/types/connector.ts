@@ -22,6 +22,8 @@ export interface ConnectorSource {
   readonly url?: string;
   /** Connector-specific metadata (not rendered, for debugging/routing) */
   readonly meta?: Readonly<Record<string, unknown>>;
+  /** F134: Original sender info for group chat messages (message-level binding, not thread-level) */
+  readonly sender?: { readonly id: string; readonly name?: string };
 }
 
 // ── Connector Definition (registry entry) ──
@@ -87,6 +89,19 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     },
   },
   {
+    id: 'github-ci',
+    displayName: 'GitHub CI/CD',
+    icon: 'github',
+    color: { primary: '#2563EB', secondary: '#EFF6FF' },
+    description: 'GitHub CI/CD 状态通知',
+    tailwindTheme: {
+      avatar: 'bg-slate-100 ring-2 ring-slate-200',
+      label: 'text-slate-700',
+      labelLink: 'text-slate-700 hover:text-slate-900',
+      bubble: 'border border-slate-200 bg-slate-50',
+    },
+  },
+  {
     id: 'vote-result',
     displayName: '投票结果',
     icon: 'ballot',
@@ -136,6 +151,32 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
       label: 'text-sky-700',
       labelLink: 'text-sky-700 hover:text-sky-900',
       bubble: 'border border-sky-200 bg-sky-50',
+    },
+  },
+  {
+    id: 'dingtalk',
+    displayName: '钉钉',
+    icon: '/images/connectors/dingtalk.png',
+    color: { primary: '#3296FA', secondary: '#E8F4FE' },
+    description: '钉钉企业内部应用',
+    tailwindTheme: {
+      avatar: 'bg-blue-100 ring-2 ring-blue-200',
+      label: 'text-blue-700',
+      labelLink: 'text-blue-700 hover:text-blue-900',
+      bubble: 'border border-blue-200 bg-blue-50',
+    },
+  },
+  {
+    id: 'weixin',
+    displayName: '微信',
+    icon: '/images/connectors/weixin.png',
+    color: { primary: '#07C160', secondary: '#E8F8EE' },
+    description: '微信个人号 iLink Bot',
+    tailwindTheme: {
+      avatar: 'bg-green-100 ring-2 ring-green-200',
+      label: 'text-green-700',
+      labelLink: 'text-green-700 hover:text-green-900',
+      bubble: 'border border-green-200 bg-green-50',
     },
   },
   {

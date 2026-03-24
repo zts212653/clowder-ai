@@ -1181,7 +1181,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.ok(Array.isArray(queueUpdate.data.queue));
     });
 
-    it('merges consecutive connector messages from same source', async () => {
+    it('does NOT merge consecutive connector messages (F134: each may be from a different group sender)', async () => {
       trackerMock.setActive('thread-1');
       const trigger = createTrigger();
 
@@ -1191,11 +1191,9 @@ describe('ConnectorInvokeTrigger', () => {
       await waitForTrigger();
 
       const entries = queue.list('thread-1', 'user-1');
-      assert.strictEqual(entries.length, 1, 'Should merge into one entry');
+      assert.strictEqual(entries.length, 2, 'Connector messages must not merge');
       assert.ok(entries[0].content.includes('First review'));
-      assert.ok(entries[0].content.includes('Second review'));
-      assert.strictEqual(entries[0].messageId, 'msg-1');
-      assert.deepStrictEqual(entries[0].mergedMessageIds, ['msg-2']);
+      assert.ok(entries[1].content.includes('Second review'));
     });
 
     it('emits queue_full_warning when queue is full', async () => {

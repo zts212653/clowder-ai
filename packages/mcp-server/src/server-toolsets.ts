@@ -3,6 +3,7 @@ import {
   callbackMemoryTools,
   callbackTools,
   evidenceTools,
+  gameActionTools,
   limbTools,
   reflectTools,
   richBlockRulesTools,
@@ -18,7 +19,7 @@ type ToolDef = {
   handler: (args: never) => Promise<unknown>;
 };
 
-const collabTools: readonly ToolDef[] = [...callbackTools, ...richBlockRulesTools];
+const collabTools: readonly ToolDef[] = [...callbackTools, ...richBlockRulesTools, ...gameActionTools];
 
 const memoryTools: readonly ToolDef[] = [
   ...callbackMemoryTools,

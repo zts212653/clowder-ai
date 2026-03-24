@@ -772,9 +772,34 @@ interface EvidenceItemWithDrillDown extends EvidenceItem {
 
 ### 建议实现顺序
 
-1. 先开 `EMBED_MODE=on`（改环境变量即可，零代码改动）
-2. 验证 Recall 提升（用本线程的 13 题考题 + 中英混搜 case）
-3. 如果要保留 shadow 模式，补上日志（否则直接废弃 shadow）
+1. ~~先开 `EMBED_MODE=on`~~ ✅ 已完成（PR #618 auto-derive from EMBED_ENABLED）
+2. ~~验证 Recall 提升~~ ✅ 已验证：hybrid 搜 "cat naming origin story" 命中花名册
+3. ~~如果要保留 shadow 模式~~ ✅ 已废弃 shadow（直接 off → on）
+
+### Gap-4: semantic/hybrid 模式未正确实现（Phase C 缺口）
+
+**现状**：`SqliteEvidenceStore.search()` 不读 `mode` 参数。三种模式走同一条路径：
+- BM25 召回 → embedding rerank（如果可用）
+
+**问题**：
+- `mode=semantic` 应该跳过 BM25，纯向量 NN 搜索。当前等同 hybrid。
+- `mode=hybrid` 应该 BM25 召回 + 向量 NN 召回 → 合并去重 → RRF 融合。当前只做 rerank。
+- `mode=lexical` 应该纯 BM25。当前行为恰好是对的（rerank 在 embedDeps=null 时跳过）。
+
+**影响**：搜 "why are cats named Ragdoll Maine Coon Siamese" 时，BM25 召回不到猫名故事，
+embedding 无法补救（rerank 只重排已召回的，不发现新文档）。
+
+**正确实现**：
+
+```typescript
+// mode=lexical: 纯 BM25（现有）
+// mode=semantic: 纯向量 NN → evidence_vectors nearest-neighbor
+// mode=hybrid: BM25 召回一批 + 向量 NN 召回一批 → 合并去重 → RRF 融合排序
+```
+
+**修改文件**：`SqliteEvidenceStore.ts` 的 `search()` 方法
+
+**KD-44**：三种检索模式各有独立实现路径，semantic 不依赖 BM25 召回。
 
 ## Phase D 完成后的预期效果
 
@@ -956,6 +981,7 @@ interface EvidenceItemWithDrillDown extends EvidenceItem {
 | KD-41 | **摘要单元是 thread（不是 session）**——thread 是所有猫共享的对话空间，对每只猫的 session 分别摘要 = 同一段对话重复摘要 | team lead指出：多猫 session 有重合，保存多份很奇怪；thread 概念全部猫都用，应该基于 thread 而不是 session | 2026-03-20 |
 | KD-42 | **LSM-style compaction + 双写（read model + append-only segment ledger）**——`evidence_docs.summary` 是 read model，`summary_segments` 是 append-only provenance。L2 凝结 deferred 但 segment ledger 让升级成本很低 | Maine Coon坚持 segment ledger 防漂移/不可审计/错误放大，架构师采纳——成本仅多一张表一次 INSERT，收益是完整可审计性 | 2026-03-20 |
 | KD-43 | **一次 delta batch 产出 1..N 个 topic segments**（Opus 按话题切分，最多 3 段，不确定退化 1 段）——跨时间窗只 link 不 merge，merge 留给 L2 | team lead提出动态语义窗口（一个增量可能混多个话题），Maine Coon约束：连续/覆盖/最多 3 段/不回改旧 segment/必须带 topicKey + boundaryReason | 2026-03-20 |
+| KD-44 | **三种检索模式各有独立路径**——lexical=纯 BM25，semantic=纯向量 NN（跳过 BM25），hybrid=BM25+NN 双路召回 → RRF 融合。Phase C 只实现了 rerank（BM25 上重排序），不是真的 semantic/hybrid | team lead实测：semantic 搜 "why are cats named Ragdoll Maine Coon Siamese" 搜不到猫名故事——因为 BM25 没召回，rerank 无法补救。真的 semantic 应该直接 NN 搜索 | 2026-03-21 |
 
 ## 实现路线图（F/G/Gap 整体规划）
 

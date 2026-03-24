@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-DEFAULT_RUNTIME_DIR="$(cd "$PROJECT_DIR/.." && pwd -P)/cat-cafe-runtime"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_RUNTIME_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-runtime"
 
 RUNTIME_DIR="${CAT_CAFE_RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
 RUNTIME_BRANCH="${CAT_CAFE_RUNTIME_BRANCH:-runtime/main-sync}"
@@ -81,10 +81,6 @@ abs_path() {
   printf '%s/%s\n' "${dir%/}" "${base%/}"
 }
 
-normalize_runtime_dir() {
-  RUNTIME_DIR="$(abs_path "$RUNTIME_DIR")"
-}
-
 read_env_file_value() {
   local env_file="$1"
   local key="$2"
@@ -98,30 +94,10 @@ read_env_file_value() {
 }
 
 runtime_env_value() {
-  read_env_file_value "$RUNTIME_DIR/.env" "$1"
+  local runtime_dir
+  runtime_dir="$(abs_path "$RUNTIME_DIR")"
+  read_env_file_value "$runtime_dir/.env" "$1"
 }
-
-sync_runtime_env_files() {
-  [ -d "$RUNTIME_DIR" ] || return 0
-
-  local file source_file runtime_file
-  for file in .env .env.local; do
-    source_file="$PROJECT_DIR/$file"
-    runtime_file="$RUNTIME_DIR/$file"
-
-    if [ -f "$source_file" ]; then
-      if [ ! -f "$runtime_file" ] || ! cmp -s "$source_file" "$runtime_file"; then
-        cp "$source_file" "$runtime_file"
-        info "synced $file into runtime worktree"
-      fi
-    elif [ -f "$runtime_file" ]; then
-      rm -f "$runtime_file"
-      info "removed stale runtime $file (source file missing)"
-    fi
-  done
-}
-
-normalize_runtime_dir
 
 require_git_repo() {
   git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -146,11 +122,51 @@ ensure_remote_exists() {
     || die "remote '$REMOTE_NAME' not found"
 }
 
+probe_port_with_lsof() {
+  local port="$1"
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+probe_port_with_ss() {
+  local port="$1"
+  ss -ltn "( sport = :$port )" 2>/dev/null | awk 'NR > 1 { found = 1; exit } END { exit found ? 0 : 1 }'
+}
+
+probe_port_with_nc() {
+  local port="$1"
+  nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
+}
+
+probe_port_with_dev_tcp() {
+  local port="$1"
+  # Bash-only: requires net redirections support (enabled in most mainstream builds).
+  (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
+}
+
+port_is_listening() {
+  local port="$1"
+
+  if command -v lsof >/dev/null 2>&1 && probe_port_with_lsof "$port"; then
+    return 0
+  fi
+  if command -v ss >/dev/null 2>&1 && probe_port_with_ss "$port"; then
+    return 0
+  fi
+  if command -v nc >/dev/null 2>&1 && probe_port_with_nc "$port"; then
+    return 0
+  fi
+  if probe_port_with_dev_tcp "$port"; then
+    return 0
+  fi
+
+  return 1
+}
+
 is_api_running() {
   local port
   port="$(runtime_env_value API_SERVER_PORT 2>/dev/null || true)"
   port="${port:-${API_SERVER_PORT:-3004}}"
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+  port_is_listening "$port"
 }
 
 start_arg_present() {
@@ -289,8 +305,6 @@ init_runtime_worktree() {
     pnpm -C "$RUNTIME_DIR" install
   fi
 
-  sync_runtime_env_files
-
   info "runtime worktree ready at $RUNTIME_DIR"
 }
 
@@ -326,8 +340,6 @@ sync_runtime_worktree() {
     fi
   fi
 
-  sync_runtime_env_files
-
   info "sync complete"
 }
 
@@ -358,20 +370,18 @@ status_runtime_worktree() {
 
 start_runtime_worktree() {
   if ! is_git_repo; then
-    ensure_restart_authorized
     RUNTIME_DIR="$PROJECT_DIR"
+    ensure_restart_authorized
     ensure_runtime_start_prereqs
     info "running in-place (deployment mode): $PROJECT_DIR"
     cd "$PROJECT_DIR"
-    exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 CAT_CAFE_CONFIG_ROOT="${CAT_CAFE_CONFIG_ROOT:-$PROJECT_DIR}" ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
+    exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
   if ! worktree_exists; then
     info "runtime worktree missing; initializing first"
     init_runtime_worktree
   fi
-
-  sync_runtime_env_files
 
   # Runtime is single-instance infra; restarting an active API requires
   # explicit opt-in so accidental `pnpm start` in runtime sessions cannot
@@ -392,11 +402,8 @@ start_runtime_worktree() {
   info "starting production stack from runtime worktree: $RUNTIME_DIR"
   cd "$RUNTIME_DIR"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
-  # CAT_CAFE_CONFIG_ROOT points back to the source repo so platform-level
-  # config (.cat-cafe/provider-profiles.json etc.) is read from one place,
-  # not from the runtime worktree's separate pnpm-workspace root (#176).
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
-  exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 CAT_CAFE_CONFIG_ROOT="${CAT_CAFE_CONFIG_ROOT:-$PROJECT_DIR}" ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
+  exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
 
 COMMAND="${1:-status}"

@@ -399,6 +399,37 @@ export async function handleCreateRichBlock(input: { block: string }): Promise<T
   );
 }
 
+/** F088 Phase J2: Generate a document (PDF/DOCX/MD) from Markdown content */
+export const generateDocumentInputSchema = {
+  markdown: z
+    .string()
+    .min(1)
+    .describe('Full Markdown content for the document. Supports headings, tables, lists, code blocks, etc.'),
+  format: z
+    .enum(['pdf', 'docx', 'md'])
+    .describe('Output format. Recommend "docx" (most compatible). "pdf" needs LaTeX, "md" always works.'),
+  baseName: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe(
+      'Display name without extension (e.g. "调研报告", "GTC2026-具身智能调研"). Will appear as filename in IM.',
+    ),
+};
+
+export async function handleGenerateDocument(input: {
+  markdown: string;
+  format: string;
+  baseName: string;
+}): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/generate-document', {
+    markdown: input.markdown,
+    format: input.format,
+    baseName: input.baseName,
+  });
+  return result;
+}
+
 export const requestPermissionInputSchema = {
   action: z.string().min(1).describe('The action requiring permission (e.g. "git_commit", "file_delete")'),
   reason: z.string().min(1).describe('Why you need this permission'),
@@ -684,58 +715,83 @@ export const callbackTools = [
   {
     name: 'cat_cafe_post_message',
     description:
-      'Post a proactive async message to the Clowder AI chat mid-task (e.g. progress updates, sharing results). To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires.',
+      'Post a proactive async message to the Clowder AI chat mid-task (e.g. progress updates, sharing results). ' +
+      'To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires. ' +
+      'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to inline @mention in your response text. ' +
+      'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
   },
   {
     name: 'cat_cafe_get_pending_mentions',
-    description: 'Get recent messages that @-mention you. Use this to check if anyone is trying to get your attention.',
+    description:
+      'Get recent messages that @-mention you. Use at session start to check if anyone is trying to get your attention. ' +
+      'TIP: Call this early in your session, then call ack_mentions after processing to avoid seeing the same mentions next session.',
     inputSchema: getPendingMentionsInputSchema,
     handler: handleGetPendingMentions,
   },
   {
     name: 'cat_cafe_ack_mentions',
     description:
-      'Acknowledge that you have processed mentions up to a specific message ID. Call this after processing mentions from get_pending_mentions to avoid seeing them again in future sessions.',
+      'Acknowledge that you have processed mentions up to a specific message ID. ' +
+      'Call this AFTER processing mentions from get_pending_mentions to avoid seeing them again in future sessions. ' +
+      'GOTCHA: Pass the message ID of the LAST mention you processed, not the first.',
     inputSchema: ackMentionsInputSchema,
     handler: handleAckMentions,
   },
   {
     name: 'cat_cafe_get_thread_context',
     description:
-      'Get recent conversation messages for context. Use this to understand what has been discussed recently. Pass threadId to read a different thread (cross-thread context).',
+      'Get recent conversation messages for context. Use to understand what has been discussed recently in a thread. ' +
+      'Pass threadId to read a DIFFERENT thread (cross-thread context); omit to read the current thread. ' +
+      'Use keyword filter to find specific topics without reading all messages. ' +
+      'TIP: For searching across ALL threads/sessions, use search_evidence instead — this tool only reads one thread.',
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
   },
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
   {
     name: 'cat_cafe_list_threads',
-    description: 'List thread summaries for discovery. Supports limit and activeSince filters.',
+    description:
+      'List thread summaries for discovery. Use when you need to find a thread by keyword or see recent activity. ' +
+      'Returns thread IDs, titles, and activity timestamps. ' +
+      'Use activeSince (Unix ms) to filter to recently active threads. Use keyword to search by title.',
     inputSchema: listThreadsInputSchema,
     handler: handleListThreads,
   },
   {
     name: 'cat_cafe_feat_index',
-    description: 'Lookup feature index entries by featId or query. Returns featId/name/status/threadIds.',
+    description:
+      'Lookup feature index entries by featId or query. Returns featId, name, status, and linked threadIds. ' +
+      'Use when you need to find which thread(s) a feature is discussed in, or check feature status. ' +
+      'PARAM GUIDE: featId = exact match (e.g. "F043"), query = fuzzy substring over all fields.',
     inputSchema: featIndexInputSchema,
     handler: handleFeatIndex,
   },
   {
     name: 'cat_cafe_cross_post_message',
-    description: 'Post a message to a specific thread by threadId (cross-thread notification).',
+    description:
+      'Post a message to a specific thread by threadId (cross-thread notification). ' +
+      'Use when you need to notify a different thread about something relevant. ' +
+      'GOTCHA: Requires threadId — use list_threads or feat_index to find the right thread first.',
     inputSchema: crossPostMessageInputSchema,
     handler: handleCrossPostMessage,
   },
   {
     name: 'cat_cafe_list_tasks',
-    description: 'List tasks with optional threadId/catId/status filters for global task discovery.',
+    description:
+      'List tasks with optional threadId/catId/status filters for global task discovery. ' +
+      'Use when you need to see what tasks exist, who owns them, or what is blocked. ' +
+      'TIP: Filter by status="blocked" to find tasks that need attention.',
     inputSchema: listTasksInputSchema,
     handler: handleListTasks,
   },
   {
     name: 'cat_cafe_update_task',
-    description: 'Update the status of a task you own. Use this to mark tasks as doing/blocked/done.',
+    description:
+      'Update the status of a task you own. Use to mark tasks as doing/blocked/done. ' +
+      'GOTCHA: You can only update tasks assigned to you (your catId). ' +
+      'TIP: Include a "why" note when marking as blocked — it helps others understand the situation.',
     inputSchema: updateTaskInputSchema,
     handler: handleUpdateTask,
   },
@@ -743,28 +799,49 @@ export const callbackTools = [
     name: 'cat_cafe_create_rich_block',
     description:
       'Create a rich block (card, diff, checklist, media_gallery, audio, or interactive) attached to the current message. ' +
-      'Use card for status/decisions, diff for code changes, checklist for todos, media_gallery for images, audio for voice messages, interactive for user selection/confirmation.',
+      'Use card for status/decisions, diff for code changes, checklist for todos, media_gallery for images, audio for voice, interactive for user selection/confirmation. ' +
+      'GOTCHA: The block JSON must use "kind" (NOT "type") and include "v": 1 and a unique "id". ' +
+      "GOTCHA: Call get_rich_block_rules first if you haven't loaded the full schema yet in this session. " +
+      'If callback auth fails, falls back to cc_rich text encoding automatically.',
     inputSchema: createRichBlockInputSchema,
     handler: handleCreateRichBlock,
   },
   {
+    name: 'cat_cafe_generate_document',
+    description:
+      'Generate a document (PDF/DOCX/MD) from Markdown and deliver to IM platforms (Feishu/Telegram). ' +
+      'Use when: user asks to "生成报告", "导出文档", "发PDF", "写份文档给我", "export to DOCX", or any document generation request. ' +
+      'NOT for: sending an existing file you already have (use create_rich_block with kind:"file" + url pointing to /uploads/). ' +
+      'Output: file saved to /uploads/, attached as file RichBlock, automatically delivered to bound IM chats. Web UI shows download link. ' +
+      'GOTCHA: Do NOT manually run pandoc + create_rich_block — that skips IM delivery and the file will NOT reach Feishu/Telegram. Always use this tool. ' +
+      'Degradation: PDF needs LaTeX engine → falls back to DOCX → falls back to MD. No pandoc → .md only.',
+    inputSchema: generateDocumentInputSchema,
+    handler: handleGenerateDocument,
+  },
+  {
     name: 'cat_cafe_request_permission',
     description:
-      'Request permission from the user before performing a sensitive action (e.g. git_commit, file_delete). Returns granted/denied immediately if a rule exists, or pending with a requestId if the user needs to approve.',
+      'Request permission from the user before performing a sensitive action (e.g. git_commit, file_delete). ' +
+      'Returns granted/denied immediately if a rule exists, or pending with a requestId if the user needs to approve. ' +
+      'WORKFLOW: request_permission → if pending → wait → check_permission_status with the returned requestId.',
     inputSchema: requestPermissionInputSchema,
     handler: handleRequestPermission,
   },
   {
     name: 'cat_cafe_check_permission_status',
     description:
-      'Check the status of a previously submitted permission request. Use the requestId returned from request_permission.',
+      'Check the status of a previously submitted permission request. ' +
+      'Use the requestId returned from request_permission. Returns granted/denied/pending.',
     inputSchema: checkPermissionStatusInputSchema,
     handler: handleCheckPermissionStatus,
   },
   {
     name: 'cat_cafe_register_pr_tracking',
     description:
-      'Register a PR for email review notification routing. Call this right after `gh pr create` so that cloud Codex review emails are automatically routed to your current thread. The server resolves threadId and catId automatically from your invocation identity — you only need repoFullName and prNumber.',
+      'Register a PR for email review notification routing. Call right after `gh pr create` ' +
+      'so that cloud Codex review emails are automatically routed to your current thread. ' +
+      'The server resolves threadId and catId from your invocation identity — you only need repoFullName and prNumber. ' +
+      'GOTCHA: Must be called in the same session that created the PR, while callback credentials are still valid.',
     inputSchema: registerPrTrackingInputSchema,
     handler: handleRegisterPrTracking,
   },
@@ -773,7 +850,9 @@ export const callbackTools = [
     description:
       'Update the SOP workflow stage for a Feature (Mission Hub bulletin board). ' +
       'Use to record current stage, baton holder, resume capsule, and checks. ' +
-      'This is information sharing, not flow control — cats decide their own actions.',
+      'This is information sharing, not flow control — cats decide their own actions. ' +
+      'STAGE VALUES: kickoff → impl → quality_gate → review → merge → completion. ' +
+      'TIP: Always set resumeCapsule when updating stage — it helps the next cat cold-start.',
     inputSchema: updateWorkflowInputSchema,
     handler: handleUpdateWorkflow,
   },
@@ -781,18 +860,21 @@ export const callbackTools = [
     name: 'cat_cafe_multi_mention',
     description:
       'Invoke up to 3 cats in parallel to gather perspectives on a question. ' +
-      'All responses are automatically routed back to callbackTo. ' +
-      'Requires searchEvidenceRefs (what you searched first) or overrideReason. ' +
-      'Use this instead of multiple @mentions when you need structured multi-cat collaboration with guaranteed response aggregation.',
+      'All responses are automatically routed back to callbackTo (usually yourself). ' +
+      "REQUIRES: searchEvidenceRefs (list what you searched first) OR overrideReason (why you're skipping search). " +
+      'This enforces the "先搜后问" principle — always search before asking other cats. ' +
+      'Use this instead of multiple @mentions when you need structured multi-cat collaboration with guaranteed response aggregation. ' +
+      'GOTCHA: callbackTo is usually your own catId so responses come back to you.',
     inputSchema: multiMentionInputSchema,
     handler: handleMultiMention,
   },
   {
     name: 'cat_cafe_start_vote',
     description:
-      'Start a voting session in the current thread. Use when you need collective decision-making ' +
+      'Start a voting session in the current thread for collective decision-making ' +
       '(e.g. "REST vs GraphQL?"). Voters receive notification and reply with [VOTE:option]. ' +
-      'Auto-closes when all voters have voted or timeout expires.',
+      'Auto-closes when all voters have voted or timeout expires (default 120s). ' +
+      'GOTCHA: voters must be valid catIds (e.g. ["opus", "codex", "gemini"]). Options need at least 2 choices.',
     inputSchema: startVoteInputSchema,
     handler: handleStartVote,
   },
@@ -802,7 +884,8 @@ export const callbackTools = [
     description:
       'Update the bootcamp training state for a thread. Use to advance phase, set lead cat, ' +
       'record task selection, store env check results, or mark completion. ' +
-      'Fields are merged into existing state — only send what changed.',
+      'Fields are merged into existing state — only send what changed. ' +
+      'GOTCHA: Only use this during bootcamp threads. Phase values must follow the sequence.',
     inputSchema: updateBootcampStateInputSchema,
     handler: handleUpdateBootcampState,
   },
@@ -811,7 +894,7 @@ export const callbackTools = [
     description:
       'Run environment check for bootcamp (Node.js, pnpm, Git, Claude CLI, MCP, TTS, ASR, Pencil). ' +
       "Results are automatically stored in the thread's bootcampState.envCheck. " +
-      'Returns the full check results for display to the user.',
+      'Returns the full check results for display to the user. Only use during bootcamp phase-2-env-check.',
     inputSchema: bootcampEnvCheckInputSchema,
     handler: handleBootcampEnvCheck,
   },

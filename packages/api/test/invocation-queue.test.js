@@ -122,6 +122,34 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
+  // ── F134: connector messages never merge ──
+
+  it('does NOT merge consecutive connector entries (F134 group chat safety)', () => {
+    const r1 = queue.enqueue(entry({ source: 'connector', content: 'msg from user A' }));
+    assert.equal(r1.outcome, 'enqueued');
+    const r2 = queue.enqueue(entry({ source: 'connector', content: 'msg from user B' }));
+    assert.equal(r2.outcome, 'enqueued');
+    assert.equal(queue.size('t1', 'u1'), 2);
+  });
+
+  it('still merges consecutive user entries (F134 does not affect non-connector)', () => {
+    queue.enqueue(entry({ source: 'user', content: 'first' }));
+    const r2 = queue.enqueue(entry({ source: 'user', content: 'second' }));
+    assert.equal(r2.outcome, 'merged');
+    assert.equal(queue.size('t1', 'u1'), 1);
+  });
+
+  it('preserves senderMeta on enqueued connector entry', () => {
+    const r = queue.enqueue(
+      entry({
+        source: 'connector',
+        senderMeta: { id: 'ou_abc', name: 'You' },
+      }),
+    );
+    assert.equal(r.outcome, 'enqueued');
+    assert.deepEqual(r.entry.senderMeta, { id: 'ou_abc', name: 'You' });
+  });
+
   // ── Backfill / Merge IDs ──
 
   it('backfillMessageId sets messageId on new entry (null → value)', () => {

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F050]
-related_features: [F002, F005, F027, F032, F041, F043, F061, F105, F126]
+related_features: [F002, F005, F027, F032, F041, F043, F061, F105, F126, F135]
 topics: [a2a, external-agent, cli-integration, interoperability, dare, system-prompt, governance]
 doc_kind: spec
 created: 2026-03-02

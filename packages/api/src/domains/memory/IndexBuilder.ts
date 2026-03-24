@@ -60,6 +60,9 @@ export interface ThreadSnapshot {
 /** Callback that returns all threads for indexing. */
 export type ThreadListFn = () => ThreadSnapshot[] | Promise<ThreadSnapshot[]>;
 
+/** Callback that returns thread IDs to exclude from session digest indexing. */
+export type ExcludeThreadIdsFn = () => Set<string> | Promise<Set<string>>;
+
 /** Snapshot of a single message for passage indexing. */
 export interface StoredMessageSnapshot {
   id: string;
@@ -86,6 +89,7 @@ export class IndexBuilder implements IIndexBuilder {
     private readonly transcriptDataDir?: string,
     private readonly threadListFn?: ThreadListFn,
     private readonly messageListFn?: MessageListFn,
+    private readonly excludeThreadIdsFn?: ExcludeThreadIdsFn,
   ) {}
 
   setEmbedDeps(deps: { embedding: IEmbeddingService; vectorStore: VectorStore }): void {
@@ -181,7 +185,8 @@ export class IndexBuilder implements IIndexBuilder {
 
     // Phase D-6: Index session digests (kind=session)
     if (this.transcriptDataDir) {
-      const sessionItems = this.discoverSessionDigests();
+      const excludedThreadIds = this.excludeThreadIdsFn ? await this.excludeThreadIdsFn() : undefined;
+      const sessionItems = this.discoverSessionDigests(excludedThreadIds);
       for (const item of sessionItems) {
         currentAnchors.add(item.anchor);
         if (!options?.force) {
@@ -555,7 +560,7 @@ export class IndexBuilder implements IIndexBuilder {
    * D6: Discover sealed session digests from transcript data directory.
    * Scans dataDir/threads/{threadId}/{catId}/sessions/{sessionId}/digest.extractive.json
    */
-  private discoverSessionDigests(): EvidenceItem[] {
+  private discoverSessionDigests(excludedThreadIds?: Set<string>): EvidenceItem[] {
     if (!this.transcriptDataDir) return [];
     const results: EvidenceItem[] = [];
     const threadsDir = join(this.transcriptDataDir, 'threads');
@@ -574,6 +579,7 @@ export class IndexBuilder implements IIndexBuilder {
     }
 
     for (const threadId of threadIds) {
+      if (excludedThreadIds?.has(threadId)) continue;
       const threadPath = join(threadsDir, threadId);
       let catIds: string[];
       try {

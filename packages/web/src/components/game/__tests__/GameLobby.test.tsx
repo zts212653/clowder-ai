@@ -5,7 +5,7 @@ import { GameLobby } from '../GameLobby';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
-const mockCats = [
+const mockCats: React.ComponentProps<typeof GameLobby>['cats'] = [
   {
     id: 'opus',
     displayName: '宪宪',
@@ -16,6 +16,7 @@ const mockCats = [
     defaultModel: 'claude-opus-4-6',
     roleDescription: '架构',
     personality: '',
+    source: 'seed',
   },
   {
     id: 'sonnet',
@@ -27,6 +28,7 @@ const mockCats = [
     defaultModel: 'claude-sonnet',
     roleDescription: '快速',
     personality: '',
+    source: 'seed',
   },
   {
     id: 'codex',
@@ -38,19 +40,19 @@ const mockCats = [
     defaultModel: 'gpt-5.3-codex',
     roleDescription: 'review',
     personality: '',
+    source: 'seed',
   },
 ];
 
-function render(props: Partial<Parameters<typeof GameLobby>[0]> = {}): string {
-  return renderToStaticMarkup(
-    React.createElement(GameLobby, {
-      mode: 'player',
-      cats: mockCats,
-      onConfirm: () => {},
-      onCancel: () => {},
-      ...props,
-    }),
-  );
+function render(props: Partial<React.ComponentProps<typeof GameLobby>> = {}): string {
+  const merged: React.ComponentProps<typeof GameLobby> = {
+    mode: 'player',
+    cats: mockCats,
+    onConfirm: () => {},
+    onCancel: () => {},
+    ...props,
+  };
+  return renderToStaticMarkup(React.createElement(GameLobby, merged));
 }
 
 describe('GameLobby', () => {

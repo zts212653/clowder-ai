@@ -91,6 +91,7 @@ export class ConnectorInvokeTrigger {
     messageId: string,
     contentBlocks?: readonly MessageContent[],
     policy?: ConnectorTriggerPolicy,
+    sender?: { id: string; name?: string },
   ): void {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
@@ -98,7 +99,7 @@ export class ConnectorInvokeTrigger {
     // Urgent connector policy: preempt active invocation in the same thread.
     // Used for GitHub review comments so cats don't get stuck behind long queue chatter.
     if (priority === 'urgent' && invocationTracker.has(threadId, catId)) {
-      this.handleUrgentTrigger(threadId, catId, userId, message, messageId, policy?.reason).catch((err) => {
+      this.handleUrgentTrigger(threadId, catId, userId, message, messageId, policy?.reason, sender).catch((err) => {
         this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
       });
       return;
@@ -106,7 +107,7 @@ export class ConnectorInvokeTrigger {
 
     // Normal connector policy: if this cat is already running in this thread, enqueue.
     if (invocationTracker.has(threadId, catId)) {
-      this.enqueueWhileActive(threadId, catId, userId, message, messageId);
+      this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
       return;
     }
 
@@ -123,6 +124,7 @@ export class ConnectorInvokeTrigger {
     userId: string,
     message: string,
     messageId: string,
+    sender?: { id: string; name?: string },
   ): 'full' | 'enqueued' | 'merged' {
     const { invocationQueue, socketManager, log } = this.opts;
     const result = invocationQueue.enqueue({
@@ -132,6 +134,7 @@ export class ConnectorInvokeTrigger {
       source: 'connector',
       targetCats: [catId],
       intent: 'execute',
+      ...(sender ? { senderMeta: sender } : {}),
     });
 
     if (result.outcome === 'full') {
@@ -172,12 +175,13 @@ export class ConnectorInvokeTrigger {
     message: string,
     messageId: string,
     reason?: string,
+    sender?: { id: string; name?: string },
   ): Promise<void> {
     const { invocationTracker, invocationRecordStore, log } = this.opts;
     const idempotencyKey = `connector-${messageId}`;
     const activeOwner = invocationTracker.getUserId(threadId, catId);
     if (activeOwner && activeOwner !== userId) {
-      this.enqueueWhileActive(threadId, catId, userId, message, messageId);
+      this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
       return;
     }
 
@@ -215,7 +219,7 @@ export class ConnectorInvokeTrigger {
 
     if (invocationTracker.has(threadId, catId)) {
       // Avoid queue race: enqueue first while thread is still observed active.
-      const enqueueOutcome = this.enqueueWhileActive(threadId, catId, userId, message, messageId);
+      const enqueueOutcome = this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
       if (enqueueOutcome !== 'full') {
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'canceled',
@@ -422,6 +426,17 @@ export class ConnectorInvokeTrigger {
 
         // R1-P1 fix: restore OR condition — richBlocks-only replies must also trigger delivery
         const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+        log.info(
+          {
+            threadId,
+            hasOutboundHook: !!this.opts.outboundHook,
+            hasContent,
+            textPartsCount: collectedTextParts.length,
+            outboundTurnsCount: outboundTurns.length,
+            finalContentLen: collectedTextParts.join('').length,
+          },
+          '[ConnectorInvokeTrigger] Outbound delivery check',
+        );
         if (this.opts.outboundHook && hasContent) {
           // Best-effort threadMeta lookup — must not block invocation completion
           let threadMeta;
@@ -466,6 +481,8 @@ export class ConnectorInvokeTrigger {
                 turn.catId as CatId,
                 turn.richBlocks,
                 threadMeta,
+                undefined,
+                messageId,
               );
               inflightDeliverPromises.push(deliverPromise);
               try {
@@ -489,6 +506,8 @@ export class ConnectorInvokeTrigger {
               turn.catId as CatId,
               richBlocks,
               threadMeta,
+              undefined,
+              messageId,
             );
             inflightDeliverPromises.push(deliverPromise);
             try {
@@ -510,6 +529,8 @@ export class ConnectorInvokeTrigger {
               catId,
               richBlocks,
               threadMeta,
+              undefined,
+              messageId,
             );
             inflightDeliverPromises.push(deliverPromise);
             try {

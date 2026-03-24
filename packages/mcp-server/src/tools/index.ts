@@ -46,6 +46,11 @@ export {
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
 export {
+  gameActionTools,
+  handleSubmitGameAction,
+  submitGameActionInputSchema,
+} from './game-action-tools.js';
+export {
   handleLimbInvoke,
   handleLimbListAvailable,
   limbInvokeInputSchema,

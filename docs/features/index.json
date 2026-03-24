@@ -543,7 +543,7 @@
     {
       "id": "F088",
       "name": "Multi-Platform Chat Gateway — 聊天平台接入网关",
-      "status": "Phase 1-6+A+B+C+D+E+G(8A) done | **Owner**: Ragdoll",
+      "status": "Phase 1-6+A+B+C+D+E+G(8A)+8 done | **Owner**: Ragdoll",
       "file": "F088-multi-platform-chat-gateway.md"
     },
     {
@@ -621,7 +621,7 @@
     {
       "id": "F101",
       "name": "Mode v2 — 游戏系统引擎 + 狼人杀",
-      "status": "in-progress (reopened) | **Owner**: Ragdoll | **Priority**: P1 | **Reopened**: 2026-03-14",
+      "status": "in-progress (Phase I in progress) | **Owner**: Ragdoll | **Priority**: P1 | **Reopened**: 2026-03-14",
       "file": "F101-mode-v2-game-engine.md"
     },
     {
@@ -801,9 +801,45 @@
     {
       "id": "F131",
       "name": "Workspace Navigator — 猫猫可编程导航 Workspace 面板",
-      "status": "in-progress | **Owner**: 金渐层 | **Priority**: P2",
+      "status": "done | **Owner**: 金渐层 | **Priority**: P2 | **Completed**: 2026-03-23",
       "file": "F131-workspace-navigator.md"
+    },
+    {
+      "id": "F132",
+      "name": "DingTalk + WeCom Chat Gateway — 钉钉/企微接入",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F132-dingtalk-wecom-gateway.md"
+    },
+    {
+      "id": "F133",
+      "name": "GitHub CI/CD Tracking — 已注册 PR 的 CI/CD 执行结果自动追踪",
+      "status": "in-progress | **Owner**: 金渐层 | **Priority**: P2",
+      "file": "F133-cicd-tracking.md"
+    },
+    {
+      "id": "F134",
+      "name": "Feishu Group Chat — 飞书群聊多用户支持",
+      "status": "done (Phase A-C) | **Owner**: 金渐层 | **Priority**: P1 | **PR**: #697 merged `dc4ef024`",
+      "file": "F134-feishu-group-chat.md"
+    },
+    {
+      "id": "F135",
+      "name": "狸花猫开箱即用（DARE Out-of-the-Box）",
+      "status": "spec | **Owner**: bouillipx (社区) | **Priority**: P2",
+      "file": "F135-dare-ootb.md"
+    },
+    {
+      "id": "F136",
+      "name": "Unified Config Hot Reload — 配置热更新统一管线",
+      "status": "spec | **Owner**: 待定 | **Priority**: P1",
+      "file": "F136-unified-config-hot-reload.md"
+    },
+    {
+      "id": "F137",
+      "name": "WeChat Personal Gateway — 微信个人号 iLink Bot 接入",
+      "status": "in-progress | **Owner**: 金渐层 | **Priority**: P1",
+      "file": "F137-weixin-personal-gateway.md"
     }
   ],
-  "generated_at": "2026-03-22T01:25:29.527Z"
+  "generated_at": "2026-03-24T09:01:54.892Z"
 }

@@ -20,12 +20,14 @@ import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getAllCatIdsFromConfig, getDefaultCatId } from '../config/cat-config-loader.js';
+import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
-import { GameAutoPlayer } from '../domains/cats/services/game/GameAutoPlayer.js';
+import { createGameDriver } from '../domains/cats/services/game/createGameDriver.js';
+import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
 import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
@@ -41,11 +43,35 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+
+/** F088 ISSUE-15: Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
+interface OutboundDeliveryHookLike {
+  deliver(
+    threadId: string,
+    content: string,
+    catId?: string,
+    richBlocks?: unknown[],
+    threadMeta?: { threadShortId: string; threadTitle?: string; deepLinkUrl?: string },
+    origin?: string,
+    triggerMessageId?: string,
+  ): Promise<void>;
+}
+
+/** F088 ISSUE-15: Minimal streaming hook interface. */
+interface StreamingHookLike {
+  onStreamStart(threadId: string, catId?: string, invocationId?: string): Promise<void>;
+  onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
+  onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
+  cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
+}
+
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
+
+const STREAM_START_TIMEOUT_MS = 5_000;
 
 /**
  * Dependencies injected via Fastify plugin options.
@@ -73,7 +99,11 @@ export interface MessagesRoutesOptions {
   /** F101: Game store for /game command interception */
   gameStore?: IGameStore;
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
-  autoPlayer?: Pick<GameAutoPlayer, 'startLoop' | 'stopAllLoops'>;
+  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopAllLoops'>;
+  /** F088 ISSUE-15: Outbound delivery hook for connector platforms (late-bound after gateway bootstrap) */
+  outboundHook?: OutboundDeliveryHookLike;
+  /** F088 ISSUE-15: Streaming hook for connector platforms (late-bound after gateway bootstrap) */
+  streamingHook?: StreamingHookLike;
 }
 
 const log = createModuleLogger('routes/messages');
@@ -123,10 +153,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     : null;
   const gameAutoPlayer = gameOrchestrator
     ? (opts.autoPlayer ??
-      new GameAutoPlayer({
-        gameStore: opts.gameStore!,
-        orchestrator: gameOrchestrator,
-        messageStore: opts.messageStore,
+      createGameDriver({
+        gameNarratorEnabled: false,
+        legacyDeps: {
+          gameStore: opts.gameStore!,
+          orchestrator: gameOrchestrator,
+          messageStore: opts.messageStore,
+        },
       }))
     : null;
 
@@ -643,6 +676,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         // F39: Track final status for queue auto-dequeue
         let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
 
+        // F088 ISSUE-15: Hoisted so catch/abort branches can clean up streaming sessions
+        let streamStartPromise: Promise<void> | undefined;
+
         try {
           await opts.invocationRecordStore?.update(createResult.invocationId, {
             status: 'running',
@@ -665,6 +701,25 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           let governanceErrorCode: string | undefined;
           // Aggregate streamed assistant text for push summary/decision classification.
           let assistantReplyContent = '';
+
+          // F088 ISSUE-15: Collect per-turn content for outbound delivery to connector platforms
+          const outboundTurns: Array<{
+            catId: string;
+            textParts: string[];
+            richBlocks?: unknown[];
+          }> = [];
+          let currentTurnCatId: string | undefined;
+          const collectedTextParts: string[] = [];
+
+          // F088 ISSUE-15: Start streaming placeholder on external platforms
+          if (opts.streamingHook) {
+            streamStartPromise = opts.streamingHook
+              .onStreamStart(resolvedThreadId, primaryCat, createResult.invocationId)
+              .catch((err) => {
+                log.warn({ err, threadId: resolvedThreadId }, '[messages] StreamingHook.onStreamStart failed');
+              });
+          }
+
           for await (const msg of router.routeExecution(
             userId,
             content,
@@ -699,6 +754,48 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             if (msg.type === 'done' && msg.errorCode) {
               governanceErrorCode = msg.errorCode;
             }
+
+            // F088 ISSUE-15: Collect outbound turns (same pattern as QueueProcessor)
+            if (msg.type === 'done' && msg.catId) {
+              if (persistenceContext.richBlocks) {
+                const turn = outboundTurns[outboundTurns.length - 1];
+                if (turn && turn.catId === msg.catId && currentTurnCatId === msg.catId) {
+                  turn.richBlocks = [...persistenceContext.richBlocks];
+                } else {
+                  outboundTurns.push({
+                    catId: msg.catId,
+                    textParts: [],
+                    richBlocks: [...persistenceContext.richBlocks],
+                  });
+                }
+                persistenceContext.richBlocks = undefined;
+              }
+              currentTurnCatId = undefined;
+            }
+            if (msg.type === 'text' && typeof (msg as unknown as Record<string, unknown>).content === 'string') {
+              const textContent = (msg as unknown as Record<string, unknown>).content as string;
+              collectedTextParts.push(textContent);
+              if (msg.catId) {
+                if (msg.catId !== currentTurnCatId) {
+                  outboundTurns.push({ catId: msg.catId, textParts: [] });
+                  currentTurnCatId = msg.catId;
+                }
+                outboundTurns[outboundTurns.length - 1].textParts.push(textContent);
+              }
+              // F088 ISSUE-15: Forward streaming chunks to external platforms
+              if (opts.streamingHook) {
+                const accumulated = collectedTextParts.join('');
+                opts.streamingHook
+                  .onStreamChunk(resolvedThreadId, accumulated, createResult.invocationId)
+                  .catch((streamErr) => {
+                    log.warn(
+                      { err: streamErr, threadId: resolvedThreadId },
+                      '[messages] StreamingHook.onStreamChunk failed',
+                    );
+                  });
+              }
+            }
+
             opts.socketManager.broadcastAgentMessage(
               { ...msg, invocationId: createResult.invocationId },
               resolvedThreadId,
@@ -732,6 +829,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 resolvedThreadId,
               );
             }
+            // P1 fix: finalize streaming session on abort so external placeholders are cleaned up
+            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
             // Skip ack/succeeded/push-notify — let finally handle cleanup
           } else if (persistenceContext.failed) {
             const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
@@ -760,12 +859,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 })
                 .catch(() => {});
             }
+            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else if (governanceErrorCode) {
             // F070: Governance gate blocked — mark as failed with errorCode for retry
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
               error: governanceErrorCode,
             });
+            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else {
             // ADR-008 S3: ack cursors before marking succeeded so that if ack
             // throws, the catch block sees running→failed (valid transition).
@@ -818,6 +919,22 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   /* ignore */
                 });
             }
+
+            // F088 ISSUE-15: Outbound delivery to connector platforms (Feishu/Telegram)
+            // P2 fix: fire-and-forget so delivery latency doesn't block invocationTracker.complete()
+            deliverOutboundFromWeb(
+              resolvedThreadId,
+              primaryCat,
+              createResult.invocationId,
+              collectedTextParts,
+              outboundTurns,
+              persistenceContext,
+              streamStartPromise,
+              opts,
+              log,
+            ).catch((deliverErr) => {
+              log.error({ err: deliverErr, threadId: resolvedThreadId }, '[messages] deliverOutboundFromWeb failed');
+            });
           }
         } catch (err) {
           // F39 bugfix: detect abort (cancel/force) vs real failure
@@ -827,6 +944,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               status: 'canceled',
             });
             // Don't broadcast error for intentional cancel
+            // P1-A fix: clean up streaming placeholder even on abort/cancel
+            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else {
             log.error({ err, invocationId: createResult.invocationId }, 'Background processing error');
             const errorMsg = normalizeErrorMessage(err);
@@ -856,6 +975,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 })
                 .catch(() => {});
             }
+            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } // end else (non-abort error)
         } finally {
           clearInterval(heartbeatInterval);
@@ -979,7 +1099,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Map chat messages (union type allows summary items to be pushed later)
     type TimelineItem = {
       id: string;
-      type: 'user' | 'assistant' | 'connector' | 'summary';
+      type: 'user' | 'assistant' | 'connector' | 'summary' | 'system';
       catId: string | null;
       content: string;
       timestamp: number;
@@ -988,7 +1108,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     };
     const chatItems: TimelineItem[] = page.map((m) => ({
       id: m.id,
-      type: (m.catId ? 'assistant' : m.source ? 'connector' : 'user') as 'user' | 'assistant' | 'connector',
+      type: (m.catId
+        ? 'assistant'
+        : m.source
+          ? 'connector'
+          : m.userId === 'system'
+            ? 'system'
+            : 'user') as TimelineItem['type'],
       catId: m.catId,
       content: m.content,
       ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
@@ -1129,3 +1255,150 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     };
   });
 };
+
+/** @internal exported for testing — do not use outside of test. */
+export async function cleanupStreamingOnFailure(
+  threadId: string,
+  invocationId: string,
+  streamStartPromise: Promise<void> | undefined,
+  opts: MessagesRoutesOptions,
+  logger: typeof log,
+): Promise<void> {
+  if (!opts.streamingHook) return;
+  try {
+    if (streamStartPromise) {
+      await Promise.race([streamStartPromise, new Promise<void>((r) => setTimeout(r, STREAM_START_TIMEOUT_MS))]);
+    }
+    await opts.streamingHook.onStreamEnd(threadId, '', invocationId);
+    await opts.streamingHook.cleanupPlaceholders?.(threadId, invocationId);
+  } catch (err) {
+    logger.warn({ err, threadId }, '[messages] cleanupStreamingOnFailure failed');
+  }
+}
+
+/** @internal exported for testing — do not use outside of test. */
+export async function deliverOutboundFromWeb(
+  threadId: string,
+  primaryCat: string,
+  invocationId: string,
+  collectedTextParts: string[],
+  outboundTurns: Array<{ catId: string; textParts: string[]; richBlocks?: unknown[] }>,
+  persistenceContext: PersistenceContext,
+  streamStartPromise: Promise<void> | undefined,
+  opts: MessagesRoutesOptions,
+  logger: typeof log,
+): Promise<void> {
+  const finalContent = collectedTextParts.join('');
+
+  if (opts.streamingHook) {
+    if (streamStartPromise) {
+      await Promise.race([
+        streamStartPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
+      ]);
+    }
+    await opts.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
+      logger.warn({ err, threadId }, '[messages] StreamingHook.onStreamEnd failed');
+    });
+  }
+
+  const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+  if (!opts.outboundHook || !hasContent) {
+    if (opts.streamingHook?.cleanupPlaceholders) {
+      await opts.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
+        logger.warn({ err, threadId }, '[messages] StreamingHook.cleanupPlaceholders failed (silent)');
+      });
+    }
+    return;
+  }
+
+  let threadMeta: { threadShortId: string; threadTitle?: string; deepLinkUrl?: string } | undefined;
+  try {
+    const LOOKUP_TIMEOUT_MS = 2000;
+    const thread = opts.threadStore?.get(threadId);
+    if (thread) {
+      const lookupPromise = Promise.resolve(thread).catch(() => undefined);
+      const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS));
+      const resolved = await Promise.race([lookupPromise, timeout]);
+      if (resolved) {
+        const frontendBase = resolveFrontendBaseUrl(process.env);
+        threadMeta = {
+          threadShortId: threadId.slice(0, 15),
+          threadTitle: resolved.title ?? undefined,
+          deepLinkUrl: `${frontendBase}/threads/${threadId}`,
+        };
+      }
+    }
+  } catch {
+    logger.warn({ threadId }, '[messages] threadMeta lookup failed');
+  }
+
+  const DELIVER_TIMEOUT_MS = 10_000;
+  const nonEmptyTurns = outboundTurns.filter(
+    (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
+  );
+
+  let deliveryFailed = false;
+  const inflightDeliverPromises: Promise<void>[] = [];
+
+  if (nonEmptyTurns.length > 1) {
+    for (const turn of nonEmptyTurns) {
+      const turnContent = turn.textParts.join('');
+      const deliverPromise = opts.outboundHook.deliver(threadId, turnContent, turn.catId, turn.richBlocks, threadMeta);
+      inflightDeliverPromises.push(deliverPromise);
+      try {
+        await Promise.race([
+          deliverPromise,
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS)),
+        ]);
+      } catch (err) {
+        deliveryFailed = true;
+        logger.error({ err, threadId, catId: turn.catId }, '[messages] Outbound delivery error');
+      }
+    }
+  } else if (nonEmptyTurns.length === 1) {
+    const turn = nonEmptyTurns[0];
+    const richBlocks = persistenceContext.richBlocks ?? turn.richBlocks;
+    const deliverPromise = opts.outboundHook.deliver(threadId, finalContent, turn.catId, richBlocks, threadMeta);
+    inflightDeliverPromises.push(deliverPromise);
+    try {
+      await Promise.race([
+        deliverPromise,
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS)),
+      ]);
+    } catch (err) {
+      deliveryFailed = true;
+      logger.error({ err, threadId }, '[messages] Outbound delivery error');
+    }
+  } else {
+    const richBlocks = persistenceContext.richBlocks;
+    if (richBlocks) {
+      const deliverPromise = opts.outboundHook.deliver(threadId, finalContent, primaryCat, richBlocks, threadMeta);
+      inflightDeliverPromises.push(deliverPromise);
+      try {
+        await Promise.race([
+          deliverPromise,
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS)),
+        ]);
+      } catch (err) {
+        deliveryFailed = true;
+        logger.error({ err, threadId }, '[messages] Outbound delivery error');
+      }
+    }
+  }
+
+  if (!deliveryFailed && opts.streamingHook?.cleanupPlaceholders) {
+    await opts.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
+      logger.warn({ err, threadId }, '[messages] StreamingHook.cleanupPlaceholders failed');
+    });
+  } else if (deliveryFailed && opts.streamingHook?.cleanupPlaceholders) {
+    const cleanupFn = opts.streamingHook.cleanupPlaceholders.bind(opts.streamingHook);
+    Promise.allSettled(inflightDeliverPromises).then((results) => {
+      if (results.every((r) => r.status === 'fulfilled')) {
+        cleanupFn(threadId, invocationId).catch((err) => {
+          logger.warn({ err, threadId }, '[messages] Late-success placeholder cleanup failed');
+        });
+      }
+    });
+  }
+}

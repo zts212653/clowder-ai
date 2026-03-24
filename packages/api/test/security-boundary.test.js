@@ -67,6 +67,8 @@ test('API binds to 127.0.0.1 by default', async (t) => {
   const apiDir = path.resolve(process.cwd());
   const childEnv = { ...process.env, API_SERVER_PORT: '0', MEMORY_STORE: '1', PREVIEW_GATEWAY_PORT: '0' };
   delete childEnv.API_SERVER_HOST;
+  delete childEnv.REDIS_URL;
+  delete childEnv.CAT_CAFE_REDIS_TEST_ISOLATED;
 
   const child = spawn(process.execPath, ['dist/index.js'], {
     cwd: apiDir,

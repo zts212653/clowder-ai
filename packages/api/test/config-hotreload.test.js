@@ -119,7 +119,7 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     assert.equal(auditCalls[0].type, 'config_updated');
     assert.equal(auditCalls[0].data.key, 'cli.timeoutMs');
     assert.equal(auditCalls[0].data.operator, 'user-1');
-    assert.equal(auditCalls[0].data.oldValue, 300000);
+    assert.equal(auditCalls[0].data.oldValue, 1800000);
     assert.equal(auditCalls[0].data.newValue, 60000);
   });
 
@@ -141,7 +141,7 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     });
     assert.equal(configRes.statusCode, 200);
     const configBody = configRes.json();
-    assert.equal(configBody.config.cli.timeoutMs, 300000);
+    assert.equal(configBody.config.cli.timeoutMs, 1800000);
   });
 
   it('logs warn for high-risk key updates', async () => {

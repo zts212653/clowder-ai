@@ -23,6 +23,7 @@ const EXPECTED_TOOLS = [
   'cat_cafe_list_tasks',
   'cat_cafe_update_task',
   'cat_cafe_create_rich_block',
+  'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
   // Workflow SOP tools (F073 P1)
@@ -65,6 +66,8 @@ const EXPECTED_TOOLS = [
   'limb_invoke',
   'limb_pair_list',
   'limb_pair_approve',
+  // F101 Phase I: Game action tool
+  'cat_cafe_submit_game_action',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
@@ -78,6 +81,7 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_list_tasks',
   'cat_cafe_update_task',
   'cat_cafe_create_rich_block',
+  'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
@@ -87,6 +91,7 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
+  'cat_cafe_submit_game_action',
 ];
 
 const EXPECTED_MEMORY_TOOLS = [

@@ -152,6 +152,14 @@ Phase 1 开始时，用 **8 栏诊断胶囊** 结构化调查过程：
 - **`defense-in-depth.md`** — 找到根因后，在多层添加防御性校验
 - **`condition-based-waiting.md`** — 用条件轮询替代任意 timeout
 
+## 运行日志快速查看（F130）
+
+右侧状态面板底部有「运行日志 → 查看日志」按钮：
+- 点击后自动切换到 Workspace 面板，展开到 `packages/api/data/logs/api/` 并打开最新日志文件
+- 日志格式：Pino JSON（每行一条），文件名 `api.YYYY-MM-DD.SEQ.log`（日轮转，14天保留）
+- 也可以通过 Navigate API 打开：`POST /api/workspace/navigate {"path":"packages/api/data/logs/api/","action":"reveal","worktreeId":"..."}`
+- 调试时**先看日志**再分析，不要猜
+
 ## 下一步
 
 修复完成并通过验证后 → 加载 `quality-gate` 做提交前验收

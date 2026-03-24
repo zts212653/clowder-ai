@@ -13,7 +13,7 @@ const mockHandleAgentMessage = vi.fn();
 
 let capturedSocketCallbacks: {
   onIntentMode?: (data: { threadId: string; mode: string; targetCats: string[] }) => void;
-  onMessage?: (msg: unknown) => boolean | undefined;
+  onMessage?: (msg: unknown) => void;
 } | null = null;
 
 const mockStoreState = () => ({

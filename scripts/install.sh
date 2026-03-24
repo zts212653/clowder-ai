@@ -559,6 +559,18 @@ if [[ ${#NEED_PKGS[@]} -gt 0 ]]; then
 else ok "All system dependencies present"
 fi
 
+# F088 Phase J2: pandoc for document generation (MD → PDF/DOCX)
+if command -v pandoc &>/dev/null; then
+    ok "pandoc found ($(pandoc --version | head -1))"
+else
+    info "Installing pandoc (document generation)..."
+    case "$DISTRO_FAMILY" in
+        debian) $SUDO $PKG_INSTALL pandoc && ok "pandoc installed" || warn "pandoc install failed — document generation will fall back to .md" ;;
+        rhel) $SUDO $PKG_INSTALL pandoc && ok "pandoc installed" || warn "pandoc install failed — document generation will fall back to .md" ;;
+        *) warn "pandoc not installed — document generation will fall back to .md" ;;
+    esac
+fi
+
 # ── [3/9] Install Node.js 20+ ────────────────────────────
 step "[3/9] Checking Node.js / 检测 Node.js..."
 node_needs_install() {

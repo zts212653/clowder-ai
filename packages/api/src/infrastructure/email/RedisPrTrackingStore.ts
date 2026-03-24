@@ -1,5 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { IPrTrackingStore, PrTrackingEntry, PrTrackingInput } from './PrTrackingStore.js';
+import type { CiStateFields, IPrTrackingStore, PrTrackingEntry, PrTrackingInput } from './PrTrackingStore.js';
 import { PrTrackingKeys } from './pr-tracking-keys.js';
 
 const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
@@ -15,6 +15,15 @@ else
   redis.call("zrem", KEYS[2], ARGV[1])
   return 0
 end
+`.trim();
+
+// Lua: atomic patchCiState — only hset if hash still exists, preventing orphan recreation
+const PATCH_CI_STATE_LUA = `
+if redis.call("exists", KEYS[1]) == 0 then return 0 end
+for i = 1, #ARGV, 2 do
+  redis.call("hset", KEYS[1], ARGV[i], ARGV[i + 1])
+end
+return 1
 `.trim();
 
 export class RedisPrTrackingStore implements IPrTrackingStore {
@@ -70,6 +79,21 @@ export class RedisPrTrackingStore implements IPrTrackingStore {
     const member = `${repoFullName}#${prNumber}`;
     const result = await this.redis.eval(REMOVE_LUA, 2, key, PrTrackingKeys.all(), member);
     return result === 1;
+  }
+
+  async patchCiState(repoFullName: string, prNumber: number, ciFields: CiStateFields): Promise<void> {
+    const updates: Record<string, string> = {};
+    if (ciFields.headSha !== undefined) updates.headSha = ciFields.headSha;
+    if (ciFields.lastCiFingerprint !== undefined) updates.lastCiFingerprint = ciFields.lastCiFingerprint;
+    if (ciFields.lastCiBucket !== undefined) updates.lastCiBucket = ciFields.lastCiBucket;
+    if (ciFields.lastCiNotifiedAt !== undefined) updates.lastCiNotifiedAt = String(ciFields.lastCiNotifiedAt);
+    if (ciFields.ciTrackingEnabled !== undefined) updates.ciTrackingEnabled = String(ciFields.ciTrackingEnabled);
+
+    if (Object.keys(updates).length === 0) return;
+
+    const key = PrTrackingKeys.detail(repoFullName, prNumber);
+    const argv = Object.entries(updates).flat();
+    await this.redis.eval(PATCH_CI_STATE_LUA, 1, key, ...argv);
   }
 
   async listAll(): Promise<PrTrackingEntry[]> {
@@ -131,6 +155,11 @@ export class RedisPrTrackingStore implements IPrTrackingStore {
       threadId: data.threadId ?? '',
       userId: data.userId ?? '',
       registeredAt: parseInt(data.registeredAt ?? '0', 10),
+      ...(data.headSha ? { headSha: data.headSha } : {}),
+      ...(data.lastCiFingerprint ? { lastCiFingerprint: data.lastCiFingerprint } : {}),
+      ...(data.lastCiBucket ? { lastCiBucket: data.lastCiBucket } : {}),
+      ...(data.lastCiNotifiedAt ? { lastCiNotifiedAt: parseInt(data.lastCiNotifiedAt, 10) } : {}),
+      ...(data.ciTrackingEnabled !== undefined ? { ciTrackingEnabled: data.ciTrackingEnabled === 'true' } : {}),
     };
   }
 }

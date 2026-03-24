@@ -551,5 +551,58 @@ describe('ConnectorRouter', () => {
       assert.ok(hubThread.connectorHubState.lastCommandAt, 'lastCommandAt should be set');
       assert.ok(hubThread.connectorHubState.lastCommandAt >= beforeCmd, 'lastCommandAt should be recent');
     });
+
+    // F134 regression: group chats must support /commands (KD-8 was incorrectly blocking them)
+    it('handles /commands in group chats (F134)', async () => {
+      bindingStore.bind('feishu', 'group-chat-1', 'thread-grp-1', 'owner-1');
+      const result = await commandRouter.route(
+        'feishu',
+        'group-chat-1',
+        '/where',
+        'ext-grp-cmd-1',
+        undefined,
+        undefined,
+        'group',
+      );
+      assert.equal(result.kind, 'command');
+      assert.equal(adapterSendCalls.length, 1);
+      assert.equal(adapterSendCalls[0].content, 'You are here');
+      assert.equal(cmdTrigger.calls.length, 0);
+    });
+
+    // F134 regression: group Hub title includes chatName to distinguish multiple groups
+    it('group Hub thread title includes chatName (F134)', async () => {
+      bindingStore.bind('feishu', 'grp-hub-1', 'thread-grp-hub-1', 'owner-1');
+      const hubRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: cmdTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/where': { kind: 'where', response: 'info' },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+
+      const result = await hubRouter.route(
+        'feishu',
+        'grp-hub-1',
+        '/where',
+        'ext-grp-hub-1',
+        undefined,
+        undefined,
+        'group',
+        '猫猫咖啡测试群',
+      );
+      const hubThread = threadStore.threads.get(result.threadId);
+      assert.ok(hubThread);
+      assert.ok(hubThread.title.includes('猫猫咖啡测试群'), `expected chatName in Hub title, got: ${hubThread.title}`);
+      assert.ok(hubThread.title.includes('IM Hub'));
+    });
   });
 });

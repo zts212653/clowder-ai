@@ -213,7 +213,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   // F089: Invocation-level hard timeout — independent of NDJSON stream / CLI timeout.
   // Must be > CLI_TIMEOUT_MS to avoid racing the inner timeout.
-  // When CLI_TIMEOUT_MS=0 (disable), fall back to DEFAULT (5min) so invocation still has a ceiling.
+  // When CLI_TIMEOUT_MS=0 (disable), fall back to DEFAULT (30min) so invocation still has a ceiling.
   const INVOCATION_TIMEOUT_MULTIPLIER = 2;
   const cliTimeoutMs = resolveCliTimeoutMs(undefined);
   const invocationTimeoutMs =
@@ -247,6 +247,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     CAT_CAFE_INVOCATION_ID: invocationId,
     CAT_CAFE_CALLBACK_TOKEN: callbackToken,
     CAT_CAFE_USER_ID: userId,
+    CAT_CAFE_CAT_ID: catId,
     ...(process.env.CAT_CAFE_SIGNAL_USER ? { CAT_CAFE_SIGNAL_USER: process.env.CAT_CAFE_SIGNAL_USER } : {}),
   };
 
@@ -521,7 +522,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (threadStore) {
       const thread = await threadStore.get(threadId);
       if (thread?.projectPath && thread.projectPath !== 'default') {
-        if (isUnderAllowedRoot(thread.projectPath)) {
+        // F101: Game threads use virtual projectPaths (e.g. 'games/werewolf') for
+        // categorization only — they are not real filesystem directories. Skip them
+        // to avoid triggering the F070 governance gate on a non-existent path.
+        if (!thread.projectPath.startsWith('games/') && isUnderAllowedRoot(thread.projectPath)) {
           workingDirectory = thread.projectPath;
         }
       }

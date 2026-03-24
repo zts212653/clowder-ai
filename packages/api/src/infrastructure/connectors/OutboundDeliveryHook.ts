@@ -18,7 +18,11 @@ export interface IOutboundAdapter {
     catDisplayName: string,
     metadata?: Record<string, unknown>,
   ): Promise<void>;
-  sendFormattedReply?(externalChatId: string, envelope: MessageEnvelope): Promise<void>;
+  sendFormattedReply?(
+    externalChatId: string,
+    envelope: MessageEnvelope,
+    metadata?: Record<string, unknown>,
+  ): Promise<void>;
   /** Phase 5: Send a media message (image, file, audio). */
   sendMedia?(
     externalChatId: string,
@@ -49,6 +53,10 @@ export interface OutboundDeliveryHookOptions {
   readonly log: FastifyBaseLogger;
   /** Resolve a route URL (e.g. /uploads/x.png) to an absolute file path on disk. */
   readonly mediaPathResolver?: ((url: string) => string | undefined) | undefined;
+  /** F134: Look up a stored message by ID to retrieve its source.sender for group chat @sender replies. */
+  readonly messageLookup?:
+    | ((messageId: string) => Promise<{ source?: { sender?: { id: string; name?: string } } } | null>)
+    | undefined;
 }
 
 export class OutboundDeliveryHook {
@@ -63,9 +71,35 @@ export class OutboundDeliveryHook {
     richBlocks?: RichBlock[],
     threadMeta?: ThreadMeta,
     origin?: MessageOrigin,
+    triggerMessageId?: string,
   ): Promise<void> {
+    this.opts.log.info(
+      { threadId, catId, contentLen: content.length, hasRichBlocks: !!(richBlocks && richBlocks.length) },
+      '[OutboundDeliveryHook] deliver() called',
+    );
     const bindings = await this.opts.bindingStore.getByThread(threadId);
-    if (bindings.length === 0) return;
+    if (bindings.length === 0) {
+      this.opts.log.warn(
+        { threadId },
+        '[OutboundDeliveryHook] No bindings found for thread — skipping outbound delivery',
+      );
+      return;
+    }
+    this.opts.log.info(
+      { threadId, bindingCount: bindings.length, connectors: bindings.map((b) => b.connectorId) },
+      '[OutboundDeliveryHook] Found bindings, delivering',
+    );
+
+    // F134: Resolve sender from the trigger message for group chat @sender replies
+    let replyToSender: { id: string; name?: string } | undefined;
+    if (triggerMessageId && this.opts.messageLookup) {
+      try {
+        const msg = await this.opts.messageLookup(triggerMessageId);
+        replyToSender = msg?.source?.sender ?? undefined;
+      } catch (err) {
+        this.opts.log.warn({ err, triggerMessageId }, '[OutboundDeliveryHook] messageLookup failed');
+      }
+    }
 
     const entry = catId ? catRegistry.tryGet(catId) : undefined;
     const catDisplayName = entry?.config.displayName ?? '';
@@ -74,6 +108,7 @@ export class OutboundDeliveryHook {
     const finalContent = `${textPrefix}${content}`;
 
     const hasRichBlocks = richBlocks && richBlocks.length > 0;
+    const outMeta = replyToSender ? { replyToSender } : undefined;
 
     await Promise.allSettled(
       bindings.map(async (binding) => {
@@ -105,21 +140,21 @@ export class OutboundDeliveryHook {
                   body: content,
                   origin,
                 });
-            await adapter.sendFormattedReply(binding.externalChatId, envelope);
+            await adapter.sendFormattedReply(binding.externalChatId, envelope, outMeta);
           } else if (hasRichBlocks && adapter.sendRichMessage) {
             await adapter.sendRichMessage(
               binding.externalChatId,
               content,
               richBlocks,
               catDisplayName || 'Cat',
-              undefined,
+              outMeta,
             );
           } else if (hasRichBlocks) {
             // Fallback: append plaintext-rendered blocks to text
             const blockText = renderAllRichBlocksPlaintext(richBlocks);
-            await adapter.sendReply(binding.externalChatId, `${finalContent}\n\n${blockText}`, undefined);
+            await adapter.sendReply(binding.externalChatId, `${finalContent}\n\n${blockText}`, outMeta);
           } else {
-            await adapter.sendReply(binding.externalChatId, finalContent, undefined);
+            await adapter.sendReply(binding.externalChatId, finalContent, outMeta);
           }
 
           // Phase 6: Send audio blocks with url as media messages
@@ -139,6 +174,41 @@ export class OutboundDeliveryHook {
                   ...(absPath ? { absPath } : {}),
                   ...('text' in block && block.text ? { text: block.text as string } : {}),
                 });
+              }
+              // Phase J: Send file blocks as file messages
+              // P0 security: file blocks MUST resolve to absPath — never pass raw url to adapter
+              // (raw url could be an arbitrary local path like /etc/passwd, exploitable via Telegram InputFile)
+              if (block.kind === 'file' && 'url' in block && block.url) {
+                const fileUrl = block.url as string;
+                const absPath = resolve?.(fileUrl);
+                const fileName = 'fileName' in block ? (block.fileName as string) : undefined;
+                if (absPath) {
+                  this.opts.log.info(
+                    { blockKind: block.kind, url: fileUrl, absPath, fileName },
+                    '[OutboundDeliveryHook] Phase J: sending file block',
+                  );
+                  await adapter.sendMedia(binding.externalChatId, {
+                    type: 'file',
+                    absPath,
+                    ...(fileName ? { fileName } : {}),
+                  });
+                } else if (fileUrl.startsWith('https://')) {
+                  // External HTTPS URLs are safe to pass through (Feishu adapter downloads + uploads)
+                  this.opts.log.info(
+                    { blockKind: block.kind, url: fileUrl, fileName },
+                    '[OutboundDeliveryHook] Phase J: sending file block via external URL',
+                  );
+                  await adapter.sendMedia(binding.externalChatId, {
+                    type: 'file',
+                    url: fileUrl,
+                    ...(fileName ? { fileName } : {}),
+                  });
+                } else {
+                  this.opts.log.warn(
+                    { blockKind: block.kind, url: fileUrl },
+                    '[OutboundDeliveryHook] Phase J: file block skipped — resolver failed and url is not https',
+                  );
+                }
               }
               if (block.kind === 'media_gallery' && 'items' in block) {
                 const items = (block as { items?: Array<{ url?: string; type?: string }> }).items;

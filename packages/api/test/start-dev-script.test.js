@@ -369,6 +369,93 @@ fi
   assert.equal(output, 'failed-fast');
 });
 
+test('wait_for_port_or_exit falls back when lsof probe fails but the port is actually listening', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+tmp_dir=$(mktemp -d)
+trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$tmp_dir"' RETURN
+cat > "$tmp_dir/server.js" <<'EOF'
+const net = require('node:net');
+const server = net.createServer((socket) => {
+  socket.on('error', () => {});
+  socket.end();
+});
+server.on('error', (err) => {
+  console.error(err);
+  process.exit(1);
+});
+server.listen(65531, '127.0.0.1', () => {
+  setInterval(() => {}, 1000);
+});
+EOF
+node "$tmp_dir/server.js" >/dev/null 2>&1 &
+server_pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  nc -z 127.0.0.1 65531 >/dev/null 2>&1 && break
+  sleep 0.1
+done
+lsof() { return 1; }
+ss() { return 127; }
+if wait_for_port_or_exit 65531 "test-service" "$server_pid" 2 >/dev/null; then
+  printf 'fallback-ok'
+else
+  printf 'fallback-failed'
+fi
+`,
+  );
+
+  assert.equal(output, 'fallback-ok');
+});
+
+test('terminate_managed_pids kills tracked child process trees', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+if ! command -v pgrep >/dev/null 2>&1; then
+  printf 'skipped'
+  exit 0
+fi
+sh -c 'sleep 30 & wait' &
+parent_pid=$!
+child_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  child_pid=$(pgrep -P "$parent_pid" | head -n 1 || true)
+  [ -n "$child_pid" ] && break
+  sleep 0.1
+done
+[ -n "$child_pid" ] || { printf 'missing-child'; exit 1; }
+MANAGED_PIDS=("$parent_pid")
+terminate_managed_pids
+sleep 0.2
+if kill -0 "$child_pid" 2>/dev/null; then
+  printf 'child-alive'
+else
+  printf 'child-killed'
+fi
+`,
+  );
+
+  assert.equal(output, 'child-killed');
+});
+
+test('port_listen_pids accepts fuser pid output from stderr', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+lsof() { return 1; }
+ss() { return 1; }
+fuser() { printf '3000/tcp: 4321 9876\\n' >&2; }
+printf '%s' "$(port_listen_pids 3000 | paste -sd ',' -)"
+`,
+  );
+
+  assert.equal(output, '4321,9876');
+});
+
 test('api_launch_command uses exec so wait tracks the long-lived server process', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const output = runSourceOnlySnippet(

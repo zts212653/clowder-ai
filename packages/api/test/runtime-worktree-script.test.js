@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -10,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeScriptSource = join(__dirname, '..', '..', '..', 'scripts', 'runtime-worktree.sh');
 const tempDirs = [];
+const tempProcs = [];
 
 function createTempProject(name) {
   const projectDir = mkdtempSync(join(tmpdir(), `${name}-`));
@@ -22,36 +24,10 @@ function createTempProject(name) {
   writeFileSync(join(projectDir, 'scripts', 'runtime-worktree.sh'), readFileSync(runtimeScriptSource, 'utf8'), {
     mode: 0o755,
   });
-  writeFileSync(
-    join(projectDir, 'scripts', 'start-dev.sh'),
-    `#!/bin/sh
-set -eu
-if [ -f ./.env ]; then
-  set -a
-  . ./.env >/dev/null 2>&1
-  set +a
-fi
-printf "STARTED:%s|API:%s|PREVIEW:%s|OPENAI:%s\\n" "$PWD" "\${API_SERVER_PORT-}" "\${PREVIEW_GATEWAY_PORT-}" "\${OPENAI_API_KEY-}"
-`,
-    {
-      mode: 0o755,
-    },
-  );
+  writeFileSync(join(projectDir, 'scripts', 'start-dev.sh'), '#!/bin/sh\nprintf "STARTED:%s\\n" "$PWD"\n', {
+    mode: 0o755,
+  });
   return projectDir;
-}
-
-function initGitRepoWithOrigin(projectDir) {
-  const remoteDir = mkdtempSync(join(tmpdir(), 'runtime-remote-'));
-  tempDirs.push(remoteDir);
-
-  execFileSync('git', ['init', '--bare', remoteDir], { stdio: 'ignore' });
-  execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.name', 'Runtime Test'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.email', 'runtime-test@example.com'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['add', '.'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['commit', '-m', 'init'], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: projectDir, stdio: 'ignore' });
-  execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
 }
 
 function createPnpmStub(projectDir) {
@@ -113,10 +89,6 @@ function withStubbedPnpmEnv(projectDir) {
   };
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function seedRuntimeDependencyMarkers(projectDir) {
   mkdirSync(join(projectDir, 'node_modules', '.pnpm'), { recursive: true });
   mkdirSync(join(projectDir, 'packages', 'web', 'node_modules', 'next'), { recursive: true });
@@ -127,7 +99,30 @@ function seedRuntimeDependencyMarkers(projectDir) {
   writeFileSync(join(projectDir, 'packages', 'mcp-server', 'node_modules', 'typescript', 'package.json'), '{}');
 }
 
+async function waitForLocalPort(port, attempts = 20) {
+  for (let i = 0; i < attempts; i += 1) {
+    const connected = await new Promise((resolve) => {
+      const socket = createConnection({ host: '127.0.0.1', port });
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+    if (connected) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`timed out waiting for localhost:${port}`);
+}
+
 afterEach(async () => {
+  while (tempProcs.length > 0) {
+    const proc = tempProcs.pop();
+    proc.kill('SIGKILL');
+  }
   while (tempDirs.length > 0) {
     await rm(tempDirs.pop(), { recursive: true, force: true });
   }
@@ -151,7 +146,40 @@ describe('runtime-worktree.sh', () => {
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /running in-place \(deployment mode\)/);
-    assert.match(result.stdout, new RegExp(`STARTED:${escapeRegExp(realpathSync(projectDir))}`));
+    assert.match(result.stdout, new RegExp(`STARTED:${projectDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  });
+
+  it('ignores sibling runtime .env when starting in-place outside git', async () => {
+    const projectDir = createTempProject('runtime-non-git-sibling-runtime');
+    seedRuntimeDependencyMarkers(projectDir);
+
+    const siblingRuntimeDir = join(projectDir, '..', 'cat-cafe-runtime');
+    mkdirSync(siblingRuntimeDir, { recursive: true });
+    writeFileSync(join(siblingRuntimeDir, '.env'), 'API_SERVER_PORT=3010\n');
+
+    const server = spawn(
+      process.execPath,
+      [
+        '-e',
+        `const net=require('node:net');
+const server=net.createServer((socket)=>{socket.on('error',()=>{}); socket.end();});
+server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
+      ],
+      { stdio: 'ignore' },
+    );
+    tempProcs.push(server);
+    await waitForLocalPort(3010);
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: { ...process.env, CAT_CAFE_RUNTIME_RESTART_OK: '1' },
+    });
+
+    assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.match(result.stdout, /running in-place \(deployment mode\)/);
+    assert.match(result.stdout, new RegExp(`STARTED:${projectDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.doesNotMatch(result.stderr, /API port appears active/);
   });
 
   it('fails fast when project is a git repo but the configured remote is missing', () => {
@@ -247,46 +275,74 @@ describe('runtime-worktree.sh', () => {
 
     assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     assert.match(result.stdout, /running in-place \(deployment mode\)/);
-    assert.match(result.stdout, new RegExp(`STARTED:${escapeRegExp(realpathSync(projectDir))}`));
+    assert.match(result.stdout, new RegExp(`STARTED:${projectDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
   });
 
-  it('normalizes CAT_CAFE_RUNTIME_DIR symlink aliases and mirrors source .env into the runtime worktree', () => {
-    const projectDir = createTempProject('runtime-symlink-env');
-    initGitRepoWithOrigin(projectDir);
+  it('refuses restart when nc fallback sees an active API port and lsof-style probes fail', async () => {
+    const projectDir = createTempProject('runtime-port-fallback');
+    seedRuntimeDependencyMarkers(projectDir);
+    const { binDir, logFile } = createPnpmStub(projectDir);
+    writeFileSync(join(binDir, 'lsof'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    writeFileSync(join(binDir, 'ss'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
 
-    writeFileSync(
-      join(projectDir, '.env'),
-      'API_SERVER_PORT=7314\nPREVIEW_GATEWAY_PORT=7410\nOPENAI_API_KEY=test-openai-key\n',
-      'utf8',
+    const server = spawn(
+      process.execPath,
+      [
+        '-e',
+        `const net=require('node:net');
+const server=net.createServer((socket)=>{socket.on('error',()=>{}); socket.end();});
+server.listen(3002,'127.0.0.1',()=>setInterval(()=>{},1000));`,
+      ],
+      { stdio: 'ignore' },
     );
-
-    const env = withStubbedPnpmEnv(projectDir);
-    const physicalRoot = mkdtempSync(join(tmpdir(), 'runtime-real-'));
-    tempDirs.push(physicalRoot);
-    const runtimeAliasRoot = `${physicalRoot}-alias`;
-    symlinkSync(physicalRoot, runtimeAliasRoot);
-    tempDirs.push(runtimeAliasRoot);
-
-    const runtimeDirViaAlias = join(runtimeAliasRoot, 'cat-cafe-runtime');
-    const runtimeDirPhysical = join(realpathSync(physicalRoot), 'cat-cafe-runtime');
+    tempProcs.push(server);
+    await waitForLocalPort(3002);
 
     const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
       cwd: projectDir,
       encoding: 'utf8',
       env: {
-        ...env,
-        CAT_CAFE_RUNTIME_DIR: runtimeDirViaAlias,
+        ...process.env,
+        API_SERVER_PORT: '3002',
+        PATH: `${binDir}:${process.env.PATH}`,
+        RUNTIME_TEST_PNPM_LOG: logFile,
       },
     });
 
-    assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-    assert.match(
-      result.stdout,
-      new RegExp(`STARTED:${escapeRegExp(runtimeDirPhysical)}\\|API:7314\\|PREVIEW:7410\\|OPENAI:test-openai-key`),
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /API port appears active/);
+    assert.doesNotMatch(result.stdout, /STARTED:/);
+  });
+
+  it('reads API_SERVER_PORT from runtime .env before allowing restart', async () => {
+    const projectDir = createTempProject('runtime-port-from-env-file');
+    seedRuntimeDependencyMarkers(projectDir);
+    writeFileSync(join(projectDir, '.env'), 'API_SERVER_PORT=3010\n');
+
+    const server = spawn(
+      process.execPath,
+      [
+        '-e',
+        `const net=require('node:net');
+const server=net.createServer((socket)=>{socket.on('error',()=>{}); socket.end();});
+server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
+      ],
+      { stdio: 'ignore' },
     );
-    assert.equal(
-      readFileSync(join(runtimeDirPhysical, '.env'), 'utf8'),
-      readFileSync(join(projectDir, '.env'), 'utf8'),
-    );
+    tempProcs.push(server);
+    await waitForLocalPort(3010);
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CAT_CAFE_RUNTIME_DIR: projectDir,
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /API port appears active/);
+    assert.doesNotMatch(result.stdout, /STARTED:/);
   });
 });

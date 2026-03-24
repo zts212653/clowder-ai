@@ -22,6 +22,7 @@ const MANY_CATS: CatData[] = [
     avatar: '/a.png',
     roleDescription: 'dev',
     personality: 'kind',
+    source: 'seed',
   },
   {
     id: 'codex',
@@ -33,6 +34,7 @@ const MANY_CATS: CatData[] = [
     avatar: '/b.png',
     roleDescription: 'review',
     personality: 'strict',
+    source: 'seed',
   },
   {
     id: 'gemini',
@@ -44,6 +46,7 @@ const MANY_CATS: CatData[] = [
     avatar: '/c.png',
     roleDescription: 'design',
     personality: 'creative',
+    source: 'seed',
   },
   {
     id: 'sonnet',
@@ -56,6 +59,7 @@ const MANY_CATS: CatData[] = [
     avatar: '/d.png',
     roleDescription: 'fast dev',
     personality: 'quick',
+    source: 'seed',
   },
 ];
 
