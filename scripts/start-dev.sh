@@ -312,24 +312,58 @@ STARTED_REDIS=false
 
 export MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
 
+port_has_listener() {
+    local port=$1
+
+    if command -v ss >/dev/null 2>&1; then
+        if ss -ltn "( sport = :$port )" 2>/dev/null | awk 'NR > 1 { found=1 } END { exit found ? 0 : 1 }'; then
+            return 0
+        fi
+    fi
+
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -i ":$port" -sTCP:LISTEN >/dev/null 2>&1
+        return $?
+    fi
+
+    return 1
+}
+
+list_listening_pids() {
+    local port=$1
+    local pids=""
+
+    if command -v ss >/dev/null 2>&1; then
+        pids=$(ss -ltnp "( sport = :$port )" 2>/dev/null | grep -o 'pid=[0-9]\+' | cut -d= -f2 | sort -u || true)
+        if [ -n "$pids" ]; then
+            printf '%s\n' "$pids"
+            return 0
+        fi
+    fi
+
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true
+    fi
+}
+
 # 杀掉占用端口的进程
 kill_port() {
     local port=$1
     local name=$2
     local pids
-    pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+    pids=$(list_listening_pids "$port")
     if [ -n "$pids" ]; then
         echo -e "${YELLOW}  端口 $port ($name) 被占用，正在终止进程...${NC}"
         echo "$pids" | xargs kill 2>/dev/null || true
         sleep 1
         # 确认已死
-        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+        pids=$(list_listening_pids "$port")
         if [ -n "$pids" ]; then
             echo -e "${YELLOW}  强制终止...${NC}"
             echo "$pids" | xargs kill -9 2>/dev/null || true
             sleep 1
         fi
-        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+        pids=$(list_listening_pids "$port")
         if [ -n "$pids" ]; then
             echo -e "${RED}  ✗ 端口 $port 仍被占用，无法继续启动 $name${NC}"
             return 1
@@ -368,7 +402,7 @@ wait_for_port() {
     local max_wait=${3:-15}
     local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
-        if lsof -nP -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+        if port_has_listener "$port"; then
             echo -e "${GREEN}  ✓ $name 已启动 (端口 $port, ${elapsed}s)${NC}"
             return 0
         fi
@@ -387,7 +421,7 @@ wait_for_port_or_exit() {
     local elapsed=0
 
     while [ $elapsed -lt $max_wait ]; do
-        if lsof -nP -i ":$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        if port_has_listener "$port"; then
             echo -e "${GREEN}  ✓ $name 已启动 (端口 $port, ${elapsed}s)${NC}"
             return 0
         fi
@@ -410,7 +444,8 @@ kill_processes_on_port() {
     local port=$1
     local pids
 
-    pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null) || return 0
+    pids=$(list_listening_pids "$port")
+    [ -n "$pids" ] || return 0
 
     if [ -n "$pids" ]; then
         echo -e "${YELLOW}  ⚠ 端口 $port 被占用，正在清理...${NC}"
@@ -418,7 +453,7 @@ kill_processes_on_port() {
         # 等待端口释放
         local elapsed=0
         while [ $elapsed -lt 5 ]; do
-            if ! lsof -nP -i ":$port" -sTCP:LISTEN >/dev/null 2>&1; then
+            if ! port_has_listener "$port"; then
                 echo -e "${GREEN}  ✓ 端口 $port 已释放${NC}"
                 return 0
             fi
@@ -430,7 +465,6 @@ kill_processes_on_port() {
     fi
     return 0
 }
-
 # Sidecar 状态机：disabled → launching → ready | failed
 # 用法: start_sidecar <name> <state_var> <port> <timeout> <launch_cmd...>
 start_sidecar() {
