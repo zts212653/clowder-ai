@@ -100,7 +100,7 @@ const CLIENT_PROTOCOL_MAP: Partial<Record<BuiltinAccountClient, ProviderProfileP
   opencode: 'anthropic',
 };
 
-const DEFAULT_BOOTSTRAP_CLIENTS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google'];
+const DEFAULT_BOOTSTRAP_CLIENTS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'dare'];
 const ALL_BUILTIN_CLIENTS = BUILTIN_ACCOUNT_SPECS.map((spec) => spec.client) as BuiltinAccountClient[];
 const providerStoreLocks = new Map<string, Promise<void>>();
 

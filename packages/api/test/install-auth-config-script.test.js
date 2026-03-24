@@ -46,7 +46,7 @@ test('client-auth set creates a generic api key account and bootstrap binding fo
       anthropic: { enabled: true, mode: 'api_key', accountRef: 'installer-anthropic' },
       openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
       google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
-      dare: { enabled: false, mode: 'skip' },
+      dare: { enabled: true, mode: 'oauth', accountRef: 'dare' },
       opencode: { enabled: false, mode: 'skip' },
     });
     assert.deepEqual(apiKeyAccount, {
@@ -159,7 +159,7 @@ test('claude-profile create and remove keeps installer-managed account in sync',
       mode: 'oauth',
       accountRef: 'gemini',
     });
-    assert.deepEqual(profiles.bootstrapBindings.dare, { enabled: false, mode: 'skip' });
+    assert.deepEqual(profiles.bootstrapBindings.dare, { enabled: true, mode: 'oauth', accountRef: 'dare' });
     assert.deepEqual(profiles.bootstrapBindings.opencode, { enabled: false, mode: 'skip' });
     assert.deepEqual(installerManaged, {
       id: 'installer-managed',
