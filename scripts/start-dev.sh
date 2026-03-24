@@ -449,7 +449,7 @@ kill_processes_on_port() {
 
     if [ -n "$pids" ]; then
         echo -e "${YELLOW}  ⚠ 端口 $port 被占用，正在清理...${NC}"
-        echo "$pids" | xargs -r kill 2>/dev/null || true
+        echo "$pids" | xargs kill 2>/dev/null || true
         # 等待端口释放
         local elapsed=0
         while [ $elapsed -lt 5 ]; do
