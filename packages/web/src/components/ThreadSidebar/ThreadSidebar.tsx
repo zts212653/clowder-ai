@@ -34,6 +34,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
     updateThreadTitle,
     getThreadState,
     threadStates,
+    clearThreadState,
   } = useChatStore();
   const [isCreating, setIsCreating] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -167,6 +168,8 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
         }
 
         if (opts.projectPath) setCurrentProject(opts.projectPath);
+        // Clear thread state cache to avoid pollution when threadId was reused
+        clearThreadState(thread.id);
         navigateToThread(thread.id);
         // Auto-close sidebar on mobile after creating a new conversation
         if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -179,7 +182,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
         setIsCreating(false);
       }
     },
-    [setCurrentProject, navigateToThread, loadThreads, onClose],
+    [clearThreadState, setCurrentProject, navigateToThread, loadThreads, onClose],
   );
 
   // F095 Phase D: Load trashed threads
@@ -237,6 +240,8 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
       });
       if (!res.ok) return;
       const thread: Thread = await res.json();
+      // Clear thread state cache to avoid pollution when threadId was reused
+      clearThreadState(thread.id);
       navigateToThread(thread.id);
       if (typeof window !== 'undefined' && window.innerWidth < 768) {
         onClose?.();
@@ -247,7 +252,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
     } finally {
       setIsCreating(false);
     }
-  }, [navigateToThread, loadThreads, onClose]);
+  }, [clearThreadState, navigateToThread, loadThreads, onClose]);
 
   // I-1: Show confirmation dialog instead of deleting immediately
   const handleDeleteRequest = useCallback(

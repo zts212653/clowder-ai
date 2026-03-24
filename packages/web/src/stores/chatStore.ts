@@ -424,6 +424,8 @@ interface ChatState {
   clearThreadActiveInvocation: (threadId: string) => void;
   /** Clear invocation-scoped UI state for a specific thread (active or background) */
   resetThreadInvocationState: (threadId: string) => void;
+  /** Clear thread state from cache (e.g., for new thread creation) */
+  clearThreadState: (threadId: string) => void;
 
   // ── F39: Queue actions ──
   setQueue: (threadId: string, queue: QueueEntry[]) => void;
@@ -1646,6 +1648,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       };
     }),
+
+  /** Clear thread state from cache (e.g., for new thread creation to avoid pollution) */
+  clearThreadState: (threadId) =>
+    set((state) => ({
+      threadStates: Object.fromEntries(Object.entries(state.threadStates).filter(([k]) => k !== threadId)),
+    })),
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setSplitPaneThreadIds: (ids) => set({ splitPaneThreadIds: ids }),
