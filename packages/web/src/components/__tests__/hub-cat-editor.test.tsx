@@ -8,6 +8,14 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
+const storeState = {
+  currentProjectPath: 'default',
+};
+
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
+}));
+
 const mockConfirm = vi.fn(() => Promise.resolve(true));
 vi.mock('@/components/useConfirm', () => ({
   useConfirm: () => mockConfirm,
@@ -22,7 +30,6 @@ import {
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
-import type { ProfileItem } from '@/components/hub-provider-profiles.types';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -74,6 +81,7 @@ describe('HubCatEditor', () => {
   });
 
   beforeEach(() => {
+    storeState.currentProjectPath = 'default';
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -103,10 +111,9 @@ describe('HubCatEditor', () => {
       caution: '',
       strengths: '',
       client: 'openai',
-      accountRef: '',
+      providerProfileId: '',
       defaultModel: 'gpt-5.4',
       commandArgs: '',
-      cliConfigArgs: [],
       sessionChain: 'true',
       maxPromptTokens: '',
       maxContextTokens: '',
@@ -145,10 +152,9 @@ describe('HubCatEditor', () => {
       caution: '',
       strengths: '',
       client: 'openai',
-      accountRef: '',
+      providerProfileId: '',
       defaultModel: 'gpt-5.4',
       commandArgs: '',
-      cliConfigArgs: [],
       sessionChain: 'true',
       maxPromptTokens: '',
       maxContextTokens: '',
@@ -187,10 +193,9 @@ describe('HubCatEditor', () => {
       caution: '',
       strengths: '',
       client: 'antigravity',
-      accountRef: '',
+      providerProfileId: '',
       defaultModel: 'gemini-bridge',
       commandArgs: '',
-      cliConfigArgs: [],
       sessionChain: 'true',
       maxPromptTokens: '',
       maxContextTokens: '',
@@ -299,6 +304,84 @@ describe('HubCatEditor', () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
+  it('loads provider profiles from current project path when available', async () => {
+    storeState.currentProjectPath = '/tmp/runtime-worktree';
+    let requestedPath = '';
+
+    mockApiFetch.mockImplementation((path: string) => {
+      requestedPath = path;
+      return Promise.resolve(
+        jsonResponse({
+          projectPath: '/tmp/runtime-worktree',
+          activeProfileId: null,
+          providers: [],
+        }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    expect(requestedPath).toBe(`/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/runtime-worktree')}`);
+  });
+
+  it('keeps provider profiles request unscoped when current project is default', async () => {
+    storeState.currentProjectPath = 'default';
+    let requestedPath = '';
+
+    mockApiFetch.mockImplementation((path: string) => {
+      requestedPath = path;
+      return Promise.resolve(
+        jsonResponse({
+          projectPath: '/home/yuhan/clowder-ai',
+          activeProfileId: null,
+          providers: [],
+        }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    expect(requestedPath).toBe('/api/provider-profiles');
+  });
+
+  it('refetches provider profiles when project path changes while editor stays open', async () => {
+    const requests: string[] = [];
+    mockApiFetch.mockImplementation((path: string) => {
+      requests.push(path);
+      return Promise.resolve(
+        jsonResponse({
+          projectPath: '/tmp/runtime-worktree-a',
+          activeProfileId: null,
+          providers: [],
+        }),
+      );
+    });
+
+    storeState.currentProjectPath = '/tmp/runtime-worktree-a';
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    storeState.currentProjectPath = '/tmp/runtime-worktree-b';
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    const profileRequests = requests.filter((path) => path.startsWith('/api/provider-profiles'));
+    expect(profileRequests).toEqual([
+      `/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/runtime-worktree-a')}`,
+      `/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/runtime-worktree-b')}`,
+    ]);
+  });
+
   it('blocks creating opencode member with bare model (requires providerId/modelId)', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -359,7 +442,9 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     // Save should be blocked — bare model without providerId/ prefix is rejected.
-    const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
+    const postCall = mockApiFetch.mock.calls.find(
+      ([path, init]: [string, RequestInit | undefined]) => path === '/api/cats' && init?.method === 'POST',
+    );
     expect(postCall).toBeUndefined();
     expect(container.textContent).toContain('providerId/modelId');
   });
@@ -376,7 +461,6 @@ describe('HubCatEditor', () => {
             displayName: 'Claude (OAuth)',
             name: 'Claude (OAuth)',
             authType: 'oauth',
-            kind: 'builtin',
             builtin: true,
             client: 'anthropic',
             models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
@@ -390,7 +474,6 @@ describe('HubCatEditor', () => {
             displayName: 'Codex Sponsor',
             name: 'Codex Sponsor',
             authType: 'api_key',
-            kind: 'api_key',
             builtin: false,
             models: ['gpt-5.4-mini'],
             hasApiKey: true,
@@ -517,7 +600,7 @@ describe('HubCatEditor', () => {
   });
 
   it('keeps builtin accounts client-specific while exposing all API key accounts', () => {
-    const profiles: ProfileItem[] = [
+    const profiles = [
       {
         id: 'claude-oauth',
         provider: 'claude-oauth',
@@ -525,7 +608,6 @@ describe('HubCatEditor', () => {
         name: 'Claude (OAuth)',
         authType: 'oauth',
         protocol: 'anthropic',
-        kind: 'builtin',
         builtin: true,
         mode: 'subscription',
         models: ['claude-opus-4-6'],
@@ -540,7 +622,6 @@ describe('HubCatEditor', () => {
         name: 'Claude Sponsor',
         authType: 'api_key',
         protocol: 'anthropic',
-        kind: 'api_key',
         builtin: false,
         mode: 'api_key',
         models: ['claude-opus-4-6'],
@@ -555,7 +636,6 @@ describe('HubCatEditor', () => {
         name: 'Codex (OAuth)',
         authType: 'oauth',
         protocol: 'openai',
-        kind: 'builtin',
         builtin: true,
         mode: 'subscription',
         models: ['gpt-5.4'],
@@ -570,7 +650,6 @@ describe('HubCatEditor', () => {
         name: 'Codex Sponsor',
         authType: 'api_key',
         protocol: 'openai',
-        kind: 'api_key',
         builtin: false,
         mode: 'api_key',
         models: ['gpt-5.4'],
