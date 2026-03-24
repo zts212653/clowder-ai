@@ -105,6 +105,8 @@ describe('cat account binding', () => {
     const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const projectRoot = await mkdtemp(join(tmpdir(), 'cat-account-binding-sibling-inherited-'));
     const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
 
     try {
       await seedTemplate(projectRoot);
@@ -142,6 +144,8 @@ describe('cat account binding', () => {
       assert.equal(resolveBoundAccountRefForCat(projectRoot, 'codex', allCats.codex), 'codex-sponsor');
       assert.equal(resolveBoundAccountRefForCat(projectRoot, 'spark', allCats.spark), undefined);
     } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
       await rm(projectRoot, { recursive: true, force: true });

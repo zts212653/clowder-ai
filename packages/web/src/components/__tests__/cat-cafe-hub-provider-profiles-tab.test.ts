@@ -124,14 +124,14 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(html).toContain('加载中');
   });
 
-  it('loads provider profiles for the current thread project when no explicit switcher selection exists', async () => {
-    storeState.currentProjectPath = '/tmp/f127-worktree';
+  it('loads global provider profiles without projectPath (global profiles stored in ~/.cat-cafe/)', async () => {
+    // Global profiles are stored in ~/.cat-cafe/ and shared across all projects
+    // No projectPath is needed in the API call
     let requestedPath = '';
     mockApiFetch.mockImplementation((path: string) => {
       requestedPath = path;
       return Promise.resolve(
         jsonResponse({
-          projectPath: '/tmp/f127-worktree',
           activeProfileId: null,
           bootstrapBindings: {},
           providers: [],
@@ -144,7 +144,8 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(requestedPath).toBe(`/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/f127-worktree')}`);
+    // Global profiles: no projectPath in URL
+    expect(requestedPath).toBe('/api/provider-profiles');
   });
 
   it('keeps ragdoll rescue controls out of provider profiles after tab data loads', async () => {
@@ -553,8 +554,8 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).toContain('至少添加 1 个模型');
   });
 
-  it('pins create requests to the resolved projectPath even before the user touches the project switcher', async () => {
-    storeState.currentProjectPath = 'default';
+  it('creates api-key profile without projectPath (global profiles stored in ~/.cat-cafe/)', async () => {
+    // Global profiles: no projectPath in POST body
     let createPayload: Record<string, unknown> | null = null;
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/provider-profiles' && init?.method === 'POST') {
@@ -571,7 +572,6 @@ describe('CatCafeHub provider profiles tab', () => {
       if (path.startsWith('/api/provider-profiles')) {
         return Promise.resolve(
           jsonResponse({
-            projectPath: '/tmp/project-from-get',
             activeProfileId: null,
             bootstrapBindings: {},
             providers: [
@@ -645,8 +645,9 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
+    // Global profiles: no projectPath in POST body
     expect(createPayload).not.toBeNull();
-    expect((createPayload as unknown as Record<string, unknown>)?.projectPath).toBe('/tmp/project-from-get');
+    expect((createPayload as unknown as Record<string, unknown>)?.projectPath).toBeUndefined();
   });
 
   it('shows built-in and custom provider cards together without the old filter tabs', async () => {

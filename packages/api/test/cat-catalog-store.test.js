@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it } from 'node:test';
+import { after, before, beforeEach, describe, it } from 'node:test';
 
 const { bootstrapCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
 const { createRuntimeCat, deleteRuntimeCat, readRuntimeCatCatalog, updateRuntimeCat } = await import(
@@ -223,6 +223,21 @@ function makeSiblingTemplate(seedCatId) {
 }
 
 describe('cat-catalog-store', () => {
+  // Isolate provider profiles to a clean tmpdir so tests don't read from ~/.cat-cafe/
+  let savedGlobalRoot;
+  const isolationRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-isolation-'));
+  before(() => {
+    savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = isolationRoot;
+  });
+  beforeEach(() => {
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = isolationRoot;
+  });
+  after(() => {
+    if (savedGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
+  });
+
   it('bootstraps managed clients with bindings while preserving skipped seed members', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-f127-default-'));
     const templatePath = join(projectRoot, 'cat-template.json');
@@ -245,6 +260,7 @@ describe('cat-catalog-store', () => {
 
   it('bootstraps installer api_key bindings while preserving skipped seed members', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-f127-installer-'));
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
     const templatePath = join(projectRoot, 'cat-template.json');
     writeFileSync(templatePath, JSON.stringify(makeF127BootstrapTemplate(), null, 2));
     mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
@@ -727,6 +743,7 @@ describe('cat-catalog-store', () => {
 
   it('api_key bootstrap uses profile model when template defaultModel is not in profile', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-model-'));
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
     const templatePath = join(projectRoot, 'cat-template.json');
     const catCafeDir = join(projectRoot, '.cat-cafe');
     mkdirSync(catCafeDir, { recursive: true });
