@@ -25,7 +25,15 @@ interface MessageActionsProps {
 export function MessageActions({ message, threadId, children }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const removeMessage = useChatStore((s) => s.removeMessage);
+  const clearThreadState = useChatStore((s) => s.clearThreadState);
   const router = useRouter();
+  const navigateToFreshThread = useCallback(
+    (newThreadId: string) => {
+      clearThreadState(newThreadId);
+      router.push(`/thread/${newThreadId}`);
+    },
+    [clearThreadState, router],
+  );
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
@@ -101,12 +109,12 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       });
       if (res.ok) {
         const { threadId: newThreadId } = await res.json();
-        router.push(`/thread/${newThreadId}`);
+        navigateToFreshThread(newThreadId);
       }
     } catch {
       /* show error in future */
     }
-  }, [dialog, message.id, message.content, threadId, router]);
+  }, [dialog, message.id, message.content, threadId, navigateToFreshThread]);
 
   const branchingRef = useRef(false);
   const confirmBranchDirect = useCallback(async () => {
@@ -121,14 +129,14 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       });
       if (res.ok) {
         const { threadId: newThreadId } = await res.json();
-        router.push(`/thread/${newThreadId}`);
+        navigateToFreshThread(newThreadId);
       }
     } catch {
       /* show error in future */
     } finally {
       branchingRef.current = false;
     }
-  }, [message.id, threadId, router]);
+  }, [message.id, threadId, navigateToFreshThread]);
 
   const close = useCallback(() => setDialog({ type: 'none' }), []);
 

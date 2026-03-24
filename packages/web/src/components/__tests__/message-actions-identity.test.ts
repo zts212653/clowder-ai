@@ -7,15 +7,23 @@ const getUserIdMock = vi.hoisted(() => vi.fn(() => 'alice'));
 const confirmDialogSpy = vi.hoisted(() => vi.fn());
 const pushMock = vi.fn();
 const removeMessageMock = vi.fn();
+const clearThreadStateMock = vi.fn();
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
-vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (selector: (state: { removeMessage: typeof removeMessageMock }) => unknown) =>
-    selector({ removeMessage: removeMessageMock }),
-}));
+vi.mock('@/stores/chatStore', () => {
+  const state = {
+    removeMessage: removeMessageMock,
+    clearThreadState: clearThreadStateMock,
+  };
+
+  const useChatStore = (selector: (store: typeof state) => unknown) => selector(state);
+  useChatStore.getState = () => state;
+
+  return { useChatStore };
+});
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: apiFetchMock,
@@ -44,6 +52,7 @@ describe('MessageActions identity source', () => {
   beforeEach(() => {
     pushMock.mockReset();
     removeMessageMock.mockReset();
+    clearThreadStateMock.mockReset();
     window.history.pushState({}, '', '/?userId=alice');
 
     container = document.createElement('div');
@@ -120,5 +129,56 @@ describe('MessageActions identity source', () => {
     const body = JSON.parse(init.body ?? '{}') as { userId?: string };
 
     expect(body.userId).toBe('alice');
+    expect(clearThreadStateMock).toHaveBeenCalledWith('thread-branch-1');
+    expect(pushMock).toHaveBeenCalledWith('/thread/thread-branch-1');
+  });
+
+  it('clears stale cache before navigating from the edit-confirm branch flow', async () => {
+    const { MessageActions } = await import('@/components/MessageActions');
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          MessageActions,
+          {
+            message: {
+              id: 'msg-user-1',
+              type: 'user',
+              content: 'draft',
+              timestamp: Date.now(),
+            },
+            threadId: 'thread-1',
+          },
+          React.createElement('div', null, 'user message'),
+        ),
+      );
+    });
+
+    const editButton = container.querySelector('button[title="编辑 (创建分支)"]') as HTMLButtonElement | null;
+    expect(editButton).not.toBeNull();
+
+    await act(async () => {
+      editButton?.click();
+    });
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    expect(saveButton).toBeTruthy();
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const confirmDialogProps = confirmDialogSpy.mock.calls
+      .map(([props]) => props as { title?: string; open?: boolean; onConfirm?: () => Promise<void> | void })
+      .find((props) => props.title === '创建分支' && props.open === true);
+
+    expect(confirmDialogProps).toBeTruthy();
+
+    await act(async () => {
+      await confirmDialogProps?.onConfirm?.();
+    });
+
+    expect(clearThreadStateMock).toHaveBeenCalledWith('thread-branch-1');
+    expect(pushMock).toHaveBeenCalledWith('/thread/thread-branch-1');
   });
 });

@@ -16,11 +16,13 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
+const clearThreadStateMock = vi.fn();
 const mockStore: Record<string, unknown> = {
   threads: [],
   currentThreadId: 'default',
   setThreads: vi.fn(),
   setCurrentProject: vi.fn(),
+  clearThreadState: clearThreadStateMock,
   isLoadingThreads: false,
   setLoadingThreads: vi.fn(),
   updateThreadTitle: vi.fn(),
@@ -58,6 +60,7 @@ describe('ThreadSidebar mobile auto-close', () => {
     root = createRoot(container);
     mockApiFetch.mockReset();
     mockPush.mockReset();
+    clearThreadStateMock.mockReset();
     // Default: threads list returns empty
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/threads') return jsonOk({ threads: [] });
@@ -135,6 +138,7 @@ describe('ThreadSidebar mobile auto-close', () => {
     });
     await flush();
 
+    expect(clearThreadStateMock).toHaveBeenCalledWith('new-thread-123');
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -178,6 +182,7 @@ describe('ThreadSidebar mobile auto-close', () => {
     });
     await flush();
 
+    expect(clearThreadStateMock).toHaveBeenCalledWith('new-thread-456');
     expect(onClose).not.toHaveBeenCalled();
   });
 });
