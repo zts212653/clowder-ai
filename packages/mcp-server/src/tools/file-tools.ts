@@ -183,20 +183,26 @@ export async function handleListFiles(input: { path: string; recursive?: boolean
 export const fileTools = [
   {
     name: 'read_file',
-    description: 'Read the contents of a file. Only files within allowed directories can be read.',
+    description:
+      'Read the contents of a file within allowed directories. ' +
+      'Returns the full file content as text. Rejects paths outside allowed directories.',
     inputSchema: readFileInputSchema,
     handler: handleReadFile,
   },
   {
     name: 'write_file',
     description:
-      'Write content to a file. Creates parent directories if needed. Only files within allowed directories can be written.',
+      'Write content to a file within allowed directories. Creates parent directories if needed. ' +
+      'GOTCHA: This overwrites the entire file — not a patch/append operation. ' +
+      'Rejects paths outside allowed directories.',
     inputSchema: writeFileInputSchema,
     handler: handleWriteFile,
   },
   {
     name: 'list_files',
-    description: 'List files in a directory. Only directories within allowed paths can be listed.',
+    description:
+      'List files in a directory within allowed paths. Set recursive=true to include all subdirectories. ' +
+      'Directories are suffixed with "/" in the output to distinguish them from files.',
     inputSchema: listFilesInputSchema,
     handler: handleListFiles,
   },

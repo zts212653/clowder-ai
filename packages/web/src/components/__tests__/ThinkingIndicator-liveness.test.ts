@@ -97,7 +97,11 @@ describe('F118 ThinkingIndicator liveness states', () => {
 
     const { ThinkingIndicator } = await import('../ThinkingIndicator');
     act(() => {
-      root.render(React.createElement(ThinkingIndicator, { onCancel: mockCancelInvocation }));
+      root.render(
+        React.createElement(ThinkingIndicator as React.FC<{ onCancel?: (threadId: string) => void }>, {
+          onCancel: mockCancelInvocation,
+        }),
+      );
     });
 
     const el = container.querySelector('[data-testid="liveness-warning"]');
@@ -125,7 +129,11 @@ describe('F118 ThinkingIndicator liveness states', () => {
 
     const { ThinkingIndicator } = await import('../ThinkingIndicator');
     act(() => {
-      root.render(React.createElement(ThinkingIndicator, { onCancel: mockCancelInvocation }));
+      root.render(
+        React.createElement(ThinkingIndicator as React.FC<{ onCancel?: (threadId: string) => void }>, {
+          onCancel: mockCancelInvocation,
+        }),
+      );
     });
 
     const cancelBtn = container.querySelector('[data-testid="cancel-btn"]') as HTMLButtonElement;

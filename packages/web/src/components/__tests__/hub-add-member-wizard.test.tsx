@@ -13,6 +13,7 @@ vi.mock('@/components/useConfirm', () => ({
 
 import { HubAddMemberWizard } from '@/components/HubAddMemberWizard';
 import { HubCatEditor } from '@/components/HubCatEditor';
+import type { HubCatEditorDraft } from '@/components/hub-cat-editor.model';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -53,7 +54,7 @@ async function click(button: HTMLElement) {
 
 function WizardHost() {
   const [wizardOpen, setWizardOpen] = useState(true);
-  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const [draft, setDraft] = useState<HubCatEditorDraft | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
 
   return (
@@ -62,7 +63,7 @@ function WizardHost() {
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         onComplete={(nextDraft) => {
-          setDraft(nextDraft as Record<string, string>);
+          setDraft(nextDraft);
           setWizardOpen(false);
           setEditorOpen(true);
         }}

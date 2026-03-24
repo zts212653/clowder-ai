@@ -8,7 +8,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getAllCatIdsFromConfig } from '../config/cat-config-loader.js';
-import { GameAutoPlayer } from '../domains/cats/services/game/GameAutoPlayer.js';
+import { createGameDriver } from '../domains/cats/services/game/createGameDriver.js';
+import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
 import { GameViewBuilder } from '../domains/cats/services/game/GameViewBuilder.js';
 import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
@@ -16,6 +17,7 @@ import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { clearGameNonces } from './game-actions.js';
 import { buildGameSeats, sanitizeCatIds } from './game-command-interceptor.js';
 
 interface SocketLike {
@@ -28,7 +30,7 @@ export interface GameRoutesOptions {
   socketManager: SocketLike;
   threadStore: IThreadStore;
   messageStore: IMessageStore;
-  autoPlayer?: Pick<GameAutoPlayer, 'startLoop' | 'stopAllLoops'>;
+  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopAllLoops'>;
 }
 
 const seatSchema = z.object({
@@ -124,7 +126,12 @@ const gameStartSchema = z.object({
 export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opts) => {
   const { gameStore, socketManager, threadStore, messageStore } = opts;
   const orchestrator = new GameOrchestrator({ gameStore, socketManager, messageStore });
-  const autoPlayer = opts.autoPlayer ?? new GameAutoPlayer({ gameStore, orchestrator, messageStore });
+  const autoPlayer =
+    opts.autoPlayer ??
+    createGameDriver({
+      gameNarratorEnabled: false,
+      legacyDeps: { gameStore, orchestrator, messageStore },
+    });
 
   app.addHook('onClose', async () => {
     autoPlayer.stopAllLoops();
@@ -175,10 +182,11 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       resolvedDetectiveSeatId = seat.seatId;
     }
 
-    // Create independent game thread
+    // Create independent game thread with play mode (Layer 1 info isolation, KD-40/AC-I9)
     const gameTitle = `狼人杀 — ${clampedCount}人局`;
     const gameThread = await threadStore.create(userId, gameTitle, `games/${gameType}`);
     const gameThreadId = gameThread.id;
+    await threadStore.updateThinkingMode(gameThreadId, 'play');
 
     // Store a system message in the game thread for context
     await messageStore.append({
@@ -255,6 +263,10 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
         seats: seats as Parameters<typeof orchestrator.startGame>[0]['seats'],
         config: config as Parameters<typeof orchestrator.startGame>[0]['config'],
       });
+
+      // Set play mode on existing thread (Layer 1 info isolation, KD-40/AC-I9)
+      await threadStore.updateThinkingMode(threadId, 'play');
+
       return runtime;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -413,6 +425,7 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
     }
 
     await gameStore.endGame(runtime.gameId, 'aborted');
+    clearGameNonces(runtime.gameId);
 
     socketManager.broadcastToRoom(`thread:${threadId}`, 'game:aborted', {
       gameId: runtime.gameId,

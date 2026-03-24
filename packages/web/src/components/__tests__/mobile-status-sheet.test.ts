@@ -111,7 +111,7 @@ describe('MobileStatusSheet', () => {
         codex: {
           startedAt: Date.now() - 1000,
           taskProgress: {
-            tasks: [{ id: 't-1', subject: 'Done item', status: 'completed' }],
+            tasks: [{ id: 't-1', subject: 'Done item', status: 'completed' as const }],
             lastUpdate: Date.now(),
             snapshotStatus: 'completed' as const,
           },

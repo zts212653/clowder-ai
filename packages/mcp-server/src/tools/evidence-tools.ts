@@ -99,7 +99,11 @@ export const evidenceTools = [
     description:
       'Search project knowledge base — features, decisions, plans, lessons, session history. ' +
       'This is the PRIMARY entry point for all memory recall. Start here before drilling down. ' +
-      'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw).',
+      'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). ' +
+      'MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). ' +
+      'hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. ' +
+      'semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. ' +
+      'TIP: When unsure, use mode=hybrid.',
     inputSchema: searchEvidenceInputSchema,
     handler: handleSearchEvidence,
   },

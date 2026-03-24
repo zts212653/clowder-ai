@@ -206,44 +206,63 @@ export const signalGeneratePodcastInputSchema = {
 export const signalStudyTools = [
   {
     name: 'signal_update_article',
-    description: 'Update article fields: status, tags, or note. Use for managing articles from chat.',
+    description:
+      'Update article fields: status, tags, or note. Use for managing articles from chat. ' +
+      'STATUS VALUES: inbox (unread), read, starred (important), archived (done). ' +
+      'TIP: Use tags for categorization (e.g. ["ai", "infrastructure"]) and note for 铲屎官 personal remarks.',
     inputSchema: signalUpdateArticleInputSchema,
     handler: handleUpdateArticle,
   },
   {
     name: 'signal_delete_article',
-    description: 'Soft-delete one or more articles. Use when 铲屎官 wants to clean up garbage signals.',
+    description:
+      'Soft-delete one or more articles. Use when 铲屎官 wants to clean up garbage or irrelevant signals. ' +
+      'Accepts multiple IDs for batch deletion. Articles are soft-deleted (recoverable).',
     inputSchema: signalDeleteArticleInputSchema,
     handler: handleDeleteArticle,
   },
   {
     name: 'signal_link_thread',
-    description: 'Link or unlink a Signal article to/from a thread for Study association.',
+    description:
+      'Link or unlink a Signal article to/from a thread for Study association. ' +
+      'Use when starting to discuss an article in a specific thread, so the study context is trackable. ' +
+      'Default action is "link"; pass action="unlink" to remove the association.',
     inputSchema: signalLinkThreadInputSchema,
     handler: handleLinkThread,
   },
   {
     name: 'signal_start_study',
     description:
-      'Start studying a Signal article. Returns article content for context injection and optionally links a thread.',
+      'Start studying a Signal article. Returns full article content for context injection and optionally links a thread. ' +
+      'WORKFLOW: start_study → read and discuss → save_notes → optionally generate_podcast. ' +
+      'Use this as the entry point for deep-diving into an article.',
     inputSchema: signalStartStudyInputSchema,
     handler: handleStartStudy,
   },
   {
     name: 'signal_save_notes',
-    description: 'Save study notes for an article. Notes include insights, reflections, open questions.',
+    description:
+      'Save study notes for an article. Notes should include insights, reflections, and open questions from the study session. ' +
+      'Use after discussing/analyzing an article. Include participants array to credit who studied it.',
     inputSchema: signalSaveNotesInputSchema,
     handler: handleSaveNotes,
   },
   {
     name: 'signal_list_studies',
-    description: 'List study artifacts (notes, podcasts, reports) for an article.',
+    description:
+      'List study artifacts (notes, podcasts, research reports) for an article. ' +
+      'Use to check what study work has already been done on an article. ' +
+      'TIP: Pass articleId to narrow results to a specific article; omit to list studies across all articles.',
     inputSchema: signalListStudiesInputSchema,
     handler: handleListStudies,
   },
   {
     name: 'signal_generate_podcast',
-    description: 'Generate podcast from article study. Two modes: essence (2-3 min) or deep (10 min).',
+    description:
+      'Generate a podcast from an article study. ' +
+      'MODE SELECTION: essence = 2-3 min quick overview, deep = 10 min thorough analysis. ' +
+      'Optional speakers param takes cat IDs for voice assignments (1-3 speakers). ' +
+      'Returns an artifact ID and state (queued → processing → complete).',
     inputSchema: signalGeneratePodcastInputSchema,
     handler: handleGeneratePodcast,
   },

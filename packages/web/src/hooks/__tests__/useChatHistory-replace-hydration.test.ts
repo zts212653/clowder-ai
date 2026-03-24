@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatMessage, ThreadState } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useChatHistory } from '../useChatHistory';
@@ -36,6 +37,7 @@ function buildThreadBState(cachedAssistantTs: number) {
     isLoadingHistory: false,
     hasMore: true,
     hasActiveInvocation: true,
+    activeInvocations: {},
     intentMode: 'execute' as const,
     targetCats: ['opus'],
     catStatuses: { opus: 'streaming' as const },
@@ -113,7 +115,7 @@ describe('useChatHistory replace hydration', () => {
     apiFetchMock.mockReset();
   });
 
-  function mountReplaceHydrationThread(threadState: ReturnType<typeof buildThreadBState>) {
+  function mountReplaceHydrationThread(threadState: ThreadState) {
     useChatStore.setState({
       messages: [{ id: 'a1', type: 'user', content: 'thread-a message', timestamp: Date.now() - 2000 }],
       currentThreadId: 'thread-a',
@@ -352,6 +354,7 @@ describe('useChatHistory replace hydration', () => {
       isLoadingHistory: false,
       hasMore: true,
       hasActiveInvocation: false,
+      activeInvocations: {},
       intentMode: null,
       targetCats: [],
       catStatuses: {},
@@ -446,7 +449,7 @@ describe('useChatHistory replace hydration', () => {
     const cachedAssistantTs = Date.now() - 1000;
     const now = Date.now();
     mountReplaceHydrationThread(makeThreadBState(cachedAssistantTs));
-    const seededMessages = [
+    const seededMessages: ChatMessage[] = [
       {
         id: 'b1',
         type: 'assistant' as const,

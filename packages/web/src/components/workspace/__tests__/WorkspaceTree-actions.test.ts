@@ -149,7 +149,7 @@ describe('WorkspaceTree with file management actions', () => {
     expect(newFileBtn).toBeTruthy();
 
     act(() => {
-      newFileBtn?.click();
+      (newFileBtn as HTMLElement)?.click();
     });
 
     // Inline input should appear

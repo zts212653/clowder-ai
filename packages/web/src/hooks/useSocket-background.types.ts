@@ -95,6 +95,8 @@ export interface HandleBackgroundMessageOptions {
   addToast: (toast: BackgroundToastInput) => void;
   /** #80 fix-C: Clear the done-timeout guard when a background thread completes */
   clearDoneTimeout?: (threadId?: string) => void;
+  /** #586 follow-up: Just-finalized stream bubble IDs keyed by streamKey */
+  finalizedBgRefs: Map<string, string>;
 }
 
 export type ActiveRoutedAgentMessage = {

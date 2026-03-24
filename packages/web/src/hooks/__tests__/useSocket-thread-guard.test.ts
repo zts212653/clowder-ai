@@ -483,7 +483,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       });
     }).not.toThrow();
 
-    const dump = JSON.parse(debugApi?.dump({ rawThreadId: true })) as {
+    const dump = JSON.parse(debugApi!.dump({ rawThreadId: true })) as {
       events: Array<Record<string, unknown>>;
     };
     const event = dump.events.find((item) => item.event === 'queue_updated');
@@ -510,7 +510,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       });
     });
 
-    const maskedDump = JSON.parse(debugApi?.dump()) as {
+    const maskedDump = JSON.parse(debugApi!.dump()) as {
       meta: { marker: string; rawThreadId: boolean };
       events: Array<Record<string, unknown>>;
     };
@@ -523,7 +523,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(maskedEvent?.headers).toBeUndefined();
     expect(maskedEvent?.userInput).toBeUndefined();
 
-    const rawDump = JSON.parse(debugApi?.dump({ rawThreadId: true })) as {
+    const rawDump = JSON.parse(debugApi!.dump({ rawThreadId: true })) as {
       meta: { marker: string; rawThreadId: boolean };
       events: Array<Record<string, unknown>>;
     };

@@ -28,7 +28,7 @@ export class TaskRunner {
       if (this.timers.has(task.name)) continue;
       this.running.set(task.name, false);
 
-      const timer = setInterval(async () => {
+      const runTick = async () => {
         if (!task.enabled()) return;
         if (this.running.get(task.name)) {
           this.logger.info(`[scheduler] ${task.name}: still running, skipping tick`);
@@ -44,7 +44,12 @@ export class TaskRunner {
         } finally {
           this.running.set(task.name, false);
         }
-      }, task.intervalMs);
+      };
+
+      // Run first tick immediately on startup (don't wait intervalMs)
+      setTimeout(runTick, 0);
+
+      const timer = setInterval(runTick, task.intervalMs);
 
       // Unref so the timer doesn't prevent process exit
       if (typeof timer === 'object' && 'unref' in timer) {

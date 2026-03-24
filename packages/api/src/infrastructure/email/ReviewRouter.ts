@@ -2,10 +2,13 @@
  * Review Router
  * When a GitHub review email is detected, route it to the correct cat + thread.
  *
- * Routing strategy (砚砚 R1/R2 design):
- *   1. PrTrackingStore lookup (主路径: repo+pr → catId+threadId)
- *   2. Fallback: PR title [猫名🐾] → cat's Review Inbox thread
- *   3. Triage: no cat identified → 铲屎官 Triage thread
+ * Routing strategy (#668 simplified):
+ *   1. PrTrackingStore lookup (唯一路径: repo+pr → catId+threadId)
+ *   2. Not registered → log + skip (no thread creation, no noise)
+ *
+ * Previous Layer 2 (PR title cat tag fallback) and Layer 3 (Triage thread)
+ * were removed in #668: they silently created garbage threads on every restart
+ * and routed unregistered PR notifications into a black hole nobody watched.
  *
  * BACKLOG #81
  */
@@ -13,7 +16,7 @@
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
-import type { IThreadStore, Thread } from '../../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IThreadStore } from '../../domains/cats/services/stores/ports/ThreadStore.js';
 import type { GithubReviewEvent } from './GithubReviewWatcher.js';
 import type { IProcessedEmailStore } from './ProcessedEmailStore.js';
 import type { IPrTrackingStore } from './PrTrackingStore.js';
@@ -25,11 +28,10 @@ export type RouteResult =
       threadId: string;
       catId: string;
       userId: string;
-      source: 'registry' | 'fallback';
+      source: 'registry';
       messageId: string;
       content: string;
     }
-  | { kind: 'triage'; threadId: string; reason: string }
   | { kind: 'skipped'; reason: string };
 
 export interface ReviewRouterOptions {
@@ -41,14 +43,10 @@ export interface ReviewRouterOptions {
     broadcastToRoom: (room: string, event: string, data: unknown) => void;
   };
   readonly log: FastifyBaseLogger;
-  readonly triageThreadId?: string;
   readonly defaultUserId?: string;
   /** Optional: fetches GitHub review content for severity extraction. */
   readonly reviewContentFetcher?: IReviewContentFetcher;
 }
-
-/** Cached Review Inbox thread IDs per cat (in-memory, lost on restart). */
-const reviewInboxThreads = new Map<string, string>();
 
 export class ReviewRouter {
   private readonly opts: ReviewRouterOptions;
@@ -84,7 +82,7 @@ export class ReviewRouter {
 
   /**
    * Route a review event to the appropriate thread.
-   * Returns the route result (routed/triage/skipped).
+   * Returns the route result (routed/skipped).
    */
   async route(event: GithubReviewEvent): Promise<RouteResult> {
     const { processedEmailStore } = this.opts;
@@ -95,9 +93,31 @@ export class ReviewRouter {
       return { kind: 'skipped', reason: `Email UID ${event.emailUid} already processed` };
     }
 
-    // --- PR-level atomic dedup (check+mark in one call; Cloud Codex P1-2) ---
-    // Covers both sequential re-poll (PR already invoked within window) and
-    // concurrent race (two events for same PR dispatched simultaneously).
+    return this.deliverAndMark(event);
+  }
+
+  /**
+   * Internal: perform layer routing, deliver message, then mark processed.
+   * PR dedup claim + rollback handled internally.
+   */
+  private async deliverAndMark(event: GithubReviewEvent): Promise<RouteResult> {
+    const { prTrackingStore, processedEmailStore, log } = this.opts;
+
+    // --- Layer 1: PrTrackingStore lookup ---
+    const tracking = await prTrackingStore.get(event.repository, event.prNumber);
+    if (!tracking) {
+      log.warn(`[ReviewRouter] Skipping unregistered PR: ${event.repository}#${event.prNumber} (no tracking entry)`);
+      await processedEmailStore.markProcessed(event.emailUid);
+      return {
+        kind: 'skipped',
+        reason: `No tracking entry for PR ${event.repository}#${event.prNumber}`,
+      };
+    }
+
+    // --- PR-level atomic dedup (only for registered PRs; Cloud Codex P1-2) ---
+    // Covers concurrent race (two events for same PR dispatched simultaneously).
+    // Must happen AFTER tracking check so unregistered PRs don't claim the window
+    // and block delivery after late registration (#668 P1 fix).
     const prAlreadyClaimed = await processedEmailStore.checkAndMarkPrInvoked(event.repository, event.prNumber);
     if (prAlreadyClaimed) {
       await processedEmailStore.markProcessed(event.emailUid);
@@ -107,27 +127,7 @@ export class ReviewRouter {
       };
     }
 
-    // Deliver, then mark processed. If delivery fails, rollback PR claim
-    // so next poll retries (Cloud Codex P1-1 + P1-2 combined fix).
     try {
-      return await this.deliverAndMark(event);
-    } catch (err) {
-      // Rollback: allow retry on next poll cycle
-      await processedEmailStore.unmarkPrInvoked(event.repository, event.prNumber);
-      throw err;
-    }
-  }
-
-  /**
-   * Internal: perform layer routing, deliver message, then mark processed.
-   * Caller must rollback PR claim on failure.
-   */
-  private async deliverAndMark(event: GithubReviewEvent): Promise<RouteResult> {
-    const { prTrackingStore, processedEmailStore, log } = this.opts;
-
-    // --- Layer 1: PrTrackingStore lookup ---
-    const tracking = await prTrackingStore.get(event.repository, event.prNumber);
-    if (tracking) {
       const resolvedUserId = await this.resolveRegistryUserId(tracking.threadId, tracking.userId);
       log.info(
         `[ReviewRouter] Registry hit: PR ${event.repository}#${event.prNumber} → cat=${tracking.catId} thread=${tracking.threadId}`,
@@ -145,47 +145,11 @@ export class ReviewRouter {
         messageId: posted.messageId,
         content: posted.content,
       };
+    } catch (err) {
+      // Rollback PR claim so next poll retries (Cloud Codex P1-1 + P1-2)
+      await processedEmailStore.unmarkPrInvoked(event.repository, event.prNumber);
+      throw err;
     }
-
-    // --- Layer 2: Fallback via PR title cat tag ---
-    if (event.catTag && event.catId) {
-      const userId = this.resolveUserId();
-      const catId = event.catId;
-      const inboxThreadId = await this.getOrCreateReviewInboxThread(catId);
-
-      log.info(
-        `[ReviewRouter] Fallback: PR ${event.repository}#${event.prNumber} → cat=${catId} inbox=${inboxThreadId}`,
-      );
-
-      const posted = await this.postReviewMessage(inboxThreadId, catId, userId, event);
-      await processedEmailStore.markProcessed(event.emailUid);
-
-      return {
-        kind: 'routed',
-        threadId: inboxThreadId,
-        catId,
-        userId,
-        source: 'fallback',
-        messageId: posted.messageId,
-        content: posted.content,
-      };
-    }
-
-    // --- Layer 3: Triage (no cat identified) ---
-    const triageThreadId = await this.getOrCreateTriageThread();
-
-    log.warn(
-      `[ReviewRouter] Triage: PR ${event.repository}#${event.prNumber} — no tracking entry and no cat tag in title`,
-    );
-
-    await this.postTriageMessage(triageThreadId, event);
-    await processedEmailStore.markProcessed(event.emailUid);
-
-    return {
-      kind: 'triage',
-      threadId: triageThreadId,
-      reason: `No tracking entry and no cat tag for PR ${event.repository}#${event.prNumber}`,
-    };
   }
 
   private async postReviewMessage(
@@ -233,44 +197,6 @@ export class ReviewRouter {
     return { messageId: stored.id, content };
   }
 
-  private async postTriageMessage(threadId: string, event: GithubReviewEvent): Promise<void> {
-    const { messageStore } = this.opts;
-    const userId = this.resolveUserId();
-
-    const content = [
-      `**GitHub Review 需要分派**`,
-      ``,
-      `PR #${event.prNumber}: ${event.title}`,
-      `仓库: ${event.repository}`,
-      `Review 类型: ${formatReviewType(event.reviewType)}`,
-      event.reviewer ? `Reviewer: @${event.reviewer}` : '',
-      ``,
-      `无法自动路由：注册表无匹配 + PR title 无猫名标签。`,
-      `请铲屎官手动指派或补注册。`,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const source: ConnectorSource = {
-      connector: 'github-review',
-      label: 'GitHub Review',
-      icon: 'github',
-      url: `https://github.com/${event.repository}/pull/${event.prNumber}`,
-    };
-
-    const stored = await messageStore.append({
-      threadId,
-      userId,
-      catId: null,
-      content,
-      source,
-      mentions: [],
-      timestamp: Date.now(),
-    });
-
-    this.emitConnectorMessage(threadId, stored);
-  }
-
   private emitConnectorMessage(
     threadId: string,
     message: {
@@ -290,32 +216,6 @@ export class ReviewRouter {
         timestamp: message.timestamp,
       },
     });
-  }
-
-  private async getOrCreateReviewInboxThread(catId: string): Promise<string> {
-    const cached = reviewInboxThreads.get(catId);
-    if (cached) return cached;
-
-    const userId = this.resolveUserId();
-    const thread = (await this.opts.threadStore.create(userId, `${catId} Review Inbox`)) as Thread;
-
-    reviewInboxThreads.set(catId, thread.id);
-    return thread.id;
-  }
-
-  private async getOrCreateTriageThread(): Promise<string> {
-    if (this.opts.triageThreadId) {
-      return this.opts.triageThreadId;
-    }
-
-    const cached = reviewInboxThreads.get('__triage__');
-    if (cached) return cached;
-
-    const userId = this.resolveUserId();
-    const thread = (await this.opts.threadStore.create(userId, 'Review Triage (未匹配)')) as Thread;
-
-    reviewInboxThreads.set('__triage__', thread.id);
-    return thread.id;
   }
 }
 

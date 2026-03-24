@@ -17,6 +17,7 @@ function threadState(partial: Partial<ThreadState>): ThreadState {
     isLoadingHistory: false,
     hasMore: true,
     hasActiveInvocation: false,
+    activeInvocations: {},
     intentMode: null,
     targetCats: [],
     catStatuses: {},

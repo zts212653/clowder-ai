@@ -451,15 +451,23 @@ interface ChatState {
   workspaceOpenFileLine: number | null;
   workspaceEditToken: string | null;
   workspaceEditTokenExpiry: number | null;
+  /** @internal Last workspace-file-set event context (timestamp + threadId).
+   * Used by WorkspacePanel to distinguish fresh navigate from stale leftovers on mount. */
+  _workspaceFileSetAt: { ts: number; threadId: string | null };
   setRightPanelMode: (mode: 'status' | 'workspace') => void;
   setWorkspaceWorktreeId: (id: string | null) => void;
-  setWorkspaceOpenFile: (path: string | null, line?: number | null, worktreeId?: string | null) => void;
+  setWorkspaceOpenFile: (
+    path: string | null,
+    line?: number | null,
+    worktreeId?: string | null,
+    originThreadId?: string | null,
+  ) => void;
   closeWorkspaceTab: (path: string) => void;
   restoreWorkspaceTabs: (tabs: string[], openFile: string | null) => void;
   setWorkspaceEditToken: (token: string | null, expiresIn?: number) => void;
 
   workspaceRevealPath: string | null;
-  setWorkspaceRevealPath: (path: string | null) => void;
+  setWorkspaceRevealPath: (path: string | null, originThreadId?: string | null) => void;
 
   // ── F120: Preview auto-open (always-mounted listener) ──
   pendingPreviewAutoOpen: { port: number; path: string } | null;
@@ -629,8 +637,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   workspaceOpenFileLine: null,
   workspaceEditToken: null,
   workspaceEditTokenExpiry: null,
+  _workspaceFileSetAt: { ts: 0, threadId: null },
   setRightPanelMode: (mode) => set({ rightPanelMode: mode }),
-  setWorkspaceWorktreeId: (id) =>
+  setWorkspaceWorktreeId: (id) => {
+    // Guard: skip destructive reset when worktreeId is unchanged.
+    // setWorkspaceWorktreeId unconditionally clears openFilePath/openTabs,
+    // which causes "snapback" if callers (e.g. fetchWorktrees auto-select)
+    // redundantly set the same worktreeId that's already active.
+    if (id === get().workspaceWorktreeId) return;
     set({
       workspaceWorktreeId: id,
       workspaceOpenTabs: [],
@@ -638,9 +652,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       workspaceOpenFileLine: null,
       workspaceEditToken: null,
       workspaceEditTokenExpiry: null,
-    }),
-  setWorkspaceOpenFile: (path, line, targetWorktreeId) => {
+    });
+  },
+  setWorkspaceOpenFile: (path, line, targetWorktreeId, originThreadId) => {
     if (path) {
+      const stamp = { ts: Date.now(), threadId: originThreadId ?? get().currentThreadId };
       // Switch worktree if a different one is specified
       if (targetWorktreeId && targetWorktreeId !== get().workspaceWorktreeId) {
         set({
@@ -651,6 +667,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceEditToken: null,
           workspaceEditTokenExpiry: null,
           rightPanelMode: 'workspace',
+          _workspaceFileSetAt: stamp,
         });
       } else {
         const tabs = get().workspaceOpenTabs;
@@ -660,6 +677,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceOpenFilePath: path,
           workspaceOpenFileLine: line ?? null,
           rightPanelMode: 'workspace',
+          _workspaceFileSetAt: stamp,
         });
       }
     } else {
@@ -696,7 +714,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }),
 
   workspaceRevealPath: null,
-  setWorkspaceRevealPath: (path) => set({ workspaceRevealPath: path, rightPanelMode: 'workspace' }),
+  setWorkspaceRevealPath: (path, originThreadId) =>
+    set((state) => ({
+      workspaceRevealPath: path,
+      rightPanelMode: 'workspace' as const,
+      _workspaceFileSetAt: { ts: Date.now(), threadId: originThreadId ?? state.currentThreadId },
+    })),
 
   // ── F120: Preview auto-open ──
   pendingPreviewAutoOpen: null,

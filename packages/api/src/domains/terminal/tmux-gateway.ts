@@ -42,6 +42,12 @@ function resolveTmuxBin(): string {
   }
 }
 
+function isNoServerRunningError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const details = `${error.message}\n${'stderr' in error ? String((error as { stderr?: unknown }).stderr ?? '') : ''}`;
+  return details.includes('no server running') || details.includes('server exited unexpectedly');
+}
+
 /**
  * Manages tmux servers: one tmux server per worktree.
  * Uses CLI mode (execFile per command) — simple, reliable, and the terminal endstate.
@@ -58,6 +64,28 @@ export class TmuxGateway {
   /** Socket name for a worktree */
   socketName(worktreeId: string): string {
     return `catcafe-${worktreeId}`;
+  }
+
+  private async createDetachedSession(
+    sock: string,
+    cwd: string,
+    shell: string,
+    cols: number,
+    rows: number,
+  ): Promise<void> {
+    const newSessionArgs = ['-L', sock, 'new-session', '-d', '-x', String(cols), '-y', String(rows), '-c', cwd, shell];
+
+    try {
+      await exec(this.tmuxBin, newSessionArgs);
+    } catch (error) {
+      if (!isNoServerRunningError(error)) throw error;
+      try {
+        execFileSync(this.tmuxBin, ['-L', sock, 'kill-server'], { stdio: 'ignore' });
+      } catch {
+        // Stale socket / dead server is already gone — keep going.
+      }
+      await exec(this.tmuxBin, newSessionArgs);
+    }
   }
 
   /** Ensure a tmux server is running for this worktree */
@@ -85,23 +113,19 @@ export class TmuxGateway {
 
     if (!this.activeServers.has(worktreeId)) {
       // Create new session (this starts the tmux server)
-      await exec(this.tmuxBin, [
-        '-L',
-        sock,
-        'new-session',
-        '-d',
-        '-x',
-        String(cols),
-        '-y',
-        String(rows),
-        '-c',
-        cwd,
-        shell,
-      ]);
+      await this.createDetachedSession(sock, cwd, shell, cols, rows);
       this.activeServers.add(worktreeId);
     } else {
-      // Add window to existing session
-      await exec(this.tmuxBin, ['-L', sock, 'new-window', '-c', cwd, shell]);
+      try {
+        // Add window to existing session
+        await exec(this.tmuxBin, ['-L', sock, 'new-window', '-c', cwd, shell]);
+      } catch (error) {
+        if (!isNoServerRunningError(error)) throw error;
+        // The server can die outside this process while the in-memory cache still
+        // says it exists (for example between isolated test cases). Self-heal by
+        // recreating the detached session instead of leaking the stale cache.
+        await this.createDetachedSession(sock, cwd, shell, cols, rows);
+      }
     }
 
     // Get the pane ID of the most recently created pane

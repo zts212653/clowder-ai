@@ -17,7 +17,7 @@ afterAll(() => {
   delete (globalThis as { React?: typeof React }).React;
 });
 
-let mockApiFetch: ReturnType<typeof vi.fn>;
+let mockApiFetch: ReturnType<typeof vi.fn<(...args: unknown[]) => unknown>>;
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
@@ -555,7 +555,8 @@ describe('F24: SessionChainPanel', () => {
     });
 
     // First render: thread-1 (slow)
-    mockApiFetch.mockImplementation((url: string) => {
+    mockApiFetch.mockImplementation((...args: unknown[]) => {
+      const url = args[0] as string;
       if (url.includes('thread-1')) return thread1Promise;
       if (url.includes('thread-2')) return thread2Promise;
       return Promise.resolve({ ok: false });
@@ -641,7 +642,7 @@ describe('F24: SessionChainPanel', () => {
       // Should show codex (no active session) but not opus (has active session)
       const select = container.querySelector('select');
       expect(select).not.toBeNull();
-      const options = Array.from(select?.querySelectorAll('option'));
+      const options = Array.from(select!.querySelectorAll('option'));
       const optionTexts = options.map((o) => o.textContent);
       expect(optionTexts.some((t) => t?.includes('缅因猫'))).toBe(true);
       expect(optionTexts.some((t) => t?.includes('布偶猫'))).toBe(false);

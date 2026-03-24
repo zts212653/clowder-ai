@@ -94,7 +94,12 @@ export interface ConnectorRouterOptions {
     | {
         download(
           connectorId: string,
-          attachment: { type: 'image' | 'file' | 'audio'; platformKey: string; fileName?: string; duration?: number },
+          attachment: {
+            type: 'image' | 'file' | 'audio';
+            platformKey: string;
+            fileName?: string;
+            duration?: number;
+          },
         ): Promise<{ localUrl: string; absPath: string; mimeType: string }>;
       }
     | undefined;

@@ -44,6 +44,10 @@ export function consumeBackgroundSystemInfo(
     if (parsed?.type === 'invocation_created') {
       const targetCatId = parsed.catId ?? msg.catId;
       const invocationId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+      // #586: Clear stale finalizedBgRef so previous invocation's finalized bubble
+      // can't be overwritten by the next invocation's callback.
+      const bgStreamKey = `${msg.threadId}::${targetCatId}`;
+      options.finalizedBgRefs.delete(bgStreamKey);
       if (targetCatId && invocationId) {
         options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
           invocationId,
