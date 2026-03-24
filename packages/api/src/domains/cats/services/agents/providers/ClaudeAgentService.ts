@@ -111,9 +111,17 @@ function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<s
       env.ANTHROPIC_DEFAULT_HAIKU_MODEL = effectiveModel;
     }
   } else if (mode === 'subscription') {
-    // Subscription mode: explicitly clear inherited key-based env vars.
+    // Subscription mode: explicitly clear all api_key env vars that may have been
+    // inherited from the parent process (e.g. if a previous api_key invocation ran).
     env.ANTHROPIC_API_KEY = null;
+    env.ANTHROPIC_AUTH_TOKEN = null;
     env.ANTHROPIC_BASE_URL = null;
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = null;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = null;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = null;
+    env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = null;
+    env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = null;
+    env.ENABLE_TOOL_SEARCH = null;
   }
   return env;
 }
@@ -185,11 +193,12 @@ export class ClaudeAgentService implements AgentService {
 
     // Profile-level model override (e.g. "opus[1m]") takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.[ANTHROPIC_MODEL_OVERRIDE_KEY]?.trim() || this.model;
-    // In api_key mode, omit --model entirely and let ANTHROPIC_DEFAULT_*_MODEL env vars
-    // handle model selection. Passing --model causes Claude CLI to validate the model name
-    // against the API's /v1/models endpoint, which fails on third-party APIs that don't
-    // list claude-* models. Without --model, the CLI uses its default tier and the env vars
-    // override the actual model used at the API level.
+    // In api_key mode, pass --model with a tier alias ('opus') so the CLI resolves it
+    // via ANTHROPIC_DEFAULT_OPUS_MODEL env var. Passing the actual model name (e.g. 'glm-5')
+    // fails validation because the CLI doesn't recognize non-Claude model names. Omitting
+    // --model entirely also fails because the CLI defaults to 'claude-opus-4-6' and validates
+    // it against the third-party API which doesn't list Claude models.
+    // See: https://docs.bigmodel.cn/cn/guide/develop/claude
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
     const args: string[] = [
       '-p',
@@ -198,7 +207,8 @@ export class ClaudeAgentService implements AgentService {
       'stream-json',
       '--include-partial-messages',
       '--verbose',
-      ...(isApiKeyMode ? [] : ['--model', effectiveModel]),
+      '--model',
+      isApiKeyMode ? 'opus' : effectiveModel,
       '--effort',
       getCatEffort(this.catId as string),
       '--permission-mode',
