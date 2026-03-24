@@ -87,7 +87,7 @@ export class SocketManager {
 
       socket.on('join_room', (room: string) => {
         // Validate room name format — only allow known prefixes
-        if (!/^(thread:|worktree:|preview:global$|user:)/.test(room)) {
+        if (!/^(thread:|worktree:|preview:global$|workspace:global$|user:)/.test(room)) {
           log.warn({ socketId: socket.id, room }, 'Attempted to join invalid room');
           return;
         }

@@ -25,6 +25,7 @@ export interface GameOrchestratorDeps {
   socketManager: SocketLike;
   /** Optional: when provided, game announce/speech events are dual-written to messageStore (Phase H) */
   messageStore?: IMessageStore;
+  onGameEnd?: (gameId: string) => void;
 }
 
 export interface StartGameInput {
@@ -38,11 +39,13 @@ export class GameOrchestrator {
   private readonly store: IGameStore;
   private readonly socket: SocketLike;
   private readonly messageStore?: IMessageStore;
+  private readonly onGameEnd?: (gameId: string) => void;
 
   constructor(deps: GameOrchestratorDeps) {
     this.store = deps.gameStore;
     this.socket = deps.socketManager;
     this.messageStore = deps.messageStore;
+    this.onGameEnd = deps.onGameEnd;
   }
 
   /** Create and persist a new game, broadcast to thread */
@@ -506,6 +509,7 @@ export class GameOrchestrator {
         winner,
         timestamp: Date.now(),
       });
+      this.onGameEnd?.(runtime.gameId);
       return;
     }
 

@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -70,7 +71,7 @@ describe('ChatMessage layout-change event timing', () => {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
-          message: message as unknown,
+          message: message as unknown as ChatMessageType,
           getCatById: () => undefined,
         }),
       );
@@ -126,7 +127,7 @@ describe('ChatMessage layout-change event timing', () => {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
-          message: message as unknown,
+          message: message as unknown as ChatMessageType,
           getCatById: () => undefined,
         }),
       );

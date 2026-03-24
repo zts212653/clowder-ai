@@ -209,6 +209,73 @@ function RevealWhispersButton({ threadId }: { threadId: string }) {
   );
 }
 
+const LOGS_DIR = 'packages/api/data/logs/api';
+
+function parseLogFilename(name: string): { date: string; seq: number } | null {
+  const m = name.match(/^api\.(\d{4}-\d{2}-\d{2})\.(\d+)\.log$/);
+  if (!m) return null;
+  return { date: m[1], seq: Number(m[2]) };
+}
+
+function RuntimeLogsButton() {
+  const setRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
+  const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
+
+  const handleClick = useCallback(async () => {
+    // Capture the originating thread BEFORE any awaits so that
+    // workspace stamps attribute actions to the correct thread
+    // even if the user switches threads during the async gap.
+    const originThreadId = useChatStore.getState().currentThreadId;
+    setRevealPath(LOGS_DIR, originThreadId);
+
+    try {
+      const wtRes = await apiFetch('/api/workspace/worktrees');
+      if (!wtRes.ok) return;
+      if (useChatStore.getState().currentThreadId !== originThreadId) return;
+      const wtData = await wtRes.json();
+      const wId = (wtData.worktrees ?? [])[0]?.id;
+      if (!wId) return;
+
+      const params = new URLSearchParams({ worktreeId: wId, path: LOGS_DIR, depth: '1' });
+      const res = await apiFetch(`/api/workspace/tree?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (useChatStore.getState().currentThreadId !== originThreadId) return;
+      const entries: { name: string; type: string }[] = Array.isArray(data.tree)
+        ? data.tree
+        : (data.tree?.children ?? []);
+      const logFiles = entries
+        .filter((f: { name: string; type: string }) => f.type === 'file' && f.name.endsWith('.log'))
+        .map((f: { name: string }) => ({ name: f.name, parsed: parseLogFilename(f.name) }))
+        .filter((f): f is { name: string; parsed: { date: string; seq: number } } => f.parsed !== null)
+        .sort((a, b) => {
+          const dc = b.parsed.date.localeCompare(a.parsed.date);
+          return dc !== 0 ? dc : b.parsed.seq - a.parsed.seq;
+        });
+      if (logFiles.length > 0) {
+        setOpenFile(`${LOGS_DIR}/${logFiles[0].name}`, null, wId, originThreadId);
+      }
+    } catch {
+      // Directory revealed; file open is best-effort
+    }
+  }, [setRevealPath, setOpenFile]);
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-gray-700">运行日志</h3>
+        <button
+          onClick={handleClick}
+          className="text-[11px] px-2 py-0.5 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-100 transition-colors"
+          title="在 Workspace 面板中打开运行日志目录"
+        >
+          查看日志
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function RightStatusPanel({
   intentMode,
   targetCats,
@@ -379,6 +446,9 @@ export function RightStatusPanel({
         externalSessionId={viewSessionId}
         onCloseSession={() => setViewSessionId(null)}
       />
+
+      {/* ── F130: Runtime logs quick-access ────────────── */}
+      <RuntimeLogsButton />
     </aside>
   );
 }

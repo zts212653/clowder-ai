@@ -1,25 +1,27 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 const ROOT = resolve(process.cwd());
+const SYNC_SCRIPT = resolve(ROOT, 'scripts/sync-to-opensource.sh');
 
 function createSandbox(envFile = '') {
   const dir = mkdtempSync(join(tmpdir(), 'cc-start-dev-profile-'));
-  cpSync(resolve(ROOT, 'scripts/start-dev.sh'), join(dir, 'scripts', 'start-dev.sh'), {
-    force: true,
-    recursive: false,
-  });
-  cpSync(resolve(ROOT, 'scripts/download-source-overrides.sh'), join(dir, 'scripts', 'download-source-overrides.sh'), {
-    force: true,
-    recursive: false,
-  });
+  mkdirSync(join(dir, 'scripts'), { recursive: true });
+  cpSync(resolve(ROOT, 'scripts/start-dev.sh'), join(dir, 'scripts', 'start-dev.sh'));
+
+  const downloadOverrides = resolve(ROOT, 'scripts/download-source-overrides.sh');
+  if (existsSync(downloadOverrides)) {
+    cpSync(downloadOverrides, join(dir, 'scripts', 'download-source-overrides.sh'));
+  }
+
   if (envFile) {
     writeFileSync(join(dir, '.env'), envFile, 'utf8');
   }
+
   return dir;
 }
 
@@ -28,6 +30,7 @@ function runSourceOnly({ sandboxDir, env = {}, extraArgs = [] }) {
     `source scripts/start-dev.sh --source-only ${extraArgs.join(' ')}`,
     'printf "PROFILE=%s\\nASR=%s\\nPROXY=%s\\nTTS=%s\\nLLM=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ASR_ENABLED" "$ANTHROPIC_PROXY_ENABLED" "$TTS_ENABLED" "$LLM_POSTPROCESS_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
   ].join('; ');
+
   return spawnSync('bash', ['-lc', command], {
     cwd: sandboxDir,
     env: {
@@ -40,8 +43,8 @@ function runSourceOnly({ sandboxDir, env = {}, extraArgs = [] }) {
   });
 }
 
-describe('start-dev direct profile isolation', () => {
-  it('strict profile mode ignores inherited shell env for profile-controlled vars', () => {
+describe('start-dev strict profile isolation', () => {
+  it('ignores inherited shell env for profile-controlled vars when strict mode is on', () => {
     const sandboxDir = createSandbox();
     try {
       const result = runSourceOnly({
@@ -76,7 +79,7 @@ describe('start-dev direct profile isolation', () => {
     }
   });
 
-  it('strict profile mode still allows .env overrides after sanitize', () => {
+  it('still allows .env overrides after strict sanitize', () => {
     const sandboxDir = createSandbox('ASR_ENABLED=1\nMESSAGE_TTL_SECONDS=123\nREDIS_PROFILE=custom\n');
     try {
       const result = runSourceOnly({
@@ -102,26 +105,69 @@ describe('start-dev direct profile isolation', () => {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
   });
+});
 
-  it('package direct-launch wrappers pin strict profile defaults to opensource', () => {
-    const pkg = JSON.parse(
-      spawnSync('node', ['-e', 'process.stdout.write(require("fs").readFileSync("package.json", "utf8"))'], {
-        cwd: ROOT,
-        encoding: 'utf8',
-      }).stdout,
-    );
+describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC_SCRIPT) }, () => {
+  it('exports opensource-pinned direct launch wrappers and runtime startup', () => {
+    const result = spawnSync('bash', [SYNC_SCRIPT, '--dry-run', '--yes'], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        PATH: process.env.PATH ?? '',
+        HOME: process.env.HOME ?? '',
+        TERM: process.env.TERM ?? 'xterm-256color',
+      },
+      encoding: 'utf8',
+      maxBuffer: 20 * 1024 * 1024,
+    });
 
-    assert.match(pkg.scripts['dev:direct'], /CAT_CAFE_STRICT_PROFILE_DEFAULTS=1/);
-    assert.match(pkg.scripts['start:direct'], /CAT_CAFE_STRICT_PROFILE_DEFAULTS=1/);
-    assert.match(pkg.scripts['dev:direct'], /--profile=opensource/);
-    assert.match(pkg.scripts['start:direct'], /--profile=opensource/);
-  });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = `${result.stdout}\n${result.stderr}`;
+    const match = output.match(/Export (?:complete|preserved) at:[^\n]*\n\s*(\/[^\n]+)/);
+    assert.ok(match?.[1], output);
 
-  it('runtime-worktree start injects opensource profile, strict env isolation, and config root', () => {
-    const runtimeScript = readFileSync(resolve(ROOT, 'scripts/runtime-worktree.sh'), 'utf8');
+    const exportDir = match[1].trim();
+    try {
+      const pkg = JSON.parse(readFileSync(resolve(exportDir, 'package.json'), 'utf8'));
+      const runtimeScript = readFileSync(resolve(exportDir, 'scripts/runtime-worktree.sh'), 'utf8');
 
-    assert.match(runtimeScript, /exec env\b.*CAT_CAFE_STRICT_PROFILE_DEFAULTS=1\b/);
-    assert.match(runtimeScript, /exec env\b.*CAT_CAFE_CONFIG_ROOT=/);
-    assert.match(runtimeScript, /\.\/scripts\/start-dev\.sh --prod-web --profile=opensource/);
+      assert.match(pkg.scripts['dev:direct'], /CAT_CAFE_STRICT_PROFILE_DEFAULTS=1/);
+      assert.match(pkg.scripts['start:direct'], /CAT_CAFE_STRICT_PROFILE_DEFAULTS=1/);
+      assert.match(pkg.scripts['dev:direct'], /--profile=opensource/);
+      assert.match(pkg.scripts['start:direct'], /--profile=opensource/);
+      assert.equal(
+        pkg.scripts['check:start-profile-isolation'],
+        'node --test scripts/start-dev-profile-isolation.test.mjs',
+      );
+      assert.equal(existsSync(resolve(exportDir, 'cat-template.json')), true);
+      assert.match(pkg.scripts.check, /check:start-profile-isolation/);
+      assert.equal(existsSync(resolve(exportDir, 'scripts/download-source-overrides.sh')), true);
+      assert.equal(existsSync(resolve(exportDir, 'scripts/start-dev-profile-isolation.test.mjs')), true);
+
+      assert.match(
+        runtimeScript,
+        /exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 \.\/scripts\/start-dev\.sh --prod-web --profile=opensource/,
+      );
+
+      const envSource = spawnSync(
+        'bash',
+        ['-lc', 'set -euo pipefail\nset -a\nsource ./.env.example\nset +a\nprintf "%s" "$NEXT_PUBLIC_BRAND_NAME"'],
+        {
+          cwd: exportDir,
+          env: {
+            ...process.env,
+            PATH: process.env.PATH ?? '',
+            HOME: process.env.HOME ?? '',
+            TERM: process.env.TERM ?? 'xterm-256color',
+          },
+          encoding: 'utf8',
+        },
+      );
+
+      assert.equal(envSource.status, 0, envSource.stderr || envSource.stdout);
+      assert.equal(envSource.stdout.trim(), 'Clowder AI');
+    } finally {
+      rmSync(exportDir, { recursive: true, force: true });
+    }
   });
 });

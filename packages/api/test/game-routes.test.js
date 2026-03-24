@@ -71,6 +71,7 @@ function createStubThreadStore() {
     },
     async update() {},
     async delete() {},
+    async updateThinkingMode() {},
   };
 }
 
@@ -517,6 +518,86 @@ describe('Game API Routes', () => {
       await localApp.close();
 
       assert.equal(autoPlayer.stopCalls, 1, 'should stop auto-player loops during close');
+    });
+  });
+
+  describe('thinkingMode: play (AC-I9)', () => {
+    it('POST /api/game/start sets thinkingMode to play on new game thread', async () => {
+      const thinkingModeCalls = [];
+      const trackingThreadStore = {
+        ...createStubThreadStore(),
+        async create(userId, title, category) {
+          return { id: 'tracked-game-thread', userId, title, category, createdAt: Date.now() };
+        },
+        async updateThinkingMode(threadId, mode) {
+          thinkingModeCalls.push({ threadId, mode });
+        },
+      };
+      const localApp = Fastify();
+      await localApp.register(gameRoutes, {
+        gameStore: createStubGameStore(),
+        socketManager: createStubSocket(),
+        threadStore: trackingThreadStore,
+        messageStore: createStubMessageStore(),
+      });
+      await localApp.ready();
+
+      const res = await localApp.inject({
+        method: 'POST',
+        url: '/api/game/start',
+        payload: {
+          gameType: 'werewolf',
+          humanRole: 'player',
+          playerCount: 7,
+          catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark'],
+          voiceMode: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(thinkingModeCalls.length, 1, 'should call updateThinkingMode once');
+      assert.equal(thinkingModeCalls[0].threadId, 'tracked-game-thread');
+      assert.equal(thinkingModeCalls[0].mode, 'play');
+
+      await localApp.close();
+    });
+
+    it('POST /api/threads/:threadId/game sets thinkingMode to play on existing thread', async () => {
+      const thinkingModeCalls = [];
+      const trackingThreadStore = {
+        ...createStubThreadStore(),
+        async updateThinkingMode(threadId, mode) {
+          thinkingModeCalls.push({ threadId, mode });
+        },
+      };
+      const localApp = Fastify();
+      await localApp.register(gameRoutes, {
+        gameStore: createStubGameStore(),
+        socketManager: createStubSocket(),
+        threadStore: trackingThreadStore,
+        messageStore: createStubMessageStore(),
+      });
+      await localApp.ready();
+
+      const res = await localApp.inject({
+        method: 'POST',
+        url: '/api/threads/existing-thread-42/game',
+        payload: {
+          definition: makeDefinition(),
+          seats: [
+            { seatId: 'P1', actorType: 'cat', actorId: 'opus', role: 'wolf', alive: true, properties: {} },
+            { seatId: 'P2', actorType: 'human', actorId: 'owner', role: 'villager', alive: true, properties: {} },
+          ],
+          config: { timeoutMs: 30000, voiceMode: false, humanRole: 'player', humanSeat: 'P2' },
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(thinkingModeCalls.length, 1, 'should call updateThinkingMode once');
+      assert.equal(thinkingModeCalls[0].threadId, 'existing-thread-42');
+      assert.equal(thinkingModeCalls[0].mode, 'play');
+
+      await localApp.close();
     });
   });
 });

@@ -7,7 +7,15 @@
 
 // ── Block Kinds ─────────────────────────────────────────────
 
-export type RichBlockKind = 'card' | 'diff' | 'checklist' | 'media_gallery' | 'audio' | 'interactive' | 'html_widget';
+export type RichBlockKind =
+  | 'card'
+  | 'diff'
+  | 'checklist'
+  | 'media_gallery'
+  | 'audio'
+  | 'interactive'
+  | 'html_widget'
+  | 'file';
 
 // ── Base ────────────────────────────────────────────────────
 
@@ -107,6 +115,20 @@ export interface RichInteractiveBlock extends RichBlockBase {
   groupId?: string;
 }
 
+/** F088 Phase J: File attachment block — generated document or uploaded file.
+ *  Backend resolves `url` to absolute path for outbound delivery. */
+export interface RichFileBlock extends RichBlockBase {
+  kind: 'file';
+  /** Local URL (e.g. /uploads/report.pdf) — resolved to absPath by mediaPathResolver */
+  url: string;
+  /** Display name shown to user (e.g. "调研报告.pdf") */
+  fileName: string;
+  /** MIME type (e.g. application/pdf) — used for file_type mapping */
+  mimeType?: string;
+  /** File size in bytes — informational */
+  fileSize?: number;
+}
+
 /** F120 Phase C: Inline HTML/JS widget rendered in sandboxed iframe (srcdoc).
  *  Similar to Claude.ai's visualize:show_widget — for charts, calculators, etc. */
 export interface RichHtmlWidgetBlock extends RichBlockBase {
@@ -128,7 +150,8 @@ export type RichBlock =
   | RichMediaGalleryBlock
   | RichAudioBlock
   | RichInteractiveBlock
-  | RichHtmlWidgetBlock;
+  | RichHtmlWidgetBlock
+  | RichFileBlock;
 
 // ── Container (stored in StoredMessage.extra.rich) ──────────
 
@@ -147,6 +170,7 @@ const VALID_KINDS: readonly string[] = [
   'audio',
   'interactive',
   'html_widget',
+  'file',
 ];
 
 /**

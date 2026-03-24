@@ -237,31 +237,46 @@ export async function handleSignalSummarize(input: {
 export const signalsTools = [
   {
     name: 'signal_list_inbox',
-    description: 'List recent signal articles from inbox. Supports optional limit, tier, and source filters.',
+    description:
+      'List recent signal articles from inbox. Use when 铲屎官 asks to check signals, or when you need to browse unread articles. ' +
+      'Supports optional limit, tier, and source filters. ' +
+      'TIER GUIDE: T1 = critical/breaking, T2 = important, T3 = interesting, T4 = low priority. ' +
+      'Returns article IDs needed for other signal tools (get_article, mark_read, start_study).',
     inputSchema: signalListInboxInputSchema,
     handler: handleSignalListInbox,
   },
   {
     name: 'signal_get_article',
-    description: 'Get full signal article detail by id or URL.',
+    description:
+      'Get full signal article detail by id or URL. Returns title, content, source, tier, timestamps, and metadata. ' +
+      'Use when you need to read the full content of a specific article. ' +
+      'PARAM GUIDE: Use id (from list_inbox/search results) OR url (if 铲屎官 shared a link) — not both.',
     inputSchema: signalGetArticleInputSchema,
     handler: handleSignalGetArticle,
   },
   {
     name: 'signal_search',
-    description: 'Search signal articles by keyword with optional filters.',
+    description:
+      'Search signal articles by keyword with optional filters (status, source, tier, date range). ' +
+      'Use when looking for articles about a specific topic across all statuses. ' +
+      'TIP: Combine with dateFrom/dateTo for time-bounded searches (ISO date format).',
     inputSchema: signalSearchInputSchema,
     handler: handleSignalSearch,
   },
   {
     name: 'signal_mark_read',
-    description: 'Mark a signal article as read.',
+    description:
+      'Mark a signal article as read. Use after you or 铲屎官 have reviewed an article. ' +
+      'This removes it from the inbox view.',
     inputSchema: signalMarkReadInputSchema,
     handler: handleSignalMarkRead,
   },
   {
     name: 'signal_summarize',
-    description: 'Generate a concise summary for a signal article and persist it to article frontmatter.',
+    description:
+      'Generate a concise summary for a signal article and persist it to article frontmatter. ' +
+      'Use when an article needs a quick summary for later reference. ' +
+      'Default maxLength is 280 chars (tweet-length). Increase for more detailed summaries (max 1200).',
     inputSchema: signalSummarizeInputSchema,
     handler: handleSignalSummarize,
   },

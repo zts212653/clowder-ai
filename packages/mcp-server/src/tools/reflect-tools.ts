@@ -54,7 +54,9 @@ export const reflectTools = [
     name: 'cat_cafe_reflect',
     description:
       'Ask a reflective question about the project. Synthesizes insights from stored project knowledge (SQLite-backed). ' +
-      'Note: currently returns degradation message — use search_evidence for project knowledge recall.',
+      'Use for open-ended "why" questions that benefit from synthesis across multiple sources. ' +
+      'GOTCHA: Currently degraded — use search_evidence instead. This tool is kept for future synthesis capability. ' +
+      'WHEN TO USE: search_evidence finds facts; reflect synthesizes meaning. If search_evidence already answered your question, skip this.',
     inputSchema: reflectInputSchema,
     handler: handleReflect,
   },

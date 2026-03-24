@@ -297,6 +297,7 @@ export type {
   RichCardBlock,
   RichChecklistBlock,
   RichDiffBlock,
+  RichFileBlock,
   RichHtmlWidgetBlock,
   RichInteractiveBlock,
   RichMediaGalleryBlock,

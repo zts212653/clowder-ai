@@ -646,7 +646,7 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     expect(createPayload).not.toBeNull();
-    expect(createPayload?.projectPath).toBe('/tmp/project-from-get');
+    expect((createPayload as unknown as Record<string, unknown>)?.projectPath).toBe('/tmp/project-from-get');
   });
 
   it('shows built-in and custom provider cards together without the old filter tabs', async () => {

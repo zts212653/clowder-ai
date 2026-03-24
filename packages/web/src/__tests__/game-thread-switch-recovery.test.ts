@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ChatContainer } from '@/components/ChatContainer';
 
 // ── The spy we want to verify ──
-const mockReconnectGame = vi.fn(async () => {});
+const mockReconnectGame = vi.fn<(threadId: string) => Promise<void>>(async () => {});
 
 vi.mock('@/hooks/useGameReconnect', () => ({
   reconnectGame: (...args: [string]) => mockReconnectGame(...args),

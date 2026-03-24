@@ -8,7 +8,7 @@ import { useCollapseState } from '../ThreadSidebar/use-collapse-state';
 type HookResult = ReturnType<typeof useCollapseState>;
 
 // React 18 createRoot + act() needs this flag in bare Vitest/jsdom.
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root;
 let container: HTMLDivElement;
@@ -25,10 +25,8 @@ function makeGroups(): ThreadGroup[] {
           id: 'thread-pinned',
           title: 'Pinned thread',
           participants: [],
-          messages: [],
-          taskQueue: [],
-          archivedTasks: [],
           projectPath: 'default',
+          createdBy: 'test-user',
           lastActiveAt: Date.now(),
           pinned: true,
           favorited: false,
@@ -45,10 +43,8 @@ function makeGroups(): ThreadGroup[] {
           id: 'thread-project',
           title: 'Project thread',
           participants: [],
-          messages: [],
-          taskQueue: [],
-          archivedTasks: [],
           projectPath: '/proj/cat-cafe',
+          createdBy: 'test-user',
           lastActiveAt: Date.now() - 1000,
           pinned: false,
           favorited: false,

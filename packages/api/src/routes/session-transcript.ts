@@ -37,6 +37,14 @@ const searchSchema = z.object({
   scope: z.enum(['digests', 'transcripts', 'both']).optional(),
 });
 
+function checkCatIdAccess(request: { headers: Record<string, unknown> }, sessionCatId: string): string | null {
+  const callerCatId = request.headers['x-cat-id'] as string | undefined;
+  if (callerCatId && sessionCatId !== callerCatId) {
+    return 'Access denied: session belongs to a different cat';
+  }
+  return null;
+}
+
 export async function sessionTranscriptRoutes(
   app: FastifyInstance,
   opts: SessionTranscriptRouteOptions,
@@ -64,6 +72,12 @@ export async function sessionTranscriptRoutes(
     if (!thread || thread.createdBy !== userId) {
       reply.status(403);
       return { error: 'Access denied' };
+    }
+
+    const callerCatIdErr = checkCatIdAccess(request, session.catId);
+    if (callerCatIdErr) {
+      reply.status(403);
+      return { error: callerCatIdErr };
     }
 
     const view = (request.query.view ?? 'raw') as string;
@@ -130,6 +144,12 @@ export async function sessionTranscriptRoutes(
       return { error: 'Access denied' };
     }
 
+    const callerCatIdErr2 = checkCatIdAccess(request, session.catId);
+    if (callerCatIdErr2) {
+      reply.status(403);
+      return { error: callerCatIdErr2 };
+    }
+
     const digest = await transcriptReader.readDigest(sessionId, session.threadId, session.catId);
     if (!digest) {
       return reply.status(404).send({ error: 'Digest not found' });
@@ -158,6 +178,12 @@ export async function sessionTranscriptRoutes(
     if (!thread || thread.createdBy !== userId) {
       reply.status(403);
       return { error: 'Access denied' };
+    }
+
+    const callerCatIdErr3 = checkCatIdAccess(request, session.catId);
+    if (callerCatIdErr3) {
+      reply.status(403);
+      return { error: callerCatIdErr3 };
     }
 
     const events = await transcriptReader.readInvocationEvents(
@@ -199,7 +225,10 @@ export async function sessionTranscriptRoutes(
 
     const { q, cats, sessionIds, limit, scope } = parseResult.data;
 
-    const catsArr = cats?.split(',').filter(Boolean);
+    // P0a enforcement: when x-cat-id header is present, force-filter to caller's own sessions only
+    // Prevents game-playing cats from searching other cats' session content (KD-39)
+    const callerCatId = request.headers['x-cat-id'] as string | undefined;
+    const catsArr = callerCatId ? [callerCatId] : cats?.split(',').filter(Boolean);
     const sessionIdsArr = sessionIds?.split(',').filter(Boolean);
 
     const hits = await transcriptReader.search(threadId, q, {

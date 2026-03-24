@@ -8,7 +8,7 @@ created: 2026-03-21
 
 # F131: Workspace Navigator — 猫猫可编程导航 Workspace 面板
 
-> **Status**: in-progress | **Owner**: 金渐层 | **Priority**: P2
+> **Status**: done | **Owner**: 金渐层 | **Priority**: P2 | **Completed**: 2026-03-23
 
 ## Why
 
@@ -84,7 +84,7 @@ Hub: 右面板自动打开并导航到文件
 - [x] AC-3: 支持指定 worktreeId 跨 worktree 导航（如从 main 导航到 runtime 的日志目录） ✅ PR #611 (threadId session isolation)
 - [x] AC-4: 面板关闭时收到事件能自动打开（参考 usePreviewAutoOpen 的 pending 机制） ✅ PR #611 (复用 chatStore.setWorkspaceRevealPath/setWorkspaceOpenFile)
 - [x] AC-5: Skill 文档 `workspace-navigator/SKILL.md` 创建完成，含意图匹配策略、调用步骤、常见场景速查 ✅ commit 8d61c783
-- [ ] AC-6: 端到端验证——team lead说"帮我打开日志"，猫猫能自己找到路径 → 调 API → Hub 右面板自动展示日志目录
+- [x] AC-6: 端到端验证——team lead说"帮我打开日志"，猫猫能自己找到路径 → 调 API → Hub 右面板自动展示日志目录 ✅ 2026-03-23 runtime E2E（含 PR #678 回归）
 
 ## Dependencies
 

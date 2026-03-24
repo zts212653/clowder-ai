@@ -197,7 +197,7 @@ test('CLI_TIMEOUT_MS=0 disables timeout (no auto-kill on silence)', async () => 
   }
 });
 
-test('spawnCli uses 5 minute fallback timeout when CLI_TIMEOUT_MS is unset', async () => {
+test('spawnCli uses 30 minute fallback timeout when CLI_TIMEOUT_MS is unset', async () => {
   const savedEnv = process.env.CLI_TIMEOUT_MS;
   delete process.env.CLI_TIMEOUT_MS;
 
@@ -219,7 +219,7 @@ test('spawnCli uses 5 minute fallback timeout when CLI_TIMEOUT_MS is unset', asy
     await promise;
 
     assert.ok(delays.length > 0);
-    assert.equal(delays[0], 300000);
+    assert.equal(delays[0], 1800000);
   } finally {
     global.setTimeout = originalSetTimeout;
     if (savedEnv === undefined) {
@@ -789,7 +789,7 @@ test('P2-fix: stderr activity notifies probe (no false silent warning)', async (
         command: 'codex',
         args: [],
         timeoutMs: 500,
-        livenessProbe: { sampleIntervalMs: 30, softWarningMs: 80, stallWarningMs: 300 },
+        livenessProbe: { sampleIntervalMs: 30, softWarningMs: 300, stallWarningMs: 1000 },
       },
       { spawnFn },
     ),

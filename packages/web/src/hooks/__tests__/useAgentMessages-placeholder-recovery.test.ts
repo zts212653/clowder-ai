@@ -308,7 +308,6 @@ describe('useAgentMessages placeholder recovery', () => {
         origin: 'stream',
         replyTo: 'msg-parent-1',
         replyPreview: { senderCatId: 'opus', content: '@缅因猫 帮忙看一下' },
-        timestamp: Date.now(),
       });
     });
 

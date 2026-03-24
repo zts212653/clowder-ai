@@ -34,7 +34,7 @@ const MOCK_CATS = [
     color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
     mentionPatterns: ['@codex'],
     provider: 'openai',
-    providerProfileId: '',
+    providerProfileId: 'codex-oauth',
     defaultModel: 'gpt-5.4',
     avatar: '/avatars/codex.png',
     roleDescription: 'review',
@@ -256,7 +256,7 @@ describe('HubQuotaBoardTab v2 — glanceable quota board', () => {
 
   it('renders F127 group headings on static render', () => {
     const html = renderToStaticMarkup(React.createElement(HubQuotaBoardTab));
-    expect(html).toContain('OAuth 订阅额度（按账号配置）');
+    expect(html).toContain('内置账号额度（按账号配置）');
     expect(html).toContain('API Key 额度（按账号配置）');
     expect(html).toContain('F127 变化说明');
   });
@@ -297,7 +297,7 @@ describe('HubQuotaBoardTab — account pool grouping', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('OAuth 订阅额度（按账号配置）');
+    expect(container.textContent).toContain('内置账号额度（按账号配置）');
     expect(container.textContent).toContain('API Key 额度（按账号配置）');
     expect(container.textContent).toContain('Claude (OAuth)');
     expect(container.textContent).toContain('Codex (OAuth)');
@@ -330,8 +330,8 @@ describe('HubQuotaBoardTab — account pool grouping', () => {
 
     expect(sponsorHeader).toBeTruthy();
     expect(codexOauthHeader).toBeTruthy();
-    expect(sponsorHeader?.parentElement?.textContent ?? '').toContain('@codex');
-    expect(codexOauthHeader?.parentElement?.textContent ?? '').not.toContain('@codex');
+    expect(sponsorHeader?.parentElement?.textContent ?? '').toContain('@spark');
+    expect(codexOauthHeader?.parentElement?.textContent ?? '').toContain('@codex');
   });
 
   it('shows a visible error banner when quota loading fails', async () => {

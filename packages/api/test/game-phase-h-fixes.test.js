@@ -240,6 +240,7 @@ describe('Phase H P1 Fixes — definition-level regression guards', () => {
         },
         async update() {},
         async delete() {},
+        async updateThinkingMode() {},
       },
       messageStore: routeMsgStore,
     });

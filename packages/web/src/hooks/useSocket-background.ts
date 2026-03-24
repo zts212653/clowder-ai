@@ -76,6 +76,9 @@ function stopTrackedStream(
   const existing = options.bgStreamRefs.get(streamKey);
   if (!existing) return undefined;
   options.store.setThreadMessageStreaming(msg.threadId, existing.id, false);
+  // #586 follow-up: Record finalized bubble ID so callback can find it
+  // after bgStreamRefs is cleared and isStreaming is false.
+  options.finalizedBgRefs.set(streamKey, existing.id);
   options.bgStreamRefs.delete(streamKey);
   return existing;
 }
@@ -172,6 +175,7 @@ function findBackgroundCallbackReplacementTarget(
   // against null before writing to replacedInvocations. Using a pseudo ID would
   // cause shouldSuppressLateBackgroundStreamChunk to permanently drop future
   // invocationless stream chunks.
+  // First pass: actively-streaming invocationless placeholder
   for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
     const m = threadMessages[i];
     if (
@@ -182,6 +186,19 @@ function findBackgroundCallbackReplacementTarget(
       !m.extra?.stream?.invocationId
     ) {
       return { id: m.id, invocationId: invocationId ?? null };
+    }
+  }
+  // #586 follow-up: Check finalizedBgRefs — the done handler records the exact
+  // message ID of the just-finalized stream bubble. This avoids the greedy scan
+  // that could match arbitrary historical messages (P1 from review).
+  const streamKey = `${msg.threadId}::${msg.catId}`;
+  const finalizedId = options.finalizedBgRefs.get(streamKey);
+  if (finalizedId) {
+    const finalized = threadMessages.find(
+      (m) => m.id === finalizedId && m.type === 'assistant' && m.catId === msg.catId && m.origin === 'stream',
+    );
+    if (finalized) {
+      return { id: finalized.id, invocationId: invocationId ?? null };
     }
   }
 
@@ -319,6 +336,8 @@ export function handleBackgroundAgentMessage(
           ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
         });
         options.bgStreamRefs.delete(streamKey);
+        // Consume finalized ref — callback successfully replaced
+        options.finalizedBgRefs.delete(streamKey);
         // #586 P1-2 fix: Only set replacedInvocations when we have a real invocationId.
         // Fallback matches return null — writing a pseudo ID would permanently suppress
         // future invocationless stream chunks via shouldSuppressLateBackgroundStreamChunk.

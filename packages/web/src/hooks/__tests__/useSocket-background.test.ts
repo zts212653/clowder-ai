@@ -21,6 +21,7 @@ import {
 let testBgSeq = 0;
 const testBgStreamRefs = new Map<string, { id: string; threadId: string; catId: string }>();
 const testBgReplacedInvocations = new Map<string, string>();
+const testBgFinalizedRefs = new Map<string, string>();
 
 /** #80 fix-C: Track clearDoneTimeout calls */
 let clearDoneTimeoutCalls: Array<string | undefined> = [];
@@ -38,7 +39,7 @@ function simulateBackgroundMessage(msg: {
   toolInput?: Record<string, unknown>;
   error?: string;
   isFinal?: boolean;
-  metadata?: { provider: string; model: string };
+  metadata?: { provider: string; model: string; sessionId?: string };
   origin?: 'stream' | 'callback';
   invocationId?: string;
   timestamp: number;
@@ -46,6 +47,7 @@ function simulateBackgroundMessage(msg: {
   handleBackgroundAgentMessage(msg as BackgroundAgentMessage, {
     store: useChatStore.getState(),
     bgStreamRefs: testBgStreamRefs,
+    finalizedBgRefs: testBgFinalizedRefs,
     replacedInvocations: testBgReplacedInvocations,
     nextBgSeq: () => testBgSeq++,
     addToast: (toast) => useToastStore.getState().addToast(toast),
@@ -83,6 +85,7 @@ describe('background thread socket handling', () => {
     useToastStore.setState({ toasts: [] });
     testBgSeq = 0;
     testBgStreamRefs.clear();
+    testBgFinalizedRefs.clear();
     testBgReplacedInvocations.clear();
     clearDoneTimeoutCalls = [];
   });
@@ -603,8 +606,6 @@ describe('background thread socket handling', () => {
           type: 'text',
           catId: 'opus',
           threadId: 'thread-bg',
-          content: 'more',
-          timestamp: now + 1,
         },
         testBgStreamRefs,
       );
@@ -643,9 +644,7 @@ describe('background thread socket handling', () => {
           type: 'error',
           catId: 'opus',
           threadId: 'thread-bg',
-          error: 'transient',
           isFinal: false,
-          timestamp: now + 1,
         },
         testBgStreamRefs,
       );

@@ -53,6 +53,7 @@ describe('HubProviderProfileItem', () => {
       name: 'Claude API',
       authType: 'api_key',
       protocol: 'anthropic',
+      kind: 'api_key',
       builtin: false,
       mode: 'api_key',
       baseUrl: 'https://api.anthropic.com',
@@ -62,7 +63,7 @@ describe('HubProviderProfileItem', () => {
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
     };
-    const onSave = vi.fn(async () => {});
+    const onSave = vi.fn<(profileId: string, payload: ProfileEditPayload) => Promise<void>>(async () => {});
 
     await act(async () => {
       root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
@@ -76,7 +77,7 @@ describe('HubProviderProfileItem', () => {
     });
 
     expect(onSave).toHaveBeenCalledTimes(1);
-    const payload = onSave.mock.calls[0]?.[1] as ProfileEditPayload;
+    const payload = onSave.mock.calls[0]![1] as ProfileEditPayload;
     expect(payload).toMatchObject({
       displayName: 'Claude API',
       baseUrl: 'https://api.anthropic.com',
@@ -93,6 +94,7 @@ describe('HubProviderProfileItem', () => {
       name: 'Codex API',
       authType: 'api_key',
       protocol: 'openai',
+      kind: 'api_key',
       builtin: false,
       mode: 'api_key',
       baseUrl: 'https://api.openai-proxy.dev',
@@ -101,7 +103,7 @@ describe('HubProviderProfileItem', () => {
       createdAt: '2026-03-18T00:00:00.000Z',
       updatedAt: '2026-03-18T00:00:00.000Z',
     };
-    const onSave = vi.fn(async () => {});
+    const onSave = vi.fn<(profileId: string, payload: ProfileEditPayload) => Promise<void>>(async () => {});
 
     await act(async () => {
       root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
@@ -123,7 +125,8 @@ describe('HubProviderProfileItem', () => {
       queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    const payload = onSave.mock.calls[0]?.[1] as ProfileEditPayload;
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const payload = onSave.mock.calls[0]![1] as ProfileEditPayload;
     expect(payload.baseUrl).toBe('');
   });
 
@@ -135,6 +138,7 @@ describe('HubProviderProfileItem', () => {
       name: 'Codex (OAuth)',
       authType: 'oauth',
       protocol: 'openai',
+      kind: 'builtin',
       builtin: true,
       mode: 'subscription',
       models: ['gpt-5.4'],
@@ -163,6 +167,7 @@ describe('HubProviderProfileItem', () => {
       name: 'OpenCode (client-auth)',
       authType: 'oauth',
       protocol: 'anthropic',
+      kind: 'builtin',
       builtin: true,
       mode: 'subscription',
       models: ['claude-sonnet-4'],
@@ -191,6 +196,7 @@ describe('HubProviderProfileItem', () => {
       name: 'Codex Sponsor',
       authType: 'api_key',
       protocol: 'openai',
+      kind: 'api_key',
       builtin: false,
       mode: 'api_key',
       baseUrl: 'https://proxy.example',

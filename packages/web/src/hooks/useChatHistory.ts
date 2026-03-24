@@ -322,11 +322,15 @@ export function useChatHistory(threadId: string) {
           }) =>
             ({
               id: m.id,
-              type: (m.summary ? 'summary' : m.source ? 'connector' : m.catId ? 'assistant' : 'user') as
-                | 'user'
-                | 'assistant'
-                | 'summary'
-                | 'connector',
+              type: (m.type === 'system'
+                ? 'system'
+                : m.summary
+                  ? 'summary'
+                  : m.source
+                    ? 'connector'
+                    : m.catId
+                      ? 'assistant'
+                      : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
               catId: m.catId,
               content: m.content,
               ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),

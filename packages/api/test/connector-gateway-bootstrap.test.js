@@ -39,18 +39,25 @@ const baseDeps = {
 };
 
 describe('ConnectorGateway Bootstrap', () => {
-  it('returns null when no connectors configured', async () => {
+  it('creates gateway in QR-only mode when no connectors configured', async () => {
     const result = await startConnectorGateway({}, baseDeps);
-    assert.equal(result, null);
+    assert.ok(result, 'Gateway should be created even without env tokens (for WeChat QR login)');
+    assert.ok(result.weixinAdapter);
+    assert.equal(result.weixinAdapter.hasBotToken(), false);
+    assert.equal(result.webhookHandlers.size, 0);
+    await result.stop();
   });
 
-  it('returns null when feishu credentials present but no verification token (fail-closed)', async () => {
+  it('creates gateway without feishu when verification token missing (fail-closed)', async () => {
     const config = {
       feishuAppId: 'test-app-id',
       feishuAppSecret: 'test-app-secret',
     };
     const result = await startConnectorGateway(config, baseDeps);
-    assert.equal(result, null);
+    assert.ok(result, 'Gateway should be created');
+    assert.equal(result.webhookHandlers.has('feishu'), false, 'Feishu should not be registered');
+    assert.ok(result.weixinAdapter, 'WeChat adapter should always be present');
+    await result.stop();
   });
 
   it('creates gateway handle with feishu webhook handler', async () => {

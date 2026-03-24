@@ -200,7 +200,7 @@ describe('skill system', () => {
     gs.activateSkill('opus46');
     const hit = gs.checkSkillHit('opus46');
     expect(hit).not.toBeNull();
-    gs.applySkillEffect('opus46', hit?.defenderId);
+    gs.applySkillEffect('opus46', hit!.defenderId);
     expect(gs.getFighter('codex').stunMs).toBe(2000);
   });
 
@@ -213,7 +213,7 @@ describe('skill system', () => {
     const hit = gs.checkSkillHit('codex');
     expect(hit).not.toBeNull();
     const beforeX = gs.getFighter('opus46').x;
-    gs.applySkillEffect('codex', hit?.defenderId);
+    gs.applySkillEffect('codex', hit!.defenderId);
     // code_flood pushes opponent away
     expect(gs.getFighter('opus46').x).not.toBe(beforeX);
   });

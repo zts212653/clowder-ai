@@ -9,7 +9,6 @@ import type {
   IEvidenceStore,
   SearchOptions,
 } from './interfaces.js';
-import { SemanticReranker } from './SemanticReranker.js';
 import { applyMigrations } from './schema.js';
 import type { VectorStore } from './VectorStore.js';
 
@@ -54,6 +53,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   async search(query: string, options?: SearchOptions): Promise<EvidenceItem[]> {
     this.ensureOpen();
     const limit = options?.limit ?? 10;
+    // P2 fix (砚砚): hybrid needs a wider BM25 candidate pool for meaningful RRF
+    const bm25Pool = options?.mode === 'hybrid' ? Math.min(Math.max(limit * 4, 20), 100) : limit;
     const trimmed = query.trim();
     if (!trimmed) return [];
 
@@ -130,7 +131,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         // Superseded items sort last (KD-16), archive results deprioritized (P2 fix)
         sql += " ORDER BY (d.superseded_by IS NOT NULL), (d.source_path LIKE 'archive/%'), rank";
         sql += ' LIMIT ?';
-        params.push(limit);
+        params.push(bm25Pool);
 
         const rows = this.db?.prepare(sql).all(...params) as RowShape[];
         for (const row of rows) {
@@ -167,7 +168,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           kwParams.push(...options.keywords.map((kw) => `%"${kw}"%`));
         }
         kwSql += " ORDER BY (superseded_by IS NOT NULL), (source_path LIKE 'archive/%'), updated_at DESC LIMIT ?";
-        kwParams.push(limit);
+        kwParams.push(bm25Pool);
         try {
           const kwRows = this.db?.prepare(kwSql).all(...kwParams) as RowShape[];
           for (const row of kwRows) {
@@ -202,28 +203,171 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       }
     }
 
-    let lexicalResults = results.slice(0, limit);
+    // P1 fix (砚砚 review): depth=raw must stay lexical-only — no passage vectors yet.
+    // Short-circuit BEFORE mode split to prevent semantic/hybrid from eating raw results.
+    if (options?.depth === 'raw') {
+      return results.slice(0, limit);
+    }
 
-    // Phase C: semantic rerank
-    if (this.embedDeps && this.embedDeps.embedding.isReady()) {
+    // P2 R2 fix (砚砚): keep full BM25 candidate pool for hybrid RRF,
+    // only slice to limit for lexical/fallback returns
+    const lexicalCandidates = results.slice(0, bm25Pool);
+    const lexicalResults = results.slice(0, limit);
+
+    // ── Mode-based retrieval (KD-44: three independent paths) ──────
+    const searchMode = options?.mode ?? 'lexical';
+    const embeddingAvailable = this.embedDeps?.embedding.isReady() && this.embedDeps.mode === 'on';
+
+    if (searchMode === 'lexical') {
+      return lexicalResults;
+    }
+
+    if (searchMode === 'semantic') {
+      if (!embeddingAvailable) {
+        return lexicalResults;
+      }
       try {
-        const queryVec = await this.embedDeps.embedding.embed([query]);
-        const vecResults = this.embedDeps.vectorStore.search(queryVec[0], limit * 2);
-        const reranker = new SemanticReranker();
-
-        if (this.embedDeps.mode === 'on') {
-          lexicalResults = reranker.rerankWithDistances(lexicalResults, vecResults);
-        } else if (this.embedDeps.mode === 'shadow') {
-          // Shadow: compute rerank but return lexical order (log comparison)
-          const _reranked = reranker.rerankWithDistances(lexicalResults, vecResults);
-          // Silent comparison — actual logging added in eval phase
-        }
+        return await this.semanticNNSearch(query, limit, options);
       } catch {
-        // AC-C4 fail-open: rerank failed → return lexical order
+        return lexicalResults;
+      }
+    }
+
+    if (searchMode === 'hybrid') {
+      if (!embeddingAvailable) {
+        return lexicalResults;
+      }
+      try {
+        // Pass full candidate pool, not truncated lexicalResults
+        return await this.hybridRRFSearch(query, lexicalCandidates, limit, options);
+      } catch {
+        return lexicalResults;
       }
     }
 
     return lexicalResults;
+  }
+
+  /**
+   * KD-44: Pure vector nearest-neighbor search (mode=semantic).
+   * Skips BM25 entirely — queries evidence_vectors directly.
+   * Hydrates results from evidence_docs in a single IN(...) query (砚砚: no N+1).
+   */
+  private async semanticNNSearch(query: string, limit: number, options?: SearchOptions): Promise<EvidenceItem[]> {
+    const pool = Math.min(Math.max(limit * 4, 20), 100); // 砚砚: generous pool, cap 100
+    const queryVec = await this.embedDeps!.embedding.embed([query]);
+    const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
+    if (nnResults.length === 0) return [];
+
+    // Hydrate from evidence_docs in one query (no N+1)
+    const anchors = nnResults.map((r) => r.anchor);
+    const placeholders = anchors.map(() => '?').join(',');
+    let sql = `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`;
+    const params: unknown[] = [...anchors];
+
+    // Apply ALL SearchOptions filters (P1 fix: semantic must respect status/keywords too)
+    const effectiveKind =
+      options?.kind ?? (options?.scope === 'threads' || options?.scope === 'sessions' ? 'session' : undefined);
+    const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+    if (effectiveKind) {
+      sql += ' AND kind = ?';
+      params.push(effectiveKind);
+    }
+    if (excludeSession) {
+      sql += " AND kind != 'session'";
+    }
+    if (options?.status) {
+      sql += ' AND status = ?';
+      params.push(options.status);
+    }
+    if (options?.keywords?.length) {
+      sql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
+      params.push(...options.keywords.map((kw) => `%"${kw}"%`));
+    }
+
+    const rows = this.db?.prepare(sql).all(...params) as RowShape[];
+    const docMap = new Map(rows.map((r) => [r.anchor, rowToItem(r)]));
+
+    // Return in NN distance order, filtered by what passed scope/kind
+    return nnResults
+      .filter((r) => docMap.has(r.anchor))
+      .map((r) => docMap.get(r.anchor)!)
+      .slice(0, limit);
+  }
+
+  /**
+   * KD-44: Hybrid search — BM25 + vector NN dual-path recall → RRF fusion.
+   * 砚砚 R5: pool = max(limit*4, 20) cap 100, RRF k=60.
+   */
+  private async hybridRRFSearch(
+    query: string,
+    lexicalResults: EvidenceItem[],
+    limit: number,
+    options?: SearchOptions,
+  ): Promise<EvidenceItem[]> {
+    const pool = Math.min(Math.max(limit * 4, 20), 100);
+    const queryVec = await this.embedDeps!.embedding.embed([query]);
+    const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
+
+    // RRF fusion: score = Σ 1/(k + rank_i), k=60
+    const RRF_K = 60;
+    const scores = new Map<string, number>();
+
+    // BM25 ranks
+    for (let i = 0; i < lexicalResults.length; i++) {
+      const anchor = lexicalResults[i].anchor;
+      scores.set(anchor, (scores.get(anchor) ?? 0) + 1 / (RRF_K + i));
+    }
+
+    // NN ranks
+    for (let i = 0; i < nnResults.length; i++) {
+      const anchor = nnResults[i].anchor;
+      scores.set(anchor, (scores.get(anchor) ?? 0) + 1 / (RRF_K + i));
+    }
+
+    // Collect all unique anchors, hydrate missing ones from DB
+    const allAnchors = [...scores.keys()];
+    const lexicalMap = new Map(lexicalResults.map((r) => [r.anchor, r]));
+
+    // P1 fix: hydrate missing NN anchors WITH filters (status/kind/keywords)
+    const missingAnchors = allAnchors.filter((a) => !lexicalMap.has(a));
+    if (missingAnchors.length > 0 && this.db) {
+      const placeholders = missingAnchors.map(() => '?').join(',');
+      let sql = `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`;
+      const params: unknown[] = [...missingAnchors];
+
+      // Apply SearchOptions filters (same as semanticNNSearch)
+      const effectiveKind =
+        options?.kind ?? (options?.scope === 'threads' || options?.scope === 'sessions' ? 'session' : undefined);
+      const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+      if (effectiveKind) {
+        sql += ' AND kind = ?';
+        params.push(effectiveKind);
+      }
+      if (excludeSession) {
+        sql += " AND kind != 'session'";
+      }
+      if (options?.status) {
+        sql += ' AND status = ?';
+        params.push(options.status);
+      }
+      if (options?.keywords?.length) {
+        sql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
+        params.push(...options.keywords.map((kw) => `%"${kw}"%`));
+      }
+
+      const rows = this.db.prepare(sql).all(...params) as RowShape[];
+      for (const row of rows) {
+        lexicalMap.set(row.anchor, rowToItem(row));
+      }
+    }
+
+    // Sort by RRF score descending, return top limit
+    return allAnchors
+      .filter((a) => lexicalMap.has(a))
+      .sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
+      .map((a) => lexicalMap.get(a)!)
+      .slice(0, limit);
   }
 
   async upsert(items: EvidenceItem[]): Promise<void> {

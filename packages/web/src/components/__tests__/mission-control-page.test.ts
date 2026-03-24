@@ -1,3 +1,4 @@
+import type { CatId } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -271,7 +272,7 @@ describe('MissionControlPage', () => {
         title: 'Thread Alpha',
         createdBy: 'u_test',
         lastActiveAt: now - 500,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         backlogItemId: 'seed-situation',
       },
     ]);
@@ -418,7 +419,7 @@ describe('MissionControlPage', () => {
     });
     await flush(act);
 
-    resolveFirstThreads(
+    (resolveFirstThreads as (response: Response) => void)(
       mockResponse(200, {
         threads: [
           {
@@ -426,7 +427,7 @@ describe('MissionControlPage', () => {
             title: 'Thread Old',
             createdBy: 'u_test',
             lastActiveAt: now - 1_000,
-            participants: ['codex'],
+            participants: ['codex' as CatId],
             backlogItemId: itemA.id,
           },
         ],
@@ -466,7 +467,7 @@ describe('MissionControlPage', () => {
         updatedAt: now,
         audit: [{ id: 'a-reject', action: 'created', actor: { kind: 'user', id: 'u_test' }, timestamp: now }],
         suggestion: {
-          catId: 'codex',
+          catId: 'codex' as CatId,
           why: '先给建议',
           plan: '再驳回',
           requestedPhase: 'coding',
@@ -519,7 +520,7 @@ describe('MissionControlPage', () => {
         updatedAt: now,
         audit: [{ id: 'a-approved', action: 'approved', actor: { kind: 'user', id: 'u_test' }, timestamp: now }],
         suggestion: {
-          catId: 'codex',
+          catId: 'codex' as CatId,
           why: '可恢复',
           plan: '手动重试',
           requestedPhase: 'coding',
@@ -575,7 +576,7 @@ describe('MissionControlPage', () => {
     });
 
     expect(container.textContent).toContain('加载 backlog 中...');
-    resolveList?.(mockResponse(200, { items: [] }));
+    (resolveList as unknown as (value: Response) => void)(mockResponse(200, { items: [] }));
     await flush(act);
   });
 
@@ -600,7 +601,7 @@ describe('MissionControlPage', () => {
 
   it('shows self-claim button when policy allows global self-claim', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'global');
+    backend.setSelfClaimScope('codex' as CatId, 'global');
     backend.setItems([
       {
         id: 'seed-self-claim',
@@ -638,7 +639,7 @@ describe('MissionControlPage', () => {
 
   it('hides self-claim button when policy is disabled', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'disabled');
+    backend.setSelfClaimScope('codex' as CatId, 'disabled');
     backend.setItems([
       {
         id: 'seed-self-claim-disabled',
@@ -678,7 +679,7 @@ describe('MissionControlPage', () => {
 
   it('shows once policy blocker reason when self-claim API rejects with once scope conflict', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'once');
+    backend.setSelfClaimScope('codex' as CatId, 'once');
     backend.setItems([
       {
         id: 'seed-self-claim-once',
@@ -744,7 +745,7 @@ describe('MissionControlPage', () => {
 
   it('shows thread policy blocker reason when self-claim API rejects with active lease conflict', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'thread');
+    backend.setSelfClaimScope('codex' as CatId, 'thread');
     backend.setItems([
       {
         id: 'seed-self-claim-thread',
@@ -830,7 +831,7 @@ describe('MissionControlPage', () => {
         dispatchedThreadId: 'thread-lease-ui',
         dispatchedThreadPhase: 'coding',
         lease: {
-          ownerCatId: 'codex',
+          ownerCatId: 'codex' as CatId,
           state: 'active',
           acquiredAt: now - 2_000,
           heartbeatAt: now - 1_000,
@@ -888,7 +889,7 @@ describe('MissionControlPage', () => {
         dispatchedThreadId: 'thread-lease-expired',
         dispatchedThreadPhase: 'coding',
         lease: {
-          ownerCatId: 'codex',
+          ownerCatId: 'codex' as CatId,
           state: 'active',
           acquiredAt: now - 5_000,
           heartbeatAt: now - 4_000,
@@ -958,7 +959,7 @@ describe('MissionControlPage', () => {
         dispatchedThreadId: 'thread-lease-ticking',
         dispatchedThreadPhase: 'coding',
         lease: {
-          ownerCatId: 'codex',
+          ownerCatId: 'codex' as CatId,
           state: 'active',
           acquiredAt: now - 3_000,
           heartbeatAt: now - 2_000,
@@ -1250,7 +1251,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         updatedAt: now,
         audit: [],
         suggestion: {
-          catId: 'codex',
+          catId: 'codex' as CatId,
           why: 'w',
           plan: 'p',
           requestedPhase: 'coding',
@@ -1685,7 +1686,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         title: '[F099] some related thread',
         createdBy: 'u_test',
         lastActiveAt: now - 200,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         // no backlogItemId!
       },
     ]);
@@ -1738,7 +1739,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         title: 'Direct Linked Thread',
         createdBy: 'u_test',
         lastActiveAt: now - 100,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         backlogItemId: 'seed-direct-pref', // direct link
       },
       {
@@ -1746,7 +1747,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         title: '[F088] title match thread',
         createdBy: 'u_test',
         lastActiveAt: now - 300,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         // no backlogItemId — would match by title
       },
     ]);

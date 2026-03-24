@@ -53,11 +53,22 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     }
 
     const { catId } = request.query;
-    if (catId) {
-      const sessions = await sessionChainStore.getChain(catId as CatId, threadId);
+    const callerCatId = request.headers['x-cat-id'] as string | undefined;
+
+    // When caller identifies as a specific cat (MCP tool), restrict to own sessions only.
+    // Query param `catId` is ignored when it differs from caller — prevents cross-cat enumeration.
+    const effectiveCatId = callerCatId ?? catId;
+
+    if (effectiveCatId) {
+      if (callerCatId && catId && catId !== callerCatId) {
+        reply.status(403);
+        return { error: `Cannot query sessions for cat '${catId}' — you are '${callerCatId}'` };
+      }
+      const sessions = await sessionChainStore.getChain(effectiveCatId as CatId, threadId);
       return reply.send({ sessions });
     }
 
+    // No catId filter at all (hub UI god-view) — return all sessions for the thread
     const sessions = await sessionChainStore.getChainByThread(threadId);
     return reply.send({ sessions });
   });

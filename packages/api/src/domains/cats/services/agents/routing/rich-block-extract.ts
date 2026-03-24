@@ -119,6 +119,18 @@ export function isValidRichBlock(b: unknown): b is RichBlock {
       if ('height' in obj && typeof obj.height !== 'number') return false;
       return true;
     }
+    case 'file': {
+      if (typeof obj.url !== 'string' || (obj.url as string).trim().length === 0) return false;
+      if (typeof obj.fileName !== 'string' || (obj.fileName as string).trim().length === 0) return false;
+      if ('mimeType' in obj && typeof obj.mimeType !== 'string') return false;
+      if ('fileSize' in obj && typeof obj.fileSize !== 'number') return false;
+      // P0/P1 security: whitelist safe URL patterns to prevent file exfiltration + XSS
+      const url = (obj.url as string).trim();
+      if (url.includes('..')) return false; // path traversal
+      const isSafe = url.startsWith('/uploads/') || url.startsWith('/api/') || url.startsWith('https://');
+      if (!isSafe) return false;
+      return true;
+    }
     default:
       return false;
   }

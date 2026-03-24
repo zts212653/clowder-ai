@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 
@@ -14,7 +14,10 @@ export interface NavigateEvent {
   action?: 'reveal' | 'open';
   line?: number;
   threadId?: string;
+  eventId?: string;
 }
+
+const OPEN_REVEAL_GRACE_MS = 2000;
 
 export function handleNavigateEvent(
   data: NavigateEvent,
@@ -24,21 +27,35 @@ export function handleNavigateEvent(
     setWorkspaceRevealPath: (path: string | null) => void;
     setWorkspaceOpenFile: (path: string | null, line: number | null, targetWorktreeId?: string | null) => void;
   },
-) {
+  recentOpen?: { path: string; worktreeId?: string; ts: number } | null,
+): boolean {
   if (data.action === 'open') {
     actions.setWorkspaceOpenFile(data.path, data.line ?? null, data.worktreeId ?? null);
-  } else {
-    if (data.worktreeId && data.worktreeId !== currentWorktreeId) {
-      actions.setWorkspaceWorktreeId(data.worktreeId);
-    }
-    actions.setWorkspaceRevealPath(data.path);
+    return true;
   }
+
+  if (
+    recentOpen &&
+    recentOpen.path === data.path &&
+    recentOpen.worktreeId === (data.worktreeId ?? undefined) &&
+    Date.now() - recentOpen.ts < OPEN_REVEAL_GRACE_MS
+  ) {
+    return false;
+  }
+
+  if (data.worktreeId && data.worktreeId !== currentWorktreeId) {
+    actions.setWorkspaceWorktreeId(data.worktreeId);
+  }
+  actions.setWorkspaceRevealPath(data.path);
+  return true;
 }
 
 export function useWorkspaceNavigate(worktreeId: string | null, threadId: string | null) {
   const setWorkspaceWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
   const setWorkspaceRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
   const setWorkspaceOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
+  const lastEventIdRef = useRef<string | null>(null);
+  const recentOpenRef = useRef<{ path: string; worktreeId?: string; ts: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,11 +73,21 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
 
       const handler = (data: NavigateEvent) => {
         if (!shouldAcceptNavigate(threadId, data.threadId)) return;
-        handleNavigateEvent(data, worktreeId, {
-          setWorkspaceWorktreeId,
-          setWorkspaceRevealPath,
-          setWorkspaceOpenFile,
-        });
+        if (data.eventId && data.eventId === lastEventIdRef.current) return;
+        if (data.eventId) lastEventIdRef.current = data.eventId;
+        const processed = handleNavigateEvent(
+          data,
+          worktreeId,
+          {
+            setWorkspaceWorktreeId,
+            setWorkspaceRevealPath,
+            setWorkspaceOpenFile,
+          },
+          recentOpenRef.current,
+        );
+        if (processed && data.action === 'open') {
+          recentOpenRef.current = { path: data.path, worktreeId: data.worktreeId, ts: Date.now() };
+        }
       };
 
       socket.on('workspace:navigate', handler);

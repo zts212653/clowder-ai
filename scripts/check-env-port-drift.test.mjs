@@ -554,6 +554,45 @@ excluded:
       );
     });
 
+    it('sync-to-opensource.sh supports release-intended source snapshot tags and provenance mapping', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      assert.match(
+        content,
+        /--release-tag=\*\) RELEASE_TAG="\$\{arg#--release-tag=\}" ;;/,
+        'sync-to-opensource should parse --release-tag',
+      );
+      assert.match(
+        content,
+        /SOURCE_SNAPSHOT_TAG="\$\(derive_source_snapshot_tag "\$RELEASE_TAG"\)"/,
+        'sync-to-opensource should derive a source snapshot tag from the release tag',
+      );
+      assert.match(
+        content,
+        /"release_tag": \$RELEASE_TAG_JSON,/,
+        'sync-to-opensource should persist release_tag in .sync-provenance.json',
+      );
+      assert.match(
+        content,
+        /"source_snapshot_tag": \$SOURCE_SNAPSHOT_TAG_JSON,/,
+        'sync-to-opensource should persist source_snapshot_tag in .sync-provenance.json',
+      );
+      assert.match(
+        content,
+        /ensure_source_snapshot_tag "\$SOURCE_SNAPSHOT_TAG" "\$SOURCE_SHA" "\$RELEASE_TAG"/,
+        'sync-to-opensource should auto-create the source snapshot tag before touching the real target',
+      );
+      assert.match(
+        content,
+        /git -C "\$SOURCE_DIR" tag -a "\$tag" "\$sha" -m "source snapshot for clowder-ai \$release_tag"/,
+        'release-intended sync should create an annotated source snapshot tag',
+      );
+      assert.match(
+        content,
+        /git -C "\$SOURCE_DIR" push origin "refs\/tags\/\$tag"/,
+        'release-intended sync should publish the source snapshot tag to origin',
+      );
+    });
+
     it('sync-hotfix.sh selects the latest sync baseline by mirrored target tag commit time', () => {
       const hotfix = readFileSync(resolve(ROOT, 'scripts/sync-hotfix.sh'), 'utf-8');
       assert.match(
@@ -614,11 +653,11 @@ describe(
   'Sync validation enforces static quality gates',
   { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
   () => {
-    it('validate mode stays aligned with post-sync static gates', () => {
+    it('validate mode runs the source-owned public gate on a temp target', () => {
       const content = readSyncScript();
       const staticGateFn = readFunctionBody(content, 'run_static_quality_gates');
       const validateBlock = content.match(
-        /echo -e "\$\{GREEN\}\[Step 5\/6\] Validate \(install \+ static gates \+ build \+ port check\)\.\.\.\$\{NC\}"[\s\S]*?echo -e " {2}\$\{GREEN\}✓ Validate passed\$\{NC\}"/,
+        /Validate temp target \(source-owned public gate\)[\s\S]*?\[VALIDATE\] Export at:/,
       )?.[0];
 
       assert.match(
@@ -628,24 +667,79 @@ describe(
       );
       assert.ok(validateBlock, 'expected to find the validate block in sync-to-opensource.sh');
       assert.ok(
-        validateBlock.includes('run_static_quality_gates false'),
-        'validate mode should invoke the same non-mutating static gates as the post-sync path',
+        validateBlock.includes('prepare_validation_target'),
+        'validate mode should materialize a temp target before running the public gate',
+      );
+      assert.ok(
+        validateBlock.includes('sync_filtered_into_target "$VALIDATION_TARGET_DIR"'),
+        'validate mode should apply the exact exported payload to the temp target',
+      );
+      assert.ok(
+        validateBlock.includes('run_target_public_gate "$VALIDATION_TARGET_DIR"'),
+        'validate mode should reuse the same target/public gate as a real full sync',
       );
     });
 
-    it('post-sync fast/full validation keeps static gates before startup acceptance split', () => {
+    it('full sync runs the temp target public gate before touching the real target', () => {
       const content = readSyncScript();
-      const step6Block = content.match(/# 6b: Install \+ build[\s\S]*?if \[ "\$FAST_VALIDATE" = true \]; then/)?.[0];
+      const tempGateIndex = content.indexOf('Source-owned public gate (temp target)...');
+      const realSyncIndex = content.indexOf('sync_filtered_into_target "$TARGET_DIR"');
+      const step6SummaryIndex = content.indexOf('[Step 6/6] Sync committed after source-owned public gate passed');
 
-      assert.ok(step6Block, 'expected to find the Step 6 validation block in sync-to-opensource.sh');
+      assert.notEqual(tempGateIndex, -1, 'expected to find the temp target public gate block');
+      assert.notEqual(realSyncIndex, -1, 'expected to find the real target sync call');
       assert.ok(
-        step6Block.includes('run_static_quality_gates false'),
-        'Step 6 should invoke run_static_quality_gates with autofix disabled',
+        tempGateIndex < realSyncIndex,
+        'the real target sync must happen only after the temp target public gate block',
       );
-      assert.ok(
-        step6Block.indexOf('run_static_quality_gates false') <
-          step6Block.indexOf('if [ "$FAST_VALIDATE" = true ]; then'),
-        '--fast-validate should only skip startup acceptance, not static gates',
+      assert.ok(step6SummaryIndex > realSyncIndex, 'the final summary should only run after the real target sync');
+      assert.match(
+        content,
+        /run_target_public_gate "\$VALIDATION_TARGET_DIR"/,
+        'full sync should reuse run_target_public_gate for the temp target check',
+      );
+    });
+
+    it('temp target public gate appends the validation checkout to PROJECT_ALLOWED_ROOTS', () => {
+      const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
+      assert.match(
+        gate,
+        /gate_target_real="\$\(resolve_physical_path "\$gate_target"\)"/,
+        'run_target_public_gate should canonicalize the temp target root before exporting PROJECT_ALLOWED_ROOTS',
+      );
+      assert.match(
+        gate,
+        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+pnpm --filter @cat-cafe\/api run test:public/,
+        'test:public in the temp target should treat the validation checkout as an allowed project root',
+      );
+      assert.match(
+        gate,
+        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+API_SERVER_PORT=\$accept_api_port MEMORY_STORE=1 NODE_ENV=test/,
+        'API startup acceptance should reuse the same temp-target allow-root so projectPath-based dispatch stays representative',
+      );
+    });
+
+    it('temp target public gate preserves full test:public output before tailing', () => {
+      const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
+      assert.match(
+        gate,
+        /test_public_log=\$\(mktemp "\$\{TMPDIR:-\/tmp\}\/cat-cafe-testpublic\.XXXXXX"\)/,
+        'run_target_public_gate should capture test:public output in a dedicated temp log',
+      );
+      assert.match(
+        gate,
+        /pnpm --filter @cat-cafe\/api run test:public >"\$test_public_log" 2>&1/,
+        'test:public should write its full output to a log file before summary tailing',
+      );
+      assert.match(
+        gate,
+        /tail -20 "\$test_public_log"/,
+        'failure path should print a larger tail from the captured test:public log',
+      );
+      assert.doesNotMatch(
+        gate,
+        /pnpm --filter @cat-cafe\/api run test:public 2>&1 \| tail -5/,
+        'test:public should not pipe directly into tail, or failures become opaque',
       );
     });
   },
@@ -678,23 +772,57 @@ describe(
       const content = readSyncScript();
       assert.doesNotMatch(
         content,
-        /ACCEPT_API_PORT=\$\{API_SERVER_PORT:-3004\}/,
+        /ACCEPT_API_PORT=\$\{API_SERVER_PORT:-3004\}|accept_api_port=\$\{API_SERVER_PORT:-3004\}/,
         'startup acceptance must not inherit API_SERVER_PORT from the parent shell',
       );
       assert.doesNotMatch(
         content,
-        /ACCEPT_WEB_PORT=\$\{FRONTEND_PORT:-3003\}/,
+        /ACCEPT_WEB_PORT=\$\{FRONTEND_PORT:-3003\}|accept_web_port=\$\{FRONTEND_PORT:-3003\}/,
         'startup acceptance must not inherit FRONTEND_PORT from the parent shell',
       );
       assert.match(
         content,
-        /ACCEPT_API_PORT="\$\(find_available_port 3004\)"/,
+        /accept_api_port="\$\(find_available_port 3004\)"/,
         'startup acceptance should choose its API port from a script-owned helper',
       );
       assert.match(
         content,
-        /ACCEPT_WEB_PORT="\$\(find_available_port 3003 "\$ACCEPT_API_PORT"\)"/,
+        /accept_web_port="\$\(find_available_port 3003 "\$accept_api_port"\)"/,
         'startup acceptance should choose a distinct frontend port from a script-owned helper',
+      );
+    });
+
+    it('startup acceptance does not treat the public Preview Gateway port as forbidden leakage', () => {
+      const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
+      assert.match(
+        gate,
+        /forbidden_ports="3001\|3002\|3011\|3012\|4111\|4000\|6398\|6399"/,
+        'startup acceptance should only block internal/runtime ports, not the public Preview Gateway default',
+      );
+      assert.doesNotMatch(
+        gate,
+        /forbidden_ports=.*4100/,
+        'startup acceptance must not reject the exported Preview Gateway default port 4100',
+      );
+    });
+  },
+);
+
+describe(
+  'Public-facing skill docs avoid home-only API defaults',
+  { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
+  () => {
+    it('workspace-navigator uses API_SERVER_PORT env instead of hardcoded 3002 fallbacks', () => {
+      const content = readFileSync(resolve(ROOT, 'cat-cafe-skills/workspace-navigator/SKILL.md'), 'utf-8');
+      assert.doesNotMatch(
+        content,
+        /API_SERVER_PORT=3002|API_SERVER_PORT:-3002/,
+        'workspace-navigator should not hardcode the home-only API default in public-facing usage guidance',
+      );
+      assert.match(
+        content,
+        /API_PORT="\$\{API_SERVER_PORT:\?set API_SERVER_PORT before calling Navigate API\}"/,
+        'workspace-navigator should teach readers to source the API port from the runtime environment',
       );
     });
   },

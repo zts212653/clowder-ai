@@ -49,20 +49,21 @@ describe('createMemoryServices', () => {
     assert.equal(services.vectorStore, undefined);
   });
 
-  it('embedMode=on creates embedding service (fail-open on load)', async () => {
+  it('embedMode=on creates embedding service (HTTP client, fail-open)', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
 
-    // In test env: load() will fail (no @huggingface/transformers or memory guard)
-    // Factory should NOT throw — fail-open pattern
+    // EmbeddingService is now an HTTP client (PR #608, LL-034).
+    // load() probes embed-api /health — may succeed if sidecar is running,
+    // or fail-open if not. Either way, factory should NOT throw.
     const services = await createMemoryServices({
       type: 'sqlite',
       sqlitePath: ':memory:',
-      embed: { embedMode: 'on', maxModelMemMb: 1 }, // 1MB guard will trigger
+      embed: { embedMode: 'on' },
     });
 
-    // EmbeddingService was created but load() failed → isReady()=false
+    // EmbeddingService should exist regardless of sidecar status
     assert.ok(services.embeddingService, 'embeddingService should exist');
-    assert.equal(services.embeddingService.isReady(), false, 'should not be ready after failed load');
-    // vectorStore may or may not exist depending on sqlite-vec availability
+    // isReady() depends on whether embed-api sidecar is running — both are valid
+    // The important thing is that factory didn't throw
   });
 });

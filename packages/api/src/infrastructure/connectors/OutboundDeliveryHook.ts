@@ -140,6 +140,41 @@ export class OutboundDeliveryHook {
                   ...('text' in block && block.text ? { text: block.text as string } : {}),
                 });
               }
+              // Phase J: Send file blocks as file messages
+              // P0 security: file blocks MUST resolve to absPath — never pass raw url to adapter
+              // (raw url could be an arbitrary local path like /etc/passwd, exploitable via Telegram InputFile)
+              if (block.kind === 'file' && 'url' in block && block.url) {
+                const fileUrl = block.url as string;
+                const absPath = resolve?.(fileUrl);
+                const fileName = 'fileName' in block ? (block.fileName as string) : undefined;
+                if (absPath) {
+                  this.opts.log.info(
+                    { blockKind: block.kind, url: fileUrl, absPath, fileName },
+                    '[OutboundDeliveryHook] Phase J: sending file block',
+                  );
+                  await adapter.sendMedia(binding.externalChatId, {
+                    type: 'file',
+                    absPath,
+                    ...(fileName ? { fileName } : {}),
+                  });
+                } else if (fileUrl.startsWith('https://')) {
+                  // External HTTPS URLs are safe to pass through (Feishu adapter downloads + uploads)
+                  this.opts.log.info(
+                    { blockKind: block.kind, url: fileUrl, fileName },
+                    '[OutboundDeliveryHook] Phase J: sending file block via external URL',
+                  );
+                  await adapter.sendMedia(binding.externalChatId, {
+                    type: 'file',
+                    url: fileUrl,
+                    ...(fileName ? { fileName } : {}),
+                  });
+                } else {
+                  this.opts.log.warn(
+                    { blockKind: block.kind, url: fileUrl },
+                    '[OutboundDeliveryHook] Phase J: file block skipped — resolver failed and url is not https',
+                  );
+                }
+              }
               if (block.kind === 'media_gallery' && 'items' in block) {
                 const items = (block as { items?: Array<{ url?: string; type?: string }> }).items;
                 if (items) {

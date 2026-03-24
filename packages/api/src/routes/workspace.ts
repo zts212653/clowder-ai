@@ -16,7 +16,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, relative } from 'node:path';
@@ -672,7 +672,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       return { error: 'Internal error' };
     }
 
-    const eventData = { path: filePath, worktreeId, action, line, threadId };
+    const eventData = { path: filePath, worktreeId, action, line, threadId, eventId: randomUUID() };
     if (worktreeId) {
       opts.socketEmit?.('workspace:navigate', eventData, `worktree:${worktreeId}`);
       opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');

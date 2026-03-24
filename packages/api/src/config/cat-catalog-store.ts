@@ -367,7 +367,12 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
     return catalogPath;
   }
 
-  const template = JSON.parse(readFileSync(templatePath, 'utf-8')) as CatCafeConfig;
+  // Prefer cat-config.json (real runtime config with owner data) over cat-template.json
+  // for bootstrapping the catalog. The template is only used for fresh installations
+  // where cat-config.json doesn't exist (e.g. new clones from the open-source repo).
+  const legacyConfigPath = resolve(projectRoot, 'cat-config.json');
+  const sourcePath = existsSync(legacyConfigPath) ? legacyConfigPath : templatePath;
+  const template = JSON.parse(readFileSync(sourcePath, 'utf-8')) as CatCafeConfig;
   const runtimeCatalog = filterBootstrapCatalog(template, projectRoot);
   mkdirSync(dirname(catalogPath), { recursive: true });
   writeFileAtomic(catalogPath, `${JSON.stringify(runtimeCatalog, null, 2)}\n`);

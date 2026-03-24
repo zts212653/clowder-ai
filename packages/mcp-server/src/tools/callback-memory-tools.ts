@@ -61,7 +61,12 @@ export const callbackMemoryTools = [
   // the public search_evidence / reflect tools (route supports both auth modes).
   {
     name: 'cat_cafe_retain_memory_callback',
-    description: 'Retain a durable memory item through Cat Cafe callback endpoint.',
+    description:
+      'Retain a durable memory item through Cat Cafe callback endpoint. ' +
+      'Use when you discover an important insight, decision, or lesson that should persist across sessions. ' +
+      'Examples: architectural decisions made during discussion, gotchas discovered while debugging, ' +
+      'cross-cat agreements. NOT for transient notes — only for knowledge worth remembering long-term. ' +
+      'TIP: Add descriptive tags (e.g. ["redis", "pitfall"]) so future search_evidence queries can find it.',
     inputSchema: callbackRetainMemoryInputSchema,
     handler: handleCallbackRetainMemory,
   },

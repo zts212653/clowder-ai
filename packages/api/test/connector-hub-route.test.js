@@ -39,6 +39,100 @@ async function buildApp(overrides = {}) {
   return { app, listCalls };
 }
 
+describe('GET /api/connector/weixin/qrcode-status — adapter not ready', () => {
+  it('P1: returns 503 when QR confirms but weixinAdapter is not available (cloud review a312a53f)', async () => {
+    // Arrange: inject a mock fetch that makes pollQrCodeStatus return 'confirmed'
+    const { WeixinAdapter: WA } = await import('../dist/infrastructure/connectors/adapters/WeixinAdapter.js');
+    const originalFetch = globalThis.fetch;
+    WA._injectStaticFetch(async () => ({
+      ok: true,
+      json: async () => ({ errcode: 0, status: 2, bot_token: 'tok_secret_123' }),
+    }));
+
+    const app = Fastify();
+    // Register with weixinAdapter deliberately missing (simulates gateway not started)
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      weixinAdapter: undefined,
+    });
+    await app.ready();
+
+    // Act
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/connector/weixin/qrcode-status?qrPayload=test-payload',
+      headers: AUTH_HEADERS,
+    });
+
+    // Assert: should NOT return confirmed with 200 — token would be lost
+    const body = JSON.parse(res.body);
+    assert.notEqual(res.statusCode, 200, 'Should not return 200 when adapter is missing');
+    assert.equal(res.statusCode, 503);
+    assert.ok(body.error, 'Response should contain error message');
+    assert.equal(body.status, undefined, 'Should not leak confirmed status');
+
+    // Cleanup
+    WA._injectStaticFetch(originalFetch);
+    await app.close();
+  });
+
+  it('P1: returns confirmed when adapter IS available and QR confirms', async () => {
+    const { WeixinAdapter: WA } = await import('../dist/infrastructure/connectors/adapters/WeixinAdapter.js');
+    const originalFetch = globalThis.fetch;
+    WA._injectStaticFetch(async () => ({
+      ok: true,
+      json: async () => ({ errcode: 0, status: 2, bot_token: 'tok_secret_456' }),
+    }));
+
+    let tokenSet = null;
+    let pollingStarted = false;
+    const mockAdapter = {
+      setBotToken(t) {
+        tokenSet = t;
+      },
+      hasBotToken() {
+        return tokenSet != null;
+      },
+      isPolling() {
+        return pollingStarted;
+      },
+    };
+
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      weixinAdapter: mockAdapter,
+      startWeixinPolling: () => {
+        pollingStarted = true;
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/connector/weixin/qrcode-status?qrPayload=test-payload',
+      headers: AUTH_HEADERS,
+    });
+
+    const body = JSON.parse(res.body);
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.status, 'confirmed');
+    assert.equal(tokenSet, 'tok_secret_456', 'Token should be set on adapter');
+    assert.equal(pollingStarted, true, 'Polling should be started');
+
+    WA._injectStaticFetch(originalFetch);
+    await app.close();
+  });
+});
+
 describe('GET /api/connector/hub-threads', () => {
   it('returns 401 when only a spoofed userId query param is provided', async () => {
     const { app } = await buildApp();
