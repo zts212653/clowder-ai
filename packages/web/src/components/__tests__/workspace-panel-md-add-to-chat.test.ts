@@ -113,6 +113,7 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
       pendingPreviewAutoOpen: null,
       clearPendingPreviewAutoOpen: vi.fn(),
       restoreWorkspaceTabs: vi.fn(),
+      _workspaceFileSetAt: { ts: 0, threadId: null },
     };
     return sel(store);
   });
@@ -273,6 +274,7 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
         pendingPreviewAutoOpen: null,
         clearPendingPreviewAutoOpen: vi.fn(),
         restoreWorkspaceTabs: vi.fn(),
+        _workspaceFileSetAt: { ts: 0, threadId: null },
       };
       return sel(store);
     });

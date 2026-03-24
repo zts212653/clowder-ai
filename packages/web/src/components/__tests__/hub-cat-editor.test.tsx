@@ -22,6 +22,7 @@ import {
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
+import type { ProfileItem } from '@/components/hub-provider-profiles.types';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -102,9 +103,10 @@ describe('HubCatEditor', () => {
       caution: '',
       strengths: '',
       client: 'openai',
-      providerProfileId: '',
+      accountRef: '',
       defaultModel: 'gpt-5.4',
       commandArgs: '',
+      cliConfigArgs: [],
       sessionChain: 'true',
       maxPromptTokens: '',
       maxContextTokens: '',
@@ -143,9 +145,10 @@ describe('HubCatEditor', () => {
       caution: '',
       strengths: '',
       client: 'openai',
-      providerProfileId: '',
+      accountRef: '',
       defaultModel: 'gpt-5.4',
       commandArgs: '',
+      cliConfigArgs: [],
       sessionChain: 'true',
       maxPromptTokens: '',
       maxContextTokens: '',
@@ -184,9 +187,10 @@ describe('HubCatEditor', () => {
       caution: '',
       strengths: '',
       client: 'antigravity',
-      providerProfileId: '',
+      accountRef: '',
       defaultModel: 'gemini-bridge',
       commandArgs: '',
+      cliConfigArgs: [],
       sessionChain: 'true',
       maxPromptTokens: '',
       maxContextTokens: '',
@@ -355,9 +359,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     // Save should be blocked — bare model without providerId/ prefix is rejected.
-    const postCall = mockApiFetch.mock.calls.find(
-      ([path, init]: [string, RequestInit | undefined]) => path === '/api/cats' && init?.method === 'POST',
-    );
+    const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
     expect(postCall).toBeUndefined();
     expect(container.textContent).toContain('providerId/modelId');
   });
@@ -374,6 +376,7 @@ describe('HubCatEditor', () => {
             displayName: 'Claude (OAuth)',
             name: 'Claude (OAuth)',
             authType: 'oauth',
+            kind: 'builtin',
             builtin: true,
             client: 'anthropic',
             models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
@@ -387,6 +390,7 @@ describe('HubCatEditor', () => {
             displayName: 'Codex Sponsor',
             name: 'Codex Sponsor',
             authType: 'api_key',
+            kind: 'api_key',
             builtin: false,
             models: ['gpt-5.4-mini'],
             hasApiKey: true,
@@ -513,7 +517,7 @@ describe('HubCatEditor', () => {
   });
 
   it('keeps builtin accounts client-specific while exposing all API key accounts', () => {
-    const profiles = [
+    const profiles: ProfileItem[] = [
       {
         id: 'claude-oauth',
         provider: 'claude-oauth',
@@ -521,6 +525,7 @@ describe('HubCatEditor', () => {
         name: 'Claude (OAuth)',
         authType: 'oauth',
         protocol: 'anthropic',
+        kind: 'builtin',
         builtin: true,
         mode: 'subscription',
         models: ['claude-opus-4-6'],
@@ -535,6 +540,7 @@ describe('HubCatEditor', () => {
         name: 'Claude Sponsor',
         authType: 'api_key',
         protocol: 'anthropic',
+        kind: 'api_key',
         builtin: false,
         mode: 'api_key',
         models: ['claude-opus-4-6'],
@@ -549,6 +555,7 @@ describe('HubCatEditor', () => {
         name: 'Codex (OAuth)',
         authType: 'oauth',
         protocol: 'openai',
+        kind: 'builtin',
         builtin: true,
         mode: 'subscription',
         models: ['gpt-5.4'],
@@ -563,6 +570,7 @@ describe('HubCatEditor', () => {
         name: 'Codex Sponsor',
         authType: 'api_key',
         protocol: 'openai',
+        kind: 'api_key',
         builtin: false,
         mode: 'api_key',
         models: ['gpt-5.4'],

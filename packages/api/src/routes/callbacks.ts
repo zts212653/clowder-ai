@@ -206,6 +206,22 @@ const richBlockSchema = z.discriminatedUnion('kind', [
     selectedIds: z.array(z.string()).optional(),
     groupId: z.string().min(1).optional(),
   }),
+  // F088 Phase J: file attachment block
+  z.object({
+    id: z.string().min(1),
+    kind: z.literal('file'),
+    v: z.literal(1),
+    url: z
+      .string()
+      .min(1)
+      .refine(
+        (u) => !u.includes('..') && (/^\/uploads\//.test(u) || /^\/api\//.test(u) || /^https:\/\//.test(u)),
+        'file url must start with /uploads/, /api/, or https://',
+      ),
+    fileName: z.string().min(1),
+    mimeType: z.string().optional(),
+    fileSize: z.number().int().min(0).optional(),
+  }),
   // F120 Phase C: html_widget — inline sandboxed HTML/JS visualization
   z.object({
     id: z.string().min(1),

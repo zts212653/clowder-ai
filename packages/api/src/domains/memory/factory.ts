@@ -1,7 +1,7 @@
 // F102: Memory service factory — creates SQLite-backed memory services
 
 import { EmbeddingService } from './EmbeddingService.js';
-import { IndexBuilder, type MessageListFn, type ThreadListFn } from './IndexBuilder.js';
+import { type ExcludeThreadIdsFn, IndexBuilder, type MessageListFn, type ThreadListFn } from './IndexBuilder.js';
 import type {
   EmbedConfig,
   IEmbeddingService,
@@ -50,6 +50,8 @@ export interface MemoryConfig {
   threadListFn?: ThreadListFn;
   /** Phase E-3: callback that returns messages for a given thread (passage indexing) */
   messageListFn?: MessageListFn;
+  /** Callback returning thread IDs to exclude from session digest indexing (e.g. game threads) */
+  excludeThreadIdsFn?: ExcludeThreadIdsFn;
 }
 
 export async function createMemoryServices(config: MemoryConfig): Promise<MemoryServices> {
@@ -96,6 +98,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     config.transcriptDataDir,
     config.threadListFn,
     config.messageListFn,
+    config.excludeThreadIdsFn,
   );
 
   // Wire rerank deps into store for search-time

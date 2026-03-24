@@ -416,4 +416,146 @@ describe('OutboundDeliveryHook', () => {
       assert.equal(richSent.length, 1, 'sendRichMessage still called for all blocks');
     });
   });
+
+  // Phase J: File block → sendMedia delivery
+  describe('file block delivery via sendMedia', () => {
+    it('calls sendMedia for file blocks with url', async () => {
+      const mediaSent = [];
+      const richSent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply(chatId, content) {
+          feishuMock.sent.push({ chatId, content });
+        },
+        async sendRichMessage(chatId, text, blocks, catName) {
+          richSent.push({ chatId, text, blocks, catName });
+        },
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: (url) => {
+          if (url.startsWith('/uploads/')) return `/abs${url}`;
+          return undefined;
+        },
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [{ id: 'f1', kind: 'file', v: 1, url: '/uploads/report.pdf', fileName: '调研报告.pdf' }];
+      await hook.deliver('thread-abc', 'Here is the report', 'opus', blocks);
+
+      assert.equal(mediaSent.length, 1, 'sendMedia should be called for file block');
+      assert.equal(mediaSent[0].chatId, 'chat-1');
+      assert.equal(mediaSent[0].payload.type, 'file');
+      assert.equal(mediaSent[0].payload.absPath, '/abs/uploads/report.pdf');
+    });
+
+    it('resolves absPath via mediaPathResolver for file blocks', async () => {
+      const mediaSent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply() {},
+        async sendRichMessage() {},
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: (url) => {
+          if (url.startsWith('/uploads/')) return `/abs/path${url}`;
+          return undefined;
+        },
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [{ id: 'f1', kind: 'file', v: 1, url: '/uploads/doc.docx', fileName: 'doc.docx' }];
+      await hook.deliver('thread-abc', 'Doc attached', 'opus', blocks);
+
+      assert.equal(mediaSent.length, 1);
+      assert.equal(mediaSent[0].payload.absPath, '/abs/path/uploads/doc.docx');
+    });
+
+    it('does not call sendMedia when adapter lacks sendMedia', async () => {
+      const richSent = [];
+      const noMediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply(chatId, content) {
+          feishuMock.sent.push({ chatId, content });
+        },
+        async sendRichMessage(chatId, text, blocks, catName) {
+          richSent.push({ chatId, text, blocks, catName });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', noMediaAdapter]]),
+        log: noopLog(),
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [{ id: 'f1', kind: 'file', v: 1, url: '/uploads/report.pdf', fileName: 'report.pdf' }];
+      // Should not throw
+      await hook.deliver('thread-abc', 'Text', 'opus', blocks);
+      assert.equal(richSent.length, 1, 'should fall back to sendRichMessage');
+    });
+
+    // P0 security: when resolver fails, do NOT pass raw url to adapter
+    it('does not pass unresolved url to sendMedia (prevents file exfiltration)', async () => {
+      const mediaSent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply() {},
+        async sendRichMessage() {},
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: () => undefined, // resolver rejects all paths
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [{ id: 'f1', kind: 'file', v: 1, url: '/uploads/secret.pdf', fileName: 'secret.pdf' }];
+      await hook.deliver('thread-abc', 'Text', 'opus', blocks);
+
+      // File blocks should ONLY be sent when resolver succeeds (unlike images which have URL fallback)
+      assert.equal(mediaSent.length, 0, 'file block must not be sent when resolver fails');
+    });
+
+    // P2: fileName should be passed through to adapter
+    it('passes fileName to sendMedia for file blocks', async () => {
+      const mediaSent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply() {},
+        async sendRichMessage() {},
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: (url) => `/abs${url}`,
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [{ id: 'f1', kind: 'file', v: 1, url: '/uploads/report.pdf', fileName: '调研报告.pdf' }];
+      await hook.deliver('thread-abc', 'Report', 'opus', blocks);
+
+      assert.equal(mediaSent.length, 1);
+      assert.equal(mediaSent[0].payload.fileName, '调研报告.pdf', 'fileName should be passed through');
+    });
+  });
 });

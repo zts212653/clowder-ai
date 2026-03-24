@@ -494,6 +494,20 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'connector',
     sensitive: true,
   },
+  {
+    name: 'DINGTALK_APP_KEY',
+    defaultValue: '(未设置 → 不启用)',
+    description: '钉钉应用 AppKey',
+    category: 'connector',
+    sensitive: false,
+  },
+  {
+    name: 'DINGTALK_APP_SECRET',
+    defaultValue: '(未设置)',
+    description: '钉钉应用 AppSecret',
+    category: 'connector',
+    sensitive: true,
+  },
 
   // --- codex ---
   {

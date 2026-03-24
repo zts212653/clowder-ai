@@ -8,6 +8,8 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CatData } from '@/hooks/useCatData';
+import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -38,7 +40,7 @@ vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 describe('ChatMessage dual timestamp (deliveredAt)', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let ChatMessage: React.FC<{ message: Record<string, unknown> }>;
+  let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
 
   beforeAll(async () => {
     (globalThis as { React?: typeof React }).React = React;
@@ -72,6 +74,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
           message: {
             id: 'msg-1',
             type: 'user',
@@ -99,6 +102,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
           message: {
             id: 'msg-2',
             type: 'user',
@@ -123,6 +127,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
           message: {
             id: 'msg-3',
             type: 'user',

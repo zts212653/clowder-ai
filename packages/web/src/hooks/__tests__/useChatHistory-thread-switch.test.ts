@@ -110,6 +110,7 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: false,
+          activeInvocations: {},
           intentMode: null,
           targetCats: [],
           catStatuses: {},
@@ -155,6 +156,7 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: false,
+          activeInvocations: {},
           intentMode: null,
           targetCats: [],
           catStatuses: {},
@@ -212,6 +214,7 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: false,
+          activeInvocations: {},
           intentMode: null,
           targetCats: [],
           catStatuses: {},
@@ -248,6 +251,7 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: true,
+          activeInvocations: {},
           intentMode: 'execute',
           targetCats: ['opus'],
           catStatuses: { opus: 'streaming' },
@@ -358,7 +362,7 @@ describe('useChatHistory thread switch ordering', () => {
     expect(stateAfterThreadSwitch.targetCats).toEqual(['opus']);
     expect(stateAfterThreadSwitch.catStatuses).toEqual({ opus: 'streaming' });
 
-    resolveMessages?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+    resolveMessages!(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
     await act(async () => {
       await Promise.resolve();
     });

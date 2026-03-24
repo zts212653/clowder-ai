@@ -50,7 +50,7 @@ Step 3: 调 API — 让 Hub 前端导航
 
 | 铲屎官说的 | 搜索策略 | 示例命令 |
 |-----------|----------|---------|
-| "打开日志" / "看日志" | 日志在 `packages/api/data/logs/` 下 | `glob("packages/api/data/logs/**")` |
+| "打开日志" / "看日志" | **快捷方式：右侧状态面板底部「运行日志 → 查看日志」按钮**。也可用 Navigate API | 按钮会自动打开最新 .log 文件 |
 | "看审计日志" | 审计日志在 `packages/api/data/audit/` 下 | `glob("packages/api/data/audit/**")` |
 | "打开 F131 的文档" | Feature 文档在 `docs/features/` 下 | `glob("docs/features/F131*")` |
 | "看看 F131 的设计图" | Pencil 设计文件 | `glob("**/*F131*.pen")` 或 `glob("designs/*F131*")` |
@@ -100,26 +100,37 @@ Step 3: 调 API — 让 Hub 前端导航
 | 文件（如 `docs/features/F131-workspace-navigator.md`） | `open` | 打开文件查看器显示文件内容 |
 | 不确定 | `reveal` | 安全默认——展开到那里让铲屎官自己看 |
 
+### 获取 API 端口
+
+Cat Cafe API 端口**不要写死**，通过以下方式确定：
+
+1. **优先读运行态 env**：直接用 `API_SERVER_PORT`
+2. **没有 env 时按关系推导**：`API port = Frontend port + 1`
+3. **验证**：`curl -s http://localhost:${API_PORT}/api/workspace/worktrees` 能返回 JSON 即可
+
+> 注意：不同 profile / 发布通道的默认端口不一样。`3001` 是 Hub 前端（Next.js），**不是** API 后端；Navigate API 始终走 Fastify 的 `API_SERVER_PORT`。
+
 ### 调用示例
 
 ```bash
+# 先拿当前运行态的 API 端口；没有就先去看 .env / 启动日志，不要写死
+API_PORT="${API_SERVER_PORT:?set API_SERVER_PORT before calling Navigate API}"
+
 # 打开日志目录
-curl -X POST http://localhost:3003/api/workspace/navigate \
+curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
   -H "Content-Type: application/json" \
   -d '{"path": "packages/api/data/logs/api/", "action": "reveal", "worktreeId": "cat-cafe-runtime"}'
 
 # 打开 Feature 文档
-curl -X POST http://localhost:3003/api/workspace/navigate \
+curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
   -H "Content-Type: application/json" \
   -d '{"path": "docs/features/F131-workspace-navigator.md", "action": "open", "worktreeId": "cat-cafe"}'
 
 # 跨 worktree 打开 runtime 日志
-curl -X POST http://localhost:3003/api/workspace/navigate \
+curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
   -H "Content-Type: application/json" \
   -d '{"path": "packages/api/data/logs/api/", "action": "reveal", "worktreeId": "cat-cafe-runtime"}'
 ```
-
-> **怎么获取 API 端口**：Cat Cafe API 默认跑在 3001。如果不确定，可以 `curl -s http://localhost:3003/healthz` 验证。
 
 ## 什么时候主动用
 
@@ -128,6 +139,16 @@ curl -X POST http://localhost:3003/api/workspace/navigate \
 - 讨论 Feature 时提到 spec → 主动打开 spec 文档
 - Debug 时提到某个文件 → 主动打开让铲屎官和你一起看
 - 铲屎官说"看看设计图" → 找到 .pen 文件并打开
+
+## 面板快捷入口（F130）
+
+右侧状态面板底部有内置快捷按钮，不需要走 Navigate API：
+
+| 按钮 | 位置 | 效果 |
+|------|------|------|
+| **运行日志 → 查看日志** | 右侧状态面板，AuditExplorerPanel 下方 | 自动展开到 `packages/api/data/logs/api/` 并打开最新 `.log` 文件 |
+
+铲屎官说"看日志"时，**告诉铲屎官点右侧面板的按钮**比你调 API 更快。你也可以用 Navigate API 代替。
 
 ## 不要做的事
 

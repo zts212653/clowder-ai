@@ -16,12 +16,12 @@ const MOCK_ENV_SUMMARY = {
   variables: [
     {
       name: 'API_SERVER_PORT',
-      defaultValue: '3003',
+      defaultValue: '3004',
       description: 'API 服务端口',
       category: 'server',
       sensitive: false,
       runtimeEditable: false,
-      currentValue: '3003',
+      currentValue: '3002',
     },
     {
       name: 'PREVIEW_GATEWAY_PORT',
@@ -65,6 +65,7 @@ const MOCK_ENV_SUMMARY = {
     homeDir: '/tmp/home',
     dataDirs: {
       auditLogs: '/tmp/project/data/audit-logs',
+      runtimeLogs: '/tmp/project/data/runtime-logs',
       cliArchive: '/tmp/project/data/cli-raw-archive',
       redisDevSandbox: '/tmp/home/.cat-cafe/redis-dev-sandbox',
       uploads: '/tmp/project/uploads',

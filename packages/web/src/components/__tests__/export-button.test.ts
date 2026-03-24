@@ -11,7 +11,7 @@ afterAll(() => {
   delete (globalThis as { React?: typeof React }).React;
 });
 
-let mockApiFetch: ReturnType<typeof vi.fn>;
+let mockApiFetch: ReturnType<typeof vi.fn<(...args: unknown[]) => unknown>>;
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),

@@ -100,28 +100,35 @@ export const limbTools = [
   {
     name: 'limb_list_available',
     description:
-      '列出当前在线的四肢节点及其能力。可选按能力类别过滤。' +
-      '四肢是外部设备/节点（iPhone, Windows 机, Mac Mini 等），不是猫猫。',
+      'List currently online limb nodes and their capabilities. Optionally filter by capability category. ' +
+      'Limbs are external devices/nodes (iPhone, Windows PC, Mac Mini, etc.) — NOT cats. ' +
+      'Use when you need to discover what physical devices are available for tasks like camera capture, GPU rendering, etc.',
     inputSchema: limbListAvailableInputSchema,
     handler: handleLimbListAvailable,
   },
   {
     name: 'limb_invoke',
     description:
-      '调用指定四肢节点的能力。需要 nodeId 和 command。' +
-      '例如: limb_invoke(nodeId="iphone-1", command="camera.snap")',
+      'Invoke a capability on a specific limb node. Requires nodeId and command. ' +
+      'Example: limb_invoke(nodeId="iphone-1", command="camera.snap") ' +
+      'GOTCHA: Get the nodeId from limb_list_available first — do not guess node IDs.',
     inputSchema: limbInvokeInputSchema,
     handler: handleLimbInvoke,
   },
   {
     name: 'limb_pair_list',
-    description: '列出待审批的四肢配对请求。远程设备注册后需要铲屎官审批才能接入。',
+    description:
+      'List pending limb pairing requests. Remote devices must be approved by 铲屎官 before cats can use them. ' +
+      'Use to check if any new devices are waiting for approval.',
     inputSchema: limbPairListInputSchema,
     handler: handleLimbPairList,
   },
   {
     name: 'limb_pair_approve',
-    description: '审批一个四肢配对请求。审批后远程设备自动注册到 Registry，猫猫可以调用。',
+    description:
+      'Approve a limb pairing request. After approval, the remote device is automatically registered in the Registry ' +
+      'and becomes available for cats to invoke. ' +
+      'GOTCHA: Only 铲屎官 should initiate approval — do not auto-approve without user consent.',
     inputSchema: limbPairApproveInputSchema,
     handler: handleLimbPairApprove,
   },

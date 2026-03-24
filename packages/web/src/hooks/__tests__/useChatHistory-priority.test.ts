@@ -100,7 +100,7 @@ describe('useChatHistory request priority', () => {
     expect(urlsBeforeHistoryResolved.some((u) => u.includes('/task-progress'))).toBe(false);
     expect(urlsBeforeHistoryResolved.some((u) => u.includes('/queue'))).toBe(false);
 
-    resolveMessages?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+    resolveMessages!(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
 
     await act(async () => {
       await Promise.resolve();
@@ -157,7 +157,7 @@ describe('useChatHistory request priority', () => {
     expect(fallbackUrls.some((u) => u.includes('/queue'))).toBe(true);
 
     // Clean up pending promise to avoid dangling async.
-    resolveMessages?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+    resolveMessages!(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
     await act(async () => {
       await Promise.resolve();
     });

@@ -144,6 +144,7 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
       workspaceExpanded: true,
       setWorkspaceExpanded: vi.fn(),
       currentWorktree: { id: 'main', branch: 'main', root: '/tmp/repo' },
+      _workspaceFileSetAt: { ts: 0, threadId: null },
     };
     return sel(store);
   });

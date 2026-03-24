@@ -81,20 +81,19 @@ describe('MessageActions identity source', () => {
 
     await act(async () => {
       root.render(
-        React.createElement(
-          MessageActions,
-          {
-            message: {
-              id: 'msg-1',
-              type: 'assistant',
-              catId: 'codex',
-              content: 'hello',
-              timestamp: Date.now(),
-            },
-            threadId: 'thread-1',
+        // eslint-disable-next-line react/no-children-prop -- createElement in test
+        React.createElement(MessageActions, {
+          message: {
+            id: 'msg-1',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'hello',
+            timestamp: Date.now(),
           },
-          React.createElement('div', null, 'assistant message'),
-        ),
+          threadId: 'thread-1',
+          // biome-ignore lint/correctness/noChildrenProp: createElement in test
+          children: React.createElement('div', null, 'assistant message'),
+        }),
       );
     });
 

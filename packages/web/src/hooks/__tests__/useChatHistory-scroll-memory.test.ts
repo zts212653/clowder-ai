@@ -32,6 +32,7 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     isLoadingHistory: false,
     hasMore: false,
     hasActiveInvocation: false,
+    activeInvocations: {},
     intentMode: null,
     targetCats: [],
     catStatuses: {},

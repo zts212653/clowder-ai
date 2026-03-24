@@ -325,6 +325,16 @@ describe('runSignalFetchScheduler', () => {
         ],
       }),
       loadNotifications: async () => createNotificationsConfig(),
+      createEmailService: () => ({
+        async sendDailyDigest() {
+          return { status: 'sent' };
+        },
+      }),
+      createInAppService: () => ({
+        async publishDailyDigest() {
+          return { status: 'sent' };
+        },
+      }),
       fetchers: [
         {
           canHandle() {

@@ -31,6 +31,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.6.2",
     "cheerio": "^1.1.2",
+    "dingtalk-stream": "2.1.6-beta.1",
     "fastify": "^4.25.0",
     "grammy": "^1.41.1",
     "http-proxy": "^1.18.1",

@@ -46,6 +46,7 @@ describe('ChatContainerHeader safe-area', () => {
           onOpenMobileStatus: vi.fn(),
           statusPanelOpen: true,
           onToggleStatusPanel: vi.fn(),
+          defaultCatId: 'opus',
         }),
       );
     });

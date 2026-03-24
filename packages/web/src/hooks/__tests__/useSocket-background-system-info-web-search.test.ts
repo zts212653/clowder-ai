@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { HandleBackgroundMessageOptions } from '@/hooks/useSocket-background.types';
 import { consumeBackgroundSystemInfo } from '@/hooks/useSocket-background-system-info';
 
 function createMockStore(overrides: Record<string, unknown> = {}) {
@@ -32,6 +33,7 @@ function createMockOptions(storeOverrides: Record<string, unknown> = {}) {
   return {
     store: createMockStore(storeOverrides),
     bgStreamRefs: new Map(),
+    finalizedBgRefs: new Map(),
     replacedInvocations: new Map(),
     nextBgSeq: (() => {
       let i = 0;
@@ -39,7 +41,7 @@ function createMockOptions(storeOverrides: Record<string, unknown> = {}) {
     })(),
     addToast: vi.fn(),
     clearDoneTimeout: vi.fn(),
-  };
+  } as unknown as HandleBackgroundMessageOptions;
 }
 
 describe('consumeBackgroundSystemInfo web_search', () => {

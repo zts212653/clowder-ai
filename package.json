@@ -50,7 +50,6 @@
     "check:deps": "depcruise packages/api/src packages/shared/src --config .dependency-cruiser.cjs",
     "check:lockfile": "pnpm install --frozen-lockfile",
     "check:env-ports": "node --test scripts/check-env-port-drift.test.mjs",
-    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs",
     "check:features": "node scripts/check-feature-truth.mjs",
     "audit:feature-docs": "node scripts/audit-feature-doc-template.mjs",
     "check:skills": "bash scripts/check-skills-mount.sh",
@@ -58,7 +57,8 @@
     "rescue:claude:thinking": "node ./scripts/rescue-claude-thinking-signature.mjs",
     "proxy:anthropic": "node ./scripts/anthropic-proxy.mjs",
     "logs:health": "bash ./scripts/logs-health.sh",
-    "clean": "pnpm -r run clean && rm -rf node_modules"
+    "clean": "pnpm -r run clean && rm -rf node_modules",
+    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",

@@ -170,13 +170,44 @@ describe('ReviewRouter', () => {
       assert.ok(result.reason.includes('already processed'));
     });
 
-    it('skips PR in dedup window', async () => {
+    it('skips PR in dedup window (registered PR)', async () => {
       const router = createRouter();
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
       processedEmailStore.markPrInvoked('zts212653/cat-cafe', 42);
 
       const result = await router.route(makeEvent());
       assert.strictEqual(result.kind, 'skipped');
       assert.ok(result.reason.includes('recently invoked'));
+    });
+
+    it('unregistered PR does not claim dedup window (#668 P1)', async () => {
+      const router = createRouter();
+
+      const r1 = await router.route(makeEvent({ emailUid: 3001 }));
+      assert.strictEqual(r1.kind, 'skipped');
+      assert.ok(r1.reason.includes('No tracking entry'));
+
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      const r2 = await router.route(makeEvent({ emailUid: 3002 }));
+      assert.strictEqual(r2.kind, 'routed');
+      if (r2.kind === 'routed') {
+        assert.strictEqual(r2.catId, 'opus');
+        assert.strictEqual(r2.threadId, 'thread-abc');
+      }
+      assert.strictEqual(messageMock.messages.length, 1);
     });
   });
 
@@ -214,55 +245,22 @@ describe('ReviewRouter', () => {
     });
   });
 
-  // ── Layer 2: Fallback ────────────────────────────────────────────
+  // ── Unregistered PR: skip (#668) ──────────────────────────────────
 
-  describe('Layer 2: Fallback via cat tag', () => {
-    it('creates Review Inbox thread and routes when cat tag present', async () => {
+  describe('Unregistered PR skip (#668)', () => {
+    it('skips when cat tag present but no tracking entry', async () => {
       const router = createRouter();
 
       const result = await router.route(makeEvent());
 
-      assert.strictEqual(result.kind, 'routed');
-      if (result.kind === 'routed') {
-        assert.strictEqual(result.catId, 'opus');
-        assert.strictEqual(result.source, 'fallback');
-        // Thread was auto-created
-        assert.ok(result.threadId.startsWith('thread-'));
-      }
+      assert.strictEqual(result.kind, 'skipped');
+      assert.ok(result.reason.includes('No tracking entry'));
 
-      assert.strictEqual(messageMock.messages.length, 1);
-      assert.ok(messageMock.messages[0].content.includes('GitHub Review 通知'));
+      // No message should be posted
+      assert.strictEqual(messageMock.messages.length, 0);
     });
 
-    it('reuses cached Review Inbox thread on second call', async () => {
-      const router = createRouter();
-
-      const result1 = await router.route(makeEvent({ emailUid: 1001 }));
-      // Need a different UID and clear the PR dedup window for second call
-      processedEmailStore = new MemoryProcessedEmailStore();
-      // Re-create router with fresh processedEmailStore
-      const router2 = new ReviewRouter({
-        prTrackingStore,
-        processedEmailStore,
-        threadStore,
-        messageStore: messageMock.store,
-        log: noopLog(),
-      });
-      const result2 = await router2.route(makeEvent({ emailUid: 1002 }));
-
-      assert.strictEqual(result1.kind, 'routed');
-      assert.strictEqual(result2.kind, 'routed');
-      if (result1.kind === 'routed' && result2.kind === 'routed') {
-        // Same thread ID since cached from first call
-        assert.strictEqual(result1.threadId, result2.threadId);
-      }
-    });
-  });
-
-  // ── Layer 3: Triage ──────────────────────────────────────────────
-
-  describe('Layer 3: Triage', () => {
-    it('triages when no tracking and no cat tag', async () => {
+    it('skips when no tracking and no cat tag', async () => {
       const router = createRouter();
 
       const result = await router.route(
@@ -273,30 +271,11 @@ describe('ReviewRouter', () => {
         }),
       );
 
-      assert.strictEqual(result.kind, 'triage');
-      if (result.kind === 'triage') {
-        assert.ok(result.reason.includes('No tracking entry'));
-        assert.ok(result.threadId.startsWith('thread-'));
-      }
+      assert.strictEqual(result.kind, 'skipped');
+      assert.ok(result.reason.includes('No tracking entry'));
 
-      assert.strictEqual(messageMock.messages.length, 1);
-      assert.ok(messageMock.messages[0].content.includes('需要分派'));
-    });
-
-    it('uses configured triageThreadId when provided', async () => {
-      const router = createRouter({ triageThreadId: 'triage-fixed' });
-
-      const result = await router.route(
-        makeEvent({
-          catTag: undefined,
-          catId: '',
-        }),
-      );
-
-      assert.strictEqual(result.kind, 'triage');
-      if (result.kind === 'triage') {
-        assert.strictEqual(result.threadId, 'triage-fixed');
-      }
+      // No message should be posted, no thread created
+      assert.strictEqual(messageMock.messages.length, 0);
     });
   });
 
@@ -305,6 +284,13 @@ describe('ReviewRouter', () => {
   describe('message content', () => {
     it('includes review type in routed message', async () => {
       const router = createRouter();
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
 
       await router.route(makeEvent({ reviewType: 'changes_requested' }));
 
@@ -313,6 +299,13 @@ describe('ReviewRouter', () => {
 
     it('includes reviewer in message when present', async () => {
       const router = createRouter();
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
 
       await router.route(makeEvent({ reviewer: 'codex-bot' }));
 
@@ -321,20 +314,17 @@ describe('ReviewRouter', () => {
 
     it('omits reviewer line when not present', async () => {
       const router = createRouter();
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
 
       await router.route(makeEvent({ reviewer: undefined }));
 
       assert.ok(!messageMock.messages[0].content.includes('Reviewer:'));
-    });
-
-    it('triage message includes PR info', async () => {
-      const router = createRouter();
-
-      await router.route(makeEvent({ catTag: undefined, catId: '', prNumber: 77 }));
-
-      const content = messageMock.messages[0].content;
-      assert.ok(content.includes('PR #77'));
-      assert.ok(content.includes('铲屎官'));
     });
   });
 
@@ -440,30 +430,13 @@ describe('ReviewRouter', () => {
       }
     });
 
-    it('fallback: message userId comes from defaultUserId', async () => {
+    it('unregistered PR skips without posting message regardless of defaultUserId', async () => {
       const router = createRouter({ defaultUserId: 'configured-user' });
 
-      await router.route(makeEvent());
+      const result = await router.route(makeEvent());
 
-      assert.strictEqual(messageMock.messages.length, 1);
-      assert.strictEqual(messageMock.messages[0].userId, 'configured-user');
-    });
-
-    it('triage: message userId comes from defaultUserId', async () => {
-      const router = createRouter({ defaultUserId: 'configured-user' });
-
-      await router.route(makeEvent({ catTag: undefined, catId: undefined }));
-
-      assert.strictEqual(messageMock.messages.length, 1);
-      assert.strictEqual(messageMock.messages[0].userId, 'configured-user');
-    });
-
-    it('defaults to "default-user" when no defaultUserId configured', async () => {
-      const router = createRouter();
-
-      await router.route(makeEvent({ catTag: undefined, catId: undefined }));
-
-      assert.strictEqual(messageMock.messages[0].userId, 'default-user');
+      assert.strictEqual(result.kind, 'skipped');
+      assert.strictEqual(messageMock.messages.length, 0);
     });
   });
 
@@ -496,40 +469,12 @@ describe('ReviewRouter', () => {
       // First call: append throws
       await assert.rejects(() => router.route(makeEvent()), /transient store failure/);
 
-      // Email should NOT be marked as processed (so retry works)
       assert.strictEqual(processedEmailStore.isProcessed(1000), false);
+      assert.strictEqual(processedEmailStore.isPrRecentlyInvoked('zts212653/cat-cafe', 42), false);
 
       // Second call: should retry successfully
       const result = await router.route(makeEvent());
       assert.strictEqual(result.kind, 'routed');
-      assert.strictEqual(appendCallCount, 2);
-    });
-
-    it('retries triage delivery when messageStore.append throws', async () => {
-      let appendCallCount = 0;
-      const failingMessageStore = /** @type {any} */ ({
-        append(msg) {
-          appendCallCount++;
-          if (appendCallCount === 1) {
-            throw new Error('transient store failure');
-          }
-          return { id: 'msg-1', ...msg };
-        },
-      });
-
-      const router = createRouter({ messageStore: failingMessageStore });
-
-      const event = makeEvent({ catTag: undefined, catId: undefined });
-
-      // First call: append throws
-      await assert.rejects(() => router.route(event), /transient store failure/);
-
-      // Email should NOT be marked as processed
-      assert.strictEqual(processedEmailStore.isProcessed(1000), false);
-
-      // Second call: should retry
-      const result = await router.route(event);
-      assert.strictEqual(result.kind, 'triage');
       assert.strictEqual(appendCallCount, 2);
     });
   });
@@ -539,6 +484,13 @@ describe('ReviewRouter', () => {
   describe('concurrent PR dedup (cloud Codex P1-2)', () => {
     it('only one of two concurrent routes for same PR succeeds', async () => {
       const router = createRouter();
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
 
       const e1 = makeEvent({ emailUid: 2001 });
       const e2 = makeEvent({ emailUid: 2002 });
@@ -551,7 +503,6 @@ describe('ReviewRouter', () => {
       assert.strictEqual(routed.length, 1, 'exactly one should be routed');
       assert.strictEqual(skipped.length, 1, 'exactly one should be skipped by PR dedup');
 
-      // Only one message should be posted
       assert.strictEqual(messageMock.messages.length, 1);
     });
   });
@@ -580,17 +531,13 @@ describe('ReviewRouter', () => {
       }
     });
 
-    it('fallback route returns messageId and defaultUserId', async () => {
+    it('unregistered PR returns skipped with reason', async () => {
       const router = createRouter({ defaultUserId: 'default-user' });
 
       const result = await router.route(makeEvent());
 
-      assert.strictEqual(result.kind, 'routed');
-      if (result.kind === 'routed') {
-        assert.ok(result.messageId);
-        assert.ok(result.content.includes('GitHub Review 通知'));
-        assert.strictEqual(result.userId, 'default-user');
-      }
+      assert.strictEqual(result.kind, 'skipped');
+      assert.ok(result.reason.includes('No tracking entry'));
     });
   });
 
@@ -618,26 +565,12 @@ describe('ReviewRouter', () => {
       assert.strictEqual(msg.source.url, 'https://github.com/zts212653/cat-cafe/pull/42');
     });
 
-    it('fallback message includes ConnectorSource with correct PR URL', async () => {
+    it('unregistered PR produces no ConnectorSource message', async () => {
       const router = createRouter();
 
       await router.route(makeEvent({ prNumber: 99, repository: 'org/repo' }));
 
-      const msg = messageMock.messages[0];
-      assert.ok(msg.source, 'fallback message should have source field');
-      assert.strictEqual(msg.source.connector, 'github-review');
-      assert.strictEqual(msg.source.url, 'https://github.com/org/repo/pull/99');
-    });
-
-    it('triage message includes ConnectorSource with warning icon', async () => {
-      const router = createRouter();
-
-      await router.route(makeEvent({ catTag: undefined, catId: undefined }));
-
-      const msg = messageMock.messages[0];
-      assert.ok(msg.source, 'triage message should have source field');
-      assert.strictEqual(msg.source.connector, 'github-review');
-      assert.strictEqual(msg.source.icon, 'github');
+      assert.strictEqual(messageMock.messages.length, 0);
     });
   });
 
@@ -670,15 +603,12 @@ describe('ReviewRouter', () => {
       });
     });
 
-    it('broadcasts connector_message to triage thread', async () => {
+    it('does not broadcast when PR is unregistered', async () => {
       const router = createRouter();
 
       await router.route(makeEvent({ catTag: undefined, catId: undefined }));
 
-      assert.strictEqual(socketMock.events.length, 1);
-      const evt = socketMock.events[0];
-      assert.strictEqual(evt.event, 'connector_message');
-      assert.ok(evt.room.startsWith('thread:thread-'));
+      assert.strictEqual(socketMock.events.length, 0);
     });
   });
 
@@ -700,6 +630,13 @@ describe('ReviewRouter', () => {
       };
 
       const router = createRouter({ reviewContentFetcher: mockFetcher });
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
 
       const result = await router.route(makeEvent());
       assert.strictEqual(result.kind, 'routed');
@@ -722,6 +659,13 @@ describe('ReviewRouter', () => {
       };
 
       const router = createRouter({ reviewContentFetcher: mockFetcher });
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
 
       const result = await router.route(makeEvent());
       assert.strictEqual(result.kind, 'routed');
@@ -740,6 +684,13 @@ describe('ReviewRouter', () => {
       };
 
       const router = createRouter({ reviewContentFetcher: mockFetcher });
+      prTrackingStore.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
 
       const result = await router.route(makeEvent());
       assert.strictEqual(result.kind, 'routed');
@@ -747,7 +698,6 @@ describe('ReviewRouter', () => {
         assert.ok(result.content.includes('GitHub Review 通知'), 'message should still be delivered');
         assert.ok(!result.content.includes('检测到'), 'no severity claimed');
       }
-      // Message was still posted
       assert.strictEqual(messageMock.messages.length, 1);
     });
   });

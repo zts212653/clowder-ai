@@ -23,6 +23,7 @@ const SYSTEM_EVENT_TYPES = new Set([
   'round_announce',
   'last_words_announce',
   'game_end_announce',
+  'narrative',
 ]);
 
 /** Announce events that should render as prominent cards (not inline text) */
@@ -32,6 +33,7 @@ const ANNOUNCE_CARD_TYPES = new Set([
   'round_announce',
   'game_end_announce',
   'game_end',
+  'narrative',
 ]);
 
 function isSystemEvent(type: string): boolean {
@@ -55,6 +57,7 @@ function formatSystemMessage(event: GameEvent): string {
 
 /** Get card style based on announce type */
 function getAnnounceCardStyle(type: string): string {
+  if (type === 'narrative') return 'border-ww-cute bg-ww-cute-soft text-ww-main';
   if (type === 'dawn_announce') return 'border-ww-danger bg-ww-danger-soft text-ww-danger';
   if (type === 'exile_announce') return 'border-ww-danger bg-ww-danger-soft text-ww-danger';
   if (type === 'round_announce') return 'border-ww-info bg-ww-info-soft text-ww-info';

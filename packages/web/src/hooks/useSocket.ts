@@ -119,6 +119,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const joinedRoomsRef = useRef<Set<string>>(new Set());
   const bgStreamRefsRef = useRef<Map<string, { id: string; threadId: string; catId: string }>>(new Map());
   const bgReplacedInvocationsRef = useRef<Map<string, string>>(new Map());
+  const bgFinalizedRefsRef = useRef<Map<string, string>>(new Map());
   const bgSeqRef = useRef(0);
   const userIdRef = useRef(getUserId());
   const threadIdRef = useRef(threadId);
@@ -270,6 +271,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       handleBackgroundAgentMessage(msg as BackgroundAgentMessage, {
         store: useChatStore.getState(),
         bgStreamRefs: bgStreamRefsRef.current,
+        finalizedBgRefs: bgFinalizedRefsRef.current,
         replacedInvocations: bgReplacedInvocationsRef.current,
         nextBgSeq: () => bgSeqRef.current++,
         addToast: (toast) => useToastStore.getState().addToast(toast),
@@ -489,6 +491,20 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('game:state_update', (data: { gameId: string; view: unknown; timestamp: number }) => {
       callbacksRef.current.onGameStateUpdate?.(data);
     });
+
+    // F101 Phase I: Narrator narrative messages (e.g. "🐺 狼人请睁眼")
+    socket.on(
+      'game:narrative',
+      (data: { threadId: string; message: { id: string; type: string; content: string; timestamp: number } }) => {
+        if (!data?.threadId || !data?.message?.id) return;
+        useChatStore.getState().addMessageToThread(data.threadId, {
+          id: data.message.id,
+          type: 'system',
+          content: data.message.content,
+          timestamp: data.message.timestamp,
+        });
+      },
+    );
 
     // F101 Phase D: Independent game thread created
     socket.on(

@@ -36,6 +36,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `bootcamp-guide` | CVO 新手训练营引导 | — |
 | `cross-thread-sync` | 跨 thread 协同/通知/争用协调 | — |
 | `browser-preview` | 写前端/跑 dev server/看页面效果 | — |
+| `workspace-navigator` | 铲屎官说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
 
 ### 参考文件（refs/，按需读取）
 

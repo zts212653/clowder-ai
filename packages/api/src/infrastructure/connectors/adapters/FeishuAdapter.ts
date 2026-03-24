@@ -55,6 +55,8 @@ export interface FeishuMediaPayload {
   url?: string;
   /** Absolute filesystem path for upload (from mediaPathResolver) */
   absPath?: string;
+  /** Display name — used as file_name in Feishu upload and for file_type inference */
+  fileName?: string;
 }
 
 export interface FeishuAdapterOptions {
@@ -184,12 +186,19 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
         };
       }
       case 'post': {
-        const locale =
-          (content as Record<string, unknown>).zh_cn ??
-          (content as Record<string, unknown>).en_us ??
-          (content as Record<string, unknown>).ja_jp;
-        if (!locale || typeof locale !== 'object') return null;
-        const loc = locale as { title?: string; content?: unknown[][] };
+        // Feishu sends post content in two formats:
+        // 1. Locale-wrapped: { zh_cn: { title, content }, en_us: ... }
+        // 2. Direct (no locale wrapper): { title, content: [[...]] }
+        const c = content as Record<string, unknown>;
+        const locale = c.zh_cn ?? c.en_us ?? c.ja_jp;
+        const resolved =
+          locale && typeof locale === 'object'
+            ? locale
+            : Array.isArray(c.content) // direct format — content is array of paragraphs
+              ? c
+              : null;
+        if (!resolved || typeof resolved !== 'object') return null;
+        const loc = resolved as { title?: string; content?: unknown[][] };
         const textParts: string[] = [];
         const attachments: FeishuAttachment[] = [];
         if (loc.title) textParts.push(loc.title);
@@ -202,7 +211,10 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
               if (n.tag === 'text' || n.tag === 'a') {
                 if (typeof n.text === 'string') paraTexts.push(n.text);
               } else if (n.tag === 'img' && typeof n.image_key === 'string') {
-                attachments.push({ type: 'image' as const, feishuKey: n.image_key as string });
+                attachments.push({
+                  type: 'image' as const,
+                  feishuKey: n.image_key as string,
+                });
               }
             }
             if (paraTexts.length > 0) textParts.push(paraTexts.join(''));
@@ -287,7 +299,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
       return;
     }
     if (payload.absPath && this.tokenManager) {
-      const uploaded = await this.uploadToFeishu(payload.absPath, payload.type);
+      const uploaded = await this.uploadToFeishu(payload.absPath, payload.type, payload.fileName);
       if (uploaded) {
         await this.sendWithPlatformKey(externalChatId, { ...payload, ...uploaded });
         return;
@@ -301,7 +313,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
       const tempPath = await this.downloadToTempFile(payload.url);
       if (tempPath) {
         try {
-          const uploaded = await this.uploadToFeishu(tempPath, payload.type);
+          const uploaded = await this.uploadToFeishu(tempPath, payload.type, payload.fileName);
           if (uploaded) {
             await this.sendWithPlatformKey(externalChatId, { ...payload, ...uploaded });
             return;
@@ -340,6 +352,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   private async uploadToFeishu(
     absPath: string,
     type: 'image' | 'file' | 'audio',
+    displayFileName?: string,
   ): Promise<{ imageKey?: string; fileKey?: string } | null> {
     const token = await this.tokenManager?.getTenantAccessToken();
     if (!token) {
@@ -367,7 +380,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
       }
     }
 
-    const originalFileName = absPath.split('/').pop() ?? 'file';
+    const originalFileName = displayFileName ?? absPath.split('/').pop() ?? 'file';
 
     try {
       return await this.uploadToFeishuInner(uploadPath, type, token, originalFileName);
@@ -406,7 +419,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     }
 
     const fileName = originalFileName ?? absPath.split('/').pop() ?? 'file';
-    const fileType = type === 'audio' ? 'opus' : 'stream';
+    const fileType = type === 'audio' ? 'opus' : inferFeishuFileType(fileName);
     const uploadFileName = type === 'audio' ? fileName.replace(/\.\w+$/, '.opus') : fileName;
     form.append('file_type', fileType);
     form.append('file_name', uploadFileName);
@@ -628,6 +641,26 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   _injectUploadFetch(fn: typeof fetch): void {
     this.uploadFetchFn = fn;
   }
+}
+
+/**
+ * Phase J: Map file extension to Feishu file_type for native preview.
+ * Feishu recognizes: pdf, doc, xls, ppt, mp4, opus, stream (catch-all).
+ */
+const FEISHU_EXT_TO_FILE_TYPE: Record<string, string> = {
+  pdf: 'pdf',
+  doc: 'doc',
+  docx: 'doc',
+  xls: 'xls',
+  xlsx: 'xls',
+  ppt: 'ppt',
+  pptx: 'ppt',
+  mp4: 'mp4',
+};
+
+export function inferFeishuFileType(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
+  return FEISHU_EXT_TO_FILE_TYPE[ext] ?? 'stream';
 }
 
 /** Read a Node.js ReadStream into a Buffer. */
