@@ -311,27 +311,153 @@ REDIS_DBFILE=${REDIS_DBFILE:-dump.rdb}
 REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
+CLEANUP_RUNNING=false
+MANAGED_PIDS=()
 
 export MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
+
+register_managed_pid() {
+    local pid="${1:-}"
+    local existing
+    [ -n "$pid" ] || return 0
+    for existing in "${MANAGED_PIDS[@]}"; do
+        [ "$existing" = "$pid" ] && return 0
+    done
+    MANAGED_PIDS+=("$pid")
+}
+
+probe_port_with_lsof() {
+    local port=$1
+    lsof -nP -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+probe_port_with_ss() {
+    local port=$1
+    ss -ltn "( sport = :$port )" 2>/dev/null | awk 'NR > 1 { found = 1; exit } END { exit found ? 0 : 1 }'
+}
+
+probe_port_with_nc() {
+    local port=$1
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
+}
+
+probe_port_with_dev_tcp() {
+    local port=$1
+    # Bash-only: requires net redirections support (enabled in most mainstream builds).
+    (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
+}
+
+port_listen_pids() {
+    local port=$1
+    local pids=""
+
+    if command -v lsof >/dev/null 2>&1; then
+        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            printf '%s\n' "$pids"
+            return 0
+        fi
+    fi
+
+    if command -v ss >/dev/null 2>&1; then
+        pids=$(ss -ltnp "( sport = :$port )" 2>/dev/null | awk '
+            {
+                while (match($0, /pid=[0-9]+/)) {
+                    print substr($0, RSTART + 4, RLENGTH - 4)
+                    $0 = substr($0, RSTART + RLENGTH)
+                }
+            }
+        ' | sort -u || true)
+        if [ -n "$pids" ]; then
+            printf '%s\n' "$pids"
+            return 0
+        fi
+    fi
+
+    if command -v fuser >/dev/null 2>&1; then
+        pids=$(fuser -n tcp "$port" 2>&1 | sed 's#^[^:]*:##' | grep -oE '[0-9]+' | sort -u || true)
+        if [ -n "$pids" ]; then
+            printf '%s\n' "$pids"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+port_is_listening() {
+    local port=$1
+
+    if command -v lsof >/dev/null 2>&1 && probe_port_with_lsof "$port"; then
+        return 0
+    fi
+    if command -v ss >/dev/null 2>&1 && probe_port_with_ss "$port"; then
+        return 0
+    fi
+    if command -v nc >/dev/null 2>&1 && probe_port_with_nc "$port"; then
+        return 0
+    fi
+    if probe_port_with_dev_tcp "$port"; then
+        return 0
+    fi
+
+    return 1
+}
+
+list_child_pids() {
+    local pid=$1
+    command -v pgrep >/dev/null 2>&1 || return 0
+    pgrep -P "$pid" 2>/dev/null || true
+}
+
+terminate_pid_tree_with_signal() {
+    local signal="$1"
+    local pid="$2"
+    local child
+
+    [ -n "$pid" ] || return 0
+    kill -0 "$pid" 2>/dev/null || return 0
+
+    while IFS= read -r child; do
+        [ -n "$child" ] || continue
+        terminate_pid_tree_with_signal "$signal" "$child"
+    done < <(list_child_pids "$pid")
+
+    kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+terminate_managed_pids() {
+    local pid
+    for pid in "${MANAGED_PIDS[@]}"; do
+        terminate_pid_tree_with_signal TERM "$pid"
+    done
+    sleep 1
+    for pid in "${MANAGED_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            terminate_pid_tree_with_signal KILL "$pid"
+        fi
+    done
+    MANAGED_PIDS=()
+}
 
 # 杀掉占用端口的进程
 kill_port() {
     local port=$1
     local name=$2
     local pids
-    pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+    pids=$(port_listen_pids "$port" || true)
     if [ -n "$pids" ]; then
         echo -e "${YELLOW}  端口 $port ($name) 被占用，正在终止进程...${NC}"
         echo "$pids" | xargs kill 2>/dev/null || true
         sleep 1
         # 确认已死
-        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+        pids=$(port_listen_pids "$port" || true)
         if [ -n "$pids" ]; then
             echo -e "${YELLOW}  强制终止...${NC}"
             echo "$pids" | xargs kill -9 2>/dev/null || true
             sleep 1
         fi
-        pids=$(lsof -nP -i ":$port" -sTCP:LISTEN -t 2>/dev/null || true)
+        pids=$(port_listen_pids "$port" || true)
         if [ -n "$pids" ]; then
             echo -e "${RED}  ✗ 端口 $port 仍被占用，无法继续启动 $name${NC}"
             return 1
@@ -370,7 +496,7 @@ wait_for_port() {
     local max_wait=${3:-15}
     local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
-        if lsof -nP -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+        if port_is_listening "$port"; then
             echo -e "${GREEN}  ✓ $name 已启动 (端口 $port, ${elapsed}s)${NC}"
             return 0
         fi
@@ -389,7 +515,7 @@ wait_for_port_or_exit() {
     local elapsed=0
 
     while [ $elapsed -lt $max_wait ]; do
-        if lsof -nP -i ":$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        if port_is_listening "$port"; then
             echo -e "${GREEN}  ✓ $name 已启动 (端口 $port, ${elapsed}s)${NC}"
             return 0
         fi
@@ -432,6 +558,7 @@ background_eval_with_null_stdin() {
         exec </dev/null
         eval "$launch_cmd"
     ) &
+    register_managed_pid "$!"
 }
 
 api_launch_command() {
@@ -715,9 +842,19 @@ setup_storage() {
 
 # 清理函数 — Ctrl+C 时杀所有子进程 + 关闭专属 Redis
 cleanup() {
+    [ "$CLEANUP_RUNNING" = true ] && return 0
+    CLEANUP_RUNNING=true
+
     echo ""
     echo "正在关闭服务..."
-    kill $(jobs -p) 2>/dev/null || true
+
+    local job_pid
+    while IFS= read -r job_pid; do
+        register_managed_pid "$job_pid"
+    done <<< "$(jobs -p 2>/dev/null || true)"
+
+    terminate_managed_pids
+
     # 关闭我们启动的专属 Redis (不影响其他 Redis 实例)
     if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ] && redis-cli -p "$REDIS_PORT" ping &> /dev/null 2>&1; then
         archive_redis_snapshot "pre-stop"
