@@ -109,6 +109,17 @@ describe('chatStore multi-thread state', () => {
     expect(before).toBe(after); // exact same reference (no state change)
   });
 
+  it('drops stale cached state before switching to a reused thread id', () => {
+    useChatStore.getState().addMessageToThread('thread-reused', makeMsg('stale-1', 'stale history'));
+    expect(useChatStore.getState().threadStates['thread-reused']?.messages).toHaveLength(1);
+
+    useChatStore.getState().clearThreadState('thread-reused');
+    useChatStore.getState().setCurrentThread('thread-reused');
+
+    expect(useChatStore.getState().messages).toEqual([]);
+    expect(useChatStore.getState().currentThreadId).toBe('thread-reused');
+  });
+
   describe('addMessageToThread', () => {
     it('adds to flat state when thread is active', () => {
       useChatStore.getState().addMessageToThread('thread-a', makeMsg('m1'));

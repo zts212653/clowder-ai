@@ -57,6 +57,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
   const router = useRouter();
   const storeThreads = useChatStore((s) => s.threads);
   const setThreads = useChatStore((s) => s.setThreads);
+  const clearThreadState = useChatStore((s) => s.clearThreadState);
   const [isCreating, setIsCreating] = useState(false);
 
   // F106 P1 fix: fetch bootcamp threads from API directly, not from sidebar-dependent store
@@ -110,6 +111,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
       if (!res.ok) return;
       const thread: Thread = await res.json();
       setThreads([thread, ...storeThreads]);
+      clearThreadState(thread.id);
       router.push(`/thread/${thread.id}`);
       onClose();
     } finally {

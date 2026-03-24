@@ -61,6 +61,7 @@ export function ChatInput({
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const activeInvocations = useChatStore((s) => s.activeInvocations);
   const storeTargetCats = useChatStore((s) => s.targetCats);
+  const clearThreadState = useChatStore((s) => s.clearThreadState);
   const activeCatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const inv of Object.values(activeInvocations ?? {})) {
@@ -200,6 +201,7 @@ export function ChatInput({
         }
         // Success — dismiss lobby and navigate
         setLobbyMode(null);
+        clearThreadState(data.gameThreadId);
         router.push(`/thread/${data.gameThreadId}`);
         // Hydrate game state immediately (socket reconnect won't fire for same connection)
         reconnectGame(data.gameThreadId).catch(() => {});
@@ -217,7 +219,7 @@ export function ChatInput({
         setGameStarting(false);
       }
     },
-    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting, router],
+    [clearThreadState, closeMenus, disabled, sendTemporarilyDisabled, gameStarting, router],
   );
 
   const insertMention = useCallback(

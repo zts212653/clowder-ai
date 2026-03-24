@@ -2,8 +2,12 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '@/components/ChatInput';
+import { useChatStore } from '@/stores/chatStore';
 
 const mockPush = vi.fn();
+const clearThreadStateMock = vi.fn();
+let originalClearThreadState: ReturnType<typeof useChatStore.getState>['clearThreadState'] | null = null;
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
@@ -65,11 +69,22 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+
+  clearThreadStateMock.mockReset();
+  if (!originalClearThreadState) {
+    originalClearThreadState = useChatStore.getState().clearThreadState;
+  }
+  useChatStore.setState({
+    clearThreadState: clearThreadStateMock as ReturnType<typeof useChatStore.getState>['clearThreadState'],
+  });
 });
 
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  if (originalClearThreadState) {
+    useChatStore.setState({ clearThreadState: originalClearThreadState });
+  }
 });
 
 describe('sendGameCommand respects sendTemporarilyDisabled', () => {
@@ -173,6 +188,8 @@ describe('sendGameCommand respects sendTemporarilyDisabled', () => {
         body: expect.stringContaining('"gameType":"werewolf"'),
       }),
     );
+    expect(clearThreadStateMock).toHaveBeenCalledWith('gt1');
+    expect(mockPush).toHaveBeenCalledWith('/thread/gt1');
 
     vi.restoreAllMocks();
   });
