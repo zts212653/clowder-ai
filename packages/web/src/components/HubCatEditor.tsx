@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
-import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import { buildEditorLoadingNote, uploadAvatarAsset } from './hub-cat-editor.client';
@@ -38,8 +37,6 @@ interface HubCatEditorProps {
 }
 
 export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEditorProps) {
-  const currentProjectPath = useChatStore((state) => state.currentProjectPath);
-  const requestProjectPath = currentProjectPath && currentProjectPath !== 'default' ? currentProjectPath : null;
   const confirm = useConfirm();
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
@@ -87,10 +84,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     if (!open) return;
     let cancelled = false;
     setLoadingProfiles(true);
-    const query = new URLSearchParams();
-    if (requestProjectPath) query.set('projectPath', requestProjectPath);
-    const requestPath = query.size > 0 ? `/api/provider-profiles?${query.toString()}` : '/api/provider-profiles';
-    apiFetch(requestPath)
+    apiFetch('/api/provider-profiles')
       .then(async (res) => {
         if (!res.ok) throw new Error(`账号配置加载失败 (${res.status})`);
         return (await res.json()) as ProviderProfilesResponse;
@@ -107,7 +101,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     return () => {
       cancelled = true;
     };
-  }, [open, requestProjectPath]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !cat) {
