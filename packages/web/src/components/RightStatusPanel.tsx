@@ -226,7 +226,7 @@ function RuntimeLogsButton() {
     // workspace stamps attribute actions to the correct thread
     // even if the user switches threads during the async gap.
     const originThreadId = useChatStore.getState().currentThreadId;
-    setRevealPath(LOGS_DIR, originThreadId);
+    setRevealPath(LOGS_DIR);
 
     try {
       const wtRes = await apiFetch('/api/workspace/worktrees');
@@ -253,7 +253,7 @@ function RuntimeLogsButton() {
           return dc !== 0 ? dc : b.parsed.seq - a.parsed.seq;
         });
       if (logFiles.length > 0) {
-        setOpenFile(`${LOGS_DIR}/${logFiles[0].name}`, null, wId, originThreadId);
+        setOpenFile(`${LOGS_DIR}/${logFiles[0].name}`, null, wId);
       }
     } catch {
       // Directory revealed; file open is best-effort
