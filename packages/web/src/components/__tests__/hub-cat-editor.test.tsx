@@ -8,6 +8,14 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
+const storeState = {
+  currentProjectPath: 'default',
+};
+
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
+}));
+
 const mockConfirm = vi.fn(() => Promise.resolve(true));
 vi.mock('@/components/useConfirm', () => ({
   useConfirm: () => mockConfirm,
@@ -73,6 +81,7 @@ describe('HubCatEditor', () => {
   });
 
   beforeEach(() => {
+    storeState.currentProjectPath = 'default';
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -293,6 +302,84 @@ describe('HubCatEditor', () => {
     expect(payload.accountRef).toBe('codex-sponsor');
     expect(payload.defaultModel).toBe('gpt-5.4-mini');
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads provider profiles from current project path when available', async () => {
+    storeState.currentProjectPath = '/tmp/runtime-worktree';
+    let requestedPath = '';
+
+    mockApiFetch.mockImplementation((path: string) => {
+      requestedPath = path;
+      return Promise.resolve(
+        jsonResponse({
+          projectPath: '/tmp/runtime-worktree',
+          activeProfileId: null,
+          providers: [],
+        }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    expect(requestedPath).toBe(`/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/runtime-worktree')}`);
+  });
+
+  it('keeps provider profiles request unscoped when current project is default', async () => {
+    storeState.currentProjectPath = 'default';
+    let requestedPath = '';
+
+    mockApiFetch.mockImplementation((path: string) => {
+      requestedPath = path;
+      return Promise.resolve(
+        jsonResponse({
+          projectPath: '/home/yuhan/clowder-ai',
+          activeProfileId: null,
+          providers: [],
+        }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    expect(requestedPath).toBe('/api/provider-profiles');
+  });
+
+  it('refetches provider profiles when project path changes while editor stays open', async () => {
+    const requests: string[] = [];
+    mockApiFetch.mockImplementation((path: string) => {
+      requests.push(path);
+      return Promise.resolve(
+        jsonResponse({
+          projectPath: '/tmp/runtime-worktree-a',
+          activeProfileId: null,
+          providers: [],
+        }),
+      );
+    });
+
+    storeState.currentProjectPath = '/tmp/runtime-worktree-a';
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    storeState.currentProjectPath = '/tmp/runtime-worktree-b';
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    const profileRequests = requests.filter((path) => path.startsWith('/api/provider-profiles'));
+    expect(profileRequests).toEqual([
+      `/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/runtime-worktree-a')}`,
+      `/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/runtime-worktree-b')}`,
+    ]);
   });
 
   it('blocks creating opencode member with bare model (requires providerId/modelId)', async () => {
