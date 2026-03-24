@@ -1,0 +1,33 @@
+{
+  "name": "clowder-ai-desktop",
+  "version": "0.2.0",
+  "description": "Clowder AI Desktop - Multi-Agent Collaboration Platform",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "author": "Clowder AI",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "ai.clowder.desktop",
+    "productName": "Clowder AI",
+    "win": {
+      "target": "dir",
+      "icon": "assets/icon.ico"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "assets/**/*"
+    ],
+    "extraResources": [],
+    "asar": false
+  }
+}

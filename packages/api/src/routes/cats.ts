@@ -4,6 +4,7 @@
  * GET /api/cats/:id/status - 获取猫猫状态
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type CatConfig, type CatProvider, type ContextBudget, catRegistry, type RosterEntry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -324,6 +325,49 @@ function getResolvedCats(projectRoot: string) {
   }
 }
 
+/** Provider → CLI name mapping for desktop mode filtering */
+const PROVIDER_CLI_MAP: Record<string, string> = {
+  anthropic: 'claude',
+  openai: 'codex',
+  google: 'gemini',
+  dare: 'dare',
+  opencode: 'opencode',
+  antigravity: 'antigravity',
+};
+
+interface DesktopConfig {
+  desktopMode: boolean;
+  installedClis: Record<string, boolean>;
+  alwaysHidden?: string[];
+}
+
+function loadDesktopConfig(projectRoot: string): DesktopConfig | null {
+  const configPath = resolve(projectRoot, '.cat-cafe', 'desktop-config.json');
+  if (!existsSync(configPath)) return null;
+  try {
+    return JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function filterCatsForDesktop(
+  cats: Record<string, CatConfig>,
+  projectRoot: string,
+): Record<string, CatConfig> {
+  const dc = loadDesktopConfig(projectRoot);
+  if (!dc?.desktopMode) return cats;
+
+  const filtered: Record<string, CatConfig> = {};
+  for (const [id, cat] of Object.entries(cats)) {
+    const cliName = PROVIDER_CLI_MAP[cat.provider] ?? cat.provider;
+    if (dc.installedClis[cliName] === false) continue;
+    if (dc.alwaysHidden?.includes(cat.breedId ?? '')) continue;
+    filtered[id] = cat;
+  }
+  return filtered;
+}
+
 interface CatsRoutesOptions {
   onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
 }
@@ -332,11 +376,13 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   // GET /api/cats - 获取所有猫猫配置
   app.get('/api/cats', async () => {
     const projectRoot = resolveProjectRoot();
+    const allCats = getResolvedCats(projectRoot);
+    const visibleCats = filterCatsForDesktop(allCats, projectRoot);
     const resolveMetadata = buildCatResponseMetadataResolver(projectRoot);
     const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver(projectRoot);
     return {
       cats: await Promise.all(
-        Object.values(getResolvedCats(projectRoot)).map((cat) =>
+        Object.values(visibleCats).map((cat) =>
           toCatResponse(cat, resolveMetadata(cat.id), resolveEffectiveAccountRef),
         ),
       ),
