@@ -4,12 +4,8 @@
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
-  "bin": {
-    "cat-cafe-mcp": "./dist/index.js"
-  },
   "scripts": {
     "build": "tsc",
-    "prepare": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
