@@ -78,6 +78,7 @@ const createNormalCatSchema = baseCatSchema.extend({
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
+  ocProviderName: z.string().min(1).optional(),
 });
 
 const createAntigravityCatSchema = baseCatSchema.extend({
@@ -111,6 +112,7 @@ const updateCatSchema = z.object({
   cli: cliSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
+  ocProviderName: z.string().min(1).nullable().optional(),
 });
 
 function resolveOperator(raw: unknown): string | null {
@@ -266,6 +268,7 @@ async function toCatResponse(
     sessionChain: cat.sessionChain,
     commandArgs: cat.commandArgs,
     cliConfigArgs: cat.cliConfigArgs,
+    ocProviderName: cat.ocProviderName,
     variantLabel: cat.variantLabel ?? undefined,
     isDefaultVariant: cat.isDefaultVariant ?? undefined,
     breedDisplayName: cat.breedDisplayName ?? undefined,
@@ -431,6 +434,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               body.client === 'opencode'),
           cli: body.cli ?? defaultCliForClient(body.client),
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
+          ...(body.ocProviderName ? { ocProviderName: body.ocProviderName } : {}),
         });
       }
     } catch (err) {
@@ -544,6 +548,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.cli !== undefined ? { cli: body.cli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
         ...(body.cliConfigArgs !== undefined ? { cliConfigArgs: body.cliConfigArgs } : {}),
+        ...(body.ocProviderName !== undefined
+          ? body.ocProviderName === null
+            ? { ocProviderName: undefined }
+            : { ocProviderName: body.ocProviderName }
+          : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore, opts.onCatalogChanged);
       const cat = resolved[request.params.id];

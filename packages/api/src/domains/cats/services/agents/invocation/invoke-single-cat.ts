@@ -34,12 +34,7 @@ import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import {
-  OC_API_KEY_ENV,
-  OC_BASE_URL_ENV,
-  parseOpenCodeModel,
-  writeOpenCodeRuntimeConfig,
-} from '../providers/opencode-config-template.js';
+import { OC_API_KEY_ENV, OC_BASE_URL_ENV, writeOpenCodeRuntimeConfig } from '../providers/opencode-config-template.js';
 
 const log = createModuleLogger('invoke');
 
@@ -727,25 +722,29 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     // F189: OpenCode custom provider config injection.
-    // When opencode + api_key with a "providerName/modelName" model string,
-    // generate a per-catId runtime config file with {env:VAR} credential substitution.
+    // When opencode + api_key + ocProviderName is set, generate a per-catId runtime config
+    // and assemble the full model string as `ocProviderName/defaultModel` for -m routing.
     // This lets opencode route to custom providers (e.g. maas/glm-5, deepseek/deepseek-r2).
-    if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && defaultModel) {
-      const parsed = parseOpenCodeModel(defaultModel);
-      if (parsed) {
-        try {
-          const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
-            providerName: parsed.providerName,
-            models: resolvedAccount.models ?? [parsed.modelName],
-            defaultModel,
-          });
-          callbackEnv.OPENCODE_CONFIG = configPath;
-          if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
-          if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
-          log.info({ catId, configPath, provider: parsed.providerName }, 'OpenCode runtime config written');
-        } catch (err) {
-          log.warn({ catId, err }, 'Failed to write OpenCode runtime config — falling back to env vars');
-        }
+    const ocProviderName = catConfig?.ocProviderName?.trim();
+    if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && ocProviderName && defaultModel) {
+      // Assemble full model: ocProviderName/defaultModel (e.g. "maas" + "glm-5" → "maas/glm-5")
+      // The model override ensures OpenCodeAgentService passes the assembled name to -m flag.
+      const assembledModel = defaultModel.includes('/')
+        ? defaultModel // already has prefix (e.g. user typed "maas/glm-5" directly)
+        : `${ocProviderName}/${defaultModel}`;
+      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
+      try {
+        const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
+          providerName: ocProviderName,
+          models: resolvedAccount.models ?? [defaultModel],
+          defaultModel: assembledModel,
+        });
+        callbackEnv.OPENCODE_CONFIG = configPath;
+        if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
+        log.info({ catId, configPath, provider: ocProviderName }, 'OpenCode runtime config written');
+      } catch (err) {
+        log.warn({ catId, err }, 'Failed to write OpenCode runtime config — falling back to env vars');
       }
     }
 

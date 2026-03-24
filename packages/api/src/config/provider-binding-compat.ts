@@ -40,24 +40,28 @@ function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProf
 
 /**
  * Returns an error string when the model does not follow "providerId/modelId" convention for opencode.
- * The opencode CLI expects this format; bare models like "glm-5" become "glm-5/" at runtime.
- * Server-side callers MUST reject; frontend shows the same message as a pre-flight hint.
+ * The opencode CLI expects this format for routing; bare models like "glm-5" need a provider prefix.
  *
- * This check applies regardless of profileKind — even api_key auth needs the provider
- * prefix because opencode routes to custom providers via the model prefix (e.g. maas/glm-5).
- * Without it, runtime config injection in invoke-single-cat.ts cannot determine the provider name.
+ * Skipped when profileKind is "api_key" — api_key members store bare model names (e.g. "glm-5")
+ * and the provider prefix is supplied by the separate ocProviderName field on the member config.
+ * Runtime assembly happens in invoke-single-cat.ts: `${ocProviderName}/${defaultModel}`.
+ *
+ * For builtin auth (OAuth), the model must already include the provider prefix since there's
+ * no separate provider name field — opencode's builtin providers handle routing by convention.
  */
 export function validateModelFormatForProvider(
   provider: CatProvider,
   defaultModel?: string | null,
-  _profileKind?: ProviderProfileKind,
+  profileKind?: ProviderProfileKind,
 ): string | null {
   if (provider !== 'opencode') return null;
+  // api_key members use ocProviderName for routing — bare model names are valid
+  if (profileKind === 'api_key') return null;
   const trimmedModel = defaultModel?.trim();
   if (!trimmedModel) return null;
   const slashIndex = trimmedModel.indexOf('/');
   if (slashIndex > 0 && slashIndex < trimmedModel.length - 1) return null;
-  return 'client "opencode" requires model format "providerId/modelId" (e.g. openai/gpt-5.4, maas/glm-5)';
+  return 'client "opencode" recommends model format "providerId/modelId" (e.g. openai/gpt-5.4)';
 }
 
 export function validateRuntimeProviderBinding(
