@@ -135,7 +135,7 @@ describe('DareAgentService', () => {
     assert.ok(types.includes('tool_result'));
   });
 
-  test('passes --headless and --auto-approve in CLI args', async () => {
+  test('passes --headless and --full-auto in CLI args', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
@@ -146,29 +146,10 @@ describe('DareAgentService', () => {
     const call = spawnFn.mock.calls[0];
     const args = call.arguments[1];
     assert.ok(args.includes('--headless'), `expected --headless in args: ${args}`);
-    assert.ok(args.includes('--auto-approve'), `expected --auto-approve in args: ${args}`);
+    assert.ok(args.includes('--full-auto'), `expected --full-auto in args: ${args}`);
+    assert.ok(!args.includes('--auto-approve'), `--auto-approve should be replaced by --full-auto: ${args}`);
+    assert.ok(!args.includes('--auto-approve-tool'), `--auto-approve-tool no longer needed with --full-auto: ${args}`);
     assert.ok(args.includes('-m') && args.includes('client'), `expected -m client in args: ${args}`);
-  });
-
-  test('passes --auto-approve-tool for high-risk DARE tools', async () => {
-    const proc = createMockProcess();
-    const spawnFn = mock.fn(() => proc);
-    const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
-    const promise = collect(service.invoke('Write a file'));
-    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
-    await promise;
-
-    const args = spawnFn.mock.calls[0].arguments[1];
-    // DARE's --auto-approve only covers read_file/search_code by default.
-    // We must extend the whitelist for write_file, run_command, etc.
-    const approveToolArgs = args.reduce((acc, arg, i) => {
-      if (arg === '--auto-approve-tool') acc.push(args[i + 1]);
-      return acc;
-    }, []);
-    assert.ok(approveToolArgs.includes('write_file'), `expected write_file: ${approveToolArgs}`);
-    assert.ok(approveToolArgs.includes('run_command'), `expected run_command: ${approveToolArgs}`);
-    assert.ok(approveToolArgs.includes('write_code'), `expected write_code: ${approveToolArgs}`);
-    assert.ok(approveToolArgs.includes('run_cmd'), `expected run_cmd: ${approveToolArgs}`);
   });
 
   test('passes --adapter and --model', async () => {

@@ -4,7 +4,7 @@
  *
  * CLI 调用方式:
  *   python -m client --adapter openrouter --model MODEL \
- *     run --task "prompt" --auto-approve --headless
+ *     run --task "prompt" --full-auto --headless
  *   (API key passed via child process env, not CLI args)
  *
  * NDJSON 事件格式 (headless envelope v1):
@@ -80,13 +80,6 @@ export function resolveVenvPython(darePath: string): string {
   if (existsSync(venvPython)) return venvPython;
   return 'python';
 }
-
-/**
- * DARE tools that require approval beyond the built-in DEFAULT_AUTO_APPROVE_TOOLS
- * (which only covers read_file + search_code). Without these, headless mode
- * times out waiting for human approval that can never arrive.
- */
-const EXTRA_AUTO_APPROVE_TOOLS: readonly string[] = ['write_file', 'write_code', 'run_command', 'run_cmd'];
 
 function resolveDefaultDarePath(): string | undefined {
   const vendorPath = resolveVendorDarePath();
@@ -270,11 +263,7 @@ export class DareAgentService implements AgentService {
     if (sessionId) {
       args.push('--session-id', sessionId);
     }
-    args.push('--task', prompt, '--auto-approve');
-    for (const tool of EXTRA_AUTO_APPROVE_TOOLS) {
-      args.push('--auto-approve-tool', tool);
-    }
-    args.push('--headless');
+    args.push('--task', prompt, '--full-auto', '--headless');
 
     return args;
   }
