@@ -56,6 +56,13 @@ import {
 import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
 
+/** Ensure defaultModel is present in the models list for runtime config generation. */
+function ensureModelInList(models: string[], defaultModel: string): string[] {
+  const bare = defaultModel.includes('/') ? defaultModel.split('/').pop()! : defaultModel;
+  if (models.includes(bare) || models.includes(defaultModel)) return models;
+  return [...models, bare];
+}
+
 /** F118: Module-level singleton — guards per-cliSessionId serialization */
 const sessionMutex = new SessionMutex();
 
@@ -740,7 +747,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           ocProviderName === 'anthropic' ? 'anthropic' : ocProviderName === 'google' ? 'google' : 'openai';
         const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
           providerName: ocProviderName,
-          models: resolvedAccount.models ?? [defaultModel],
+          models: ensureModelInList(resolvedAccount.models ?? [], defaultModel),
           defaultModel: assembledModel,
           apiType,
         });
@@ -1244,6 +1251,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
       };
+      // Debug: log invoke parameters (redacting secrets) per 铲屎官 request
+      if (attempt === 0) {
+        const safeEnv = Object.fromEntries(
+          Object.entries(options.callbackEnv ?? {}).filter(
+            ([k]) => !k.includes('API_KEY') && !k.includes('AUTH_TOKEN') && !k.includes('SECRET'),
+          ),
+        );
+        log.info({ catId, model: defaultModel, provider, sessionId, callbackEnv: safeEnv }, 'invoke params');
+      }
       let suppressedMissingSessionError: AgentMessage | undefined;
       let suppressedPromptLimitError: AgentMessage | undefined;
       let suppressedTransientCliError: AgentMessage | undefined;
