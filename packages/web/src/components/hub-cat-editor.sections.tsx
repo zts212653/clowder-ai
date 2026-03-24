@@ -34,9 +34,9 @@ function autoSlug(name: string, currentId?: string): string {
     .replace(/-{2,}/g, '-')
     .slice(0, 40);
 
-  if (/^[a-z]/.test(slug) && slug.length >= 2) return slug;
+  if (/^[a-z]/.test(slug)) return slug;
 
-  // Non-ASCII or too-short name: keep existing random ID if present
+  // Non-ASCII name: keep existing random ID if present
   if (currentId && /^cat-[a-z0-9]+$/.test(currentId)) return currentId;
 
   const rand = Math.random().toString(36).substring(2, 10);
