@@ -24,6 +24,9 @@ test('source-only exposes helper functions for testing seams', () => {
     `
 declare -F configure_mcp_server_path >/dev/null
 declare -F background_eval_with_null_stdin >/dev/null
+declare -F port_is_listening >/dev/null
+declare -F port_listen_pids >/dev/null
+declare -F kill_processes_on_port >/dev/null
 declare -F wait_for_port_or_exit >/dev/null
 declare -F api_launch_command >/dev/null
 declare -F frontend_launch_command >/dev/null
@@ -407,6 +410,74 @@ fi
   );
 
   assert.equal(output, 'fallback-ok');
+});
+
+test('wait_for_port_or_exit accepts ss listener when lsof is a false negative', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+tmp_dir=$(mktemp -d)
+trap 'rm -rf "$tmp_dir"' RETURN
+cat > "$tmp_dir/ss" <<'EOF'
+#!/bin/sh
+printf '%s\n' \
+  'State Recv-Q Send-Q Local Address:Port Peer Address:Port Process' \
+  'LISTEN 0 511 0.0.0.0:3013 0.0.0.0:* users:(("next-server",pid=4242,fd=23))'
+EOF
+cat > "$tmp_dir/lsof" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$tmp_dir/ss" "$tmp_dir/lsof"
+PATH="$tmp_dir:$PATH"
+if wait_for_port_or_exit 3013 "Frontend" "$$" 1 >/dev/null; then
+  printf 'ss-detected'
+else
+  printf 'missed-listener'
+fi
+`,
+  );
+
+  assert.equal(output, 'ss-detected');
+});
+
+test('kill_processes_on_port can terminate ss-detected listener when lsof misses it', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+tmp_dir=$(mktemp -d)
+trap 'rm -rf "$tmp_dir"' RETURN
+sleep 30 &
+victim=$!
+cat > "$tmp_dir/ss" <<EOF
+#!/bin/sh
+if kill -0 "$victim" 2>/dev/null; then
+  printf '%s\\n' \
+    'State Recv-Q Send-Q Local Address:Port Peer Address:Port Process' \
+    'LISTEN 0 511 0.0.0.0:3013 0.0.0.0:* users:(("next-server",pid=$victim,fd=23))'
+else
+  printf '%s\\n' 'State Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
+fi
+EOF
+cat > "$tmp_dir/lsof" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$tmp_dir/ss" "$tmp_dir/lsof"
+PATH="$tmp_dir:$PATH"
+kill_processes_on_port 3013 >/dev/null
+if kill -0 "$victim" 2>/dev/null; then
+  printf 'still-running'
+else
+  printf 'killed-via-ss'
+fi
+wait "$victim" 2>/dev/null || true
+`,
+  );
+
+  assert.equal(output, 'killed-via-ss');
 });
 
 test('terminate_managed_pids kills tracked child process trees', () => {

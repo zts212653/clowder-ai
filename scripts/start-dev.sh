@@ -532,6 +532,32 @@ wait_for_port_or_exit() {
     return 1
 }
 
+# 清理占用指定端口的进程（启动前调用，避免 EADDRINUSE）
+kill_processes_on_port() {
+    local port=$1
+    local name=$2
+    local pids
+
+    pids=$(port_listen_pids "$port" || true)
+    [ -n "$pids" ] || return 0
+
+    echo -e "${YELLOW}  ⚠ 端口 $port 被占用，正在清理...${NC}"
+    echo "$pids" | xargs kill 2>/dev/null || true
+
+    local elapsed=0
+    while [ $elapsed -lt 5 ]; do
+        if ! port_is_listening "$port"; then
+            echo -e "${GREEN}  ✓ 端口 $port 已释放${NC}"
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    echo -e "${RED}  ✗ 端口 $port 清理失败${NC}"
+    return 1
+}
+
 # Sidecar 状态机：disabled → launching → ready | failed
 # 用法: start_sidecar <name> <state_var> <port> <timeout> <launch_cmd...>
 start_sidecar() {
@@ -1047,12 +1073,14 @@ main() {
     fi
 
     # API Server
+    kill_processes_on_port "$API_PORT" "API" || exit 1
     echo "  启动 API Server (端口 $API_PORT)..."
     background_eval_with_null_stdin "$API_LAUNCH_CMD"
     API_PID=$!
     wait_for_port_or_exit "$API_PORT" "API Server" "$API_PID" 20 || exit 1
 
     # Frontend
+    kill_processes_on_port "$WEB_PORT" "Frontend" || exit 1
     if [ "$PROD_WEB" = true ]; then
         # Production: next start (PWA + Tailscale 友好)
         echo "  启动 Frontend (端口 $WEB_PORT, production)..."
