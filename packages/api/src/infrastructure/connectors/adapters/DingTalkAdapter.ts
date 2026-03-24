@@ -9,9 +9,9 @@
  * F132 DingTalk + WeCom Chat Gateway — Phase A
  */
 
+import { basename } from 'node:path';
 import type { RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import { basename } from 'node:path';
 import type { MessageEnvelope } from '../ConnectorMessageFormatter.js';
 import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
 
@@ -329,7 +329,13 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
    */
   async sendMedia(
     externalChatId: string,
-    payload: { type: 'image' | 'file' | 'audio'; url?: string; absPath?: string; fileName?: string; [key: string]: unknown },
+    payload: {
+      type: 'image' | 'file' | 'audio';
+      url?: string;
+      absPath?: string;
+      fileName?: string;
+      [key: string]: unknown;
+    },
   ): Promise<void> {
     const url = typeof payload.url === 'string' && payload.url.length > 0 ? payload.url : undefined;
     const mediaReference =
