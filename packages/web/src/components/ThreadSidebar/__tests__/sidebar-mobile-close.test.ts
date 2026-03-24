@@ -185,4 +185,31 @@ describe('ThreadSidebar mobile auto-close', () => {
     expect(clearThreadStateMock).toHaveBeenCalledWith('new-thread-456');
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('calls clearThreadState when creating bootcamp thread', async () => {
+    const onClose = vi.fn();
+    act(() => {
+      root.render(React.createElement(ThreadSidebar, { onClose }));
+    });
+    await flush();
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/threads' && init?.method === 'POST') {
+        return jsonOk({ id: 'bootcamp-thread-123', kind: 'bootcamp' });
+      }
+      if (path === '/api/threads') return jsonOk({ threads: [] });
+      return jsonOk({});
+    });
+
+    // Find and click bootcamp button (data-testid="sidebar-bootcamp")
+    const bootcampBtn = container.querySelector('[data-testid="sidebar-bootcamp"]') as HTMLButtonElement;
+    expect(bootcampBtn).toBeTruthy();
+    act(() => {
+      bootcampBtn.click();
+    });
+    await flush();
+
+    // Verify clearThreadState was called with the new bootcamp thread ID
+    expect(clearThreadStateMock).toHaveBeenCalledWith('bootcamp-thread-123');
+  });
 });
