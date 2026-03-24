@@ -66,8 +66,12 @@ const PROVIDER_WRITERS = {
   google: writeGeminiMcpConfig,
 } as const;
 
-function hasUsableStdioCommand(command: string | undefined): boolean {
-  return typeof command === 'string' && command.trim().length > 0;
+/** Check if a descriptor has a usable transport (stdio command or streamableHttp URL). */
+function hasUsableTransport(desc: { command?: string; transport?: string; url?: string }): boolean {
+  if (desc.transport === 'streamableHttp') {
+    return typeof desc.url === 'string' && desc.url.trim().length > 0;
+  }
+  return typeof desc.command === 'string' && desc.command.trim().length > 0;
 }
 
 /**
@@ -141,9 +145,7 @@ export async function discoverExternalMcpServers(paths: DiscoveryPaths): Promise
   const result: McpServerDescriptor[] = [];
 
   for (const server of [...claude, ...codex, ...gemini]) {
-    // TD104 (URL transport) is not represented in McpServerDescriptor yet.
-    // Ignore entries without stdio command to avoid writing invalid configs.
-    if (!hasUsableStdioCommand(server.command)) continue;
+    if (!hasUsableTransport(server)) continue;
     if (!seen.has(server.name)) {
       seen.add(server.name);
       result.push({ ...server, source: 'external' });
@@ -195,7 +197,7 @@ function buildCatCafeSplitMcpDescriptors(projectRoot: string): McpServerDescript
   ];
 }
 
-function toCapabilityEntry(server: McpServerDescriptor): CapabilityEntry {
+export function toCapabilityEntry(server: McpServerDescriptor): CapabilityEntry {
   const entry: CapabilityEntry = {
     id: server.name,
     type: 'mcp',
@@ -206,6 +208,9 @@ function toCapabilityEntry(server: McpServerDescriptor): CapabilityEntry {
       args: server.args,
     },
   };
+  if (server.transport) entry.mcpServer!.transport = server.transport;
+  if (server.url) entry.mcpServer!.url = server.url;
+  if (server.headers) entry.mcpServer!.headers = server.headers;
   if (server.env) entry.mcpServer!.env = server.env;
   if (server.workingDir) entry.mcpServer!.workingDir = server.workingDir;
   return entry;
@@ -299,16 +304,7 @@ export async function bootstrapCapabilities(
   for (const ext of externals) {
     // Skip built-in server names if already discovered from existing config
     if (ext.name === 'cat-cafe' || splitNames.has(ext.name)) continue;
-    const entry: CapabilityEntry = {
-      id: ext.name,
-      type: 'mcp',
-      enabled: ext.enabled,
-      source: 'external',
-      mcpServer: { command: ext.command, args: ext.args },
-    };
-    if (ext.env) entry.mcpServer!.env = ext.env;
-    if (ext.workingDir) entry.mcpServer!.workingDir = ext.workingDir;
-    capabilities.push(entry);
+    capabilities.push(toCapabilityEntry(ext));
   }
 
   const config: CapabilitiesConfig = { version: 1, capabilities };
@@ -340,9 +336,8 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
       // Resolve effective enabled: global + per-cat override
       const override = cap.overrides?.find((o) => o.catId === catId);
       const enabledFromConfig = override ? override.enabled : cap.enabled;
-      // Guardrail: commandless MCP entries are invalid for current stdio model.
-      // Keep descriptor for writer cleanup (disabled => remove in Gemini/Claude).
-      const enabled = enabledFromConfig && hasUsableStdioCommand(mcpServer.command);
+      // Guardrail: entries without usable transport stay disabled for writer cleanup.
+      const enabled = enabledFromConfig && hasUsableTransport(mcpServer);
 
       const desc: McpServerDescriptor = {
         name: cap.id,
@@ -351,6 +346,9 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
         enabled,
         source: cap.source,
       };
+      if (mcpServer.transport) desc.transport = mcpServer.transport;
+      if (mcpServer.url) desc.url = mcpServer.url;
+      if (mcpServer.headers) desc.headers = mcpServer.headers;
       if (mcpServer.env) desc.env = mcpServer.env;
       if (mcpServer.workingDir) desc.workingDir = mcpServer.workingDir;
       return desc;

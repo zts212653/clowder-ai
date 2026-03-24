@@ -109,10 +109,16 @@ export async function writeClaudeMcpConfig(filePath: string, servers: McpServerD
   // Update managed entries (only enabled — Claude has no enabled field)
   for (const s of servers) {
     if (s.enabled) {
-      const entry: Record<string, unknown> = { command: s.command, args: s.args };
-      if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
-      if (s.workingDir) entry.cwd = s.workingDir;
-      existingServers[s.name] = entry;
+      if (s.transport === 'streamableHttp' && s.url) {
+        const entry: Record<string, unknown> = { type: 'streamableHttp', url: s.url };
+        if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
+        existingServers[s.name] = entry;
+      } else {
+        const entry: Record<string, unknown> = { command: s.command, args: s.args };
+        if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
+        if (s.workingDir) entry.cwd = s.workingDir;
+        existingServers[s.name] = entry;
+      }
     } else {
       // Disabled managed server → remove from config (Claude has no enabled field)
       delete existingServers[s.name];
@@ -145,9 +151,9 @@ export async function writeCodexMcpConfig(filePath: string, servers: McpServerDe
 
   // Update/add only managed entries; preserve user's own servers
   for (const s of servers) {
-    // Skip entries without a usable stdio command — writing them produces
-    // invalid TOML that newer Codex versions reject during config validation.
-    if (!s.command || s.command.trim().length === 0) {
+    // Skip URL-based servers — Codex only supports stdio transport.
+    // Also skip entries without a usable stdio command to avoid invalid TOML.
+    if (s.transport === 'streamableHttp' || !s.command || s.command.trim().length === 0) {
       delete existingMcp[s.name];
       continue;
     }
@@ -183,6 +189,8 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
 
   // Update/add managed entries; remove disabled managed; preserve user's own
   for (const s of servers) {
+    // Skip URL-based servers — Gemini only supports stdio transport.
+    if (s.transport === 'streamableHttp') continue;
     if (shouldSkipGeminiProjectServer(s.name)) {
       delete existingMcp[s.name];
       continue;
@@ -250,6 +258,7 @@ function toStringRecord(val: unknown): Record<string, string> | undefined {
 }
 
 function toDescriptor(name: string, cfg: Record<string, unknown>, enabled: boolean): McpServerDescriptor {
+  const isHttp = cfg.type === 'streamableHttp';
   const desc: McpServerDescriptor = {
     name,
     command: typeof cfg.command === 'string' ? cfg.command : '',
@@ -257,6 +266,12 @@ function toDescriptor(name: string, cfg: Record<string, unknown>, enabled: boole
     enabled,
     source: 'external',
   };
+  if (isHttp) {
+    desc.transport = 'streamableHttp';
+    if (typeof cfg.url === 'string' && cfg.url) desc.url = cfg.url;
+    const headers = toStringRecord(cfg.headers);
+    if (headers) desc.headers = headers;
+  }
   const env = toStringRecord(cfg.env);
   if (env) desc.env = env;
   const cwd = cfg.cwd;

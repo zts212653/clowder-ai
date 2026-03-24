@@ -5,15 +5,24 @@
  * 配置编排器从此格式生成三种 CLI 配置 (.mcp.json / .codex/config.toml / .gemini/settings.json)。
  */
 
-/** MCP server descriptor — 统一内部模型 (不含 transport, YAGNI → TD104) */
+/** MCP transport type — stdio (default) or remote HTTP (TD104) */
+export type McpTransport = 'stdio' | 'streamableHttp';
+
+/** MCP server descriptor — 统一内部模型 */
 export interface McpServerDescriptor {
   /** MCP server name (e.g. 'cat-cafe', 'filesystem') */
   name: string;
-  /** Command to spawn (e.g. 'node') */
+  /** Transport type (default: 'stdio'). TD104: 'streamableHttp' for URL-based servers. */
+  transport?: McpTransport;
+  /** Command to spawn (e.g. 'node') — required for stdio, empty for streamableHttp */
   command: string;
-  /** Command arguments */
+  /** Command arguments — stdio only */
   args: string[];
-  /** Optional environment variables */
+  /** Remote MCP endpoint URL — streamableHttp only */
+  url?: string;
+  /** HTTP headers for remote transport (e.g. Authorization) — streamableHttp only */
+  headers?: Record<string, string>;
+  /** Optional environment variables — stdio only */
   env?: Record<string, string>;
   /** Whether globally enabled */
   enabled: boolean;
