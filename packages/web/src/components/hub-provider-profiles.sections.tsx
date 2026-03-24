@@ -3,38 +3,13 @@
 import { useState } from 'react';
 import { TagEditor } from './hub-tag-editor';
 
-export function ProviderProfilesSummaryCard({
-  projectLabel,
-  allPaths,
-  activePath,
-  onSwitchProject,
-}: {
-  projectLabel: string;
-  allPaths: Array<{ path: string; label: string }>;
-  activePath: string | null;
-  onSwitchProject: (next: string | null) => void;
-}) {
-  void projectLabel;
-
+export function ProviderProfilesSummaryCard() {
   return (
     <div className="rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[13px] font-semibold text-[#E29578]">系统配置 &gt; 账号配置</p>
-        {allPaths.length > 1 ? (
-          <select
-            value={activePath ?? ''}
-            onChange={(e) => onSwitchProject(e.target.value || null)}
-            className="rounded-full border border-[#E8DCCF] bg-white px-3 py-1.5 text-xs text-[#5C4B42]"
-          >
-            {allPaths.map((option) => (
-              <option key={option.path} value={option.path}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </div>
-      <p className="mt-2 text-[13px] leading-6 text-[#8A776B]">每个账号可添加或删除模型。</p>
+      <p className="text-[13px] font-semibold text-[#E29578]">系统配置 &gt; 账号配置</p>
+      <p className="mt-2 text-[13px] leading-6 text-[#8A776B]">
+        每个账号可添加或删除模型。账号配置全局共享，所有项目通用。
+      </p>
     </div>
   );
 }

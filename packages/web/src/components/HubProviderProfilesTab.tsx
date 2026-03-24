@@ -1,38 +1,26 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { HubProviderProfileItem, type ProfileEditPayload } from './HubProviderProfileItem';
 import { CreateApiKeyProfileSection, ProviderProfilesSummaryCard } from './hub-provider-profiles.sections';
 import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
 import { ensureBuiltinProviderProfiles, resolveAccountActionId } from './hub-provider-profiles.view';
-import { getProjectPaths, projectDisplayName } from './ThreadSidebar/thread-utils';
 
 export function HubProviderProfilesTab() {
-  const threads = useChatStore((s) => s.threads);
-  const currentProjectPath = useChatStore((s) => s.currentProjectPath);
-  const knownProjects = useMemo(() => getProjectPaths(threads), [threads]);
-  const threadProjectPath = currentProjectPath && currentProjectPath !== 'default' ? currentProjectPath : null;
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ProviderProfilesResponse | null>(null);
-  const [projectPath, setProjectPath] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [createDisplayName, setCreateDisplayName] = useState('');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
   const [createModels, setCreateModels] = useState<string[]>([]);
-  const requestProjectPath = projectPath ?? threadProjectPath;
-  const mutationProjectPath = projectPath ?? data?.projectPath ?? threadProjectPath;
 
-  const fetchProfiles = useCallback(async (forProject?: string) => {
+  const fetchProfiles = useCallback(async () => {
     setError(null);
     try {
-      const query = new URLSearchParams();
-      if (forProject) query.set('projectPath', forProject);
-      const res = await apiFetch(`/api/provider-profiles?${query.toString()}`);
+      const res = await apiFetch('/api/provider-profiles');
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         setError((body.error as string) ?? '加载失败');
@@ -49,17 +37,8 @@ export function HubProviderProfilesTab() {
 
   useEffect(() => {
     setLoading(true);
-    fetchProfiles(requestProjectPath ?? undefined);
-  }, [fetchProfiles, requestProjectPath]);
-
-  const switchProject = useCallback(
-    (nextPath: string | null) => {
-      setProjectPath(nextPath);
-      setLoading(true);
-      fetchProfiles(nextPath ?? threadProjectPath ?? undefined);
-    },
-    [fetchProfiles, threadProjectPath],
-  );
+    fetchProfiles();
+  }, [fetchProfiles]);
 
   const callApi = useCallback(async (path: string, init: RequestInit) => {
     const res = await apiFetch(path, {
@@ -76,10 +55,6 @@ export function HubProviderProfilesTab() {
     return body;
   }, []);
 
-  const refresh = useCallback(async () => {
-    await fetchProfiles(mutationProjectPath ?? undefined);
-  }, [fetchProfiles, mutationProjectPath]);
-
   const createProfile = useCallback(async () => {
     if (!createDisplayName.trim()) {
       setError('请输入账号显示名');
@@ -95,7 +70,6 @@ export function HubProviderProfilesTab() {
       await callApi('/api/provider-profiles', {
         method: 'POST',
         body: JSON.stringify({
-          projectPath: mutationProjectPath ?? undefined,
           displayName: createDisplayName.trim(),
           authType: 'api_key',
           baseUrl: createBaseUrl.trim(),
@@ -107,33 +81,28 @@ export function HubProviderProfilesTab() {
       setCreateBaseUrl('');
       setCreateApiKey('');
       setCreateModels([]);
-      await refresh();
+      await fetchProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyId(null);
     }
-  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, mutationProjectPath, refresh]);
+  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, fetchProfiles]);
 
   const deleteProfile = useCallback(
     async (profileId: string) => {
       setBusyId(profileId);
       setError(null);
       try {
-        await callApi(`/api/provider-profiles/${profileId}`, {
-          method: 'DELETE',
-          body: JSON.stringify({
-            projectPath: mutationProjectPath ?? undefined,
-          }),
-        });
-        await refresh();
+        await callApi(`/api/provider-profiles/${profileId}`, { method: 'DELETE' });
+        await fetchProfiles();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setBusyId(null);
       }
     },
-    [callApi, mutationProjectPath, refresh],
+    [callApi, fetchProfiles],
   );
 
   const saveProfile = useCallback(
@@ -143,28 +112,17 @@ export function HubProviderProfilesTab() {
       try {
         await callApi(`/api/provider-profiles/${profileId}`, {
           method: 'PATCH',
-          body: JSON.stringify({
-            projectPath: mutationProjectPath ?? undefined,
-            ...payload,
-          }),
+          body: JSON.stringify(payload),
         });
-        await refresh();
+        await fetchProfiles();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setBusyId(null);
       }
     },
-    [callApi, mutationProjectPath, refresh],
+    [callApi, fetchProfiles],
   );
-
-  const allPaths = useMemo(() => {
-    const paths = new Set<string>();
-    if (data?.projectPath) paths.add(data.projectPath);
-    if (threadProjectPath) paths.add(threadProjectPath);
-    for (const p of knownProjects) paths.add(p);
-    return [...paths].map((path) => ({ path, label: projectDisplayName(path) }));
-  }, [data?.projectPath, knownProjects, threadProjectPath]);
 
   const displayProfiles = useMemo(() => ensureBuiltinProviderProfiles(data?.providers ?? []), [data?.providers]);
   const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
@@ -178,12 +136,7 @@ export function HubProviderProfilesTab() {
     <div className="space-y-4">
       {error && <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
 
-      <ProviderProfilesSummaryCard
-        projectLabel={projectDisplayName(data.projectPath)}
-        allPaths={allPaths}
-        activePath={mutationProjectPath}
-        onSwitchProject={switchProject}
-      />
+      <ProviderProfilesSummaryCard />
 
       <div role="group" aria-label="Provider Profile List" className="space-y-4">
         {displayCards.map((profile) => (
@@ -210,7 +163,7 @@ export function HubProviderProfilesTab() {
         onCreate={createProfile}
       />
       <p className="text-xs leading-5 text-[#B59A88]">
-        secrets 存储在 `.cat-cafe/provider-profiles.secrets.local.json`，Git 忽略。
+        secrets 存储在 `~/.cat-cafe/provider-profiles.secrets.local.json`（全局），Git 忽略。
       </p>
     </div>
   );
