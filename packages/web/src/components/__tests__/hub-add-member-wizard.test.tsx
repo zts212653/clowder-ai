@@ -7,6 +7,14 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
+const storeState = {
+  currentProjectPath: 'default',
+};
+
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
+}));
+
 vi.mock('@/components/useConfirm', () => ({
   useConfirm: () => () => Promise.resolve(true),
 }));
@@ -93,6 +101,7 @@ describe('HubAddMemberWizard', () => {
   });
 
   beforeEach(() => {
+    storeState.currentProjectPath = 'default';
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -229,6 +238,108 @@ describe('HubAddMemberWizard', () => {
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').value).toBe('openai');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('codex-sponsor');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('gpt-5.4-mini');
+  });
+
+  it('loads provider profiles from current project path when available', async () => {
+    storeState.currentProjectPath = '/tmp/member-worktree';
+    let requestedPath = '';
+
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/api/provider-profiles')) requestedPath = path;
+      if (path.startsWith('/api/provider-profiles')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/member-worktree',
+            activeProfileId: null,
+            providers: [],
+          }),
+        );
+      }
+      if (path === '/api/cats') return Promise.resolve(jsonResponse({ cats: [] }));
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubAddMemberWizard, {
+          open: true,
+          onClose: vi.fn(),
+          onComplete: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(requestedPath).toBe(`/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/member-worktree')}`);
+  });
+
+  it('keeps provider profiles request unscoped when current project is default', async () => {
+    storeState.currentProjectPath = 'default';
+    let requestedPath = '';
+
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/api/provider-profiles')) requestedPath = path;
+      if (path.startsWith('/api/provider-profiles')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/home/yuhan/clowder-ai',
+            activeProfileId: null,
+            providers: [],
+          }),
+        );
+      }
+      if (path === '/api/cats') return Promise.resolve(jsonResponse({ cats: [] }));
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubAddMemberWizard, {
+          open: true,
+          onClose: vi.fn(),
+          onComplete: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(requestedPath).toBe('/api/provider-profiles');
+  });
+
+  it('refetches provider profiles when project path changes while wizard stays open', async () => {
+    const requests: string[] = [];
+    mockApiFetch.mockImplementation((path: string) => {
+      requests.push(path);
+      if (path.startsWith('/api/provider-profiles')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/member-worktree-a',
+            activeProfileId: null,
+            providers: [],
+          }),
+        );
+      }
+      if (path === '/api/cats') return Promise.resolve(jsonResponse({ cats: [] }));
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    storeState.currentProjectPath = '/tmp/member-worktree-a';
+    await act(async () => {
+      root.render(React.createElement(HubAddMemberWizard, { open: true, onClose: vi.fn(), onComplete: vi.fn() }));
+    });
+    await flushEffects();
+
+    storeState.currentProjectPath = '/tmp/member-worktree-b';
+    await act(async () => {
+      root.render(React.createElement(HubAddMemberWizard, { open: true, onClose: vi.fn(), onComplete: vi.fn() }));
+    });
+    await flushEffects();
+
+    const profileRequests = requests.filter((path) => path.startsWith('/api/provider-profiles'));
+    expect(profileRequests).toEqual([
+      `/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/member-worktree-a')}`,
+      `/api/provider-profiles?projectPath=${encodeURIComponent('/tmp/member-worktree-b')}`,
+    ]);
   });
 
   it('blocks creating opencode member with bare model (requires providerId/modelId)', async () => {
