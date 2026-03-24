@@ -63,20 +63,30 @@ export function transformDareEvent(event: unknown, catId: CatId | string): Agent
         toolName: str(data.tool_name, 'unknown'),
         timestamp: ts,
       };
-      if (typeof data.tool_call_id === 'string') {
-        msg.toolInput = { tool_call_id: data.tool_call_id };
+      // Forward all available fields from DARE's tool.invoke event.
+      // DARE emits: tool_call_id, capability_id, attempt, risk_level,
+      // requires_approval, policy_decision, arguments (if present).
+      const input: Record<string, unknown> = {};
+      if (typeof data.tool_call_id === 'string') input.tool_call_id = data.tool_call_id;
+      if (typeof data.capability_id === 'string') input.capability_id = data.capability_id;
+      if (data.arguments != null && typeof data.arguments === 'object') {
+        Object.assign(input, data.arguments as Record<string, unknown>);
       }
+      if (Object.keys(input).length > 0) msg.toolInput = input;
       return msg;
     }
 
-    case 'tool.result':
+    case 'tool.result': {
+      const resultContent =
+        typeof data.output === 'string' && data.output.length > 0 ? data.output : `${str(data.tool_name)} completed`;
       return {
         type: 'tool_result',
         catId: catId as CatId,
         toolName: str(data.tool_name),
-        content: `${str(data.tool_name)} completed`,
+        content: resultContent,
         timestamp: ts,
       };
+    }
 
     case 'tool.error':
       return {

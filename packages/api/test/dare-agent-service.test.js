@@ -410,6 +410,114 @@ describe('DareAgentService', () => {
     assert.ok(!args.includes('--resume'), `did not expect --resume in args: ${args}`);
   });
 
+  // P2-1: Session init dedup — only first session.started is emitted
+  test('deduplicates session_init: only first session.started is emitted (P2-1)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
+    const promise = collect(service.invoke('Multi-step'));
+
+    const SESSION_STARTED_2 = {
+      ...SESSION_STARTED,
+      seq: 10,
+      session_id: 'dare-sess-2',
+    };
+    emitDareEvents(proc, [SESSION_STARTED, TOOL_INVOKE, TOOL_RESULT, SESSION_STARTED_2, TASK_COMPLETED]);
+    const messages = await promise;
+
+    const sessionInits = messages.filter((m) => m.type === 'session_init');
+    assert.strictEqual(sessionInits.length, 1, `expected 1 session_init, got ${sessionInits.length}`);
+    assert.strictEqual(sessionInits[0].sessionId, 'dare-sess-1');
+  });
+
+  // systemPrompt: passed via --system-prompt-text
+  test('systemPrompt is forwarded via --system-prompt-text and --system-prompt-mode append', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
+    const promise = collect(service.invoke('Test', { systemPrompt: 'You are a helpful cat.' }));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const modeIdx = args.indexOf('--system-prompt-mode');
+    assert.ok(modeIdx >= 0, `expected --system-prompt-mode in args: ${args}`);
+    assert.strictEqual(args[modeIdx + 1], 'append');
+
+    const textIdx = args.indexOf('--system-prompt-text');
+    assert.ok(textIdx >= 0, `expected --system-prompt-text in args: ${args}`);
+    assert.strictEqual(args[textIdx + 1], 'You are a helpful cat.');
+  });
+
+  test('no --system-prompt-text when systemPrompt is absent', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
+    const promise = collect(service.invoke('Test'));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('--system-prompt-text'), `should not have --system-prompt-text: ${args}`);
+    assert.ok(!args.includes('--system-prompt-mode'), `should not have --system-prompt-mode: ${args}`);
+  });
+
+  // MCP path: passed via --mcp-path when callbackEnv is present
+  test('mcpServerPath is forwarded via --mcp-path when callbackEnv is present', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({
+      catId: 'dare',
+      spawnFn,
+      model: 'test/model',
+      mcpServerPath: '/opt/mcp/dist/index.js',
+    });
+    const promise = collect(service.invoke('Test', { callbackEnv: { CAT_CAFE_API_URL: 'http://localhost:3004' } }));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const mcpIdx = args.indexOf('--mcp-path');
+    assert.ok(mcpIdx >= 0, `expected --mcp-path in args: ${args}`);
+    assert.strictEqual(args[mcpIdx + 1], '/opt/mcp/dist/index.js');
+  });
+
+  test('no --mcp-path when callbackEnv is absent', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({
+      catId: 'dare',
+      spawnFn,
+      model: 'test/model',
+      mcpServerPath: '/opt/mcp/dist/index.js',
+    });
+    const promise = collect(service.invoke('Test'));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('--mcp-path'), `should not have --mcp-path without callbackEnv: ${args}`);
+  });
+
+  // cliConfigArgs: user-defined CLI flags are forwarded
+  test('cliConfigArgs are forwarded to CLI args', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
+    const promise = collect(service.invoke('Test', { cliConfigArgs: ['--budget-tokens 5000', '--verbose'] }));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--budget-tokens'), `expected --budget-tokens in args: ${args}`);
+    assert.ok(args.includes('5000'), `expected 5000 in args: ${args}`);
+    assert.ok(args.includes('--verbose'), `expected --verbose in args: ${args}`);
+    // cliConfigArgs should appear before --task (after run)
+    const taskIdx = args.indexOf('--task');
+    const budgetIdx = args.indexOf('--budget-tokens');
+    assert.ok(budgetIdx < taskIdx, `cliConfigArgs should appear before --task`);
+  });
+
   // F135: venv python — uses .venv/bin/python when available
   test('uses venv python as command when .venv/bin/python exists (F135)', async () => {
     const tmpDare = join(tmpdir(), `dare-test-venv-${Date.now()}`);

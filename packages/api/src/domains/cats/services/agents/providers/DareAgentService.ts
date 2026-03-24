@@ -16,7 +16,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
@@ -25,6 +25,18 @@ import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { transformDareEvent } from './dare-event-transform.js';
+
+function resolveDefaultDareMcpServerPath(cwd = process.cwd()): string | undefined {
+  const candidates = [
+    resolve(cwd, '../mcp-server/dist/index.js'),
+    resolve(cwd, 'packages/mcp-server/dist/index.js'),
+    resolve(cwd, '../../packages/mcp-server/dist/index.js'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
 
 interface DareAgentServiceOptions {
   catId?: CatId;
@@ -38,6 +50,8 @@ interface DareAgentServiceOptions {
   apiKey?: string;
   /** Path to DARE repo (used as cwd fallback) */
   darePath?: string;
+  /** Absolute path to MCP server entry (dist/index.js) for --mcp-path */
+  mcpServerPath?: string;
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
 }
@@ -97,6 +111,7 @@ export class DareAgentService implements AgentService {
   private readonly endpoint: string | undefined;
   private readonly apiKey: string | undefined;
   private readonly darePath: string | undefined;
+  private readonly mcpServerPath: string | undefined;
   private readonly spawnFn: SpawnFn | undefined;
 
   constructor(options?: DareAgentServiceOptions) {
@@ -108,6 +123,12 @@ export class DareAgentService implements AgentService {
       options?.endpoint ?? process.env[DARE_ENDPOINT_ENV] ?? process.env[this.getAdapterEndpointEnvName()];
     this.apiKey = options?.apiKey ?? process.env[DARE_API_KEY_ENV];
     this.darePath = options?.darePath ?? process.env.DARE_PATH ?? resolveDefaultDarePath();
+    const configuredMcp = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
+    if (configuredMcp && configuredMcp.trim().length > 0) {
+      this.mcpServerPath = isAbsolute(configuredMcp) ? configuredMcp : resolve(process.cwd(), configuredMcp);
+    } else {
+      this.mcpServerPath = resolveDefaultDareMcpServerPath();
+    }
     this.spawnFn = options?.spawnFn;
   }
 
@@ -141,7 +162,15 @@ export class DareAgentService implements AgentService {
     }
 
     const endpoint = this.resolveEndpoint(options?.callbackEnv);
-    const args = this.buildArgs(prompt, options?.workingDirectory, options?.sessionId, endpoint, effectiveModel);
+    const args = this.buildArgs(prompt, {
+      workspace: options?.workingDirectory,
+      sessionId: options?.sessionId,
+      endpoint,
+      model: effectiveModel,
+      cliConfigArgs: options?.cliConfigArgs,
+      systemPrompt: options?.systemPrompt,
+      mcpServerPath: options?.callbackEnv ? this.mcpServerPath : undefined,
+    });
     // P1-1: cwd must ALWAYS be darePath (where `python -m client` can find the module).
     // Thread's workingDirectory goes to --workspace instead.
     const cwd = this.darePath;
@@ -150,6 +179,7 @@ export class DareAgentService implements AgentService {
     // P1-3: Pass API key via child env, not CLI args (avoids ps/audit leakage)
     const childEnv = this.buildEnv(options?.callbackEnv);
     const metadata: MessageMetadata = { provider: 'dare', model: effectiveModel };
+    let sessionInitEmitted = false;
 
     try {
       const cliOpts = {
@@ -216,8 +246,12 @@ export class DareAgentService implements AgentService {
 
         const result = transformDareEvent(event, this.catId);
         if (result !== null) {
-          if (result.type === 'session_init' && result.sessionId) {
-            metadata.sessionId = result.sessionId;
+          // P2-1: Only emit the first session_init; subsequent session.started events
+          // in multi-step runs are silently dropped to avoid duplicate session metrics.
+          if (result.type === 'session_init') {
+            if (sessionInitEmitted) continue;
+            sessionInitEmitted = true;
+            if (result.sessionId) metadata.sessionId = result.sessionId;
           }
           yield { ...result, metadata };
         }
@@ -238,31 +272,54 @@ export class DareAgentService implements AgentService {
 
   private buildArgs(
     prompt: string,
-    workspace?: string,
-    sessionId?: string,
-    endpoint?: string,
-    model?: string,
+    opts?: {
+      workspace?: string;
+      sessionId?: string;
+      endpoint?: string;
+      model?: string;
+      cliConfigArgs?: readonly string[];
+      systemPrompt?: string;
+      mcpServerPath?: string;
+    },
   ): string[] {
     const args = ['-m', 'client'];
-    const effectiveModel = model ?? this.model;
+    const effectiveModel = opts?.model ?? this.model;
 
     args.push('--adapter', this.adapter);
     args.push('--model', effectiveModel);
-    if (endpoint) {
-      args.push('--endpoint', endpoint);
+    if (opts?.endpoint) {
+      args.push('--endpoint', opts.endpoint);
     }
 
     // P1-1: Pass thread's project directory as DARE workspace
-    if (workspace) {
-      args.push('--workspace', workspace);
+    if (opts?.workspace) {
+      args.push('--workspace', opts.workspace);
+    }
+
+    // System prompt: inject via --system-prompt-text (DARE CLI supports append mode)
+    if (opts?.systemPrompt) {
+      args.push('--system-prompt-mode', 'append');
+      args.push('--system-prompt-text', opts.systemPrompt);
+    }
+
+    // MCP server: inject via --mcp-path when callback env is available
+    if (opts?.mcpServerPath) {
+      args.push('--mcp-path', opts.mcpServerPath);
     }
 
     // P1-3: API key is passed via child env (buildEnv), NOT CLI args
 
     args.push('run');
-    if (sessionId) {
-      args.push('--session-id', sessionId);
+    if (opts?.sessionId) {
+      args.push('--session-id', opts.sessionId);
     }
+
+    // User-defined CLI args from the member editor (parity with opencode).
+    for (const arg of opts?.cliConfigArgs ?? []) {
+      const parts = arg.trim().split(/\s+/);
+      args.push(...parts);
+    }
+
     args.push('--task', prompt, '--full-auto', '--headless');
 
     return args;
