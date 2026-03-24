@@ -16,11 +16,13 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
+const clearThreadStateMock = vi.fn();
 const mockStore: Record<string, unknown> = {
   threads: [],
   currentThreadId: 'default',
   setThreads: vi.fn(),
   setCurrentProject: vi.fn(),
+  clearThreadState: clearThreadStateMock,
   isLoadingThreads: false,
   setLoadingThreads: vi.fn(),
   updateThreadTitle: vi.fn(),
@@ -58,6 +60,7 @@ describe('ThreadSidebar mobile auto-close', () => {
     root = createRoot(container);
     mockApiFetch.mockReset();
     mockPush.mockReset();
+    clearThreadStateMock.mockReset();
     // Default: threads list returns empty
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/threads') return jsonOk({ threads: [] });
@@ -135,6 +138,7 @@ describe('ThreadSidebar mobile auto-close', () => {
     });
     await flush();
 
+    expect(clearThreadStateMock).toHaveBeenCalledWith('new-thread-123');
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -178,6 +182,34 @@ describe('ThreadSidebar mobile auto-close', () => {
     });
     await flush();
 
+    expect(clearThreadStateMock).toHaveBeenCalledWith('new-thread-456');
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('calls clearThreadState when creating bootcamp thread', async () => {
+    const onClose = vi.fn();
+    act(() => {
+      root.render(React.createElement(ThreadSidebar, { onClose }));
+    });
+    await flush();
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/threads' && init?.method === 'POST') {
+        return jsonOk({ id: 'bootcamp-thread-123', kind: 'bootcamp' });
+      }
+      if (path === '/api/threads') return jsonOk({ threads: [] });
+      return jsonOk({});
+    });
+
+    // Find and click bootcamp button (data-testid="sidebar-bootcamp")
+    const bootcampBtn = container.querySelector('[data-testid="sidebar-bootcamp"]') as HTMLButtonElement;
+    expect(bootcampBtn).toBeTruthy();
+    act(() => {
+      bootcampBtn.click();
+    });
+    await flush();
+
+    // Verify clearThreadState was called with the new bootcamp thread ID
+    expect(clearThreadStateMock).toHaveBeenCalledWith('bootcamp-thread-123');
   });
 });

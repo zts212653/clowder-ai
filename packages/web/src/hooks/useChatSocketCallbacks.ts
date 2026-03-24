@@ -104,6 +104,7 @@ export function useChatSocketCallbacks({
       onGameThreadCreated: (data) => {
         // Only navigate the initiator — other users in the room should not be auto-redirected
         if (data.initiatorUserId === userId) {
+          useChatStore.getState().clearThreadState(data.gameThreadId);
           onNavigateToThread?.(data.gameThreadId);
         }
       },
