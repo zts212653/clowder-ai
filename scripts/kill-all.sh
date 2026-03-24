@@ -19,7 +19,8 @@ echo "   Project path: $PROJECT"
 echo ""
 
 # Find PIDs by cmdline (most reliable)
-PIDS=$(ps aux | grep -E "(node|tsx|next|esbuild)" | grep "$PROJECT" | grep -v grep | awk '{print $2}' || true)
+# Use -F for fixed string matching to handle special characters in paths
+PIDS=$(ps aux | grep -E "(node|tsx|next|esbuild)" | grep -F "$PROJECT" | grep -v grep | awk '{print $2}' || true)
 
 # Also check by cwd (catches subprocesses)
 for pid in $(ps aux | awk '{print $2}'); do

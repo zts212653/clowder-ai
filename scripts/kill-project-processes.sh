@@ -32,7 +32,8 @@ echo ""
 
 # Find all processes related to the project directory
 # This matches: node, tsx, next, esbuild, pnpm processes that contain the project path
-PIDS=$(ps aux | grep -E "(node|tsx|next|esbuild|pnpm)" | grep -E "$PROJECT_PATH" | grep -v grep | awk '{print $2}' || true)
+# Use -F for fixed string matching to handle special characters in paths
+PIDS=$(ps aux | grep -E "(node|tsx|next|esbuild|pnpm)" | grep -F "$PROJECT_PATH" | grep -v grep | awk '{print $2}' || true)
 
 # Also find related child processes that might be in node_modules but not show full path
 # Check for processes with CWD in the project
