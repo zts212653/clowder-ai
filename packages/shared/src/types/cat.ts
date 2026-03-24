@@ -63,6 +63,8 @@ export interface CatConfig {
   readonly sessionChain?: boolean;
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time. */
   readonly cliConfigArgs?: readonly string[];
+  /** F189: OpenCode custom provider name for api_key routing (runtime assembles provider/model). */
+  readonly ocProviderName?: string;
 }
 
 /**

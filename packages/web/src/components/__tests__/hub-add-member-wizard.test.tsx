@@ -227,11 +227,11 @@ describe('HubAddMemberWizard', () => {
 
     expect(container.textContent).toContain('成员配置');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').value).toBe('openai');
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('codex-sponsor');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('codex-sponsor');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('gpt-5.4-mini');
   });
 
-  it('blocks creating opencode member with bare model (requires providerId/modelId)', async () => {
+  it('allows opencode member with bare model (ocProviderName is set in editor)', async () => {
     const onComplete = vi.fn();
 
     await act(async () => {
@@ -248,15 +248,14 @@ describe('HubAddMemberWizard', () => {
     await click(queryButton(container, 'OpenCode'));
     await click(queryButton(container, 'Codex Sponsor'));
 
-    // Finish button should be disabled — bare model without providerId/ prefix is rejected.
+    // Finish button should NOT be disabled — bare model is allowed, editor will collect ocProviderName.
     const finishButton = queryButton(container, '创建后继续编辑');
-    expect(finishButton.disabled).toBe(true);
+    expect(finishButton.disabled).toBe(false);
 
     await click(finishButton);
     await flushEffects();
 
-    // Wizard blocks — bare model is not accepted.
-    expect(onComplete).not.toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalled();
   });
 
   it('walks the Antigravity flow with default CLI args and lands in the editor', async () => {

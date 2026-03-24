@@ -78,6 +78,7 @@ const createNormalCatSchema = baseCatSchema.extend({
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
+  ocProviderName: z.string().min(1).optional(),
 });
 
 const createAntigravityCatSchema = baseCatSchema.extend({
@@ -111,6 +112,7 @@ const updateCatSchema = z.object({
   cli: cliSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
+  ocProviderName: z.string().min(1).nullable().optional(),
 });
 
 function resolveOperator(raw: unknown): string | null {
@@ -217,6 +219,7 @@ async function validateAccountBindingOrThrow(
   client: CatProvider,
   accountRef?: string | null,
   defaultModel?: string | null,
+  ocProviderName?: string | null,
 ): Promise<void> {
   const trimmedAccountRef = accountRef?.trim();
   if (client === 'antigravity' && trimmedAccountRef) {
@@ -234,7 +237,7 @@ async function validateAccountBindingOrThrow(
   if (compatibilityError) {
     throw new Error(compatibilityError);
   }
-  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.kind);
+  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.kind, ocProviderName);
   if (modelFormatError) {
     throw new Error(modelFormatError);
   }
@@ -266,6 +269,7 @@ async function toCatResponse(
     sessionChain: cat.sessionChain,
     commandArgs: cat.commandArgs,
     cliConfigArgs: cat.cliConfigArgs,
+    ocProviderName: cat.ocProviderName,
     variantLabel: cat.variantLabel ?? undefined,
     isDefaultVariant: cat.isDefaultVariant ?? undefined,
     breedDisplayName: cat.breedDisplayName ?? undefined,
@@ -376,7 +380,14 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const accountRef = resolveAccountRef(body);
     try {
-      await validateAccountBindingOrThrow(projectRoot, body.client, accountRef, body.defaultModel);
+      const ocProviderNameForValidation = 'ocProviderName' in body ? body.ocProviderName : undefined;
+      await validateAccountBindingOrThrow(
+        projectRoot,
+        body.client,
+        accountRef,
+        body.defaultModel,
+        ocProviderNameForValidation,
+      );
       const resolvedAvatar = body.avatar ?? '/avatars/default.png';
       if (body.client === 'antigravity') {
         createRuntimeCat(projectRoot, {
@@ -431,6 +442,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               body.client === 'opencode'),
           cli: body.cli ?? defaultCliForClient(body.client),
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
+          ...(body.ocProviderName ? { ocProviderName: body.ocProviderName } : {}),
         });
       }
     } catch (err) {
@@ -495,7 +507,15 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     if (providerConfigTouched) {
       try {
-        await validateAccountBindingOrThrow(projectRoot, effectiveClient, effectiveAccountRef, effectiveDefaultModel);
+        const effectiveOcProviderName =
+          body.ocProviderName !== undefined ? body.ocProviderName : currentCat.ocProviderName;
+        await validateAccountBindingOrThrow(
+          projectRoot,
+          effectiveClient,
+          effectiveAccountRef,
+          effectiveDefaultModel,
+          effectiveOcProviderName,
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         reply.status(400);
@@ -544,6 +564,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.cli !== undefined ? { cli: body.cli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
         ...(body.cliConfigArgs !== undefined ? { cliConfigArgs: body.cliConfigArgs } : {}),
+        ...(body.ocProviderName !== undefined
+          ? body.ocProviderName === null
+            ? { ocProviderName: undefined }
+            : { ocProviderName: body.ocProviderName }
+          : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore, opts.onCatalogChanged);
       const cat = resolved[request.params.id];

@@ -89,6 +89,10 @@ export interface CatVariant {
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time.
    *  Each entry is a raw config string, e.g. 'model_reasoning_effort="low"'. */
   readonly cliConfigArgs?: readonly string[];
+  /** F189: OpenCode custom provider name (e.g. "maas", "deepseek").
+   *  Used with api_key auth — runtime assembles `ocProviderName/defaultModel` for the -m flag
+   *  and generates an OPENCODE_CONFIG runtime config file for the provider. */
+  readonly ocProviderName?: string;
 }
 
 /**

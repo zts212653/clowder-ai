@@ -34,6 +34,7 @@ import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+import { OC_API_KEY_ENV, OC_BASE_URL_ENV, writeOpenCodeRuntimeConfig } from '../providers/opencode-config-template.js';
 
 const log = createModuleLogger('invoke');
 
@@ -659,6 +660,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
         if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
+        // Pass model override so ClaudeAgentService can use env var mapping
+        // for non-Anthropic model names (e.g. glm-5 on BigModel).
+        if (defaultModel) callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel;
         if (resolvedAccount.baseUrl) {
           const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
           const proxyPortNum = parseInt(proxyPortStr, 10);
@@ -721,6 +725,35 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (provider === 'dare' && resolvedAccount?.authType === 'api_key') {
       if (resolvedAccount.apiKey) callbackEnv.DARE_API_KEY = resolvedAccount.apiKey;
       if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
+    }
+
+    // F189: OpenCode unified custom provider config injection.
+    // All opencode + api_key members go through this path — ocProviderName is always required
+    // by validation. Built-in provider names (anthropic, openai) and custom names (maas, deepseek)
+    // are both handled identically: generate a per-catId runtime config, assemble provider/model.
+    const ocProviderName = catConfig?.ocProviderName?.trim();
+    if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && ocProviderName && defaultModel) {
+      const assembledModel = defaultModel.includes('/') ? defaultModel : `${ocProviderName}/${defaultModel}`;
+      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
+      try {
+        // Infer apiType from ocProviderName (not effectiveProtocol — protocol UI was removed).
+        // Most third-party APIs are OpenAI-compatible; only "anthropic" and "google" need
+        // their native adapters. This covers maas, deepseek, openrouter, etc. as openai.
+        const apiType: 'openai' | 'anthropic' | 'google' =
+          ocProviderName === 'anthropic' ? 'anthropic' : ocProviderName === 'google' ? 'google' : 'openai';
+        const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
+          providerName: ocProviderName,
+          models: resolvedAccount.models ?? [defaultModel],
+          defaultModel: assembledModel,
+          apiType,
+        });
+        callbackEnv.OPENCODE_CONFIG = configPath;
+        if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
+        log.info({ catId, configPath, provider: ocProviderName, apiType }, 'OpenCode runtime config written');
+      } catch (err) {
+        log.warn({ catId, err }, 'Failed to write OpenCode runtime config — falling back to env vars');
+      }
     }
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new sessions for cats

@@ -39,21 +39,34 @@ function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProf
 }
 
 /**
- * Returns an error string when the model does not follow "providerId/modelId" convention for opencode.
- * The opencode CLI expects this format; bare models like "glm-5" become "glm-5/" at runtime.
- * Server-side callers MUST reject; frontend shows the same message as a pre-flight hint.
- * Skipped when profileKind is "api_key" — API key auth uses credentials directly.
+ * Returns an error string when the opencode provider binding is incomplete.
+ *
+ * For api_key profiles: ocProviderName is **always required**. The runtime generates a
+ * per-catId config file and assembles `${ocProviderName}/${defaultModel}` for -m routing.
+ * Built-in provider names (anthropic, openai, openrouter) and custom names (maas, deepseek)
+ * are both valid — "anthropic" as ocProviderName is just the special case that was previously
+ * handled as a separate code path (Path B). Now unified into one mechanism.
+ *
+ * For builtin auth (OAuth): the model should use "providerId/modelId" format (e.g. openai/gpt-5.4)
+ * since opencode's built-in provider registry handles routing natively.
  */
 export function validateModelFormatForProvider(
   provider: CatProvider,
   defaultModel?: string | null,
   profileKind?: ProviderProfileKind,
+  ocProviderName?: string | null,
 ): string | null {
   if (provider !== 'opencode') return null;
-  // API key auth uses credentials directly — provider/model format not required
-  if (profileKind === 'api_key') return null;
   const trimmedModel = defaultModel?.trim();
   if (!trimmedModel) return null;
+  if (profileKind === 'api_key') {
+    // api_key always requires ocProviderName — runtime config generation depends on it
+    if (!ocProviderName?.trim()) {
+      return 'client "opencode" with API key auth requires an OpenCode Provider name (e.g. anthropic, openai, maas)';
+    }
+    return null;
+  }
+  // builtin/OAuth: recommend provider/model format for native routing
   const slashIndex = trimmedModel.indexOf('/');
   if (slashIndex > 0 && slashIndex < trimmedModel.length - 1) return null;
   return 'client "opencode" recommends model format "providerId/modelId" (e.g. openai/gpt-5.4)';

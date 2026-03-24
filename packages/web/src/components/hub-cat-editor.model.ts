@@ -27,6 +27,7 @@ export interface HubCatEditorFormState {
   defaultModel: string;
   commandArgs: string;
   cliConfigArgs: string[];
+  ocProviderName: string;
   sessionChain: SessionChainValue;
   maxPromptTokens: string;
   maxContextTokens: string;
@@ -253,6 +254,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
+    ocProviderName: cat?.ocProviderName ?? '',
     sessionChain: String(cat?.sessionChain ?? true) as SessionChainValue,
     maxPromptTokens: cat?.contextBudget ? String(cat.contextBudget.maxPromptTokens) : '',
     maxContextTokens: cat?.contextBudget ? String(cat.contextBudget.maxContextTokens) : '',
