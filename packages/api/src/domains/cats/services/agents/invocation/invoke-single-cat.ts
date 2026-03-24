@@ -1251,12 +1251,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
       };
-      // Debug: log invoke parameters (redacting secrets) per 铲屎官 request
+      // Debug: log invoke parameters (whitelist only — no secrets) per 铲屎官 request
       if (attempt === 0) {
+        const SAFE_ENV_KEYS = new Set([
+          'CAT_CAFE_EFFECTIVE_PROTOCOL',
+          'CAT_CAFE_ANTHROPIC_PROFILE_MODE',
+          'CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE',
+          'CAT_CAFE_ANTHROPIC_BASE_URL',
+          'ANTHROPIC_BASE_URL',
+          'ANTHROPIC_DEFAULT_OPUS_MODEL',
+          'ANTHROPIC_DEFAULT_SONNET_MODEL',
+          'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+          'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+          'OPENAI_BASE_URL',
+          'OPENAI_API_BASE',
+          'CODEX_AUTH_MODE',
+          'OPENCODE_CONFIG',
+          'GEMINI_BASE_URL',
+        ]);
         const safeEnv = Object.fromEntries(
-          Object.entries(options.callbackEnv ?? {}).filter(
-            ([k]) => !k.includes('API_KEY') && !k.includes('AUTH_TOKEN') && !k.includes('SECRET'),
-          ),
+          Object.entries(options.callbackEnv ?? {}).filter(([k]) => SAFE_ENV_KEYS.has(k)),
         );
         log.info({ catId, model: defaultModel, provider, sessionId, callbackEnv: safeEnv }, 'invoke params');
       }
