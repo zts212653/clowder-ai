@@ -9,6 +9,7 @@ import {
   sessionChainTools,
   signalStudyTools,
   signalsTools,
+  webFetchTools,
 } from './tools/index.js';
 
 type ToolDef = {
@@ -58,9 +59,16 @@ export function registerLimbToolset(server: McpServer): void {
   registerTools(server, limbNodeTools);
 }
 
+const webTools: readonly ToolDef[] = [...webFetchTools];
+
+export function registerWebToolset(server: McpServer): void {
+  registerTools(server, webTools);
+}
+
 export function registerFullToolset(server: McpServer): void {
   registerCollabToolset(server);
   registerMemoryToolset(server);
   registerSignalToolset(server);
   registerLimbToolset(server);
+  registerWebToolset(server);
 }

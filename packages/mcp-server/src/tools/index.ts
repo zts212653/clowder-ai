@@ -77,6 +77,11 @@ export {
 } from './session-chain-tools.js';
 export { signalStudyTools } from './signal-study-tools.js';
 export {
+  handleWebFetch,
+  webFetchInputSchema,
+  webFetchTools,
+} from './web-fetch-tools.js';
+export {
   handleSignalGetArticle,
   handleSignalListInbox,
   handleSignalMarkRead,

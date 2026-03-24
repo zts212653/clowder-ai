@@ -65,6 +65,8 @@ const EXPECTED_TOOLS = [
   'limb_invoke',
   'limb_pair_list',
   'limb_pair_approve',
+  // Web fetch tools
+  'cat_cafe_web_fetch',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
