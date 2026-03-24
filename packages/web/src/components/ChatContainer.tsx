@@ -265,26 +265,37 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   // Sync URL-driven threadId to store (store is follower, URL is source of truth)
   // setCurrentThread saves old thread state to map, restores new thread state.
+  //
+  // Bug fix (double-call issue):
+  // Previously, setCurrentThread was called twice on thread change:
+  // 1. Inside the if block (when prevThreadRef.current !== threadId)
+  // 2. Unconditionally after the if block ("First mount" case)
+  // This caused unnecessary save/restore cycles and potential state corruption.
+  //
+  // Solution: Only call setCurrentThread when actually needed:
+  // - On thread switch (prevThreadRef.current !== threadId)
+  // - When store is out of sync with URL (needsSync check)
   const setCurrentProject = useChatStore((s) => s.setCurrentProject);
   const storeThreads = useChatStore((s) => s.threads);
   const prevThreadRef = useRef(threadId);
   useEffect(() => {
-    if (prevThreadRef.current !== threadId) {
-      // Thread switch: store saves/restores per-thread state automatically
+    const storeThreadId = useChatStore.getState().currentThreadId;
+    const needsSync = storeThreadId !== threadId;
+
+    if (prevThreadRef.current !== threadId || needsSync) {
+      // Thread switch or store out of sync: save/restore per-thread state
       setCurrentThread(threadId);
       // Clean up non-thread-scoped refs
       resetRefs();
       clearTasks();
       prevThreadRef.current = threadId;
     }
-    // First mount — sync threadId to store without save/restore
-    setCurrentThread(threadId);
     // F101: Recover game state for the new thread (or clear stale game from previous thread)
     reconnectGame(threadId).catch(() => {});
   }, [
     threadId,
     clearTasks, // Clean up non-thread-scoped refs
-    resetRefs, // First mount — sync threadId to store without save/restore
+    resetRefs,
     setCurrentThread,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
