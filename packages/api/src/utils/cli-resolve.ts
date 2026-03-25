@@ -29,7 +29,10 @@ export function resolveCliCommand(command: string): string | null {
     const which = IS_WINDOWS ? `where ${command}` : `which ${command}`;
     const result = execSync(which, { timeout: 5000, encoding: 'utf-8' }).trim();
     if (result) {
-      const lines = result.split('\n').map((l) => l.trim()).filter(Boolean);
+      const lines = result
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
       // On Windows, prefer the .cmd shim (more reliable for shim resolution)
       const resolved = (IS_WINDOWS && lines.find((l) => /\.cmd$/i.test(l))) || lines[0];
       resolvedCache.set(command, resolved);
