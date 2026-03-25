@@ -5,7 +5,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { catRegistry } from '@cat-cafe/shared';
+import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import {
   bootstrapCapabilities,
   buildCatCafeMcpDescriptor,
@@ -21,6 +21,11 @@ import {
   resolveServersForCat,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
+
+// Bootstrap catRegistry so provider-gated tests can resolve cat → provider.
+for (const [id, config] of Object.entries(CAT_CONFIGS)) {
+  if (!catRegistry.has(id)) catRegistry.register(id, config);
+}
 
 /** @param {string} prefix */
 async function makeTmpDir(prefix) {
@@ -207,6 +212,35 @@ describe('discoverExternalMcpServers', () => {
     assert.deepEqual(servers, []);
   });
 
+  it('prefers enabled entry over disabled when same name and same transport', async () => {
+    // Codex config supports the enabled field natively.
+    // First entry: disabled stdio server.
+    const codexFile = join(dir, 'codex.toml');
+    await writeFile(
+      codexFile,
+      ['[mcp_servers.shared]', 'command = "codex-cmd"', 'args = []', 'enabled = false'].join('\n'),
+    );
+    // Second entry: enabled stdio server (same name, same transport).
+    const geminiFile = join(dir, 'gemini.json');
+    await writeFile(
+      geminiFile,
+      JSON.stringify({
+        mcpServers: { shared: { command: 'gemini-cmd', args: [] } },
+      }),
+    );
+
+    const servers = await discoverExternalMcpServers({
+      claudeConfig: join(dir, 'nonexistent.json'),
+      codexConfig: codexFile,
+      geminiConfig: geminiFile,
+    });
+
+    assert.equal(servers.length, 1);
+    // The enabled entry (gemini) should win over the disabled one (codex)
+    assert.equal(servers[0].command, 'gemini-cmd');
+    assert.notEqual(servers[0].enabled, false);
+  });
+
   it('skips commandless entries (invalid for stdio config model)', async () => {
     const geminiFile = join(dir, 'gemini.json');
     await writeFile(
@@ -227,6 +261,72 @@ describe('discoverExternalMcpServers', () => {
 
     assert.equal(servers.length, 1);
     assert.equal(servers[0].name, 'filesystem');
+  });
+
+  it('discovers streamableHttp server from Claude config (URL-based, no command)', async () => {
+    const claudeFile = join(dir, 'claude.json');
+    await writeFile(
+      claudeFile,
+      JSON.stringify({
+        mcpServers: {
+          'remote-tool': {
+            type: 'http',
+            url: 'https://mcp.example.com/sse',
+            headers: { Authorization: 'Bearer tok' },
+          },
+        },
+      }),
+    );
+
+    const servers = await discoverExternalMcpServers({
+      claudeConfig: claudeFile,
+      codexConfig: join(dir, 'nonexistent.toml'),
+      geminiConfig: join(dir, 'nonexistent.json'),
+    });
+
+    assert.equal(servers.length, 1);
+    assert.equal(servers[0].name, 'remote-tool');
+    assert.equal(servers[0].transport, 'streamableHttp');
+    assert.equal(servers[0].url, 'https://mcp.example.com/sse');
+    assert.deepEqual(servers[0].headers, { Authorization: 'Bearer tok' });
+    assert.equal(servers[0].source, 'external');
+  });
+
+  it('discovers both type:http and type:streamableHttp from Claude config', async () => {
+    const claudeFile = join(dir, 'claude.json');
+    await writeFile(
+      claudeFile,
+      JSON.stringify({
+        mcpServers: {
+          'remote-http': {
+            type: 'http',
+            url: 'https://mcp.example.com/http',
+          },
+          'remote-streamable': {
+            type: 'streamableHttp',
+            url: 'https://mcp.example.com/streamable',
+          },
+        },
+      }),
+    );
+
+    const servers = await discoverExternalMcpServers({
+      claudeConfig: claudeFile,
+      codexConfig: join(dir, 'nonexistent.toml'),
+      geminiConfig: join(dir, 'nonexistent.json'),
+    });
+
+    assert.equal(servers.length, 2);
+
+    const httpServer = servers.find((s) => s.name === 'remote-http');
+    assert.ok(httpServer);
+    assert.equal(httpServer.transport, 'streamableHttp');
+    assert.equal(httpServer.url, 'https://mcp.example.com/http');
+
+    const streamableServer = servers.find((s) => s.name === 'remote-streamable');
+    assert.ok(streamableServer);
+    assert.equal(streamableServer.transport, 'streamableHttp');
+    assert.equal(streamableServer.url, 'https://mcp.example.com/streamable');
   });
 });
 
@@ -549,6 +649,43 @@ describe('resolveServersForCat', () => {
     const servers = resolveServersForCat(config, 'opus');
     assert.equal(servers[0].enabled, false);
   });
+
+  it('enables streamableHttp for Anthropic cat, disables for non-Anthropic cat', () => {
+    const config = makeConfig([
+      {
+        id: 'remote-tool',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: {
+          command: '',
+          args: [],
+          transport: 'streamableHttp',
+          url: 'https://mcp.example.com/sse',
+        },
+      },
+    ]);
+
+    // opus is anthropic → streamableHttp should be enabled
+    const opusServers = resolveServersForCat(config, 'opus');
+    assert.equal(opusServers.length, 1);
+    assert.equal(opusServers[0].name, 'remote-tool');
+    assert.equal(opusServers[0].enabled, true);
+    assert.equal(opusServers[0].transport, 'streamableHttp');
+    assert.equal(opusServers[0].url, 'https://mcp.example.com/sse');
+
+    // codex is openai → streamableHttp should be disabled
+    const codexServers = resolveServersForCat(config, 'codex');
+    assert.equal(codexServers.length, 1);
+    assert.equal(codexServers[0].name, 'remote-tool');
+    assert.equal(codexServers[0].enabled, false);
+
+    // gemini is google → streamableHttp should also be disabled
+    const geminiServers = resolveServersForCat(config, 'gemini');
+    assert.equal(geminiServers.length, 1);
+    assert.equal(geminiServers[0].name, 'remote-tool');
+    assert.equal(geminiServers[0].enabled, false);
+  });
 });
 
 // ────────── Generate CLI configs ──────────
@@ -653,6 +790,63 @@ describe('generateCliConfigs', () => {
 
     assert.equal(data.mcpServers.jetbrains, undefined, 'invalid managed entry should be removed');
     assert.ok(data.mcpServers['cat-cafe-collab'], 'valid managed entry should remain');
+  });
+
+  it('serializes streamableHttp to Claude config and omits it from Codex/Gemini', async () => {
+    const hasAnyCats = catRegistry.getAllIds().length > 0;
+    if (!hasAnyCats) return;
+
+    const paths = {
+      anthropic: join(dir, '.mcp.json'),
+      openai: join(dir, '.codex', 'config.toml'),
+      google: join(dir, '.gemini', 'settings.json'),
+    };
+
+    const config = makeConfig([
+      {
+        id: 'remote-tool',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: {
+          command: '',
+          args: [],
+          transport: 'streamableHttp',
+          url: 'https://mcp.example.com/sse',
+          headers: { Authorization: 'Bearer tok' },
+        },
+      },
+    ]);
+
+    await generateCliConfigs(config, paths);
+
+    // Claude config should contain the streamableHttp entry with url
+    const claudeData = JSON.parse(await readFile(paths.anthropic, 'utf-8'));
+    const remoteTool = claudeData.mcpServers['remote-tool'];
+    assert.ok(remoteTool, 'streamableHttp server should be written to Claude config');
+    assert.equal(remoteTool.type, 'http');
+    assert.equal(remoteTool.url, 'https://mcp.example.com/sse');
+    assert.deepEqual(remoteTool.headers, { Authorization: 'Bearer tok' });
+
+    // Codex config should NOT contain the streamableHttp entry
+    try {
+      const codexRaw = await readFile(paths.openai, 'utf-8');
+      assert.ok(!codexRaw.includes('remote-tool'), 'streamableHttp should not appear in Codex config');
+    } catch {
+      // File may not exist if no openai cats — that's fine
+    }
+
+    // Gemini config should NOT contain the streamableHttp entry
+    try {
+      const geminiData = JSON.parse(await readFile(paths.google, 'utf-8'));
+      assert.equal(
+        geminiData.mcpServers?.['remote-tool'],
+        undefined,
+        'streamableHttp should not appear in Gemini config',
+      );
+    } catch {
+      // File may not exist if no google cats — that's fine
+    }
   });
 });
 

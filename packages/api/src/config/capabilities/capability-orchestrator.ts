@@ -66,8 +66,12 @@ const PROVIDER_WRITERS = {
   google: writeGeminiMcpConfig,
 } as const;
 
-function hasUsableStdioCommand(command: string | undefined): boolean {
-  return typeof command === 'string' && command.trim().length > 0;
+/** Check if a descriptor has a usable transport (stdio command or streamableHttp URL). */
+function hasUsableTransport(desc: { command?: string; transport?: string; url?: string }): boolean {
+  if (desc.transport === 'streamableHttp') {
+    return typeof desc.url === 'string' && desc.url.trim().length > 0;
+  }
+  return typeof desc.command === 'string' && desc.command.trim().length > 0;
 }
 
 /**
@@ -137,19 +141,26 @@ export async function discoverExternalMcpServers(paths: DiscoveryPaths): Promise
     readGeminiMcpConfig(paths.geminiConfig),
   ]);
 
-  const seen = new Set<string>();
-  const result: McpServerDescriptor[] = [];
+  const byName = new Map<string, McpServerDescriptor>();
 
   for (const server of [...claude, ...codex, ...gemini]) {
-    // TD104 (URL transport) is not represented in McpServerDescriptor yet.
-    // Ignore entries without stdio command to avoid writing invalid configs.
-    if (!hasUsableStdioCommand(server.command)) continue;
-    if (!seen.has(server.name)) {
-      seen.add(server.name);
-      result.push({ ...server, source: 'external' });
+    if (!hasUsableTransport(server)) continue;
+    const existing = byName.get(server.name);
+    if (!existing) {
+      byName.set(server.name, { ...server, source: 'external' });
+    } else if (existing.transport === 'streamableHttp' && server.transport !== 'streamableHttp') {
+      // Prefer stdio over streamableHttp — but only when the stdio entry is actually
+      // enabled, or when the existing streamableHttp entry is disabled anyway.
+      // This prevents a disabled stdio duplicate from replacing an enabled HTTP server.
+      if (server.enabled !== false || existing.enabled !== true) {
+        byName.set(server.name, { ...server, source: 'external' });
+      }
+    } else if (existing.enabled === false && server.enabled !== false) {
+      // Same transport: prefer enabled entry over disabled one.
+      byName.set(server.name, { ...server, source: 'external' });
     }
   }
-  return result;
+  return [...byName.values()];
 }
 
 /**
@@ -195,7 +206,7 @@ function buildCatCafeSplitMcpDescriptors(projectRoot: string): McpServerDescript
   ];
 }
 
-function toCapabilityEntry(server: McpServerDescriptor): CapabilityEntry {
+export function toCapabilityEntry(server: McpServerDescriptor): CapabilityEntry {
   const entry: CapabilityEntry = {
     id: server.name,
     type: 'mcp',
@@ -206,6 +217,9 @@ function toCapabilityEntry(server: McpServerDescriptor): CapabilityEntry {
       args: server.args,
     },
   };
+  if (server.transport) entry.mcpServer!.transport = server.transport;
+  if (server.url) entry.mcpServer!.url = server.url;
+  if (server.headers) entry.mcpServer!.headers = server.headers;
   if (server.env) entry.mcpServer!.env = server.env;
   if (server.workingDir) entry.mcpServer!.workingDir = server.workingDir;
   return entry;
@@ -299,16 +313,7 @@ export async function bootstrapCapabilities(
   for (const ext of externals) {
     // Skip built-in server names if already discovered from existing config
     if (ext.name === 'cat-cafe' || splitNames.has(ext.name)) continue;
-    const entry: CapabilityEntry = {
-      id: ext.name,
-      type: 'mcp',
-      enabled: ext.enabled,
-      source: 'external',
-      mcpServer: { command: ext.command, args: ext.args },
-    };
-    if (ext.env) entry.mcpServer!.env = ext.env;
-    if (ext.workingDir) entry.mcpServer!.workingDir = ext.workingDir;
-    capabilities.push(entry);
+    capabilities.push(toCapabilityEntry(ext));
   }
 
   const config: CapabilitiesConfig = { version: 1, capabilities };
@@ -325,11 +330,17 @@ export interface CliConfigPaths {
   google: string; // e.g. <projectRoot>/.gemini/settings.json
 }
 
+/** Providers that support streamableHttp transport (URL-based MCP). */
+const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic']);
+
 /**
  * Resolve effective MCP servers for a specific cat.
- * Applies global enabled + per-cat overrides.
+ * Applies global enabled + per-cat overrides + provider transport compatibility.
  */
 export function resolveServersForCat(config: CapabilitiesConfig, catId: string): McpServerDescriptor[] {
+  const entry = catRegistry.tryGet(catId);
+  const provider = entry?.config.provider;
+
   return config.capabilities
     .filter((cap) => cap.type === 'mcp' && cap.mcpServer)
     .map((cap) => {
@@ -340,9 +351,13 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
       // Resolve effective enabled: global + per-cat override
       const override = cap.overrides?.find((o) => o.catId === catId);
       const enabledFromConfig = override ? override.enabled : cap.enabled;
-      // Guardrail: commandless MCP entries are invalid for current stdio model.
-      // Keep descriptor for writer cleanup (disabled => remove in Gemini/Claude).
-      const enabled = enabledFromConfig && hasUsableStdioCommand(mcpServer.command);
+      // Guardrail: entries without usable transport stay disabled for writer cleanup.
+      // Also gate streamableHttp by provider — only Anthropic supports URL transport.
+      const transportSupported =
+        mcpServer.transport === 'streamableHttp'
+          ? provider !== undefined && STREAMABLE_HTTP_PROVIDERS.has(provider) && !!mcpServer.url?.trim()
+          : hasUsableTransport(mcpServer);
+      const enabled = enabledFromConfig && transportSupported;
 
       const desc: McpServerDescriptor = {
         name: cap.id,
@@ -351,6 +366,9 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
         enabled,
         source: cap.source,
       };
+      if (mcpServer.transport) desc.transport = mcpServer.transport;
+      if (mcpServer.url) desc.url = mcpServer.url;
+      if (mcpServer.headers) desc.headers = mcpServer.headers;
       if (mcpServer.env) desc.env = mcpServer.env;
       if (mcpServer.workingDir) desc.workingDir = mcpServer.workingDir;
       return desc;
