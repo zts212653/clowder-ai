@@ -207,6 +207,35 @@ describe('discoverExternalMcpServers', () => {
     assert.deepEqual(servers, []);
   });
 
+  it('prefers enabled entry over disabled when same name and same transport', async () => {
+    // Codex config supports the enabled field natively.
+    // First entry: disabled stdio server.
+    const codexFile = join(dir, 'codex.toml');
+    await writeFile(
+      codexFile,
+      ['[mcp_servers.shared]', 'command = "codex-cmd"', 'args = []', 'enabled = false'].join('\n'),
+    );
+    // Second entry: enabled stdio server (same name, same transport).
+    const geminiFile = join(dir, 'gemini.json');
+    await writeFile(
+      geminiFile,
+      JSON.stringify({
+        mcpServers: { shared: { command: 'gemini-cmd', args: [] } },
+      }),
+    );
+
+    const servers = await discoverExternalMcpServers({
+      claudeConfig: join(dir, 'nonexistent.json'),
+      codexConfig: codexFile,
+      geminiConfig: geminiFile,
+    });
+
+    assert.equal(servers.length, 1);
+    // The enabled entry (gemini) should win over the disabled one (codex)
+    assert.equal(servers[0].command, 'gemini-cmd');
+    assert.notEqual(servers[0].enabled, false);
+  });
+
   it('skips commandless entries (invalid for stdio config model)', async () => {
     const geminiFile = join(dir, 'gemini.json');
     await writeFile(

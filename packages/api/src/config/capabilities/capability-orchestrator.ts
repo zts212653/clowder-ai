@@ -155,6 +155,9 @@ export async function discoverExternalMcpServers(paths: DiscoveryPaths): Promise
       if (server.enabled !== false || existing.enabled !== true) {
         byName.set(server.name, { ...server, source: 'external' });
       }
+    } else if (existing.enabled === false && server.enabled !== false) {
+      // Same transport: prefer enabled entry over disabled one.
+      byName.set(server.name, { ...server, source: 'external' });
     }
   }
   return [...byName.values()];

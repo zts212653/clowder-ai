@@ -575,6 +575,9 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         if (server.enabled !== false || existing.enabled !== true) {
           discoveredByName.set(server.name, server);
         }
+      } else if (existing.enabled === false && server.enabled !== false) {
+        // Same transport: prefer enabled entry over disabled one.
+        discoveredByName.set(server.name, server);
       }
     }
     // Skip legacy Cat Cafe names — a stale 'cat-cafe' entry in user config should
