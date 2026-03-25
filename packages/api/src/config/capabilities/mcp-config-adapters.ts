@@ -110,7 +110,7 @@ export async function writeClaudeMcpConfig(filePath: string, servers: McpServerD
   for (const s of servers) {
     if (s.enabled) {
       if (s.transport === 'streamableHttp' && s.url) {
-        const entry: Record<string, unknown> = { type: 'streamableHttp', url: s.url };
+        const entry: Record<string, unknown> = { type: 'http', url: s.url };
         if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
         existingServers[s.name] = entry;
       } else {
@@ -262,7 +262,7 @@ function toStringRecord(val: unknown): Record<string, string> | undefined {
 }
 
 function toDescriptor(name: string, cfg: Record<string, unknown>, enabled: boolean): McpServerDescriptor {
-  const isHttp = cfg.type === 'streamableHttp';
+  const isHttp = cfg.type === 'streamableHttp' || cfg.type === 'http';
   const desc: McpServerDescriptor = {
     name,
     command: typeof cfg.command === 'string' ? cfg.command : '',

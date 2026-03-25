@@ -270,7 +270,7 @@ describe('discoverExternalMcpServers', () => {
       JSON.stringify({
         mcpServers: {
           'remote-tool': {
-            type: 'streamableHttp',
+            type: 'http',
             url: 'https://mcp.example.com/sse',
             headers: { Authorization: 'Bearer tok' },
           },
@@ -290,6 +290,43 @@ describe('discoverExternalMcpServers', () => {
     assert.equal(servers[0].url, 'https://mcp.example.com/sse');
     assert.deepEqual(servers[0].headers, { Authorization: 'Bearer tok' });
     assert.equal(servers[0].source, 'external');
+  });
+
+  it('discovers both type:http and type:streamableHttp from Claude config', async () => {
+    const claudeFile = join(dir, 'claude.json');
+    await writeFile(
+      claudeFile,
+      JSON.stringify({
+        mcpServers: {
+          'remote-http': {
+            type: 'http',
+            url: 'https://mcp.example.com/http',
+          },
+          'remote-streamable': {
+            type: 'streamableHttp',
+            url: 'https://mcp.example.com/streamable',
+          },
+        },
+      }),
+    );
+
+    const servers = await discoverExternalMcpServers({
+      claudeConfig: claudeFile,
+      codexConfig: join(dir, 'nonexistent.toml'),
+      geminiConfig: join(dir, 'nonexistent.json'),
+    });
+
+    assert.equal(servers.length, 2);
+
+    const httpServer = servers.find((s) => s.name === 'remote-http');
+    assert.ok(httpServer);
+    assert.equal(httpServer.transport, 'streamableHttp');
+    assert.equal(httpServer.url, 'https://mcp.example.com/http');
+
+    const streamableServer = servers.find((s) => s.name === 'remote-streamable');
+    assert.ok(streamableServer);
+    assert.equal(streamableServer.transport, 'streamableHttp');
+    assert.equal(streamableServer.url, 'https://mcp.example.com/streamable');
   });
 });
 
@@ -787,7 +824,7 @@ describe('generateCliConfigs', () => {
     const claudeData = JSON.parse(await readFile(paths.anthropic, 'utf-8'));
     const remoteTool = claudeData.mcpServers['remote-tool'];
     assert.ok(remoteTool, 'streamableHttp server should be written to Claude config');
-    assert.equal(remoteTool.type, 'streamableHttp');
+    assert.equal(remoteTool.type, 'http');
     assert.equal(remoteTool.url, 'https://mcp.example.com/sse');
     assert.deepEqual(remoteTool.headers, { Authorization: 'Bearer tok' });
 
