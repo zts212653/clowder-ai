@@ -743,9 +743,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // their native adapters. This covers maas, deepseek, openrouter, etc. as openai.
         const apiType: 'openai' | 'anthropic' | 'google' =
           ocProviderName === 'anthropic' ? 'anthropic' : ocProviderName === 'google' ? 'google' : 'openai';
+        // Strip ocProviderName/ prefix from model IDs — OpenCode runtime config keys
+        // must be bare model names (the part after provider/), not provider-qualified.
+        const rawModels = resolvedAccount.models ?? [defaultModel];
+        const prefix = `${ocProviderName}/`;
+        const bareModels = rawModels.map((m: string) => (m.startsWith(prefix) ? m.slice(prefix.length) : m));
         const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
           providerName: ocProviderName,
-          models: resolvedAccount.models ?? [defaultModel],
+          models: bareModels,
           defaultModel: assembledModel,
           apiType,
           hasBaseUrl: !!resolvedAccount.baseUrl,
