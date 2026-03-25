@@ -669,14 +669,15 @@ describe('provider profile store', () => {
           bootstrapBindings: {},
         }),
       );
+      // Write local secrets in legacy v1 format (providers.anthropic keyed)
       await writeFile(
         join(localDirC, 'provider-profiles.secrets.local.json'),
         JSON.stringify({
-          version: 3,
-          profiles: { 'acct-charlie': { apiKey: 'sk-charlie' } },
+          version: 1,
+          providers: { anthropic: { 'acct-charlie': { apiKey: 'sk-charlie' } } },
         }),
       );
-      // Force global meta to legacy v1 format to trigger normalization edge case
+      // Force global meta AND secrets to legacy v1 format
       await writeFile(
         join(globalRoot, '.cat-cafe', 'provider-profiles.json'),
         JSON.stringify({
@@ -691,13 +692,21 @@ describe('provider profile store', () => {
           },
         }),
       );
-      // Sync migration should normalize legacy v1 global before merging project C
+      await writeFile(
+        join(globalRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({
+          version: 1,
+          providers: { anthropic: { 'acct-alpha': { apiKey: 'sk-alpha-global' } } },
+        }),
+      );
+      // Sync migration should normalize legacy v1 meta+secrets before merging
       const { readBootstrapBindingsSync } = await import('../dist/config/provider-profiles.js');
       process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
       readBootstrapBindingsSync(projectC);
       const finalView = await readProviderProfiles(globalRoot);
       const charlieProfile = finalView.providers.find((p) => p.id === 'acct-charlie');
       assert.ok(charlieProfile, 'project C profile should be merged into global after legacy v1 normalization');
+      assert.ok(charlieProfile.hasApiKey, 'project C api key must survive legacy v1 secrets normalization');
       await rm(projectC, { recursive: true, force: true });
     } finally {
       if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;

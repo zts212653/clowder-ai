@@ -679,13 +679,15 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
       writeFileSync(globalMetaPath, `${JSON.stringify(globalMeta, null, 2)}\n`);
       // Merge secrets too
       if (existsSync(localSecretsPath)) {
-        const localSecrets = JSON.parse(readFileSync(localSecretsPath, 'utf-8'));
-        const globalSecrets = existsSync(globalSecretsPath)
+        const rawLocalSecrets = JSON.parse(readFileSync(localSecretsPath, 'utf-8'));
+        const localSecrets = normalizeSecrets(rawLocalSecrets).value;
+        const rawGlobalSecrets = existsSync(globalSecretsPath)
           ? JSON.parse(readFileSync(globalSecretsPath, 'utf-8'))
-          : { version: 3, profiles: {} };
+          : null;
+        const globalSecrets = normalizeSecrets(rawGlobalSecrets).value;
         for (const p of localProviders) {
           const originalId = p.id.replace(/-migrated-\d+$/, '');
-          const secretEntry = localSecrets.profiles?.[originalId] ?? localSecrets.profiles?.[p.id];
+          const secretEntry = localSecrets.profiles[originalId] ?? localSecrets.profiles[p.id];
           if (secretEntry) {
             globalSecrets.profiles[p.id] = secretEntry;
           }
