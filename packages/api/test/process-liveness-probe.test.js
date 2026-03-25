@@ -36,15 +36,19 @@ test('detects dead process (PID does not exist)', async () => {
   probe.stop();
 });
 
-test('classifies as busy-silent when CPU grows but no output (Unix only)', { skip: process.platform === 'win32' && 'busy-silent requires ps CPU sampling (Unix only)' }, async () => {
-  const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
-  probe.start();
-  const reachedBusySilent = await waitForBusySilent(probe);
-  const state = probe.getState();
-  assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${state}`);
-  assert.equal(state, 'busy-silent');
-  probe.stop();
-});
+test(
+  'classifies as busy-silent when CPU grows but no output (Unix only)',
+  { skip: process.platform === 'win32' && 'busy-silent requires ps CPU sampling (Unix only)' },
+  async () => {
+    const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
+    probe.start();
+    const reachedBusySilent = await waitForBusySilent(probe);
+    const state = probe.getState();
+    assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${state}`);
+    assert.equal(state, 'busy-silent');
+    probe.stop();
+  },
+);
 
 test('generates alive_but_silent warning at soft threshold', async () => {
   const probe = new ProcessLivenessProbe(process.pid, {
@@ -88,14 +92,18 @@ test('notifyActivity resets silence timer and clears warning state', async () =>
   probe.stop();
 });
 
-test('shouldExtendTimeout returns true when busy-silent (Unix only)', { skip: process.platform === 'win32' && 'busy-silent requires ps CPU sampling (Unix only)' }, async () => {
-  const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
-  probe.start();
-  const reachedBusySilent = await waitForBusySilent(probe);
-  assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${probe.getState()}`);
-  assert.equal(probe.shouldExtendTimeout(), true);
-  probe.stop();
-});
+test(
+  'shouldExtendTimeout returns true when busy-silent (Unix only)',
+  { skip: process.platform === 'win32' && 'busy-silent requires ps CPU sampling (Unix only)' },
+  async () => {
+    const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
+    probe.start();
+    const reachedBusySilent = await waitForBusySilent(probe);
+    assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${probe.getState()}`);
+    assert.equal(probe.shouldExtendTimeout(), true);
+    probe.stop();
+  },
+);
 
 test('isHardCapExceeded returns true when elapsed >= factor * timeout', () => {
   const probe = new ProcessLivenessProbe(process.pid, { boundedExtensionFactor: 2 });
