@@ -219,6 +219,29 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('keyword=redis+lock'));
   });
 
+  test('handleGetThreadContext treats dot threadId as current thread and omits override', async () => {
+    const { handleGetThreadContext } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ threadId: 'thread-current', messages: [] }),
+      };
+    };
+
+    const result = await handleGetThreadContext({
+      threadId: '.',
+      limit: 20,
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/thread-context'));
+    assert.ok(capturedUrl.includes('limit=20'));
+    assert.ok(!capturedUrl.includes('threadId=.'));
+  });
+
   test('handleListThreads forwards limit/activeSince filters', async () => {
     const { handleListThreads } = await import('../dist/tools/callback-tools.js');
 

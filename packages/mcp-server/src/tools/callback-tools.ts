@@ -269,9 +269,12 @@ export async function handleGetThreadContext(input: {
   catId?: string | undefined;
   keyword?: string | undefined;
 }): Promise<ToolResult> {
+  const normalizedThreadId = input.threadId?.trim();
   return callbackGet('/api/callbacks/thread-context', {
     ...(input.limit ? { limit: String(input.limit) } : {}),
-    ...(input.threadId ? { threadId: input.threadId } : {}),
+    ...(normalizedThreadId && normalizedThreadId !== '.' && normalizedThreadId !== './'
+      ? { threadId: normalizedThreadId }
+      : {}),
     ...(input.catId ? { catId: input.catId } : {}),
     ...(input.keyword ? { keyword: input.keyword } : {}),
   });

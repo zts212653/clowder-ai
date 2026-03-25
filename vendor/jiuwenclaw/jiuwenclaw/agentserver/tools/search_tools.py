@@ -20,7 +20,26 @@ _USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
-_REQUEST_HEADERS = {"User-Agent": _USER_AGENT}
+_REQUEST_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.7",
+}
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _relaxed_search_queries(query: str) -> list[str]:
+    variants = [query.strip()]
+    relaxed = re.sub(r"\bsite:[^\s]+", " ", query, flags=re.IGNORECASE)
+    relaxed = re.sub(r"\s+", " ", relaxed).strip()
+    if relaxed and relaxed not in variants:
+        variants.append(relaxed)
+    unquoted = relaxed.replace('"', "").replace("'", "").strip() if relaxed else ""
+    if unquoted and unquoted not in variants:
+        variants.append(unquoted)
+    return variants
 
 
 def _http_request(method: str, url: str, **kwargs) -> requests.Response:
@@ -166,40 +185,60 @@ def _search_duckduckgo_via_jina_sync(
 
 
 def _search_bing_sync(query: str, max_results: int, timeout_seconds: int) -> list[dict[str, str]]:
-    url = f"https://www.bing.com/search?q={quote_plus(query)}"
-    response = _http_request("GET", url, headers=_REQUEST_HEADERS, timeout=timeout_seconds)
-    response.raise_for_status()
-    html = response.text
+    query_variants = _relaxed_search_queries(query)
+    for candidate_query in query_variants:
+        params = {"q": candidate_query}
+        if not _contains_cjk(candidate_query):
+            # Force English/US market for global tech/news queries. Without this Bing often
+            # falls back to noisy locale-personalized pages that are useless for office work.
+            params.update({
+                "setlang": "en-US",
+                "cc": "us",
+                "mkt": "en-US",
+                "ensearch": "1",
+            })
+        response = _http_request(
+            "GET",
+            "https://www.bing.com/search",
+            params=params,
+            headers=_REQUEST_HEADERS,
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        html = response.text
 
-    blocks = re.findall(
-        r'<li[^>]+class="[^"]*\bb_algo\b[^"]*"[^>]*>(.*?)</li>',
-        html,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    rows: list[dict[str, str]] = []
-    seen: set[str] = set()
-
-    for block in blocks:
-        title_match = re.search(
-            r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
-            block,
+        blocks = re.findall(
+            r'<li[^>]+class="[^"]*\bb_algo\b[^"]*"[^>]*>(.*?)</li>',
+            html,
             flags=re.IGNORECASE | re.DOTALL,
         )
-        if not title_match:
-            continue
-        href_raw = unescape(title_match.group(1))
-        href = _decode_bing_redirect(href_raw)
-        title = _strip_tags(title_match.group(2))
-        if not href or href in seen:
-            continue
-        seen.add(href)
-        snippet_match = re.search(r"<p>(.*?)</p>", block, flags=re.IGNORECASE | re.DOTALL)
-        snippet = _strip_tags(snippet_match.group(1)) if snippet_match else ""
-        rows.append({"title": title or f"Result {len(rows) + 1}", "url": href, "snippet": snippet})
-        if len(rows) >= max_results:
-            break
+        rows: list[dict[str, str]] = []
+        seen: set[str] = set()
 
-    return rows
+        for block in blocks:
+            title_match = re.search(
+                r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+                block,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if not title_match:
+                continue
+            href_raw = unescape(title_match.group(1))
+            href = _decode_bing_redirect(href_raw)
+            title = _strip_tags(title_match.group(2))
+            if not href or href in seen:
+                continue
+            seen.add(href)
+            snippet_match = re.search(r"<p>(.*?)</p>", block, flags=re.IGNORECASE | re.DOTALL)
+            snippet = _strip_tags(snippet_match.group(1)) if snippet_match else ""
+            rows.append({"title": title or f"Result {len(rows) + 1}", "url": href, "snippet": snippet})
+            if len(rows) >= max_results:
+                break
+
+        if rows:
+            return rows
+
+    return []
 
 
 def _search_free_sync(
@@ -207,9 +246,9 @@ def _search_free_sync(
 ) -> tuple[str, list[dict[str, str]]]:
     errors: list[str] = []
     engines = [
+        ("bing", _search_bing_sync),
         ("duckduckgo", _search_duckduckgo_sync),
         ("duckduckgo-jina", _search_duckduckgo_via_jina_sync),
-        ("bing", _search_bing_sync),
     ]
     for engine_name, runner in engines:
         try:
