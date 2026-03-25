@@ -63,7 +63,7 @@ interface CodexAgentServiceOptions {
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 function getCodexAuthMode(callbackEnv?: Record<string, string>): CodexAuthMode {
-  const raw = callbackEnv?.CODEX_AUTH_MODE?.trim().toLowerCase() ?? process.env.CODEX_AUTH_MODE?.trim().toLowerCase();
+  const raw = callbackEnv?.CODEX_AUTH_MODE?.trim().toLowerCase();
   if (raw === 'api_key' || raw === 'auto' || raw === 'oauth') return raw;
   return 'oauth';
 }
