@@ -503,7 +503,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       nextAccountRef !== undefined ? (nextAccountRef ?? undefined) : currentEffectiveAccountRef;
     const effectiveDefaultModel = body.defaultModel !== undefined ? body.defaultModel : currentCat.defaultModel;
     const providerConfigTouched =
-      body.client !== undefined || body.defaultModel !== undefined || nextAccountRef !== undefined || body.ocProviderName !== undefined;
+      body.client !== undefined ||
+      body.defaultModel !== undefined ||
+      nextAccountRef !== undefined ||
+      body.ocProviderName !== undefined;
 
     if (providerConfigTouched) {
       try {
