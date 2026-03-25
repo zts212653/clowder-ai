@@ -267,7 +267,7 @@ describe('F088 Gateway Integration', () => {
       await h.outboundHook.deliver(r.threadId, 'Hello!', 'opus');
 
       assert.equal(h.telegramSent.length, 1);
-      assert.match(h.telegramSent[0].text, /^【布偶猫🐱】\nHello!$/);
+      assert.match(h.telegramSent[0].text, /^\[布偶猫🐱\] Hello!$/);
     });
   });
 
@@ -289,7 +289,7 @@ describe('F088 Gateway Integration', () => {
       // 4. Simulate outbound with codex identity
       await h.outboundHook.deliver(r.threadId, 'LGTM!', 'codex');
       assert.equal(h.telegramSent.length, 1);
-      assert.match(h.telegramSent[0].text, /^【缅因猫🐱】\nLGTM!$/);
+      assert.match(h.telegramSent[0].text, /^\[缅因猫🐱\] LGTM!$/);
     });
 
     it('@布偶猫 in Feishu → triggers opus + prefixed reply', async () => {

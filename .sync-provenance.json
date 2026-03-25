@@ -1,12 +1,12 @@
 {
-  "source_commit_sha": "541736064c7f",
-  "target_head_sha": "200f04152b9a881ab9497e3f347faf7cb8734832",
-  "release_tag": null,
-  "source_snapshot_tag": null,
+  "source_commit_sha": "4ea75f2c1df0",
+  "target_head_sha": "24a28cc6cb968bff3b4ee7765b8193b5db8805f1",
+  "release_tag": "v0.3.0",
+  "source_snapshot_tag": "clowder-v0.3.0-source",
   "manifest_version": 3,
-  "included_file_count": 1903,
+  "included_file_count": 1899,
   "excluded_file_count": 13,
-  "transform_count": 31,
+  "transform_count": 29,
   "secret_scan_result": "clean",
-  "synced_at": "2026-03-25T07:44:26Z"
+  "synced_at": "2026-03-25T03:34:10Z"
 }

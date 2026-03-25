@@ -6,7 +6,7 @@ describe('formatTelegramHtml', () => {
   it('formats card with title and body', () => {
     const blocks = [{ id: 'b1', kind: 'card', v: 1, title: 'Review', bodyMarkdown: 'All good' }];
     const html = formatTelegramHtml(blocks, '布偶猫');
-    assert.ok(html.includes('<b>【布偶猫🐱】</b>'));
+    assert.ok(html.includes('<b>[布偶猫🐱]</b>'));
     assert.ok(html.includes('<b>Review</b>'));
     assert.ok(html.includes('All good'));
   });

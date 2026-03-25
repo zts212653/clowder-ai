@@ -20,16 +20,19 @@ export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
     iconBg: '#DBEAFE',
     iconColor: '#2563EB',
     icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/feishu.png" alt="Feishu" className="w-[18px] h-[18px]" />
+      <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+      </svg>
     ),
   },
   telegram: {
     iconBg: '#E0F2FE',
     iconColor: '#0284C7',
     icon: (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src="/images/connectors/telegram.png" alt="Telegram" className="w-[18px] h-[18px]" />
+      <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+        <path d="m22 2-7 20-4-9-9-4Z" />
+        <path d="M22 2 11 13" />
+      </svg>
     ),
   },
   weixin: {
@@ -41,7 +44,7 @@ export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
     ),
   },
   dingtalk: {
-    iconBg: '#CFFAFE',
+    iconBg: '#DBEAFE',
     iconColor: '#3296FA',
     icon: (
       // eslint-disable-next-line @next/next/no-img-element

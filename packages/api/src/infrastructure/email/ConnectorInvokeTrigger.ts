@@ -502,10 +502,10 @@ export class ConnectorInvokeTrigger {
                 allRichBlocks.push(...turn.richBlocks);
               }
               if (turnTextParts.length > 0) {
-                mergedParts.push(`【${catName}🐱】\n${turnTextParts.join('\n')}`);
+                mergedParts.push(`[${catName}]\n${turnTextParts.join('\n')}`);
               }
             }
-            const mergedContent = mergedParts.join('\n\n─────────\n\n');
+            const mergedContent = mergedParts.join('\n\n');
             log.info(
               {
                 threadId,

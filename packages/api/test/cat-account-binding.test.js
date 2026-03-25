@@ -17,8 +17,6 @@ describe('cat account binding', () => {
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const { resolveBoundAccountRefForCat } = await import('../dist/config/cat-account-binding.js');
     const projectRoot = await mkdtemp(join(tmpdir(), 'cat-account-binding-inherited-'));
-    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
 
     try {
       await seedTemplate(projectRoot);
@@ -27,8 +25,6 @@ describe('cat account binding', () => {
       assert.ok(catConfig, 'codex should be present in bootstrapped runtime catalog');
       assert.equal(resolveBoundAccountRefForCat(projectRoot, 'codex', catConfig), undefined);
     } finally {
-      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
@@ -38,8 +34,6 @@ describe('cat account binding', () => {
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const { resolveBoundAccountRefForCat } = await import('../dist/config/cat-account-binding.js');
     const projectRoot = await mkdtemp(join(tmpdir(), 'cat-account-binding-explicit-'));
-    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
 
     try {
       await seedTemplate(projectRoot, (template) => {
@@ -52,8 +46,6 @@ describe('cat account binding', () => {
       assert.ok(catConfig, 'codex should be present in bootstrapped runtime catalog');
       assert.equal(resolveBoundAccountRefForCat(projectRoot, 'codex', catConfig), 'codex-pinned');
     } finally {
-      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
@@ -66,12 +58,10 @@ describe('cat account binding', () => {
     const { resolveBoundAccountRefForCat } = await import('../dist/config/cat-account-binding.js');
     const projectRoot = await mkdtemp(join(tmpdir(), 'cat-account-binding-legacy-seed-'));
     const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
-    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
 
     try {
       await seedTemplate(projectRoot);
       process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
-      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
       bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
 
       const catalogPath = resolveCatCatalogPath(projectRoot);
@@ -102,8 +92,6 @@ describe('cat account binding', () => {
     } finally {
       if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
-      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       await rm(projectRoot, { recursive: true, force: true });
     }
   });

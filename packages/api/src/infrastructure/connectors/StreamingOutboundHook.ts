@@ -47,7 +47,7 @@ export class StreamingOutboundHook {
       if (!adapter?.sendPlaceholder) continue;
       try {
         const catEntry = catId ? catRegistry.tryGet(catId) : undefined;
-        const prefix = catEntry ? `【${catEntry.config.displayName}🐱】` : '';
+        const prefix = catEntry ? `[${catEntry.config.displayName}🐱] ` : '';
         const msgId = await adapter.sendPlaceholder(binding.externalChatId, `${prefix}🤔 思考中...`);
         if (msgId) {
           sessions.push({

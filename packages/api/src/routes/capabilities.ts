@@ -178,7 +178,7 @@ function getProjectRoot(): string {
 }
 
 /**
- * Resolve Cat Cafe skills source from module location (stable), not selected project path.
+ * Resolve Clowder AI skills source from module location (stable), not selected project path.
  * This avoids false "未挂载" when projectPath points to another repo (e.g. cat-cafe-runtime).
  */
 function resolveCatCafeSkillsSourceDir(): string {
