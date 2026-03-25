@@ -191,7 +191,11 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const validatedParent = await validateProjectPath(parentDir);
     if (!validatedParent) {
       reply.status(403);
-      return { error: 'Access denied: path is outside allowed roots' };
+      return {
+        error: isDenylistMode()
+          ? 'Access denied: path is under a restricted system directory'
+          : 'Access denied: path is outside allowed roots',
+      };
     }
 
     try {
@@ -240,7 +244,11 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const validatedPath = await validateProjectPath(targetPath);
     if (!validatedPath) {
       reply.status(403);
-      return { error: 'Access denied: path is outside allowed roots' };
+      return {
+        error: isDenylistMode()
+          ? 'Access denied: path is under a restricted system directory'
+          : 'Access denied: path is outside allowed roots',
+      };
     }
 
     try {
