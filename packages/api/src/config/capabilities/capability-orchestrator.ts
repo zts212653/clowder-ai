@@ -355,7 +355,7 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
       // Also gate streamableHttp by provider — only Anthropic supports URL transport.
       const transportSupported =
         mcpServer.transport === 'streamableHttp'
-          ? provider !== undefined && STREAMABLE_HTTP_PROVIDERS.has(provider) && !!mcpServer.url
+          ? provider !== undefined && STREAMABLE_HTTP_PROVIDERS.has(provider) && !!mcpServer.url?.trim()
           : hasUsableTransport(mcpServer);
       const enabled = enabledFromConfig && transportSupported;
 
