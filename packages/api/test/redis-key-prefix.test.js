@@ -28,7 +28,7 @@ describe('createRedisClient keyPrefix isolation', { skip: !REDIS_URL ? 'REDIS_UR
       connected = true;
     } catch {
       console.warn('[redis-key-prefix.test] Redis unreachable, skipping tests');
-      await Promise.all([redis1.quit(), redis2.quit(), redis3.quit()].map(p => p.catch(() => {})));
+      await Promise.all([redis1.quit(), redis2.quit(), redis3.quit()].map((p) => p.catch(() => {})));
       return;
     }
   });
@@ -114,7 +114,7 @@ describe('createRedisClient keyPrefix isolation', { skip: !REDIS_URL ? 'REDIS_UR
     // Use a subprocess to test env var behavior (ESM module cache makes
     // in-process env changes ineffective for already-loaded modules)
     const { spawn } = await import('node:child_process');
-    const { readFile, writeFile, unlink } = await import('node:fs/promises');
+    const { writeFile, unlink } = await import('node:fs/promises');
     const { join } = await import('node:path');
 
     // Create a temp test script in the api package directory (where modules are resolvable)
@@ -140,41 +140,41 @@ await redis.quit();
       });
       let output = '';
       let stderr = '';
-      proc.stdout.on('data', (d) => { output += d.toString(); });
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.stdout.on('data', (d) => {
+        output += d.toString();
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
       proc.on('close', (code) => {
         if (code !== 0) return reject(new Error(`Exit ${code}: ${stderr}`));
         resolve(output);
       });
     });
     const defaultResult = await testDefault;
-    assert.equal(
-      defaultResult.includes('PREFIX: cat-cafe:'),
-      true,
-      `Expected default prefix, got: ${defaultResult}`
-    );
+    assert.equal(defaultResult.includes('PREFIX: cat-cafe:'), true, `Expected default prefix, got: ${defaultResult}`);
 
     // Test 2: with env var set, should use the env value
     const testWithEnv = new Promise((resolve, reject) => {
       const proc = spawn(process.execPath, [tempScript], {
         cwd: apiDir,
-        env: { ...process.env, REDIS_KEY_PREFIX: 'env-test-prefix:' }
+        env: { ...process.env, REDIS_KEY_PREFIX: 'env-test-prefix:' },
       });
       let output = '';
       let stderr = '';
-      proc.stdout.on('data', (d) => { output += d.toString(); });
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.stdout.on('data', (d) => {
+        output += d.toString();
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
       proc.on('close', (code) => {
         if (code !== 0) return reject(new Error(`Exit ${code}: ${stderr}`));
         resolve(output);
       });
     });
     const envResult = await testWithEnv;
-    assert.equal(
-      envResult.includes('PREFIX: env-test-prefix:'),
-      true,
-      `Expected env prefix, got: ${envResult}`
-    );
+    assert.equal(envResult.includes('PREFIX: env-test-prefix:'), true, `Expected env prefix, got: ${envResult}`);
 
     // Cleanup
     await unlink(tempScript);
