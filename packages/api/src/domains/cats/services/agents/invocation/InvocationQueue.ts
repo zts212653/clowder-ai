@@ -442,6 +442,20 @@ export class InvocationQueue {
     return false;
   }
 
+  /**
+   * Whether any user-sourced message is queued for this thread.
+   * Agent/connector-sourced entries are excluded — they have their own
+   * per-cat dedup via hasActiveOrQueuedAgentForCat and must NOT block
+   * the A2A text-scan fairness gate in routeSerial.
+   */
+  hasQueuedUserMessagesForThread(threadId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      if (q.some((e) => e.status === 'queued' && e.source === 'user')) return true;
+    }
+    return false;
+  }
+
   // ── Internal helpers ──
 
   private findEntry(threadId: string, userId: string, entryId: string): QueueEntry | undefined {

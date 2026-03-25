@@ -8,7 +8,7 @@ created: 2026-03-24
 
 # F134: Feishu Group Chat — 飞书群聊多用户支持
 
-> **Status**: done (Phase A-C) | **Owner**: 金渐层 | **Priority**: P1 | **PR**: #697 merged `dc4ef024`
+> **Status**: done (Phase A-D) | **Owner**: Ragdoll | **Priority**: P1 | **PR**: #697, #699, #700, #705
 >
 > **Related**: F088（复用公共层 + Phase 7 公共层扩展）| F132（钉钉/企微，同模式独立 Feature）
 
@@ -115,13 +115,24 @@ export interface FeishuInboundMessage {
    - DM 回复不变（不需要 @）
 3. **ConnectorMessageFormatter 感知 sender**：格式化 envelope 时可包含 replyTo 信息
 
-### Phase D: 权限控制（后续，team lead确认后做）
+### Phase D: 权限控制
 
-> team lead说"好像可以先做1-3 然后再做4"，此 Phase 暂不开工。
+> team lead场景：演示时别人拉人进群，担心 token 被刷爆、thread 被乱切。需要控制谁能做什么。
 
-1. **群白名单**：哪些群允许机器人响应（env 配置或 Redis 存储）
-2. **用户白名单**：哪些用户允许 @机器人（可选，默认全群可用）
-3. **管理命令**：`/allow-group`、`/deny-group`（通过 CommandLayer 实现）
+**三层权限模型**（team lead 2026-03-25 确认）：
+
+1. **群白名单（第一层）**：哪些群允许 bot 响应
+   - 未授权群的 @bot 消息静默忽略或回复权限提示
+   - 管理命令 `/allow-group`、`/deny-group`（仅team lead可用）
+   - 存储：Redis 或 env 配置
+
+2. **@bot 对话全开放（第二层 — 不做限制）**：群里所有人都能 @bot 对话
+   - team lead确认不需要用户级白名单
+
+3. **/command 只限管理员（第三层）**：`/threads`、`/new`、`/use` 等管理命令只有team lead能用
+   - 防止群里其他人随意 `/new` 创建 thread 或 `/use` 切换 thread
+   - 管理员身份：匹配team lead的飞书 open_id（env 配置 `FEISHU_ADMIN_OPEN_IDS`）
+   - 非管理员发 /command → 回复"只有管理员可以使用此命令"
 
 ## Acceptance Criteria
 
@@ -145,10 +156,12 @@ export interface FeishuInboundMessage {
 - [x] AC-C2: 猫回复 DM 消息时，不添加 @（保持原行为）
 - [x] AC-C3: 多人在群里 @机器人，各自的回复正确 @各自的发送者
 
-### Phase D（权限控制 — 暂不开工）
-- [ ] AC-D1: 可配置哪些群允许/禁止机器人响应
-- [ ] AC-D2: 未授权群的 @机器人消息被静默忽略或回复权限提示
-- [ ] AC-D3: 管理命令 `/allow-group` `/deny-group` 可用
+### Phase D（权限控制） ✅
+- [x] AC-D1: 群白名单 — 未授权群的 @bot 消息静默忽略或回复权限提示
+- [x] AC-D2: `/allow-group` `/deny-group` 管理命令可用（仅管理员）
+- [x] AC-D3: `/threads` `/new` `/use` 等管理命令仅管理员可用，非管理员回复提示
+- [x] AC-D4: 管理员身份通过 `FEISHU_ADMIN_OPEN_IDS` env 配置（首次启动 seed，持久化到 Redis）
+- [x] AC-D5: @bot 对话不受限（群里所有人都能 @bot 提问）
 
 ## 需求点 Checklist
 
@@ -195,10 +208,11 @@ export interface FeishuInboundMessage {
 | KD-5 | Bot open_id 双策略获取 | 启动时调 `GET /open-apis/bot/v3/info` 自动获取 + `FEISHU_BOT_OPEN_ID` env 兜底。原因：open_id 是 app-scoped（同一 bot 不同 app token 看到不同 open_id，见 openclaw/openclaw#40768），env 兜底防 API 失败 | 2026-03-25 |
 | KD-6 | 发送者姓名通过 Contact API 获取 + 内存缓存 | `event.sender` 只有 `sender_id`（含 open_id/user_id/union_id），无 name 字段。需调 `GET /contact/v3/users/:open_id` 获取。用 Map 缓存避免重复调用。需 `contact:user.base:readonly` 权限 | 2026-03-25 |
 | KD-7 | @所有人（@_all）不触发 bot | team lead确认："我@所有人的时候，bot我觉得应该不要响应，而是要明确@bot时候才响应"。`@_all` 在 mentions 中 key 为 `@_all`，与 `@_user_N` 不同，过滤即可 | 2026-03-25 |
-| KD-8 | 群聊中禁用 /命令，仅允许对话 | 群聊场景下 /new /threads /use 等命令语义不清且可能被误触。初版只在 DM 中允许命令 | 2026-03-25 |
+| KD-8 | ~~群聊中禁用 /命令~~ → 群聊支持 /命令 + 每群独立 IM Hub | 初版 KD-8 禁用了群聊 /command，team lead实测发现 `/threads` 被猫猫"扮演系统"回复。PR #699 移除限制，群聊恢复 /slash 命令支持，Hub 标题含群名（`飞书群聊 · {群名} IM Hub`）区分多群 | 2026-03-25 |
 | KD-9 | `@sender` 采用 message-level 绑定（`source.sender` 写入 messageStore）而非 thread-level lastSender | 原设计的 `lastSender` 是 thread 级覆盖存储，群聊并发时后到消息会覆盖先到的 sender，导致错 @。改用 message-level：每条入站消息的 `ConnectorSource.sender` 已持久化在 messageStore，deliver 时通过 `triggerMessageId` 回溯原始消息的 sender。详见 KD-9 技术设计章节 | 2026-03-25 |
 | KD-10 | Contact API + Chat API 放在 FeishuAdapter，不预抽服务 | `resolveSenderName(openId)` + `resolveChatName(chatId)` 带 TTL Map cache，直接放在 FeishuAdapter 内。只有第二个 connector 也需要时才抽 `FeishuContactService`。需权限：`contact:user.base:readonly` + `im:chat:readonly`（team lead已配） | 2026-03-25 |
 | KD-11 | Connector source 队列禁止 merge | `source === 'connector'` 的消息直接禁止 merge（快速稳妥方案）。QueueEntry 新增可选 `senderMeta` 字段用于 UI 展示，但不参与 merge 判断。这避免群聊中不同 sender 的消息被合并 | 2026-03-25 |
+| KD-12 | Phase D 三层权限模型 | 第一层：群白名单（`/allow-group` `/deny-group`）；第二层：@bot 对话全开放不限制；第三层：/command 管理命令仅管理员可用（`FEISHU_ADMIN_OPEN_IDS` env）。team lead场景：演示时防别人刷 token、乱切 thread | 2026-03-25 |
 
 ## Design Gate Results（2026-03-25）
 

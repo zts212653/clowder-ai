@@ -93,6 +93,7 @@ export type {
   CatColor,
   CatConfig,
   CatProvider,
+  KnownCatProvider,
   CatState,
   CatStatus,
 } from './cat.js';

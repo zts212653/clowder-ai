@@ -54,7 +54,7 @@ export function AdvancedRuntimeSection({
   return (
     <SectionCard
       title="高级运行时参数"
-      description="contextBudget + Session 策略 + Client 特有参数。🏷️ 标记的参数仅在选择对应 Client 时显示。"
+      description="contextBudget + Session 策略 + Client 特有参数。标有 (Codex) 的参数仅在选择对应 Client 时显示。"
       tone="success"
     >
       <p className="text-xs leading-5 text-[#6C7A6D]">
@@ -101,6 +101,20 @@ export function AdvancedRuntimeSection({
           onChange={(value) => onChange({ sessionChain: value as HubCatEditorFormState['sessionChain'] })}
           tone="success"
         />
+        {form.client === 'opencode' ? (
+          <div className="space-y-1">
+            <TextField
+              label="OpenCode Provider 名称"
+              value={form.ocProviderName}
+              onChange={(value) => onChange({ ocProviderName: value })}
+              tone="success"
+              placeholder="例如 maas、deepseek（留空 = 使用内置 provider）"
+            />
+            <p className="text-[11px] leading-4 text-[#8A776B]">
+              自定义 API Key 认证时需要。运行时自动组装为 provider/model 格式路由到 opencode CLI。
+            </p>
+          </div>
+        ) : null}
         {form.client === 'openai' || form.client === 'opencode' ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-[#3D2E22]">额外 CLI 参数</p>
@@ -139,7 +153,7 @@ export function AdvancedRuntimeSection({
           {strategyForm ? (
             <div className="space-y-4">
               <div className="rounded-2xl border border-[#CFE5D5] bg-[#F5FBF6] px-4 py-3 text-xs leading-5 text-[#6C7A6D]">
-                📊 阈值基于 context 填充率 = 当前 tokens / Max Context Tokens。拖动滑条调节百分比。
+                阈值基于 context 填充率 = 当前 tokens / Max Context Tokens。拖动滑条调节百分比。
               </div>
               <div className="space-y-2">
                 <SelectField
@@ -155,13 +169,13 @@ export function AdvancedRuntimeSection({
                   label="Session Warn Threshold"
                   value={strategyForm.warnThreshold}
                   onChange={(value) => onStrategyChange({ warnThreshold: value })}
-                  hint="⚡ context 填充到此比例时前端弹出警告提示"
+                  hint="context 填充到此比例时前端弹出警告提示"
                 />
                 <RangeField
                   label="Session Action Threshold"
                   value={strategyForm.actionThreshold}
                   onChange={(value) => onStrategyChange({ actionThreshold: value })}
-                  hint="🔥 context 填充到此比例时触发 Session 策略动作（如 handoff 换 session）"
+                  hint="context 填充到此比例时触发 Session 策略动作（如 handoff 换 session）"
                 />
                 {strategyForm.strategy === 'hybrid' ? (
                   <TextField
@@ -195,8 +209,8 @@ export function AdvancedRuntimeSection({
           </p>
           <div className="space-y-2">
             <SelectField
-              label="Codex Sandbox 🏷️"
-              ariaLabel="Codex Sandbox 🏷️"
+              label="Codex Sandbox (Codex)"
+              ariaLabel="Codex Sandbox"
               value={effectiveCodexSettings.sandboxMode}
               options={CODEX_SANDBOX_OPTIONS}
               onChange={(value) => onCodexChange({ sandboxMode: value as CodexRuntimeSettings['sandboxMode'] })}
@@ -204,8 +218,8 @@ export function AdvancedRuntimeSection({
               tone="success"
             />
             <SelectField
-              label="Codex Approval 🏷️"
-              ariaLabel="Codex Approval 🏷️"
+              label="Codex Approval (Codex)"
+              ariaLabel="Codex Approval"
               value={effectiveCodexSettings.approvalPolicy}
               options={CODEX_APPROVAL_OPTIONS}
               onChange={(value) => onCodexChange({ approvalPolicy: value as CodexRuntimeSettings['approvalPolicy'] })}
@@ -213,8 +227,8 @@ export function AdvancedRuntimeSection({
               tone="success"
             />
             <SelectField
-              label="Codex Auth Mode 🏷️"
-              ariaLabel="Codex Auth Mode 🏷️"
+              label="Codex Auth Mode (Codex)"
+              ariaLabel="Codex Auth Mode"
               value={effectiveCodexSettings.authMode}
               options={CODEX_AUTH_MODE_OPTIONS}
               onChange={(value) => onCodexChange({ authMode: value as CodexRuntimeSettings['authMode'] })}

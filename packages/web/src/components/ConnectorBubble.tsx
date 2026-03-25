@@ -57,6 +57,10 @@ function ConnectorIcon({ connector, fallbackIcon }: { connector: string; fallbac
       return <ConnectorImage src="/images/connectors/telegram.png" alt="Telegram" className="w-5 h-5" />;
     case 'imessage':
       return <ConnectorImage src="/images/connectors/imessage.png" alt="iMessage" className="w-5 h-5" />;
+    case 'weixin':
+      return <ConnectorImage src="/images/connectors/weixin.png" alt="WeChat" className="w-5 h-5" />;
+    case 'dingtalk':
+      return <ConnectorImage src="/images/connectors/dingtalk.png" alt="DingTalk" className="w-5 h-5" />;
     case 'github-review':
     case 'github-ci':
       // Preserve legacy non-default icons (e.g., triage stored ⚠️ instead of 🔔)

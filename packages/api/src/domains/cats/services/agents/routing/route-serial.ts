@@ -336,6 +336,10 @@ export async function* routeSerial(
       let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
       // Always pass isLastCat:false — we set isFinal AFTER A2A detection
+      log.debug(
+        { catId: catId as string, threadId, promptLength: prompt.length, index, worklistSize: worklist.length },
+        'Invoking cat via invokeSingleCat',
+      );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service: getService(deps.services, catId),
@@ -714,6 +718,23 @@ export async function* routeSerial(
           }
         }
 
+        // Diagnostic: log when A2A text-scan gate blocks (previously silent)
+        if (a2aMentions.length > 0) {
+          if (queuedMessagesPending) {
+            log.info(
+              { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount },
+              'A2A text-scan blocked: user messages pending in queue (fairness gate)',
+            );
+          } else if (worklistEntry.a2aCount >= maxDepth) {
+            log.info(
+              { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount, maxDepth },
+              'A2A text-scan blocked: depth limit reached',
+            );
+          } else if (signal?.aborted) {
+            log.info({ threadId, catId, a2aMentions }, 'A2A text-scan blocked: signal aborted');
+          }
+        }
+
         if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
           const pendingTail = worklist.slice(index + 1);
           const pendingOriginalTargets = targetCats.slice(index + 1);
@@ -789,6 +810,17 @@ export async function* routeSerial(
         const shouldPersistNoTextMessage =
           hasRichBlocks || collectedToolEvents.length > 0 || Boolean(thinkingContent?.trim().length > 0);
 
+        log.debug(
+          {
+            catId: catId as string,
+            threadId,
+            hasRichBlocks,
+            toolCount: collectedToolEvents.length,
+            shouldPersist: shouldPersistNoTextMessage,
+            thinkingLen: thinkingContent?.length ?? 0,
+          },
+          'Cat produced no text — evaluating silent_completion',
+        );
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
         // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
         if (collectedToolEvents.length > 0 && !hasRichBlocks) {

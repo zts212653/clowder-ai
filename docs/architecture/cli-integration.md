@@ -334,7 +334,7 @@ child.stderr?.on('data', () => {
 
 ### 2. CLI_TIMEOUT_MS=0 不生效
 
-**问题**：`Number(env['CLI_TIMEOUT_MS']) || 300000` 对 `0` 无效，因为 `0 || 300000 = 300000`。
+**问题**：`Number(env['CLI_TIMEOUT_MS']) || 1800000` 对 `0` 无效，因为 `0 || 1800000 = 1800000`。
 
 **解决**：显式判断：
 ```typescript

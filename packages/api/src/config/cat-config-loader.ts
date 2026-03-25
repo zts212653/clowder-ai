@@ -63,12 +63,13 @@ const catVariantSchema = z.object({
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
   providerProfileId: z.string().min(1).optional(), // Legacy migration path
-  provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a', 'relayclaw']),
+  provider: z.string().min(1),
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
   cli: cliConfigSchema,
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
   cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
+  ocProviderName: z.string().min(1).optional(), // F189: opencode custom provider name (e.g. "maas")
   roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
   sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
   personality: z.string().optional(),
@@ -324,8 +325,12 @@ export function loadCatConfig(filePath?: string): CatCafeConfig {
   const json: unknown = JSON.parse(raw);
   const result = catCafeConfigSchema.safeParse(json);
   if (!result.success) {
-    const issues = result.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`);
-    throw new Error(`Invalid cat config:\n${issues.join('\n')}`);
+    const issues = result.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message} (code: ${i.code})`);
+    const topLevel = typeof json === 'object' && json !== null ? Object.keys(json as Record<string, unknown>) : [];
+    const version = (json as Record<string, unknown>)?.version;
+    throw new Error(
+      `Invalid cat config (version=${version}, keys=[${topLevel.join(',')}], path=${resolvedPath}):\n${issues.join('\n')}`,
+    );
   }
 
   // Validate defaultVariantId references
@@ -434,6 +439,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
           ? { cliConfigArgs: [...variant.cliConfigArgs] }
           : {}),
         ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
+        ...(variant.ocProviderName != null ? { ocProviderName: variant.ocProviderName } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
         breedId: breed.id,

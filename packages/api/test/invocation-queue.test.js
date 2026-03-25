@@ -556,4 +556,44 @@ describe('InvocationQueue', () => {
     queue.removeProcessed('t1', 'system', e.id);
     assert.equal(queue.hasActiveOrQueuedAgentForCat('t1', 'codex'), false);
   });
+
+  // ── hasQueuedUserMessagesForThread: fairness gate must only count user-sourced entries ──
+
+  it('hasQueuedUserMessagesForThread returns false when only agent entries are queued', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    assert.equal(
+      queue.hasQueuedUserMessagesForThread('t1'),
+      false,
+      'agent-sourced entries must NOT block A2A text-scan fairness gate',
+    );
+    // Sanity: unfiltered hasQueuedForThread still sees it
+    assert.equal(queue.hasQueuedForThread('t1'), true);
+  });
+
+  it('hasQueuedUserMessagesForThread returns true when user entry is queued', () => {
+    queue.enqueue(entry({ source: 'user' }));
+    assert.equal(
+      queue.hasQueuedUserMessagesForThread('t1'),
+      true,
+      'user-sourced entries must block A2A text-scan to respect queue fairness',
+    );
+  });
+
+  it('hasQueuedUserMessagesForThread ignores connector entries (treated like agent)', () => {
+    queue.enqueue(entry({ source: 'connector' }));
+    assert.equal(
+      queue.hasQueuedUserMessagesForThread('t1'),
+      false,
+      'connector-sourced entries should not block A2A text-scan',
+    );
+  });
 });

@@ -117,15 +117,18 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
    - 在配置面板内展示 QR 码图片（qrUrl 直连）
    - 底部显示"请用微信扫描二维码"提示
 
-3. **扫码状态轮询**：
-   - 自动轮询 `GET /api/connector/weixin/qrcode-status?qrPayload=<hex>` 
+3. **扫码状态轮询（⚠️ 铁律：必须全自动，零用户干预）**：
+   - **QR 码获取成功后立即自动启动 poll**（`setInterval` / `useEffect`），用户不需要点任何额外按钮或发任何消息
+   - 轮询 `GET /api/connector/weixin/qrcode-status?qrPayload=<hex>`，间隔 2~3s
    - 状态映射：`0` → 等待扫码 → `1` → 已扫码待确认 → `4` → 成功
    - 超时处理：60s 无扫码自动过期，提示重新获取
+   - team experience：*"扫码之后得自动 poll！不要我还要给你发个消息才能 poll"*
 
-4. **扫码完成 → 激活**：
-   - 扫码成功后自动调用 `POST /api/connector/weixin/activate`
-   - 激活后卡片切换为"已连接"状态
+4. **扫码完成 → 自动激活（零用户干预）**：
+   - poll 到 `confirmed` 后自动调用 `POST /api/connector/weixin/activate`
+   - 激活后卡片自动切换为"已连接"状态
    - 显示连接时间和轮询状态
+   - 整条链路：点击生成二维码 → 展示 QR → 用户扫码 → 自动检测 → 自动激活 → 完成。**用户只需做两件事：①点按钮 ②扫码**
 
 5. **已有后端 API**（Phase A 已实现，无需改动）：
    ```
@@ -163,11 +166,18 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 - [ ] AC-B4: `sendMedia` 接口实现正确
 
 ### Phase C（IM Hub + 健壮性）
-- [ ] AC-C1: IM Hub 配置向导可添加微信个人号（QR 展示 + 扫码流程）
+- [x] AC-C1: IM Hub 配置向导可添加微信个人号（QR 展示 + 扫码流程）
 - [ ] AC-C2: Session 过期（errcode -14）自动检测 + 提醒重新扫码
 - [ ] AC-C3: 长轮询断线自动重连 + 指数退避
 - [ ] AC-C4: 幂等去重（InboundMessageDedup 复用）
 - [ ] AC-C5: 现有飞书/Telegram/钉钉功能无回归
+
+### Phase C AC-C1 验证证据
+- PR #713: `WeixinQrPanel.tsx` (152 行) — 全自动 QR 状态机
+- 7 测试覆盖所有状态转换 (idle→fetching→waiting→scanned→confirmed→error→expired)
+- 自动轮询铁律：`setInterval(2500ms)` + `setTimeout(60000ms)`，扫码后零用户干预
+- Pencil 绘制 SVG 图标，无 emoji
+- Maine Coon (codex) R2 放行 + 云端 Codex review 无 P1/P2
 
 ## 需求点 Checklist
 
@@ -176,13 +186,13 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 | R1 | "把我们的猫猫接入微信" | AC-A1~A7 | test + manual DM | [ ] |
 | R2 | "你也得复用那些基础设施，就不要自己做一套" | AC-A5, AC-C4 | code review: 公共层 diff = 0 | [ ] |
 | R3 | "也得接入我们的消息管线，都得是一样的" | AC-A5, AC-A6 | /new /threads /use /where 可用 | [ ] |
-| R4 | "如果有配置需要配置...在那边能够显示" | AC-C1 | IM Hub 配置向导可见 | [ ] |
+| R4 | "如果有配置需要配置...在那边能够显示" | AC-C1 | IM Hub 配置向导可见 | [x] |
 | R5 | "按照我们的开发速度，不需要一天" | Phase A 优先 | Phase A 独立可用 | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
 - [x] 每个 AC 都有验证方式
-- [ ] 前端需求已准备需求→证据映射表（若适用）— Phase C IM Hub 需要
+- [x] 前端需求已准备需求→证据映射表（若适用）— Phase C IM Hub AC-C1 已完成
 
 ## Dependencies
 
@@ -250,29 +260,46 @@ cat-cafe:connector-binding:weixin:o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
 - `OutboundDeliveryHook.deliver()` 在 `bindings.length === 0` 时 **静默返回**（第 68 行无日志）
 - `WeixinAdapter.sendReply()` 在成功时 **无日志输出**
 
-**疑似根因（按可能性排序）**：
+### BUG-2: 后续轮次回复无法投递到微信（P0）
 
-1. **`OutboundDeliveryHook.deliver()` 查询到 0 个 binding**：
-   - `getByThread(threadId)` 返回空数组 → 静默 return
-   - 可能原因：Redis reverse index `connector-binding-rev:{threadId}` 的 Set 成员（unprefixed key）与 `hgetall` 的 ioredis `keyPrefix` 交互有误？
-   - 或者 `threadId` 在 outbound 路径中不一致（`hub_threadId` vs `threadId`）？
+**状态**: 🟢 Fixed — PR #704 + #708 + #710 + #711 累积修复，E2E 三轮验证通过 (2026-03-24)
 
-2. **`ConnectorInvokeTrigger.opts.outboundHook` 为 undefined**：
-   - `setOutboundHook()` 在 `index.ts` 行 1283 调用
-   - 但如果 connector gateway bootstrap 在 invokeTrigger 初始化之前完成，可能存在时序问题
+**现象**：team lead发第一条微信消息 → 猫猫回复 → 微信收到 ✅。发第二条 → 猫猫回复 → 微信收不到 ❌（或延迟 3-5 分钟才收到）。
 
-3. **WeixinAdapter.sendReply() 或 sendMessageApi() HTTP 成功但 iLink 静默丢弃**：
-   - sendMessageApi 无成功日志，无法排除
-   - 但零日志更指向 deliver() 根本未被调用
+**根因（多层）**：
+1. **iLink `context_token` 单次消费**（PR #704）：第一次 `sendmessage` + `FINISH` 后 token 作废，后续用同一 token 被静默丢弃
+2. **分块发送触发 iLink 单次消费约束**（PR #710）：即使不同 token，每个 token 只投递第一个 `sendmessage` 调用，分块（多次调用）的后续块被丢弃
+3. **`sendmessage` 请求体缺少官方必要字段**（PR #711）：我们的请求体比官方 `@tencent-weixin/openclaw-weixin@2.0.1` 少了 `client_id`、`message_type`、`from_user_id` 三个字段
 
-4. **context_token 竞态**：
-   - Token 在入站处理中缓存（Map 内存），但 deliver() 发生在不同异步上下文
+**修复时间线**：
+| PR | Commit | 修复内容 |
+|----|--------|---------|
+| #704 | 50b62edb | Token 消费追踪 + debounce 3s 聚合多猫回复 + 跨 token 隔离 |
+| #708 | a0a07250 | sendTyping keepalive（typing_ticket → 5s heartbeat）— 排除了 typing 缺失假设 |
+| #710 | 8f1e7fe9 | 禁用分块，单条 sendmessage 发送全部内容 — 排除了 chunking 假设，收敛到协议字段 |
+| #711 | 61f6baf4 | 对齐官方 sendmessage body（补 `client_id/message_type/from_user_id`）+ 200+非 JSON/空 body 硬失败 + raw response 调试日志 |
 
-**修复前必做**：
-- 在 `OutboundDeliveryHook.deliver()` 第 68 行添加 `bindings.length === 0` 日志
-- 在 `WeixinAdapter.sendReply()` 添加成功日志
-- 在 `WeixinAdapter.sendMessageApi()` 添加响应体日志
-- 重新测试后根据日志定位确切根因
+**E2E 验证证据（2026-03-24，runtime PID 55412）**：
+
+| 轮次 | 收到消息 (UTC) | 发出回复 (UTC) | tokenHash | iLink 返回 | 微信收到 |
+|------|---------------|---------------|-----------|-----------|---------|
+| 第 1 轮 | 22:30:46 | 22:31:01 | C3xsSh9V | 200 OK | ✅（延迟 ~3min，iLink 服务端投递延迟） |
+| 第 2 轮 | 22:37:40 | 22:37:54 | KN/0/AOm | 200 OK | ✅ 立即收到 |
+| 第 3 轮 | 22:39:04 | 22:39:20 | lomEmTvf | 200 OK | ✅ 立即收到 |
+
+**已知 Debt（DEBT-1）**：triple-token rotation during async flush — 当 tokenA 正在异步 flush 时，tokenB 的 sendReply 在 `await flushReply()` 处等待，此时 tokenC 到达并建桶。B 恢复后发现桶的 token 不匹配，当前行为是 `resolve()` 静默跳过（B 内容不发出）。触发条件极端（3 个 token 在一次 flush 的网络时间内连续轮换），日常不会命中，但属于协议正确性 debt。修复方向：pending 按 `(chatId, token)` 双 key 分桶，或引入 per-chatId 发送队列。
+
+### BUG-4：A→B→C 接力链只送达 A，B/C 静默丢失
+
+**现象**：team lead在微信端发消息触发 A→B→C 猫猫接力链时，只收到 A 的回复，B 和 C 的回复静默丢失。iLink API 均返回 200 OK。
+
+**根因**：`context_token` 单次消费（iLink 协议约束）+ 3s debounce 阻塞 deliver loop。A 的 `flushReply()` 消费 token 后删除，B/C 的 `sendReply()` 到达时已无 token，静默跳过（`WeixinAdapter.ts:519-524`）。
+
+**代码证据**：`ConnectorInvokeTrigger.ts:475` 逐 turn `await deliver()`，但 `sendReply` 的 Promise 在 `flushReply` 完成后（3s）才 resolve。Turn A flush 后 `contextTokens.delete(chatId)` → Turn B 到达 → `!currentToken && !pendingReplies` → silent return。
+
+**修复**：`ConnectorInvokeTrigger` 检测到 WeChat binding 且 `nonEmptyTurns > 1` 时，合并所有 turn 内容（带猫名前缀）为单次 `deliver()` 调用。非 WeChat 连接器保持原有逐 turn 投递逻辑。richBlocks 渲染为纯文本嵌入合并内容（避免 adapter fallback 重复追加）。混合 connector 绑定（如 weixin+feishu）回退到逐 turn 投递。
+
+**验证**：4 条新增测试覆盖合并路径 + richBlocks 保留 + 混合 connector 回归 + 非 WeChat 回归。42/42 全绿。PR #717 merged（2026-03-25，commit 2be35f8a）。
 
 ## Key Decisions
 

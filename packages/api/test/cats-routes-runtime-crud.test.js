@@ -71,6 +71,7 @@ function makeTemplate() {
 function createProjectRoot() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-'));
   tempDirs.push(projectRoot);
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
   writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
   return projectRoot;
 }
@@ -84,19 +85,25 @@ function createMonorepoProjectRoot() {
 function createProjectRootFromRepoTemplate() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-seed-'));
   tempDirs.push(projectRoot);
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
   const repoTemplate = JSON.parse(readFileSync(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8'));
   writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(repoTemplate, null, 2));
   return projectRoot;
 }
 
 describe('cats routes runtime CRUD', { concurrency: false }, () => {
+  /** @type {string | undefined} */ let savedGlobalRoot;
+
   beforeEach(() => {
     savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     resetRegistryToBuiltins();
     _clearRuntimeOverrides();
   });
 
   afterEach(() => {
+    if (savedGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
     if (savedTemplatePath === undefined) {
       delete process.env.CAT_TEMPLATE_PATH;
     } else {
@@ -522,13 +529,14 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         client: 'opencode',
         providerProfileId: crossProtocolProfile.id,
         defaultModel: 'openai/claude-sonnet-4-6',
+        ocProviderName: 'openai',
       }),
     });
 
     assert.equal(createRes.statusCode, 201, 'cross-protocol api_key binding should be allowed');
   });
 
-  it('POST /api/cats rejects opencode model without providerId/ prefix', async () => {
+  it('POST /api/cats opencode+api_key always requires ocProviderName', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -548,30 +556,68 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const app = Fastify();
     await app.register(catsRoutes);
 
-    const createRes = await app.inject({
+    // Case 1: bare model WITHOUT ocProviderName → 400
+    const bareReject = await app.inject({
       method: 'POST',
       url: '/api/cats',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
       body: JSON.stringify({
-        catId: 'runtime-opencode-bare-model',
-        name: '运行时金渐层',
-        displayName: '运行时金渐层',
+        catId: 'oc-bare-no-provider',
+        name: '金渐层A',
+        displayName: '金渐层A',
         avatar: '/avatars/opencode.png',
         color: { primary: '#0f172a', secondary: '#e2e8f0' },
-        mentionPatterns: ['@runtime-opencode-bare-model'],
+        mentionPatterns: ['@oc-bare-no-provider'],
         roleDescription: '审查',
         client: 'opencode',
         providerProfileId: openaiProfile.id,
         defaultModel: 'gpt-5.4',
       }),
     });
+    assert.equal(bareReject.statusCode, 400, 'bare model without ocProviderName → 400');
+    assert.match(JSON.parse(bareReject.body).error, /provider/i);
 
-    assert.equal(createRes.statusCode, 400);
-    const createBody = JSON.parse(createRes.body);
-    assert.match(createBody.error, /providerId\/modelId/i);
+    // Case 2: provider/model format WITHOUT ocProviderName → 400 (Path B eliminated)
+    const slashReject = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-slash-no-provider',
+        name: '金渐层B',
+        displayName: '金渐层B',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-slash-no-provider'],
+        roleDescription: '审查',
+        client: 'opencode',
+        providerProfileId: openaiProfile.id,
+        defaultModel: 'openai/gpt-5.4',
+      }),
+    });
+    assert.equal(slashReject.statusCode, 400, 'provider/model without ocProviderName → 400');
+    assert.match(JSON.parse(slashReject.body).error, /provider/i);
+
+    // Case 3: bare model WITH ocProviderName → 201
+    const bareAccept = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-bare-with-provider',
+        name: '金渐层C',
+        displayName: '金渐层C',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-bare-with-provider'],
+        roleDescription: '审查',
+        client: 'opencode',
+        providerProfileId: openaiProfile.id,
+        defaultModel: 'gpt-5.4',
+        ocProviderName: 'openai',
+      }),
+    });
+    assert.equal(bareAccept.statusCode, 201, 'bare model + ocProviderName → 201');
   });
 
   it('POST /api/cats rejects catId values that are not lowercase-safe identifiers', async () => {

@@ -21,7 +21,13 @@ interface TerminalRouteOpts {
   portDiscovery?: PortDiscoveryService;
 }
 interface PtyBinding {
-  pty: { onData: (cb: (data: string) => void) => { dispose: () => void }; onExit: (cb: () => void) => void; write: (data: string) => void; resize: (cols: number, rows: number) => void; kill: () => void };
+  pty: {
+    onData: (cb: (data: string) => void) => { dispose: () => void };
+    onExit: (cb: () => void) => void;
+    write: (data: string) => void;
+    resize: (cols: number, rows: number) => void;
+    kill: () => void;
+  };
 }
 
 export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app, opts) => {

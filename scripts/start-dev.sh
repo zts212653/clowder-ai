@@ -3,8 +3,8 @@
 # Cat Cafe 启动脚本（底层实现）
 # 用户入口:
 #   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
-#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + 非 watch API + 优先当前 .env 端口）
-#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，优先当前 .env 端口)
+#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=opensource + 非 watch API + 优先当前 .env 端口）
+#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=opensource)
 #
 # 直接调用脚本:
 #   ./scripts/start-dev.sh            — 开发模式 (next dev + Redis 持久化)
@@ -60,12 +60,14 @@ NC='\033[0m' # No Color
 QUICK_MODE=false
 USE_REDIS=true
 PROD_WEB=false
+DEBUG_MODE=false
 PROFILE=""
 for arg in "$@"; do
     case $arg in
         --quick|-q) QUICK_MODE=true ;;
         --memory|--no-redis) USE_REDIS=false ;;
         --prod-web) PROD_WEB=true ;;
+        --debug) DEBUG_MODE=true ;;
         --profile=*) PROFILE="${arg#*=}" ;;
         *)
             parse_manual_download_source_arg "$arg" || true
@@ -75,19 +77,6 @@ done
 
 # 加载环境变量 (放最前面，后续函数需要端口号)
 # 默认读取 .env；.env.local 仅用于 DARE 相关白名单键，避免全量覆盖引发配置漂移。
-clear_inherited_profile_env() {
-    [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
-    [ -n "$PROFILE" ] || return 0
-
-    # Public direct-launch wrappers may inherit a dev shell from another checkout.
-    # Clear only profile-controlled vars, then let .env re-apply explicit overrides.
-    unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED
-    unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
-    unset REDIS_PROFILE
-}
-
-clear_inherited_profile_env
-
 CLI_FRONTEND_PORT_OVERRIDE="${FRONTEND_PORT-}"
 CLI_API_SERVER_PORT_OVERRIDE="${API_SERVER_PORT-}"
 CLI_REDIS_PORT_OVERRIDE="${REDIS_PORT-}"
@@ -100,6 +89,19 @@ CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
 CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
 CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
 PREFER_DOTENV_PORTS="${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}"
+
+clear_inherited_profile_env() {
+    [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
+    [ -n "$PROFILE" ] || return 0
+
+    # Public direct-launch wrappers should honor the requested profile rather
+    # than ambient Cat Cafe shell exports leaked from another checkout.
+    unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED
+    unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
+    unset REDIS_PROFILE
+}
+
+clear_inherited_profile_env
 
 if [ -f .env ]; then
     set -a
@@ -138,7 +140,6 @@ load_dare_env_from_local() {
         DARE_ADAPTER \
         DARE_API_KEY \
         DARE_ENDPOINT \
-        CAT_DARE_MODEL \
         OPENROUTER_API_KEY \
         OPENROUTER_BASE_URL \
         OPENAI_API_KEY \
@@ -164,6 +165,21 @@ default_redis_port() {
     else
         echo "6398"
     fi
+}
+
+normalize_raw_dev_redis_defaults() {
+    [ "$USE_REDIS" = true ] || return 0
+    [ "$PROD_WEB" = false ] || return 0
+    [ "$PREFER_DOTENV_PORTS" = "1" ] && return 0
+    [ -n "$CLI_REDIS_PORT_OVERRIDE" ] && return 0
+    [ "${REDIS_PORT:-}" = "6399" ] || return 0
+
+    REDIS_PORT="6398"
+    case "${REDIS_URL:-}" in
+        ""|"redis://localhost:6399"|"redis://127.0.0.1:6399")
+            REDIS_URL="redis://localhost:6398"
+            ;;
+    esac
 }
 
 # Profile 默认值（env 变量优先，profile 作 fallback）
@@ -244,6 +260,7 @@ print_config_summary() {
 API_PORT=${API_SERVER_PORT:-3004}
 WEB_PORT=${FRONTEND_PORT:-3003}
 REDIS_PORT=${REDIS_PORT:-$(default_redis_port)}
+normalize_raw_dev_redis_defaults
 
 # Profile-aware config resolution
 resolve_config "ANTHROPIC_PROXY_ENABLED"
@@ -474,7 +491,7 @@ kill_managed_ports() {
         kill_port $preview_gateway_port "Preview Gateway"
     fi
     if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
-        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
+        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
     fi
     if [ "${ASR_ENABLED:-0}" = "1" ]; then
         kill_port ${WHISPER_PORT:-9876} "ASR"
@@ -561,10 +578,14 @@ background_eval_with_null_stdin() {
 }
 
 api_launch_command() {
+    local env_prefix=""
+    if [ "$DEBUG_MODE" = true ]; then
+        env_prefix="LOG_LEVEL=debug "
+    fi
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
-        printf '%s' "cd packages/api && exec pnpm run start"
+        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run start"
     else
-        printf '%s' "cd packages/api && exec pnpm run dev"
+        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run dev"
     fi
 }
 
@@ -930,6 +951,14 @@ main() {
     # 2. 清理缓存
     clean_cache
     sanitize_lockfiles
+
+    # 2.5. 自动安装依赖（worktree 等场景 node_modules 可能不存在或不完整）
+    if [ ! -x "$PROJECT_DIR/node_modules/.bin/tsc" ]; then
+        echo ""
+        echo -e "${YELLOW}检测到依赖不完整，自动安装...${NC}"
+        run_logged_step "pnpm install" 5 pnpm install --frozen-lockfile
+        echo -e "${GREEN}  ✓ 依赖安装完成${NC}"
+    fi
 
     # 3. 构建 shared + API (除非 --quick)
     if [ "$QUICK_MODE" = false ]; then

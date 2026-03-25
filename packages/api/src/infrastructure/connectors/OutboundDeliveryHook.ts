@@ -64,6 +64,16 @@ export class OutboundDeliveryHook {
 
   constructor(private readonly opts: OutboundDeliveryHookOptions) {}
 
+  /**
+   * Return the set of connectorIds bound to a thread.
+   * Used by ConnectorInvokeTrigger to detect single-token adapters (e.g. weixin)
+   * that require multi-turn content to be merged before delivery.
+   */
+  async getConnectorIds(threadId: string): Promise<string[]> {
+    const bindings = await this.opts.bindingStore.getByThread(threadId);
+    return [...new Set(bindings.map((b) => b.connectorId))];
+  }
+
   async deliver(
     threadId: string,
     content: string,

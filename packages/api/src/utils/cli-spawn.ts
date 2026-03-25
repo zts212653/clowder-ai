@@ -5,7 +5,7 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createModuleLogger } from '../infrastructure/logger.js';
-import { escapeCmdArg, resolveWindowsShimSpawn } from './cli-spawn-win.js';
+import { escapeBashArg, escapeCmdArg, findGitBashPath, resolveWindowsShimSpawn } from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
@@ -64,11 +64,15 @@ export async function* spawnCli(
   // Default timeout is configurable via CLI_TIMEOUT_MS env var; 0 disables timeout.
   const timeoutMs = resolveCliTimeoutMs(options.timeoutMs);
 
+  log.info({ command: options.command, args: options.args, cwd: options.cwd, timeoutMs }, 'Spawning CLI process');
+
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
     env: buildChildEnv(options.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+  log.info({ pid: child.pid, command: options.command }, 'CLI process spawned');
 
   // Buffer stderr for error reporting (handler attached after resetTimeout is defined)
   let stderrBuffer = '';
@@ -83,6 +87,7 @@ export async function* spawnCli(
       childExited = true;
       exitCode = code;
       exitSignal = signal;
+      log.info({ pid: child.pid, command: options.command, exitCode: code, signal }, 'CLI process exited');
       resolve();
     });
   });
@@ -223,7 +228,8 @@ export async function* spawnCli(
 
       if (isParseError(value)) {
         const parseErr = value as { line: string };
-        log.error({ command: options.command, line: parseErr.line }, 'JSON parse error');
+        log.warn({ command: options.command, line: parseErr.line }, 'CLI non-JSON output');
+        yield value;
         pendingNext = ndjson.next();
         continue;
       }
@@ -261,7 +267,11 @@ export async function* spawnCli(
 
     // Yield error on abnormal exit (only if WE didn't kill it AND no semantic completion)
     // Covers both non-zero exitCode AND external signal kills
-    if (!semanticDone && !killed && (exitCode !== 0 || exitSignal !== null)) {
+    // Windows: exit code 3221226505 (0xC0000409 STATUS_STACK_BUFFER_OVERRUN) is a libuv
+    // assertion crash in the MCP subprocess shutdown path. If we already received valid
+    // NDJSON events, the CLI output is fine — suppress the spurious error.
+    const isWindowsLibuvCrash = process.platform === 'win32' && exitCode === 3221226505 && firstEventAt !== null;
+    if (!semanticDone && !killed && !isWindowsLibuvCrash && (exitCode !== 0 || exitSignal !== null)) {
       const reasonCode = classifyKnownCliStderr(stderrBuffer);
       // Log stderr for debugging (never expose to users — may contain thinking/traces)
       if (stderrBuffer.trim()) {
@@ -394,12 +404,25 @@ function defaultSpawn(
   if (IS_WINDOWS) {
     const shimSpawn = resolveWindowsShimSpawn(command, args);
     if (shimSpawn) {
+      log.info({ original: command, resolved: shimSpawn.command, args: shimSpawn.args }, 'Windows shim resolved');
       return nodeSpawn(shimSpawn.command, shimSpawn.args, {
         cwd: options.cwd,
         env: options.env,
         stdio: options.stdio,
       });
     }
+    // Prefer Git Bash (UTF-8 native) over cmd.exe (GBK codepage corrupts CJK args)
+    const gitBash = findGitBashPath();
+    if (gitBash) {
+      log.info({ command, shell: gitBash }, 'Windows shim unresolved, falling back to Git Bash');
+      return nodeSpawn(command, args.map(escapeBashArg), {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: options.stdio,
+        shell: gitBash,
+      });
+    }
+    log.info({ command, shell: true }, 'Windows shim unresolved, falling back to cmd.exe');
     return nodeSpawn(command, args.map(escapeCmdArg), {
       cwd: options.cwd,
       env: options.env,

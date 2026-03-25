@@ -21,6 +21,11 @@ import { FeishuTokenManager } from './adapters/FeishuTokenManager.js';
 import { TelegramAdapter } from './adapters/TelegramAdapter.js';
 import { WeixinAdapter } from './adapters/WeixinAdapter.js';
 import { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
+import {
+  type IConnectorPermissionStore,
+  MemoryConnectorPermissionStore,
+  RedisConnectorPermissionStore,
+} from './ConnectorPermissionStore.js';
 import { ConnectorRouter } from './ConnectorRouter.js';
 import { MemoryConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { InboundMessageDedup } from './InboundMessageDedup.js';
@@ -40,6 +45,7 @@ export interface ConnectorGatewayConfig {
   feishuAppSecret?: string | undefined;
   feishuVerificationToken?: string | undefined;
   feishuBotOpenId?: string | undefined;
+  feishuAdminOpenIds?: string | undefined;
   dingtalkAppKey?: string | undefined;
   dingtalkAppSecret?: string | undefined;
   weixinBotToken?: string | undefined;
@@ -134,6 +140,7 @@ export interface ConnectorGatewayHandle {
   readonly streamingHook: StreamingOutboundHook;
   readonly webhookHandlers: Map<string, ConnectorWebhookHandler>;
   readonly weixinAdapter: InstanceType<typeof WeixinAdapter> | null;
+  readonly permissionStore: IConnectorPermissionStore;
   readonly startWeixinPolling: () => void;
   stop(): Promise<void>;
 }
@@ -145,6 +152,7 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     feishuAppSecret: process.env.FEISHU_APP_SECRET,
     feishuVerificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
     feishuBotOpenId: process.env.FEISHU_BOT_OPEN_ID,
+    feishuAdminOpenIds: process.env.FEISHU_ADMIN_OPEN_IDS,
     dingtalkAppKey: process.env.DINGTALK_APP_KEY,
     dingtalkAppSecret: process.env.DINGTALK_APP_SECRET,
     weixinBotToken: process.env.WEIXIN_BOT_TOKEN,
@@ -184,11 +192,35 @@ export async function startConnectorGateway(
   // making them visible in the frontend thread list. (F088 ISSUE-1 fix)
   const effectiveUserId = config.coCreatorUserId || deps.defaultUserId;
 
+  // F134 Phase D: Permission store + admin config
+  const adminOpenIds = config.feishuAdminOpenIds
+    ? config.feishuAdminOpenIds
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  const permissionStore: IConnectorPermissionStore = deps.redis
+    ? new RedisConnectorPermissionStore(deps.redis)
+    : new MemoryConnectorPermissionStore();
+  if (adminOpenIds.length > 0) {
+    const alreadyConfigured = await permissionStore.hasAdminConfig('feishu');
+    if (!alreadyConfigured) {
+      await permissionStore.setAdminOpenIds('feishu', adminOpenIds);
+      log.info(
+        { adminCount: adminOpenIds.length },
+        '[ConnectorGateway] Feishu admin open_ids seeded from env (first boot)',
+      );
+    } else {
+      log.info('[ConnectorGateway] Feishu admin config already persisted, env seed skipped');
+    }
+  }
+
   const commandLayer = new ConnectorCommandLayer({
     bindingStore,
     threadStore: deps.threadStore,
     ...(deps.backlogStore ? { backlogStore: deps.backlogStore } : {}),
     frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003',
+    permissionStore,
   });
 
   // Phase 5+6: Media service + STT provider (optional)
@@ -216,6 +248,7 @@ export async function startConnectorGateway(
     defaultCatId: deps.defaultCatId,
     log,
     commandLayer,
+    permissionStore,
     adapters,
     mediaService,
     sttProvider,
@@ -513,6 +546,7 @@ export async function startConnectorGateway(
     streamingHook,
     webhookHandlers,
     weixinAdapter: weixin,
+    permissionStore,
     startWeixinPolling,
     async stop() {
       cleanupJob.stop();

@@ -26,6 +26,7 @@
     "@fastify/multipart": "8",
     "@fastify/static": "7",
     "@fastify/websocket": "^10.0.0",
+    "@huggingface/transformers": "^3",
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.6.2",
@@ -37,20 +38,18 @@
     "imapflow": "^1.2.10",
     "ioredis": "^5.3.0",
     "js-tiktoken": "^1.0.21",
+    "node-pty": "1.2.0-beta.12",
     "nodemailer": "^6.9.16",
     "pino-roll": "^4.0.0",
+    "puppeteer": "^24.37.2",
     "rss-parser": "^3.13.0",
+    "sharp": "^0.34.5",
     "smol-toml": "^1.6.0",
     "socket.io": "^4.7.0",
     "sqlite-vec": "^0.1.6",
     "web-push": "^3.6.7",
     "yaml": "^2.8.1",
     "zod": "^3.22.0"
-  },
-  "optionalDependencies": {
-    "node-pty": "1.2.0-beta.12",
-    "puppeteer": "^24.37.2",
-    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

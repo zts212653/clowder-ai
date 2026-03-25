@@ -49,8 +49,8 @@ export class OpenCodeAgentService implements AgentService {
   constructor(options?: OpenCodeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opencode');
     this.model = options?.model ?? getCatModel(this.catId as string);
-    this.apiKey = options?.apiKey ?? process.env[OPENCODE_API_KEY_ENV] ?? process.env[ANTHROPIC_API_KEY_ENV];
-    this.baseUrl = options?.baseUrl ?? process.env.OPENCODE_BASE_URL ?? process.env[ANTHROPIC_BASE_URL_ENV];
+    this.apiKey = options?.apiKey;
+    this.baseUrl = options?.baseUrl;
     this.spawnFn = options?.spawnFn;
   }
 
@@ -198,6 +198,18 @@ export class OpenCodeAgentService implements AgentService {
 
   private buildEnv(callbackEnv?: Record<string, string>): Record<string, string | null> {
     const env: Record<string, string | null> = { ...callbackEnv };
+
+    // F189: When OPENCODE_CONFIG is set (custom provider via runtime config file),
+    // credentials are injected via {env:CAT_CAFE_OC_*} substitution in the config.
+    // Clear anthropic env vars to prevent opencode from using the builtin anthropic provider.
+    if (callbackEnv?.OPENCODE_CONFIG) {
+      env[ANTHROPIC_API_KEY_ENV] = null;
+      env[ANTHROPIC_BASE_URL_ENV] = null;
+      env[OPENCODE_API_KEY_ENV] = null;
+      env.OPENCODE_BASE_URL = null;
+      return env;
+    }
+
     const profileMode = callbackEnv?.CAT_CAFE_ANTHROPIC_PROFILE_MODE;
 
     // Subscription mode must not inherit API-key credentials from parent env.

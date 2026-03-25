@@ -54,6 +54,12 @@ export interface EvidenceItem {
   supersededBy?: string;
   materializedFrom?: string;
   updatedAt: string;
+  /** G-4: drill-down hint — tells the cat what tool to use to see full details */
+  drillDown?: {
+    tool: string;
+    params: Record<string, string>;
+    hint: string;
+  };
 }
 
 export interface Edge {

@@ -12,12 +12,14 @@
   .\scripts\start-windows.ps1 -Quick       # skip rebuild
   .\scripts\start-windows.ps1 -Memory      # skip Redis, use in-memory storage
   .\scripts\start-windows.ps1 -Dev         # development mode (next dev, hot reload)
+  .\scripts\start-windows.ps1 -Debug       # enable debug-level logging (writes to data/logs/api/)
 #>
 
 param(
     [switch]$Quick,
     [switch]$Memory,
-    [switch]$Dev
+    [switch]$Dev,
+    [switch]$Debug
 )
 
 $ErrorActionPreference = "Stop"
@@ -486,7 +488,7 @@ try {
     # No --env-file needed - avoids depending on Node's --env-file support here.
     Write-Host "  Starting API Server (port $ApiPort)..."
     $apiJob = Start-Job -Name "api" -ScriptBlock {
-        param($root, $envFile, $runtimeEnvOverrides, $apiEntry, $nodeCommand)
+        param($root, $envFile, $runtimeEnvOverrides, $apiEntry, $nodeCommand, $debugFlag)
         Set-Location (Join-Path $root "packages/api")
         # Load .env into job process (Start-Job inherits parent env,
         # but re-load to be safe if process env was not fully propagated)
@@ -510,8 +512,13 @@ try {
                 [System.Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, "Process")
             }
         }
-        & $nodeCommand $apiEntry 2>&1
-    } -ArgumentList $ProjectRoot, $envFile, $runtimeEnvOverrides, $apiEntry, $nodeCommand
+        if ($debugFlag) {
+            $env:LOG_LEVEL = "debug"
+            & $nodeCommand $apiEntry --debug 2>&1
+        } else {
+            & $nodeCommand $apiEntry 2>&1
+        }
+    } -ArgumentList $ProjectRoot, $envFile, $runtimeEnvOverrides, $apiEntry, $nodeCommand, $Debug.IsPresent
     $jobs += $apiJob
 
     Start-Sleep -Seconds 2
@@ -546,6 +553,7 @@ try {
     $safeEffectiveRedisUrl = Get-RedactedRedisUrl -RedisUrl $effectiveRedisUrl
     $storageMode = if ($useRedis -and $safeEffectiveRedisUrl) { "Redis ($safeEffectiveRedisUrl)" } elseif ($useRedis) { "Redis (redis://localhost:$RedisPort)" } else { "Memory (restart loses data)" }
     $frontendMode = if ($Dev) { "development (hot reload)" } else { "production (PWA enabled)" }
+    $logDir = Join-Path $ProjectRoot "data/logs/api"
 
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
@@ -556,6 +564,9 @@ try {
     Write-Host "  API:      http://localhost:$ApiPort"
     Write-Host "  Storage:  $storageMode"
     Write-Host "  Frontend: $frontendMode"
+    if ($Debug) {
+        Write-Host "  Debug:    ON (logs: $logDir)" -ForegroundColor Yellow
+    }
     Write-Host ""
     Write-Host "  Press Ctrl+C to stop all services" -ForegroundColor Yellow
     Write-Host ""

@@ -129,6 +129,11 @@ export class ProcessLivenessProbe {
       return;
     }
 
+    // On Windows, `ps` is not available. The process.kill(pid, 0) check above
+    // is sufficient for liveness detection. CPU-based busy-silent classification
+    // is only available on Unix.
+    if (process.platform === 'win32') return;
+
     // Sample CPU time via ps
     execFile('ps', ['-o', 'cputime=', '-p', String(this.pid)], (err, stdout) => {
       if (err) {

@@ -10,7 +10,13 @@ import { createCatId } from './ids.js';
 /**
  * AI provider behind a cat
  */
-export type CatProvider = 'anthropic' | 'openai' | 'google' | 'dare' | 'antigravity' | 'opencode' | 'a2a' | 'relayclaw';
+/**
+ * Known built-in providers. The runtime accepts any string so that new
+ * providers introduced in config don't break older code — unknown values
+ * fall through to `default` branches in switch statements.
+ */
+export type KnownCatProvider = 'anthropic' | 'openai' | 'google' | 'dare' | 'antigravity' | 'opencode' | 'a2a' | 'relayclaw';
+export type CatProvider = string;
 
 /**
  * Cat status in the system
@@ -63,6 +69,8 @@ export interface CatConfig {
   readonly sessionChain?: boolean;
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time. */
   readonly cliConfigArgs?: readonly string[];
+  /** F189: OpenCode custom provider name for api_key routing (runtime assembles provider/model). */
+  readonly ocProviderName?: string;
 }
 
 /**

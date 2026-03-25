@@ -278,6 +278,13 @@ describe('WeixinAdapter', () => {
   });
 
   describe('sendReply', () => {
+    // Helper: sendReply + immediately flush (avoids waiting for debounce timer)
+    async function sendAndFlush(adapter, chatId, content) {
+      const p = adapter.sendReply(chatId, content);
+      await adapter._flushAllPending();
+      return p;
+    }
+
     it('sends text message via iLink sendmessage API with msg wrapper', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'ctx-token-1');
@@ -290,7 +297,7 @@ describe('WeixinAdapter', () => {
         return { ok: true, json: async () => ({ ret: 0 }) };
       });
 
-      await adapter.sendReply('user-1', 'Hello from Clowder AI!');
+      await sendAndFlush(adapter, 'user-1', 'Hello from Clowder AI!');
 
       assert.ok(capturedUrl.includes('/ilink/bot/sendmessage'));
       assert.ok(capturedBody.msg, 'body must have msg wrapper');
@@ -303,6 +310,192 @@ describe('WeixinAdapter', () => {
       assert.ok(capturedBody.base_info, 'body must include base_info');
     });
 
+    it('marks token as consumed after successful send', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-token-1');
+      adapter._injectFetch(async () => ({ ok: true, json: async () => ({ ret: 0 }) }));
+
+      await sendAndFlush(adapter, 'user-1', 'Hello');
+      assert.ok(adapter._isTokenConsumed('user-1', 'ctx-token-1'));
+    });
+
+    it('rejects second send with consumed token (does not call iLink API)', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-token-1');
+      let sendCount = 0;
+      adapter._injectFetch(async () => {
+        sendCount++;
+        return { ok: true, json: async () => ({ ret: 0 }) };
+      });
+
+      await sendAndFlush(adapter, 'user-1', 'First reply');
+      assert.equal(sendCount, 1);
+
+      // Re-inject the same (now consumed) token
+      adapter._injectContextToken('user-1', 'ctx-token-1');
+      await sendAndFlush(adapter, 'user-1', 'Second reply — should be blocked');
+      assert.equal(sendCount, 1, 'iLink API should NOT be called with consumed token');
+    });
+
+    it('aggregates multiple sendReply calls within debounce window', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-token-1');
+      const sentTexts = [];
+      adapter._injectFetch(async (_url, opts) => {
+        const body = JSON.parse(opts.body);
+        sentTexts.push(body.msg.item_list[0].text_item.text);
+        return { ok: true, json: async () => ({ ret: 0 }) };
+      });
+
+      // Queue two replies without flushing
+      const p1 = adapter.sendReply('user-1', '[Cat A] Hello!');
+      const p2 = adapter.sendReply('user-1', '[Cat B] Meow!');
+      await adapter._flushAllPending();
+      await Promise.all([p1, p2]);
+
+      // Should be merged into a single API call
+      assert.equal(sentTexts.length, 1);
+      assert.ok(sentTexts[0].includes('Cat A'));
+      assert.ok(sentTexts[0].includes('Cat B'));
+    });
+
+    it('uses token bound at queue time, not token at flush time (token rotation safety)', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'token-A');
+
+      let capturedToken = null;
+      adapter._injectFetch(async (_url, opts) => {
+        const body = JSON.parse(opts.body);
+        capturedToken = body.msg.context_token;
+        return { ok: true, json: async () => ({ ret: 0 }) };
+      });
+
+      // Queue reply while token-A is active
+      const p = adapter.sendReply('user-1', 'reply for message A');
+
+      // Simulate new inbound message arriving with token-B (overwrites Map)
+      adapter._injectContextToken('user-1', 'token-B');
+
+      // Flush — should use token-A (bound at queue time), NOT token-B
+      await adapter._flushAllPending();
+      await p;
+
+      assert.equal(capturedToken, 'token-A', 'must use token bound at queue time, not current Map value');
+    });
+
+    it('cross-token replies are NOT merged — new token flushes old bucket first', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'token-A');
+
+      const calls = [];
+      adapter._injectFetch(async (_url, opts) => {
+        const body = JSON.parse(opts.body);
+        calls.push({ token: body.msg.context_token, text: body.msg.item_list[0].text_item.text });
+        return { ok: true, json: async () => ({ ret: 0 }) };
+      });
+
+      // Queue reply for token-A (starts debounce)
+      const pA = adapter.sendReply('user-1', 'reply for A');
+
+      // New message arrives with token-B → sendReply with token-B should flush old A bucket first
+      adapter._injectContextToken('user-1', 'token-B');
+      const pB = adapter.sendReply('user-1', 'reply for B');
+      await adapter._flushAllPending();
+      await Promise.all([pA, pB]);
+
+      // Must be 2 separate sends: A with token-A, B with token-B
+      assert.equal(calls.length, 2, 'must be 2 separate API calls, not merged');
+      assert.equal(calls[0].token, 'token-A');
+      assert.ok(calls[0].text.includes('reply for A'));
+      assert.equal(calls[1].token, 'token-B');
+      assert.ok(calls[1].text.includes('reply for B'));
+    });
+
+    it('token changes twice during flush — B refuses cross-token merge with C bucket', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'token-A');
+
+      // Gate token-A's fetch so we control when it completes
+      let releaseFetchA;
+      const fetchGate = new Promise((r) => {
+        releaseFetchA = r;
+      });
+      const calls = [];
+      adapter._injectFetch(async (_url, opts) => {
+        const body = JSON.parse(opts.body);
+        const token = body.msg.context_token;
+        if (token === 'token-A') await fetchGate;
+        calls.push({ token, text: body.msg.item_list[0].text_item.text });
+        return { ok: true, json: async () => ({ ret: 0 }) };
+      });
+
+      // 1. Queue reply for A
+      const pA = adapter.sendReply('user-1', 'reply-A');
+
+      // 2. Token B arrives → sendReply(B) starts flushing A (blocked by fetchGate)
+      adapter._injectContextToken('user-1', 'token-B');
+      const pB = adapter.sendReply('user-1', 'reply-B');
+
+      // 3. While A flush is blocked, token C arrives + creates pending
+      adapter._injectContextToken('user-1', 'token-C');
+      const pC = adapter.sendReply('user-1', 'reply-C');
+
+      // 4. Release A's fetch → B resumes → B must NOT merge into C's bucket
+      releaseFetchA();
+      await adapter._flushAllPending();
+      await Promise.allSettled([pA, pB, pC]);
+
+      // A sent with token-A, C sent with token-C. B refused to merge (different token bucket)
+      assert.ok(
+        calls.some((c) => c.token === 'token-A' && c.text.includes('reply-A')),
+        'A must be sent',
+      );
+      assert.ok(
+        calls.some((c) => c.token === 'token-C' && c.text.includes('reply-C')),
+        'C must be sent',
+      );
+      assert.ok(!calls.some((c) => c.text.includes('reply-B') && c.token === 'token-C'), 'B must NOT be merged into C');
+    });
+
+    it('flushReply compare-and-delete does not remove newer token', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'token-A');
+      adapter._injectFetch(async () => ({ ok: true, json: async () => ({ ret: 0 }) }));
+
+      // Queue reply for token-A
+      const p = adapter.sendReply('user-1', 'reply A');
+
+      // New token-B arrives before flush
+      adapter._injectContextToken('user-1', 'token-B');
+
+      // Flush old bucket — should consume token-A but NOT delete token-B from contextTokens
+      await adapter._flushAllPending();
+      await p;
+
+      assert.ok(adapter._isTokenConsumed('user-1', 'token-A'), 'token-A should be consumed');
+      assert.ok(adapter.hasContextToken('user-1'), 'token-B must still be in contextTokens');
+    });
+
+    it('no-token reply does not poison bucket for subsequent valid reply', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      let sendCount = 0;
+      adapter._injectFetch(async () => {
+        sendCount++;
+        return { ok: true, json: async () => ({ ret: 0 }) };
+      });
+
+      // First reply with no token — should be skipped, no bucket created
+      await adapter.sendReply('user-1', 'no-token reply');
+      assert.equal(sendCount, 0);
+
+      // Now token arrives and second reply queued
+      adapter._injectContextToken('user-1', 'valid-token');
+      await sendAndFlush(adapter, 'user-1', 'valid reply');
+
+      // The valid reply must be sent
+      assert.equal(sendCount, 1, 'valid reply after no-token skip must be sent');
+    });
+
     it('silently skips when no context_token cached', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       let fetchCalled = false;
@@ -311,7 +504,7 @@ describe('WeixinAdapter', () => {
         return { ok: true, json: async () => ({ ret: 0 }) };
       });
 
-      await adapter.sendReply('unknown-user', 'This should not send');
+      await sendAndFlush(adapter, 'unknown-user', 'This should not send');
       assert.equal(fetchCalled, false);
     });
 
@@ -326,28 +519,84 @@ describe('WeixinAdapter', () => {
         return { ok: true, json: async () => ({ ret: 0 }) };
       });
 
-      await adapter.sendReply('user-1', '**Hello** from [Clowder AI](https://example.com)!');
+      await sendAndFlush(adapter, 'user-1', '**Hello** from [Clowder AI](https://example.com)!');
       assert.equal(capturedText, 'Hello from Clowder AI!');
     });
 
-    it('adds inter-chunk delay for multi-chunk messages', async () => {
+    it('sends official sendmessage fields expected by openclaw protocol', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'ctx-1');
 
-      const sendTimestamps = [];
+      let capturedMsg = null;
       adapter._injectFetch(async (_url, opts) => {
-        sendTimestamps.push(Date.now());
+        const body = JSON.parse(opts.body);
+        capturedMsg = body.msg;
         return { ok: true, json: async () => ({ ret: 0 }) };
       });
 
-      const longText = 'A'.repeat(1200);
-      await adapter.sendReply('user-1', longText);
+      await sendAndFlush(adapter, 'user-1', 'hello');
 
-      assert.ok(sendTimestamps.length >= 3, `Expected >= 3 chunks, got ${sendTimestamps.length}`);
-      for (let i = 1; i < sendTimestamps.length; i++) {
-        const gap = sendTimestamps[i] - sendTimestamps[i - 1];
-        assert.ok(gap >= 200, `Gap between chunk ${i - 1} and ${i} was only ${gap}ms, expected >= 200ms`);
-      }
+      assert.equal(capturedMsg.from_user_id, '');
+      assert.equal(capturedMsg.to_user_id, 'user-1');
+      assert.equal(capturedMsg.message_type, 2);
+      assert.equal(capturedMsg.message_state, 2);
+      assert.equal(capturedMsg.context_token, 'ctx-1');
+      assert.match(capturedMsg.client_id, /^cat-cafe-weixin-/);
+    });
+
+    it('parses raw text sendmessage responses without requiring res.json()', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+      adapter._injectFetch(async () => ({
+        ok: true,
+        text: async () => JSON.stringify({ ret: 0, errmsg: 'ok' }),
+      }));
+
+      await sendAndFlush(adapter, 'user-1', 'hello');
+    });
+
+    it('throws on non-JSON 200 sendmessage response', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+      adapter._injectFetch(async () => ({
+        ok: true,
+        text: async () => '<html>gateway error</html>',
+      }));
+
+      await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'hello'), /sendmessage returned non-JSON response/);
+      assert.equal(adapter._isTokenConsumed('user-1', 'ctx-1'), false);
+    });
+
+    it('throws on empty 200 sendmessage response body', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+      adapter._injectFetch(async () => ({
+        ok: true,
+        text: async () => '',
+      }));
+
+      await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'hello'), /sendmessage returned empty response body/);
+      assert.equal(adapter._isTokenConsumed('user-1', 'ctx-1'), false);
+    });
+
+    it('sends all content in a single sendmessage call (no chunking)', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+
+      let callCount = 0;
+      let capturedTextLen = 0;
+      adapter._injectFetch(async (_url, opts) => {
+        callCount++;
+        const body = JSON.parse(opts.body);
+        capturedTextLen = body.msg.item_list[0].text_item.text.length;
+        return { ok: true, json: async () => ({ ret: 0 }) };
+      });
+
+      const longText = 'A'.repeat(8000);
+      await sendAndFlush(adapter, 'user-1', longText);
+
+      assert.equal(callCount, 1, 'must be exactly 1 sendmessage call, no chunking');
+      assert.equal(capturedTextLen, 8000, 'full text sent in single call');
     });
 
     it('throws on HTTP error from sendmessage', async () => {
@@ -360,7 +609,7 @@ describe('WeixinAdapter', () => {
         text: async () => 'server error',
       }));
 
-      await assert.rejects(() => adapter.sendReply('user-1', 'test'), /sendmessage HTTP 500/);
+      await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'test'), /sendmessage HTTP 500/);
     });
 
     it('throws on errcode -14 from sendmessage', async () => {
@@ -371,7 +620,7 @@ describe('WeixinAdapter', () => {
         json: async () => ({ errcode: -14, errmsg: 'session expired' }),
       }));
 
-      await assert.rejects(() => adapter.sendReply('user-1', 'test'), /errcode -14/);
+      await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'test'), /errcode -14/);
     });
 
     it('throws on ret -14 from sendmessage', async () => {
@@ -382,7 +631,7 @@ describe('WeixinAdapter', () => {
         json: async () => ({ ret: -14, errmsg: 'session expired' }),
       }));
 
-      await assert.rejects(() => adapter.sendReply('user-1', 'test'), /errcode -14/);
+      await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'test'), /errcode -14/);
     });
   });
 
@@ -395,7 +644,7 @@ describe('WeixinAdapter', () => {
 
     it('breaks at newlines when possible', () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
-      const text = 'A'.repeat(15) + '\n' + 'B'.repeat(10);
+      const text = `${'A'.repeat(15)}\n${'B'.repeat(10)}`;
       const chunks = adapter.chunkMessage(text, 20);
       assert.equal(chunks.length, 2);
       assert.equal(chunks[0], 'A'.repeat(15));
@@ -404,7 +653,7 @@ describe('WeixinAdapter', () => {
 
     it('breaks at spaces as fallback', () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
-      const text = 'A'.repeat(15) + ' ' + 'B'.repeat(10);
+      const text = `${'A'.repeat(15)} ${'B'.repeat(10)}`;
       const chunks = adapter.chunkMessage(text, 20);
       assert.equal(chunks.length, 2);
       assert.equal(chunks[0], 'A'.repeat(15));
@@ -566,7 +815,9 @@ describe('WeixinAdapter', () => {
         return { ok: true, json: async () => ({ errcode: 0 }) };
       });
 
-      await adapter.sendReply('user-1', 'test');
+      const p = adapter.sendReply('user-1', 'test');
+      await adapter._flushAllPending();
+      await p;
 
       assert.equal(capturedHeaders.AuthorizationType, 'ilink_bot_token');
       assert.equal(capturedHeaders.Authorization, 'Bearer my-bot-token');

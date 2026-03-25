@@ -162,7 +162,6 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   const canFinish = Boolean(
     client &&
       defaultModel.trim() &&
-      !(client === 'opencode' && !defaultModel.includes('/')) &&
       (client === 'antigravity' ? commandArgs.trim().length > 0 : Boolean(selectedProfile)),
   );
 
@@ -202,17 +201,17 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <div
-        className="w-full max-w-[520px] rounded-[32px] border border-[#F0DDCD] bg-[#FFF8F2] shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-[520px] flex-col rounded-[32px] border border-[#F0DDCD] bg-[#FFF8F2] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between px-7 pb-2 pt-7">
+        <div className="flex shrink-0 items-start justify-between px-7 pb-2 pt-7">
           <p className="text-[13px] font-semibold text-[#D18A61]">成员协作 &gt; 总览 &gt; 添加成员</p>
           <button type="button" onClick={onClose} className="text-2xl leading-none text-[#B59A88]" aria-label="关闭">
             ×
           </button>
         </div>
 
-        <div className="space-y-5 px-7 py-6">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-7 py-6">
           <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 1: 选择 Client</h4>
@@ -321,9 +320,9 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
                 />
               </label>
             )}
-            {client === 'opencode' && defaultModel.trim() && !defaultModel.includes('/') ? (
+            {client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-2 text-xs leading-5 text-[#8A776B]">
-                建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。
+                OpenCode API Key 认证需要 Provider 名称，下一步编辑器中填写。
               </p>
             ) : null}
           </section>
@@ -331,7 +330,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
           {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p> : null}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-7 py-4">
+        <div className="flex shrink-0 items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-7 py-4">
           <button
             type="button"
             onClick={onClose}

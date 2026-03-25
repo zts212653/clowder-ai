@@ -63,7 +63,7 @@ interface CodexAgentServiceOptions {
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 function getCodexAuthMode(callbackEnv?: Record<string, string>): CodexAuthMode {
-  const raw = callbackEnv?.CODEX_AUTH_MODE?.trim().toLowerCase() ?? process.env.CODEX_AUTH_MODE?.trim().toLowerCase();
+  const raw = callbackEnv?.CODEX_AUTH_MODE?.trim().toLowerCase();
   if (raw === 'api_key' || raw === 'auto' || raw === 'oauth') return raw;
   return 'oauth';
 }
@@ -328,12 +328,16 @@ export class CodexAgentService implements AgentService {
         delete rawEnv.OPENAI_BASE_URL;
         delete rawEnv.OPENAI_API_BASE;
       }
-      // For API Key mode: use temp HOME to prevent OAuth token refresh interference
+      // For API Key mode: use temp HOME to prevent OAuth token refresh interference.
+      // On Windows, Rust/codex uses USERPROFILE (not HOME) for config directory.
       if (authMode === 'api_key' && customBaseUrl) {
         const { mkdtempSync } = await import('node:fs');
         const { tmpdir } = await import('node:os');
         const isolatedHome = mkdtempSync(`${tmpdir()}/codex-apikey-`);
         rawEnv.HOME = isolatedHome;
+        if (process.platform === 'win32') {
+          rawEnv.USERPROFILE = isolatedHome;
+        }
       }
       const codexEnv = applyAuthMode(rawEnv, authMode);
 

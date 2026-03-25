@@ -111,7 +111,16 @@ export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoC
           </div>
           <h3 className="text-base font-bold text-[#2D2118]">{coCreator.name}</h3>
         </div>
-        <span className="rounded-full bg-[#FFF3E0] px-2.5 py-1 text-[11px] font-semibold text-[#E65100]">🔒 Owner</span>
+        <span className="rounded-full bg-[#FFF3E0] px-2.5 py-1 text-[11px] font-semibold text-[#E65100] flex items-center gap-1">
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
+            />
+          </svg>
+          Owner
+        </span>
       </div>
       <p className="mt-2.5 text-[13px] text-[#8A776B]">
         别名: {coCreator.aliases.join(' · ') || '无'} · 只能编辑，不能新增或删除

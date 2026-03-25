@@ -168,6 +168,11 @@ export class QueueProcessor {
     return this.deps.queue.hasQueuedForThread(threadId);
   }
 
+  /** A2A fairness gate: only user-sourced entries should block text-scan A2A. */
+  hasQueuedUserMessagesForThread(threadId: string): boolean {
+    return this.deps.queue.hasQueuedUserMessagesForThread(threadId);
+  }
+
   /** A2A dedup: check if a specific cat already has a queued or processing entry for this thread. */
   hasQueuedAgentForCat(threadId: string, catId: string): boolean {
     return this.deps.queue.hasQueuedAgentForCat(threadId, catId);
@@ -547,7 +552,7 @@ export class QueueProcessor {
         {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
-          queueHasQueuedMessages: (tid: string) => queue.hasQueuedForThread(tid),
+          queueHasQueuedMessages: (tid: string) => queue.hasQueuedUserMessagesForThread(tid),
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
           cursorBoundaries,
           persistenceContext,

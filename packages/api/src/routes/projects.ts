@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import { basename, posix, resolve, win32 } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import { getAllowedRoots, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
+import { getAllowedRoots, isDenylistMode, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const execFileAsync = promisify(execFile);
@@ -160,9 +160,12 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     if (!validated) {
       reply.status(403);
       return {
-        error: 'Selected directory is outside allowed roots',
+        error: isDenylistMode()
+          ? 'Selected directory is under a restricted system path'
+          : 'Selected directory is outside allowed roots',
         selectedPath: result.path,
-        allowedRoots: getAllowedRoots(),
+        restrictedRoots: isDenylistMode() ? getAllowedRoots() : undefined,
+        allowedRoots: isDenylistMode() ? undefined : getAllowedRoots(),
       };
     }
     return { path: validated, name: basename(validated) };
@@ -188,7 +191,11 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const validatedParent = await validateProjectPath(parentDir);
     if (!validatedParent) {
       reply.status(403);
-      return { error: 'Access denied: path is outside allowed roots' };
+      return {
+        error: isDenylistMode()
+          ? 'Access denied: path is under a restricted system directory'
+          : 'Access denied: path is outside allowed roots',
+      };
     }
 
     try {
@@ -237,7 +244,11 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const validatedPath = await validateProjectPath(targetPath);
     if (!validatedPath) {
       reply.status(403);
-      return { error: 'Access denied: path is outside allowed roots' };
+      return {
+        error: isDenylistMode()
+          ? 'Access denied: path is under a restricted system directory'
+          : 'Access denied: path is outside allowed roots',
+      };
     }
 
     try {

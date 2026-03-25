@@ -456,6 +456,181 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(deliverCalls[1].content, 'Hello from codex!');
   });
 
+  it('BUG-4: WeChat multi-turn A2A merges into single deliver call', async () => {
+    const multiCatRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'Hello from opus!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+        };
+        yield { type: 'text', catId: 'codex', content: 'Hello from codex!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 80, outputTokens: 40 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: any}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ threadId, content, catId });
+      },
+      getConnectorIds: async (_threadId) => ['weixin'],
+    };
+
+    const trigger = createTrigger({ router: multiCatRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Hello', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 1, 'WeChat should merge multi-turn into single deliver');
+    assert.strictEqual(deliverCalls[0].catId, undefined, 'Merged delivery should not have a single catId');
+    assert.ok(deliverCalls[0].content.includes('Hello from opus!'), 'Merged content contains opus text');
+    assert.ok(deliverCalls[0].content.includes('Hello from codex!'), 'Merged content contains codex text');
+    assert.ok(deliverCalls[0].content.includes('['), 'Merged content has cat name prefix brackets');
+  });
+
+  it('BUG-4 P1: WeChat merge preserves richBlocks in merged content', async () => {
+    const multiCatRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'Hello from opus!', timestamp: Date.now() };
+        options.persistenceContext.richBlocks = [
+          { id: 'rb1', kind: 'card', v: 1, title: 'Status Card', bodyMarkdown: 'All good' },
+        ];
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+        };
+        yield { type: 'text', catId: 'codex', content: 'Hello from codex!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 80, outputTokens: 40 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: any, richBlocks: any}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId, richBlocks) => {
+        deliverCalls.push({ threadId, content, catId, richBlocks });
+      },
+      getConnectorIds: async (_threadId) => ['weixin'],
+    };
+
+    const trigger = createTrigger({ router: multiCatRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Hello', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 1, 'WeChat should merge into single deliver');
+    assert.ok(
+      deliverCalls[0].content.includes('Status Card'),
+      'Merged content includes richBlock rendered as plaintext',
+    );
+    assert.ok(deliverCalls[0].content.includes('All good'), 'Merged content includes richBlock body');
+    assert.strictEqual(
+      deliverCalls[0].richBlocks,
+      undefined,
+      'richBlocks NOT passed to deliver (already baked into text, avoids duplication)',
+    );
+  });
+
+  it('BUG-4 P2: mixed weixin+feishu bindings delivers per-turn (not merged)', async () => {
+    const multiCatRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'Hello from opus!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+        };
+        yield { type: 'text', catId: 'codex', content: 'Hello from codex!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 80, outputTokens: 40 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: string}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ threadId, content, catId });
+      },
+      getConnectorIds: async (_threadId) => ['weixin', 'feishu'],
+    };
+
+    const trigger = createTrigger({ router: multiCatRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Hello', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 2, 'Mixed connectors should deliver per-turn, not merge');
+    assert.strictEqual(deliverCalls[0].catId, 'opus');
+    assert.strictEqual(deliverCalls[1].catId, 'codex');
+  });
+
+  it('BUG-4 regression: non-WeChat multi-turn still delivers per-turn', async () => {
+    const multiCatRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'Hello from opus!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+        };
+        yield { type: 'text', catId: 'codex', content: 'Hello from codex!', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'codex',
+          content: '',
+          timestamp: Date.now(),
+          metadata: { usage: { inputTokens: 80, outputTokens: 40 } },
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: string}>} */ ([]);
+    const outboundHook = {
+      deliver: async (threadId, content, catId) => {
+        deliverCalls.push({ threadId, content, catId });
+      },
+      getConnectorIds: async (_threadId) => ['feishu'],
+    };
+
+    const trigger = createTrigger({ router: multiCatRouter, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Hello', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 2, 'Non-WeChat should deliver per-turn');
+    assert.strictEqual(deliverCalls[0].catId, 'opus');
+    assert.strictEqual(deliverCalls[0].content, 'Hello from opus!');
+    assert.strictEqual(deliverCalls[1].catId, 'codex');
+    assert.strictEqual(deliverCalls[1].content, 'Hello from codex!');
+  });
+
   it('single-cat outbound delivery still works with per-cat logic', async () => {
     const deliverCalls = /** @type {Array<{threadId: string, content: string, catId: string}>} */ ([]);
     const outboundHook = {
