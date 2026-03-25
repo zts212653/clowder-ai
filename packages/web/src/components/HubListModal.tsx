@@ -59,6 +59,15 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
     }
   }, [open, fetchHubThreads]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const handleNavigate = (threadId: string) => {

@@ -12,6 +12,8 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'danger' | 'default';
+  /** When true, clicking the backdrop does not close the dialog */
+  disableBackdropClose?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -25,6 +27,7 @@ export function ConfirmDialog({
   confirmLabel = '确认',
   cancelLabel = '取消',
   variant = 'default',
+  disableBackdropClose = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -53,8 +56,14 @@ export function ConfirmDialog({
   const isDanger = variant === 'danger';
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
+    <div
+      className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+      onClick={disableBackdropClose ? undefined : onCancel}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4"
+        onClick={disableBackdropClose ? undefined : (e) => e.stopPropagation()}
+      >
         <h3 className="text-base font-semibold mb-2">{title}</h3>
         <p className="text-sm text-gray-600 mb-4 whitespace-pre-wrap">{message}</p>
         {requireInput && (
