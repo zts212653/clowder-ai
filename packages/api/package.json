@@ -42,7 +42,6 @@
     "nodemailer": "^6.9.16",
     "pino-roll": "^4.0.0",
     "puppeteer": "^24.37.2",
-    "qrcode": "^1.5.4",
     "rss-parser": "^3.13.0",
     "sharp": "^0.34.5",
     "smol-toml": "^1.6.0",

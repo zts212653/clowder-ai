@@ -114,7 +114,7 @@ export class OutboundDeliveryHook {
     const entry = catId ? catRegistry.tryGet(catId) : undefined;
     const catDisplayName = entry?.config.displayName ?? '';
     const catEmoji = '🐱';
-    const textPrefix = catDisplayName ? `【${catDisplayName}🐱】\n` : '';
+    const textPrefix = catDisplayName ? `[${catDisplayName}🐱] ` : '';
     const finalContent = `${textPrefix}${content}`;
 
     const hasRichBlocks = richBlocks && richBlocks.length > 0;

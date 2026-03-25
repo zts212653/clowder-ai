@@ -671,24 +671,6 @@ created: 2026-02-26
 
 ---
 
-### LL-036: full sync 长跑不能在 Step 5 半路报喜——必须等脚本给出成功/失败结果
-
-- 状态：validated
-- 更新时间：2026-03-24
-- 坑：`sync-to-opensource.sh` 进入 temp target public gate 后，Maine Coon多次在 `Biome check...` 或 `Smoke test (test:public)...` 阶段就回消息，误把“脚本还在跑 / 会话还活着”当成阶段完成。结果一旦执行停下，外部看到的是“同步到了 Step 5”，但真实 target 还没被碰到，PR/CI 也根本没开始。
-- 根因：(1) 把长静默门禁误当成 checkpoint；(2) 只观察到了会话状态，没有等到脚本退出码和终态输出；(3) `opensource-ops` / outbound sync 文档之前写了 temp target public gate 必须全绿，但没把“执行中的猫不得在 Step 5 半路退出”写成硬约束。
-- 触发条件：release-intended full sync / full sync 进入 temp target public gate，尤其卡在 `pnpm check`、`pnpm lint`、`build`、`test:public`、startup acceptance 这类长静默步骤时。
-- 修复：
-  - `cat-cafe-skills/opensource-ops/SKILL.md` 增加关键原则：full sync 是长跑门禁，不是中途 checkpoint
-  - `cat-cafe-skills/refs/opensource-ops-outbound-sync.md` 增加执行纪律：Step 5 只允许以 `✓ Source-owned public gate passed` 或明确红灯失败作为退出条件
-- 防护：
-  - release / full sync 期间，只要脚本还没打印 `=== Sync complete ===` 或失败红灯，就继续守在执行链上
-  - 禁止在 `Biome check...` / `Smoke test (test:public)...` / `Startup acceptance...` 这些中间状态汇报“已经到下一步”
-  - 对外状态必须基于终态：`sync completed`、`PR opened`、`CI running`、`sync failed`
-- 原理：Step 5 是 source-owned public gate 的单个阻塞门禁。它的业务含义不是“看起来跑到了哪一行日志”，而是“真实 target 是否被允许触碰”。在脚本没打印 `✓ Source-owned public gate passed` 之前，这个答案始终是否定的。
-
----
-
 ## 8) 维护约定
 
 - 本文件是入口，不替代 ADR/bug-report 原文。

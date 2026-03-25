@@ -160,10 +160,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#3296FA', secondary: '#E8F4FE' },
     description: '钉钉企业内部应用',
     tailwindTheme: {
-      avatar: 'bg-cyan-100 ring-2 ring-cyan-200',
-      label: 'text-cyan-700',
-      labelLink: 'text-cyan-700 hover:text-cyan-900',
-      bubble: 'border border-cyan-200 bg-cyan-50',
+      avatar: 'bg-blue-100 ring-2 ring-blue-200',
+      label: 'text-blue-700',
+      labelLink: 'text-blue-700 hover:text-blue-900',
+      bubble: 'border border-blue-200 bg-blue-50',
     },
   },
   {

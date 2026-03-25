@@ -439,11 +439,8 @@ export async function startConnectorGateway(
     const dingtalk = new DingTalkAdapter(log, {
       appKey: config.dingtalkAppKey!,
       appSecret: config.dingtalkAppSecret!,
-      redis: deps.redis,
     });
     adapters.set('dingtalk', dingtalk);
-
-    await dingtalk.hydrateGroupChatIds();
 
     mediaService.setDingtalkDownloadFn(async (downloadCode: string) => {
       const downloadUrl = await dingtalk.downloadMedia(downloadCode);
@@ -459,31 +456,7 @@ export async function startConnectorGateway(
         ...(a.fileName ? { fileName: a.fileName } : {}),
         ...(a.duration != null ? { duration: a.duration } : {}),
       }));
-
-      // F132 A.2: Register group chatId so outbound dispatch survives cold restarts
-      if (msg.chatType === 'group') {
-        dingtalk.registerGroupChatId(msg.chatId);
-      }
-
-      // F132 A.2: Enrich sender and chat info (mirroring F134 Feishu pattern)
-      const senderName = msg.senderNick ?? dingtalk.resolveSenderName(msg.senderId);
-      const chatName = msg.conversationTitle ?? dingtalk.resolveConversationTitle(msg.chatId);
-
-      const sender =
-        msg.chatType === 'group' && msg.senderId !== 'unknown'
-          ? { id: msg.senderId, ...(senderName ? { name: senderName } : {}) }
-          : undefined;
-
-      await connectorRouter.route(
-        'dingtalk',
-        msg.chatId,
-        msg.text,
-        msg.messageId,
-        attachments,
-        sender,
-        msg.chatType,
-        chatName,
-      );
+      await connectorRouter.route('dingtalk', msg.chatId, msg.text, msg.messageId, attachments);
     });
 
     stopFns.push(async () => dingtalk.stopStream());

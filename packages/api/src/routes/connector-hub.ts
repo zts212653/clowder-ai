@@ -197,11 +197,7 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     try {
       const { WeixinAdapter: WA } = await import('../infrastructure/connectors/adapters/WeixinAdapter.js');
       const result = await WA.fetchQrCode();
-      // iLink returns a webpage URL (https://liteapp.weixin.qq.com/q/...), not an image.
-      // Generate a real QR code data URI from the URL so <img> can render it.
-      const QRCode = await import('qrcode');
-      const qrDataUri = await QRCode.toDataURL(result.qrUrl, { width: 384, margin: 2 });
-      return { qrUrl: qrDataUri, qrPayload: result.qrPayload };
+      return { qrUrl: result.qrUrl, qrPayload: result.qrPayload };
     } catch (err) {
       app.log.error({ err }, '[WeChat QR] Failed to fetch QR code');
       reply.status(502);

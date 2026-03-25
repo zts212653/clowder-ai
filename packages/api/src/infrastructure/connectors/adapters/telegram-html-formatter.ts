@@ -36,7 +36,7 @@ function blockToHtml(block: RichBlock): string {
 }
 
 export function formatTelegramHtml(blocks: RichBlock[], catDisplayName: string, textContent?: string): string {
-  const header = `<b>【${esc(catDisplayName)}🐱】</b>`;
+  const header = `<b>[${esc(catDisplayName)}🐱]</b>`;
   const parts = [header];
   if (textContent) {
     parts.push(esc(textContent));
