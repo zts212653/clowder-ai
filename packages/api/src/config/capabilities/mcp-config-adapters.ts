@@ -190,7 +190,11 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
   // Update/add managed entries; remove disabled managed; preserve user's own
   for (const s of servers) {
     // Skip URL-based servers — Gemini only supports stdio transport.
-    if (s.transport === 'streamableHttp') continue;
+    // Delete any stale managed entry so Gemini doesn't load old stdio config.
+    if (s.transport === 'streamableHttp') {
+      delete existingMcp[s.name];
+      continue;
+    }
     if (shouldSkipGeminiProjectServer(s.name)) {
       delete existingMcp[s.name];
       continue;

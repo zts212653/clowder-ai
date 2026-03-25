@@ -141,17 +141,19 @@ export async function discoverExternalMcpServers(paths: DiscoveryPaths): Promise
     readGeminiMcpConfig(paths.geminiConfig),
   ]);
 
-  const seen = new Set<string>();
-  const result: McpServerDescriptor[] = [];
+  const byName = new Map<string, McpServerDescriptor>();
 
   for (const server of [...claude, ...codex, ...gemini]) {
     if (!hasUsableTransport(server)) continue;
-    if (!seen.has(server.name)) {
-      seen.add(server.name);
-      result.push({ ...server, source: 'external' });
+    const existing = byName.get(server.name);
+    if (!existing) {
+      byName.set(server.name, { ...server, source: 'external' });
+    } else if (existing.transport === 'streamableHttp' && server.transport !== 'streamableHttp') {
+      // Prefer stdio over streamableHttp — stdio is universally supported by all CLIs.
+      byName.set(server.name, { ...server, source: 'external' });
     }
   }
-  return result;
+  return [...byName.values()];
 }
 
 /**
