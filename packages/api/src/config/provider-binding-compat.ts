@@ -10,6 +10,7 @@ export function resolveBuiltinClientForProvider(provider: CatProvider): BuiltinA
     case 'anthropic':
       return 'anthropic';
     case 'openai':
+    case 'relayclaw':
       return 'openai';
     case 'google':
       return 'google';
@@ -56,6 +57,15 @@ export function validateRuntimeProviderBinding(
   profile: RuntimeProviderProfile,
   defaultModel?: string | null,
 ): string | null {
+  if (provider === 'relayclaw') {
+    if (profile.authType !== 'api_key') {
+      return 'client "jiuwenClaw" requires an API key provider profile';
+    }
+    if (profile.protocol !== 'openai') {
+      return 'client "jiuwenClaw" currently only supports openai-compatible API key profiles';
+    }
+  }
+
   // Gemini CLI currently only supports builtin Google auth in our runtime.
   // API-key profiles (especially third-party endpoints) are intentionally blocked
   // for provider="google" to enforce the hard constraint at server side.

@@ -14,11 +14,13 @@ function humanizeProvider(provider: string) {
   if (provider === 'google') return 'Gemini';
   if (provider === 'dare') return 'Dare';
   if (provider === 'opencode') return 'OpenCode';
+  if (provider === 'relayclaw') return 'jiuwenClaw';
   if (provider === 'antigravity') return 'Antigravity';
   return provider;
 }
 
 function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
+  if (cat.provider === 'relayclaw') return 'jiuwenClaw';
   const accountRef = (cat.accountRef ?? cat.providerProfileId ?? '').toLowerCase();
   if (accountRef.includes('claude')) return 'Claude';
   if (accountRef.includes('codex')) return 'Codex';

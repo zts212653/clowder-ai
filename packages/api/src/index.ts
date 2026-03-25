@@ -96,6 +96,8 @@ import {
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { gameRoutes } from './routes/games.js';
+import { resolveActiveProjectRoot } from './utils/active-project-root.js';
+import { resolveJiuwenClawAppDir, resolveJiuwenClawPythonBin } from './utils/jiuwenclaw-paths.js';
 import {
   auditRoutes,
   authorizationRoutes,
@@ -590,6 +592,25 @@ async function main(): Promise<void> {
             continue;
           }
           service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+          break;
+        }
+        case 'relayclaw': {
+          const { RelayClawAgentService } = await import('./domains/cats/services/agents/providers/RelayClawAgentService.js');
+          const wsEnvKey = `CAT_${id.toUpperCase()}_WS_URL`;
+          const wsUrl = process.env[wsEnvKey]?.trim() ?? '';
+          const projectRoot = resolveActiveProjectRoot(process.cwd());
+          const appDir = resolveJiuwenClawAppDir();
+          const pythonBin = resolveJiuwenClawPythonBin(undefined, appDir);
+          service = new RelayClawAgentService({
+            catId,
+            config: {
+              ...(wsUrl ? { url: wsUrl, autoStart: false } : { autoStart: true }),
+              appDir,
+              pythonBin,
+              homeDir: join(projectRoot, '.cat-cafe', 'relayclaw', id),
+              modelName: config.defaultModel,
+            },
+          });
           break;
         }
         default:

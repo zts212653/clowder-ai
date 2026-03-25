@@ -6,8 +6,9 @@
  */
 
 import { execFile } from 'node:child_process';
+import { jiuwenClawBundleAvailable } from './jiuwenclaw-paths.js';
 
-type ClientId = 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode' | 'antigravity';
+type ClientId = 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode' | 'antigravity' | 'relayclaw';
 
 interface ClientInfo {
   id: ClientId;
@@ -22,6 +23,7 @@ const CLIENT_COMMAND_MAP: ClientInfo[] = [
   { id: 'dare', label: 'Dare', command: 'dare' },
   { id: 'opencode', label: 'OpenCode', command: 'opencode' },
   { id: 'antigravity', label: 'Antigravity', command: 'antigravity' },
+  { id: 'relayclaw', label: 'jiuwenClaw', command: 'jiuwenclaw-app' },
 ];
 
 export interface AvailableClient {
@@ -41,15 +43,22 @@ function commandExists(command: string): Promise<boolean> {
   });
 }
 
+function relayClawSidecarAvailable(): boolean {
+  return jiuwenClawBundleAvailable();
+}
+
 /** Detect all clients and cache the result. */
 export async function detectAvailableClients(): Promise<AvailableClient[]> {
   const results = await Promise.all(
-    CLIENT_COMMAND_MAP.map(async (info) => ({
-      id: info.id,
-      label: info.label,
-      command: info.command,
-      available: await commandExists(info.command),
-    })),
+    CLIENT_COMMAND_MAP.map(async (info) => {
+      const available = info.id === 'relayclaw' ? relayClawSidecarAvailable() : await commandExists(info.command);
+      return {
+        id: info.id,
+        label: info.label,
+        command: info.command,
+        available,
+      };
+    }),
   );
   cachedClients = results;
   return results;

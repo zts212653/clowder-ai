@@ -1,0 +1,263 @@
+# 前端显示语言：zh（中文）/ en（英文），与 Web 界面语言切换同步
+preferred_language: zh
+
+models:
+  default:
+      model_client_config:
+        api_base: ${API_BASE}
+        api_key: ${API_KEY}
+        model_name: ${MODEL_NAME:-xiaomi/mimo-v2-omni}
+        client_provider: ${MODEL_PROVIDER}
+        timeout: 1800
+        verify_ssl: false
+      model_config_obj:
+        temperature: 0.95
+  video:
+      model_client_config:
+        api_base: ${VIDEO_API_BASE}
+        api_key: ${VIDEO_API_KEY}
+        model_name: ${VIDEO_MODEL_NAME:-xiaomi/mimo-v2-omni}
+        client_provider: ${VIDEO_PROVIDER}
+        timeout: 1800
+        verify_ssl: false
+      model_config_obj:
+        temperature: 0.95
+  audio:
+      model_client_config:
+        api_base: ${AUDIO_API_BASE}
+        api_key: ${AUDIO_API_KEY}
+        model_name: ${AUDIO_MODEL_NAME:-openai/gpt-4o-audio-preview}
+        client_provider: ${AUDIO_PROVIDER}
+        verify_ssl: false
+        timeout: 1800
+      model_config_obj:
+        temperature: 0.95
+  vision:
+      model_client_config:
+        api_base: ${VISION_API_BASE}
+        api_key: ${VISION_API_KEY}
+        model_name: ${VISION_MODEL_NAME:-bytedance-seed/seed-2.0-mini}
+        client_provider: ${VISION_PROVIDER}
+        verify_ssl: false
+        timeout: 1800
+      model_config_obj:
+        temperature: 0.95
+
+react:
+  agent_name: main_agent
+  max_iterations: 100
+  model_name: ${MODEL_NAME:-deepseek-chat}
+  answer_chunk_size: 500
+  stream_chunk_threshold: 50
+  stream_character_threshold: 2000
+  context_engine_config:
+    enable_reload: true
+    enabled: true
+    message_offloader_config:
+      messages_threshold: 40
+      tokens_threshold: 20000
+      large_message_threshold: 1000
+      trim_size: 500
+      offload_message_type: [ "tool" ]
+      keep_last_round: false
+    dialogue_compressor_config:
+      messages_threshold: 40
+      tokens_threshold: 50000
+      keep_last_round: false
+  # Skills 在线自演进配置
+  evolution:
+    enabled: true             # true = 启用在线 Skills 自演进
+    auto_scan: false           # true = 每轮对话后自动扫描（建议先用手动 /evolve）
+    skill_base_dir: "agent/skills"  # Skill 根目录
+
+tools:
+  - todo
+  - skill
+
+email_settings:
+  email_address: ${EMAIL_ADDRESS}
+  token: ${EMAIL_TOKEN}
+  smtp_server: ${SMTP_SERVER:-smtp.gmail.com}
+  port: ${EMAIL_PORT:-587}
+
+embed:
+  embed_api_key: ${EMBED_API_KEY}
+  embed_base_url: ${EMBED_API_BASE}
+  embed_model: ${EMBED_MODEL}
+
+heartbeat:
+  # 心跳间隔（秒），默认 60
+  every: 3600
+  # 心跳结果回传的 channel（如 "web"），
+  target: web
+  # 心跳生效时间段（本地时间），start <= now < end 时心跳生效
+  active_hours:
+    start: 08:00
+    end: 22:00
+
+channels:
+  feishu:
+    # 飞书应用配置
+    app_id:
+    app_secret:
+    encrypt_key:
+    verification_token:
+    allow_from:
+    enable_streaming: false
+    enabled: false
+  xiaoyi:
+    # 华为小艺 A2A 配置
+    mode: xiaoyi_channel
+    ak:
+    sk:
+    api_id:
+    push_id:
+    agent_id:
+    ws_url1: wss://hag.cloud.huawei.com/openclaw/v1/ws/link
+    ws_url2: wss://116.63.174.231/openclaw/v1/ws/link
+    enable_streaming: true
+    enabled: false
+    # xiaoyi_claw配置
+    uid:
+    api_key:
+    push_url:
+    file_upload_url:
+  dingtalk:
+    # 钉钉应用配置
+    client_id:
+    client_secret:
+    allow_from: []
+    enabled: false
+  telegram:
+    # Telegram Bot 配置
+    # 从 @BotFather 获取 bot_token
+    bot_token:
+    # 用户白名单（Telegram user_id），为空则允许所有用户
+    allow_from: []
+    # 消息解析模式: Markdown, HTML, None
+    parse_mode: Markdown
+    # 群聊模式: mention(仅响应@提及), reply(仅响应回复), all(响应所有), off(禁用群聊)
+    group_chat_mode: mention
+    enabled: false
+  discord:
+    # Discord Bot 配置（当前版本仅支持参数管理）
+    # Bot Token（Discord Developer Portal -> Bot）
+    bot_token:
+    # Application ID（Discord Developer Portal -> General Information）
+    application_id:
+    # 目标服务器 ID（Guild ID）
+    guild_id:
+    # 目标频道 ID（Channel ID）
+    channel_id:
+    # 用户白名单（Discord user_id），为空则允许所有用户
+    allow_from: []
+    enabled: false
+  whatsapp:
+    # WhatsApp 配置（通过本地 Baileys bridge）
+    bridge_ws_url: ws://127.0.0.1:19600/ws
+    default_jid:
+    allow_from: []
+    enable_streaming: true
+    auto_start_bridge: false
+    bridge_command: node scripts/whatsapp-bridge.js
+    bridge_workdir:
+    enabled: false
+  wecom:
+    # 企业微信 AI 机器人配置
+    bot_id:
+    secret:
+    ws_url: wss://openws.work.weixin.qq.com
+    allow_from: []
+    enable_streaming: true
+    send_thinking_message: false
+    enabled: false
+
+# ========== 细粒度权限管控 ==========
+#
+# 三种权限动作:
+#   allow  - 直接执行，无需确认
+#   ask    - 弹出确认框，用户决定
+#   deny   - 拒绝执行，返回错误
+#
+# 优先级规则:
+#   deny 绝对否决: 任何匹配到的 deny 规则都不会被覆盖
+#   来源优先级 (用于 ask/allow 之间的决断):
+#     1. tools.<tool>.patterns[i]         工具级模式规则
+#     2. tools.<tool>.*                   工具级默认
+#     3. defaults.*                       全局默认
+#   同一工具的 patterns 内部: deny > ask > allow (最严格者胜出)
+permissions:
+  enabled: false
+
+  # 全局默认: 未匹配任何规则时的行为
+  defaults:
+    "*": "allow"
+
+  # 按具体工具名设置权限 (支持 patterns 子规则)
+  tools:
+    mcp_exec_command:
+      "*": "ask"           # 命令默认需确认
+      patterns:
+        "git status *": "allow"
+        "git log *": "allow"
+        "git diff *": "allow"
+        "git branch *": "allow"
+        "ls *": "allow"
+        "dir *": "allow"
+        "pwd *": "allow"
+        "cd *": "allow"
+        "echo *": "allow"
+        "cat *": "allow"
+        "type *": "allow"
+        "head *": "allow"
+        "tail *": "allow"
+        "rm *": "deny"
+        "del *": "deny"
+        "rd *": "deny"
+        "format *": "deny"
+        "shutdown *": "deny"
+        "reboot *": "deny"
+        "mkfs *": "deny"
+        "diskpart *": "deny"
+        "sudo *": "deny"
+    write_memory: "allow"
+    edit_memory: "allow"
+    read_memory: "allow"
+    memory_search: "allow"
+    memory_get: "allow"
+    mcp_free_search: "allow"
+    mcp_paid_search: "allow"
+    mcp_fetch_webpage: "allow"
+    cron_list_jobs: "allow"
+    cron_get_job: "allow"
+    cron_create_job: "allow"
+    cron_update_job: "allow"
+    cron_delete_job: "allow"
+    cron_toggle_job: "allow"
+    cron_preview_job: "allow"
+
+  # 外部目录访问 (访问 workspace 外路径时的权限)
+  external_directory:
+    "*": "ask"   # deny | ask | allow
+
+browser:
+  # chrome_path can be a string or per-OS map.
+  # Example:
+  # chrome_path:
+  #   windows: "C:\\Users\\YOUR_USER\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"
+  #   macos: "/Applications/Google Chrome.app"
+  #   linux: "/usr/bin/google-chrome"
+  remote_debugging_address: "127.0.0.1"
+  remote_debugging_port: 9222
+  # empty means use launcher default profile path by OS
+  user_data_dir: ""
+  profile_directory: "Default"
+
+updater:
+  enabled: true
+  repo_owner: CharlieZhao95
+  repo_name: jiuwenclaw
+  release_api_url: ""
+  asset_name_pattern: "jiuwenclaw-setup-{version}.exe"
+  sha256_name_pattern: "jiuwenclaw-setup-{version}.exe.sha256"
+  timeout_seconds: 20

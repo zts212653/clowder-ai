@@ -640,6 +640,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       anthropic: 'anthropic',
       opencode: 'anthropic',
       openai: 'openai',
+      relayclaw: 'openai',
       google: 'google',
       dare: 'openai',
     };

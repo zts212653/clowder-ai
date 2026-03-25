@@ -5,6 +5,7 @@ export function protocolForClient(client: ClientValue): 'anthropic' | 'openai' |
     case 'anthropic':
       return 'anthropic';
     case 'openai':
+    case 'relayclaw':
       return 'openai';
     case 'google':
       return 'google';

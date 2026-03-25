@@ -82,6 +82,13 @@
       "lead": true,
       "available": true,
       "evaluation": "开源多模型编码猫，自带 Oh My OpenCode 多专家编排 + LSP (F105)"
+    },
+    "jiuwenclaw": {
+      "family": "jiuwenclaw",
+      "roles": ["assistant", "office"],
+      "lead": false,
+      "available": false,
+      "evaluation": "通用 office 助理，适合文档整理、信息汇总、日程和事务协助；绑定 OpenAI-compatible API key 后可启用"
     }
   },
   "reviewPolicy": {
@@ -623,6 +630,46 @@
             "refText": "你的本事不错，对丘丘…咳…邪魔从不手软，我们结伴而行如何。",
             "instruct": "用一个正直可靠的少年语气说话，话不多但每句都认真",
             "temperature": 0.3
+          }
+        }
+      ]
+    },
+    {
+      "id": "jiuwenclaw",
+      "catId": "jiuwenclaw",
+      "name": "办公助理",
+      "displayName": "办公助理",
+      "nickname": "小九",
+      "avatar": "/avatars/jiuwenclaw.png",
+      "color": {
+        "primary": "#D97A3A",
+        "secondary": "#F6E7DA"
+      },
+      "mentionPatterns": ["@jiuwenclaw", "@jiuwenClaw", "@jiuwen", "@办公助理", "@office", "@小九"],
+      "roleDescription": "通用 office 助理，负责文档整理、会议纪要、资料汇总、事项跟进和日常事务协助",
+      "teamStrengths": "文档整理、会议纪要、信息汇总、事务推进、流程协助",
+      "caution": "默认仅固定展示；真正启用仍需绑定 OpenAI-compatible API key profile",
+      "defaultVariantId": "jiuwenclaw-default",
+      "features": {
+        "sessionChain": false
+      },
+      "variants": [
+        {
+          "id": "jiuwenclaw-default",
+          "provider": "relayclaw",
+          "defaultModel": "gpt-5.4",
+          "mcpSupport": true,
+          "cli": {
+            "command": "jiuwenclaw-app",
+            "outputFormat": "json"
+          },
+          "personality": "耐心细致、沟通清楚，优先帮助用户把办公事务梳理清楚并推进落地",
+          "strengths": ["office-assistant", "documentation", "summarization", "coordination"],
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 10000
           }
         }
       ]

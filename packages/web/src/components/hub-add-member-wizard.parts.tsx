@@ -3,7 +3,7 @@
 import { CLIENT_OPTIONS, type ClientValue } from './hub-cat-editor.model';
 
 export const CLIENT_ROW_1: ClientValue[] = ['anthropic', 'openai', 'google'];
-export const CLIENT_ROW_2: ClientValue[] = ['opencode', 'dare', 'antigravity'];
+export const CLIENT_ROW_2: ClientValue[] = ['opencode', 'dare', 'relayclaw', 'antigravity'];
 export const FALLBACK_ANTIGRAVITY_ARGS = '. --remote-debugging-port=9000';
 export const FALLBACK_ANTIGRAVITY_MODELS = ['gemini-3.1-pro', 'claude-opus-4-6'] as const;
 

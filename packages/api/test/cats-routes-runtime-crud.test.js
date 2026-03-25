@@ -718,6 +718,75 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(createBody.error, /only supports builtin Gemini auth/i);
   });
 
+  it('POST /api/cats allows jiuwenClaw with openai-compatible api_key profiles and rejects oauth bindings', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const openaiProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Codex Sponsor',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.codex-sponsor.example',
+      apiKey: 'sk-codex-sponsor',
+      models: ['gpt-5.4'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const okRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-jiuwenclaw',
+        name: '九问爪猫',
+        displayName: '九问爪猫',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@runtime-jiuwenclaw'],
+        roleDescription: '审查',
+        client: 'relayclaw',
+        providerProfileId: openaiProfile.id,
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(okRes.statusCode, 201);
+    assert.equal(JSON.parse(okRes.body).cat.provider, 'relayclaw');
+
+    const rejectRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-jiuwenclaw-oauth',
+        name: '九问爪猫 OAuth',
+        displayName: '九问爪猫 OAuth',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@runtime-jiuwenclaw-oauth'],
+        roleDescription: '审查',
+        client: 'relayclaw',
+        providerProfileId: 'codex',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(rejectRes.statusCode, 400);
+    assert.match(JSON.parse(rejectRes.body).error, /client "jiuwenClaw" requires an API key provider profile/i);
+  });
+
   it('PATCH /api/cats/:id rejects models that are not available on the bound provider profile', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

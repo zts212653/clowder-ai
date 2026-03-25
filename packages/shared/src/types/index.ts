@@ -287,6 +287,13 @@ export type {
   ResolutionItem,
   ResolutionStatus,
 } from './resolution.js';
+// RelayClaw types (relay-claw WebSocket agent bridge)
+export type {
+  RelayClawAgentConfig,
+  RelayClawChunkPayload,
+  RelayClawEventType,
+  RelayClawWsFrame,
+} from './relayclaw.js';
 // Rich block types (F22 Rich Blocks 富消息系统)
 export type {
   InteractiveOption,

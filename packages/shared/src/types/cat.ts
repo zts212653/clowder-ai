@@ -10,7 +10,7 @@ import { createCatId } from './ids.js';
 /**
  * AI provider behind a cat
  */
-export type CatProvider = 'anthropic' | 'openai' | 'google' | 'dare' | 'antigravity' | 'opencode' | 'a2a';
+export type CatProvider = 'anthropic' | 'openai' | 'google' | 'dare' | 'antigravity' | 'opencode' | 'a2a' | 'relayclaw';
 
 /**
  * Cat status in the system
@@ -135,6 +135,24 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
     breedId: 'siamese',
     roleDescription: '视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达',
     personality: '活泼有创意，善于用视觉语言表达想法，喜欢尝试新事物',
+  },
+  jiuwenclaw: {
+    id: createCatId('jiuwenclaw'),
+    name: '办公助理',
+    displayName: '办公助理',
+    nickname: '小九',
+    avatar: '/avatars/jiuwenclaw.png',
+    color: {
+      primary: '#D97A3A',
+      secondary: '#F6E7DA',
+    },
+    mentionPatterns: ['@jiuwenclaw', '@jiuwenClaw', '@jiuwen', '@办公助理', '@office', '@小九'],
+    provider: 'relayclaw',
+    defaultModel: 'gpt-5.4',
+    mcpSupport: true,
+    breedId: 'jiuwenclaw',
+    roleDescription: '通用 office 助理，负责文档整理、会议纪要、资料汇总、事项跟进和日常事务协助',
+    personality: '耐心细致、沟通清楚，优先帮助用户把办公事务梳理清楚并推进落地',
   },
 } as const;
 

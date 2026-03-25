@@ -6,6 +6,8 @@ import { apiFetch } from '@/utils/api-client';
 import {
   ChoiceButton,
   clientLabel,
+  CLIENT_ROW_1,
+  CLIENT_ROW_2,
   FALLBACK_ANTIGRAVITY_ARGS,
   FALLBACK_ANTIGRAVITY_MODELS,
   PillChoiceButton,
@@ -28,11 +30,11 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   const { clients: detectedClients, loading: loadingClients } = useAvailableClients();
   const clientIds = useMemo(() => new Set(detectedClients.map((c) => c.id)), [detectedClients]);
   const clientRow1 = useMemo(
-    () => (['anthropic', 'openai', 'google'] as ClientValue[]).filter((id) => clientIds.has(id)),
+    () => CLIENT_ROW_1.filter((id) => clientIds.has(id)),
     [clientIds],
   );
   const clientRow2 = useMemo(
-    () => (['opencode', 'dare', 'antigravity'] as ClientValue[]).filter((id) => clientIds.has(id)),
+    () => CLIENT_ROW_2.filter((id) => clientIds.has(id)),
     [clientIds],
   );
 

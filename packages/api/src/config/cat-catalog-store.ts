@@ -332,6 +332,70 @@ function filterBootstrapCatalog(template: CatCafeConfig, projectRoot: string): C
   };
 }
 
+function reconcileCatalogWithSourceCatalog(
+  existingCatalog: CatCafeConfig,
+  sourceCatalog: CatCafeConfig,
+): { catalog: CatCafeConfig; dirty: boolean } {
+  const nextCatalog = structuredClone(existingCatalog) as CatCafeConfig & { roster?: Roster };
+  let dirty = false;
+
+  const existingBreeds = nextCatalog.breeds as unknown as Array<Record<string, unknown>>;
+  const existingBreedById = new Map(
+    existingBreeds
+      .filter((breed) => typeof breed.id === 'string' && breed.id.length > 0)
+      .map((breed) => [breed.id as string, breed]),
+  );
+
+  for (const sourceBreed of sourceCatalog.breeds as unknown as Array<Record<string, unknown>>) {
+    const sourceBreedId = typeof sourceBreed.id === 'string' ? sourceBreed.id : null;
+    if (!sourceBreedId) continue;
+    const existingBreed = existingBreedById.get(sourceBreedId);
+    if (!existingBreed) {
+      existingBreeds.push(structuredClone(sourceBreed));
+      dirty = true;
+      continue;
+    }
+
+    const existingVariants = Array.isArray(existingBreed.variants)
+      ? (existingBreed.variants as Array<Record<string, unknown>>)
+      : [];
+    const existingVariantIds = new Set(
+      existingVariants
+        .map((variant) => (typeof variant.id === 'string' ? variant.id : null))
+        .filter((id): id is string => id !== null),
+    );
+    const sourceVariants = Array.isArray(sourceBreed.variants)
+      ? (sourceBreed.variants as Array<Record<string, unknown>>)
+      : [];
+    for (const sourceVariant of sourceVariants) {
+      const sourceVariantId = typeof sourceVariant.id === 'string' ? sourceVariant.id : null;
+      if (!sourceVariantId || existingVariantIds.has(sourceVariantId)) continue;
+      existingVariants.push(structuredClone(sourceVariant));
+      existingVariantIds.add(sourceVariantId);
+      dirty = true;
+    }
+    if (existingVariants.length > 0) {
+      existingBreed.variants = existingVariants;
+    }
+  }
+
+  if ('roster' in sourceCatalog) {
+    const nextRoster = { ...(('roster' in nextCatalog ? nextCatalog.roster : {}) ?? {}) } as Roster;
+    for (const [catId, rosterEntry] of Object.entries(sourceCatalog.roster ?? {})) {
+      if (nextRoster[catId]) continue;
+      nextRoster[catId] = structuredClone(rosterEntry);
+      dirty = true;
+    }
+    if ('roster' in nextCatalog) {
+      nextCatalog.roster = nextRoster;
+    } else {
+      nextCatalog.roster = nextRoster;
+    }
+  }
+
+  return { catalog: nextCatalog as CatCafeConfig, dirty };
+}
+
 export function resolveCatCatalogPath(projectRoot: string): string {
   return safePath(projectRoot, CAT_CAFE_DIR, CAT_CATALOG_FILENAME);
 }
@@ -363,6 +427,17 @@ export function readCatCatalog(projectRoot: string): CatCafeConfig | null {
 export function bootstrapCatCatalog(projectRoot: string, templatePath: string): string {
   const catalogPath = resolveCatCatalogPath(projectRoot);
   if (existsSync(catalogPath)) {
+    const sourcePath = existsSync(resolve(projectRoot, 'cat-config.json')) ? resolve(projectRoot, 'cat-config.json') : templatePath;
+    try {
+      const existingCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8')) as CatCafeConfig;
+      const sourceCatalog = JSON.parse(readFileSync(sourcePath, 'utf-8')) as CatCafeConfig;
+      const reconciled = reconcileCatalogWithSourceCatalog(existingCatalog, sourceCatalog);
+      if (reconciled.dirty) {
+        writeFileAtomic(catalogPath, `${JSON.stringify(reconciled.catalog, null, 2)}\n`);
+      }
+    } catch {
+      // Fall back to raw migration-only path when catalog or source cannot be parsed.
+    }
     readCatCatalogRaw(projectRoot);
     return catalogPath;
   }

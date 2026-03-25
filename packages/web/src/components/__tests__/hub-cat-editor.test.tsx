@@ -33,6 +33,7 @@ const ALL_CLIENTS_RESPONSE = {
     { id: 'google', label: 'Gemini', command: 'gemini', available: true },
     { id: 'dare', label: 'Dare', command: 'dare', available: true },
     { id: 'opencode', label: 'OpenCode', command: 'opencode', available: true },
+    { id: 'relayclaw', label: 'jiuwenClaw', command: 'jiuwenclaw-app', available: true },
     { id: 'antigravity', label: 'Antigravity', command: 'antigravity', available: true },
   ],
 };
@@ -624,6 +625,7 @@ describe('HubCatEditor', () => {
       'claude-sponsor',
       'codex-sponsor',
     ]);
+    expect(filterProfiles('relayclaw', profiles).map((profile) => profile.id)).toEqual(['codex-sponsor']);
   });
 
   it('preserves existing model when it is not listed in provider defaults', async () => {

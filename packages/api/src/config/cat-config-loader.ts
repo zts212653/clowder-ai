@@ -63,7 +63,7 @@ const catVariantSchema = z.object({
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
   providerProfileId: z.string().min(1).optional(), // Legacy migration path
-  provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a']),
+  provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a', 'relayclaw']),
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
   cli: cliConfigSchema,
