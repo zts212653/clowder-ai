@@ -12,7 +12,7 @@
  *   pnpm dev:direct          → start-entry.mjs dev:direct [--debug] [--quick] [--memory]
  */
 import { spawn } from 'node:child_process';
-import { resolve, dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,10 +26,7 @@ const [mode, ...rest] = process.argv.slice(2);
 if (IS_WINDOWS) {
   // Map Unix-style flags to PowerShell switch params
   const flagMap = { '--debug': '-Debug', '--quick': '-Quick', '--memory': '-Memory', '--dev': '-Dev' };
-  const psArgs = [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass',
-    '-File', resolve(__dirname, 'start-windows.ps1'),
-  ];
+  const psArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve(__dirname, 'start-windows.ps1')];
   // dev:direct → pass -Dev to PowerShell
   if (mode === 'dev:direct') psArgs.push('-Dev');
   for (const arg of rest) {

@@ -107,9 +107,10 @@ function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<s
       env.ANTHROPIC_DEFAULT_HAIKU_MODEL = effectiveModel;
     }
   } else if (mode === 'subscription') {
-    // Subscription mode: clear Cat-Café-injected overrides only.
-    // DO NOT null out ANTHROPIC_API_KEY / BASE_URL — the CLI reads auth from
-    // ~/.claude/settings.json (included via --setting-sources user).
+    // Subscription mode must not inherit shell-level Anthropic credentials.
+    // Claude CLI should read auth from ~/.claude/settings.json instead.
+    env.ANTHROPIC_API_KEY = null;
+    env.ANTHROPIC_BASE_URL = null;
     env.ANTHROPIC_DEFAULT_OPUS_MODEL = null;
     env.ANTHROPIC_DEFAULT_SONNET_MODEL = null;
     env.ANTHROPIC_DEFAULT_HAIKU_MODEL = null;

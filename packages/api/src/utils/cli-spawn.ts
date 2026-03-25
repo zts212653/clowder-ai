@@ -270,8 +270,7 @@ export async function* spawnCli(
     // Windows: exit code 3221226505 (0xC0000409 STATUS_STACK_BUFFER_OVERRUN) is a libuv
     // assertion crash in the MCP subprocess shutdown path. If we already received valid
     // NDJSON events, the CLI output is fine — suppress the spurious error.
-    const isWindowsLibuvCrash =
-      process.platform === 'win32' && exitCode === 3221226505 && firstEventAt !== null;
+    const isWindowsLibuvCrash = process.platform === 'win32' && exitCode === 3221226505 && firstEventAt !== null;
     if (!semanticDone && !killed && !isWindowsLibuvCrash && (exitCode !== 0 || exitSignal !== null)) {
       const reasonCode = classifyKnownCliStderr(stderrBuffer);
       // Log stderr for debugging (never expose to users — may contain thinking/traces)
