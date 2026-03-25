@@ -64,7 +64,10 @@ export async function listProviderProfilesProjectRoots(projectRoot: string): Pro
 
 function resolveGlobalRoot(): string {
   const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-  if (envRoot) return resolve(envRoot);
+  if (envRoot) {
+    const resolved = resolve(envRoot);
+    try { return realpathSync(resolved); } catch { return resolved; }
+  }
   return homedir();
 }
 
@@ -91,7 +94,8 @@ export function resolveProviderProfilesRootSync(_projectRoot: string): string {
  * - Local meta exists AND global meta exists (merge scenario — second+ project)
  */
 export function detectProjectLocalProfiles(projectRoot: string): string | null {
-  const absProject = resolve(projectRoot);
+  let absProject = resolve(projectRoot);
+  try { absProject = realpathSync(absProject); } catch { /* keep resolved */ }
   const globalRoot = resolveGlobalRoot();
   // Don't migrate when project root IS the global root
   if (absProject === globalRoot) return null;
