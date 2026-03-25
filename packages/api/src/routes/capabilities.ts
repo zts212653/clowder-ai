@@ -569,11 +569,24 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       if (!existing) {
         discoveredByName.set(server.name, server);
       } else if (existing.transport === 'streamableHttp' && server.transport !== 'streamableHttp') {
-        // Prefer stdio — universally supported across all CLIs.
-        discoveredByName.set(server.name, server);
+        // Prefer stdio — but only when the stdio entry is actually enabled,
+        // or when the existing streamableHttp entry is disabled anyway.
+        // Prevents a disabled user-level stdio from replacing an enabled project-level HTTP server.
+        if (server.enabled !== false || existing.enabled !== true) {
+          discoveredByName.set(server.name, server);
+        }
       }
     }
+    // Skip legacy Cat Cafe names — a stale 'cat-cafe' entry in user config should
+    // not be re-added alongside the split 'cat-cafe-*' built-in entries.
+    const CAT_CAFE_BUILTIN_NAMES = new Set([
+      'cat-cafe',
+      'cat-cafe-collab',
+      'cat-cafe-memory',
+      'cat-cafe-signals',
+    ]);
     for (const server of discoveredByName.values()) {
+      if (CAT_CAFE_BUILTIN_NAMES.has(server.name)) continue;
       const exists = config.capabilities.some((c) => c.type === 'mcp' && c.id === server.name);
       if (!exists) {
         config.capabilities.push(toCapabilityEntry(server));

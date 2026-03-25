@@ -149,8 +149,12 @@ export async function discoverExternalMcpServers(paths: DiscoveryPaths): Promise
     if (!existing) {
       byName.set(server.name, { ...server, source: 'external' });
     } else if (existing.transport === 'streamableHttp' && server.transport !== 'streamableHttp') {
-      // Prefer stdio over streamableHttp — stdio is universally supported by all CLIs.
-      byName.set(server.name, { ...server, source: 'external' });
+      // Prefer stdio over streamableHttp — but only when the stdio entry is actually
+      // enabled, or when the existing streamableHttp entry is disabled anyway.
+      // This prevents a disabled stdio duplicate from replacing an enabled HTTP server.
+      if (server.enabled !== false || existing.enabled !== true) {
+        byName.set(server.name, { ...server, source: 'external' });
+      }
     }
   }
   return [...byName.values()];
