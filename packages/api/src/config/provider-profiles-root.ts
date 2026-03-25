@@ -66,7 +66,11 @@ function resolveGlobalRoot(): string {
   const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   if (envRoot) {
     const resolved = resolve(envRoot);
-    try { return realpathSync(resolved); } catch { return resolved; }
+    try {
+      return realpathSync(resolved);
+    } catch {
+      return resolved;
+    }
   }
   return homedir();
 }
@@ -95,7 +99,11 @@ export function resolveProviderProfilesRootSync(_projectRoot: string): string {
  */
 export function detectProjectLocalProfiles(projectRoot: string): string | null {
   let absProject = resolve(projectRoot);
-  try { absProject = realpathSync(absProject); } catch { /* keep resolved */ }
+  try {
+    absProject = realpathSync(absProject);
+  } catch {
+    /* keep resolved */
+  }
   const globalRoot = resolveGlobalRoot();
   // Don't migrate when project root IS the global root
   if (absProject === globalRoot) return null;
