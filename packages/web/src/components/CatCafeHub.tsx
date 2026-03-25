@@ -254,6 +254,7 @@ export function CatCafeHub() {
         <HubCatEditor
           open={editorOpen}
           cat={editingCat}
+          configCat={editingCat ? config?.cats[editingCat.id] : undefined}
           draft={createDraft}
           onClose={closeEditor}
           onSaved={handleEditorSaved}

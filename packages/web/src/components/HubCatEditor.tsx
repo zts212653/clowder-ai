@@ -31,16 +31,29 @@ import { useConfirm } from './useConfirm';
 
 interface HubCatEditorProps {
   cat?: CatData | null;
+  configCat?: ConfigData['cats'][string];
   draft?: HubCatEditorDraft | null;
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }
 
-export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEditorProps) {
+function resolveEditorCat(cat?: CatData | null, configCat?: ConfigData['cats'][string]): CatData | null | undefined {
+  if (!cat) return cat;
+  if (!configCat) return cat;
+  return {
+    ...cat,
+    displayName: configCat.displayName || cat.displayName,
+    provider: configCat.provider || cat.provider,
+    defaultModel: configCat.model || cat.defaultModel,
+  };
+}
+
+export function HubCatEditor({ cat, configCat, draft, open, onClose, onSaved }: HubCatEditorProps) {
   const confirm = useConfirm();
   const { clients: detectedClients } = useAvailableClients();
   const availableClientIds = useMemo(() => new Set(detectedClients.map((c) => c.id)), [detectedClients]);
+  const resolvedCat = useMemo(() => resolveEditorCat(cat, configCat), [cat, configCat]);
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [loadingStrategy, setLoadingStrategy] = useState(false);
@@ -52,7 +65,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
-  const [form, setForm] = useState<HubCatEditorFormState>(() => initialState(cat, draft));
+  const [form, setForm] = useState<HubCatEditorFormState>(() => initialState(resolvedCat, draft));
   const [strategyForm, setStrategyForm] = useState<StrategyFormState | null>(null);
   const [strategyBaseline, setStrategyBaseline] = useState<StrategyFormState | null>(null);
   const [strategyBaselineHasOverride, setStrategyBaselineHasOverride] = useState(false);
@@ -73,7 +86,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
 
   useEffect(() => {
     if (!open) return;
-    setForm(initialState(cat, draft));
+    setForm(initialState(resolvedCat, draft));
     setFieldErrors({});
     setError(null);
     setStrategyError(null);
@@ -81,7 +94,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     setStrategyBaselineHasOverride(false);
     setCodexSettingsBaseline(null);
     setHasUnsavedChanges(false);
-  }, [open, cat, draft]);
+  }, [open, resolvedCat, draft]);
 
   useEffect(() => {
     if (!open) return;
@@ -107,7 +120,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   }, [open]);
 
   useEffect(() => {
-    if (!open || !cat) {
+    if (!open || !resolvedCat) {
       setStrategyForm(null);
       setStrategyBaseline(null);
       setStrategyBaselineHasOverride(false);
@@ -125,7 +138,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       })
       .then((body) => {
         if (cancelled) return;
-        const entry = body.cats?.find((item) => item.catId === cat.id) ?? null;
+        const entry = body.cats?.find((item) => item.catId === resolvedCat.id) ?? null;
         const nextStrategyForm = entry ? toStrategyForm(entry) : null;
         setStrategyForm(nextStrategyForm);
         setStrategyBaseline(nextStrategyForm);
@@ -140,7 +153,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     return () => {
       cancelled = true;
     };
-  }, [open, cat]);
+  }, [open, resolvedCat]);
 
   useEffect(() => {
     if (!open || !showCodexSettings) {
@@ -176,7 +189,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     return () => {
       cancelled = true;
     };
-  }, [cat, open, showCodexSettings]);
+  }, [open, resolvedCat, showCodexSettings]);
 
   useEffect(() => {
     if (form.client === 'antigravity') {
@@ -308,17 +321,17 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       }
     };
     try {
-      const catPayload = buildCatPayload(form, cat);
-      const rollbackCatPayload = cat ? buildCatPayload(initialState(cat, null), cat) : null;
-      const nextStrategyPayload = cat && strategyForm ? buildStrategyPayload(strategyForm) : null;
-      const baselineStrategyPayload = cat && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
+      const catPayload = buildCatPayload(form, resolvedCat);
+      const rollbackCatPayload = resolvedCat ? buildCatPayload(initialState(resolvedCat, null), resolvedCat) : null;
+      const nextStrategyPayload = resolvedCat && strategyForm ? buildStrategyPayload(strategyForm) : null;
+      const baselineStrategyPayload = resolvedCat && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
       const strategyChanged =
-        cat && nextStrategyPayload
+        resolvedCat && nextStrategyPayload
           ? JSON.stringify(nextStrategyPayload) !== JSON.stringify(baselineStrategyPayload)
           : false;
 
-      if (cat && strategyChanged && nextStrategyPayload) {
-        const strategyRes = await apiFetch(`/api/config/session-strategy/${cat.id}`, {
+      if (resolvedCat && strategyChanged && nextStrategyPayload) {
+        const strategyRes = await apiFetch(`/api/config/session-strategy/${resolvedCat.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(nextStrategyPayload),
@@ -330,7 +343,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
         }
         if (strategyBaselineHasOverride && baselineStrategyPayload) {
           rollbackSteps.push(async () => {
-            await apiFetch(`/api/config/session-strategy/${cat.id}`, {
+            await apiFetch(`/api/config/session-strategy/${resolvedCat.id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(baselineStrategyPayload),
@@ -338,15 +351,15 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
           });
         } else {
           rollbackSteps.push(async () => {
-            await apiFetch(`/api/config/session-strategy/${cat.id}`, {
+            await apiFetch(`/api/config/session-strategy/${resolvedCat.id}`, {
               method: 'DELETE',
             });
           });
         }
       }
 
-      const res = await apiFetch(cat ? `/api/cats/${cat.id}` : '/api/cats', {
-        method: cat ? 'PATCH' : 'POST',
+      const res = await apiFetch(resolvedCat ? `/api/cats/${resolvedCat.id}` : '/api/cats', {
+        method: resolvedCat ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(catPayload),
       });
@@ -357,9 +370,9 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
         return;
       }
       const persistedCatBody = (await res.json().catch(() => ({}))) as { cat?: { id?: string } };
-      const persistedCatId = persistedCatBody.cat?.id ?? cat?.id ?? null;
+      const persistedCatId = persistedCatBody.cat?.id ?? resolvedCat?.id ?? null;
       if (persistedCatId) {
-        if (cat && rollbackCatPayload) {
+        if (resolvedCat && rollbackCatPayload) {
           rollbackSteps.push(async () => {
             await apiFetch(`/api/cats/${persistedCatId}`, {
               method: 'PATCH',
@@ -367,7 +380,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
               body: JSON.stringify(rollbackCatPayload),
             });
           });
-        } else if (!cat) {
+        } else if (!resolvedCat) {
           rollbackSteps.push(async () => {
             await apiFetch(`/api/cats/${persistedCatId}`, {
               method: 'DELETE',
