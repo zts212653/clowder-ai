@@ -1,42 +1,174 @@
-import { realpath, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { isUnderAllowedRoot } from '../utils/project-path.js';
 
-function realpathSyncOrNull(path: string): string | null {
-  try {
-    return realpathSync(path);
-  } catch {
-    return null;
-  }
-}
-
-async function realpathOrNull(path: string): Promise<string | null> {
-  try {
-    return await new Promise<string>((resolvePath, reject) => {
-      realpath(path, (err, resolved) => {
-        if (err) reject(err);
-        else resolvePath(resolved);
-      });
-    });
-  } catch {
-    return null;
-  }
-}
+const CAT_CAFE_DIR = '.cat-cafe';
+const META_FILENAME = 'provider-profiles.json';
+const KNOWN_ROOTS_FILENAME = 'known-project-roots.json';
+const MIGRATED_ROOTS_FILENAME = 'migrated-project-roots.json';
 
 export function isAllowedProviderProfilesRoot(absPath: string): boolean {
   return isUnderAllowedRoot(absPath);
 }
 
+/**
+ * Register a project root in the global known-roots registry.
+ * Called on every provider store access so delete can check all projects.
+ */
+export function registerProjectRoot(projectRoot: string): void {
+  const globalRoot = resolveGlobalRoot();
+  const dir = resolve(globalRoot, CAT_CAFE_DIR);
+  const filePath = resolve(dir, KNOWN_ROOTS_FILENAME);
+  let roots: string[] = [];
+  if (existsSync(filePath)) {
+    try {
+      roots = JSON.parse(readFileSync(filePath, 'utf-8'));
+    } catch {
+      /* corrupt file — reset */
+    }
+  }
+  const absRoot = resolve(projectRoot);
+  if (!Array.isArray(roots)) roots = [];
+  if (!roots.includes(absRoot)) {
+    roots.push(absRoot);
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(filePath, `${JSON.stringify(roots, null, 2)}\n`);
+    } catch {
+      /* best-effort: read-only home should not crash read paths */
+    }
+  }
+}
+
+/**
+ * Returns project roots whose cat-catalogs may reference a provider profile.
+ * Scans the known-roots registry to cover all projects that have ever used
+ * global provider profiles. Filters to roots that still exist on disk.
+ */
 export async function listProviderProfilesProjectRoots(projectRoot: string): Promise<string[]> {
-  return [await resolveProviderProfilesRoot(projectRoot)];
+  const globalRoot = resolveGlobalRoot();
+  const filePath = resolve(globalRoot, CAT_CAFE_DIR, KNOWN_ROOTS_FILENAME);
+  const roots = new Set<string>([resolve(projectRoot)]);
+  if (existsSync(filePath)) {
+    try {
+      const stored = JSON.parse(readFileSync(filePath, 'utf-8'));
+      if (Array.isArray(stored)) {
+        for (const r of stored) {
+          if (typeof r === 'string' && existsSync(r)) {
+            roots.add(resolve(r));
+          }
+        }
+      }
+    } catch {
+      /* ignore corrupt registry */
+    }
+  }
+  return [...roots];
 }
 
-export async function resolveProviderProfilesRoot(projectRoot: string): Promise<string> {
-  const root = resolve(projectRoot);
-  return (await realpathOrNull(root)) ?? root;
+function resolveGlobalRoot(): string {
+  const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+  if (envRoot) {
+    const resolved = resolve(envRoot);
+    try {
+      return realpathSync(resolved);
+    } catch {
+      return resolved;
+    }
+  }
+  const home = homedir();
+  try {
+    return realpathSync(home);
+  } catch {
+    return home;
+  }
 }
 
-export function resolveProviderProfilesRootSync(projectRoot: string): string {
-  const root = resolve(projectRoot);
-  return realpathSyncOrNull(root) ?? root;
+/**
+ * Resolve the storage root for provider-profiles.
+ * Default: user home directory (global).
+ * Override: CAT_CAFE_GLOBAL_CONFIG_ROOT env var.
+ */
+export async function resolveProviderProfilesRoot(_projectRoot: string): Promise<string> {
+  return resolveGlobalRoot();
+}
+
+export function resolveProviderProfilesRootSync(_projectRoot: string): string {
+  return resolveGlobalRoot();
+}
+
+/**
+ * Record that a project root has been successfully migrated to global storage.
+ * Written to the global config dir (always writable) so that read-only project
+ * checkouts do not re-trigger migration on every provider-store read.
+ */
+/** Canonicalize a project root (resolve symlinks like /tmp → /private/tmp on macOS). */
+function canonicalizeRoot(root: string): string {
+  const abs = resolve(root);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+export function markProjectRootMigrated(projectRoot: string): void {
+  const globalRoot = resolveGlobalRoot();
+  const dir = resolve(globalRoot, CAT_CAFE_DIR);
+  const filePath = resolve(dir, MIGRATED_ROOTS_FILENAME);
+  let roots: string[] = [];
+  try {
+    roots = JSON.parse(readFileSync(filePath, 'utf-8'));
+    if (!Array.isArray(roots)) roots = [];
+  } catch {
+    /* missing or corrupt — reset */
+  }
+  const absRoot = canonicalizeRoot(projectRoot);
+  if (!roots.includes(absRoot)) {
+    roots.push(absRoot);
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(filePath, `${JSON.stringify(roots, null, 2)}\n`);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+function isProjectRootMigrated(projectRoot: string): boolean {
+  const globalRoot = resolveGlobalRoot();
+  const filePath = resolve(globalRoot, CAT_CAFE_DIR, MIGRATED_ROOTS_FILENAME);
+  try {
+    const roots: unknown = JSON.parse(readFileSync(filePath, 'utf-8'));
+    return Array.isArray(roots) && roots.includes(canonicalizeRoot(projectRoot));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check whether a project-local provider-profiles.json exists that should be
+ * migrated to the global location. Returns the project-local storage root
+ * if migration is needed, or null if not.
+ *
+ * Triggers migration when:
+ * - Local meta exists AND global meta does not (first project)
+ * - Local meta exists AND global meta exists (merge scenario — second+ project)
+ */
+export function detectProjectLocalProfiles(projectRoot: string): string | null {
+  let absProject = resolve(projectRoot);
+  try {
+    absProject = realpathSync(absProject);
+  } catch {
+    /* keep resolved */
+  }
+  const globalRoot = resolveGlobalRoot();
+  // Don't migrate when project root IS the global root
+  if (absProject === globalRoot) return null;
+  const localMeta = resolve(absProject, CAT_CAFE_DIR, META_FILENAME);
+  if (!existsSync(localMeta)) return null;
+  // Already migrated — global-side marker prevents re-migration on read-only checkouts
+  if (isProjectRootMigrated(absProject)) return null;
+  return absProject;
 }
