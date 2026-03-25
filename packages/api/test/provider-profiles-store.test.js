@@ -643,6 +643,62 @@ describe('provider profile store', () => {
       // 6. Builtin profiles were NOT duplicated
       const builtinClaudes = view.providers.filter((p) => p.id === 'claude');
       assert.equal(builtinClaudes.length, 1, 'builtin claude should not be duplicated');
+
+      // 7. Sync merge with legacy v1 global — normalizeMeta must handle it
+      const projectC = await makeTmpDir('merge-projC');
+      const localDirC = join(projectC, '.cat-cafe');
+      await mkdir(localDirC, { recursive: true });
+      // Write a v3 local meta with a new account
+      const now = new Date().toISOString();
+      await writeFile(
+        join(localDirC, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3,
+          providers: [
+            {
+              id: 'acct-charlie',
+              displayName: 'Charlie',
+              kind: 'api_key',
+              authType: 'api_key',
+              builtin: false,
+              baseUrl: 'https://api.charlie.dev',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          bootstrapBindings: {},
+        }),
+      );
+      await writeFile(
+        join(localDirC, 'provider-profiles.secrets.local.json'),
+        JSON.stringify({
+          version: 3,
+          profiles: { 'acct-charlie': { apiKey: 'sk-charlie' } },
+        }),
+      );
+      // Force global meta to legacy v1 format to trigger normalization edge case
+      await writeFile(
+        join(globalRoot, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 1,
+          providers: {
+            anthropic: {
+              activeProfileId: null,
+              profiles: [
+                { id: 'acct-alpha', displayName: 'Alpha Acct', authType: 'api_key', baseUrl: 'https://api.alpha.dev' },
+              ],
+            },
+          },
+        }),
+      );
+      // Sync migration should normalize legacy v1 global before merging project C
+      const { readBootstrapBindingsSync } = await import('../dist/config/provider-profiles.js');
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      readBootstrapBindingsSync(projectC);
+      const finalView = await readProviderProfiles(globalRoot);
+      const charlieProfile = finalView.providers.find((p) => p.id === 'acct-charlie');
+      assert.ok(charlieProfile, 'project C profile should be merged into global after legacy v1 normalization');
+      await rm(projectC, { recursive: true, force: true });
     } finally {
       if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
       else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;

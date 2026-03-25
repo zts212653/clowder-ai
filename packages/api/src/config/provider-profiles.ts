@@ -660,8 +660,9 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
   if (existsSync(globalMetaPath)) {
     const rawLocalMeta = JSON.parse(readFileSync(localMetaPath, 'utf-8'));
     const normalizedLocal = normalizeMeta(rawLocalMeta);
-    const globalMeta = JSON.parse(readFileSync(globalMetaPath, 'utf-8')) as ProviderProfilesMetaFile;
-    const existingIds = new Set((globalMeta.providers ?? []).map((p) => p.id));
+    const rawGlobalMeta = JSON.parse(readFileSync(globalMetaPath, 'utf-8'));
+    const globalMeta = normalizeMeta(rawGlobalMeta).value;
+    const existingIds = new Set(globalMeta.providers.map((p) => p.id));
     const localProviders: ProviderProfileMeta[] = [];
     for (const p of normalizedLocal.value.providers) {
       // Skip builtins — normalization already guarantees their presence in the global store.
@@ -674,14 +675,14 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
       existingIds.add(mergedId);
     }
     if (localProviders.length > 0) {
-      globalMeta.providers = [...(globalMeta.providers ?? []), ...localProviders];
+      globalMeta.providers = [...globalMeta.providers, ...localProviders];
       writeFileSync(globalMetaPath, `${JSON.stringify(globalMeta, null, 2)}\n`);
       // Merge secrets too
       if (existsSync(localSecretsPath)) {
         const localSecrets = JSON.parse(readFileSync(localSecretsPath, 'utf-8'));
         const globalSecrets = existsSync(globalSecretsPath)
           ? JSON.parse(readFileSync(globalSecretsPath, 'utf-8'))
-          : { profiles: {} };
+          : { version: 3, profiles: {} };
         for (const p of localProviders) {
           const originalId = p.id.replace(/-migrated-\d+$/, '');
           const secretEntry = localSecrets.profiles?.[originalId] ?? localSecrets.profiles?.[p.id];
