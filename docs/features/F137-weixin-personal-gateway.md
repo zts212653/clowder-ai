@@ -101,6 +101,74 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 - 入站图片: CDN 下载 → AES-128-ECB 解密
 - 实现 `sendMedia?(externalChatId, payload)` 接口
 
+### 富媒体能力调研（2026-07-25）
+
+> team lead提问：*"个人微信能接入和飞书那样超级多的富文本包括文件的传输 音频 图片等等吗？"*
+
+**结论：收入方向支持图片/文件/语音；发出方向目前只能纯文本。这是 iLink 协议限制，不是我们的代码限制。**
+
+#### iLink 协议消息类型（`ILinkMessageItem.type`）
+
+| type 值 | 名称 | 入站（微信→Cat Cafe） | 出站（Cat Cafe→微信） |
+|---------|------|:-----:|:-----:|
+| 1 | TEXT | 已实现 | 已实现（唯一出站类型） |
+| 2 | IMAGE | 已实现（`image_item.url` → attachment） | 不支持 |
+| 3 | VOICE | 已实现（`voice_item.text` 语音转文字） | 不支持 |
+| 4 | FILE | 已实现（`file_item.file_name` → attachment） | 不支持 |
+| 5 | VIDEO | 协议有定义（`video_item`），代码未实现 | 不支持 |
+
+#### 出站限制的技术根因
+
+`/ilink/bot/sendmessage` API 的 `item_list` 仅支持 `text_item`（`type=1`）。`WeixinAdapter.sendMessageApi()`（第 642 行）构造的请求体：
+
+```json
+{
+  "msg": {
+    "item_list": [{ "type": 1, "text_item": { "text": "..." } }],
+    "message_type": 2,
+    "message_state": 2
+  }
+}
+```
+
+**~~之前结论有误~~**：iLink `sendmessage` API **支持发送图片/文件/语音/视频**——通过 `item_list` 中的 `image_item`/`file_item`/`voice_item`/`video_item`。需要先调 `getuploadurl` 获取 CDN 上传地址，用 AES-128-ECB 加密后上传，拿到 `filekey` + `encrypt_query_param` + `aes_key` 后放入 item。官方 `@tencent-weixin/openclaw-weixin@2.0.1` 的 `send-media.ts` + `cdn/upload.ts` 有完整实现。
+
+> 纠正来源：2026-03-25 Ragdoll核实 openclaw v2.0.1 源码 `sendImageMessageWeixin` / `uploadFileToWeixin` 确认。
+
+#### iLink 富媒体能力矩阵
+
+| 能力 | iLink 协议 | Cat Cafe 实现 | 状态 |
+|------|:-:|:-:|:-:|
+| 文字收/发 | ✅ | ✅ | Phase A 已完成 |
+| 图片收 | ✅ CDN URL | ⚠️ 只解析 URL，没下载 | Phase B 待做 |
+| 图片发 | ✅ CDN 上传 + `image_item` | ❌ `sendMedia()` 未实现 | Phase B 待做 |
+| 语音收 | ✅ CDN | ⚠️ 只解析元数据/转文字 | Phase B 待做 |
+| 语音发 | ✅ CDN 上传 | ❌ | Phase B 待做 |
+| 文件收 | ✅ CDN | ⚠️ 只解析文件名 | Phase B 待做 |
+| 文件发 | ✅ CDN 上传 | ❌ | Phase B 待做 |
+| 视频收 | ✅ 协议定义 | ❌ 完全没做 | Phase B 待做 |
+| 视频发 | ✅ CDN 上传 | ❌ | Phase B 待做 |
+| 交互卡片 | ❌ 协议不支持 | — | 微信本身限制 |
+| 消息编辑 | ❌ 协议不支持 | — | 微信本身限制 |
+| 群聊 | ⚠️ `group_id` 字段存在但灰度未开放 | — | 等腾讯 |
+
+#### CDN 上传流程（官方 openclaw v2.0.1 参考）
+
+```
+1. getUploadUrl(mediaType, fileSize) → { upload_url, file_key_prefix }
+2. AES-128-ECB 加密文件内容（PKCS7 padding）
+3. HTTP PUT 到 CDN upload_url
+4. 拿到 filekey + encrypt_query_param + aes_key
+5. sendmessage({ msg: { item_list: [{ type: IMAGE, image_item: { media: { encrypt_query_param, aes_key } } }] } })
+```
+
+#### 纯文本辨识度方案
+
+在无法发送富文本的限制下，通过以下手段提升消息辨识度：
+- 猫名标识：`【Ragdoll🐱】` 中文方括号 + cat emoji 作为前缀
+- 多猫接力时每只猫独立标识段落，分隔线 `─────────` 提升可读性
+- stripMarkdown 保留结构（bullet list → `•`、heading → 文本）
+
 ### Phase C: IM Hub 配置向导 + 健壮性
 
 **IM Hub QR 登录 UI**（team lead明确要求：*"能不能做到im hub内？我点击获取二维码 然后给我二维码 我点击扫码完成 然后挂上这个？"*）：
@@ -160,10 +228,12 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 - [x] AC-A7: `connector.ts` 新增 `'weixin'` ConnectorDefinition，前端 bubble 正确渲染
 
 ### Phase B（输入状态 + 媒体）
-- [ ] AC-B1: agent 处理期间微信显示"对方正在输入中"
-- [ ] AC-B2: 图片发送到微信（CDN 上传 + AES-128-ECB 加密）
-- [ ] AC-B3: 图片从微信接收（CDN 下载 + AES-128-ECB 解密）
-- [ ] AC-B4: `sendMedia` 接口实现正确
+- [x] AC-B1: agent 处理期间微信显示"对方正在输入中" — PR #708 已实现 sendTyping keepalive
+- [ ] AC-B2: 图片发送到微信 — `getuploadurl` → AES-128-ECB 加密 → CDN 上传 → `sendmessage` with `image_item`
+- [ ] AC-B3: 图片从微信接收并下载 — CDN 下载 → AES-128-ECB 解密 → 本地文件
+- [ ] AC-B4: `sendMedia` 接口实现 — `WeixinAdapter.sendMedia(chatId, { type, absPath })` 路由到对应上传+发送流程
+- [ ] AC-B5: 文件发送到微信 — `uploadFileAttachmentToWeixin` + `sendFileMessageWeixin` 流程
+- [ ] AC-B6: 文件从微信接收并解析 — CDN 下载 → 解密 → 附件存储
 
 ### Phase C（IM Hub + 健壮性）
 - [x] AC-C1: IM Hub 配置向导可添加微信个人号（QR 展示 + 扫码流程）

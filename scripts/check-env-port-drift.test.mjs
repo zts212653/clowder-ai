@@ -591,6 +591,16 @@ excluded:
         /git -C "\$SOURCE_DIR" push origin "refs\/tags\/\$tag"/,
         'release-intended sync should publish the source snapshot tag to origin',
       );
+      assert.match(
+        content,
+        /require_release_source_commit_on_main\(\) \{/,
+        'release-intended sync should define a guard ensuring the source snapshot commit is on origin\\/main',
+      );
+      assert.match(
+        content,
+        /require_release_source_commit_on_main "\$SOURCE_SHA"/,
+        'release-intended sync should verify the source commit is reachable from origin\\/main before syncing',
+      );
     });
 
     it('sync-hotfix.sh selects the latest sync baseline by mirrored target tag commit time', () => {

@@ -55,7 +55,7 @@ function blockToElements(block: RichBlock): LarkCardElement[] {
 export function formatFeishuCard(blocks: RichBlock[], catDisplayName: string, textContent?: string): LarkCard {
   const firstCard = blocks.find((b) => b.kind === 'card');
   const title =
-    firstCard && firstCard.kind === 'card' ? `[${catDisplayName}🐱] ${firstCard.title}` : `[${catDisplayName}🐱]`;
+    firstCard && firstCard.kind === 'card' ? `【${catDisplayName}🐱】${firstCard.title}` : `【${catDisplayName}🐱】`;
   const tone = (firstCard?.kind === 'card' && firstCard.tone) || 'info';
   const template = TONE_TO_COLOR[tone] || 'blue';
 

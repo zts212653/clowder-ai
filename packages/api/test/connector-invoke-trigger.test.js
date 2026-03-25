@@ -495,7 +495,7 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(deliverCalls[0].catId, undefined, 'Merged delivery should not have a single catId');
     assert.ok(deliverCalls[0].content.includes('Hello from opus!'), 'Merged content contains opus text');
     assert.ok(deliverCalls[0].content.includes('Hello from codex!'), 'Merged content contains codex text');
-    assert.ok(deliverCalls[0].content.includes('['), 'Merged content has cat name prefix brackets');
+    assert.ok(deliverCalls[0].content.includes('【'), 'Merged content has cat name prefix with lenticular brackets');
   });
 
   it('BUG-4 P1: WeChat merge preserves richBlocks in merged content', async () => {

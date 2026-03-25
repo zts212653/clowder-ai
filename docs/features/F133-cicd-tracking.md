@@ -8,7 +8,7 @@ created: 2026-03-23
 
 # F133: GitHub CI/CD Tracking — 已注册 PR 的 CI/CD 执行结果自动追踪
 
-> **Status**: in-progress | **Owner**: 金渐层 | **Priority**: P2
+> **Status**: done | **Owner**: 金渐层 | **Priority**: P2 | **Completed**: 2026-03-25
 
 ## Why
 
@@ -42,7 +42,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
   → deliverConnectorMessage() (共享 helper)
     → messageStore.append({ connector: 'github-ci' })
     → socketManager.broadcastToRoom()
-  → CI 失败 → ConnectorInvokeTrigger.trigger(priority: 'normal')
+  → CI 失败 → ConnectorInvokeTrigger.trigger(priority: 'urgent')
   → CI 成功 → 不 trigger
 ```
 
@@ -103,9 +103,9 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 2. **CiCdRouter** — 新增独立路由器
    - 不塞 ReviewRouter，独立处理 CI 事件的格式化和投递
    - 共享 `deliverConnectorMessage()` helper（messageStore.append + socket broadcast）
-   - CI 失败 → 投递消息 + `ConnectorInvokeTrigger.trigger()` with `priority: 'normal'`
+   - CI 失败 → 投递消息 + `ConnectorInvokeTrigger.trigger()` with `priority: 'urgent'`（与 review 一致，允许抢占）
    - CI 成功 → 投递消息，不 trigger
-   - 不要一上来全局 `urgent`；如果后面 merge-gate 场景需要更强提醒，再做 repo/phase 级策略
+   - 当前决策：CI failure 直接 `urgent`（与 review 行为一致）；CI success 仍不 trigger
 
 3. **PrTrackingStore 扩展**
    - 新增接口：`patchCiState(repo, pr, ciFields)` — 只更新 CI 相关字段，不刷新注册态
@@ -160,7 +160,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 
 ### Phase A（核心投递管道）
 - [x] AC-A1: 注册 PR 后，CI 失败自动投递消息到原始 thread（connector: `github-ci`）
-- [x] AC-A2: CI 失败消息自动唤醒猫（ConnectorInvokeTrigger, priority: `normal`）
+- [x] AC-A2: CI 失败消息自动唤醒猫（ConnectorInvokeTrigger, priority: `urgent`，可打断正在进行中的通知猫）
 - [x] AC-A3: CI 成功投递消息但不唤醒猫
 - [x] AC-A4: 状态迁移去重 — 同一 headSha + 同一 aggregateBucket 只通知一次
 - [x] AC-A5: 合法状态迁移（pending → fail → success）不被吞掉
@@ -172,7 +172,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 - [x] AC-A11: 测试覆盖：CiCdCheckPoller + CiCdRouter 单元测试（轮询、去重、投递、lifecycle）
 
 ### Phase B（Skill 文档 + SOP）
-- [ ] AC-B1: merge-gate SKILL.md 包含等 CI 绿灯步骤（⏸️ team lead：只在有 Actions 额度时才有意义，暂缓）
+- [x] AC-B1: ~~merge-gate SKILL.md 包含等 CI 绿灯步骤~~ → **N/A**（team lead确认：只在有 Actions 额度时才有意义，暂缓。转 OQ 待 Phase C 时重新评估）
 - [x] AC-B2: opensource-ops SKILL.md 的 Outbound PR / Hotfix 流程含 CI 门禁
 - [x] AC-B3: refs/cicd-tracking.md 新增（通知格式、配置、处理策略）
 
@@ -201,7 +201,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 | KD-1 | CI/CD 通知复用现有 Review 消息管道（messageStore → socket → trigger） | 投递体验一致；不需要新建管道；ConnectorSource 协议已支持 | 2026-03-23 |
 | KD-2 | 数据源用 PR 级 rollup（`gh pr view --json statusCheckRollup`），不用 raw Checks API | 一次请求拿 headSha + lifecycle + 聚合状态；覆盖 Checks + commit statuses 两套体系；Maine Coon Design Gate 提出 | 2026-03-23 |
 | KD-3 | 只 track 已注册 PR | 零噪音；复用现有 register_pr_tracking 入口 | 2026-03-23 |
-| KD-4 | CI 失败唤醒猫（priority: normal），CI 成功只投递消息 | 失败需要猫处理；成功是信息性的；v1 不用 urgent，后续需要再做策略 | 2026-03-23 |
+| KD-4 | CI 失败唤醒猫（priority: urgent），CI 成功只投递消息 | 与 `github-review` 行为归一；失败消息应抢占避免在队列中长时间堆积 | 2026-03-24 |
 | KD-5 | 独立 CiCdRouter，不塞 ReviewRouter | ReviewRouter 把 review 专属的去重/内容抓取/格式化混在一起，硬塞 CI 会耦死两个数据源；抽共享 deliverConnectorMessage() helper | 2026-03-23 |
 | KD-6 | 独立 github-ci-bootstrap.ts | lifecycle 和日志独立，不复用 review bootstrap 语义 | 2026-03-23 |
 | KD-7 | PrTrackingStore 新增 patchCiState()，不复用 register() | register() 会整 hash 重写并刷新 registeredAt，把注册和运行态状态更新混成一个操作 | 2026-03-23 |
@@ -218,7 +218,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 2. 提出 `PrTrackingStore` 缺少 patch/update 接口 → 新增 `patchCiState()`
 3. 发现 `ProcessedEmailStore` 5min 窗口去重不适合 CI 状态迁移 → 改用 `headSha + aggregateBucket` 去重
 4. 建议独立 `CiCdRouter` + 独立 bootstrap，不塞 ReviewRouter
-5. 建议 CI failure trigger 用 `normal` 而非 `urgent`
+5. Design Gate 建议 CI failure trigger 用 `normal`；后续经team lead确认，升级为 `urgent` 以与 review 抢占行为归一
 6. 强调 headSha 必须 poll 时覆盖更新，不能只注册时拉一次
 7. PR lifecycle: open 持续轮询，merged/closed 才停
 8. required checks 为空时 fallback 到 all checks
