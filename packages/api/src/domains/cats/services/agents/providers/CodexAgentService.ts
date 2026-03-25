@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
+import { getCodexApprovalPolicy, getCodexSandboxMode, shouldSkipCodexModel } from '../../../../../config/codex-cli.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
@@ -240,7 +240,7 @@ export class CodexAgentService implements AgentService {
 
     const sandboxMode = getCodexSandboxMode();
     const approvalPolicy = getCodexApprovalPolicy();
-    const modelArgs = ['--model', effectiveModel];
+    const modelArgs = shouldSkipCodexModel() ? [] : ['--model', effectiveModel];
     const effortLevel = getCatEffort(this.catId as string);
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
