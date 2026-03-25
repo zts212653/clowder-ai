@@ -1,6 +1,7 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -518,5 +519,138 @@ describe('provider profile store', () => {
       0o600,
       `secrets file should have mode 0600 but got ${(secretsStat.mode & 0o777).toString(8)}`,
     );
+  });
+
+  it('merges second project profiles into existing global store', async () => {
+    const projectA = await makeTmpDir('merge-projA');
+    const projectB = await makeTmpDir('merge-projB');
+    const globalRoot = await makeTmpDir('merge-global');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    try {
+      // --- Project A: seed local profiles and migrate via readProviderProfiles ---
+      const localDirA = join(projectA, '.cat-cafe');
+      await mkdir(localDirA, { recursive: true });
+      await writeFile(
+        join(localDirA, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3,
+          activeProfileId: null,
+          providers: [
+            {
+              id: 'acct-alpha',
+              displayName: 'Alpha',
+              kind: 'api_key',
+              authType: 'api_key',
+              builtin: false,
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+            },
+          ],
+          bootstrapBindings: {},
+        }),
+      );
+      await writeFile(
+        join(localDirA, 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ version: 3, profiles: { 'acct-alpha': { apiKey: 'sk-alpha' } } }),
+      );
+
+      // Trigger first migration (empty global -> copy)
+      await readProviderProfiles(projectA);
+
+      // Verify first migration populated global
+      const globalMeta1 = JSON.parse(await readFile(join(globalRoot, '.cat-cafe', 'provider-profiles.json'), 'utf-8'));
+      assert.ok(
+        globalMeta1.providers.some((p) => p.id === 'acct-alpha'),
+        'alpha should be in global after first migration',
+      );
+
+      // --- Project B: seed local profiles with a collision ID and a unique ID ---
+      const localDirB = join(projectB, '.cat-cafe');
+      await mkdir(localDirB, { recursive: true });
+      await writeFile(
+        join(localDirB, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3,
+          activeProfileId: null,
+          providers: [
+            {
+              id: 'acct-alpha',
+              displayName: 'Alpha Copy',
+              kind: 'api_key',
+              authType: 'api_key',
+              builtin: false,
+              createdAt: '2026-02-01T00:00:00Z',
+              updatedAt: '2026-02-01T00:00:00Z',
+            },
+            {
+              id: 'acct-beta',
+              displayName: 'Beta',
+              kind: 'api_key',
+              authType: 'api_key',
+              builtin: false,
+              createdAt: '2026-02-01T00:00:00Z',
+              updatedAt: '2026-02-01T00:00:00Z',
+            },
+          ],
+          bootstrapBindings: {},
+        }),
+      );
+      await writeFile(
+        join(localDirB, 'provider-profiles.secrets.local.json'),
+        JSON.stringify({
+          version: 3,
+          profiles: { 'acct-alpha': { apiKey: 'sk-alpha-b' }, 'acct-beta': { apiKey: 'sk-beta' } },
+        }),
+      );
+
+      // Trigger second migration (merge into existing global)
+      const view = await readProviderProfiles(projectB);
+
+      // --- Assertions ---
+      // 1. Original alpha from project A still exists
+      const alpha = view.providers.find((p) => p.id === 'acct-alpha');
+      assert.ok(alpha, 'original acct-alpha from project A should still exist');
+
+      // 2. Colliding alpha from project B was re-ID'd with -migrated- suffix
+      const migratedAlpha = view.providers.find(
+        (p) => p.id !== 'acct-alpha' && p.id.startsWith('acct-alpha-migrated-'),
+      );
+      assert.ok(migratedAlpha, 'colliding acct-alpha from project B should be re-IDd with -migrated- suffix');
+      assert.equal(migratedAlpha.displayName, 'Alpha Copy');
+
+      // 3. Unique beta from project B exists as-is
+      const beta = view.providers.find((p) => p.id === 'acct-beta');
+      assert.ok(beta, 'unique acct-beta from project B should exist in global');
+
+      // 4. Secrets from both projects are present
+      const globalSecrets = JSON.parse(
+        await readFile(join(globalRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'), 'utf-8'),
+      );
+      assert.equal(globalSecrets.profiles['acct-alpha']?.apiKey, 'sk-alpha', 'project A secret preserved');
+      assert.equal(
+        globalSecrets.profiles[migratedAlpha.id]?.apiKey,
+        'sk-alpha-b',
+        'colliding profile secret mapped to new ID',
+      );
+      assert.equal(globalSecrets.profiles['acct-beta']?.apiKey, 'sk-beta', 'project B unique secret present');
+
+      // 5. Project B local file was renamed to .migrated
+      const localMetaB = join(localDirB, 'provider-profiles.json');
+      assert.equal(existsSync(localMetaB), false, 'project B local meta should be gone');
+      assert.equal(existsSync(`${localMetaB}.migrated`), true, 'project B local meta should be renamed to .migrated');
+
+      // 6. Builtin profiles were NOT duplicated
+      const builtinClaudes = view.providers.filter((p) => p.id === 'claude');
+      assert.equal(builtinClaudes.length, 1, 'builtin claude should not be duplicated');
+    } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      await Promise.all([
+        rm(projectA, { recursive: true, force: true }),
+        rm(projectB, { recursive: true, force: true }),
+        rm(globalRoot, { recursive: true, force: true }),
+      ]);
+    }
   });
 });
