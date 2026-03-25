@@ -39,6 +39,7 @@ import {
   resolveServersForCat,
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
+import { loadInstalledRegistry } from '../domains/cats/services/skillhub/InstalledSkillRegistry.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
@@ -497,6 +498,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     };
 
     // 3. Sync discovered skills into capabilities.json
+    const installedRegistry = await loadInstalledRegistry(dirname(CAT_CAFE_SKILLS_SRC));
+    const remoteInstalledNames = new Set(installedRegistry.skills.map((s) => s.name));
     const allSkillNames = new Set<string>();
     for (const skills of Object.values(providerSkills)) {
       for (const s of skills) allSkillNames.add(s);
@@ -513,7 +516,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const exists = config.capabilities.some((c) => c.type === 'skill' && c.id === skillName);
       if (!exists) {
         // F041 re-open fix: project-level skills → 'cat-cafe', user-level → 'external'
-        const source = projectSkillNames.has(skillName) ? ('cat-cafe' as const) : ('external' as const);
+        const source = remoteInstalledNames.has(skillName)
+          ? ('external' as const)
+          : projectSkillNames.has(skillName)
+            ? ('cat-cafe' as const)
+            : ('external' as const);
         config.capabilities.push({
           id: skillName,
           type: 'skill',
@@ -524,10 +531,17 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     // Also fix source for existing skills that were incorrectly classified
+    // Remote-installed skills should always be 'external'
     for (const cap of config.capabilities) {
       if (cap.type !== 'skill') continue;
+      if (remoteInstalledNames.has(cap.id)) {
+        if (cap.source !== 'external') {
+          cap.source = 'external';
+          configDirty = true;
+        }
+        continue;
+      }
       const shouldBeCatCafe = projectSkillNames.has(cap.id);
-      // Upgrade is safe when we have evidence; downgrade is only safe when cat-cafe-skills scan succeeded.
       if (shouldBeCatCafe && cap.source !== 'cat-cafe') {
         cap.source = 'cat-cafe';
         configDirty = true;
@@ -668,7 +682,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       if (meta?.description) skillItem.description = meta.description;
       if (meta?.triggers) skillItem.triggers = meta.triggers;
       const category = skillCategoryMap.get(cap.id);
-      if (category) skillItem.category = category;
+      skillItem.category = category ?? (remoteInstalledNames.has(cap.id) ? 'SkillHub' : '未分类');
       items.push(skillItem);
     }
 
@@ -735,9 +749,9 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }),
     );
 
-    // Registration consistency: BOOTSTRAP.md vs source dir
+    // Registration consistency: BOOTSTRAP.md vs source dir (exclude remote-installed skills)
     const bootstrapNames = new Set(skillCategoryMap.keys());
-    const unregistered = [...mountSourceNames].filter((n) => !bootstrapNames.has(n));
+    const unregistered = [...mountSourceNames].filter((n) => !bootstrapNames.has(n) && !remoteInstalledNames.has(n));
     const phantom = [...bootstrapNames].filter((n) => !mountSourceNames.has(n));
     let allMounted =
       catCafeSkillItems.length > 0 &&
