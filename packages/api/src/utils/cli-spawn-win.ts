@@ -8,7 +8,7 @@
 
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 /**
  * Cache for resolved shim scripts to avoid repeated filesystem lookups.
@@ -31,10 +31,53 @@ export interface WindowsShimSpawn {
 }
 
 /**
+ * Extract the bare command name from a path or command string.
+ * e.g. 'C:\Users\Admin\bin\claude.cmd' → 'claude'
+ *      'claude' → 'claude'
+ */
+function extractBareName(command: string): string {
+  return basename(command).replace(/\.(cmd|exe|bat)$/i, '');
+}
+
+/**
+ * Try to extract a .js entry script from a .cmd shim file by parsing its content.
+ * Handles both standard npm shims (%~dp0\...) and custom shims that reference
+ * npm node_modules paths directly.
+ */
+function parseShimFile(cmdPath: string): string | null {
+  if (!existsSync(cmdPath)) return null;
+  const shimContent = readFileSync(cmdPath, 'utf-8');
+  const shimDir = dirname(cmdPath);
+
+  // Pattern 1: npm standard shims — "%~dp0\..." or "%dp0\..." relative paths
+  for (const match of shimContent.matchAll(/%~?dp0\\([^"\r\n]*?\.js)/gi)) {
+    const scriptPath = join(shimDir, match[1].replace(/\\/g, '/'));
+    if (existsSync(scriptPath)) return scriptPath;
+  }
+
+  // Pattern 2: custom shims that reference node_modules paths via env vars
+  // e.g. node "%NPM_BIN%\node_modules\@anthropic-ai\claude-code\cli.js" %*
+  const npmModuleMatch = shimContent.match(/node_modules[/\\]([^"'\s%]+\.js)/i);
+  if (npmModuleMatch) {
+    const appData = process.env.APPDATA;
+    if (appData) {
+      const candidate = join(appData, 'npm', 'node_modules', npmModuleMatch[1].replace(/\\/g, '/'));
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Resolve the underlying .js entry script from a Windows .cmd shim.
  *
+ * Accepts both bare command names ('claude') and full paths
+ * ('C:\Users\Admin\bin\claude.cmd') — resolveCliCommand returns full paths.
+ *
  * Strategy:
- * 1. Locate the .cmd selected by PATH via `where`, parse %dp0% relative paths
+ * 1a. If command is a full path to an existing .cmd file, parse it directly
+ * 1b. Otherwise locate via `where` and parse %dp0% relative paths
  * 2. Fall back to known paths under %APPDATA%/npm/node_modules
  * 3. Cache result (null = not resolvable, use shell fallback)
  */
@@ -46,34 +89,39 @@ export function resolveCmdShimScript(command: string): string | null {
     resolvedShimCache.delete(command);
   }
 
-  // Strategy 1: parse the .cmd shim selected by PATH via `where`
+  const bareName = extractBareName(command);
+  const isFullPath = /[/\\]/.test(command);
+
+  // Strategy 1a: command is already a full .cmd path — parse it directly
+  if (isFullPath && /\.cmd$/i.test(command)) {
+    const result = parseShimFile(command);
+    if (result) {
+      resolvedShimCache.set(command, result);
+      return result;
+    }
+  }
+
+  // Strategy 1b: locate via `where` using the bare name
   try {
-    const whereOutput = execSync(`where ${command}.cmd`, {
+    const whereTarget = isFullPath ? bareName : command;
+    const whereOutput = execSync(`where "${whereTarget}.cmd"`, {
       encoding: 'utf-8',
       timeout: 5000,
     }).trim();
     for (const cmdPath of whereOutput.split(/\r?\n/)) {
-      if (!cmdPath || !existsSync(cmdPath)) continue;
-      const shimContent = readFileSync(cmdPath, 'utf-8');
-      const shimDir = cmdPath.replace(/[/\\][^/\\]+$/, '');
-      // npm .cmd shims use "%~dp0\..." or "%dp0\..." relative script targets.
-      // Scan every match so wrappers with a node.exe prelude still resolve the
-      // actual .js entrypoint.
-      for (const match of shimContent.matchAll(/%~?dp0\\([^"\r\n]*?\.js)/gi)) {
-        const scriptPath = join(shimDir, match[1].replace(/\\/g, '/'));
-        if (existsSync(scriptPath)) {
-          resolvedShimCache.set(command, scriptPath);
-          return scriptPath;
-        }
+      const result = parseShimFile(cmdPath.trim());
+      if (result) {
+        resolvedShimCache.set(command, result);
+        return result;
       }
     }
   } catch {
-    // `where` failed or timed out — fall through to shell mode
+    // `where` failed or timed out — fall through
   }
 
-  // Strategy 2: known paths as a fallback when PATH probing fails
+  // Strategy 2: known paths using bare command name for lookup
   const appData = process.env.APPDATA;
-  const knownPaths = KNOWN_SHIM_SCRIPTS[command];
+  const knownPaths = KNOWN_SHIM_SCRIPTS[bareName];
   if (appData && knownPaths) {
     for (const relPath of knownPaths) {
       const candidate = join(appData, 'npm', 'node_modules', relPath);
