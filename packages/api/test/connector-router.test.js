@@ -656,6 +656,7 @@ describe('ConnectorRouter', () => {
         log: noopLog(),
         commandLayer: mockPermCommandLayer({
           '/where': { kind: 'where', response: 'You are here' },
+          '/allow-group': { kind: 'allow-group', response: 'Group allowed' },
         }),
         permissionStore: permStore,
         adapters: adaptersMap,
@@ -676,6 +677,21 @@ describe('ConnectorRouter', () => {
       assert.equal(result.reason, 'group_not_allowed');
       assert.equal(permSendCalls.length, 1);
       assert.ok(permSendCalls[0].content.includes('未授权'));
+    });
+
+    it('AC-D1: allows admin /allow-group in blocked group before whitelist check', async () => {
+      const result = await permRouter.route(
+        'feishu',
+        'blocked-group',
+        '/allow-group',
+        'ext-perm-allow-1',
+        undefined,
+        { id: 'admin-user-1' },
+        'group',
+      );
+      assert.equal(result.kind, 'command');
+      assert.equal(permSendCalls.length, 1);
+      assert.equal(permSendCalls[0].content, 'Group allowed');
     });
 
     it('AC-D1: allows group messages when group is whitelisted', async () => {

@@ -156,21 +156,37 @@ export class ConnectorRouter {
       return { kind: 'skipped', reason: 'duplicate' };
     }
 
+    const trimmedText = text.trim();
+
     // 1a. F134 Phase D: Group whitelist check
     if (chatType === 'group' && this.opts.permissionStore) {
-      const allowed = await this.opts.permissionStore.isGroupAllowed(connectorId, externalChatId);
-      if (!allowed) {
-        const adapter = this.opts.adapters?.get(connectorId);
-        if (adapter) {
-          await adapter.sendReply(externalChatId, '🔒 此群未授权使用 bot。请联系管理员使用 /allow-group 授权。');
+      const commandName = trimmedText.split(/\s+/, 1)[0]?.toLowerCase();
+      const isAdminAllowGroupCommand =
+        this.opts.commandLayer &&
+        sender &&
+        commandName === '/allow-group' &&
+        (await this.opts.permissionStore.isAdmin(connectorId, sender.id));
+
+      if (isAdminAllowGroupCommand) {
+        log.info(
+          { connectorId, externalChatId, senderId: sender.id },
+          '[ConnectorRouter] Admin /allow-group bypasses whitelist precheck',
+        );
+      } else {
+        const allowed = await this.opts.permissionStore.isGroupAllowed(connectorId, externalChatId);
+        if (!allowed) {
+          const adapter = this.opts.adapters?.get(connectorId);
+          if (adapter) {
+            await adapter.sendReply(externalChatId, '🔒 此群未授权使用 bot。请联系管理员使用 /allow-group 授权。');
+          }
+          log.info({ connectorId, externalChatId }, '[ConnectorRouter] Group not in whitelist, skipped');
+          return { kind: 'skipped', reason: 'group_not_allowed' };
         }
-        log.info({ connectorId, externalChatId }, '[ConnectorRouter] Group not in whitelist, skipped');
-        return { kind: 'skipped', reason: 'group_not_allowed' };
       }
     }
 
     // 1b. Command interception — handle /commands before agent routing
-    if (this.opts.commandLayer && text.trim().startsWith('/')) {
+    if (this.opts.commandLayer && trimmedText.startsWith('/')) {
       // F134 Phase D: admin-only commands in group chats
       if (chatType === 'group' && sender && this.opts.permissionStore) {
         const isAdmin = await this.opts.permissionStore.isAdmin(connectorId, sender.id);
