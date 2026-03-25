@@ -207,22 +207,22 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 - [x] AC-A6: 复用 ConnectorRouter/CommandLayer/BindingStore，公共层零改动
 - [x] AC-A7: Stream 连接断线自动重连 + 幂等去重
 
-### Phase A.1（DingTalk 媒体原生发送）
-- [ ] AC-A1.1: 语音通过 `sampleAudio` msgKey 原生发送（不再文本降级）
-- [ ] AC-A1.2: 文件通过 `sampleFile` msgKey 原生发送（不再文本降级）
-- [ ] AC-A1.3: 图片支持本地文件上传路径（不仅 URL 直发）
-- [ ] AC-A1.4: 媒体上传通过 `/v1.0/robot/messageFiles/upload` API
-- [ ] AC-A1.5: 上传优先链与飞书一致：platform key > absPath upload > URL download+upload > text fallback
-- [ ] AC-A1.6: 公共层零改动
+### Phase A.1（DingTalk 媒体原生发送）✅ PR #720 merged
+- [x] AC-A1.1: 语音通过 `sampleAudio` msgKey 原生发送（不再文本降级）
+- [x] AC-A1.2: 文件通过 `sampleFile` msgKey 原生发送（不再文本降级）
+- [x] AC-A1.3: 图片支持本地文件上传路径（不仅 URL 直发）
+- [x] AC-A1.4: 媒体上传通过 `/v1.0/robot/messageFiles/upload` API
+- [x] AC-A1.5: 上传优先链与飞书一致：platform key > absPath upload > URL download+upload > text fallback
+- [x] AC-A1.6: 公共层零改动
 
-### Phase A.2（DingTalk 群聊支持）
-- [ ] AC-A2.1: 群聊消息入站解析正确（移除 DM-only 过滤）
-- [ ] AC-A2.2: 群组消息通过 `orgGroupSend` API 发送
-- [ ] AC-A2.3: AI Card 在群聊中正确投递（`imGroupOpenDeliverModel`）
-- [ ] AC-A2.4: 群聊回复带 @sender 提及
-- [ ] AC-A2.5: 用户名/群名解析 + TTL 缓存
-- [ ] AC-A2.6: 复用 IM Hub 群聊抽象（bootstrap routing + ConnectorRouter + OutboundDeliveryHook）
-- [ ] AC-A2.7: 公共层零改动
+### Phase A.2（DingTalk 群聊支持）✅ PR #723 merged
+- [x] AC-A2.1: 群聊消息入站解析正确（移除 DM-only 过滤）
+- [x] AC-A2.2: 群组消息通过 `orgGroupSend` API 发送
+- [x] AC-A2.3: AI Card 在群聊中正确投递（`imGroupOpenDeliverModel`）
+- [x] AC-A2.4: 群聊回复带 @sender 提及
+- [x] AC-A2.5: 用户名/群名解析 + TTL 缓存
+- [x] AC-A2.6: 复用 IM Hub 群聊抽象（bootstrap routing + ConnectorRouter + OutboundDeliveryHook）
+- [x] AC-A2.7: 公共层零改动
 
 ### Phase B（WeCom Bot Adapter）
 - [ ] AC-B1: 企微 Bot WebSocket 连接 + 心跳 + 重连
@@ -257,8 +257,8 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 | R3 | "必须复用我们的 channel 等等架构设计" | AC-A6, AC-A1.6, AC-A2.7, AC-B6, AC-C7 | code review: 公共层 diff = 0 | [ ] |
 | R4 | "学习飞书的接入" | AC-D2~D3 | adapter 结构对照 FeishuAdapter | [ ] |
 | R5 | 参考 OpenClaw 生态 | KD-1, KD-4 | 设计文档引用 + 调研综合报告 | [ ] |
-| R6 | "富文本/媒体原生发送都支持完整" | AC-A1.1~A1.5 | 语音/文件/图片原生发送，不降级 | [ ] |
-| R7 | "群聊对接飞书 IM Hub 抽象" | AC-A2.1~A2.7 | 群聊收发 + @回复 + 名称解析 | [ ] |
+| R6 | "富文本/媒体原生发送都支持完整" | AC-A1.1~A1.5 | 语音/文件/图片原生发送，不降级 | [x] |
+| R7 | "群聊对接飞书 IM Hub 抽象" | AC-A2.1~A2.7 | 群聊收发 + @回复 + 名称解析 | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC

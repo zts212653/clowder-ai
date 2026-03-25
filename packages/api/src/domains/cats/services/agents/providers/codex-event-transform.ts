@@ -1,5 +1,6 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage } from '../../types.js';
+import { normalizeTaskStatus } from '../invocation/invoke-helpers.js';
 
 // F060: Allowed image MIME types and max base64 payload size (5 MB encoded ≈ 3.75 MB decoded)
 const IMAGE_MIME_WHITELIST = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']);
@@ -56,7 +57,7 @@ export function transformCodexEvent(
         : [];
     const tasks = rawItems.map((t, i) => {
       const subject = typeof t.content === 'string' ? t.content : typeof t.text === 'string' ? t.text : '';
-      const status =
+      const rawStatus =
         typeof t.status === 'string'
           ? t.status
           : typeof t.completed === 'boolean'
@@ -67,7 +68,7 @@ export function transformCodexEvent(
       return {
         id: typeof t.id === 'string' ? t.id : `task-${i}`,
         subject: subject.slice(0, 120),
-        status,
+        status: normalizeTaskStatus(rawStatus),
       };
     });
     return {
