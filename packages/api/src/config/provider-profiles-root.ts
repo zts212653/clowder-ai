@@ -31,8 +31,12 @@ export function registerProjectRoot(projectRoot: string): void {
   if (!Array.isArray(roots)) roots = [];
   if (!roots.includes(absRoot)) {
     roots.push(absRoot);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify(roots, null, 2)}\n`);
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(filePath, `${JSON.stringify(roots, null, 2)}\n`);
+    } catch {
+      /* best-effort: read-only home should not crash read paths */
+    }
   }
 }
 
@@ -72,7 +76,12 @@ function resolveGlobalRoot(): string {
       return resolved;
     }
   }
-  return homedir();
+  const home = homedir();
+  try {
+    return realpathSync(home);
+  } catch {
+    return home;
+  }
 }
 
 /**
