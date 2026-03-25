@@ -205,6 +205,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
       providerName: 'maas',
       models: ['glm-5', 'glm-4-plus'],
       defaultModel: 'maas/glm-5',
+      hasBaseUrl: true,
     });
 
     assert.ok(config.$schema, 'must have $schema');

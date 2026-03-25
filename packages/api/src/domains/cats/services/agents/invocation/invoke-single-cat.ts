@@ -733,7 +733,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // are both handled identically: generate a per-catId runtime config, assemble provider/model.
     const ocProviderName = catConfig?.ocProviderName?.trim();
     if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && ocProviderName && defaultModel) {
-      const assembledModel = defaultModel.includes('/') ? defaultModel : `${ocProviderName}/${defaultModel}`;
+      const assembledModel = defaultModel.startsWith(`${ocProviderName}/`) ? defaultModel : `${ocProviderName}/${defaultModel}`;
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
       try {
         // Infer apiType from ocProviderName (not effectiveProtocol — protocol UI was removed).
@@ -746,6 +746,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           models: resolvedAccount.models ?? [defaultModel],
           defaultModel: assembledModel,
           apiType,
+          hasBaseUrl: !!resolvedAccount.baseUrl,
         });
         callbackEnv.OPENCODE_CONFIG = configPath;
         if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
