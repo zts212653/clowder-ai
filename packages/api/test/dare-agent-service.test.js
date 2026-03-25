@@ -229,6 +229,27 @@ describe('DareAgentService', () => {
     assert.strictEqual(textMsg.metadata.model, 'zhipu/glm-4.7');
   });
 
+  test('metadata model includes workspace adapter/model when no explicit override is provided', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const root = join(tmpdir(), `dare-workspace-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    mkdirSync(join(root, '.dare'), { recursive: true });
+    writeFileSync(
+      join(root, '.dare', 'config.json'),
+      JSON.stringify({ llm: { adapter: 'huawei-modelarts', model: 'glm-5' } }),
+      'utf8',
+    );
+    const service = new DareAgentService({ catId: 'dare', spawnFn, darePath: '/opt/dare' });
+    const promise = collect(service.invoke('Test', { workingDirectory: root }));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    const messages = await promise;
+
+    const textMsg = messages.find((m) => m.type === 'text');
+    assert.ok(textMsg.metadata);
+    assert.strictEqual(textMsg.metadata.provider, 'dare');
+    assert.strictEqual(textMsg.metadata.model, 'huawei-modelarts/glm-5');
+  });
+
   test('metadata.sessionId set after session_init', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
