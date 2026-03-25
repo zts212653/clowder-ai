@@ -323,11 +323,17 @@ export interface CliConfigPaths {
   google: string; // e.g. <projectRoot>/.gemini/settings.json
 }
 
+/** Providers that support streamableHttp transport (URL-based MCP). */
+const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic']);
+
 /**
  * Resolve effective MCP servers for a specific cat.
- * Applies global enabled + per-cat overrides.
+ * Applies global enabled + per-cat overrides + provider transport compatibility.
  */
 export function resolveServersForCat(config: CapabilitiesConfig, catId: string): McpServerDescriptor[] {
+  const entry = catRegistry.tryGet(catId);
+  const provider = entry?.config.provider;
+
   return config.capabilities
     .filter((cap) => cap.type === 'mcp' && cap.mcpServer)
     .map((cap) => {
@@ -339,7 +345,12 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
       const override = cap.overrides?.find((o) => o.catId === catId);
       const enabledFromConfig = override ? override.enabled : cap.enabled;
       // Guardrail: entries without usable transport stay disabled for writer cleanup.
-      const enabled = enabledFromConfig && hasUsableTransport(mcpServer);
+      // Also gate streamableHttp by provider — only Anthropic supports URL transport.
+      const transportSupported =
+        mcpServer.transport === 'streamableHttp'
+          ? provider !== undefined && STREAMABLE_HTTP_PROVIDERS.has(provider)
+          : hasUsableTransport(mcpServer);
+      const enabled = enabledFromConfig && transportSupported;
 
       const desc: McpServerDescriptor = {
         name: cap.id,

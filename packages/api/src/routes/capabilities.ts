@@ -563,10 +563,17 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       discoverExternalMcpServers(userLevelPaths),
     ]);
     const allDiscoveredServers = [...projectLevelServers, ...userLevelServers];
-    const seenDiscovered = new Set<string>();
+    const discoveredByName = new Map<string, (typeof allDiscoveredServers)[number]>();
     for (const server of allDiscoveredServers) {
-      if (seenDiscovered.has(server.name)) continue;
-      seenDiscovered.add(server.name);
+      const existing = discoveredByName.get(server.name);
+      if (!existing) {
+        discoveredByName.set(server.name, server);
+      } else if (existing.transport === 'streamableHttp' && server.transport !== 'streamableHttp') {
+        // Prefer stdio — universally supported across all CLIs.
+        discoveredByName.set(server.name, server);
+      }
+    }
+    for (const server of discoveredByName.values()) {
       const exists = config.capabilities.some((c) => c.type === 'mcp' && c.id === server.name);
       if (!exists) {
         config.capabilities.push(toCapabilityEntry(server));
