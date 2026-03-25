@@ -49,15 +49,24 @@ describe('isUnderAllowedRoot', () => {
 });
 
 describe('getDefaultRootsForPlatform', () => {
-  it('keeps Windows defaults scoped to the user home directory', () => {
+  it('includes existing Windows drive roots in the default allowlist', () => {
     const roots = getDefaultRootsForPlatform('win32', {
       homeDir: 'C:\\Users\\share',
       pathExists: (target) => target === 'C:\\' || target === 'D:\\',
     });
-    assert.deepStrictEqual(roots, ['C:\\Users\\share']);
+    assert.deepStrictEqual(roots, ['C:\\Users\\share', 'C:\\', 'D:\\']);
     assert.strictEqual(isPathUnderRoots('C:\\Users\\share\\repo', roots, 'win32'), true);
-    assert.strictEqual(isPathUnderRoots('C:\\Windows', roots, 'win32'), false);
-    assert.strictEqual(isPathUnderRoots('D:\\other-user', roots, 'win32'), false);
+    assert.strictEqual(isPathUnderRoots('C:\\Windows', roots, 'win32'), true);
+    assert.strictEqual(isPathUnderRoots('D:\\other-user', roots, 'win32'), true);
+  });
+
+  it('keeps a UNC home root when no drive letters are available', () => {
+    const roots = getDefaultRootsForPlatform('win32', {
+      homeDir: '\\\\fileserver\\users\\share',
+      pathExists: () => false,
+    });
+    assert.deepStrictEqual(roots, ['\\\\fileserver\\users\\share', '\\\\fileserver\\users\\']);
+    assert.strictEqual(isPathUnderRoots('\\\\fileserver\\users\\share\\repo', roots, 'win32'), true);
   });
 });
 

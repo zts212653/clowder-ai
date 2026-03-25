@@ -98,7 +98,7 @@ export const ENV_VARS: EnvDefinition[] = [
   { name: 'UPLOAD_DIR', defaultValue: './uploads', description: '文件上传目录', category: 'server', sensitive: false },
   {
     name: 'PROJECT_ALLOWED_ROOTS',
-    defaultValue: 'home, tmp roots, /workspace, /Volumes (macOS), home-only (Windows)',
+    defaultValue: 'home, tmp roots, /workspace, /Volumes (macOS), existing drive roots (Windows)',
     description:
       '允许访问的项目根目录（按系统路径分隔符分隔，设置后覆盖默认值；配合 PROJECT_ALLOWED_ROOTS_APPEND=true 可追加）',
     category: 'server',

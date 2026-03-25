@@ -6,6 +6,7 @@
  * 被 projects.ts, threads.ts, AgentRouter.ts 复用。
  */
 
+import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { delimiter, relative, resolve, win32 } from 'node:path';
@@ -14,6 +15,7 @@ import { delimiter, relative, resolve, win32 } from 'node:path';
  * Allowed root directories for project paths.
  *
  * Default: homedir + /tmp + /private/tmp + /workspace + /Volumes (macOS only).
+ * Windows: existing drive roots (plus the home root for UNC/shared-home setups).
  *
  * PROJECT_ALLOWED_ROOTS (system path delimiter separated):
  *   - Default behaviour: **replaces** built-in defaults (backward compat).
@@ -27,6 +29,17 @@ export function getDefaultRootsForPlatform(
   const roots = new Set<string>([homeDir]);
 
   if (platformName === 'win32') {
+    const pathExists = opts?.pathExists ?? existsSync;
+    const homeRoot = win32.parse(homeDir).root;
+    if (homeRoot) {
+      roots.add(homeRoot);
+    }
+    for (let code = 65; code <= 90; code++) {
+      const driveRoot = `${String.fromCharCode(code)}:\\`;
+      if (pathExists(driveRoot)) {
+        roots.add(driveRoot);
+      }
+    }
     return [...roots];
   }
 
