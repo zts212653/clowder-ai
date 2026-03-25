@@ -15,7 +15,7 @@
  *   task.failed      → error
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
@@ -56,6 +56,11 @@ interface DareAgentServiceOptions {
   spawnFn?: SpawnFn;
 }
 
+interface DareWorkspaceConfig {
+  adapter?: string;
+  model?: string;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -75,6 +80,44 @@ const ADAPTER_ENDPOINT_ENV: Record<string, string> = {
   anthropic: 'ANTHROPIC_BASE_URL',
   'huawei-modelarts': 'HUAWEI_MODELARTS_BASE_URL',
 };
+
+function readWorkspaceDareConfig(workspace?: string): DareWorkspaceConfig | null {
+  if (!workspace) return null;
+  const configPath = join(workspace, '.dare', 'config.json');
+  if (!existsSync(configPath)) return null;
+  try {
+    const raw = readFileSync(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as { llm?: { adapter?: unknown; model?: unknown } };
+    const adapter = typeof parsed.llm?.adapter === 'string' ? parsed.llm.adapter.trim() : '';
+    const model = typeof parsed.llm?.model === 'string' ? parsed.llm.model.trim() : '';
+    if (!adapter && !model) return null;
+    return {
+      ...(adapter ? { adapter } : {}),
+      ...(model ? { model } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatWorkspaceModel(config: DareWorkspaceConfig | null): string | undefined {
+  const adapter = config?.adapter?.trim();
+  const model = config?.model?.trim();
+  if (adapter && model) return `${adapter}/${model}`;
+  if (model) return model;
+  return undefined;
+}
+
+function resolveMetadataModel(catId: CatId, explicitModel?: string, workspaceConfig?: DareWorkspaceConfig | null): string {
+  if (explicitModel) return explicitModel;
+  const workspaceModel = formatWorkspaceModel(workspaceConfig ?? null);
+  if (workspaceModel) return workspaceModel;
+  try {
+    return getCatModel(catId as string);
+  } catch {
+    return 'unknown';
+  }
+}
 
 /**
  * F135: Resolve vendor/dare-cli path from project root (not cwd).
@@ -132,8 +175,9 @@ export class DareAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const workspaceConfig = readWorkspaceDareConfig(options?.workingDirectory);
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_DARE_MODEL_OVERRIDE ?? this.model;
-    const metadataModel = effectiveModel ?? getCatModel(this.catId as string);
+    const metadataModel = resolveMetadataModel(this.catId, effectiveModel, workspaceConfig);
 
     // Runtime mode: require resolvable DARE module path to avoid opaque "No module named client".
     // Unit tests pass spawnFn and may not provide a real filesystem path; skip hard check there.
