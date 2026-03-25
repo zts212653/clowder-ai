@@ -32,9 +32,13 @@ cp .env.example .env
 
 # 5. 启动
 pnpm start
+# 如果报 "target path exists" 错误，改用：
+#   pnpm start:direct
 ```
 
 `pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
+
+> **提示：** 如果 `pnpm start` 因为 `../cat-cafe-runtime` 已存在而失败，改用 `pnpm start:direct` — 直接在当前目录启动，不创建 worktree。也可以自定义路径：`CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`。
 
 打开 `http://localhost:3003`，开始和你的团队对话。
 
@@ -61,6 +65,8 @@ your-projects/
 | `pnpm runtime:status` | 显示 worktree 路径、分支、HEAD、ahead/behind |
 
 首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。
+
+> **自定义运行时路径：** 设置 `CAT_CAFE_RUNTIME_DIR` 使用不同位置：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
 
 ## 配置
 
@@ -365,6 +371,12 @@ pnpm alpha:test         # 运行 alpha 集成测试
 ```
 
 ## 常见问题
+
+**`pnpm start` 报 "target path exists" 错误？**
+- 运行时 worktree 路径 `../cat-cafe-runtime` 已被其他项目或目录占用
+- **快速解决：** 改用 `pnpm start:direct`，跳过 worktree 直接在当前目录启动
+- **替代方案：** 自定义运行时路径：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+- 不需要 Redis 的话：`pnpm start:direct -- --memory`
 
 **Redis 启动不了？**
 - 检查端口 6399 是否被占用：`lsof -i :6399`
