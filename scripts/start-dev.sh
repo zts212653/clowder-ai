@@ -167,6 +167,21 @@ default_redis_port() {
     fi
 }
 
+normalize_raw_dev_redis_defaults() {
+    [ "$USE_REDIS" = true ] || return 0
+    [ "$PROD_WEB" = false ] || return 0
+    [ "$PREFER_DOTENV_PORTS" = "1" ] && return 0
+    [ -n "$CLI_REDIS_PORT_OVERRIDE" ] && return 0
+    [ "${REDIS_PORT:-}" = "6399" ] || return 0
+
+    REDIS_PORT="6398"
+    case "${REDIS_URL:-}" in
+        ""|"redis://localhost:6399"|"redis://127.0.0.1:6399")
+            REDIS_URL="redis://localhost:6398"
+            ;;
+    esac
+}
+
 # Profile 默认值（env 变量优先，profile 作 fallback）
 apply_profile_defaults() {
     local profile="$1"
@@ -245,6 +260,7 @@ print_config_summary() {
 API_PORT=${API_SERVER_PORT:-3004}
 WEB_PORT=${FRONTEND_PORT:-3003}
 REDIS_PORT=${REDIS_PORT:-$(default_redis_port)}
+normalize_raw_dev_redis_defaults
 
 # Profile-aware config resolution
 resolve_config "ANTHROPIC_PROXY_ENABLED"
