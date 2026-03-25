@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cat Café</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* macOS traffic light padding */
+    .drag-region {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 28px;
+      -webkit-app-region: drag;
+    }
+    .loader {
+      text-align: center;
+      padding: 2rem;
+    }
+    .loader h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .loader p {
+      color: #888;
+      font-size: 0.875rem;
+      margin-bottom: 1.5rem;
+    }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #333;
+      border-top-color: #e5e5e5;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { display: none; color: #f87171; }
+    .retry-btn {
+      margin-top: 1rem;
+      padding: 0.5rem 1.5rem;
+      background: #262626;
+      color: #e5e5e5;
+      border: 1px solid #404040;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .retry-btn:hover { background: #333; }
+  </style>
+</head>
+<body>
+  <div class="drag-region"></div>
+  <div class="loader">
+    <div class="spinner" id="spinner"></div>
+    <h1>Cat Café</h1>
+    <p id="status">正在连接服务器...</p>
+    <div class="error" id="error">
+      <p>无法连接到 Cat Café 服务器</p>
+      <p style="color: #888; margin-top: 0.5rem; font-size: 0.8rem;">请确保已运行 <code>pnpm start</code></p>
+      <button class="retry-btn" onclick="tryConnect()">重试</button>
+    </div>
+  </div>
+  <script>
+    const SERVER_URL = 'http://localhost:3003';
+    const MAX_RETRIES = 10;
+    let retries = 0;
+
+    async function tryConnect() {
+      document.getElementById('spinner').style.display = 'block';
+      document.getElementById('error').style.display = 'none';
+      document.getElementById('status').textContent = '正在连接服务器...';
+      retries = 0;
+      connect();
+    }
+
+    async function connect() {
+      try {
+        const res = await fetch(SERVER_URL, { mode: 'no-cors' });
+        window.location.href = SERVER_URL;
+      } catch (e) {
+        retries++;
+        if (retries < MAX_RETRIES) {
+          document.getElementById('status').textContent =
+            `正在连接服务器... (${retries}/${MAX_RETRIES})`;
+          setTimeout(connect, 1000);
+        } else {
+          document.getElementById('spinner').style.display = 'none';
+          document.getElementById('status').style.display = 'none';
+          document.getElementById('error').style.display = 'block';
+        }
+      }
+    }
+
+    connect();
+  </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { useChatStore } from '@/stores/chatStore';
+import { useTauri } from '@/hooks/useTauri';
 import { ExportButton } from './ExportButton';
 import { HubButton } from './HubButton';
 import { CatCafeLogo } from './icons/CatCafeLogo';
@@ -34,9 +35,14 @@ export function ChatContainerHeader({
   onToggleStatusPanel,
   defaultCatId,
 }: ChatContainerHeaderProps) {
+  const isTauri = useTauri();
+
   return (
-    <header className="border-b border-cocreator-light bg-cocreator-bg safe-area-top">
-      <div className="px-5 py-3 flex items-center gap-2">
+    <header
+      className="border-b border-cocreator-light bg-cocreator-bg safe-area-top"
+      {...(isTauri ? { 'data-tauri-drag-region': true } : {})}
+    >
+      <div className={`px-5 py-3 flex items-center gap-2 ${isTauri ? 'pl-20' : ''}`}>
         <button
           onClick={onToggleSidebar}
           className="p-1 rounded-lg hover:bg-cocreator-light transition-colors mr-1"
