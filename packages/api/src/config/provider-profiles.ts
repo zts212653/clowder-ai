@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { isSameProject } from '../utils/monorepo-root.js';
 import type {
@@ -608,16 +608,21 @@ async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: stri
   const globalMetaPath = safePath(globalRoot, CAT_CAFE_DIR, META_FILENAME);
   const globalSecretsPath = safePath(globalRoot, CAT_CAFE_DIR, SECRETS_FILENAME);
 
-  // Merge: if global already has profiles, add non-duplicate local profiles
+  // Merge: if global already has profiles, add local profiles (re-ID on collision)
   if (existsSync(globalMetaPath)) {
     const globalResult = await readRawAtStorageRoot(globalRoot);
     const existingIds = new Set(globalResult.meta.providers.map((p) => p.id));
     for (const profile of localResult.meta.providers) {
-      if (!existingIds.has(profile.id)) {
-        globalResult.meta.providers.push(profile);
-        if (localResult.secrets.profiles[profile.id]) {
-          globalResult.secrets.profiles[profile.id] = localResult.secrets.profiles[profile.id];
-        }
+      let mergedId = profile.id;
+      if (existingIds.has(mergedId)) {
+        mergedId = `${mergedId}-migrated-${Date.now()}`;
+      }
+      const mergedProfile = { ...profile, id: mergedId };
+      globalResult.meta.providers.push(mergedProfile);
+      existingIds.add(mergedId);
+      const secretEntry = localResult.secrets.profiles[profile.id];
+      if (secretEntry) {
+        globalResult.secrets.profiles[mergedId] = secretEntry;
       }
     }
     await writeRaw(globalMetaPath, globalSecretsPath, globalResult.meta, globalResult.secrets);
@@ -625,9 +630,18 @@ async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: stri
     await writeRaw(globalMetaPath, globalSecretsPath, localResult.meta, localResult.secrets);
   }
 
-  // Mark local file as migrated to prevent re-processing
+  await chmod(globalSecretsPath, 0o600);
+
+  // Mark local file as migrated to prevent re-processing.
+  // Tolerate ENOENT: a concurrent caller may have already renamed the file.
   const localMetaPath = safePath(projectRoot, CAT_CAFE_DIR, META_FILENAME);
-  renameSync(localMetaPath, `${localMetaPath}.migrated`);
+  try {
+    renameSync(localMetaPath, `${localMetaPath}.migrated`);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || !existsSync(`${localMetaPath}.migrated`)) {
+      throw err;
+    }
+  }
 }
 
 function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string): void {
@@ -641,12 +655,21 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
 
   if (!existsSync(localMetaPath)) return;
 
-  // Merge: if global already has profiles, add non-duplicate local profiles
+  // Merge: if global already has profiles, add local profiles (re-ID on collision)
   if (existsSync(globalMetaPath)) {
-    const localMeta = JSON.parse(readFileSync(localMetaPath, 'utf-8')) as ProviderProfilesMetaFile;
+    const rawLocalMeta = JSON.parse(readFileSync(localMetaPath, 'utf-8'));
+    const normalizedLocal = normalizeMeta(rawLocalMeta);
     const globalMeta = JSON.parse(readFileSync(globalMetaPath, 'utf-8')) as ProviderProfilesMetaFile;
     const existingIds = new Set((globalMeta.providers ?? []).map((p) => p.id));
-    const localProviders = (localMeta.providers ?? []).filter((p) => !existingIds.has(p.id));
+    const localProviders: ProviderProfileMeta[] = [];
+    for (const p of normalizedLocal.value.providers) {
+      let mergedId = p.id;
+      if (existingIds.has(mergedId)) {
+        mergedId = `${mergedId}-migrated-${Date.now()}`;
+      }
+      localProviders.push({ ...p, id: mergedId });
+      existingIds.add(mergedId);
+    }
     if (localProviders.length > 0) {
       globalMeta.providers = [...(globalMeta.providers ?? []), ...localProviders];
       writeFileSync(globalMetaPath, `${JSON.stringify(globalMeta, null, 2)}\n`);
@@ -657,8 +680,10 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
           ? JSON.parse(readFileSync(globalSecretsPath, 'utf-8'))
           : { profiles: {} };
         for (const p of localProviders) {
-          if (localSecrets.profiles?.[p.id]) {
-            globalSecrets.profiles[p.id] = localSecrets.profiles[p.id];
+          const originalId = p.id.replace(/-migrated-\d+$/, '');
+          const secretEntry = localSecrets.profiles?.[originalId] ?? localSecrets.profiles?.[p.id];
+          if (secretEntry) {
+            globalSecrets.profiles[p.id] = secretEntry;
           }
         }
         writeFileSync(globalSecretsPath, `${JSON.stringify(globalSecrets, null, 2)}\n`);
@@ -673,8 +698,15 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
     }
   }
 
-  // Mark local file as migrated
-  renameSync(localMetaPath, `${localMetaPath}.migrated`);
+  // Mark local file as migrated.
+  // Tolerate ENOENT: a concurrent caller may have already renamed the file.
+  try {
+    renameSync(localMetaPath, `${localMetaPath}.migrated`);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || !existsSync(`${localMetaPath}.migrated`)) {
+      throw err;
+    }
+  }
 }
 
 async function readRaw(projectRoot: string): Promise<{
@@ -685,6 +717,7 @@ async function readRaw(projectRoot: string): Promise<{
   dirty: boolean;
 }> {
   const storageRoot = await resolveProviderProfilesRoot(projectRoot);
+  registerProjectRoot(projectRoot);
   const localRoot = detectProjectLocalProfiles(projectRoot);
   if (localRoot) {
     await migrateProjectLocalToGlobal(localRoot, storageRoot);
