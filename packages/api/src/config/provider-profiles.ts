@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
-import { isSameProject } from '../utils/monorepo-root.js';
 import type {
   AnthropicRuntimeProfile,
   BootstrapBinding,
@@ -613,6 +612,8 @@ async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: stri
     const globalResult = await readRawAtStorageRoot(globalRoot);
     const existingIds = new Set(globalResult.meta.providers.map((p) => p.id));
     for (const profile of localResult.meta.providers) {
+      // Skip builtins — normalization already guarantees their presence in the global store.
+      if (profile.kind === 'builtin' || profile.builtin) continue;
       let mergedId = profile.id;
       if (existingIds.has(mergedId)) {
         mergedId = `${mergedId}-migrated-${Date.now()}`;
@@ -663,6 +664,8 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
     const existingIds = new Set((globalMeta.providers ?? []).map((p) => p.id));
     const localProviders: ProviderProfileMeta[] = [];
     for (const p of normalizedLocal.value.providers) {
+      // Skip builtins — normalization already guarantees their presence in the global store.
+      if (p.kind === 'builtin' || p.builtin) continue;
       let mergedId = p.id;
       if (existingIds.has(mergedId)) {
         mergedId = `${mergedId}-migrated-${Date.now()}`;
@@ -850,8 +853,6 @@ async function collectRuntimeCatsBoundToProfileAcrossRoots(projectRoot: string, 
   const roots = await listProviderProfilesProjectRoots(projectRoot);
   const result = new Set<string>();
   for (const root of roots) {
-    // Skip sibling worktrees — only scan the caller's own root and truly separate projects
-    if (resolve(root) !== resolve(projectRoot) && isSameProject(root, projectRoot)) continue;
     for (const catId of collectRuntimeCatsBoundToProfile(root, profileId)) {
       result.add(catId);
     }

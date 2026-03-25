@@ -231,7 +231,7 @@ describe('provider profile store', () => {
     );
   });
 
-  it('does not let sibling worktree runtime data block deleting a local account', async () => {
+  it('blocks deleting a global profile still referenced by a sibling worktree', async () => {
     const repoRoot = await makeTmpDir('shared-delete-main');
     const runtimeRoot = await makeTmpDir('shared-delete-runtime');
     try {
@@ -266,12 +266,9 @@ describe('provider profile store', () => {
         cli: { command: 'claude', outputFormat: 'stream-json' },
       });
 
-      await deleteProviderProfile(runtimeRoot, created.id, created.id);
-
-      const profiles = await readProviderProfiles(runtimeRoot);
-      assert.equal(
-        profiles.providers.some((profile) => profile.id === created.id),
-        false,
+      await assert.rejects(
+        deleteProviderProfile(runtimeRoot, created.id, created.id),
+        /still referenced by runtime cats/,
       );
     } finally {
       await Promise.all([
