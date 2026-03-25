@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
+import { isSameProject } from '../utils/monorepo-root.js';
 import type {
   AnthropicRuntimeProfile,
   BootstrapBinding,
@@ -24,6 +25,7 @@ import type {
 import {
   detectProjectLocalProfiles,
   listProviderProfilesProjectRoots,
+  registerProjectRoot,
   resolveProviderProfilesRoot,
   resolveProviderProfilesRootSync,
 } from './provider-profiles-root.js';
@@ -126,6 +128,7 @@ async function withStorageRootLock<T>(storageRoot: string, action: () => Promise
 
 async function withProviderStoreLock<T>(projectRoot: string, action: (storageRoot: string) => Promise<T>): Promise<T> {
   const storageRoot = await resolveProviderProfilesRoot(projectRoot);
+  registerProjectRoot(projectRoot);
   return withStorageRootLock(storageRoot, async () => {
     const localRoot = detectProjectLocalProfiles(projectRoot);
     if (localRoot) {
@@ -604,7 +607,27 @@ async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: stri
   await mkdir(globalDir, { recursive: true });
   const globalMetaPath = safePath(globalRoot, CAT_CAFE_DIR, META_FILENAME);
   const globalSecretsPath = safePath(globalRoot, CAT_CAFE_DIR, SECRETS_FILENAME);
-  await writeRaw(globalMetaPath, globalSecretsPath, localResult.meta, localResult.secrets);
+
+  // Merge: if global already has profiles, add non-duplicate local profiles
+  if (existsSync(globalMetaPath)) {
+    const globalResult = await readRawAtStorageRoot(globalRoot);
+    const existingIds = new Set(globalResult.meta.providers.map((p) => p.id));
+    for (const profile of localResult.meta.providers) {
+      if (!existingIds.has(profile.id)) {
+        globalResult.meta.providers.push(profile);
+        if (localResult.secrets.profiles[profile.id]) {
+          globalResult.secrets.profiles[profile.id] = localResult.secrets.profiles[profile.id];
+        }
+      }
+    }
+    await writeRaw(globalMetaPath, globalSecretsPath, globalResult.meta, globalResult.secrets);
+  } else {
+    await writeRaw(globalMetaPath, globalSecretsPath, localResult.meta, localResult.secrets);
+  }
+
+  // Mark local file as migrated to prevent re-processing
+  const localMetaPath = safePath(projectRoot, CAT_CAFE_DIR, META_FILENAME);
+  renameSync(localMetaPath, `${localMetaPath}.migrated`);
 }
 
 function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string): void {
@@ -615,8 +638,43 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
   const localSecretsPath = safePath(localDir, SECRETS_FILENAME);
   const globalMetaPath = safePath(globalDir, META_FILENAME);
   const globalSecretsPath = safePath(globalDir, SECRETS_FILENAME);
-  if (existsSync(localMetaPath)) copyFileSync(localMetaPath, globalMetaPath);
-  if (existsSync(localSecretsPath)) copyFileSync(localSecretsPath, globalSecretsPath);
+
+  if (!existsSync(localMetaPath)) return;
+
+  // Merge: if global already has profiles, add non-duplicate local profiles
+  if (existsSync(globalMetaPath)) {
+    const localMeta = JSON.parse(readFileSync(localMetaPath, 'utf-8')) as ProviderProfilesMetaFile;
+    const globalMeta = JSON.parse(readFileSync(globalMetaPath, 'utf-8')) as ProviderProfilesMetaFile;
+    const existingIds = new Set((globalMeta.providers ?? []).map((p) => p.id));
+    const localProviders = (localMeta.providers ?? []).filter((p) => !existingIds.has(p.id));
+    if (localProviders.length > 0) {
+      globalMeta.providers = [...(globalMeta.providers ?? []), ...localProviders];
+      writeFileSync(globalMetaPath, `${JSON.stringify(globalMeta, null, 2)}\n`);
+      // Merge secrets too
+      if (existsSync(localSecretsPath)) {
+        const localSecrets = JSON.parse(readFileSync(localSecretsPath, 'utf-8'));
+        const globalSecrets = existsSync(globalSecretsPath)
+          ? JSON.parse(readFileSync(globalSecretsPath, 'utf-8'))
+          : { profiles: {} };
+        for (const p of localProviders) {
+          if (localSecrets.profiles?.[p.id]) {
+            globalSecrets.profiles[p.id] = localSecrets.profiles[p.id];
+          }
+        }
+        writeFileSync(globalSecretsPath, `${JSON.stringify(globalSecrets, null, 2)}\n`);
+        chmodSync(globalSecretsPath, 0o600);
+      }
+    }
+  } else {
+    copyFileSync(localMetaPath, globalMetaPath);
+    if (existsSync(localSecretsPath)) {
+      copyFileSync(localSecretsPath, globalSecretsPath);
+      chmodSync(globalSecretsPath, 0o600);
+    }
+  }
+
+  // Mark local file as migrated
+  renameSync(localMetaPath, `${localMetaPath}.migrated`);
 }
 
 async function readRaw(projectRoot: string): Promise<{
@@ -759,6 +817,8 @@ async function collectRuntimeCatsBoundToProfileAcrossRoots(projectRoot: string, 
   const roots = await listProviderProfilesProjectRoots(projectRoot);
   const result = new Set<string>();
   for (const root of roots) {
+    // Skip sibling worktrees — only scan the caller's own root and truly separate projects
+    if (resolve(root) !== resolve(projectRoot) && isSameProject(root, projectRoot)) continue;
     for (const catId of collectRuntimeCatsBoundToProfile(root, profileId)) {
       result.add(catId);
     }
@@ -784,6 +844,7 @@ export async function readBootstrapBindings(projectRoot: string): Promise<Bootst
 
 export function readBootstrapBindingsSync(projectRoot: string): BootstrapBindings {
   const storageRoot = resolveProviderProfilesRootSync(projectRoot);
+  registerProjectRoot(projectRoot);
   const localRoot = detectProjectLocalProfiles(projectRoot);
   if (localRoot) {
     migrateProjectLocalToGlobalSync(localRoot, storageRoot);
