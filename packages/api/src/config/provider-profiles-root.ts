@@ -6,6 +6,7 @@ import { isUnderAllowedRoot } from '../utils/project-path.js';
 const CAT_CAFE_DIR = '.cat-cafe';
 const META_FILENAME = 'provider-profiles.json';
 const KNOWN_ROOTS_FILENAME = 'known-project-roots.json';
+const MIGRATED_ROOTS_FILENAME = 'migrated-project-roots.json';
 
 export function isAllowedProviderProfilesRoot(absPath: string): boolean {
   return isUnderAllowedRoot(absPath);
@@ -98,6 +99,55 @@ export function resolveProviderProfilesRootSync(_projectRoot: string): string {
 }
 
 /**
+ * Record that a project root has been successfully migrated to global storage.
+ * Written to the global config dir (always writable) so that read-only project
+ * checkouts do not re-trigger migration on every provider-store read.
+ */
+/** Canonicalize a project root (resolve symlinks like /tmp → /private/tmp on macOS). */
+function canonicalizeRoot(root: string): string {
+  const abs = resolve(root);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+export function markProjectRootMigrated(projectRoot: string): void {
+  const globalRoot = resolveGlobalRoot();
+  const dir = resolve(globalRoot, CAT_CAFE_DIR);
+  const filePath = resolve(dir, MIGRATED_ROOTS_FILENAME);
+  let roots: string[] = [];
+  try {
+    roots = JSON.parse(readFileSync(filePath, 'utf-8'));
+    if (!Array.isArray(roots)) roots = [];
+  } catch {
+    /* missing or corrupt — reset */
+  }
+  const absRoot = canonicalizeRoot(projectRoot);
+  if (!roots.includes(absRoot)) {
+    roots.push(absRoot);
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(filePath, `${JSON.stringify(roots, null, 2)}\n`);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+function isProjectRootMigrated(projectRoot: string): boolean {
+  const globalRoot = resolveGlobalRoot();
+  const filePath = resolve(globalRoot, CAT_CAFE_DIR, MIGRATED_ROOTS_FILENAME);
+  try {
+    const roots: unknown = JSON.parse(readFileSync(filePath, 'utf-8'));
+    return Array.isArray(roots) && roots.includes(canonicalizeRoot(projectRoot));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check whether a project-local provider-profiles.json exists that should be
  * migrated to the global location. Returns the project-local storage root
  * if migration is needed, or null if not.
@@ -118,5 +168,7 @@ export function detectProjectLocalProfiles(projectRoot: string): string | null {
   if (absProject === globalRoot) return null;
   const localMeta = resolve(absProject, CAT_CAFE_DIR, META_FILENAME);
   if (!existsSync(localMeta)) return null;
+  // Already migrated — global-side marker prevents re-migration on read-only checkouts
+  if (isProjectRootMigrated(absProject)) return null;
   return absProject;
 }

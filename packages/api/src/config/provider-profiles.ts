@@ -24,6 +24,7 @@ import type {
 import {
   detectProjectLocalProfiles,
   listProviderProfilesProjectRoots,
+  markProjectRootMigrated,
   registerProjectRoot,
   resolveProviderProfilesRoot,
   resolveProviderProfilesRootSync,
@@ -636,11 +637,12 @@ async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: stri
   // Mark local file as migrated to prevent re-processing.
   // Best-effort: global data is already persisted, so read-only checkouts
   // (EACCES/EROFS) or concurrent renames (ENOENT) should not crash callers.
+  // When rename fails, record in global migrated-roots so detection skips this project.
   const localMetaPath = safePath(projectRoot, CAT_CAFE_DIR, META_FILENAME);
   try {
     renameSync(localMetaPath, `${localMetaPath}.migrated`);
   } catch {
-    /* best-effort — global migration already succeeded */
+    markProjectRootMigrated(projectRoot);
   }
 }
 
@@ -706,10 +708,11 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
   // Mark local file as migrated.
   // Best-effort: global data is already persisted, so read-only checkouts
   // (EACCES/EROFS) or concurrent renames (ENOENT) should not crash callers.
+  // When rename fails, record in global migrated-roots so detection skips this project.
   try {
     renameSync(localMetaPath, `${localMetaPath}.migrated`);
   } catch {
-    /* best-effort — global migration already succeeded */
+    markProjectRootMigrated(projectRoot);
   }
 }
 

@@ -718,4 +718,82 @@ describe('provider profile store', () => {
       ]);
     }
   });
+
+  it('skips re-migration when project root is recorded in global migrated-roots', async () => {
+    const project = await makeTmpDir('migrated-roots-proj');
+    const globalRoot = await makeTmpDir('migrated-roots-global');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    try {
+      // Seed a local profile in the project
+      const localDir = join(project, '.cat-cafe');
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3,
+          activeProfileId: null,
+          providers: [
+            {
+              id: 'acct-once',
+              name: 'Once',
+              provider: 'anthropic',
+              kind: 'account',
+              builtin: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+          bootstrapBindings: {},
+        }),
+      );
+      await writeFile(
+        join(localDir, 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ version: 3, profiles: { 'acct-once': { apiKey: 'sk-once' } } }),
+      );
+
+      // First read triggers migration
+      const view1 = await readProviderProfiles(project);
+      const once1 = view1.providers.filter((p) => p.id.startsWith('acct-once'));
+      assert.equal(once1.length, 1, 'profile migrated once');
+
+      // Simulate read-only local FS: re-create the local meta (rename didn't delete it)
+      // The global migrated-roots marker should prevent re-migration even though local file exists.
+      await writeFile(
+        join(localDir, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3,
+          activeProfileId: null,
+          providers: [
+            {
+              id: 'acct-once',
+              name: 'Once',
+              provider: 'anthropic',
+              kind: 'account',
+              builtin: false,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+          bootstrapBindings: {},
+        }),
+      );
+
+      // Write global migrated-roots marker (as if rename had failed and fallback wrote it)
+      const { markProjectRootMigrated } = await import('../dist/config/provider-profiles-root.js');
+      markProjectRootMigrated(project);
+
+      // Second read should NOT re-merge (no duplicate)
+      const view2 = await readProviderProfiles(project);
+      const once2 = view2.providers.filter((p) => p.id.startsWith('acct-once'));
+      assert.equal(once2.length, 1, 'no duplicate after migrated-roots marker prevents re-migration');
+    } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      await Promise.all([
+        rm(project, { recursive: true, force: true }),
+        rm(globalRoot, { recursive: true, force: true }),
+      ]);
+    }
+  });
 });
