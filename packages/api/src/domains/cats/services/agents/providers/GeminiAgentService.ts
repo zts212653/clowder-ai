@@ -291,7 +291,7 @@ export class GeminiAgentService implements AgentService {
           () => {
             try {
               process.kill(-pid, 'SIGTERM');
-              log.info({ pid }, `[gemini] Antigravity process group killed via signal`);
+              log.debug({ pid }, `[gemini] Antigravity process group killed via signal`);
             } catch {
               /* already exited */
             }

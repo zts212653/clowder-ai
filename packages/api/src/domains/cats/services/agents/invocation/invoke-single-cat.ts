@@ -750,7 +750,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         callbackEnv.OPENCODE_CONFIG = configPath;
         if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
         if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
-        log.info({ catId, configPath, provider: ocProviderName, apiType }, 'OpenCode runtime config written');
+        log.debug({ catId, configPath, provider: ocProviderName, apiType }, 'OpenCode runtime config written');
       } catch (err) {
         log.warn({ catId, err }, 'Failed to write OpenCode runtime config — falling back to env vars');
       }

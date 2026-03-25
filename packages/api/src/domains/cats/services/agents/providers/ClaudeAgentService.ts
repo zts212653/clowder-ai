@@ -15,8 +15,9 @@
  *   result/success → 跳过 (done 在循环后 yield)
  */
 
-import { existsSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
@@ -106,9 +107,12 @@ function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<s
       env.ANTHROPIC_DEFAULT_HAIKU_MODEL = effectiveModel;
     }
   } else if (mode === 'subscription') {
-    // Subscription mode: explicitly clear inherited key-based env vars.
-    env.ANTHROPIC_API_KEY = null;
-    env.ANTHROPIC_BASE_URL = null;
+    // Subscription mode: clear Cat-Café-injected overrides only.
+    // DO NOT null out ANTHROPIC_API_KEY / BASE_URL — the CLI reads auth from
+    // ~/.claude/settings.json (included via --setting-sources user).
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = null;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = null;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = null;
   }
   return env;
 }
@@ -157,6 +161,8 @@ export class ClaudeAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
   private readonly mcpServerPath: string | undefined;
+  /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
+  private mcpConfigFilePath: string | undefined;
 
   constructor(options?: ClaudeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
@@ -199,9 +205,10 @@ export class ClaudeAgentService implements AgentService {
       getCatEffort(this.catId as string),
       '--permission-mode',
       PERMISSION_MODE,
-      // Skip global user settings to prevent config pollution across sessions
+      // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
+      // subscription mode: include user-level so CLI reads auth from ~/.claude/settings.json.
       '--setting-sources',
-      'project,local',
+      isApiKeyMode ? 'project,local' : 'project,local,user',
       // Enable Chrome MCP integration (built-in, requires Chrome + extension running)
       '--chrome',
     ];
@@ -219,18 +226,34 @@ export class ClaudeAgentService implements AgentService {
     }
 
     // Add MCP server config when callback env is present
+    // On Windows, Claude CLI treats inline JSON as a file path — write to temp file instead.
+    // The file is cached per-instance so concurrent invocations share one file (no temp spam).
     if (options?.callbackEnv && this.mcpServerPath) {
-      args.push(
-        '--mcp-config',
-        JSON.stringify({
-          mcpServers: {
-            'cat-cafe': {
-              command: 'node',
-              args: [this.mcpServerPath],
+      if (IS_WINDOWS) {
+        if (!this.mcpConfigFilePath || !existsSync(this.mcpConfigFilePath)) {
+          const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-'));
+          this.mcpConfigFilePath = join(dir, 'mcp-config.json');
+          writeFileSync(
+            this.mcpConfigFilePath,
+            JSON.stringify({
+              mcpServers: {
+                'cat-cafe': { command: 'node', args: [this.mcpServerPath] },
+              },
+            }),
+            'utf-8',
+          );
+        }
+        args.push('--mcp-config', this.mcpConfigFilePath);
+      } else {
+        args.push(
+          '--mcp-config',
+          JSON.stringify({
+            mcpServers: {
+              'cat-cafe': { command: 'node', args: [this.mcpServerPath] },
             },
-          },
-        }),
-      );
+          }),
+        );
+      }
     }
 
     const metadata: MessageMetadata = { provider: 'anthropic', model: effectiveModel };
