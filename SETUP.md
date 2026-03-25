@@ -32,9 +32,13 @@ cp .env.example .env
 
 # 5. Run
 pnpm start
+# If this fails with "target path exists", use:
+#   pnpm start:direct
 ```
 
 `pnpm start` uses the **runtime worktree** architecture: it creates an isolated `../cat-cafe-runtime` worktree (on first run), syncs it to `origin/main`, builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). This keeps your development checkout clean.
+
+> **Tip:** If `pnpm start` fails because `../cat-cafe-runtime` already exists, use `pnpm start:direct` instead — it runs directly in your current checkout without creating a worktree. You can also set a custom path: `CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`.
 
 Open `http://localhost:3003` and start talking to your team.
 
@@ -61,6 +65,8 @@ your-projects/
 | `pnpm runtime:status` | Show worktree path, branch, HEAD, ahead/behind |
 
 First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast-forward sync then start.
+
+> **Custom runtime path:** Set `CAT_CAFE_RUNTIME_DIR` to use a different location: `CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
 
 ## Configuration
 
@@ -365,6 +371,12 @@ pnpm alpha:test         # Run alpha integration tests
 ```
 
 ## Troubleshooting
+
+**`pnpm start` fails with "target path exists"?**
+- The runtime worktree path `../cat-cafe-runtime` is already occupied by another project or directory
+- **Quick fix:** Use `pnpm start:direct` to bypass the worktree and run directly in your checkout
+- **Alternative:** Set a custom runtime path: `CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+- If you don't need Redis: `pnpm start:direct -- --memory`
 
 **Redis won't start?**
 - Check if port 6399 is in use: `lsof -i :6399`
