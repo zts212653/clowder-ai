@@ -341,34 +341,24 @@ describe('DareAgentService', () => {
     }
   });
 
-  test('DARE_API_KEY overrides adapter-specific key and maps to adapter env name', async () => {
+  test('apiKey option overrides adapter-specific key and maps to adapter env name', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
-    const oldDareKey = process.env.DARE_API_KEY;
-    const oldAnthropicKey = process.env.ANTHROPIC_API_KEY;
-    process.env.DARE_API_KEY = 'sk-dare-override';
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-will-be-overridden';
 
-    try {
-      const service = new DareAgentService({
-        catId: 'dare',
-        spawnFn,
-        adapter: 'anthropic',
-        model: 'claude-3-7-sonnet-latest',
-      });
-      const promise = collect(service.invoke('Test key override'));
-      emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
-      await promise;
+    const service = new DareAgentService({
+      catId: 'dare',
+      spawnFn,
+      adapter: 'anthropic',
+      model: 'claude-3-7-sonnet-latest',
+      apiKey: 'sk-dare-override',
+    });
+    const promise = collect(service.invoke('Test key override'));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
 
-      const opts = spawnFn.mock.calls[0].arguments[2];
-      assert.strictEqual(opts.env.ANTHROPIC_API_KEY, 'sk-dare-override');
-      assert.ok(!('DARE_API_KEY' in opts.env), 'generic key should not leak to child env');
-    } finally {
-      if (oldDareKey !== undefined) process.env.DARE_API_KEY = oldDareKey;
-      else delete process.env.DARE_API_KEY;
-      if (oldAnthropicKey !== undefined) process.env.ANTHROPIC_API_KEY = oldAnthropicKey;
-      else delete process.env.ANTHROPIC_API_KEY;
-    }
+    const opts = spawnFn.mock.calls[0].arguments[2];
+    assert.strictEqual(opts.env.ANTHROPIC_API_KEY, 'sk-dare-override');
+    assert.ok(!('DARE_API_KEY' in opts.env), 'generic key should not leak to child env');
   });
 
   test('always yields exactly one final done', async () => {

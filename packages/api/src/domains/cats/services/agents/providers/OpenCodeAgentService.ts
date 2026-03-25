@@ -49,8 +49,8 @@ export class OpenCodeAgentService implements AgentService {
   constructor(options?: OpenCodeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opencode');
     this.model = options?.model ?? getCatModel(this.catId as string);
-    this.apiKey = options?.apiKey ?? process.env[OPENCODE_API_KEY_ENV] ?? process.env[ANTHROPIC_API_KEY_ENV];
-    this.baseUrl = options?.baseUrl ?? process.env.OPENCODE_BASE_URL ?? process.env[ANTHROPIC_BASE_URL_ENV];
+    this.apiKey = options?.apiKey;
+    this.baseUrl = options?.baseUrl;
     this.spawnFn = options?.spawnFn;
   }
 
