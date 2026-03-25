@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { UploadSkillModal } from './UploadSkillModal';
 
 interface SearchSkill {
   id: string;
@@ -169,6 +170,9 @@ export function HubSkillsTab() {
   const [trendingResults, setTrendingResults] = useState<SearchResult | null>(null);
   const [trendingLoading, setTrendingLoading] = useState(false);
 
+  // Upload modal state
+  const [showUpload, setShowUpload] = useState(false);
+
   // Install status
   const [installStatus, setInstallStatus] = useState<Map<string, InstallStatus>>(new Map());
   const statusTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -316,6 +320,24 @@ export function HubSkillsTab() {
           {toast.message}
         </div>
       )}
+
+      {/* Upload button */}
+      <button
+        type="button"
+        onClick={() => setShowUpload(true)}
+        className="w-full py-2 text-xs font-medium rounded-lg border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors"
+      >
+        + 上传 Skill
+      </button>
+
+      {/* Upload modal */}
+      <UploadSkillModal
+        open={showUpload}
+        onClose={() => setShowUpload(false)}
+        onSuccess={() => {
+          showToast('Skill 上传成功', 'success');
+        }}
+      />
 
       {/* Search */}
       <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">

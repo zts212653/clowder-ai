@@ -182,33 +182,12 @@ function CapabilityCard({
 
   return (
     <div
-      className={`group relative rounded-xl border transition-all duration-300 overflow-hidden ${
+      className={`group rounded-xl border transition-all duration-300 overflow-hidden ${
         expanded
           ? 'border-indigo-300 shadow-md ring-1 ring-indigo-100 bg-white/60 backdrop-blur-sm'
           : 'border-slate-200/60 hover:border-indigo-200 hover:shadow shadow-sm bg-white/40'
       }`}
     >
-      {/* Delete button — top-right corner, visible on hover for external skills */}
-      {item.source === 'external' && onUninstall && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onUninstall(item.id);
-          }}
-          title="卸载此 Skill"
-          className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-red-50 text-red-400 hover:text-red-600"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
-      )}
-
       {/* Header */}
       <div className={`flex items-center gap-3 px-4 transition-all duration-300 ${expanded ? 'py-3' : 'py-2.5'}`}>
         <button
@@ -258,7 +237,26 @@ function CapabilityCard({
         </button>
 
         {/* Global toggle */}
-        <div className="shrink-0 pl-2">
+        <div className="shrink-0 pl-2 flex items-center gap-1">
+          {item.source === 'external' && onUninstall && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUninstall(item.id);
+              }}
+              title="卸载此 Skill"
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+          )}
           <ToggleSwitch
             enabled={item.enabled}
             disabled={isToggling}

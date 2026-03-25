@@ -9,7 +9,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readlink, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -408,6 +408,83 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
         reply.status(map[err.code] ?? 500);
         return { success: false, error: err.message, code: err.code };
       }
+      reply.status(500);
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // ────────────────────────────────────────────────────────
+  // POST /api/skills/upload — 上传本地 skill（JSON 格式）
+  // ────────────────────────────────────────────────────────
+  app.post('/api/skills/upload', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const body = request.body as {
+      name?: string;
+      files?: { path: string; content: string }[];
+    };
+
+    if (!body.name || !body.files?.length) {
+      reply.status(400);
+      return { success: false, error: 'Missing name or files' };
+    }
+
+    const skillName = body.name.trim();
+    if (!skillName || /[\\/]|(\.\.)/.test(skillName)) {
+      reply.status(422);
+      return { success: false, error: 'Invalid skill name' };
+    }
+
+    const skillsDir = resolve(CAT_CAFE_SKILLS_SRC);
+    const skillDir = join(skillsDir, skillName);
+
+    try {
+      // Write all files
+      for (const file of body.files) {
+        const safePath = file.path
+          .replace(/\\/g, '/')
+          .replace(/\.\.\//g, '')
+          .replace(/^\//, '');
+        if (!safePath) continue;
+        const fullPath = join(skillDir, safePath);
+        await mkdir(dirname(fullPath), { recursive: true });
+        await writeFile(fullPath, Buffer.from(file.content, 'base64'));
+      }
+
+      // Verify SKILL.md exists
+      if (!existsSync(join(skillDir, 'SKILL.md'))) {
+        reply.status(422);
+        return { success: false, error: 'Uploaded files must include SKILL.md' };
+      }
+
+      // Create symlinks
+      const { createProviderSymlinks } = await import('../domains/cats/services/skillhub/SymlinkManager.js');
+      const mounts = await createProviderSymlinks(skillName, skillsDir);
+
+      // Register in installed-skills.json
+      const { addInstalledSkill } = await import('../domains/cats/services/skillhub/InstalledSkillRegistry.js');
+      await addInstalledSkill(CAT_CAFE_ROOT, {
+        name: skillName,
+        source: 'skillhub',
+        skillhubUrl: '',
+        owner: 'local',
+        repo: 'upload',
+        remoteSkillName: skillName,
+        installedAt: new Date().toISOString(),
+      });
+
+      return {
+        success: true,
+        name: skillName,
+        localPath: `cat-cafe-skills/${skillName}`,
+        files: body.files.map((f) => f.path),
+        mounts,
+      };
+    } catch (err) {
       reply.status(500);
       return { success: false, error: String(err) };
     }
