@@ -267,7 +267,7 @@ export class ClaudeAgentService implements AgentService {
 
     try {
       const claudeCommand = resolveCliCommand('claude');
-      log.debug({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
+      log.info({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
       if (!claudeCommand) {
         log.warn({ catId: this.catId }, 'Claude CLI not found');
         yield {
@@ -429,7 +429,7 @@ export class ClaudeAgentService implements AgentService {
         }
       }
 
-      log.debug(
+      log.info(
         { catId: this.catId, totalEvents: eventCount, textEvents: textEventCount, sessionId: metadata.sessionId },
         'Claude CLI invocation completed',
       );
