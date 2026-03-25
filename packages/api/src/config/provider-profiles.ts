@@ -723,7 +723,7 @@ async function readRaw(projectRoot: string): Promise<{
   registerProjectRoot(projectRoot);
   const localRoot = detectProjectLocalProfiles(projectRoot);
   if (localRoot) {
-    await migrateProjectLocalToGlobal(localRoot, storageRoot);
+    await withStorageRootLock(storageRoot, () => migrateProjectLocalToGlobal(localRoot, storageRoot));
   }
   return readRawAtStorageRoot(storageRoot);
 }
@@ -765,6 +765,7 @@ async function writeRaw(
   secrets: ProviderProfilesSecretsFile,
 ): Promise<void> {
   await writeJsonAtomic(secretsPath, secrets);
+  await chmod(secretsPath, 0o600);
   await writeJsonAtomic(metaPath, meta);
 }
 

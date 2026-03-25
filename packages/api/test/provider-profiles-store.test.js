@@ -502,4 +502,21 @@ describe('provider profile store', () => {
       ]);
     }
   });
+
+  it('writeRaw preserves 0o600 permissions on the secrets file', async () => {
+    const created = await createProviderProfile(projectRoot, {
+      displayName: 'Chmod Check',
+      authType: 'api_key',
+      baseUrl: 'https://api.chmod.dev',
+      apiKey: 'sk-chmod-check',
+    });
+
+    const secretsPath = join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json');
+    const secretsStat = await stat(secretsPath);
+    assert.equal(
+      secretsStat.mode & 0o777,
+      0o600,
+      `secrets file should have mode 0600 but got ${(secretsStat.mode & 0o777).toString(8)}`,
+    );
+  });
 });
