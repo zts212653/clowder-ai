@@ -118,6 +118,7 @@ export function CapabilitySection({
   catFamilies,
   toggling,
   onToggle,
+  onUninstall,
 }: {
   icon: ReactNode;
   title: string;
@@ -126,6 +127,7 @@ export function CapabilitySection({
   catFamilies: CatFamily[];
   toggling: string | null;
   onToggle: ToggleHandler;
+  onUninstall?: (id: string) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -147,6 +149,7 @@ export function CapabilitySection({
             catFamilies={catFamilies}
             toggling={toggling}
             onToggle={onToggle}
+            onUninstall={onUninstall}
           />
         ))}
       </div>
@@ -161,11 +164,13 @@ function CapabilityCard({
   catFamilies,
   toggling,
   onToggle,
+  onUninstall,
 }: {
   item: CapabilityBoardItem;
   catFamilies: CatFamily[];
   toggling: string | null;
   onToggle: ToggleHandler;
+  onUninstall?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isToggling = toggling === `${item.type}:${item.id}`;
@@ -177,7 +182,7 @@ function CapabilityCard({
 
   return (
     <div
-      className={`rounded-xl border transition-all duration-300 overflow-hidden ${
+      className={`group rounded-xl border transition-all duration-300 overflow-hidden ${
         expanded
           ? 'border-indigo-300 shadow-md ring-1 ring-indigo-100 bg-white/60 backdrop-blur-sm'
           : 'border-slate-200/60 hover:border-indigo-200 hover:shadow shadow-sm bg-white/40'
@@ -232,7 +237,26 @@ function CapabilityCard({
         </button>
 
         {/* Global toggle */}
-        <div className="shrink-0 pl-2">
+        <div className="shrink-0 pl-2 flex items-center gap-1">
+          {item.source === 'external' && onUninstall && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUninstall(item.id);
+              }}
+              title="卸载此 Skill"
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+          )}
           <ToggleSwitch
             enabled={item.enabled}
             disabled={isToggling}

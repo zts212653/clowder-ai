@@ -31,6 +31,7 @@ export const HUB_GROUPS: HubGroup[] = [
       { id: 'capabilities', label: '能力中心', icon: 'sparkles' },
       { id: 'routing', label: '配额看板', icon: 'chart-pie' },
       { id: 'leaderboard', label: '排行榜', icon: 'trophy' },
+      { id: 'skills', label: 'SkillHub', icon: 'sparkles' },
     ],
   },
   {
