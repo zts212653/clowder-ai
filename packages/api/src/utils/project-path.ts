@@ -9,7 +9,7 @@
  */
 
 import { realpath, stat } from 'node:fs/promises';
-import { platform } from 'node:os';
+import { homedir, platform } from 'node:os';
 import { delimiter, relative, resolve, win32 } from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -42,10 +42,26 @@ function DENIED_ROOTS(): string[] {
 // Legacy allowlist (only active when PROJECT_ALLOWED_ROOTS is set)
 // ---------------------------------------------------------------------------
 
+/**
+ * Legacy default roots for allowlist mode (pre-#228).
+ * Used when PROJECT_ALLOWED_ROOTS_APPEND=true merges custom roots with defaults.
+ */
+function legacyDefaultRoots(platformName = platform()): string[] {
+  const roots = new Set<string>([homedir()]);
+  if (platformName === 'win32') return [...roots];
+  roots.add('/tmp');
+  roots.add('/private/tmp');
+  roots.add('/workspace');
+  if (platformName === 'darwin') roots.add('/Volumes');
+  return [...roots];
+}
+
 function LEGACY_ALLOWED_ROOTS(): string[] | null {
   const envRoots = process.env.PROJECT_ALLOWED_ROOTS;
   if (!envRoots?.trim()) return null;
-  return envRoots.split(delimiter).filter(Boolean);
+  const custom = envRoots.split(delimiter).filter(Boolean);
+  const append = process.env.PROJECT_ALLOWED_ROOTS_APPEND === 'true';
+  return append ? [...new Set([...legacyDefaultRoots(), ...custom])] : custom;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,9 +137,18 @@ export function isUnderAllowedRoot(absPath: string): boolean {
   return !isPathUnderRoots(absPath, DENIED_ROOTS());
 }
 
-// Keep backward-compat export for tests that import this
-export function getDefaultRootsForPlatform(platformName = platform(), _opts?: { homeDir?: string }): string[] {
-  return getDefaultDeniedRoots(platformName);
+// Keep backward-compat export — returns legacy allowlist defaults for tests
+export function getDefaultRootsForPlatform(platformName = platform(), opts?: { homeDir?: string }): string[] {
+  if (opts?.homeDir) {
+    const roots = new Set<string>([opts.homeDir]);
+    if (platformName === 'win32') return [...roots];
+    roots.add('/tmp');
+    roots.add('/private/tmp');
+    roots.add('/workspace');
+    if (platformName === 'darwin') roots.add('/Volumes');
+    return [...roots];
+  }
+  return legacyDefaultRoots(platformName);
 }
 
 /**
