@@ -634,14 +634,13 @@ async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: stri
   await chmod(globalSecretsPath, 0o600);
 
   // Mark local file as migrated to prevent re-processing.
-  // Tolerate ENOENT: a concurrent caller may have already renamed the file.
+  // Best-effort: global data is already persisted, so read-only checkouts
+  // (EACCES/EROFS) or concurrent renames (ENOENT) should not crash callers.
   const localMetaPath = safePath(projectRoot, CAT_CAFE_DIR, META_FILENAME);
   try {
     renameSync(localMetaPath, `${localMetaPath}.migrated`);
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || !existsSync(`${localMetaPath}.migrated`)) {
-      throw err;
-    }
+  } catch {
+    /* best-effort — global migration already succeeded */
   }
 }
 
@@ -705,13 +704,12 @@ function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string
   }
 
   // Mark local file as migrated.
-  // Tolerate ENOENT: a concurrent caller may have already renamed the file.
+  // Best-effort: global data is already persisted, so read-only checkouts
+  // (EACCES/EROFS) or concurrent renames (ENOENT) should not crash callers.
   try {
     renameSync(localMetaPath, `${localMetaPath}.migrated`);
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || !existsSync(`${localMetaPath}.migrated`)) {
-      throw err;
-    }
+  } catch {
+    /* best-effort — global migration already succeeded */
   }
 }
 
