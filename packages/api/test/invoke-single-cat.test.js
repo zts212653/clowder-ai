@@ -2639,6 +2639,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     await mkdir(isolatedApiDir, { recursive: true });
     await writeFile(join(isolatedRepoRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
 
+    const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = staleTemplateRoot;
     await createProviderProfile(staleTemplateRoot, {
       provider: 'openai',
       name: 'stale-openai',
@@ -2648,6 +2650,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       apiKey: 'sk-stale-openai',
       setActive: true,
     });
+    // Switch global root to the isolated repo so the stale profile is invisible
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = isolatedRepoRoot;
 
     const optionsSeen = [];
     const service = {
@@ -2677,6 +2681,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       process.chdir(previousCwd);
       if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+      if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
       await rm(staleTemplateRoot, { recursive: true, force: true });
       await rm(isolatedRepoRoot, { recursive: true, force: true });
     }
@@ -2697,6 +2703,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
     const templateRaw = await readFile(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8');
     await writeFile(join(root, 'cat-template.json'), templateRaw, 'utf-8');
+    const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
     const activatedProfile = await createProviderProfile(root, {
       provider: 'openai',
@@ -2751,6 +2759,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
       }
+      if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
       await rm(root, { recursive: true, force: true });
     }
 
@@ -2920,6 +2930,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
     const optionsSeen = [];
     const service = {
@@ -2945,6 +2957,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
     } finally {
       process.chdir(previousCwd);
+      if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
       await rm(root, { recursive: true, force: true });
     }
 

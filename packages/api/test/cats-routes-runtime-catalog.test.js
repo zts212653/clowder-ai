@@ -6,6 +6,7 @@ import { after, afterEach, beforeEach, describe, it } from 'node:test';
 
 const tempDirs = [];
 let savedTemplatePath;
+let savedGlobalRoot;
 
 function makeCatalog(catId, displayName, provider = 'openai', defaultModel = 'gpt-5.4') {
   return {
@@ -94,6 +95,7 @@ function loadRepoTemplate() {
 describe('cats routes read runtime catalog', { concurrency: false }, () => {
   beforeEach(() => {
     savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   });
 
   afterEach(() => {
@@ -101,6 +103,11 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       delete process.env.CAT_TEMPLATE_PATH;
     } else {
       process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
+    }
+    if (savedGlobalRoot === undefined) {
+      delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    } else {
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
     }
   });
 
@@ -251,6 +258,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
   it('GET /api/cats recomputes seed accountRef from the active bootstrap binding', async () => {
     const projectRoot = createTemplateOnlyProject(loadRepoTemplate());
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
 
     const { bootstrapCatCatalog } = await import('../dist/config/cat-catalog-store.js');
     const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');

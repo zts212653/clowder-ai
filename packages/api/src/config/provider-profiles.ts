@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type {
   AnthropicRuntimeProfile,
@@ -22,7 +22,10 @@ import type {
   UpdateProviderProfileInput,
 } from './provider-profiles.types.js';
 import {
+  detectProjectLocalProfiles,
   listProviderProfilesProjectRoots,
+  markProjectRootMigrated,
+  registerProjectRoot,
   resolveProviderProfilesRoot,
   resolveProviderProfilesRootSync,
 } from './provider-profiles-root.js';
@@ -125,7 +128,14 @@ async function withStorageRootLock<T>(storageRoot: string, action: () => Promise
 
 async function withProviderStoreLock<T>(projectRoot: string, action: (storageRoot: string) => Promise<T>): Promise<T> {
   const storageRoot = await resolveProviderProfilesRoot(projectRoot);
-  return withStorageRootLock(storageRoot, () => action(storageRoot));
+  registerProjectRoot(projectRoot);
+  return withStorageRootLock(storageRoot, async () => {
+    const localRoot = detectProjectLocalProfiles(projectRoot);
+    if (localRoot) {
+      await migrateProjectLocalToGlobal(localRoot, storageRoot);
+    }
+    return action(storageRoot);
+  });
 }
 
 type LegacyProviderProfilesMetaFileV1 = {
@@ -591,6 +601,121 @@ async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> 
   }
 }
 
+async function migrateProjectLocalToGlobal(projectRoot: string, globalRoot: string): Promise<void> {
+  const localResult = await readRawAtStorageRoot(projectRoot);
+  const globalDir = safePath(globalRoot, CAT_CAFE_DIR);
+  await mkdir(globalDir, { recursive: true });
+  const globalMetaPath = safePath(globalRoot, CAT_CAFE_DIR, META_FILENAME);
+  const globalSecretsPath = safePath(globalRoot, CAT_CAFE_DIR, SECRETS_FILENAME);
+
+  // Merge: if global already has profiles, add local profiles (re-ID on collision)
+  if (existsSync(globalMetaPath)) {
+    const globalResult = await readRawAtStorageRoot(globalRoot);
+    const existingIds = new Set(globalResult.meta.providers.map((p) => p.id));
+    for (const profile of localResult.meta.providers) {
+      // Skip builtins — normalization already guarantees their presence in the global store.
+      if (profile.kind === 'builtin' || profile.builtin) continue;
+      let mergedId = profile.id;
+      if (existingIds.has(mergedId)) {
+        mergedId = `${mergedId}-migrated-${Date.now()}`;
+      }
+      const mergedProfile = { ...profile, id: mergedId };
+      globalResult.meta.providers.push(mergedProfile);
+      existingIds.add(mergedId);
+      const secretEntry = localResult.secrets.profiles[profile.id];
+      if (secretEntry) {
+        globalResult.secrets.profiles[mergedId] = secretEntry;
+      }
+    }
+    await writeRaw(globalMetaPath, globalSecretsPath, globalResult.meta, globalResult.secrets);
+  } else {
+    await writeRaw(globalMetaPath, globalSecretsPath, localResult.meta, localResult.secrets);
+  }
+
+  await chmod(globalSecretsPath, 0o600);
+
+  // Mark local file as migrated to prevent re-processing.
+  // Best-effort: global data is already persisted, so read-only checkouts
+  // (EACCES/EROFS) or concurrent renames (ENOENT) should not crash callers.
+  // When rename fails, record in global migrated-roots so detection skips this project.
+  const localMetaPath = safePath(projectRoot, CAT_CAFE_DIR, META_FILENAME);
+  try {
+    renameSync(localMetaPath, `${localMetaPath}.migrated`);
+  } catch {
+    markProjectRootMigrated(projectRoot);
+  }
+}
+
+function migrateProjectLocalToGlobalSync(projectRoot: string, globalRoot: string): void {
+  const localDir = safePath(projectRoot, CAT_CAFE_DIR);
+  const globalDir = safePath(globalRoot, CAT_CAFE_DIR);
+  mkdirSync(globalDir, { recursive: true });
+  const localMetaPath = safePath(localDir, META_FILENAME);
+  const localSecretsPath = safePath(localDir, SECRETS_FILENAME);
+  const globalMetaPath = safePath(globalDir, META_FILENAME);
+  const globalSecretsPath = safePath(globalDir, SECRETS_FILENAME);
+
+  if (!existsSync(localMetaPath)) return;
+
+  // Merge: if global already has profiles, add local profiles (re-ID on collision)
+  if (existsSync(globalMetaPath)) {
+    const rawLocalMeta = JSON.parse(readFileSync(localMetaPath, 'utf-8'));
+    const normalizedLocal = normalizeMeta(rawLocalMeta);
+    const rawGlobalMeta = JSON.parse(readFileSync(globalMetaPath, 'utf-8'));
+    const globalMeta = normalizeMeta(rawGlobalMeta).value;
+    const existingIds = new Set(globalMeta.providers.map((p) => p.id));
+    const localProviders: ProviderProfileMeta[] = [];
+    for (const p of normalizedLocal.value.providers) {
+      // Skip builtins — normalization already guarantees their presence in the global store.
+      if (p.kind === 'builtin' || p.builtin) continue;
+      let mergedId = p.id;
+      if (existingIds.has(mergedId)) {
+        mergedId = `${mergedId}-migrated-${Date.now()}`;
+      }
+      localProviders.push({ ...p, id: mergedId });
+      existingIds.add(mergedId);
+    }
+    if (localProviders.length > 0) {
+      globalMeta.providers = [...globalMeta.providers, ...localProviders];
+      writeFileSync(globalMetaPath, `${JSON.stringify(globalMeta, null, 2)}\n`);
+      // Merge secrets too
+      if (existsSync(localSecretsPath)) {
+        const rawLocalSecrets = JSON.parse(readFileSync(localSecretsPath, 'utf-8'));
+        const localSecrets = normalizeSecrets(rawLocalSecrets).value;
+        const rawGlobalSecrets = existsSync(globalSecretsPath)
+          ? JSON.parse(readFileSync(globalSecretsPath, 'utf-8'))
+          : null;
+        const globalSecrets = normalizeSecrets(rawGlobalSecrets).value;
+        for (const p of localProviders) {
+          const originalId = p.id.replace(/-migrated-\d+$/, '');
+          const secretEntry = localSecrets.profiles[originalId] ?? localSecrets.profiles[p.id];
+          if (secretEntry) {
+            globalSecrets.profiles[p.id] = secretEntry;
+          }
+        }
+        writeFileSync(globalSecretsPath, `${JSON.stringify(globalSecrets, null, 2)}\n`);
+        chmodSync(globalSecretsPath, 0o600);
+      }
+    }
+  } else {
+    copyFileSync(localMetaPath, globalMetaPath);
+    if (existsSync(localSecretsPath)) {
+      copyFileSync(localSecretsPath, globalSecretsPath);
+      chmodSync(globalSecretsPath, 0o600);
+    }
+  }
+
+  // Mark local file as migrated.
+  // Best-effort: global data is already persisted, so read-only checkouts
+  // (EACCES/EROFS) or concurrent renames (ENOENT) should not crash callers.
+  // When rename fails, record in global migrated-roots so detection skips this project.
+  try {
+    renameSync(localMetaPath, `${localMetaPath}.migrated`);
+  } catch {
+    markProjectRootMigrated(projectRoot);
+  }
+}
+
 async function readRaw(projectRoot: string): Promise<{
   meta: ProviderProfilesMetaFile;
   secrets: ProviderProfilesSecretsFile;
@@ -599,6 +724,11 @@ async function readRaw(projectRoot: string): Promise<{
   dirty: boolean;
 }> {
   const storageRoot = await resolveProviderProfilesRoot(projectRoot);
+  registerProjectRoot(projectRoot);
+  const localRoot = detectProjectLocalProfiles(projectRoot);
+  if (localRoot) {
+    await withStorageRootLock(storageRoot, () => migrateProjectLocalToGlobal(localRoot, storageRoot));
+  }
   return readRawAtStorageRoot(storageRoot);
 }
 
@@ -639,6 +769,7 @@ async function writeRaw(
   secrets: ProviderProfilesSecretsFile,
 ): Promise<void> {
   await writeJsonAtomic(secretsPath, secrets);
+  await chmod(secretsPath, 0o600);
   await writeJsonAtomic(metaPath, meta);
 }
 
@@ -752,6 +883,11 @@ export async function readBootstrapBindings(projectRoot: string): Promise<Bootst
 
 export function readBootstrapBindingsSync(projectRoot: string): BootstrapBindings {
   const storageRoot = resolveProviderProfilesRootSync(projectRoot);
+  registerProjectRoot(projectRoot);
+  const localRoot = detectProjectLocalProfiles(projectRoot);
+  if (localRoot) {
+    migrateProjectLocalToGlobalSync(localRoot, storageRoot);
+  }
   const metaPath = safePath(storageRoot, CAT_CAFE_DIR, META_FILENAME);
   const raw = existsSync(metaPath)
     ? (JSON.parse(readFileSync(metaPath, 'utf-8')) as

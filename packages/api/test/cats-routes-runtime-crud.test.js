@@ -71,6 +71,7 @@ function makeTemplate() {
 function createProjectRoot() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-'));
   tempDirs.push(projectRoot);
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
   writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
   return projectRoot;
 }
@@ -84,19 +85,25 @@ function createMonorepoProjectRoot() {
 function createProjectRootFromRepoTemplate() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-seed-'));
   tempDirs.push(projectRoot);
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
   const repoTemplate = JSON.parse(readFileSync(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8'));
   writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(repoTemplate, null, 2));
   return projectRoot;
 }
 
 describe('cats routes runtime CRUD', { concurrency: false }, () => {
+  /** @type {string | undefined} */ let savedGlobalRoot;
+
   beforeEach(() => {
     savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     resetRegistryToBuiltins();
     _clearRuntimeOverrides();
   });
 
   afterEach(() => {
+    if (savedGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
     if (savedTemplatePath === undefined) {
       delete process.env.CAT_TEMPLATE_PATH;
     } else {

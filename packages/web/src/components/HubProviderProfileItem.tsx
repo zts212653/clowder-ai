@@ -1,16 +1,9 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import type { ApiProtocol } from './hub-provider-profiles.sections';
 import type { ProfileItem } from './hub-provider-profiles.types';
 import { TagEditor } from './hub-tag-editor';
 import { useConfirm } from './useConfirm';
-
-const PROTOCOL_OPTIONS: Array<{ value: ApiProtocol; label: string }> = [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'google', label: 'Google' },
-];
 
 export interface ProfileEditPayload {
   displayName: string;
@@ -38,29 +31,27 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
   const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState(profile.displayName);
-  const [editProtocol, setEditProtocol] = useState<ApiProtocol>((profile.protocol as ApiProtocol) ?? 'anthropic');
   const [editBaseUrl, setEditBaseUrl] = useState(profile.baseUrl ?? '');
   const [editApiKey, setEditApiKey] = useState('');
   const [editModels, setEditModels] = useState<string[]>(profile.models ?? []);
 
   const startEdit = useCallback(() => {
     setEditDisplayName(profile.displayName);
-    setEditProtocol((profile.protocol as ApiProtocol) ?? 'anthropic');
     setEditBaseUrl(profile.baseUrl ?? '');
     setEditApiKey('');
     setEditModels(profile.models ?? []);
     setEditing(true);
-  }, [profile.baseUrl, profile.displayName, profile.models, profile.protocol]);
+  }, [profile.baseUrl, profile.displayName, profile.models]);
 
   const saveEdit = useCallback(async () => {
     await onSave(profile.id, {
       displayName: editDisplayName.trim(),
-      ...(profile.authType === 'api_key' ? { protocol: editProtocol, baseUrl: editBaseUrl.trim() } : {}),
+      ...(profile.authType === 'api_key' ? { baseUrl: editBaseUrl.trim() } : {}),
       ...(editApiKey.trim() ? { apiKey: editApiKey.trim() } : {}),
       models: editModels,
     });
     setEditing(false);
-  }, [editApiKey, editBaseUrl, editDisplayName, editModels, editProtocol, onSave, profile.authType, profile.id]);
+  }, [editApiKey, editBaseUrl, editDisplayName, editModels, onSave, profile.authType, profile.id]);
 
   if (editing) {
     return (
@@ -74,17 +65,6 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
           />
           {profile.authType === 'api_key' ? (
             <>
-              <select
-                value={editProtocol}
-                onChange={(e) => setEditProtocol(e.target.value as ApiProtocol)}
-                className="w-full rounded border border-[#E8DCCF] bg-white px-3 py-2 text-sm"
-              >
-                {PROTOCOL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
               <input
                 value={editBaseUrl}
                 onChange={(e) => setEditBaseUrl(e.target.value)}
