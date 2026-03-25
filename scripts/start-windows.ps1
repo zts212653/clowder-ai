@@ -458,14 +458,21 @@ try {
 
     # Track background jobs for cleanup
     $jobs = @()
-    $runtimeEnvOverrides = @{
-        REDIS_URL = $env:REDIS_URL
-        REDIS_PORT = $env:REDIS_PORT
-        MEMORY_STORE = $env:MEMORY_STORE
-        CAT_CAFE_MCP_SERVER_PATH = $env:CAT_CAFE_MCP_SERVER_PATH
-        API_SERVER_PORT = $ApiPort
-        FRONTEND_PORT = $WebPort
-        NEXT_PUBLIC_API_URL = "http://127.0.0.1:$ApiPort"
+$runtimeEnvOverrides = @{
+    REDIS_URL = $env:REDIS_URL
+    REDIS_PORT = $env:REDIS_PORT
+    MEMORY_STORE = $env:MEMORY_STORE
+    CAT_CAFE_MCP_SERVER_PATH = $env:CAT_CAFE_MCP_SERVER_PATH
+    API_SERVER_PORT = $ApiPort
+    FRONTEND_PORT = $WebPort
+    NEXT_PUBLIC_API_URL = "http://127.0.0.1:$ApiPort"
+}
+    if ($bundledRelease) {
+        $runtimeEnvOverrides.CAT_CAFE_CONFIG_ROOT = $ProjectRoot
+        $bundledTemplatePath = Join-Path $ProjectRoot "cat-template.json"
+        if (Test-Path $bundledTemplatePath) {
+            $runtimeEnvOverrides.CAT_TEMPLATE_PATH = $bundledTemplatePath
+        }
     }
     Write-WindowsRuntimeStateFile -StateFile $RuntimeStateFile -State ([ordered]@{
         GeneratedAt = (Get-Date).ToString("o")

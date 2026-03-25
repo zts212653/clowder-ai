@@ -62,7 +62,10 @@ test('Windows offline installer prefers plain Redis portable zips before service
 
 test('Windows offline bundle builder deploys production packages and bundles Windows runtimes', () => {
   assert.match(buildScript, /WINDOWS_RUNTIME_NPM_ARGS = \['install', '--omit=dev'/);
-  assert.match(buildScript, /const entries = \['cat-cafe-skills', 'LICENSE', '\.env\.example', 'cat-template\.json', 'vendor'\]/);
+  assert.match(
+    buildScript,
+    /const entries = \['cat-cafe-skills', 'LICENSE', '\.env\.example', 'cat-template\.json', 'vendor'\]/,
+  );
   assert.match(buildScript, /RUNTIME_SCRIPT_FILES = \[/);
   assert.match(buildScript, /stageRuntimePackageTemplate\(targetRootDir, 'shared'/);
   assert.match(buildScript, /stageRuntimePackageTemplate\(targetRootDir, 'api'/);
@@ -125,6 +128,16 @@ test('Windows desktop launcher reads runtime state, minimizes to tray, and exits
   assert.match(launcherSource, /RequestExit/);
   assert.match(launcherSource, /TryReadRuntimeStateValue/);
   assert.match(launcherSource, /ShowBalloonTip/);
+});
+
+test('Windows startup script pins bundled config roots for packaged releases', () => {
+  assert.match(buildScript, /'cat-template\.json'/);
+  assert.match(buildScript, /'\.clowder-release\.json'/);
+  assert.match(launcherSource, /AppDomain\.CurrentDomain\.BaseDirectory/);
+  const startWindowsScript = readFileSync(join(repoRoot, 'scripts', 'start-windows.ps1'), 'utf8');
+  assert.match(startWindowsScript, /if \(\$bundledRelease\) \{/);
+  assert.match(startWindowsScript, /\$runtimeEnvOverrides\.CAT_CAFE_CONFIG_ROOT = \$ProjectRoot/);
+  assert.match(startWindowsScript, /\$runtimeEnvOverrides\.CAT_TEMPLATE_PATH = \$bundledTemplatePath/);
 });
 
 test('Local desktop web client derives API URL from the loopback frontend port instead of a baked localhost:3004 value', () => {
