@@ -306,6 +306,39 @@ describe('cat-catalog-store', () => {
     assert.equal(runtimeCodexVariant?.providerProfileId, 'codex-pinned');
   });
 
+  it('treats relayclaw seed variants as openai bootstrap clients', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-relayclaw-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    template.breeds.push({
+      id: 'jiuwenclaw',
+      catId: 'jiuwenclaw',
+      name: 'jiuwenClaw',
+      displayName: 'jiuwenClaw',
+      avatar: '/avatars/jiuwenclaw.png',
+      color: { primary: '#D97A3A', secondary: '#F6E7DA' },
+      mentionPatterns: ['@jiuwenclaw'],
+      roleDescription: 'office',
+      defaultVariantId: 'jiuwenclaw-default',
+      variants: [
+        {
+          id: 'jiuwenclaw-default',
+          provider: 'relayclaw',
+          defaultModel: 'gpt-5.4',
+          mcpSupport: true,
+          cli: { command: 'jiuwenclaw-app', outputFormat: 'json' },
+        },
+      ],
+    });
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const runtimeCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const breed = runtimeCatalog.breeds.find((entry) => entry.id === 'jiuwenclaw');
+
+    assert.equal(breed?.variants?.[0]?.accountRef, 'codex');
+  });
+
   it('bootstraps .cat-cafe/cat-catalog.json from cat-template.json', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');

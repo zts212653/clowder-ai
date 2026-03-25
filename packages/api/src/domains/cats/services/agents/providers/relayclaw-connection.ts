@@ -142,6 +142,15 @@ export class RelayClawConnectionManager implements RelayClawConnection {
         this.serverReady = false;
         this.ws = null;
         for (const queue of this.requestQueues.values()) {
+          queue.put({
+            channel_id: '',
+            payload: {
+              event_type: 'chat.error',
+              error: 'jiuwenClaw WebSocket connection closed unexpectedly',
+              is_complete: true,
+            },
+            is_complete: true,
+          });
           queue.abort();
         }
         cleanup();

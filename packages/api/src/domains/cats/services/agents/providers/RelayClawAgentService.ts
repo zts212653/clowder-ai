@@ -99,7 +99,7 @@ export class RelayClawAgentService implements AgentService {
 
     try {
       this.connection.send(buildRequest(requestId, this.config.channelId ?? 'catcafe', prompt, options));
-      yield* this.consumeFrames(queue, signal);
+      yield* this.consumeFrames(queue, signal, options?.signal);
     } catch (err) {
       if (options?.signal?.aborted) {
         yield agentMsg('done', this.catId);
@@ -126,7 +126,11 @@ export class RelayClawAgentService implements AgentService {
     await this.connection.ensureConnected(url, signal);
   }
 
-  private async *consumeFrames(queue: FrameQueue, signal: AbortSignal): AsyncIterable<AgentMessage> {
+  private async *consumeFrames(
+    queue: FrameQueue,
+    signal: AbortSignal,
+    callerSignal?: AbortSignal,
+  ): AsyncIterable<AgentMessage> {
     let sawError = false;
     let emittedText = false;
 
@@ -156,7 +160,18 @@ export class RelayClawAgentService implements AgentService {
       if (frame.is_complete === true || payload?.is_complete === true) break;
     }
 
+    if (!sawError && signal.aborted && !callerSignal?.aborted) {
+      sawError = true;
+      yield {
+        type: 'error',
+        catId: this.catId,
+        error: 'jiuwenClaw request timed out before completion',
+        timestamp: Date.now(),
+      };
+    }
+
     if (!sawError) yield agentMsg('done', this.catId);
+    else yield agentMsg('done', this.catId);
   }
 }
 

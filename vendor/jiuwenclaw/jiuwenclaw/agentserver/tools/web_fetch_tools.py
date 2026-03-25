@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import re
+import socket
 from html import unescape
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -125,6 +127,47 @@ def _normalize_url(url: str) -> str:
     return f"https://{decoded}"
 
 
+def _is_blocked_hostname(hostname: str) -> bool:
+    lowered = (hostname or "").strip().lower()
+    if not lowered:
+        return True
+    if lowered in {"localhost", "localhost.localdomain"} or lowered.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(lowered)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+        )
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(lowered, None)
+    except socket.gaierror:
+        return False
+
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            return True
+    return False
+
+
+def _assert_safe_fetch_target(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("only http/https URLs are supported")
+    if _is_blocked_hostname(parsed.hostname or ""):
+        raise ValueError("fetch target resolves to a blocked local/private address")
+
+
 def _fetch_via_jina_reader_sync(url: str, timeout_seconds: int) -> dict[str, str | int]:
     reader_url = f"https://r.jina.ai/{url}"
     response = _http_get(reader_url, headers=_REQUEST_HEADERS, timeout=timeout_seconds)
@@ -138,6 +181,7 @@ def _fetch_via_jina_reader_sync(url: str, timeout_seconds: int) -> dict[str, str
 
 
 def _fetch_webpage_sync(url: str, timeout_seconds: int) -> dict[str, str | int]:
+    _assert_safe_fetch_target(url)
     response = _http_get(url, headers=_REQUEST_HEADERS, timeout=timeout_seconds)
     if response.status_code in {401, 403, 429}:
         return _fetch_via_jina_reader_sync(url, timeout_seconds)

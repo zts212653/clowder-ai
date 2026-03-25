@@ -42,6 +42,7 @@ function providerToBootstrapClient(provider: unknown): BuiltinAccountClient | nu
     case 'anthropic':
       return 'anthropic';
     case 'openai':
+    case 'relayclaw':
       return 'openai';
     case 'google':
       return 'google';

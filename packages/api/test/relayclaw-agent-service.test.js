@@ -126,4 +126,66 @@ describe('RelayClawAgentService', () => {
     assert.equal(capturedRequest.params.cat_cafe_mcp.env.CAT_CAFE_INVOCATION_ID, 'invocation-123');
     assert.match(capturedRequest.params.query, /\[Local image path: \/tmp\/cat-cafe-uploads\/test-image\.png\]/);
   });
+
+  it('yields error before done when the provider times out', async () => {
+    const service = new RelayClawAgentService(
+      {
+        catId: 'relayclaw-debug',
+        config: {
+          url: 'ws://127.0.0.1:65535',
+          autoStart: false,
+          timeoutMs: 10,
+        },
+      },
+      {
+        createConnection: createConnectionFactory(() => {
+          // Intentionally never emits frames.
+        }),
+      },
+    );
+
+    const messages = [];
+    for await (const msg of service.invoke('This will time out')) {
+      messages.push(msg);
+    }
+
+    assert.deepEqual(messages.map((msg) => msg.type), ['session_init', 'error', 'done']);
+    assert.match(messages[1].error, /timed out/i);
+  });
+
+  it('yields error before done when the websocket closes unexpectedly', async () => {
+    const service = new RelayClawAgentService(
+      {
+        catId: 'relayclaw-debug',
+        config: {
+          url: 'ws://127.0.0.1:65535',
+          autoStart: false,
+        },
+      },
+      {
+        createConnection: createConnectionFactory((request, requestQueues) => {
+          const queue = requestQueues.get(request.request_id);
+          assert.ok(queue, 'request queue should exist before send');
+          queue.put({
+            channel_id: '',
+            payload: {
+              event_type: 'chat.error',
+              error: 'jiuwenClaw WebSocket connection closed unexpectedly',
+              is_complete: true,
+            },
+            is_complete: true,
+          });
+          queue.abort();
+        }),
+      },
+    );
+
+    const messages = [];
+    for await (const msg of service.invoke('This will close')) {
+      messages.push(msg);
+    }
+
+    assert.deepEqual(messages.map((msg) => msg.type), ['session_init', 'error', 'done']);
+    assert.match(messages[1].error, /connection closed unexpectedly/i);
+  });
 });
