@@ -1,7 +1,17 @@
+import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 
 export interface CommandResult {
-  readonly kind: 'new' | 'threads' | 'use' | 'where' | 'thread' | 'unbind' | 'not-command';
+  readonly kind:
+    | 'new'
+    | 'threads'
+    | 'use'
+    | 'where'
+    | 'thread'
+    | 'unbind'
+    | 'allow-group'
+    | 'deny-group'
+    | 'not-command';
   readonly response?: string;
   readonly newActiveThreadId?: string;
   /** Thread context for storing command exchange in messageStore */
@@ -38,12 +48,19 @@ export interface ConnectorCommandLayerDeps {
     ): { tags: readonly string[] } | null | Promise<{ tags: readonly string[] } | null>;
   };
   readonly frontendBaseUrl: string;
+  readonly permissionStore?: IConnectorPermissionStore | undefined;
 }
 
 export class ConnectorCommandLayer {
   constructor(private readonly deps: ConnectorCommandLayerDeps) {}
 
-  async handle(connectorId: string, externalChatId: string, userId: string, text: string): Promise<CommandResult> {
+  async handle(
+    connectorId: string,
+    externalChatId: string,
+    userId: string,
+    text: string,
+    senderId?: string,
+  ): Promise<CommandResult> {
     const trimmed = text.trim();
     if (!trimmed.startsWith('/')) return { kind: 'not-command' };
 
@@ -62,6 +79,10 @@ export class ConnectorCommandLayer {
         return this.handleThread(connectorId, externalChatId, userId, args);
       case '/unbind':
         return this.handleUnbind(connectorId, externalChatId);
+      case '/allow-group':
+        return this.handleAllowGroup(connectorId, externalChatId, senderId, args.join(' '));
+      case '/deny-group':
+        return this.handleDenyGroup(connectorId, externalChatId, senderId, args.join(' '));
       default:
         return { kind: 'not-command' };
     }
@@ -210,6 +231,58 @@ export class ConnectorCommandLayer {
     return {
       kind: 'unbind',
       response: `🔓 已解绑: ${title} [${binding.threadId}]\n\n下一条消息会自动创建新 thread，或用 /use 切换到已有 thread。`,
+    };
+  }
+
+  // --- Phase D: permission commands ---
+
+  private async isAdminSender(connectorId: string, senderId?: string): Promise<boolean> {
+    if (!senderId || !this.deps.permissionStore) return false;
+    return this.deps.permissionStore.isAdmin(connectorId, senderId);
+  }
+
+  private async handleAllowGroup(
+    connectorId: string,
+    externalChatId: string,
+    senderId?: string,
+    chatIdArg?: string,
+  ): Promise<CommandResult> {
+    if (!(await this.isAdminSender(connectorId, senderId))) {
+      return { kind: 'allow-group', response: '🔒 此命令仅管理员可用。' };
+    }
+    const store = this.deps.permissionStore;
+    if (!store) {
+      return { kind: 'allow-group', response: '⚠️ 权限系统未启用。' };
+    }
+    const targetChatId = chatIdArg?.trim() || externalChatId;
+    await store.allowGroup(connectorId, targetChatId);
+    const groups = await store.listAllowedGroups(connectorId);
+    return {
+      kind: 'allow-group',
+      response: `✅ 群 ${targetChatId.slice(-8)} 已加入白名单（共 ${groups.length} 个群）`,
+    };
+  }
+
+  private async handleDenyGroup(
+    connectorId: string,
+    externalChatId: string,
+    senderId?: string,
+    chatIdArg?: string,
+  ): Promise<CommandResult> {
+    if (!(await this.isAdminSender(connectorId, senderId))) {
+      return { kind: 'deny-group', response: '🔒 此命令仅管理员可用。' };
+    }
+    const store = this.deps.permissionStore;
+    if (!store) {
+      return { kind: 'deny-group', response: '⚠️ 权限系统未启用。' };
+    }
+    const targetChatId = chatIdArg?.trim() || externalChatId;
+    const removed = await store.denyGroup(connectorId, targetChatId);
+    return {
+      kind: 'deny-group',
+      response: removed
+        ? `🚫 群 ${targetChatId.slice(-8)} 已从白名单移除`
+        : `⚠️ 群 ${targetChatId.slice(-8)} 不在白名单中`,
     };
   }
 

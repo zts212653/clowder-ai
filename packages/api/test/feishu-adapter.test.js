@@ -67,7 +67,7 @@ describe('FeishuAdapter', () => {
       assert.equal(adapter.parseEvent(event), null);
     });
 
-    it('returns null for group messages (MVP = DM only)', () => {
+    it('returns null for group messages without botOpenId set', () => {
       const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
       const event = {
         header: { event_type: 'im.message.receive_v1', event_id: 'evt-003' },
@@ -97,6 +97,210 @@ describe('FeishuAdapter', () => {
         }),
         null,
       );
+    });
+
+    it('includes chatType in parsed DM message', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const event = {
+        header: { event_type: 'im.message.receive_v1' },
+        event: {
+          sender: { sender_id: { open_id: 'ou_sender' } },
+          message: {
+            message_id: 'om_msg',
+            chat_id: 'oc_chat',
+            chat_type: 'p2p',
+            content: JSON.stringify({ text: 'hello' }),
+            message_type: 'text',
+          },
+        },
+      };
+      const result = adapter.parseEvent(event);
+      assert.ok(result);
+      assert.equal(result.chatType, 'p2p');
+    });
+  });
+
+  describe('parseEvent() — F134 group chat', () => {
+    function makeGroupEvent(text, mentions, senderId = 'ou_sender_123') {
+      return {
+        header: { event_type: 'im.message.receive_v1' },
+        event: {
+          sender: { sender_id: { open_id: senderId }, sender_type: 'user' },
+          message: {
+            message_id: 'om_group_msg_001',
+            chat_id: 'oc_group_chat_789',
+            chat_type: 'group',
+            content: JSON.stringify({ text }),
+            message_type: 'text',
+            ...(mentions ? { mentions } : {}),
+          },
+        },
+      };
+    }
+
+    it('processes group message when @bot is mentioned', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter.setBotOpenId('ou_bot_abc');
+      const event = makeGroupEvent('@_user_1 你好猫猫', [
+        { key: '@_user_1', id: { open_id: 'ou_bot_abc' }, name: 'CatBot' },
+      ]);
+      const result = adapter.parseEvent(event);
+      assert.ok(result);
+      assert.equal(result.chatType, 'group');
+      assert.equal(result.chatId, 'oc_group_chat_789');
+      assert.equal(result.senderId, 'ou_sender_123');
+      assert.equal(result.text, '你好猫猫');
+    });
+
+    it('returns null for group message without @bot mention', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter.setBotOpenId('ou_bot_abc');
+      const event = makeGroupEvent('hello everyone', []);
+      assert.equal(adapter.parseEvent(event), null);
+    });
+
+    it('returns null when only @all is mentioned (not @bot)', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter.setBotOpenId('ou_bot_abc');
+      const event = makeGroupEvent('@_all 通知大家', [{ key: '@_all', id: { open_id: 'ou_bot_abc' }, name: '所有人' }]);
+      assert.equal(adapter.parseEvent(event), null);
+    });
+
+    it('strips only bot mention placeholder from text, keeps other mentions', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter.setBotOpenId('ou_bot_abc');
+      const event = makeGroupEvent('@_user_1 @_user_2 帮我查一下', [
+        { key: '@_user_1', id: { open_id: 'ou_bot_abc' }, name: 'CatBot' },
+        { key: '@_user_2', id: { open_id: 'ou_other_user' }, name: 'Alice' },
+      ]);
+      const result = adapter.parseEvent(event);
+      assert.ok(result);
+      assert.equal(result.text, '@_user_2 帮我查一下');
+    });
+
+    it('DM messages still work without botOpenId set', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const event = {
+        header: { event_type: 'im.message.receive_v1' },
+        event: {
+          sender: { sender_id: { open_id: 'ou_sender' } },
+          message: {
+            message_id: 'om_dm_001',
+            chat_id: 'oc_dm_chat',
+            chat_type: 'p2p',
+            content: JSON.stringify({ text: 'DM hello' }),
+            message_type: 'text',
+          },
+        },
+      };
+      const result = adapter.parseEvent(event);
+      assert.ok(result);
+      assert.equal(result.chatType, 'p2p');
+      assert.equal(result.text, 'DM hello');
+    });
+
+    it('handles group message with image type', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter.setBotOpenId('ou_bot_abc');
+      const event = {
+        header: { event_type: 'im.message.receive_v1' },
+        event: {
+          sender: { sender_id: { open_id: 'ou_sender' } },
+          message: {
+            message_id: 'om_group_img',
+            chat_id: 'oc_group',
+            chat_type: 'group',
+            content: JSON.stringify({ image_key: 'img_group_001' }),
+            message_type: 'image',
+            mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot_abc' }, name: 'Bot' }],
+          },
+        },
+      };
+      const result = adapter.parseEvent(event);
+      assert.ok(result);
+      assert.equal(result.chatType, 'group');
+      assert.equal(result.text, '[图片]');
+      assert.deepEqual(result.attachments, [{ type: 'image', feishuKey: 'img_group_001' }]);
+    });
+
+    it('returns null for unknown chat_type (not p2p or group)', () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const event = {
+        header: { event_type: 'im.message.receive_v1' },
+        event: {
+          sender: { sender_id: { open_id: 'ou_sender' } },
+          message: {
+            message_id: 'om_msg',
+            chat_id: 'oc_chat',
+            chat_type: 'topic_group',
+            content: JSON.stringify({ text: 'test' }),
+            message_type: 'text',
+          },
+        },
+      };
+      assert.equal(adapter.parseEvent(event), null);
+    });
+  });
+
+  describe('resolveSenderName() / resolveChatName()', () => {
+    it('returns name from Contact API and caches it', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter._injectTokenManager({ getTenantAccessToken: async () => 'mock-token' });
+      const fetchCalls = [];
+      adapter._injectUploadFetch(async (url) => {
+        fetchCalls.push(url);
+        return { ok: true, json: async () => ({ data: { user: { name: 'You' } } }) };
+      });
+
+      const name1 = await adapter.resolveSenderName('ou_123');
+      assert.equal(name1, 'You');
+      assert.equal(fetchCalls.length, 1);
+
+      const name2 = await adapter.resolveSenderName('ou_123');
+      assert.equal(name2, 'You');
+      assert.equal(fetchCalls.length, 1, 'should use cache, no extra fetch');
+    });
+
+    it('returns undefined when Contact API fails', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter._injectTokenManager({ getTenantAccessToken: async () => 'mock-token' });
+      adapter._injectUploadFetch(async () => ({ ok: false, json: async () => ({}) }));
+
+      const name = await adapter.resolveSenderName('ou_bad');
+      assert.equal(name, undefined);
+    });
+
+    it('returns undefined when no tokenManager', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const name = await adapter.resolveSenderName('ou_no_token');
+      assert.equal(name, undefined);
+    });
+
+    it('returns chat name from Chat API and caches it', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter._injectTokenManager({ getTenantAccessToken: async () => 'mock-token' });
+      const fetchCalls = [];
+      adapter._injectUploadFetch(async (url) => {
+        fetchCalls.push(url);
+        return { ok: true, json: async () => ({ data: { name: '技术讨论群' } }) };
+      });
+
+      const name1 = await adapter.resolveChatName('oc_chat_001');
+      assert.equal(name1, '技术讨论群');
+      assert.equal(fetchCalls.length, 1);
+
+      const name2 = await adapter.resolveChatName('oc_chat_001');
+      assert.equal(name2, '技术讨论群');
+      assert.equal(fetchCalls.length, 1, 'should use cache');
+    });
+
+    it('returns undefined when Chat API fails', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      adapter._injectTokenManager({ getTenantAccessToken: async () => 'mock-token' });
+      adapter._injectUploadFetch(async () => ({ ok: false }));
+
+      const name = await adapter.resolveChatName('oc_bad');
+      assert.equal(name, undefined);
     });
   });
 

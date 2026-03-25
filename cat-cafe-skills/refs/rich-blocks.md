@@ -33,6 +33,19 @@
 | checklist | items (id+text) | title |
 | media_gallery | items (url) | title, alt, caption |
 | audio | text | — |
+
+### media_gallery 图片 URL 规范
+
+`items[].url` 只接受以下四种格式（路径遍历 `../` 会被 `safeResolve` 拦截）：
+
+| 格式 | 示例 | 说明 |
+|------|------|------|
+| `/uploads/xxx.png` | `/uploads/opus-happy.png` | **推荐**，文件在 `packages/api/uploads/` |
+| `/api/connector-media/xxx` | `/api/connector-media/img.jpg` | 文件在 `data/connector-media/` |
+| `data:image/png;base64,...` | 完整 base64 编码 | 小图可用，会自动转临时文件上传 |
+| `https://...` | `https://example.com/img.png` | 外部链接 |
+
+**禁止**：`/api/connector-media/../assets/...` 等含 `../` 的路径 — 会被路径遍历保护拒绝，前端裂图。
 | interactive | interactiveType, options (id+label) | title, description, maxSelect, allowRandom, messageTemplate |
 | html_widget | html | title, height (50-2000, default 300) |
 

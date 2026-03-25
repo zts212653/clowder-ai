@@ -108,7 +108,9 @@ export function IdentitySection({
               // biome-ignore lint/performance/noImgElement: avatar path may be runtime upload URL
               <img src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
             ) : (
-              '🐱'
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" role="img" aria-label="Default avatar">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8Zm-2-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm4 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+              </svg>
             )}
           </div>
           <span>{avatarUploading ? '上传中…' : '点击上传'}</span>
@@ -227,10 +229,10 @@ function buildCallHint(client: string, profile: ProfileItem | undefined, model: 
   const fullUrl = `${base}${info.pathSuffix}`;
   let warning = '';
   if (client === 'anthropic' && hasV1Suffix) {
-    warning = `\n⚠️ base URL 末尾的 /v1 会导致路径重复（/v1/v1/messages），建议去掉 /v1 后缀`;
+    warning = `\n注意: base URL 末尾的 /v1 会导致路径重复（/v1/v1/messages），建议去掉 /v1 后缀`;
   }
   if (client === 'google') {
-    warning = `\n⚠️ Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client`;
+    warning = `\n注意: Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client`;
   }
   return `${info.cli} CLI 实际调用: ${fullUrl}${warning}`;
 }

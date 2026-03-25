@@ -206,6 +206,8 @@ export interface ConnectorSourceData {
   url?: string;
   /** F098-C2: Connector-specific metadata (e.g. targets for multi-mention) */
   meta?: Record<string, unknown>;
+  /** F134: Group chat sender identity (message-level binding) */
+  sender?: { id: string; name?: string };
 }
 
 export interface ChatMessage {

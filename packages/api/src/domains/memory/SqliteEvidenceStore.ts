@@ -59,12 +59,17 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     if (!trimmed) return [];
 
     // Phase D: resolve scope → kind filter
-    // scope='threads'/'sessions' → only search kind='session'
-    // scope='docs'/'memory' → exclude sessions (feature/decision/plan/lesson + future memory entries)
+    // scope='threads' → kind='thread' (P1 fix: was incorrectly mapped to 'session')
+    // scope='sessions' → kind='session'
+    // scope='docs'/'memory' → exclude sessions + threads
     // scope='all' → no filter
     const effectiveKind =
       options?.kind ??
-      (options?.scope === 'threads' || options?.scope === 'sessions' ? ('session' as EvidenceKind) : undefined);
+      (options?.scope === 'threads'
+        ? ('thread' as EvidenceKind)
+        : options?.scope === 'sessions'
+          ? ('session' as EvidenceKind)
+          : undefined);
     const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
     // ── Exact-anchor bypass ──────────────────────────────────────────
     // FTS5 unicode61 tokenizer splits "F042" → "F"+"042" and "ADR-005" → "ADR"+"005".
@@ -206,7 +211,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     // P1 fix (砚砚 review): depth=raw must stay lexical-only — no passage vectors yet.
     // Short-circuit BEFORE mode split to prevent semantic/hybrid from eating raw results.
     if (options?.depth === 'raw') {
-      return results.slice(0, limit);
+      return this.enrichWithDrillDown(results.slice(0, limit));
     }
 
     // P2 R2 fix (砚砚): keep full BM25 candidate pool for hybrid RRF,
@@ -218,34 +223,59 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const searchMode = options?.mode ?? 'lexical';
     const embeddingAvailable = this.embedDeps?.embedding.isReady() && this.embedDeps.mode === 'on';
 
+    // G-4: all paths go through enrichWithDrillDown before returning
     if (searchMode === 'lexical') {
-      return lexicalResults;
+      return this.enrichWithDrillDown(lexicalResults);
     }
 
     if (searchMode === 'semantic') {
       if (!embeddingAvailable) {
-        return lexicalResults;
+        return this.enrichWithDrillDown(lexicalResults);
       }
       try {
-        return await this.semanticNNSearch(query, limit, options);
+        return this.enrichWithDrillDown(await this.semanticNNSearch(query, limit, options));
       } catch {
-        return lexicalResults;
+        return this.enrichWithDrillDown(lexicalResults);
       }
     }
 
     if (searchMode === 'hybrid') {
       if (!embeddingAvailable) {
-        return lexicalResults;
+        return this.enrichWithDrillDown(lexicalResults);
       }
       try {
-        // Pass full candidate pool, not truncated lexicalResults
-        return await this.hybridRRFSearch(query, lexicalCandidates, limit, options);
+        return this.enrichWithDrillDown(await this.hybridRRFSearch(query, lexicalCandidates, limit, options));
       } catch {
-        return lexicalResults;
+        return this.enrichWithDrillDown(lexicalResults);
       }
     }
 
-    return lexicalResults;
+    return this.enrichWithDrillDown(lexicalResults);
+  }
+
+  /**
+   * G-4: Enrich search results with drill-down hints for thread/session items.
+   * Tells the cat what MCP tool to use to see full details.
+   */
+  private enrichWithDrillDown(results: EvidenceItem[]): EvidenceItem[] {
+    for (const item of results) {
+      if (item.kind === 'thread' && item.anchor.startsWith('thread-')) {
+        const threadId = item.anchor.replace('thread-', '');
+        item.drillDown = {
+          tool: 'cat_cafe_get_thread_context',
+          params: { threadId },
+          hint: `查看完整对话：get_thread_context(threadId="${threadId}")`,
+        };
+      } else if (item.kind === 'session' && item.anchor.startsWith('session-')) {
+        const sessionId = item.anchor.replace('session-', '');
+        item.drillDown = {
+          tool: 'cat_cafe_read_session_digest',
+          params: { sessionId },
+          hint: `查看 session 摘要：read_session_digest(sessionId="${sessionId}")`,
+        };
+      }
+    }
+    return results;
   }
 
   /**
@@ -267,7 +297,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
     // Apply ALL SearchOptions filters (P1 fix: semantic must respect status/keywords too)
     const effectiveKind =
-      options?.kind ?? (options?.scope === 'threads' || options?.scope === 'sessions' ? 'session' : undefined);
+      options?.kind ??
+      (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
     const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
     if (effectiveKind) {
       sql += ' AND kind = ?';
@@ -338,7 +369,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
       // Apply SearchOptions filters (same as semanticNNSearch)
       const effectiveKind =
-        options?.kind ?? (options?.scope === 'threads' || options?.scope === 'sessions' ? 'session' : undefined);
+        options?.kind ??
+        (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
       const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
       if (effectiveKind) {
         sql += ' AND kind = ?';

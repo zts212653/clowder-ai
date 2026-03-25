@@ -69,6 +69,62 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 
 **SDK**：`dingtalk-stream`（官方 Stream SDK）+ 自建薄 OpenAPI 封装（卡片/媒体）
 
+### Phase A.1: DingTalk 媒体原生发送 — 补齐飞书富媒体对等
+
+> **前置**：Phase A 已 merged（PR #674）。Phase A 的 `sendMedia()` 对 audio/file 用文本降级（`🔊 url` / `📎 file`），image 仅支持 URL。本阶段补齐原生发送。
+
+**目标**：DingTalk 媒体发送与飞书 `sendMedia()` 功能对等。
+
+**实现要点**：
+
+1. **媒体上传**：`POST /v1.0/robot/messageFiles/upload`
+   - FormData 上传，获取 `mediaId`
+   - 复用飞书 adapter 的上传优先链模式：platform key > absPath upload > URL download+upload > text fallback
+
+2. **语音原生发送**：msgKey `sampleAudio`
+   - `msgParam`: `{ mediaId: string, duration: string }` （duration 为 ms 字符串）
+   - 需先 upload 获取 `mediaId`
+   - ffmpeg 转码（如需要，复用飞书的 `convertToOpus()` 基础设施）
+
+3. **文件原生发送**：msgKey `sampleFile`
+   - `msgParam`: `{ mediaId: string, fileName: string, fileType: string }`
+   - 需先 upload 获取 `mediaId`
+
+4. **图片增强**：支持本地文件上传路径（不仅 URL）
+   - 先 upload → 获取 `mediaId` → 用 `sampleImageMsg` 发送
+   - 保留现有 URL 直发路径作为快速通道
+
+**参考**：`satorijs/satori` adapters/dingtalk + `netease-youdao/LobsterAI` dingtalkGateway.ts
+
+### Phase A.2: DingTalk 群聊支持 — 对齐飞书 F134 群聊能力
+
+> **前置**：Phase A.1 完成后。媒体原生发送是基础，群聊也需要发送富媒体。
+
+**目标**：DingTalk 群聊与飞书群聊（F134）功能对等，复用 IM Hub 群聊抽象。
+
+**入站改动**：
+
+1. **移除 DM-only 过滤**：`parseEvent()` 中 `conversationType !== '1'` → 支持群聊消息
+2. **chatType 映射**：`conversationType === '1' ? 'p2p' : 'group'`（已存在，只需解锁）
+3. **群聊 sender 解析**：从 webhook payload 提取 `senderStaffId` + `senderNick`
+
+**出站改动**：
+
+4. **群组消息发送**：`POST /v1.0/robot/orgGroupSend`
+   - 参数：`{ msgKey, msgParam, robotCode, openConversationId }`
+   - 与 `batchSendOTO` 并行路径，根据 `chatType` 分发
+5. **AI Card 群聊投递**：`createAndDeliver` 已有 `imGroupOpenDeliverModel` 骨架（line 569-571）
+6. **@sender 回复**：群聊回复前置 `@senderNick` 提及（参考飞书 `prependAtMention()`）
+
+**IM Hub 抽象对齐**（参考 F134 飞书群聊实现）：
+
+7. **名称解析**：
+   - 用户名：DingTalk Contact API + TTL 缓存（参考飞书 `resolveSenderName()`）
+   - 群名：DingTalk Chat API + TTL 缓存（参考飞书 `resolveChatName()`）
+8. **connector-gateway-bootstrap 群聊路由**：复用 F134 的 group chat routing pattern
+9. **ConnectorRouter 群聊线程**：复用现有线程命名 + 权限检查逻辑
+10. **OutboundDeliveryHook 元数据**：复用 `replyToSender` 元数据解析
+
 ### Phase B: WeCom Bot Adapter — 企微 AI Bot（实时交互）
 
 **连接方式**：WebSocket 长连接（`@wecom/aibot-node-sdk` 官方 SDK）。
@@ -142,7 +198,7 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 
 ## Acceptance Criteria
 
-### Phase A（DingTalk Adapter）
+### Phase A（DingTalk Adapter — DM 基础）
 - [x] AC-A1: 钉钉企业内部应用 DM 消息入站解析正确（text + richText）
 - [x] AC-A2: 猫猫回复通过 DingTalkAdapter 发送到钉钉（text + markdown）
 - [x] AC-A3: AI Card 正确渲染猫名 header + 正文 + deep link
@@ -150,6 +206,23 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 - [x] AC-A5: 图片/音频双向收发
 - [x] AC-A6: 复用 ConnectorRouter/CommandLayer/BindingStore，公共层零改动
 - [x] AC-A7: Stream 连接断线自动重连 + 幂等去重
+
+### Phase A.1（DingTalk 媒体原生发送）
+- [ ] AC-A1.1: 语音通过 `sampleAudio` msgKey 原生发送（不再文本降级）
+- [ ] AC-A1.2: 文件通过 `sampleFile` msgKey 原生发送（不再文本降级）
+- [ ] AC-A1.3: 图片支持本地文件上传路径（不仅 URL 直发）
+- [ ] AC-A1.4: 媒体上传通过 `/v1.0/robot/messageFiles/upload` API
+- [ ] AC-A1.5: 上传优先链与飞书一致：platform key > absPath upload > URL download+upload > text fallback
+- [ ] AC-A1.6: 公共层零改动
+
+### Phase A.2（DingTalk 群聊支持）
+- [ ] AC-A2.1: 群聊消息入站解析正确（移除 DM-only 过滤）
+- [ ] AC-A2.2: 群组消息通过 `orgGroupSend` API 发送
+- [ ] AC-A2.3: AI Card 在群聊中正确投递（`imGroupOpenDeliverModel`）
+- [ ] AC-A2.4: 群聊回复带 @sender 提及
+- [ ] AC-A2.5: 用户名/群名解析 + TTL 缓存
+- [ ] AC-A2.6: 复用 IM Hub 群聊抽象（bootstrap routing + ConnectorRouter + OutboundDeliveryHook）
+- [ ] AC-A2.7: 公共层零改动
 
 ### Phase B（WeCom Bot Adapter）
 - [ ] AC-B1: 企微 Bot WebSocket 连接 + 心跳 + 重连
@@ -181,9 +254,11 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 |----|---------------------------|---------|----------|------|
 | R1 | "接入钉钉" | AC-A1~A7 | test + manual DM | [x] |
 | R2 | "接入企业微信" | AC-B1~B6, AC-C1~C7 | test + manual DM（两种模式） | [ ] |
-| R3 | "必须复用我们的 channel 等等架构设计" | AC-A6, AC-B6, AC-C7 | code review: 公共层 diff = 0 | [ ] |
+| R3 | "必须复用我们的 channel 等等架构设计" | AC-A6, AC-A1.6, AC-A2.7, AC-B6, AC-C7 | code review: 公共层 diff = 0 | [ ] |
 | R4 | "学习飞书的接入" | AC-D2~D3 | adapter 结构对照 FeishuAdapter | [ ] |
 | R5 | 参考 OpenClaw 生态 | KD-1, KD-4 | 设计文档引用 + 调研综合报告 | [ ] |
+| R6 | "富文本/媒体原生发送都支持完整" | AC-A1.1~A1.5 | 语音/文件/图片原生发送，不降级 | [ ] |
+| R7 | "群聊对接飞书 IM Hub 抽象" | AC-A2.1~A2.7 | 群聊收发 + @回复 + 名称解析 | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -214,9 +289,10 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 |---|------|------|------|
 | KD-1 | 参考 OpenClaw 社区插件架构，不引入 ChannelPlugin 接口 | OpenClaw 社区有成熟钉钉/企微插件（`largezhou`、`YanHaidao`、`toboto` 等），验证了 adapter-only 模式。我们的三层架构已足够 | 2026-03-22 |
 | KD-2 | adapter-only 扩展，公共层零改动 | F088 架构验证 + duck typing 能力发现天然支持 | 2026-03-22 |
-| KD-3 | DM-only MVP，群聊留给 F088 Phase 7 | 与 F088 飞书/Telegram 一致的 scope 策略 | 2026-03-22 |
+| KD-3 | ~~DM-only MVP~~ → 钉钉分三步：DM 基础(A) → 媒体原生发送(A.1) → 群聊(A.2) | team lead确认"先把富文本/媒体原生发送都支持完整，然后再完整地做群聊" | 2026-03-22→03-23 |
 | KD-4 | **企微拆两个 connector**：`wecom-bot`（WebSocket + 流式）+ `wecom-agent`（HTTP callback + AES/XML） | GPT Pro 调研确认：身份、协议、流式能力完全不同，硬揉一个 adapter 会把 Principal Link 和 Session Binding 搅成毛线球。OpenClaw 生态的 `YanHaidao/wecom` 已验证 dual-mode 架构 | 2026-03-22 |
 | KD-5 | 钉钉用 AI Card 做流式，不用 plain message edit | 钉钉 plain message 不支持编辑，但 AI Card 支持 create → streaming update → finish 状态机。`soimy/openclaw-channel-dingtalk` 已验证此路径 | 2026-03-22 |
+| KD-6 | 钉钉群聊须对齐飞书 F134 IM Hub 抽象 | team experience"群聊你也得对接上飞书有的功能或者他们的抽象你要接入，IM Hub 里群聊怎么映射你们也要这么干" | 2026-03-23 |
 
 ## Review Gate
 

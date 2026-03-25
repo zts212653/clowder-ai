@@ -216,6 +216,7 @@ MCP 工具用于异步汇报等场景（token 有效期有限）：
 - cat_cafe_list_threads: 列出 thread 摘要
 - cat_cafe_update_task: 更新任务状态
 - cat_cafe_create_rich_block: 创建 rich block
+- cat_cafe_generate_document: 生成文档并投递到 IM（MD→DOCX/PDF）— 用户说"生成报告/导出文档/发PDF"时用这个，不要手动 pandoc + create_rich_block（那不会投递到飞书）
 - cat_cafe_get_rich_block_rules: 获取 rich block 规则（fallback）
 - cat_cafe_multi_mention: 并行拉1-3只猫讨论同一问题（先搜后问：必须带searchEvidenceRefs或overrideReason）
 

@@ -149,6 +149,39 @@ describe('runtime-worktree.sh', () => {
     assert.match(result.stdout, new RegExp(`STARTED:${projectDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
   });
 
+  it('ignores sibling runtime .env when starting in-place outside git', async () => {
+    const projectDir = createTempProject('runtime-non-git-sibling-runtime');
+    seedRuntimeDependencyMarkers(projectDir);
+
+    const siblingRuntimeDir = join(projectDir, '..', 'cat-cafe-runtime');
+    mkdirSync(siblingRuntimeDir, { recursive: true });
+    writeFileSync(join(siblingRuntimeDir, '.env'), 'API_SERVER_PORT=3010\n');
+
+    const server = spawn(
+      process.execPath,
+      [
+        '-e',
+        `const net=require('node:net');
+const server=net.createServer((socket)=>{socket.on('error',()=>{}); socket.end();});
+server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
+      ],
+      { stdio: 'ignore' },
+    );
+    tempProcs.push(server);
+    await waitForLocalPort(3010);
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: { ...process.env, CAT_CAFE_RUNTIME_RESTART_OK: '1' },
+    });
+
+    assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.match(result.stdout, /running in-place \(deployment mode\)/);
+    assert.match(result.stdout, new RegExp(`STARTED:${projectDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.doesNotMatch(result.stderr, /API port appears active/);
+  });
+
   it('fails fast when project is a git repo but the configured remote is missing', () => {
     const projectDir = createTempProject('runtime-missing-remote');
     execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });

@@ -28,6 +28,8 @@ export interface QueueEntry {
   autoExecute: boolean;
   /** F122B: which cat initiated this entry (for A2A/multi_mention display) */
   callerCatId?: string;
+  /** F134: sender identity for connector group chat messages (used for UI display) */
+  senderMeta?: { id: string; name?: string };
 }
 
 export interface EnqueueResult {
@@ -75,12 +77,13 @@ export class InvocationQueue {
     const key = this.scopeKey(input.threadId, input.userId);
     const q = this.getOrCreate(key);
 
-    // Check merge with tail
+    // Check merge with tail — F134: connector messages never merge (different group senders could collide)
     const tail = q.length > 0 ? q[q.length - 1] : null;
     if (
       tail &&
       tail.status === 'queued' &&
       tail.source === input.source &&
+      tail.source !== 'connector' &&
       tail.intent === input.intent &&
       arraysEqual(sorted(tail.targetCats), sorted(input.targetCats))
     ) {
@@ -110,6 +113,7 @@ export class InvocationQueue {
       createdAt: Date.now(),
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
+      senderMeta: input.senderMeta,
     };
     q.push(entry);
     this.originalContents.set(entry.id, input.content);
@@ -434,6 +438,20 @@ export class InvocationQueue {
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       if (q.some((e) => e.status === 'queued')) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Whether any user-sourced message is queued for this thread.
+   * Agent/connector-sourced entries are excluded — they have their own
+   * per-cat dedup via hasActiveOrQueuedAgentForCat and must NOT block
+   * the A2A text-scan fairness gate in routeSerial.
+   */
+  hasQueuedUserMessagesForThread(threadId: string): boolean {
+    for (const [key, q] of this.queues) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      if (q.some((e) => e.status === 'queued' && e.source === 'user')) return true;
     }
     return false;
   }

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F093]
-related_features: [F066, F092, F086, F129]
+related_features: [F066, F092, F086, F129, F138]
 topics: [vision, companionship, world-building, humanistic-ai]
 doc_kind: spec
 created: 2026-03-10

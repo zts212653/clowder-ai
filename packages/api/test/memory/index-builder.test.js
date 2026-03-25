@@ -549,7 +549,8 @@ describe('IndexBuilder with session digests (D6)', () => {
     assert.ok(result.docsIndexed >= 1, 'should index at least the session digest');
 
     // Search for it
-    const items = await store.search('Edit Bash', { scope: 'threads' });
+    // P1 fix: scope='threads' now maps to kind='thread', use scope='sessions' to find session digests
+    const items = await store.search('Edit Bash', { scope: 'sessions' });
     assert.ok(items.length >= 1, 'should find session by tool names');
     assert.equal(items[0].kind, 'session');
     assert.ok(items[0].anchor.startsWith('session-'));

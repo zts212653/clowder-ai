@@ -1400,6 +1400,8 @@ describe('AgentRouter', () => {
   test('passes workingDirectory when thread has non-default projectPath', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
     const projectPath = resolve(process.cwd(), '..', '..');
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    const previousAllowedRootsAppend = process.env.PROJECT_ALLOWED_ROOTS_APPEND;
 
     let receivedOptions = null;
     const mockClaudeService = {
@@ -1428,12 +1430,22 @@ describe('AgentRouter', () => {
       }),
     );
 
-    for await (const _ of router.route('user-1', '@opus hello', 'thread-proj')) {
-      // consume
-    }
+    process.env.PROJECT_ALLOWED_ROOTS = projectPath;
+    process.env.PROJECT_ALLOWED_ROOTS_APPEND = 'true';
+    try {
+      for await (const _ of router.route('user-1', '@opus hello', 'thread-proj')) {
+        // consume
+      }
 
-    assert.ok(receivedOptions);
-    assert.equal(receivedOptions.workingDirectory, projectPath);
+      assert.ok(receivedOptions);
+      assert.equal(receivedOptions.workingDirectory, projectPath);
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+
+      if (previousAllowedRootsAppend === undefined) delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+      else process.env.PROJECT_ALLOWED_ROOTS_APPEND = previousAllowedRootsAppend;
+    }
   });
 
   test('does NOT pass workingDirectory when thread has default projectPath', async () => {

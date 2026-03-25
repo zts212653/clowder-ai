@@ -35,18 +35,20 @@ export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
       </svg>
     ),
   },
-  dingtalk: {
-    iconBg: '#FEF3C7',
-    iconColor: '#D97706',
+  weixin: {
+    iconBg: '#D1FAE5',
+    iconColor: '#07C160',
     icon: (
-      <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
-        <path d="M12 8V4H8" />
-        <rect width="16" height="12" x="4" y="8" rx="2" />
-        <path d="M2 14h2" />
-        <path d="M20 14h2" />
-        <path d="M15 13v2" />
-        <path d="M9 13v2" />
-      </svg>
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src="/images/connectors/weixin.png" alt="WeChat" className="w-[18px] h-[18px]" />
+    ),
+  },
+  dingtalk: {
+    iconBg: '#DBEAFE',
+    iconColor: '#3296FA',
+    icon: (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src="/images/connectors/dingtalk.png" alt="DingTalk" className="w-[18px] h-[18px]" />
     ),
   },
 };
@@ -112,6 +114,67 @@ export function TriangleAlertIcon() {
       <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
+/** Solid green circle — "configured / connected" status indicator */
+export function StatusDotConnected() {
+  return (
+    <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
+      <circle cx="5" cy="5" r="5" fill="#16A34A" />
+    </svg>
+  );
+}
+
+/** Hollow gray circle — "not configured" status indicator */
+export function StatusDotIdle() {
+  return (
+    <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
+      <circle cx="5" cy="5" r="4" fill="none" stroke="#9CA3AF" strokeWidth="2" />
+    </svg>
+  );
+}
+
+/** QR code icon for the "generate QR" button */
+export function QrCodeIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+      <rect width="6" height="6" x="3" y="3" rx="1" />
+      <rect width="6" height="6" x="15" y="3" rx="1" />
+      <rect width="6" height="6" x="3" y="15" rx="1" />
+      <path d="M15 15h2v2" />
+      <path d="M21 15h-2v6h6v-2" />
+      <path d="M15 21v-2" />
+    </svg>
+  );
+}
+
+/** Spinning loader indicator */
+export function SpinnerIcon() {
+  return (
+    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.25" />
+      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Checkmark circle icon for success states */
+export function CheckCircleIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="m9 11 3 3L22 4" />
+    </svg>
+  );
+}
+
+export function LockIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+      <rect width="18" height="11" x="3" y="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
     </svg>
   );
 }

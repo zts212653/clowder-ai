@@ -19,6 +19,7 @@ import { catRegistry, getConnectorDefinition } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
 import { ConnectorMessageFormatter } from './ConnectorMessageFormatter.js';
+import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import type { InboundMessageDedup } from './InboundMessageDedup.js';
 import { parseMentions } from './mention-parser.js';
@@ -78,6 +79,8 @@ export interface ConnectorRouterOptions {
       message: string,
       messageId: string,
       contentBlocks?: readonly MessageContent[],
+      policy?: unknown,
+      sender?: { id: string; name?: string },
     ): void;
   };
   readonly socketManager?:
@@ -89,6 +92,7 @@ export interface ConnectorRouterOptions {
   readonly defaultCatId: CatId;
   readonly log: FastifyBaseLogger;
   readonly commandLayer?: ConnectorCommandLayer | undefined;
+  readonly permissionStore?: IConnectorPermissionStore | undefined;
   readonly adapters?: Map<string, IOutboundAdapter> | undefined;
   readonly mediaService?:
     | {
@@ -140,6 +144,9 @@ export class ConnectorRouter {
       duration?: number;
       messageId?: string;
     }>,
+    sender?: { id: string; name?: string },
+    chatType?: 'p2p' | 'group',
+    chatName?: string,
   ): Promise<RouteResult> {
     const { bindingStore, dedup, messageStore, threadStore, invokeTrigger, socketManager, log } = this.opts;
 
@@ -149,9 +156,57 @@ export class ConnectorRouter {
       return { kind: 'skipped', reason: 'duplicate' };
     }
 
+    const trimmedText = text.trim();
+
+    // 1a. F134 Phase D: Group whitelist check
+    if (chatType === 'group' && this.opts.permissionStore) {
+      const commandName = trimmedText.split(/\s+/, 1)[0]?.toLowerCase();
+      const isAdminAllowGroupCommand =
+        this.opts.commandLayer &&
+        sender &&
+        commandName === '/allow-group' &&
+        (await this.opts.permissionStore.isAdmin(connectorId, sender.id));
+
+      if (isAdminAllowGroupCommand) {
+        log.info(
+          { connectorId, externalChatId, senderId: sender.id },
+          '[ConnectorRouter] Admin /allow-group bypasses whitelist precheck',
+        );
+      } else {
+        const allowed = await this.opts.permissionStore.isGroupAllowed(connectorId, externalChatId);
+        if (!allowed) {
+          const adapter = this.opts.adapters?.get(connectorId);
+          if (adapter) {
+            await adapter.sendReply(externalChatId, '🔒 此群未授权使用 bot。请联系管理员使用 /allow-group 授权。');
+          }
+          log.info({ connectorId, externalChatId }, '[ConnectorRouter] Group not in whitelist, skipped');
+          return { kind: 'skipped', reason: 'group_not_allowed' };
+        }
+      }
+    }
+
     // 1b. Command interception — handle /commands before agent routing
-    if (this.opts.commandLayer && text.trim().startsWith('/')) {
-      const cmdResult = await this.opts.commandLayer.handle(connectorId, externalChatId, this.opts.defaultUserId, text);
+    if (this.opts.commandLayer && trimmedText.startsWith('/')) {
+      // F134 Phase D: admin-only commands in group chats
+      if (chatType === 'group' && sender && this.opts.permissionStore) {
+        const isAdmin = await this.opts.permissionStore.isAdmin(connectorId, sender.id);
+        const cmdAdminOnly = await this.opts.permissionStore.isCommandAdminOnly(connectorId);
+        if (cmdAdminOnly && !isAdmin) {
+          const adapter = this.opts.adapters?.get(connectorId);
+          if (adapter) {
+            await adapter.sendReply(externalChatId, '🔒 此命令仅管理员可用。');
+          }
+          log.info({ connectorId, senderId: sender.id }, '[ConnectorRouter] Non-admin command in group, blocked');
+          return { kind: 'skipped', reason: 'command_admin_only' };
+        }
+      }
+      const cmdResult = await this.opts.commandLayer.handle(
+        connectorId,
+        externalChatId,
+        this.opts.defaultUserId,
+        text,
+        sender?.id,
+      );
       if (cmdResult.kind !== 'not-command' && cmdResult.response) {
         const adapter = this.opts.adapters?.get(connectorId);
         if (adapter) {
@@ -163,7 +218,8 @@ export class ConnectorRouter {
           }
         }
         // ISSUE-8 (8A): Store command exchange in Hub thread, not conversation thread
-        const hubThreadId = await this.resolveHubThread(connectorId, externalChatId);
+        const chatLabel = chatType === 'group' ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}` : undefined;
+        const hubThreadId = await this.resolveHubThread(connectorId, externalChatId, chatLabel);
         const stored = await this.storeCommandExchange(connectorId, hubThreadId, text, cmdResult.response);
         log.info(
           { connectorId, command: cmdResult.kind, hubThreadId },
@@ -222,7 +278,10 @@ export class ConnectorRouter {
     let binding = await bindingStore.getByExternal(connectorId, externalChatId);
     if (!binding) {
       const def = getConnectorDefinition(connectorId);
-      const title = `${def?.displayName ?? connectorId} DM`;
+      const title =
+        chatType === 'group'
+          ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}`
+          : `${def?.displayName ?? connectorId} DM`;
       const thread = await threadStore.create(this.opts.defaultUserId, title);
       binding = await bindingStore.bind(connectorId, externalChatId, thread.id, this.opts.defaultUserId);
       log.info(
@@ -235,8 +294,10 @@ export class ConnectorRouter {
     const def = getConnectorDefinition(connectorId);
     const source: ConnectorSource = {
       connector: connectorId,
-      label: def?.displayName ?? connectorId,
+      label:
+        chatType === 'group' ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}` : (def?.displayName ?? connectorId),
       icon: def?.icon ?? 'message',
+      ...(sender ? { sender } : {}),
     };
 
     // Parse @-mentions to determine target cat
@@ -269,6 +330,8 @@ export class ConnectorRouter {
       resolvedText,
       stored.id,
       contentBlocks,
+      undefined,
+      sender,
     );
 
     log.info(
@@ -332,7 +395,11 @@ export class ConnectorRouter {
     return { text: parts.length > 0 ? parts.join('\n') : originalText, contentBlocks };
   }
 
-  private async resolveHubThread(connectorId: string, externalChatId: string): Promise<string | undefined> {
+  private async resolveHubThread(
+    connectorId: string,
+    externalChatId: string,
+    chatLabel?: string,
+  ): Promise<string | undefined> {
     const key = `${connectorId}:${externalChatId}`;
     const inFlight = this.hubThreadResolvers.get(key);
     if (inFlight) return inFlight;
@@ -344,7 +411,7 @@ export class ConnectorRouter {
     const inFlightAfterRead = this.hubThreadResolvers.get(key);
     if (inFlightAfterRead) return inFlightAfterRead;
 
-    const creation = this.resolveHubThreadOnce(connectorId, externalChatId).finally(() => {
+    const creation = this.resolveHubThreadOnce(connectorId, externalChatId, chatLabel).finally(() => {
       if (this.hubThreadResolvers.get(key) === creation) {
         this.hubThreadResolvers.delete(key);
       }
@@ -353,7 +420,11 @@ export class ConnectorRouter {
     return creation;
   }
 
-  private async resolveHubThreadOnce(connectorId: string, externalChatId: string): Promise<string | undefined> {
+  private async resolveHubThreadOnce(
+    connectorId: string,
+    externalChatId: string,
+    chatLabel?: string,
+  ): Promise<string | undefined> {
     const { bindingStore, threadStore, log } = this.opts;
     const binding = await bindingStore.getByExternal(connectorId, externalChatId);
     if (!binding) return undefined;
@@ -361,7 +432,8 @@ export class ConnectorRouter {
 
     const def = getConnectorDefinition(connectorId);
     const label = def?.displayName ?? connectorId;
-    const hubThread = await threadStore.create(this.opts.defaultUserId, `${label} IM Hub`);
+    const hubTitle = chatLabel ? `${chatLabel} IM Hub` : `${label} IM Hub`;
+    const hubThread = await threadStore.create(this.opts.defaultUserId, hubTitle);
     await threadStore.updateConnectorHubState(hubThread.id, {
       v: 1,
       connectorId,

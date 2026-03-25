@@ -56,6 +56,8 @@ export interface OutboundDeliveryHookLike {
     catId: string,
     richBlocks?: ReadonlyArray<{ kind: string; [key: string]: unknown }>,
     threadMeta?: { threadShortId?: string; threadTitle?: string; deepLinkUrl?: string },
+    origin?: string,
+    triggerMessageId?: string,
   ): Promise<void>;
 }
 
@@ -164,6 +166,11 @@ export class QueueProcessor {
   /** Expose queued-state for route fairness decisions in non-queue entry paths (retry/connector). */
   hasQueuedForThread(threadId: string): boolean {
     return this.deps.queue.hasQueuedForThread(threadId);
+  }
+
+  /** A2A fairness gate: only user-sourced entries should block text-scan A2A. */
+  hasQueuedUserMessagesForThread(threadId: string): boolean {
+    return this.deps.queue.hasQueuedUserMessagesForThread(threadId);
   }
 
   /** A2A dedup: check if a specific cat already has a queued or processing entry for this thread. */
@@ -545,7 +552,7 @@ export class QueueProcessor {
         {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
-          queueHasQueuedMessages: (tid: string) => queue.hasQueuedForThread(tid),
+          queueHasQueuedMessages: (tid: string) => queue.hasQueuedUserMessagesForThread(tid),
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
           cursorBoundaries,
           persistenceContext,
@@ -616,6 +623,7 @@ export class QueueProcessor {
         persistenceContext,
         streamStartPromise,
         log,
+        messageId ?? undefined,
       );
 
       return 'succeeded';
@@ -686,6 +694,7 @@ export class QueueProcessor {
     persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> },
     streamStartPromise: Promise<void> | undefined,
     log: LoggerLike,
+    triggerMessageId?: string,
   ): Promise<void> {
     const finalContent = collectedTextParts.join('');
 
@@ -738,6 +747,8 @@ export class QueueProcessor {
             turn.catId,
             turn.richBlocks,
             threadMeta,
+            undefined,
+            triggerMessageId,
           );
           inflightDeliverPromises.push(deliverPromise);
           try {
@@ -761,6 +772,8 @@ export class QueueProcessor {
           turn.catId,
           richBlocks,
           threadMeta,
+          undefined,
+          triggerMessageId,
         );
         inflightDeliverPromises.push(deliverPromise);
         try {
@@ -783,6 +796,8 @@ export class QueueProcessor {
             primaryCat,
             richBlocks,
             threadMeta,
+            undefined,
+            triggerMessageId,
           );
           inflightDeliverPromises.push(deliverPromise);
           try {

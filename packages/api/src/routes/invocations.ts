@@ -193,7 +193,8 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             signal: controller.signal,
             ...(opts.queueProcessor
               ? {
-                  queueHasQueuedMessages: (tid: string) => opts.queueProcessor?.hasQueuedForThread(tid) ?? false,
+                  queueHasQueuedMessages: (tid: string) =>
+                    opts.queueProcessor?.hasQueuedUserMessagesForThread(tid) ?? false,
                   hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
                     opts.queueProcessor?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                 }

@@ -520,7 +520,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             {messages.length === 0 && !isLoadingHistory ? (
               <div className="text-center mt-20">
                 <PawIcon className="w-12 h-12 text-cocreator-light mx-auto mb-4" />
-                <p className="text-lg text-gray-500 mb-1">Welcome to Clowder AI!</p>
+                <p className="text-lg text-gray-500 mb-1">欢迎来到 Clowder AI!</p>
                 <p className="text-sm text-gray-400">输入 @布偶 召唤布偶猫开始聊天</p>
                 {(() => {
                   const isCurrentBootcamp = storeThreads.find((t) => t.id === threadId)?.bootcampState;

@@ -179,6 +179,14 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'REDIS_KEY_PREFIX',
+    defaultValue: 'cat-cafe:',
+    description: 'Redis key 命名空间前缀，用于多实例隔离',
+    category: 'storage',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'MEMORY_STORE',
     defaultValue: '(未设置)',
     description: '设为 1 显式允许内存模式',

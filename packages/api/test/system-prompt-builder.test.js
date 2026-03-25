@@ -176,7 +176,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 3200, `Prompt is ${prompt.length} chars, expected < 3200`);
+    assert.ok(prompt.length < 3350, `Prompt is ${prompt.length} chars, expected < 3350`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -449,7 +449,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 4100, `Full runtime prompt is ${prompt.length} chars, expected < 4100`);
+      assert.ok(prompt.length < 4250, `Full runtime prompt is ${prompt.length} chars, expected < 4250`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -706,7 +706,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 3250, `Prompt with activity is ${prompt.length} chars, expected < 3250`);
+    assert.ok(prompt.length < 3400, `Prompt with activity is ${prompt.length} chars, expected < 3400`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -906,7 +906,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 3300, `Prompt with SOP hint is ${prompt.length} chars, expected < 3300`);
+    assert.ok(prompt.length < 3450, `Prompt with SOP hint is ${prompt.length} chars, expected < 3450`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -953,7 +953,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 3450, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3450`);
+    assert.ok(prompt.length < 3600, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3600`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {

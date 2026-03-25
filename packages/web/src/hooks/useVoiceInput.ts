@@ -8,7 +8,7 @@ const WHISPER_URL = process.env.NEXT_PUBLIC_WHISPER_URL || 'http://localhost:987
 const LLM_POSTPROCESS_URL = process.env.NEXT_PUBLIC_LLM_POSTPROCESS_URL || 'http://localhost:9878';
 
 const DEFAULT_PROMPT =
-  'This is a Clowder AI team conversation.' +
+  '这是 Clowder AI 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。' +
   '铲屎官经常说：帮我看看、开个 worktree、跑一下测试、review 一下、rebase 到 main。' +
   '技术栈：MCP, Redis, Fastify, TypeScript, Whisper, NDJSON, Zustand, WebSocket, ' +
   'InvocationRecord, Hindsight, Codex, Gemini, Claude, Opus, Sonnet, Haiku, ADR, Lua, CAS。';

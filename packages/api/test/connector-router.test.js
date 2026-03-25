@@ -551,5 +551,211 @@ describe('ConnectorRouter', () => {
       assert.ok(hubThread.connectorHubState.lastCommandAt, 'lastCommandAt should be set');
       assert.ok(hubThread.connectorHubState.lastCommandAt >= beforeCmd, 'lastCommandAt should be recent');
     });
+
+    // F134 regression: group chats must support /commands (KD-8 was incorrectly blocking them)
+    it('handles /commands in group chats (F134)', async () => {
+      bindingStore.bind('feishu', 'group-chat-1', 'thread-grp-1', 'owner-1');
+      const result = await commandRouter.route(
+        'feishu',
+        'group-chat-1',
+        '/where',
+        'ext-grp-cmd-1',
+        undefined,
+        undefined,
+        'group',
+      );
+      assert.equal(result.kind, 'command');
+      assert.equal(adapterSendCalls.length, 1);
+      assert.equal(adapterSendCalls[0].content, 'You are here');
+      assert.equal(cmdTrigger.calls.length, 0);
+    });
+
+    // F134 regression: group Hub title includes chatName to distinguish multiple groups
+    it('group Hub thread title includes chatName (F134)', async () => {
+      bindingStore.bind('feishu', 'grp-hub-1', 'thread-grp-hub-1', 'owner-1');
+      const hubRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: cmdTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/where': { kind: 'where', response: 'info' },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+
+      const result = await hubRouter.route(
+        'feishu',
+        'grp-hub-1',
+        '/where',
+        'ext-grp-hub-1',
+        undefined,
+        undefined,
+        'group',
+        '猫猫咖啡测试群',
+      );
+      const hubThread = threadStore.threads.get(result.threadId);
+      assert.ok(hubThread);
+      assert.ok(hubThread.title.includes('猫猫咖啡测试群'), `expected chatName in Hub title, got: ${hubThread.title}`);
+      assert.ok(hubThread.title.includes('IM Hub'));
+    });
+  });
+
+  // ── F134 Phase D: Permission tests ──
+  describe('Phase D permissions', () => {
+    let permRouter;
+    let permSendCalls;
+    let permTrigger;
+
+    function mockPermCommandLayer(responses) {
+      return {
+        async handle(_cid, _ecid, _uid, text, _sid) {
+          const cmd = text.trim().split(/\s+/)[0].toLowerCase();
+          return responses[cmd] ?? { kind: 'not-command' };
+        },
+      };
+    }
+
+    function mockPermAdapter() {
+      permSendCalls = [];
+      return {
+        async sendReply(externalChatId, content) {
+          permSendCalls.push({ externalChatId, content });
+        },
+      };
+    }
+
+    beforeEach(async () => {
+      permTrigger = mockTrigger();
+      const { MemoryConnectorPermissionStore } = await import(
+        '../dist/infrastructure/connectors/ConnectorPermissionStore.js'
+      );
+      const permStore = new MemoryConnectorPermissionStore();
+      await permStore.setWhitelistEnabled('feishu', true);
+      await permStore.allowGroup('feishu', 'allowed-group');
+      await permStore.setAdminOpenIds('feishu', ['admin-user-1']);
+      await permStore.setCommandAdminOnly('feishu', true);
+
+      const adaptersMap = new Map();
+      adaptersMap.set('feishu', mockPermAdapter());
+
+      permRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: permTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockPermCommandLayer({
+          '/where': { kind: 'where', response: 'You are here' },
+          '/allow-group': { kind: 'allow-group', response: 'Group allowed' },
+        }),
+        permissionStore: permStore,
+        adapters: adaptersMap,
+      });
+    });
+
+    it('AC-D1: blocks group messages when group not in whitelist', async () => {
+      const result = await permRouter.route(
+        'feishu',
+        'blocked-group',
+        'hello',
+        'ext-perm-1',
+        undefined,
+        { id: 'user-1' },
+        'group',
+      );
+      assert.equal(result.kind, 'skipped');
+      assert.equal(result.reason, 'group_not_allowed');
+      assert.equal(permSendCalls.length, 1);
+      assert.ok(permSendCalls[0].content.includes('未授权'));
+    });
+
+    it('AC-D1: allows admin /allow-group in blocked group before whitelist check', async () => {
+      const result = await permRouter.route(
+        'feishu',
+        'blocked-group',
+        '/allow-group',
+        'ext-perm-allow-1',
+        undefined,
+        { id: 'admin-user-1' },
+        'group',
+      );
+      assert.equal(result.kind, 'command');
+      assert.equal(permSendCalls.length, 1);
+      assert.equal(permSendCalls[0].content, 'Group allowed');
+    });
+
+    it('AC-D1: allows group messages when group is whitelisted', async () => {
+      bindingStore.bind('feishu', 'allowed-group', 'thread-allowed', 'owner-1');
+      const result = await permRouter.route(
+        'feishu',
+        'allowed-group',
+        'hello',
+        'ext-perm-2',
+        undefined,
+        { id: 'user-1' },
+        'group',
+      );
+      assert.equal(result.kind, 'routed');
+      assert.equal(permTrigger.calls.length, 1);
+    });
+
+    it('AC-D3: blocks /command from non-admin in group', async () => {
+      bindingStore.bind('feishu', 'allowed-group', 'thread-allowed2', 'owner-1');
+      const result = await permRouter.route(
+        'feishu',
+        'allowed-group',
+        '/where',
+        'ext-perm-3',
+        undefined,
+        { id: 'non-admin-user' },
+        'group',
+      );
+      assert.equal(result.kind, 'skipped');
+      assert.equal(result.reason, 'command_admin_only');
+      assert.ok(permSendCalls[0].content.includes('管理员'));
+    });
+
+    it('AC-D3: allows /command from admin in group', async () => {
+      bindingStore.bind('feishu', 'allowed-group', 'thread-allowed3', 'owner-1');
+      const result = await permRouter.route(
+        'feishu',
+        'allowed-group',
+        '/where',
+        'ext-perm-4',
+        undefined,
+        { id: 'admin-user-1' },
+        'group',
+      );
+      assert.equal(result.kind, 'command');
+    });
+
+    it('AC-D5: DM messages bypass whitelist (no restriction on @bot)', async () => {
+      const result = await permRouter.route('feishu', 'dm-chat', 'hello', 'ext-perm-5', undefined, undefined, 'p2p');
+      assert.equal(result.kind, 'routed');
+    });
+
+    it('AC-D5: DM /commands bypass admin check', async () => {
+      bindingStore.bind('feishu', 'dm-chat-cmd', 'thread-dm-cmd', 'owner-1');
+      const result = await permRouter.route(
+        'feishu',
+        'dm-chat-cmd',
+        '/where',
+        'ext-perm-6',
+        undefined,
+        undefined,
+        'p2p',
+      );
+      assert.equal(result.kind, 'command');
+    });
   });
 });

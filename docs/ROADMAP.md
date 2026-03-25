@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-03-24
+> 维护者：三猫 | 最后更新：2026-03-25
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -55,7 +55,7 @@ created: 2026-02-26
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | spec | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F132 | DingTalk + WeCom Chat Gateway — 钉钉/企微接入 | spec | Ragdoll | internal | [F132](features/F132-dingtalk-wecom-gateway.md) |
 | F133 | GitHub CI/CD Tracking — 已注册 PR 的 CI/CD 执行结果自动追踪 | spec | 金渐层 | internal [#669](https://github.com/zts212653/cat-cafe/issues/669) | [F133](features/F133-cicd-tracking.md) |
-| F134 | Feishu Group Chat — 飞书群聊多用户支持 | spec | 金渐层 | internal | [F134](features/F134-feishu-group-chat.md) |
 | F135 | 狸花猫开箱即用 — DARE Out-of-the-Box | spec | bouillipx | community [#195](https://github.com/zts212653/clowder-ai/issues/195) | [F135](features/F135-dare-ootb.md) |
 | F136 | Unified Config Hot Reload — 配置热更新统一管线 | spec | 待定 | internal | [F136](features/F136-unified-config-hot-reload.md) |
 | F137 | WeChat Personal Gateway — 微信个人号 iLink Bot 接入 | impl | 金渐层 | internal | [F137](features/F137-weixin-personal-gateway.md) |
+| F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |

@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { WeixinAdapter } from '../infrastructure/connectors/adapters/WeixinAdapter.js';
+import type { IConnectorPermissionStore } from '../infrastructure/connectors/ConnectorPermissionStore.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface ConnectorHubRoutesOptions {
@@ -13,6 +14,8 @@ export interface ConnectorHubRoutesOptions {
   weixinAdapter?: WeixinAdapter | null;
   /** Called after successful QR login to start the WeChat polling loop */
   startWeixinPolling?: () => void;
+  /** F134 Phase D: Permission store for group whitelist + admin management */
+  permissionStore?: IConnectorPermissionStore | null;
 }
 
 function requireTrustedHubIdentity(request: FastifyRequest, reply: FastifyReply): string | null {
@@ -256,5 +259,50 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     app.log.info('[WeChat QR] Manual activate — polling started');
 
     return { ok: true, polling: adapter.isPolling() };
+  });
+
+  // ── F134 Phase D: Connector Permission API ──
+
+  app.get('/api/connector/permissions/:connectorId', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+    const { connectorId } = request.params as { connectorId: string };
+    const store = opts.permissionStore;
+    if (!store) {
+      return { whitelistEnabled: false, commandAdminOnly: false, adminOpenIds: [], allowedGroups: [] };
+    }
+    return store.getConfig(connectorId);
+  });
+
+  app.put('/api/connector/permissions/:connectorId', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+    const { connectorId } = request.params as { connectorId: string };
+    const store = opts.permissionStore;
+    if (!store) {
+      reply.status(503);
+      return { error: 'Permission store not available' };
+    }
+    const body = request.body as {
+      whitelistEnabled?: boolean;
+      commandAdminOnly?: boolean;
+      adminOpenIds?: string[];
+      allowedGroups?: Array<{ externalChatId: string; label?: string }>;
+    };
+    if (body.whitelistEnabled !== undefined) {
+      await store.setWhitelistEnabled(connectorId, body.whitelistEnabled);
+    }
+    if (body.commandAdminOnly !== undefined) {
+      await store.setCommandAdminOnly(connectorId, body.commandAdminOnly);
+    }
+    if (body.adminOpenIds !== undefined) {
+      await store.setAdminOpenIds(connectorId, body.adminOpenIds);
+    }
+    if (body.allowedGroups !== undefined) {
+      const current = await store.listAllowedGroups(connectorId);
+      for (const g of current) await store.denyGroup(connectorId, g.externalChatId);
+      for (const g of body.allowedGroups) await store.allowGroup(connectorId, g.externalChatId, g.label);
+    }
+    return store.getConfig(connectorId);
   });
 };

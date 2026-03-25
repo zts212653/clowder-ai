@@ -522,7 +522,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (threadStore) {
       const thread = await threadStore.get(threadId);
       if (thread?.projectPath && thread.projectPath !== 'default') {
-        if (isUnderAllowedRoot(thread.projectPath)) {
+        // F101: Game threads use virtual projectPaths (e.g. 'games/werewolf') for
+        // categorization only — they are not real filesystem directories. Skip them
+        // to avoid triggering the F070 governance gate on a non-existent path.
+        if (!thread.projectPath.startsWith('games/') && isUnderAllowedRoot(thread.projectPath)) {
           workingDirectory = thread.projectPath;
         }
       }
