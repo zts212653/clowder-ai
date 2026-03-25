@@ -579,12 +579,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
     // Skip legacy Cat Cafe names — a stale 'cat-cafe' entry in user config should
     // not be re-added alongside the split 'cat-cafe-*' built-in entries.
-    const CAT_CAFE_BUILTIN_NAMES = new Set([
-      'cat-cafe',
-      'cat-cafe-collab',
-      'cat-cafe-memory',
-      'cat-cafe-signals',
-    ]);
+    const CAT_CAFE_BUILTIN_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
     for (const server of discoveredByName.values()) {
       if (CAT_CAFE_BUILTIN_NAMES.has(server.name)) continue;
       const exists = config.capabilities.some((c) => c.type === 'mcp' && c.id === server.name);
