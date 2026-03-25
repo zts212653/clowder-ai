@@ -866,8 +866,14 @@ function rewriteCatalogProfileRefs(projectRoot: string, idMap: Map<string, strin
     }
   }
   if (!dirty) return;
-  const filePath = resolve(projectRoot, '.cat-cafe', 'cat-catalog.json');
-  writeFileSync(filePath, `${JSON.stringify(catalog, null, 2)}\n`);
+  // Best-effort: read-only checkouts (EACCES/EROFS) must not block migration.
+  // Global store is already persisted at this point; catalog rewrite is a bonus.
+  try {
+    const filePath = resolve(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    writeFileSync(filePath, `${JSON.stringify(catalog, null, 2)}\n`);
+  } catch {
+    // silent — same policy as the rename-to-.migrated fallback
+  }
 }
 
 function collectRuntimeCatsBoundToProfile(projectRoot: string, profileId: string): string[] {

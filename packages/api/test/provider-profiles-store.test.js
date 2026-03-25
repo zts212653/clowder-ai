@@ -835,6 +835,96 @@ describe('provider profile store', () => {
     }
   });
 
+  it('catalog rewrite failure on read-only dir does not block migration or cause re-merge', async () => {
+    const projectA = await makeTmpDir('ro-projA');
+    const projectB = await makeTmpDir('ro-projB');
+    const globalRoot = await makeTmpDir('ro-global');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    try {
+      // --- Project A: seed with acct-x ---
+      const localDirA = join(projectA, '.cat-cafe');
+      await mkdir(localDirA, { recursive: true });
+      await writeFile(
+        join(localDirA, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3, activeProfileId: null, bootstrapBindings: {},
+          providers: [{
+            id: 'acct-x', displayName: 'X-A', kind: 'api_key', authType: 'api_key',
+            builtin: false, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+          }],
+        }),
+      );
+      await writeFile(
+        join(localDirA, 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ version: 3, profiles: { 'acct-x': { apiKey: 'sk-a' } } }),
+      );
+      await readProviderProfiles(projectA);
+
+      // --- Project B: colliding acct-x + read-only cat-catalog.json ---
+      const localDirB = join(projectB, '.cat-cafe');
+      await mkdir(localDirB, { recursive: true });
+      await writeFile(
+        join(localDirB, 'provider-profiles.json'),
+        JSON.stringify({
+          version: 3, activeProfileId: null, bootstrapBindings: {},
+          providers: [{
+            id: 'acct-x', displayName: 'X-B', kind: 'api_key', authType: 'api_key',
+            builtin: false, createdAt: '2026-02-01T00:00:00Z', updatedAt: '2026-02-01T00:00:00Z',
+          }],
+        }),
+      );
+      await writeFile(
+        join(localDirB, 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ version: 3, profiles: { 'acct-x': { apiKey: 'sk-b' } } }),
+      );
+      // Cat catalog references acct-x
+      const catalogPath = join(localDirB, 'cat-catalog.json');
+      await writeFile(
+        catalogPath,
+        JSON.stringify({
+          breeds: [{
+            catId: 'ro-cat', defaultVariantId: 'v1',
+            variants: [{ id: 'v1', provider: 'anthropic', accountRef: 'acct-x' }],
+          }],
+        }),
+      );
+      // Make catalog read-only to simulate EACCES
+      const { chmod: chmodAsync } = await import('node:fs/promises');
+      await chmodAsync(catalogPath, 0o444);
+
+      // Trigger migration — should NOT throw despite catalog write failure
+      const view = await readProviderProfiles(projectB);
+
+      // Global store should have the migrated profile
+      const migrated = view.providers.find((p) => p.id.startsWith('acct-x-migrated-'));
+      assert.ok(migrated, 'collision-renamed profile must be in global store');
+
+      // Catalog should still have old ref (write was blocked)
+      const rawCatalog = JSON.parse(await readFile(catalogPath, 'utf-8'));
+      assert.equal(
+        rawCatalog.breeds[0].variants[0].accountRef, 'acct-x',
+        'read-only catalog should retain original ref (best-effort: no crash)',
+      );
+
+      // markProjectRootMigrated should have run (no re-merge on next read)
+      const view2 = await readProviderProfiles(projectB);
+      const migratedCount = view2.providers.filter((p) => p.id.startsWith('acct-x-migrated-')).length;
+      assert.equal(migratedCount, 1, 'no duplicate migration — markProjectRootMigrated must have succeeded');
+
+      // Restore permissions for cleanup
+      await chmodAsync(catalogPath, 0o644);
+    } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      await Promise.all([
+        rm(projectA, { recursive: true, force: true }),
+        rm(projectB, { recursive: true, force: true }),
+        rm(globalRoot, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
   it('skips re-migration when project root is recorded in global migrated-roots', async () => {
     const project = await makeTmpDir('migrated-roots-proj');
     const globalRoot = await makeTmpDir('migrated-roots-global');
