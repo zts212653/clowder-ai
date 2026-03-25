@@ -354,7 +354,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     }
 
     // ADR-008 S1: Pre-resolve targets + intent, persisting @mentions as participants
-    log.debug({ threadId: resolvedThreadId, content: content.slice(0, 200) }, 'Resolving targets and intent');
+    log.debug({ threadId: resolvedThreadId, contentLen: content.length }, 'Resolving targets and intent');
     const { targetCats: resolvedTargetCats, intent } = await router.resolveTargetsAndIntent(content, resolvedThreadId, {
       persist: true,
     });

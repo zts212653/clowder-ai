@@ -2,78 +2,70 @@
  * Project Path Validation
  * 共享的路径安全校验，防止路径遍历和 symlink 逃逸。
  *
- * 使用 realpath() 解析 symlink 后再做边界检查。
- * 被 projects.ts, threads.ts, AgentRouter.ts 复用。
+ * Default mode: **denylist** — block known system directories, allow everything else.
+ * Legacy mode: if PROJECT_ALLOWED_ROOTS is set, uses allowlist (backward compat).
+ *
+ * See: https://github.com/zts212653/clowder-ai/issues/228
  */
 
-import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
-import { homedir, platform } from 'node:os';
+import { platform } from 'node:os';
 import { delimiter, relative, resolve, win32 } from 'node:path';
 
-/**
- * Allowed root directories for project paths.
- *
- * Default: homedir + /tmp + /private/tmp + /workspace + /Volumes (macOS only).
- * Windows: existing drive roots (plus the home root for UNC/shared-home setups).
- *
- * PROJECT_ALLOWED_ROOTS (system path delimiter separated):
- *   - Default behaviour: **replaces** built-in defaults (backward compat).
- *   - Set PROJECT_ALLOWED_ROOTS_APPEND=true to merge with defaults instead.
- */
-export function getDefaultRootsForPlatform(
-  platformName = platform(),
-  opts?: { homeDir?: string; pathExists?: (targetPath: string) => boolean },
-): string[] {
-  const homeDir = opts?.homeDir ?? homedir();
-  const roots = new Set<string>([homeDir]);
+// ---------------------------------------------------------------------------
+// Denylist: known system directories that should never be project roots
+// ---------------------------------------------------------------------------
 
+export function getDefaultDeniedRoots(platformName = platform()): string[] {
   if (platformName === 'win32') {
-    const pathExists = opts?.pathExists ?? existsSync;
-    const homeRoot = win32.parse(homeDir).root;
-    if (homeRoot) {
-      roots.add(homeRoot);
-    }
-    for (let code = 65; code <= 90; code++) {
-      const driveRoot = `${String.fromCharCode(code)}:\\`;
-      if (pathExists(driveRoot)) {
-        roots.add(driveRoot);
-      }
-    }
-    return [...roots];
+    const systemRoot = process.env.SYSTEMROOT ?? 'C:\\Windows';
+    return [resolve(systemRoot)];
   }
-
-  roots.add('/tmp');
-  roots.add('/private/tmp');
-  roots.add('/workspace');
-  if (platformName === 'darwin') roots.add('/Volumes');
-  return [...roots];
+  if (platformName === 'darwin') {
+    return ['/dev', '/sbin', '/System'];
+  }
+  // linux / others
+  return ['/proc', '/sys', '/dev', '/boot', '/sbin', '/run'];
 }
 
-const defaultRootsCache = new Map<string, string[]>();
-
-const DEFAULT_ROOTS = (): string[] => {
-  const platformName = platform();
-  const cached = defaultRootsCache.get(platformName);
-  if (cached) return cached;
-  const roots = getDefaultRootsForPlatform(platformName);
-  defaultRootsCache.set(platformName, roots);
-  return roots;
-};
-
-const ALLOWED_ROOTS = (): string[] => {
-  const envRoots = process.env.PROJECT_ALLOWED_ROOTS;
-  if (envRoots?.trim()) {
-    const custom = envRoots.split(delimiter).filter(Boolean);
-    const append = process.env.PROJECT_ALLOWED_ROOTS_APPEND === 'true';
-    return append ? [...new Set([...DEFAULT_ROOTS(), ...custom])] : custom;
+function DENIED_ROOTS(): string[] {
+  const envDenied = process.env.PROJECT_DENIED_ROOTS;
+  const defaults = getDefaultDeniedRoots();
+  if (envDenied?.trim()) {
+    const custom = envDenied.split(delimiter).filter(Boolean);
+    return [...new Set([...defaults, ...custom])];
   }
-  return DEFAULT_ROOTS();
-};
+  return defaults;
+}
 
-/** Expose the computed allowlist for structured error responses. */
+// ---------------------------------------------------------------------------
+// Legacy allowlist (only active when PROJECT_ALLOWED_ROOTS is set)
+// ---------------------------------------------------------------------------
+
+function LEGACY_ALLOWED_ROOTS(): string[] | null {
+  const envRoots = process.env.PROJECT_ALLOWED_ROOTS;
+  if (!envRoots?.trim()) return null;
+  return envRoots.split(delimiter).filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// Public API (kept backward-compatible)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns restriction info for error messages.
+ * - Denylist mode: returns denied roots
+ * - Allowlist mode: returns allowed roots
+ */
 export function getAllowedRoots(): string[] {
-  return ALLOWED_ROOTS();
+  const legacy = LEGACY_ALLOWED_ROOTS();
+  if (legacy) return legacy;
+  return DENIED_ROOTS();
+}
+
+/** Returns true if path validation uses denylist mode (default). */
+export function isDenylistMode(): boolean {
+  return LEGACY_ALLOWED_ROOTS() === null;
 }
 
 /**
@@ -81,7 +73,7 @@ export function getAllowedRoots(): string[] {
  *
  * 1. Resolves the path to absolute
  * 2. Uses realpath() to follow symlinks and canonicalize
- * 3. Checks the real path is under an allowed root (with separator boundary)
+ * 3. Checks the real path against denylist (or allowlist in legacy mode)
  * 4. Verifies the path is an existing directory
  *
  * @returns The canonicalized real path if valid, or null if rejected.
@@ -89,7 +81,6 @@ export function getAllowedRoots(): string[] {
 export async function validateProjectPath(rawPath: string): Promise<string | null> {
   try {
     const absPath = resolve(rawPath);
-    // realpath resolves symlinks → canonical path
     const realPath = await realpath(absPath);
 
     if (!isUnderAllowedRoot(realPath)) return null;
@@ -99,21 +90,16 @@ export async function validateProjectPath(rawPath: string): Promise<string | nul
 
     return realPath;
   } catch {
-    // ENOENT, EACCES, etc.
     return null;
   }
 }
 
-export function isPathUnderRoots(absPath: string, allowedRoots: string[], platformName = process.platform): boolean {
+export function isPathUnderRoots(absPath: string, roots: string[], platformName = process.platform): boolean {
   const isWindows = platformName === 'win32';
-  for (const root of allowedRoots) {
+  for (const root of roots) {
     const rel = isWindows ? win32.relative(root, absPath) : relative(root, absPath);
-    if (rel === '') {
-      return true;
-    }
-    if (isWindows && win32.isAbsolute(rel)) {
-      continue;
-    }
+    if (rel === '') return true;
+    if (isWindows && win32.isAbsolute(rel)) continue;
     if (!rel.startsWith('..') && !rel.startsWith('/') && !rel.startsWith('\\')) {
       return true;
     }
@@ -122,13 +108,22 @@ export function isPathUnderRoots(absPath: string, allowedRoots: string[], platfo
 }
 
 /**
- * Check if a path string (without fs access) is plausibly under an allowed root.
- * Uses separator-aware relative() check instead of naive startsWith().
+ * Check if a path is allowed for project use.
  *
- * For full validation (including symlinks), use validateProjectPath().
+ * - Denylist mode (default): allowed unless under a denied root.
+ * - Allowlist mode (PROJECT_ALLOWED_ROOTS set): allowed only if under an allowed root.
  */
 export function isUnderAllowedRoot(absPath: string): boolean {
-  return isPathUnderRoots(absPath, ALLOWED_ROOTS());
+  const legacy = LEGACY_ALLOWED_ROOTS();
+  if (legacy) {
+    return isPathUnderRoots(absPath, legacy);
+  }
+  return !isPathUnderRoots(absPath, DENIED_ROOTS());
+}
+
+// Keep backward-compat export for tests that import this
+export function getDefaultRootsForPlatform(platformName = platform(), _opts?: { homeDir?: string }): string[] {
+  return getDefaultDeniedRoots(platformName);
 }
 
 /**
