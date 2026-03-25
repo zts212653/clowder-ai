@@ -5,7 +5,7 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createModuleLogger } from '../infrastructure/logger.js';
-import { escapeCmdArg, resolveWindowsShimSpawn } from './cli-spawn-win.js';
+import { escapeBashArg, escapeCmdArg, findGitBashPath, resolveWindowsShimSpawn } from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
@@ -407,7 +407,18 @@ function defaultSpawn(
         stdio: options.stdio,
       });
     }
-    log.debug({ command, shell: true }, 'Windows shim unresolved, falling back to shell');
+    // Prefer Git Bash (UTF-8 native) over cmd.exe (GBK codepage corrupts CJK args)
+    const gitBash = findGitBashPath();
+    if (gitBash) {
+      log.debug({ command, shell: gitBash }, 'Windows shim unresolved, falling back to Git Bash');
+      return nodeSpawn(command, args.map(escapeBashArg), {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: options.stdio,
+        shell: gitBash,
+      });
+    }
+    log.debug({ command, shell: true }, 'Windows shim unresolved, falling back to cmd.exe');
     return nodeSpawn(command, args.map(escapeCmdArg), {
       cwd: options.cwd,
       env: options.env,
