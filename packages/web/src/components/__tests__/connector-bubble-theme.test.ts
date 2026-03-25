@@ -125,6 +125,34 @@ describe('ConnectorBubble theme', () => {
     expect(html).not.toContain('bg-blue-100');
   });
 
+  it('uses slate theme for github-ci connector (same as github-review)', () => {
+    const message: ChatMessage = {
+      id: 'm-ci',
+      type: 'connector',
+      content: '**CI/CD Build #42 passed**',
+      timestamp: Date.now(),
+      source: {
+        connector: 'github-ci',
+        label: 'GitHub CI/CD',
+        icon: 'github',
+        url: 'https://github.com/zts212653/cat-cafe/actions/runs/123',
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    const html = container.innerHTML;
+    // Same slate theme as github-review
+    expect(html).toContain('bg-slate-100');
+    expect(html).toContain('border-slate-200');
+    expect(html).not.toContain('bg-blue-100');
+    // Should render GitHubIcon SVG, not raw text "github"
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('>github<');
+  });
+
   it('preserves legacy warning icon for github-review triage messages', () => {
     const message: ChatMessage = {
       id: 'm-triage',

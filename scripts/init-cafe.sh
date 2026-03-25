@@ -44,6 +44,19 @@ check_requirements() {
     else
         echo -e "${GREEN}✓ Redis CLI${NC}"
     fi
+
+    # F088 Phase J2: pandoc for document generation (MD → PDF/DOCX)
+    if ! command -v pandoc &> /dev/null; then
+        echo -e "${YELLOW}未找到 pandoc，正在安装...${NC}"
+        if command -v brew &> /dev/null; then
+            brew install pandoc
+        else
+            echo -e "${YELLOW}警告: 未找到 brew，请手动安装 pandoc: https://pandoc.org/installing.html${NC}"
+        fi
+    fi
+    if command -v pandoc &> /dev/null; then
+        echo -e "${GREEN}✓ pandoc $(pandoc --version | head -1 | awk '{print $2}')${NC}"
+    fi
 }
 
 # 创建数据目录

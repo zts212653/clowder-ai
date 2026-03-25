@@ -7,11 +7,15 @@ import {
   ChevronRight,
   DEFAULT_VISUAL,
   ExternalLinkIcon,
+  LockIcon,
   PLATFORM_VISUALS,
+  StatusDotConnected,
+  StatusDotIdle,
   StepBadge,
   TriangleAlertIcon,
   WifiIcon,
 } from './HubConfigIcons';
+import { WeixinQrPanel } from './WeixinQrPanel';
 
 interface PlatformFieldStatus {
   envName: string;
@@ -138,14 +142,35 @@ export function HubConnectorConfigTab() {
                 <span className="block text-[15px] font-semibold text-gray-900">
                   {platform.name} {platform.nameEn !== platform.name ? platform.nameEn : ''}
                 </span>
-                <span className={`block text-xs ${platform.configured ? 'text-green-600' : 'text-gray-400'}`}>
-                  {platform.configured ? '✅ 已配置' : '⚪ 未配置'}
+                <span
+                  className={`flex items-center gap-1 text-xs ${platform.configured ? 'text-green-600' : 'text-gray-400'}`}
+                >
+                  {platform.configured ? <StatusDotConnected /> : <StatusDotIdle />}
+                  {platform.configured ? '已配置' : '未配置'}
                 </span>
               </span>
               <span className="text-gray-400 shrink-0">{isExpanded ? <ChevronDown /> : <ChevronRight />}</span>
             </button>
 
-            {isExpanded && (
+            {isExpanded && platform.id === 'weixin' && (
+              <div className="border-t border-gray-100 px-4 py-4 space-y-3.5">
+                {platform.steps.map((step, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <StepBadge num={idx + 1} />
+                      <span className="text-[13px] font-medium text-gray-900">{step}</span>
+                    </div>
+                    {idx === 0 && (
+                      <div className="ml-[26px]">
+                        <WeixinQrPanel configured={platform.configured} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {isExpanded && platform.id !== 'weixin' && (
               <div className="border-t border-gray-100 px-4 py-4 space-y-3.5">
                 {guideSteps.map((step, idx) => (
                   <div key={idx} className="space-y-1.5">
@@ -180,7 +205,11 @@ export function HubConnectorConfigTab() {
                           className="block text-xs font-medium text-gray-500 mb-1"
                         >
                           {field.label}
-                          {field.sensitive && <span className="text-amber-500 ml-1">🔒</span>}
+                          {field.sensitive && (
+                            <span className="text-amber-500 ml-1 inline-flex align-middle">
+                              <LockIcon />
+                            </span>
+                          )}
                         </label>
                         {field.sensitive ? (
                           <div className="w-full h-9 flex items-center px-3 text-[13px] bg-gray-50 border border-gray-200 rounded-lg text-gray-400">
@@ -241,7 +270,9 @@ export function HubConnectorConfigTab() {
                       </button>
                     ) : (
                       <div className="flex-1 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-700">
-                        <p className="font-medium">🔒 所有凭证为敏感字段，请手动配置：</p>
+                        <p className="font-medium flex items-center gap-1">
+                          <LockIcon /> 所有凭证为敏感字段，请手动配置：
+                        </p>
                         <code className="block mt-1 text-[11px] bg-amber-100 rounded px-2 py-1 font-mono select-all">
                           {platform.fields.map((f) => `${f.envName}=your_value`).join('\n')}
                         </code>

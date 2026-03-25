@@ -95,6 +95,7 @@ description: Use when creating new skills, editing existing skills, or verifying
 
 > 详细创建流程（TDD 红绿重构、压力测试、弹孔表）见 `writing-skills/testing-skills-with-subagents.md`
 > Anthropic 官方 skill 写作最佳实践见 `writing-skills/anthropic-best-practices.md`
+> **MCP tool description 规范见 `refs/mcp-tool-description-standard.md`**（写/改 MCP tool 必读）
 
 ## Common Mistakes
 

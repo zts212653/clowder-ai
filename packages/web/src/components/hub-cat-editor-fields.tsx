@@ -210,7 +210,7 @@ export function RangeField({
 export function PersistenceBanner() {
   return (
     <div className="rounded-[16px] border border-[#FFE0B2] bg-[#FFF3E0] px-4 py-3">
-      <p className="text-[13px] font-bold text-[#E65100]">💾 运行时持久化</p>
+      <p className="text-[13px] font-bold text-[#E65100]">运行时持久化</p>
       <p className="mt-1 text-xs leading-5 text-[#BF360C]">
         所有配置修改在运行时即时生效，并自动持久化到 `.cat-cafe/cat-catalog.json` 文件。重启后自动恢复，无需手动保存。
       </p>

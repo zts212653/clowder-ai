@@ -1,6 +1,6 @@
 ---
 feature_ids: [F054]
-related_features: [F043, F044]
+related_features: [F043, F044, F138]
 topics: [hci, social-media, mcp, preheat, content, personality, stickers]
 doc_kind: spec
 created: 2026-03-03

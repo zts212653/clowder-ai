@@ -443,10 +443,10 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={requestClose}>
       <div
-        className="max-h-[88vh] w-full max-w-[560px] overflow-y-auto rounded-[32px] border border-[#F0DDCD] bg-[#FFF8F2] shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-[560px] flex-col rounded-[32px] border border-[#F0DDCD] bg-[#FFF8F2] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between border-b border-[#F0DDCD] px-7 py-5">
+        <div className="flex shrink-0 items-start justify-between border-b border-[#F0DDCD] px-7 py-5">
           <div>
             <p className="text-[13px] font-semibold text-[#77A777]">
               成员协作 &gt; 总览 &gt; {cat ? '编辑成员' : '添加成员'}
@@ -482,7 +482,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
           </div>
         </div>
 
-        <div className="space-y-4 px-7 py-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-7 py-5">
           <IdentitySection
             cat={cat}
             form={form}
@@ -519,7 +519,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
           {error ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p> : null}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-7 py-4">
+        <div className="flex shrink-0 items-center justify-between border-t border-[#F0DDCD] bg-[#FFF3EA] px-7 py-4">
           <div className="text-xs leading-5 text-[#8A776B]">
             {buildEditorLoadingNote({ loadingProfiles, loadingStrategy, loadingCodexSettings })}
           </div>

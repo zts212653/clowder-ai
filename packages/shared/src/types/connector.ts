@@ -22,6 +22,8 @@ export interface ConnectorSource {
   readonly url?: string;
   /** Connector-specific metadata (not rendered, for debugging/routing) */
   readonly meta?: Readonly<Record<string, unknown>>;
+  /** F134: Original sender info for group chat messages (message-level binding, not thread-level) */
+  readonly sender?: { readonly id: string; readonly name?: string };
 }
 
 // ── Connector Definition (registry entry) ──
@@ -79,6 +81,19 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     icon: 'github',
     color: { primary: '#2563EB', secondary: '#EFF6FF' },
     description: 'GitHub PR review 邮件通知',
+    tailwindTheme: {
+      avatar: 'bg-slate-100 ring-2 ring-slate-200',
+      label: 'text-slate-700',
+      labelLink: 'text-slate-700 hover:text-slate-900',
+      bubble: 'border border-slate-200 bg-slate-50',
+    },
+  },
+  {
+    id: 'github-ci',
+    displayName: 'GitHub CI/CD',
+    icon: 'github',
+    color: { primary: '#2563EB', secondary: '#EFF6FF' },
+    description: 'GitHub CI/CD 状态通知',
     tailwindTheme: {
       avatar: 'bg-slate-100 ring-2 ring-slate-200',
       label: 'text-slate-700',

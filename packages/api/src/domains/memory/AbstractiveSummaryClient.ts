@@ -103,19 +103,33 @@ function buildUserPrompt(input: AbstractiveInput): string {
 
 // ─── Parse natural language output into structured segments ─────
 function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): AbstractiveResult | null {
-  // Extract title: first line starting with # or ## or ###
-  const titleMatch = text.match(/^#{1,3}\s+(.+)$/m);
-  if (!titleMatch) return null;
+  if (!text || text.trim().length < 10) return null;
 
-  const topicLabel = titleMatch[1].trim();
+  // Extract title: first line starting with # or ## or ### or **bold title**
+  const titleMatch = text.match(/^#{1,3}\s+(.+)$/m) || text.match(/^\*\*(.+?)\*\*/m);
+  let topicLabel: string;
+  let titleEnd: number;
+
+  if (titleMatch) {
+    topicLabel = titleMatch[1].trim();
+    titleEnd = text.indexOf(titleMatch[0]) + titleMatch[0].length;
+  } else {
+    // Fallback: use first non-empty line as title, or generate from thread ID
+    const firstLine = text.trim().split('\n')[0]?.trim();
+    topicLabel =
+      firstLine && firstLine.length > 5 && firstLine.length < 200
+        ? firstLine.replace(/^[-*>\s]+/, '').slice(0, 80)
+        : `Thread ${input.threadId.slice(7, 19)} Summary`;
+    titleEnd = firstLine ? text.indexOf(firstLine) + firstLine.length : 0;
+  }
+
   const topicKey = topicLabel
     .toLowerCase()
     .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 60);
 
-  // Extract summary: text between title and ## or [decision]/[lesson]/[method] or end
-  const titleEnd = text.indexOf(titleMatch[0]) + titleMatch[0].length;
+  // Extract summary: text between title and [decision]/[lesson]/[method] or end
   const candidateStart = text.search(/\n##\s+Durable|\n\[(decision|lesson|method)\]/i);
   const summaryText =
     candidateStart > titleEnd ? text.slice(titleEnd, candidateStart).trim() : text.slice(titleEnd).trim();
@@ -127,11 +141,25 @@ function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): Abst
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 800); // cap at 800 chars
+    .slice(0, 800);
 
-  if (!summary) return null;
+  // If no summary extracted, use the whole text as summary
+  if (!summary) {
+    const fallback = text
+      .replace(/^#{1,3}\s+.+$/m, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 800);
+    if (!fallback) return null;
+    return buildSingleSegment(topicLabel, topicKey, fallback, [], input);
+  }
 
   // Extract candidates: [decision], [lesson], [method] tags
+  const candidates = extractCandidates(text, input);
+  return buildSingleSegment(topicLabel, topicKey, summary, candidates, input);
+}
+
+function extractCandidates(text: string, input: AbstractiveInput): DurableCandidate[] {
   const candidates: DurableCandidate[] = [];
   const candidateRegex = /\[(decision|lesson|method)\]\s*(.+?)(?:\s*[—–-]\s*(.+))?$/gim;
   let match;
@@ -149,25 +177,35 @@ function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): Abst
       confidence: 'inferred',
     });
   }
+  return candidates;
+}
 
-  // Build single segment covering entire batch
+function buildSingleSegment(
+  topicLabel: string,
+  topicKey: string,
+  summary: string,
+  candidates: DurableCandidate[],
+  input: AbstractiveInput,
+): AbstractiveResult | null {
   const firstMsg = input.messages[0];
   const lastMsg = input.messages[input.messages.length - 1];
   if (!firstMsg || !lastMsg) return null;
 
-  const segment: TopicSegment = {
-    summary,
-    topicKey,
-    topicLabel,
-    boundaryReason: 'single batch',
-    boundaryConfidence: 'high',
-    fromMessageId: firstMsg.id,
-    toMessageId: lastMsg.id,
-    messageCount: input.messages.length,
-    candidates: candidates.length > 0 ? candidates : undefined,
+  return {
+    segments: [
+      {
+        summary,
+        topicKey,
+        topicLabel,
+        boundaryReason: 'single batch',
+        boundaryConfidence: 'high',
+        fromMessageId: firstMsg.id,
+        toMessageId: lastMsg.id,
+        messageCount: input.messages.length,
+        candidates: candidates.length > 0 ? candidates : undefined,
+      },
+    ],
   };
-
-  return { segments: [segment] };
 }
 
 // ─── Client factory ─────────────────────────────────────────────

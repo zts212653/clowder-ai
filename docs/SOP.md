@@ -198,7 +198,13 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
    - `source_commit_sha`
    - `release_tag`
    - `source_snapshot_tag`
-4. target 仓后续真正切 `vX.Y.Z` 时，release notes /后续 backport 必须引用这两个锚点，而不是口头约定
+4. target 仓后续真正切 `vX.Y.Z` 时，必须通过：
+
+```bash
+bash scripts/publish-release-tag.sh --release-tag=vX.Y.Z --target-sha <clowder_ai_release_commit_sha> --push
+```
+
+5. `publish-release-tag.sh` 会强制校验 `source snapshot tag → .sync-provenance.json → target release tag` 三点映射，release notes /后续 backport 也必须引用这两个锚点，而不是口头约定
 
 一句话：**以后对齐 release，不靠“记得当时是哪次 sync”，靠 `source snapshot tag → target release tag → backport commit` 三点映射。**
 

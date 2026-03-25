@@ -452,7 +452,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('🔒');
+    expect(container.textContent).toContain('内置');
     expect(container.textContent).toContain('系统配置 > 账号配置');
     expect(container.textContent).toContain('+ 新建 API Key 账号');
     expect(container.textContent).not.toContain('默认/覆盖模型');

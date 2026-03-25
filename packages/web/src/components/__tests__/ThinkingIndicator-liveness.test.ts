@@ -144,7 +144,7 @@ describe('F118 ThinkingIndicator liveness states', () => {
     expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1');
   });
 
-  it('normal thinking state does not render paw emoji glyph', async () => {
+  it('normal thinking state renders paw emoji (KD-9: Apple emoji preferred over Lucide SVG)', async () => {
     storeState.catStatuses = { codex: 'thinking' };
     storeState.catInvocations = {};
 
@@ -154,6 +154,6 @@ describe('F118 ThinkingIndicator liveness states', () => {
     });
 
     expect(container.textContent).toContain('思考中');
-    expect(container.textContent).not.toContain('🐾');
+    expect(container.textContent).toContain('🐾');
   });
 });

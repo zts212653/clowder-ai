@@ -189,10 +189,113 @@ describe('Search Mode Split (KD-44)', () => {
 
   it('semantic mode respects scope filter', async () => {
     if (!vectorStore) return;
-    // Search with scope=docs should exclude sessions
     const results = await store.search('naming', { mode: 'semantic', scope: 'docs', limit: 5 });
     for (const r of results) {
       assert.notEqual(r.kind, 'session', 'scope=docs should exclude sessions');
     }
+  });
+});
+
+describe('G-4: drillDown hints', () => {
+  it('thread results get drillDown hint', async () => {
+    const store = new SqliteEvidenceStore(':memory:');
+    store.initialize();
+
+    store.upsert([
+      {
+        anchor: 'thread-abc123',
+        kind: 'thread',
+        status: 'active',
+        title: 'Test Thread',
+        summary: 'test summary',
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        anchor: 'doc-feature',
+        kind: 'feature',
+        status: 'active',
+        title: 'F001 Feature',
+        summary: 'feature desc',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const results = await store.search('test', { limit: 5 });
+
+    const threadResult = results.find((r) => r.anchor === 'thread-abc123');
+    const featureResult = results.find((r) => r.anchor === 'doc-feature');
+
+    if (threadResult) {
+      assert.ok(threadResult.drillDown, 'thread result should have drillDown');
+      assert.equal(threadResult.drillDown.tool, 'cat_cafe_get_thread_context');
+      assert.equal(threadResult.drillDown.params.threadId, 'abc123');
+      assert.ok(threadResult.drillDown.hint.includes('abc123'));
+    }
+
+    if (featureResult) {
+      assert.equal(featureResult.drillDown, undefined, 'feature result should NOT have drillDown');
+    }
+  });
+
+  it('session results get drillDown hint', async () => {
+    const store = new SqliteEvidenceStore(':memory:');
+    store.initialize();
+
+    store.upsert([
+      {
+        anchor: 'session-xyz789',
+        kind: 'session',
+        status: 'active',
+        title: 'Session 0',
+        summary: 'session digest',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const results = await store.search('session', { limit: 5 });
+    const sessionResult = results.find((r) => r.anchor === 'session-xyz789');
+
+    if (sessionResult) {
+      assert.ok(sessionResult.drillDown, 'session result should have drillDown');
+      assert.equal(sessionResult.drillDown.tool, 'cat_cafe_read_session_digest');
+      assert.equal(sessionResult.drillDown.params.sessionId, 'xyz789');
+    }
+  });
+
+  it('scope=threads returns kind=thread (not session) with drillDown', async () => {
+    const store = new SqliteEvidenceStore(':memory:');
+    store.initialize();
+
+    store.upsert([
+      {
+        anchor: 'thread-t1',
+        kind: 'thread',
+        status: 'active',
+        title: 'Thread One',
+        summary: 'foo bar',
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        anchor: 'session-s1',
+        kind: 'session',
+        status: 'active',
+        title: 'Session One',
+        summary: 'foo bar',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const results = await store.search('foo', { scope: 'threads', limit: 5 });
+
+    // P1 regression: scope=threads must return thread, NOT session
+    assert.ok(results.length > 0, 'should return results');
+    for (const r of results) {
+      assert.equal(r.kind, 'thread', 'scope=threads should only return kind=thread');
+    }
+    // drillDown should be present on thread results
+    const t = results.find((r) => r.anchor === 'thread-t1');
+    assert.ok(t, 'thread-t1 should be in results');
+    assert.ok(t.drillDown, 'thread result should have drillDown');
+    assert.equal(t.drillDown.tool, 'cat_cafe_get_thread_context');
   });
 });

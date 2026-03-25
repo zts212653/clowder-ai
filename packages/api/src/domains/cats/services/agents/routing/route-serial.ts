@@ -714,6 +714,23 @@ export async function* routeSerial(
           }
         }
 
+        // Diagnostic: log when A2A text-scan gate blocks (previously silent)
+        if (a2aMentions.length > 0) {
+          if (queuedMessagesPending) {
+            log.info(
+              { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount },
+              'A2A text-scan blocked: user messages pending in queue (fairness gate)',
+            );
+          } else if (worklistEntry.a2aCount >= maxDepth) {
+            log.info(
+              { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount, maxDepth },
+              'A2A text-scan blocked: depth limit reached',
+            );
+          } else if (signal?.aborted) {
+            log.info({ threadId, catId, a2aMentions }, 'A2A text-scan blocked: signal aborted');
+          }
+        }
+
         if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
           const pendingTail = worklist.slice(index + 1);
           const pendingOriginalTargets = targetCats.slice(index + 1);

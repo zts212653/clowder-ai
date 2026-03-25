@@ -370,8 +370,8 @@ status_runtime_worktree() {
 
 start_runtime_worktree() {
   if ! is_git_repo; then
-    ensure_restart_authorized
     RUNTIME_DIR="$PROJECT_DIR"
+    ensure_restart_authorized
     ensure_runtime_start_prereqs
     info "running in-place (deployment mode): $PROJECT_DIR"
     cd "$PROJECT_DIR"

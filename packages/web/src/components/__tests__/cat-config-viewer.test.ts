@@ -112,7 +112,7 @@ describe('CatOverviewTab', () => {
       }),
     );
     expect(html).toContain('Co-worker');
-    expect(html).toContain('🔒 Owner');
+    expect(html).toContain('Owner');
     expect(html).toContain('#E29578');
     expect(html).toContain('/avatars/owner-custom.png');
     expect(html.indexOf('Co-worker')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));

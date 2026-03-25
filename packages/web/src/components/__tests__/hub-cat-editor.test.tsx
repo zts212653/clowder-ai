@@ -1538,14 +1538,14 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('认证与模型');
     expect(container.textContent).toContain('Session Chain');
     expect(container.textContent).toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
-    expect(container.textContent).toContain('Codex Sandbox 🏷️');
-    expect(container.textContent).toContain('Codex Approval 🏷️');
-    expect(container.textContent).toContain('Codex Auth Mode 🏷️');
+    expect(container.textContent).toContain('Codex Sandbox (Codex)');
+    expect(container.textContent).toContain('Codex Approval (Codex)');
+    expect(container.textContent).toContain('Codex Auth Mode (Codex)');
     expect(container.textContent).not.toContain('这 3 项是全局运行参数（非成员级）');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(false);
-    expect(container.textContent).toContain('💾 运行时持久化');
+    expect(container.textContent).toContain('运行时持久化');
     expect(container.textContent).toContain('保存修改');
     expect(container.textContent).not.toContain('删除成员');
     expect(container.textContent).not.toContain('账号与运行方式');
@@ -1781,7 +1781,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
     await flushEffects();
 
-    expect(container.textContent).toContain('Codex Sandbox 🏷️');
+    expect(container.textContent).toContain('Codex Sandbox (Codex)');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').value).toBe(
       'danger-full-access',
     );

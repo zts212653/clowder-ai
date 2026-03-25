@@ -558,4 +558,83 @@ describe('OutboundDeliveryHook', () => {
       assert.equal(mediaSent[0].payload.fileName, '调研报告.pdf', 'fileName should be passed through');
     });
   });
+
+  describe('F134 replyToSender regression (P1 fixes)', () => {
+    it('passes replyToSender metadata when messageLookup returns source.sender (AC-C1)', async () => {
+      const messageLookup = async (_id) => ({
+        source: { sender: { id: 'ou_abc123', name: 'Alice' } },
+      });
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', feishuMock.adapter]]),
+        log: noopLog(),
+        messageLookup,
+      });
+      bindingStore.bind('feishu', 'group-chat-1', 'thread-grp', 'user-1');
+
+      await hook.deliver('thread-grp', 'Reply', 'opus', undefined, undefined, undefined, 'msg-456');
+
+      assert.equal(feishuMock.sent.length, 1);
+      assert.deepEqual(feishuMock.sent[0].metadata, {
+        replyToSender: { id: 'ou_abc123', name: 'Alice' },
+      });
+    });
+
+    it('does NOT pass replyToSender when source has no sender — DM path (AC-C2)', async () => {
+      const messageLookup = async (_id) => ({
+        source: { connector: 'feishu', label: '飞书' },
+      });
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', feishuMock.adapter]]),
+        log: noopLog(),
+        messageLookup,
+      });
+      bindingStore.bind('feishu', 'chat-dm', 'thread-dm', 'user-1');
+
+      await hook.deliver('thread-dm', 'DM reply', 'opus', undefined, undefined, undefined, 'msg-dm-1');
+
+      assert.equal(feishuMock.sent.length, 1);
+      assert.equal(feishuMock.sent[0].metadata, undefined, 'DM replies must not include replyToSender');
+    });
+
+    it('does NOT call messageLookup when triggerMessageId is undefined', async () => {
+      let lookupCalled = false;
+      const messageLookup = async (_id) => {
+        lookupCalled = true;
+        return { source: { sender: { id: 'ou_xyz', name: 'Bob' } } };
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', feishuMock.adapter]]),
+        log: noopLog(),
+        messageLookup,
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-1', 'user-1');
+
+      await hook.deliver('thread-1', 'Reply without trigger');
+
+      assert.equal(lookupCalled, false, 'messageLookup must not be called when triggerMessageId is undefined');
+      assert.equal(feishuMock.sent.length, 1);
+      assert.equal(feishuMock.sent[0].metadata, undefined, 'no replyToSender without triggerMessageId');
+    });
+
+    it('does NOT pass replyToSender when messageLookup throws (graceful degradation)', async () => {
+      const messageLookup = async (_id) => {
+        throw new Error('Redis connection lost');
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', feishuMock.adapter]]),
+        log: noopLog(),
+        messageLookup,
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-1', 'user-1');
+
+      await hook.deliver('thread-1', 'Reply', 'opus', undefined, undefined, undefined, 'msg-err');
+
+      assert.equal(feishuMock.sent.length, 1);
+      assert.equal(feishuMock.sent[0].metadata, undefined, 'failed lookup should not produce replyToSender');
+    });
+  });
 });

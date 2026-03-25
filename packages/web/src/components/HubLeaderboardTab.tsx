@@ -109,23 +109,23 @@ export function HubLeaderboardTab() {
 
           {/* Mention Stats Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <SectionCard title="夜猫子 🌙">
+            <SectionCard title="夜猫子">
               <MiniRanked items={data.mentions.nightOwl} unit="次深夜 @" />
             </SectionCard>
-            <SectionCard title="话痨 💬">
+            <SectionCard title="话痨">
               <MiniRanked items={data.mentions.chatty} unit="条消息" />
             </SectionCard>
-            <SectionCard title="连续签到 🔥">
+            <SectionCard title="连续签到">
               <StreakRanked items={data.mentions.streak} />
             </SectionCard>
-            <SectionCard title="翻车现场 😹">
+            <SectionCard title="翻车现场">
               <SillyCatsList entries={data.silly?.entries ?? []} />
             </SectionCard>
           </div>
 
           {/* Phase B: Game Arena + Phase C: Achievements + CVO */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            <SectionCard title="成就墙 🎖️">
+            <SectionCard title="成就墙">
               <AchievementWall achievements={data.achievements ?? []} />
             </SectionCard>
             <SectionCard title="CVO 能力等级 🐾">
@@ -137,7 +137,7 @@ export function HubLeaderboardTab() {
                 </p>
               )}
             </SectionCard>
-            <SectionCard title="游戏竞技场 🎮">
+            <SectionCard title="游戏竞技场">
               {data.games ? (
                 <GameArena stats={data.games} />
               ) : (

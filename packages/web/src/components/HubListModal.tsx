@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubConnectorConfigTab } from './HubConnectorConfigTab';
+import HubPermissionsTab from './HubPermissionsTab';
 import { HubIcon } from './icons/HubIcon';
 import { formatRelativeTime } from './ThreadSidebar/thread-utils';
 
@@ -15,7 +16,7 @@ const CONNECTOR_LABELS: Record<string, string> = {
   discord: 'Discord',
 };
 
-type HubTab = 'threads' | 'config';
+type HubTab = 'threads' | 'config' | 'permissions';
 
 interface HubThreadSummary {
   id: string;
@@ -126,10 +127,25 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
             )}
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('permissions')}
+            className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
+              activeTab === 'permissions' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'
+            }`}
+            data-testid="hub-tab-permissions"
+          >
+            群聊权限
+            {activeTab === 'permissions' && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
+            )}
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          {activeTab === 'threads' ? (
+          {activeTab === 'permissions' ? (
+            <HubPermissionsTab />
+          ) : activeTab === 'threads' ? (
             <div className="space-y-4">
               {isLoading ? (
                 <p className="text-center text-gray-400 py-8 text-sm">加载中...</p>

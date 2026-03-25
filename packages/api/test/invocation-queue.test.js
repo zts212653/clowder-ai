@@ -122,6 +122,34 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
+  // ── F134: connector messages never merge ──
+
+  it('does NOT merge consecutive connector entries (F134 group chat safety)', () => {
+    const r1 = queue.enqueue(entry({ source: 'connector', content: 'msg from user A' }));
+    assert.equal(r1.outcome, 'enqueued');
+    const r2 = queue.enqueue(entry({ source: 'connector', content: 'msg from user B' }));
+    assert.equal(r2.outcome, 'enqueued');
+    assert.equal(queue.size('t1', 'u1'), 2);
+  });
+
+  it('still merges consecutive user entries (F134 does not affect non-connector)', () => {
+    queue.enqueue(entry({ source: 'user', content: 'first' }));
+    const r2 = queue.enqueue(entry({ source: 'user', content: 'second' }));
+    assert.equal(r2.outcome, 'merged');
+    assert.equal(queue.size('t1', 'u1'), 1);
+  });
+
+  it('preserves senderMeta on enqueued connector entry', () => {
+    const r = queue.enqueue(
+      entry({
+        source: 'connector',
+        senderMeta: { id: 'ou_abc', name: 'You' },
+      }),
+    );
+    assert.equal(r.outcome, 'enqueued');
+    assert.deepEqual(r.entry.senderMeta, { id: 'ou_abc', name: 'You' });
+  });
+
   // ── Backfill / Merge IDs ──
 
   it('backfillMessageId sets messageId on new entry (null → value)', () => {
@@ -527,5 +555,45 @@ describe('InvocationQueue', () => {
     const e = queue.markProcessing('t1', 'system');
     queue.removeProcessed('t1', 'system', e.id);
     assert.equal(queue.hasActiveOrQueuedAgentForCat('t1', 'codex'), false);
+  });
+
+  // ── hasQueuedUserMessagesForThread: fairness gate must only count user-sourced entries ──
+
+  it('hasQueuedUserMessagesForThread returns false when only agent entries are queued', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    assert.equal(
+      queue.hasQueuedUserMessagesForThread('t1'),
+      false,
+      'agent-sourced entries must NOT block A2A text-scan fairness gate',
+    );
+    // Sanity: unfiltered hasQueuedForThread still sees it
+    assert.equal(queue.hasQueuedForThread('t1'), true);
+  });
+
+  it('hasQueuedUserMessagesForThread returns true when user entry is queued', () => {
+    queue.enqueue(entry({ source: 'user' }));
+    assert.equal(
+      queue.hasQueuedUserMessagesForThread('t1'),
+      true,
+      'user-sourced entries must block A2A text-scan to respect queue fairness',
+    );
+  });
+
+  it('hasQueuedUserMessagesForThread ignores connector entries (treated like agent)', () => {
+    queue.enqueue(entry({ source: 'connector' }));
+    assert.equal(
+      queue.hasQueuedUserMessagesForThread('t1'),
+      false,
+      'connector-sourced entries should not block A2A text-scan',
+    );
   });
 });
