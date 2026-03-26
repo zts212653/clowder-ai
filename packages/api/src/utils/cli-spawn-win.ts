@@ -23,6 +23,7 @@ const KNOWN_SHIM_SCRIPTS: Record<string, string[]> = {
   claude: ['@anthropic-ai/claude-code/cli.js'],
   codex: ['@openai/codex/bin/codex.js'],
   gemini: ['@google/gemini-cli/bin/gemini.js'],
+  opencode: ['opencode-ai/bin/opencode'],
 };
 
 export interface WindowsShimSpawn {
@@ -42,18 +43,35 @@ export function extractBareName(command: string): string {
 }
 
 /**
- * Try to extract a .js entry script from a .cmd shim file by parsing its content.
- * Handles standard npm shims that use %~dp0\... relative paths.
+ * Try to extract an entry script from a .cmd shim file by parsing its content.
+ * Handles standard npm shims that use %~dp0\..., %dp0\..., or %dp0%\... relative paths.
+ * Prefers .js matches, falls back to extensionless entrypoints.
  */
 export function parseShimFile(cmdPath: string): string | null {
   if (!existsSync(cmdPath)) return null;
   const shimContent = readFileSync(cmdPath, 'utf-8');
   const shimDir = dirname(cmdPath);
 
-  // npm standard shims — "%~dp0\..." or "%dp0\..." relative paths
-  for (const match of shimContent.matchAll(/%~?dp0\\([^"\r\n]*?\.js)/gi)) {
-    const scriptPath = join(shimDir, match[1].replace(/\\/g, '/'));
-    if (existsSync(scriptPath)) return scriptPath;
+  // Match %~dp0\..., %dp0\..., and %dp0%\... relative paths
+  // Capture everything after the dp0 prefix up to a quote or line end
+  const matches = [...shimContent.matchAll(/%~?dp0%?\\([^"\r\n]+)/gi)];
+
+  // First pass: prefer paths ending in .js
+  for (const match of matches) {
+    const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
+    if (/\.js$/i.test(raw)) {
+      const scriptPath = join(shimDir, raw);
+      if (existsSync(scriptPath)) return scriptPath;
+    }
+  }
+
+  // Second pass: extensionless entrypoints (e.g. opencode-ai/bin/opencode)
+  for (const match of matches) {
+    const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
+    if (!/\.\w+$/i.test(raw) && !/^node(\.exe)?$/i.test(raw.split('/').pop() ?? '')) {
+      const scriptPath = join(shimDir, raw);
+      if (existsSync(scriptPath)) return scriptPath;
+    }
   }
 
   return null;
@@ -115,10 +133,11 @@ export function resolveCmdShimScript(command: string): string | null {
     }
   }
 
-  // Strategy 2: known paths using bare command name for lookup
+  // Strategy 2: known paths — only for bare command names (not full paths,
+  // which represent a caller-selected install that must not be remapped)
   const appData = process.env.APPDATA;
   const knownPaths = KNOWN_SHIM_SCRIPTS[bareName];
-  if (appData && knownPaths) {
+  if (!isFullPath && appData && knownPaths) {
     for (const relPath of knownPaths) {
       const candidate = join(appData, 'npm', 'node_modules', relPath);
       if (existsSync(candidate)) {

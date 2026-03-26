@@ -306,6 +306,60 @@ test('parseShimFile returns null when referenced script does not exist', () => {
   }
 });
 
+test('parseShimFile extracts script path from %dp0% shim (modern npm 10+ format)', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-parse-dp0pct-'));
+  mkdirSync(join(tempRoot, 'node_modules', 'pkg'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'test.cmd');
+  const scriptPath = join(tempRoot, 'node_modules', 'pkg', 'cli.js');
+
+  writeFileSync(cmdPath, 'SET dp0=%~dp0\r\n"%_prog%"  "%dp0%\\node_modules\\pkg\\cli.js" %*\r\n', 'utf8');
+  writeFileSync(scriptPath, 'console.log("ok");\n', 'utf8');
+
+  try {
+    assert.equal(parseShimFile(cmdPath), scriptPath);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('parseShimFile resolves extensionless entrypoints when no .js match exists', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-parse-noext-'));
+  mkdirSync(join(tempRoot, 'node_modules', 'opencode-ai', 'bin'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'opencode.cmd');
+  const scriptPath = join(tempRoot, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+
+  writeFileSync(cmdPath, '"%dp0%\\node_modules\\opencode-ai\\bin\\opencode" %*\r\n', 'utf8');
+  writeFileSync(scriptPath, '#!/usr/bin/env node\nconsole.log("ok");\n', 'utf8');
+
+  try {
+    assert.equal(parseShimFile(cmdPath), scriptPath);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('parseShimFile prefers .js match over extensionless when both exist', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-parse-prefer-js-'));
+  mkdirSync(join(tempRoot, 'node_modules', 'pkg', 'bin'), { recursive: true });
+
+  const cmdPath = join(tempRoot, 'test.cmd');
+  const jsScript = join(tempRoot, 'node_modules', 'pkg', 'bin', 'cli.js');
+  const noextScript = join(tempRoot, 'node_modules', 'pkg', 'bin', 'cli');
+
+  // Shim references the .js version
+  writeFileSync(cmdPath, '"%dp0%\\node_modules\\pkg\\bin\\cli.js" %*\r\n', 'utf8');
+  writeFileSync(jsScript, 'console.log("js");\n', 'utf8');
+  writeFileSync(noextScript, 'console.log("noext");\n', 'utf8');
+
+  try {
+    assert.equal(parseShimFile(cmdPath), jsScript);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 // --- resolveCmdShimScript full-path tests ---
 
 test('resolveCmdShimScript resolves full .cmd path directly without where fallback', () => {
@@ -364,3 +418,30 @@ test(
     }
   },
 );
+
+test('resolveCmdShimScript with full .exe path does NOT fall back to APPDATA known paths', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-exe-no-appdata-'));
+  const originalAppData = process.env.APPDATA;
+  const appDataDir = join(tempRoot, 'appdata');
+
+  mkdirSync(join(appDataDir, 'npm', 'node_modules', '@anthropic-ai', 'claude-code'), {
+    recursive: true,
+  });
+
+  const appDataScript = join(appDataDir, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  writeFileSync(appDataScript, 'console.log("appdata");\n', 'utf8');
+
+  try {
+    process.env.APPDATA = appDataDir;
+    // Full .exe path — should NOT be remapped to APPDATA install
+    const resolved = resolveCmdShimScript(join(tempRoot, 'bin', 'claude.exe'));
+    assert.equal(resolved, null, 'full .exe path must NOT fall back to APPDATA');
+  } finally {
+    if (originalAppData === undefined) {
+      delete process.env.APPDATA;
+    } else {
+      process.env.APPDATA = originalAppData;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
