@@ -584,8 +584,8 @@ export async function* routeParallel(
               await deps.invocationDeps.threadStore.updateParticipantActivity(
                 threadId,
                 msg.catId as CatId,
-                // #267: abort/cancel is not a provider failure — treat as healthy
-                !catHadError.has(msg.catId) || (signal?.aborted ?? false),
+                // #267: only errors before abort are provider failures
+                !catHadProviderError.has(msg.catId),
               );
             } catch (activityErr) {
               log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');

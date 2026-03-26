@@ -881,8 +881,8 @@ export async function* routeSerial(
                 await deps.invocationDeps.threadStore.updateParticipantActivity(
                   threadId,
                   catId,
-                  // #267: abort/cancel is not a provider failure — treat as healthy
-                  !hadError || (signal?.aborted ?? false),
+                  // #267: only errors before abort are provider failures
+                  !hadProviderError,
                 );
               } catch (activityErr) {
                 log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
