@@ -352,7 +352,7 @@ export async function* routeParallel(
     if (msg.type === 'error' && msg.catId) {
       catHadError.add(msg.catId);
       // #267: errors before abort are real provider failures; errors after abort are cleanup
-      if (!(signal?.aborted)) catHadProviderError.add(msg.catId);
+      if (!signal?.aborted) catHadProviderError.add(msg.catId);
       if (msg.error) {
         const prev = catText.get(msg.catId) ?? '';
         catText.set(msg.catId, `${prev + (prev ? '\n\n' : '')}[错误] ${msg.error}`);

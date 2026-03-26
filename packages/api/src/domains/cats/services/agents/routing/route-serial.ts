@@ -481,7 +481,7 @@ export async function* routeSerial(
         if (msg.type === 'error') {
           hadError = true;
           // #267: errors before abort are real provider failures; errors after abort are cleanup
-          if (!(signal?.aborted)) hadProviderError = true;
+          if (!signal?.aborted) hadProviderError = true;
           if (msg.error) {
             textContent += `${textContent ? '\n\n' : ''}[错误] ${msg.error}`;
           }
