@@ -580,7 +580,8 @@ export async function* routeParallel(
               await deps.invocationDeps.threadStore.updateParticipantActivity(
                 threadId,
                 msg.catId as CatId,
-                !catHadError.has(msg.catId),
+                // #267: abort/cancel is not a provider failure — treat as healthy
+                  !catHadError.has(msg.catId) || (signal?.aborted ?? false),
               );
             } catch (activityErr) {
               log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
@@ -658,7 +659,8 @@ export async function* routeParallel(
                 await deps.invocationDeps.threadStore.updateParticipantActivity(
                   threadId,
                   msg.catId as CatId,
-                  !catHadError.has(msg.catId),
+                  // #267: abort/cancel is not a provider failure — treat as healthy
+                  !catHadError.has(msg.catId) || (signal?.aborted ?? false),
                 );
               } catch (activityErr) {
                 log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
@@ -720,7 +722,8 @@ export async function* routeParallel(
                 await deps.invocationDeps.threadStore.updateParticipantActivity(
                   threadId,
                   msg.catId as CatId,
-                  !catHadError.has(msg.catId),
+                  // #267: abort/cancel is not a provider failure — treat as healthy
+                  !catHadError.has(msg.catId) || (signal?.aborted ?? false),
                 );
               } catch (activityErr) {
                 log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
