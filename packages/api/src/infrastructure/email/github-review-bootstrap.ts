@@ -72,15 +72,29 @@ export async function startGithubReviewWatcher(options: GithubReviewBootstrapOpt
     options.log.info('[GithubReviewWatcher] Disconnected from IMAP server');
   });
 
-  try {
-    await watcher.start();
-    options.log.info(`[GithubReviewWatcher] Started (polling every ${config.pollIntervalMs / 1000}s)`);
-    return true;
-  } catch (error) {
-    options.log.error(`[GithubReviewWatcher] Failed to start: ${String(error)}`);
-    watcher = null;
-    return false;
+  const MAX_START_RETRIES = 3;
+  const BASE_RETRY_DELAY_MS = 10_000;
+
+  for (let attempt = 1; attempt <= MAX_START_RETRIES; attempt++) {
+    try {
+      await watcher.start();
+      options.log.info(`[GithubReviewWatcher] Started (polling every ${config.pollIntervalMs / 1000}s)`);
+      return true;
+    } catch (error) {
+      const isLast = attempt >= MAX_START_RETRIES;
+      options.log.error(`[GithubReviewWatcher] Start attempt ${attempt}/${MAX_START_RETRIES} failed: ${String(error)}`);
+      if (isLast) {
+        options.log.error('[GithubReviewWatcher] All start attempts exhausted — watcher disabled until next restart');
+        watcher = null;
+        return false;
+      }
+      const delay = BASE_RETRY_DELAY_MS * 2 ** (attempt - 1);
+      options.log.info(`[GithubReviewWatcher] Retrying in ${delay / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
   }
+
+  return false;
 }
 
 /**
