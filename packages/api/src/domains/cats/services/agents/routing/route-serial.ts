@@ -690,7 +690,7 @@ export async function* routeSerial(
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId, !hadError);
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }
@@ -869,7 +869,7 @@ export async function* routeSerial(
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
             if (deps.invocationDeps.threadStore) {
               try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId, !hadError);
               } catch (activityErr) {
                 log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
               }
@@ -924,7 +924,7 @@ export async function* routeSerial(
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId, !hadError);
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }

@@ -72,6 +72,7 @@ end
 redis.call('SADD', KEYS[2], ARGV[1])
 redis.call('HSET', KEYS[3], ARGV[1] .. ':lastMessageAt', ARGV[2])
 redis.call('HINCRBY', KEYS[3], ARGV[1] .. ':messageCount', 1)
+redis.call('HSET', KEYS[3], ARGV[1] .. ':healthy', ARGV[4])
 local ttl = tonumber(ARGV[3])
 if ttl > 0 then
   redis.call('EXPIRE', KEYS[1], ttl)
@@ -241,7 +242,9 @@ export class RedisThreadStore implements IThreadStore {
     const result: ThreadParticipantActivity[] = participants.map((catId) => {
       const lastMessageAt = parseInt(activityData[`${catId}:lastMessageAt`] ?? '0', 10);
       const messageCount = parseInt(activityData[`${catId}:messageCount`] ?? '0', 10);
-      return { catId, lastMessageAt, messageCount };
+      const healthyRaw = activityData[`${catId}:healthy`];
+      const lastResponseHealthy = healthyRaw === undefined ? undefined : healthyRaw === '1';
+      return { catId, lastMessageAt, messageCount, lastResponseHealthy };
     });
 
     // Sort by lastMessageAt descending (most recent first)
@@ -250,7 +253,7 @@ export class RedisThreadStore implements IThreadStore {
   }
 
   /** F032 P1-2 fix: Update participant activity on every message */
-  async updateParticipantActivity(threadId: string, catId: CatId): Promise<void> {
+  async updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): Promise<void> {
     // Cloud Codex P2 fix: Use Lua script to atomically check thread existence
     // and update activity with TTL refresh.
     const detailKey = ThreadKeys.detail(threadId);
@@ -268,6 +271,7 @@ export class RedisThreadStore implements IThreadStore {
       catId,
       String(now),
       String(ttl),
+      healthy === false ? '0' : '1',
     );
   }
 

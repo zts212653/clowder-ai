@@ -577,7 +577,7 @@ export async function* routeParallel(
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId, !catHadError.has(msg.catId));
             } catch (activityErr) {
               log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
             }
@@ -651,7 +651,7 @@ export async function* routeParallel(
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
             if (deps.invocationDeps.threadStore) {
               try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
+                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId, !catHadError.has(msg.catId));
               } catch (activityErr) {
                 log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
               }
@@ -709,7 +709,7 @@ export async function* routeParallel(
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
             if (deps.invocationDeps.threadStore) {
               try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
+                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId, !catHadError.has(msg.catId));
               } catch (activityErr) {
                 log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
               }

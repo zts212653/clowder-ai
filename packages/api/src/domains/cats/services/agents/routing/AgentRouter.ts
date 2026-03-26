@@ -546,12 +546,16 @@ export class AgentRouter {
       }
 
       // F078 + #58: last-replier takes priority, scoped to preferred cats when set
+      // #267: skip cats whose last response was an error (API failure, capacity, etc.)
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
-      if (participantsWithActivity.length > 0) {
-        const lastReplier = participantsWithActivity[0]?.catId;
-        if (this.isRoutableCat(lastReplier) && (preferredSet.size === 0 || preferredSet.has(lastReplier as string))) {
-          return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
-        }
+      const healthyReplier = participantsWithActivity.find(
+        (p) =>
+          p.lastResponseHealthy !== false &&
+          this.isRoutableCat(p.catId) &&
+          (preferredSet.size === 0 || preferredSet.has(p.catId as string)),
+      );
+      if (healthyReplier) {
+        return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
       }
 
       // No last-replier (or last-replier not in preferred set): use first preferred cat
@@ -592,12 +596,16 @@ export class AgentRouter {
       }
 
       // F078 + #58: last-replier takes priority, scoped to preferred cats when set
+      // #267: skip cats whose last response was an error (API failure, capacity, etc.)
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
-      if (participantsWithActivity.length > 0) {
-        const lastReplier = participantsWithActivity[0]?.catId;
-        if (this.isRoutableCat(lastReplier) && (preferredSet.size === 0 || preferredSet.has(lastReplier as string))) {
-          return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
-        }
+      const healthyReplier = participantsWithActivity.find(
+        (p) =>
+          p.lastResponseHealthy !== false &&
+          this.isRoutableCat(p.catId) &&
+          (preferredSet.size === 0 || preferredSet.has(p.catId as string)),
+      );
+      if (healthyReplier) {
+        return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
       }
 
       // No last-replier (or last-replier not in preferred set): use first preferred cat
