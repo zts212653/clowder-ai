@@ -68,6 +68,11 @@ const EXPECTED_TOOLS = [
   'limb_pair_approve',
   // F101 Phase I: Game action tool
   'cat_cafe_submit_game_action',
+  // F139: MediaHub tools
+  'mediahub_list_providers',
+  'mediahub_generate_video',
+  'mediahub_get_job_status',
+  'mediahub_list_jobs',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [

@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { bootstrapMediaHub } from './mediahub/bootstrap.js';
 import { registerFullToolset } from './server-toolsets.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
@@ -30,6 +31,7 @@ export function createServer(): McpServer {
  */
 async function main(): Promise<void> {
   initCatCafeDir();
+  await bootstrapMediaHub();
   const server = createServer();
   const transport = new StdioServerTransport();
   console.error('[cat-cafe] MCP Server starting...');

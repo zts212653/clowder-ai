@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { mediahubTools } from './mediahub/mediahub-tools.js';
 import {
   callbackMemoryTools,
   callbackTools,
@@ -59,9 +60,14 @@ export function registerLimbToolset(server: McpServer): void {
   registerTools(server, limbNodeTools);
 }
 
+export function registerMediaHubToolset(server: McpServer): void {
+  registerTools(server, [...mediahubTools]);
+}
+
 export function registerFullToolset(server: McpServer): void {
   registerCollabToolset(server);
   registerMemoryToolset(server);
   registerSignalToolset(server);
   registerLimbToolset(server);
+  registerMediaHubToolset(server);
 }
