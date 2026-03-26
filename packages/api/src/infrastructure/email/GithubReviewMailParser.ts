@@ -116,10 +116,17 @@ export function parseGithubReviewFromSubjectAndSource(subject: string, source: s
 
   let parsed = parseGithubReviewSubject(subject);
   if (!parsed) {
+    // #257: removed strict hasReviewSignal gate — PR conversation comments
+    // use Re: format without body action markers. PR guard prevents
+    // issue-thread emails (Re: [repo] Issue (#N)) from being misclassified.
+    // Codex P2: match the exact PR number — a cross-referenced /pull/42 link
+    // in an issue #456 email must not trigger normalization for #456.
     const normalized = normalizeLegacyPrMarkerSubject(subject);
-    const hasReviewSignal = (inferred?.reviewType ?? 'unknown') !== 'unknown' || hasCodexReviewTemplate(source);
-    if (normalized && hasReviewSignal) {
-      parsed = parseGithubReviewSubject(normalized);
+    if (normalized) {
+      const prNumMatch = subject.match(/\(#(\d+)\)\s*$/);
+      if (prNumMatch && new RegExp(`/pull/${prNumMatch[1]}\\b`).test(source)) {
+        parsed = parseGithubReviewSubject(normalized);
+      }
     }
   }
   if (!parsed) return null;

@@ -37,6 +37,7 @@ export interface GithubReviewWatcherConfig {
   readonly host: string;
   readonly port: number;
   readonly pollIntervalMs: number;
+  readonly proxy?: string;
 }
 
 /** Minimal logger interface (compatible with FastifyBaseLogger). */
@@ -114,7 +115,8 @@ export class GithubReviewWatcher extends EventEmitter<WatcherEventMap> {
       this.log.info('[GithubReviewWatcher] Started successfully');
     } catch (error) {
       this.running = false;
-      this.log.error(`[GithubReviewWatcher] Failed to start: ${String(error)}`);
+      await this.destroyClient(); // Clean up partial connection to prevent leaked sockets
+      this.log.error(`[GithubReviewWatcher] Failed to start: ${formatImapError(error)}`);
       throw error;
     }
   }
@@ -155,6 +157,7 @@ export class GithubReviewWatcher extends EventEmitter<WatcherEventMap> {
         user: this.config.user,
         pass: this.config.pass,
       },
+      ...(this.config.proxy ? { proxy: this.config.proxy } : {}),
       logger: false, // Disable verbose logging
     });
 
@@ -229,7 +232,7 @@ export class GithubReviewWatcher extends EventEmitter<WatcherEventMap> {
         this.startPolling();
         this.log.info('[GithubReviewWatcher] Reconnected successfully');
       } catch (error) {
-        this.log.error(`[GithubReviewWatcher] Reconnect failed: ${String(error)}`);
+        this.log.error(`[GithubReviewWatcher] Reconnect failed: ${formatImapError(error)}`);
         this.scheduleReconnect(); // Try again with increased backoff
       }
     }, delay);
@@ -279,7 +282,7 @@ export class GithubReviewWatcher extends EventEmitter<WatcherEventMap> {
       lock = await this.client.getMailboxLock('INBOX');
     } catch (error) {
       // Connection may have died between the null check and getMailboxLock
-      this.log.error(`[GithubReviewWatcher] Failed to acquire mailbox lock: ${String(error)}`);
+      this.log.error(`[GithubReviewWatcher] Failed to acquire mailbox lock: ${formatImapError(error)}`);
       throw error; // Let startPolling's catch handler decide (reconnect or not)
     }
 
@@ -366,6 +369,20 @@ export class GithubReviewWatcher extends EventEmitter<WatcherEventMap> {
   }
 }
 
+/**
+ * Extract rich error detail from ImapFlow errors.
+ * ImapFlow attaches `responseStatus` and `executedCommand` but `String(error)`
+ * only shows the generic "Command failed". This preserves diagnostics in logs.
+ */
+function formatImapError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const e = error as Error & { responseStatus?: string; executedCommand?: string };
+  const parts = [error.message];
+  if (e.responseStatus) parts.push(`status=${e.responseStatus}`);
+  if (e.executedCommand) parts.push(`cmd=${e.executedCommand}`);
+  return parts.join(' | ');
+}
+
 /** Network/connection errors that should trigger a reconnect (not a crash). */
 function isConnectionError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -410,5 +427,6 @@ export function loadWatcherConfigFromEnv(): GithubReviewWatcherConfig | null {
     host: process.env.GITHUB_REVIEW_IMAP_HOST ?? 'imap.qq.com',
     port: parseInt(process.env.GITHUB_REVIEW_IMAP_PORT ?? '993', 10),
     pollIntervalMs,
+    proxy: process.env.GITHUB_REVIEW_IMAP_PROXY || undefined,
   };
 }
