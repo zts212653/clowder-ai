@@ -116,9 +116,10 @@ export function parseGithubReviewFromSubjectAndSource(subject: string, source: s
 
   let parsed = parseGithubReviewSubject(subject);
   if (!parsed) {
+    // #257: removed hasReviewSignal gate — PR conversation comments use Re:
+    // format without body action markers, so the gate silently dropped them.
     const normalized = normalizeLegacyPrMarkerSubject(subject);
-    const hasReviewSignal = (inferred?.reviewType ?? 'unknown') !== 'unknown' || hasCodexReviewTemplate(source);
-    if (normalized && hasReviewSignal) {
+    if (normalized) {
       parsed = parseGithubReviewSubject(normalized);
     }
   }

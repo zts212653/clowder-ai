@@ -94,7 +94,7 @@ describe('parseGithubReviewSubject', () => {
     assert.strictEqual(result.reviewer, 'chatgpt-codex-connector[bot]');
   });
 
-  it('keeps rejecting legacy Re: ... (#N) subject without review signal', () => {
+  it('#257 fix: parses legacy Re: ... (#N) subject even without review signal', () => {
     const subject = 'Re: [zts212653/cat-cafe] fix(quota): browser refresh fallback (#182)';
     const source = [
       'From: GitHub <notifications@github.com>',
@@ -103,8 +103,11 @@ describe('parseGithubReviewSubject', () => {
       'Random thread chatter without review markers.',
     ].join('\n');
 
+    // #257: hasReviewSignal gate removed — Re: format PR comments now parse
     const result = parseGithubReviewFromSubjectAndSource(subject, source);
-    assert.strictEqual(result, null);
+    assert.notStrictEqual(result, null);
+    assert.strictEqual(result.prNumber, 182);
+    assert.strictEqual(result.repository, 'zts212653/cat-cafe');
   });
 
   it('returns null for non-PR email', () => {
