@@ -152,6 +152,21 @@ describe('GovernanceBlockedCard', () => {
     expect(retryButton?.textContent).toContain('重试');
   });
 
+  it('extracts directory name from Windows backslash path', () => {
+    act(() => {
+      root.render(
+        React.createElement(GovernanceBlockedCard, {
+          projectPath: 'C:\\workspace\\tmp',
+          reasonKind: 'needs_bootstrap',
+        }),
+      );
+    });
+
+    // Should show "tmp", not the full "C:\workspace\tmp"
+    expect(container.textContent).toContain('tmp');
+    expect(container.textContent).not.toContain('C:\\workspace\\tmp');
+  });
+
   it('resets to idle state when invocationId prop changes', async () => {
     mockApiFetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({}) })

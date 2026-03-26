@@ -145,7 +145,8 @@ export function HubGovernanceTab() {
             {projects.map((p) => {
               const fallback = STATUS_STYLES['never-synced'];
               const style = STATUS_STYLES[p.status] ?? fallback;
-              const shortPath = p.projectPath.split('/').slice(-2).join('/');
+              // display-only: always use forward slash regardless of OS
+              const shortPath = p.projectPath.split(/[/\\]/).slice(-2).join('/');
               const syncDate = p.lastSyncedAt ? new Date(p.lastSyncedAt).toLocaleDateString('zh-CN') : '—';
 
               return (

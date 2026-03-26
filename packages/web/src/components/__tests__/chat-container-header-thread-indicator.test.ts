@@ -123,6 +123,15 @@ describe('ChatContainerHeader thread indicator', () => {
     expect(container.textContent).toContain('default');
   });
 
+  it('extracts basename from Windows backslash path', () => {
+    mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_win', projectPath: 'C:\\Users\\dev\\my-app' }];
+    act(() => {
+      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_win' }));
+    });
+
+    expect(container.textContent).toContain('my-app');
+  });
+
   it('maps internal basename to brand name when NEXT_PUBLIC_BRAND_NAME is set', () => {
     const origEnv = process.env.NEXT_PUBLIC_BRAND_NAME;
     process.env.NEXT_PUBLIC_BRAND_NAME = 'Clowder AI';
