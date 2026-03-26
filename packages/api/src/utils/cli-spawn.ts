@@ -418,7 +418,7 @@ function defaultSpawn(
     const gitBash = findGitBashPath();
     if (gitBash) {
       log.debug({ command, shell: gitBash }, 'Windows shim unresolved, falling back to Git Bash');
-      return nodeSpawn(command, args.map(escapeBashArg), {
+      return nodeSpawn(escapeBashArg(command), args.map(escapeBashArg), {
         cwd: options.cwd,
         env: options.env,
         stdio: options.stdio,
@@ -426,7 +426,7 @@ function defaultSpawn(
       });
     }
     log.debug({ command, shell: true }, 'Windows shim unresolved, falling back to cmd.exe');
-    return nodeSpawn(command, args.map(escapeCmdArg), {
+    return nodeSpawn(escapeCmdArg(command), args.map(escapeCmdArg), {
       cwd: options.cwd,
       env: options.env,
       stdio: options.stdio,
