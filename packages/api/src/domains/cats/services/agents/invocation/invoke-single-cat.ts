@@ -734,14 +734,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const ocProviderName = catConfig?.ocProviderName?.trim();
     if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && ocProviderName && defaultModel) {
       // If model already has our provider prefix, keep as-is.
-      // If model has a different provider prefix (e.g. openai/gpt-5.4 with ocProviderName=maas),
-      // strip the foreign prefix and re-prefix with ocProviderName.
-      // If model has no prefix, add ocProviderName/.
+      // Otherwise prepend ocProviderName/ — preserve any namespace in the model ID
+      // (e.g. "google/gemini-3-flash" stays intact as "maas/google/gemini-3-flash").
       const assembledModel = defaultModel.startsWith(`${ocProviderName}/`)
         ? defaultModel
-        : defaultModel.includes('/')
-          ? `${ocProviderName}/${defaultModel.slice(defaultModel.indexOf('/') + 1)}`
-          : `${ocProviderName}/${defaultModel}`;
+        : `${ocProviderName}/${defaultModel}`;
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
       try {
         // Infer apiType from ocProviderName (not effectiveProtocol — protocol UI was removed).
