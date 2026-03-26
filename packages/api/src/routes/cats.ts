@@ -220,6 +220,7 @@ async function validateAccountBindingOrThrow(
   accountRef?: string | null,
   defaultModel?: string | null,
   ocProviderName?: string | null,
+  options?: { legacyCompat?: boolean },
 ): Promise<void> {
   const trimmedAccountRef = accountRef?.trim();
   if (client === 'antigravity' && trimmedAccountRef) {
@@ -237,7 +238,13 @@ async function validateAccountBindingOrThrow(
   if (compatibilityError) {
     throw new Error(compatibilityError);
   }
-  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.kind, ocProviderName);
+  const modelFormatError = validateModelFormatForProvider(
+    client,
+    defaultModel,
+    runtimeProfile.kind,
+    ocProviderName,
+    options,
+  );
   if (modelFormatError) {
     throw new Error(modelFormatError);
   }
@@ -512,12 +519,27 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       try {
         const effectiveOcProviderName =
           body.ocProviderName !== undefined ? body.ocProviderName : currentCat.ocProviderName;
+        // Legacy compat: existing opencode+api_key members without ocProviderName
+        // can still be edited for non-binding changes (name, model, etc.).
+        // NOT allowed when: switching accountRef, or switching client to opencode
+        // from another provider — both create a new binding that must have ocProviderName.
+        // Compare against current binding — editor always sends accountRef even when unchanged.
+        const isBindingChange = nextAccountRef !== undefined && nextAccountRef !== currentEffectiveAccountRef;
+        const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
+        const isExistingOpencode = currentCat.provider === 'opencode';
+        const legacyCompat =
+          body.ocProviderName === undefined &&
+          !currentCat.ocProviderName &&
+          !isBindingChange &&
+          !isClientSwitch &&
+          isExistingOpencode;
         await validateAccountBindingOrThrow(
           projectRoot,
           effectiveClient,
           effectiveAccountRef,
           effectiveDefaultModel,
           effectiveOcProviderName,
+          { legacyCompat },
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -567,7 +589,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.cli !== undefined ? { cli: body.cli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
         ...(body.cliConfigArgs !== undefined ? { cliConfigArgs: body.cliConfigArgs } : {}),
-        ...(body.ocProviderName !== undefined ? { ocProviderName: body.ocProviderName } : {}),
+        ...(body.ocProviderName !== undefined
+          ? body.ocProviderName === null
+            ? { ocProviderName: null }
+            : { ocProviderName: body.ocProviderName }
+          : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore, opts.onCatalogChanged);
       const cat = resolved[request.params.id];

@@ -228,7 +228,7 @@ describe('HubAddMemberWizard', () => {
     expect(container.textContent).toContain('成员配置');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').value).toBe('openai');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('codex-sponsor');
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]').value).toBe('gpt-5.4-mini');
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').value).toBe('gpt-5.4-mini');
   });
 
   it('allows opencode member with bare model (ocProviderName is set in editor)', async () => {

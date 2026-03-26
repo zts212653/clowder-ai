@@ -6,8 +6,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 const { ProcessLivenessProbe } = await import('../dist/utils/ProcessLivenessProbe.js');
+const IS_WINDOWS = process.platform === 'win32';
 
-async function waitForBusySilent(probe, { timeoutMs = 3_000, burnMs = 180, settleMs = 40 } = {}) {
+async function waitForBusySilent(
+  probe,
+  { timeoutMs = IS_WINDOWS ? 8_000 : 3_000, burnMs = IS_WINDOWS ? 260 : 180, settleMs = IS_WINDOWS ? 70 : 40 } = {},
+) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const burnUntil = Date.now() + burnMs;
@@ -18,6 +22,20 @@ async function waitForBusySilent(probe, { timeoutMs = 3_000, burnMs = 180, settl
     if (probe.getState() === 'busy-silent') {
       return true;
     }
+  }
+  return false;
+}
+
+async function waitForWarning(
+  probe,
+  level,
+  { timeoutMs = IS_WINDOWS ? 5_000 : 1_500, pollMs = IS_WINDOWS ? 80 : 25 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const warnings = probe.drainWarnings();
+    if (warnings.some((w) => w.level === level)) return true;
+    await new Promise((r) => setTimeout(r, pollMs));
   }
   return false;
 }
@@ -50,50 +68,42 @@ test(
   },
 );
 
-test(
-  'generates alive_but_silent warning at soft threshold (Unix only)',
-  { skip: process.platform === 'win32' && 'silence warnings require Windows platform guard (PR #250)' },
-  async () => {
-    const probe = new ProcessLivenessProbe(process.pid, {
-      sampleIntervalMs: 20,
-      softWarningMs: 50,
-      stallWarningMs: 200,
-    });
-    probe.start();
-    await new Promise((r) => setTimeout(r, 100));
-    const warnings = probe.drainWarnings();
-    assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
-    probe.stop();
-  },
-);
+test('generates alive_but_silent warning at soft threshold', async () => {
+  const probe = new ProcessLivenessProbe(process.pid, {
+    sampleIntervalMs: IS_WINDOWS ? 120 : 20,
+    softWarningMs: IS_WINDOWS ? 220 : 50,
+    stallWarningMs: IS_WINDOWS ? 1_000 : 200,
+  });
+  probe.start();
+  const hasWarning = await waitForWarning(probe, 'alive_but_silent');
+  assert.ok(hasWarning, 'expected alive_but_silent warning within timeout');
+  probe.stop();
+});
 
-test(
-  'generates suspected_stall warning at stall threshold (Unix only)',
-  { skip: process.platform === 'win32' && 'silence warnings require Windows platform guard (PR #250)' },
-  async () => {
-    const probe = new ProcessLivenessProbe(process.pid, {
-      sampleIntervalMs: 20,
-      softWarningMs: 30,
-      stallWarningMs: 80,
-    });
-    probe.start();
-    await new Promise((r) => setTimeout(r, 150));
-    const warnings = probe.drainWarnings();
-    assert.ok(warnings.some((w) => w.level === 'suspected_stall'));
-    probe.stop();
-  },
-);
+test('generates suspected_stall warning at stall threshold', async () => {
+  const probe = new ProcessLivenessProbe(process.pid, {
+    sampleIntervalMs: IS_WINDOWS ? 120 : 20,
+    softWarningMs: IS_WINDOWS ? 200 : 30,
+    stallWarningMs: IS_WINDOWS ? 500 : 80,
+  });
+  probe.start();
+  const hasWarning = await waitForWarning(probe, 'suspected_stall', {
+    timeoutMs: IS_WINDOWS ? 8_000 : 2_000,
+  });
+  assert.ok(hasWarning, 'expected suspected_stall warning within timeout');
+  probe.stop();
+});
 
 test('notifyActivity resets silence timer and clears warning state', async () => {
   const probe = new ProcessLivenessProbe(process.pid, {
-    sampleIntervalMs: 20,
-    softWarningMs: 50,
-    stallWarningMs: 200,
+    sampleIntervalMs: IS_WINDOWS ? 120 : 20,
+    softWarningMs: IS_WINDOWS ? 250 : 50,
+    stallWarningMs: IS_WINDOWS ? 900 : 200,
   });
   probe.start();
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, IS_WINDOWS ? 80 : 30));
   probe.notifyActivity();
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, IS_WINDOWS ? 120 : 30));
   const warnings = probe.drainWarnings();
   const softWarnings = warnings.filter((w) => w.level === 'alive_but_silent');
   assert.equal(softWarnings.length, 0);
@@ -169,22 +179,18 @@ test('on Windows, silence warnings still fire correctly', async () => {
     return;
   }
 
+  // Keep stall threshold high so this test deterministically observes
+  // alive_but_silent first on slower Windows runners.
   const probe = new ProcessLivenessProbe(process.pid, {
-    sampleIntervalMs: 20,
-    softWarningMs: 50,
-    stallWarningMs: 150,
+    sampleIntervalMs: 120,
+    softWarningMs: 600,
+    stallWarningMs: 20_000,
   });
   probe.start();
-  await new Promise((r) => setTimeout(r, 200));
-
-  const warnings = probe.drainWarnings();
-  assert.ok(
-    warnings.some((w) => w.level === 'alive_but_silent'),
-    'should emit alive_but_silent warning on Windows',
-  );
-  assert.ok(
-    warnings.some((w) => w.level === 'suspected_stall'),
-    'should emit suspected_stall warning on Windows',
-  );
+  const hasSoftWarning = await waitForWarning(probe, 'alive_but_silent', {
+    timeoutMs: 20_000,
+    pollMs: 120,
+  });
+  assert.ok(hasSoftWarning, 'should emit alive_but_silent warning on Windows');
   probe.stop();
 });

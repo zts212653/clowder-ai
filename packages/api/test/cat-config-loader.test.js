@@ -187,6 +187,15 @@ describe('cat-config-loader', () => {
       assert.throws(() => loadCatConfig(path), /Invalid cat config/);
     });
 
+    it('rejects whitespace-only ocProviderName', () => {
+      const bad = validConfig();
+      bad.breeds[0].variants[0].provider = 'opencode';
+      bad.breeds[0].variants[0].ocProviderName = '   ';
+      bad.breeds[0].variants[0].defaultModel = 'gpt-5';
+      const path = writeTempConfig(bad);
+      assert.throws(() => loadCatConfig(path), /ocProviderName must not be blank/);
+    });
+
     it('accepts dare provider (F050)', () => {
       const config = validConfig();
       config.breeds.push({

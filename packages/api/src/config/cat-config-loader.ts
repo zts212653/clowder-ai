@@ -1,5 +1,6 @@
 /**
  * Cat Config Loader
+ *
  * 从 cat-template.json / .cat-cafe/cat-catalog.json 加载 Breed+Variant 配置。
  * Node-only — 前端继续用 shared 包的 CAT_CONFIGS 常量。
  */
@@ -69,7 +70,12 @@ const catVariantSchema = z.object({
   cli: cliConfigSchema,
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
   cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
-  ocProviderName: z.string().min(1).optional(), // F189: opencode custom provider name (e.g. "maas")
+  ocProviderName: z
+    .string()
+    .min(1)
+    .refine((v) => v.trim().length > 0, 'ocProviderName must not be blank')
+    .refine((v) => !v.includes('/'), 'ocProviderName must not contain "/"')
+    .optional(), // F189: opencode custom provider name (e.g. "maas")
   roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
   sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
   personality: z.string().optional(),
