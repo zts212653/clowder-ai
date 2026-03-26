@@ -23,13 +23,24 @@ function safeAvatarSrc(value: string): string | null {
   return null;
 }
 
-function autoSlug(name: string): string {
-  return name
+function autoSlug(name: string, currentId?: string): string {
+  const slug = name
     .trim()
     .toLowerCase()
     .replace(/[\s_]+/g, '-')
-    .replace(/[^a-z0-9\u4e00-\u9fff-]/g, '')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^[^a-z]+/, '')
+    .replace(/-+$/, '')
+    .replace(/-{2,}/g, '-')
     .slice(0, 40);
+
+  if (/^[a-z]/.test(slug)) return slug;
+
+  // Non-ASCII name: keep existing random ID if present
+  if (currentId && /^cat-[a-z0-9]+$/.test(currentId)) return currentId;
+
+  const rand = Math.random().toString(36).substring(2, 10);
+  return `cat-${rand}`;
 }
 
 function currentAliasTags(form: HubCatEditorFormState): string[] {
@@ -64,7 +75,7 @@ export function IdentitySection({
             ariaLabel="Name"
             value={form.name}
             onChange={(value) => {
-              onChange({ name: value, displayName: value, catId: autoSlug(value) });
+              onChange({ name: value, displayName: value, catId: autoSlug(value, form.catId) });
             }}
             required
             placeholder="成员显示名称，如 我的助手"
@@ -362,7 +373,7 @@ export function AccountSection({
                     label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
                   })),
               ]}
-              onChange={(value) => onChange({ accountRef: value, defaultModel: '' })}
+              onChange={(value) => onChange({ accountRef: value, defaultModel: '', ocProviderName: '' })}
               disabled={loadingProfiles}
               required
             />
@@ -371,27 +382,19 @@ export function AccountSection({
                 <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">{callHint}</p>
               </div>
             ) : null}
-            {modelOptions.length > 0 ? (
-              <SelectField
-                label="Model"
-                value={form.defaultModel}
-                options={modelOptions.map((model) => ({ value: model, label: model }))}
-                onChange={(value) => onChange({ defaultModel: value })}
-                required
-              />
-            ) : (
-              <TextField
-                label="Model"
-                value={form.defaultModel}
-                onChange={(value) => onChange({ defaultModel: value })}
-                required
-                placeholder={
-                  form.client === 'opencode'
-                    ? '例如 openai/gpt-5.4 或 openrouter/google/gemini-3-flash-preview'
-                    : '模型标识符，如 claude-sonnet-4-5'
-                }
-              />
-            )}
+            <ComboField
+              label="Model"
+              ariaLabel="Model"
+              value={form.defaultModel}
+              onChange={(value) => onChange({ defaultModel: value })}
+              suggestions={modelOptions}
+              required
+              placeholder={
+                form.client === 'opencode'
+                  ? '例如 openai/gpt-5.4 或 openrouter/google/gemini-3-flash-preview'
+                  : '模型标识符，如 claude-sonnet-4-5'
+              }
+            />
             {form.client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <ComboField
                 label="Provider 名称"

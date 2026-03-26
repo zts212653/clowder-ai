@@ -222,6 +222,17 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.strictEqual(provider.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
   });
 
+  test('omits baseURL when hasBaseUrl is false or unset', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'deepseek',
+      models: ['deepseek-r2'],
+      defaultModel: 'deepseek/deepseek-r2',
+    });
+    const provider = config.provider.deepseek;
+    assert.strictEqual(provider.options.baseURL, undefined, 'baseURL must not be present when hasBaseUrl is unset');
+    assert.strictEqual(provider.options.apiKey, `{env:${OC_API_KEY_ENV}}`, 'apiKey still present');
+  });
+
   test('credentials use env substitution, no hardcoded secrets', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'deepseek',
@@ -316,7 +327,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
 
       assert.ok(existsSync(configPath), 'config file must exist');
       assert.ok(configPath.includes('.cat-cafe'), 'must be in .cat-cafe dir');
-      assert.ok(configPath.includes('opencode-runtime-test-cat'), 'must include catId');
+      assert.ok(configPath.includes('opencode-runtime-test-cat-'), 'must include catId in per-invocation file');
 
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       assert.ok(content.provider.maas, 'file must contain custom provider');
@@ -326,24 +337,38 @@ describe('writeOpenCodeRuntimeConfig', () => {
     }
   });
 
-  test('overwrites existing config on re-invoke', () => {
+  test('same cat re-invoke writes distinct per-invocation files', () => {
     const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-config-test-'));
     try {
-      writeOpenCodeRuntimeConfig(tmpRoot, 'cat-a', {
-        providerName: 'maas',
-        models: ['glm-5'],
-        defaultModel: 'maas/glm-5',
-      });
+      const path1 = writeOpenCodeRuntimeConfig(
+        tmpRoot,
+        'cat-a',
+        {
+          providerName: 'maas',
+          models: ['glm-5'],
+          defaultModel: 'maas/glm-5',
+        },
+        'invoke-a',
+      );
 
-      const path2 = writeOpenCodeRuntimeConfig(tmpRoot, 'cat-a', {
-        providerName: 'deepseek',
-        models: ['deepseek-r2'],
-        defaultModel: 'deepseek/deepseek-r2',
-      });
+      const path2 = writeOpenCodeRuntimeConfig(
+        tmpRoot,
+        'cat-a',
+        {
+          providerName: 'deepseek',
+          models: ['deepseek-r2'],
+          defaultModel: 'deepseek/deepseek-r2',
+        },
+        'invoke-b',
+      );
 
+      assert.notStrictEqual(path1, path2, 'same cat should use different config path per invocation');
+
+      const content1 = JSON.parse(readFileSync(path1, 'utf-8'));
       const content = JSON.parse(readFileSync(path2, 'utf-8'));
+      assert.ok(content1.provider.maas, 'first invocation config must remain intact');
       assert.ok(content.provider.deepseek, 'must have updated provider');
-      assert.strictEqual(content.provider.maas, undefined, 'old provider must be gone');
+      assert.strictEqual(content.provider.maas, undefined, 'second invocation must not inherit first provider');
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }
@@ -362,6 +387,8 @@ describe('writeOpenCodeRuntimeConfig', () => {
       });
 
       assert.notStrictEqual(pathA, pathB, 'paths must differ');
+      assert.ok(pathA.includes('opencode-runtime-cat-a-'), 'cat-a prefix must appear in path');
+      assert.ok(pathB.includes('opencode-runtime-cat-b-'), 'cat-b prefix must appear in path');
       assert.ok(existsSync(pathA), 'cat-a config must exist');
       assert.ok(existsSync(pathB), 'cat-b config must exist');
     } finally {

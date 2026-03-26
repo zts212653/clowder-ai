@@ -10,6 +10,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
@@ -55,6 +56,26 @@ import {
 } from './invoke-helpers.js';
 import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
+
+/**
+ * Strip the provider prefix from a model ID only when it matches ocProviderName
+ * (redundant prefix). Otherwise keep the full ID — it is the model's namespace
+ * within the provider (e.g. OpenRouter's "z-ai/glm-4.7").
+ */
+function stripOwnProviderPrefix(model: string, ocProviderName: string): string {
+  return model.startsWith(`${ocProviderName}/`) ? model.slice(ocProviderName.length + 1) : model;
+}
+
+/** Ensure defaultModel is present in the models list for runtime config generation. */
+function ensureModelInList(models: string[], defaultModel: string, ocProviderName: string): string[] {
+  const bare = stripOwnProviderPrefix(defaultModel, ocProviderName);
+  if (models.includes(bare)) return models;
+  // Replace prefixed form with bare so runtime config key matches provider namespace
+  if (bare !== defaultModel && models.includes(defaultModel)) {
+    return models.map((m) => (m === defaultModel ? bare : m));
+  }
+  return [...models, bare];
+}
 
 /** F118: Module-level singleton — guards per-cliSessionId serialization */
 const sessionMutex = new SessionMutex();
@@ -420,6 +441,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   // F118: Declared before try so it's accessible in finally
   let sessionMutexRelease: (() => void) | undefined;
+  let openCodeRuntimeConfigPath: string | undefined;
 
   try {
     let sessionId: string | undefined;
@@ -733,49 +755,46 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // are both handled identically: generate a per-catId runtime config, assemble provider/model.
     const ocProviderName = catConfig?.ocProviderName?.trim();
     if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && ocProviderName && defaultModel) {
-      // If model already has our provider prefix, keep as-is.
-      // Otherwise prepend ocProviderName/ — preserve any namespace in the model ID
-      // (e.g. "google/gemini-3-flash" stays intact as "maas/google/gemini-3-flash").
-      const assembledModel = defaultModel.startsWith(`${ocProviderName}/`)
-        ? defaultModel
-        : `${ocProviderName}/${defaultModel}`;
+      const bareModel = stripOwnProviderPrefix(defaultModel, ocProviderName);
+      const assembledModel = `${ocProviderName}/${bareModel}`;
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
       try {
-        // Infer apiType from ocProviderName (not effectiveProtocol — protocol UI was removed).
-        // Derive apiType from resolved account protocol when available, falling back to
-        // ocProviderName-based inference. This ensures profiles with explicit protocol
-        // (e.g. protocol: 'anthropic' + ocProviderName: 'maas') use the correct SDK adapter.
-        const protocol = (resolvedAccount as { protocol?: string }).protocol?.trim()?.toLowerCase();
-        const ocNameLower = ocProviderName.toLowerCase();
-        const apiType: 'openai' | 'anthropic' | 'google' =
-          protocol === 'anthropic'
+        // Explicit account protocol takes full precedence over provider-name heuristic.
+        // Only fall back to ocProviderName when no explicit protocol is set.
+        const explicitProtocol = resolvedAccount.protocol;
+        const apiType: 'openai' | 'anthropic' | 'google' = explicitProtocol
+          ? explicitProtocol === 'anthropic'
             ? 'anthropic'
-            : protocol === 'google'
+            : explicitProtocol === 'google'
               ? 'google'
-              : ocNameLower === 'anthropic'
-                ? 'anthropic'
-                : ocNameLower === 'google'
-                  ? 'google'
-                  : 'openai';
-        // Strip only the ocProviderName/ prefix from model IDs — namespaced IDs
-        // like "google/gemini-3-flash" must stay intact as config keys so that
-        // `-m maas/google/gemini-3-flash` resolves to models["google/gemini-3-flash"].
-        const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [defaultModel];
-        const prefix = `${ocProviderName}/`;
-        const bareModels = rawModels.map((m: string) => (m.startsWith(prefix) ? m.slice(prefix.length) : m));
-        const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
-          providerName: ocProviderName,
-          models: bareModels,
-          defaultModel: assembledModel,
-          apiType,
-          hasBaseUrl: !!resolvedAccount.baseUrl,
-        });
+              : 'openai'
+          : ocProviderName === 'anthropic'
+            ? 'anthropic'
+            : ocProviderName === 'google'
+              ? 'google'
+              : 'openai';
+        const configPath = writeOpenCodeRuntimeConfig(
+          projectRoot,
+          catId as string,
+          {
+            providerName: ocProviderName,
+            models: ensureModelInList(resolvedAccount.models ?? [], defaultModel, ocProviderName),
+            defaultModel: assembledModel,
+            apiType,
+            hasBaseUrl: !!resolvedAccount.baseUrl,
+          },
+          invocationId,
+        );
+        openCodeRuntimeConfigPath = configPath;
         callbackEnv.OPENCODE_CONFIG = configPath;
         if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
         if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
-        log.debug({ catId, configPath, provider: ocProviderName, apiType }, 'OpenCode runtime config written');
+        log.info({ catId, configPath, provider: ocProviderName, apiType }, 'OpenCode runtime config written');
       } catch (err) {
-        log.warn({ catId, err }, 'Failed to write OpenCode runtime config — falling back to env vars');
+        log.error({ catId, err }, 'Failed to write OpenCode runtime config');
+        throw new Error(
+          `OpenCode runtime config write failed for cat "${catId}": ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
@@ -1532,6 +1551,22 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     await finalizeTaskProgress();
+
+    // F189 follow-up: per-invocation OPENCODE_CONFIG files must be cleaned after
+    // child process exits to avoid unbounded .cat-cafe file growth.
+    if (openCodeRuntimeConfigPath) {
+      try {
+        await unlink(openCodeRuntimeConfigPath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code !== 'ENOENT') {
+          log.warn(
+            { catId, invocationId, path: openCodeRuntimeConfigPath, err },
+            'Failed to cleanup OpenCode runtime config',
+          );
+        }
+      }
+    }
 
     // F089: Mark agent pane status when invocation completes
     if (deps.agentPaneRegistry?.getByInvocation(invocationId)) {

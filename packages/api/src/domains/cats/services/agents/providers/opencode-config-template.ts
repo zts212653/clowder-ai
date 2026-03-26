@@ -11,13 +11,13 @@
  *
  * Custom provider flow (F189):
  *   1. invoke-single-cat.ts calls writeOpenCodeRuntimeConfig() before each invoke
- *   2. Config written to {projectRoot}/.cat-cafe/opencode-runtime-{catId}.json
+ *   2. Config written to {projectRoot}/.cat-cafe/opencode-runtime-{catId}-{invocationId}.json
  *   3. OPENCODE_CONFIG env var points to the file
  *   4. Credentials injected via {env:CAT_CAFE_OC_API_KEY} / {env:CAT_CAFE_OC_BASE_URL}
- *   5. Per-catId files isolate multiple opencode members in the same session
+ *   5. Per-invocation files isolate concurrent invocations of the same cat
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // ── Legacy builtin-only config (Anthropic provider) ──────────────────────
@@ -91,7 +91,7 @@ export interface OpenCodeRuntimeConfigOptions {
   defaultModel?: string;
   /** API SDK type: which wire protocol the endpoint speaks (default: "openai") */
   apiType?: 'openai' | 'anthropic' | 'google';
-  /** Whether a base URL will be provided via env var (controls baseURL in config) */
+  /** Whether a base URL will be set via env var at runtime */
   hasBaseUrl?: boolean;
 }
 
@@ -108,12 +108,21 @@ export interface OpenCodeRuntimeConfigOptions {
  * @see https://opencode.ai/docs/models
  */
 export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOptions): OpenCodeConfig {
-  const { providerName, models, defaultModel, apiType = 'openai', hasBaseUrl = false } = options;
+  const { providerName, models, defaultModel, apiType = 'openai', hasBaseUrl } = options;
 
   // models: keyed object where key = model ID used in `-m provider/modelId`
   const modelsMap: Record<string, { name: string }> = {};
   for (const modelName of models) {
     modelsMap[modelName] = { name: modelName };
+  }
+
+  const providerOptions: Record<string, string> = {
+    apiKey: `{env:${OC_API_KEY_ENV}}`,
+  };
+  // Only emit baseURL when the caller will set the env var; otherwise OpenCode
+  // substitutes an empty string and requests fail for profiles without a base URL.
+  if (hasBaseUrl) {
+    providerOptions.baseURL = `{env:${OC_BASE_URL_ENV}}`;
   }
 
   return {
@@ -123,10 +132,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
       [providerName]: {
         npm: NPM_ADAPTER_FOR_API_TYPE[apiType] ?? NPM_ADAPTER_FOR_API_TYPE.openai,
         models: modelsMap,
-        options: {
-          ...(hasBaseUrl ? { baseURL: `{env:${OC_BASE_URL_ENV}}` } : {}),
-          apiKey: `{env:${OC_API_KEY_ENV}}`,
-        },
+        options: providerOptions,
       },
     },
   };
@@ -150,18 +156,27 @@ export function parseOpenCodeModel(model: string): { providerName: string; model
  * Write an opencode runtime config file for a specific cat member.
  * Returns the absolute path to the written config file.
  *
- * File location: {projectRoot}/.cat-cafe/opencode-runtime-{catId}.json
- * Regenerated before each invoke to pick up mid-session config changes.
+ * File location: {projectRoot}/.cat-cafe/opencode-runtime-{catId}-{invocationId}.json
+ * Generated before each invoke to avoid cross-request config races.
  */
 export function writeOpenCodeRuntimeConfig(
   projectRoot: string,
   catId: string,
   options: OpenCodeRuntimeConfigOptions,
+  invocationId?: string,
 ): string {
   const configDir = join(projectRoot, '.cat-cafe');
   mkdirSync(configDir, { recursive: true });
-  const configPath = join(configDir, `opencode-runtime-${catId}.json`);
+  // Sanitize catId to prevent path traversal (defense-in-depth; CRUD route already
+  // validates ^[a-z][a-z0-9_-]*$ but this function may be called from other contexts).
+  const safeCatId = catId.replace(/[^a-z0-9_-]/gi, '_');
+  const invocationToken = (invocationId ?? crypto.randomUUID()).replace(/[^a-z0-9_-]/gi, '_');
+  const configPath = join(configDir, `opencode-runtime-${safeCatId}-${invocationToken}.json`);
   const config = generateOpenCodeRuntimeConfig(options);
-  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  // Atomic write: unique temp file + rename avoids concurrent invocations
+  // reading truncated JSON.
+  const tmpPath = `${configPath}.${crypto.randomUUID()}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify(config, null, 2), 'utf-8');
+  renameSync(tmpPath, configPath);
   return configPath;
 }

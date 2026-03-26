@@ -41,35 +41,33 @@ function resolveExpectedProtocolForProvider(provider: CatProvider): ProviderProf
 /**
  * Returns an error string when the opencode provider binding is incomplete.
  *
- * For api_key profiles: ocProviderName is **always required**. The runtime generates a
- * per-catId config file and assembles `${ocProviderName}/${defaultModel}` for -m routing.
- * Built-in provider names (anthropic, openai, openrouter) and custom names (maas, deepseek)
- * are both valid — "anthropic" as ocProviderName is just the special case that was previously
- * handled as a separate code path (Path B). Now unified into one mechanism.
- *
- * For builtin auth (OAuth): the model should use "providerId/modelId" format (e.g. openai/gpt-5.4)
- * since opencode's built-in provider registry handles routing natively.
+ * For api_key profiles: ocProviderName is required because the runtime generates a
+ * per-catId config file and needs it for the provider block.
+ * Model format is NOT validated — users may use any model naming convention
+ * (e.g. OpenRouter's `z-ai/glm-4.7` where the prefix differs from ocProviderName).
  */
 export function validateModelFormatForProvider(
   provider: CatProvider,
-  defaultModel?: string | null,
+  _defaultModel?: string | null,
   profileKind?: ProviderProfileKind,
   ocProviderName?: string | null,
+  options?: { legacyCompat?: boolean },
 ): string | null {
   if (provider !== 'opencode') return null;
-  const trimmedModel = defaultModel?.trim();
-  if (!trimmedModel) return null;
   if (profileKind === 'api_key') {
-    // api_key always requires ocProviderName — runtime config generation depends on it
-    if (!ocProviderName?.trim()) {
+    const trimmedOcProvider = ocProviderName?.trim();
+    if (!trimmedOcProvider) {
+      // Legacy compat: existing opencode+api_key members created before F189
+      // may not have ocProviderName. Allow edits to pass through — the invoke
+      // path skips the F189 config block when ocProviderName is absent.
+      if (options?.legacyCompat) return null;
       return 'client "opencode" with API key auth requires an OpenCode Provider name (e.g. anthropic, openai, maas)';
     }
-    return null;
+    if (trimmedOcProvider.includes('/')) {
+      return 'OpenCode Provider name must not contain "/" — use a plain identifier (e.g. "openrouter", not "openrouter/google")';
+    }
   }
-  // builtin/OAuth: recommend provider/model format for native routing
-  const slashIndex = trimmedModel.indexOf('/');
-  if (slashIndex > 0 && slashIndex < trimmedModel.length - 1) return null;
-  return 'client "opencode" recommends model format "providerId/modelId" (e.g. openai/gpt-5.4)';
+  return null;
 }
 
 export function validateRuntimeProviderBinding(
@@ -91,10 +89,9 @@ export function validateRuntimeProviderBinding(
   // API Key accounts declare their own protocol — don't reject based on provider mismatch.
   // The invocation chain uses account.protocol for env var injection.
 
-  const trimmedModel = defaultModel?.trim().replace(/\x1B\[[^m]*m|\[\d+m\]/g, '');
-  if (trimmedModel && profile.models?.length && !profile.models.includes(trimmedModel)) {
-    return `model "${trimmedModel}" is not available on provider "${profile.id}"`;
-  }
+  // Model-in-profile validation removed: users may specify any model for any profile.
+  // If the model is unsupported, the downstream CLI/client will report the error at
+  // invocation time — we no longer gate at the binding level.
 
   return null;
 }
