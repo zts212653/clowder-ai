@@ -115,6 +115,7 @@ export class GithubReviewWatcher extends EventEmitter<WatcherEventMap> {
       this.log.info('[GithubReviewWatcher] Started successfully');
     } catch (error) {
       this.running = false;
+      await this.destroyClient(); // Clean up partial connection to prevent leaked sockets
       this.log.error(`[GithubReviewWatcher] Failed to start: ${formatImapError(error)}`);
       throw error;
     }
