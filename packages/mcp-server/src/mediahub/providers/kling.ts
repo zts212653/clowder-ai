@@ -12,7 +12,14 @@
 import { createHmac } from 'node:crypto';
 
 import type { MediaProvider } from '../provider.js';
-import type { GenerationRequest, MediaCapability, ProviderInfo, StatusResult, SubmitResult } from '../types.js';
+import type {
+  GenerationRequest,
+  HealthCheckResult,
+  MediaCapability,
+  ProviderInfo,
+  StatusResult,
+  SubmitResult,
+} from '../types.js';
 
 const API_BASE = 'https://api.klingapi.com';
 const DEFAULT_MODEL = 'kling-v2.6-pro';
@@ -77,6 +84,28 @@ export class KlingProvider implements MediaProvider {
 
   supports(capability: MediaCapability): boolean {
     return this.info.capabilities.includes(capability);
+  }
+
+  async checkHealth(): Promise<HealthCheckResult> {
+    try {
+      const resp = await fetch(`${API_BASE}/v1/videos/text2video?pageSize=1`, {
+        method: 'GET',
+        headers: this.authHeaders(),
+      });
+      if (resp.status === 401 || resp.status === 403) {
+        return { healthy: false, error: 'Authentication failed — check AK/SK' };
+      }
+      if (!resp.ok) {
+        return { healthy: false, error: `API error: HTTP ${resp.status}` };
+      }
+      const body = (await resp.json()) as KlingResponse;
+      if (body.code !== 0 && body.code !== 200) {
+        return { healthy: false, error: `API business error (${body.code}): ${body.message}` };
+      }
+      return { healthy: true };
+    } catch (err) {
+      return { healthy: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   private authHeaders(): Record<string, string> {
@@ -179,10 +208,10 @@ function mapKlingStatus(s: string): 'queued' | 'running' | 'succeeded' | 'failed
   }
 }
 
-/** Factory: creates provider if AK/SK are available */
-export function createKlingProvider(): KlingProvider | null {
-  const ak = process.env['KLING_ACCESS_KEY'];
-  const sk = process.env['KLING_SECRET_KEY'];
+/** Factory: creates provider from explicit keys or env vars */
+export function createKlingProvider(accessKey?: string, secretKey?: string): KlingProvider | null {
+  const ak = accessKey ?? process.env['KLING_ACCESS_KEY'];
+  const sk = secretKey ?? process.env['KLING_SECRET_KEY'];
   if (!ak || !sk) return null;
   return new KlingProvider(ak, sk);
 }

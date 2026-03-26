@@ -10,7 +10,14 @@
 import { createHash, createHmac } from 'node:crypto';
 
 import type { MediaProvider } from '../provider.js';
-import type { GenerationRequest, MediaCapability, ProviderInfo, StatusResult, SubmitResult } from '../types.js';
+import type {
+  GenerationRequest,
+  HealthCheckResult,
+  MediaCapability,
+  ProviderInfo,
+  StatusResult,
+  SubmitResult,
+} from '../types.js';
 
 const API_HOST = 'visual.volcengineapi.com';
 const API_BASE = `https://${API_HOST}`;
@@ -110,6 +117,27 @@ export class JimengProvider implements MediaProvider {
     return this.info.capabilities.includes(capability);
   }
 
+  async checkHealth(): Promise<HealthCheckResult> {
+    try {
+      // Lightweight probe: query a nonexistent task — valid auth returns 200 with business error
+      // (e.g. "task not found"), invalid auth returns 401/403, server issues return 5xx.
+      const body = JSON.stringify({ req_key: 'jimeng_t2v_v30', task_id: 'health-check-probe' });
+      const headers = signRequest(this.accessKey, this.secretKey, 'CVProcess', body);
+      const url = `${API_BASE}/?Action=CVProcess&Version=${encodeURIComponent(API_VERSION)}`;
+      const res = await fetch(url, { method: 'POST', headers, body });
+      if (res.status === 401 || res.status === 403) {
+        return { healthy: false, error: 'Authentication failed — check Volcengine AK/SK' };
+      }
+      if (!res.ok) {
+        return { healthy: false, error: `API error: HTTP ${res.status}` };
+      }
+      // 200 + any parseable response = auth works (business error from fake task is expected)
+      return { healthy: true };
+    } catch (err) {
+      return { healthy: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   private async apiCall<T>(action: string, body: Record<string, unknown>): Promise<T> {
     const bodyStr = JSON.stringify(body);
     const headers = signRequest(this.accessKey, this.secretKey, action, bodyStr);
@@ -188,10 +216,10 @@ export class JimengProvider implements MediaProvider {
   }
 }
 
-/** Factory: creates provider if Volcengine AK/SK are available */
-export function createJimengProvider(): JimengProvider | null {
-  const ak = process.env['VOLC_ACCESSKEY'];
-  const sk = process.env['VOLC_SECRETKEY'];
+/** Factory: creates provider from explicit keys or env vars */
+export function createJimengProvider(accessKey?: string, secretKey?: string): JimengProvider | null {
+  const ak = accessKey ?? process.env['VOLC_ACCESSKEY'];
+  const sk = secretKey ?? process.env['VOLC_SECRETKEY'];
   if (!ak || !sk) return null;
   return new JimengProvider(ak, sk);
 }

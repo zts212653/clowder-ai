@@ -4,7 +4,14 @@
  * New providers implement this interface and register via the registry.
  */
 
-import type { GenerationRequest, MediaCapability, ProviderInfo, StatusResult, SubmitResult } from './types.js';
+import type {
+  GenerationRequest,
+  HealthCheckResult,
+  MediaCapability,
+  ProviderInfo,
+  StatusResult,
+  SubmitResult,
+} from './types.js';
 
 /** Contract every provider must implement */
 export interface MediaProvider {
@@ -18,6 +25,9 @@ export interface MediaProvider {
 
   /** Whether this provider supports the given capability */
   supports(capability: MediaCapability): boolean;
+
+  /** Optional: verify credentials are still valid via lightweight API call */
+  checkHealth?(): Promise<HealthCheckResult>;
 }
 
 /**
@@ -32,6 +42,10 @@ export class ProviderRegistry {
       throw new Error(`Provider already registered: ${provider.info.id}`);
     }
     this.providers.set(provider.info.id, provider);
+  }
+
+  unregister(id: string): boolean {
+    return this.providers.delete(id);
   }
 
   get(id: string): MediaProvider | undefined {

@@ -12,6 +12,15 @@ export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'timeout
 /** Authentication mode for a provider */
 export type AuthMode = 'none' | 'api_key' | 'session_bridge';
 
+/** Credential health status */
+export type HealthStatus = 'healthy' | 'expired' | 'error' | 'unchecked';
+
+/** Result from provider health check */
+export interface HealthCheckResult {
+  healthy: boolean;
+  error?: string;
+}
+
 /** Provider metadata exposed to consumers */
 export interface ProviderInfo {
   id: string;

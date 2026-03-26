@@ -3,6 +3,9 @@
  * F139: Re-exports and bootstrap for the MediaHub subsystem.
  */
 
+export type { CredentialSummary } from './account-manager.js';
+export { AccountManager } from './account-manager.js';
+export { accountTools, setAccountRefs } from './account-tools.js';
 export type { RedisClient } from './job-store.js';
 export { JobStore } from './job-store.js';
 export type { CleanupResult, MediaValidation } from './media-lifecycle.js';
@@ -18,6 +21,8 @@ export { createJimengProvider, JimengProvider } from './providers/jimeng.js';
 export { createKlingProvider, KlingProvider } from './providers/kling.js';
 export type {
   GenerationRequest,
+  HealthCheckResult,
+  HealthStatus,
   JobRecord,
   JobStatus,
   MediaCapability,

@@ -75,6 +75,9 @@ const EXPECTED_TOOLS = [
   'mediahub_send_media',
   'mediahub_get_job_status',
   'mediahub_list_jobs',
+  'mediahub_bind_account',
+  'mediahub_unbind_account',
+  'mediahub_account_status',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
