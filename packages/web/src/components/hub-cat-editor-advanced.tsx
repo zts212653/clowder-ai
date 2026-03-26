@@ -101,6 +101,20 @@ export function AdvancedRuntimeSection({
           onChange={(value) => onChange({ sessionChain: value as HubCatEditorFormState['sessionChain'] })}
           tone="success"
         />
+        {form.client === 'opencode' ? (
+          <div className="space-y-1">
+            <TextField
+              label="OpenCode Provider 名称"
+              value={form.ocProviderName}
+              onChange={(value) => onChange({ ocProviderName: value })}
+              tone="success"
+              placeholder="例如 maas、deepseek（留空 = 使用内置 provider）"
+            />
+            <p className="text-[11px] leading-4 text-[#8A776B]">
+              自定义 API Key 认证时需要。运行时自动组装为 provider/model 格式路由到 opencode CLI。
+            </p>
+          </div>
+        ) : null}
         {form.client === 'openai' || form.client === 'opencode' ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-[#3D2E22]">额外 CLI 参数</p>

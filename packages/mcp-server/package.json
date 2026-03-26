@@ -4,9 +4,6 @@
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
-  "bin": {
-    "cat-cafe-mcp": "./dist/index.js"
-  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",

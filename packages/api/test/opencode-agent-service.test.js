@@ -417,4 +417,56 @@ describe('OpenCodeAgentService', () => {
       `expected exactly 1 session_init, got ${sessionInits.length} — multi-step runs must not produce duplicate session events`,
     );
   });
+
+  // ── F189: OPENCODE_CONFIG passthrough clears anthropic env vars ──
+
+  test('OPENCODE_CONFIG in callbackEnv clears ANTHROPIC env vars', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'maas/glm-5' });
+    const promise = collect(
+      service.invoke('Test', {
+        callbackEnv: {
+          OPENCODE_CONFIG: '/tmp/.cat-cafe/opencode-runtime-test.json',
+          CAT_CAFE_OC_API_KEY: 'sk-custom-key',
+          CAT_CAFE_OC_BASE_URL: 'https://maas.example.com/v1',
+          CAT_CAFE_ANTHROPIC_API_KEY: 'sk-should-be-cleared',
+          CAT_CAFE_ANTHROPIC_BASE_URL: 'https://should-be-cleared.example.com',
+        },
+      }),
+    );
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const opts = spawnFn.mock.calls[0].arguments[2];
+    // OPENCODE_CONFIG and OC credentials must be present
+    assert.strictEqual(opts.env.OPENCODE_CONFIG, '/tmp/.cat-cafe/opencode-runtime-test.json');
+    assert.strictEqual(opts.env.CAT_CAFE_OC_API_KEY, 'sk-custom-key');
+    assert.strictEqual(opts.env.CAT_CAFE_OC_BASE_URL, 'https://maas.example.com/v1');
+    // Anthropic env vars must be cleared to prevent builtin provider conflict
+    assert.strictEqual(opts.env.ANTHROPIC_API_KEY, undefined);
+    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, undefined);
+    assert.strictEqual(opts.env.OPENCODE_API_KEY, undefined);
+    assert.strictEqual(opts.env.OPENCODE_BASE_URL, undefined);
+  });
+
+  test('without OPENCODE_CONFIG, anthropic env vars are still set normally', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(
+      service.invoke('Test', {
+        callbackEnv: {
+          CAT_CAFE_ANTHROPIC_API_KEY: 'sk-normal-key',
+          CAT_CAFE_ANTHROPIC_BASE_URL: 'https://proxy.example.com/v1',
+        },
+      }),
+    );
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const opts = spawnFn.mock.calls[0].arguments[2];
+    assert.strictEqual(opts.env.ANTHROPIC_API_KEY, 'sk-normal-key');
+    assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'https://proxy.example.com/v1');
+  });
 });

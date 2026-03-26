@@ -117,5 +117,10 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     ...mcpSupportPatch,
     defaultModel: trimText(form.defaultModel),
     cliConfigArgs: (form.cliConfigArgs ?? []).filter((arg) => arg.trim().length > 0),
+    ...(trimText(form.ocProviderName)
+      ? { ocProviderName: trimText(form.ocProviderName) }
+      : cat?.ocProviderName
+        ? { ocProviderName: null as null }
+        : {}),
   };
 }

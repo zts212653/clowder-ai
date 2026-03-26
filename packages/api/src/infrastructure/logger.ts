@@ -14,7 +14,12 @@ import { resolve } from 'node:path';
 import { format as utilFormat } from 'node:util';
 import pino from 'pino';
 
-const LOG_LEVEL = (process.env.LOG_LEVEL ?? 'info') as pino.Level;
+/**
+ * --debug CLI flag: `node dist/index.js --debug` sets log level to 'debug'.
+ * Precedence: --debug flag > LOG_LEVEL env var > default 'info'.
+ */
+export const isDebugMode = process.argv.includes('--debug');
+const LOG_LEVEL = (isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info')) as pino.Level;
 const LOG_DIR = resolve(process.cwd(), 'data', 'logs', 'api');
 const RETENTION_FILES = 14;
 

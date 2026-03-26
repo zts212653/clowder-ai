@@ -336,6 +336,10 @@ export async function* routeSerial(
       let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
       // Always pass isLastCat:false — we set isFinal AFTER A2A detection
+      log.debug(
+        { catId: catId as string, threadId, promptLength: prompt.length, index, worklistSize: worklist.length },
+        'Invoking cat via invokeSingleCat',
+      );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service: getService(deps.services, catId),
@@ -806,6 +810,17 @@ export async function* routeSerial(
         const shouldPersistNoTextMessage =
           hasRichBlocks || collectedToolEvents.length > 0 || Boolean(thinkingContent?.trim().length > 0);
 
+        log.debug(
+          {
+            catId: catId as string,
+            threadId,
+            hasRichBlocks,
+            toolCount: collectedToolEvents.length,
+            shouldPersist: shouldPersistNoTextMessage,
+            thinkingLen: thinkingContent?.length ?? 0,
+          },
+          'Cat produced no text — evaluating silent_completion',
+        );
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
         // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
         if (collectedToolEvents.length > 0 && !hasRichBlocks) {

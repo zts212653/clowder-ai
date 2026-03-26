@@ -246,3 +246,12 @@ test('Windows installer retries pnpm shim detection after bootstrap instead of f
   assert.match(installScript, /Start-Sleep -Milliseconds \$DelayMs/);
   assert.match(installScript, /\$pnpmStatus = Get-PnpmStatus -Attempts 6/);
 });
+
+test('Windows skill mount detects and refreshes stale junctions instead of skipping them', () => {
+  assert.match(helpersScript, /function Get-InstallerNormalizedPath/);
+  assert.match(helpersScript, /function Get-InstallerSkillLinkTarget/);
+  assert.match(helpersScript, /\$expectedTarget = Get-InstallerNormalizedPath -Path \$skill\.FullName/);
+  assert.match(helpersScript, /\$existingTarget = Get-InstallerSkillLinkTarget -Path \$skillTarget/);
+  assert.match(helpersScript, /Refreshing stale skill mount/);
+  assert.match(helpersScript, /cmd \/c rmdir "\$skillTarget"/);
+});

@@ -11,6 +11,8 @@ import { clearTimeout as clearKeepAliveTimeout, setTimeout as setKeepAliveTimeou
 
 const { spawnCli, isCliError, isCliTimeout, isLivenessWarning, KILL_GRACE_MS, SEMANTIC_COMPLETION_GRACE_MS } =
   await import('../dist/utils/cli-spawn.js');
+const { DEFAULT_CLI_TIMEOUT_MS } = await import('../dist/utils/cli-timeout.js');
+const { isParseError } = await import('../dist/utils/ndjson-parser.js');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -124,10 +126,12 @@ test('spawnCli skips parse errors in stdout', async () => {
 
   const results = await promise;
 
-  // Behavioral assertion: parse errors are silently skipped, only valid JSON yielded
-  assert.equal(results.length, 2);
+  // Behavioral assertion: parse errors are surfaced as sentinels while valid JSON still passes through
+  assert.equal(results.length, 3);
   assert.deepEqual(results[0], { valid: true });
-  assert.deepEqual(results[1], { also: 'valid' });
+  assert.equal(isParseError(results[1]), true);
+  assert.equal(results[1].line, 'not-json-line');
+  assert.deepEqual(results[2], { also: 'valid' });
 });
 
 test('parse-error noise does not reset timeout forever', async () => {
@@ -197,7 +201,7 @@ test('CLI_TIMEOUT_MS=0 disables timeout (no auto-kill on silence)', async () => 
   }
 });
 
-test('spawnCli uses 30 minute fallback timeout when CLI_TIMEOUT_MS is unset', async () => {
+test('spawnCli uses the configured fallback timeout when CLI_TIMEOUT_MS is unset', async () => {
   const savedEnv = process.env.CLI_TIMEOUT_MS;
   delete process.env.CLI_TIMEOUT_MS;
 
@@ -219,7 +223,7 @@ test('spawnCli uses 30 minute fallback timeout when CLI_TIMEOUT_MS is unset', as
     await promise;
 
     assert.ok(delays.length > 0);
-    assert.equal(delays[0], 1800000);
+    assert.equal(delays[0], DEFAULT_CLI_TIMEOUT_MS);
   } finally {
     global.setTimeout = originalSetTimeout;
     if (savedEnv === undefined) {

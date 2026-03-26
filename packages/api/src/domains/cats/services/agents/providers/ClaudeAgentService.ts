@@ -15,11 +15,13 @@
  *   result/success → 跳过 (done 在循环后 yield)
  */
 
-import { existsSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -30,12 +32,21 @@ import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 
+const log = createModuleLogger('claude-agent');
+
 const PERMISSION_MODE = 'bypassPermissions';
 
 const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
 const ANTHROPIC_PROFILE_API_KEY = 'CAT_CAFE_ANTHROPIC_API_KEY';
 const ANTHROPIC_PROFILE_BASE_URL = 'CAT_CAFE_ANTHROPIC_BASE_URL';
 const ANTHROPIC_MODEL_OVERRIDE_KEY = 'CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE';
+
+/** Default fallback model for Claude CLI when the real model is set via env var mapping. */
+const ANTHROPIC_CLI_FALLBACK_MODEL = 'claude-opus-4-6';
+
+function isKnownAnthropicModel(model: string): boolean {
+  return model.startsWith('claude-');
+}
 
 function isInvalidThinkingSignatureMessage(message: string | undefined): boolean {
   if (!message) return false;
@@ -82,10 +93,27 @@ function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<s
       const cleanUrl = baseUrl.replace(/\/v1\/?$/, '');
       env.ANTHROPIC_BASE_URL = cleanUrl;
     }
+
+    // Model mapping for third-party Anthropic-compatible APIs (e.g. BigModel, MaaS).
+    // Claude CLI rejects non-Anthropic model names via --model. Use the env var
+    // mapping mechanism (ANTHROPIC_DEFAULT_*_MODEL) to pass custom model names:
+    // Claude CLI will receive --model claude-opus-4-6 (a known name) but
+    // the env var maps it to the actual model (e.g. glm-5) at the API level.
+    const modelOverride = callbackEnv?.[ANTHROPIC_MODEL_OVERRIDE_KEY]?.trim();
+    const effectiveModel = modelOverride || undefined;
+    if (effectiveModel && !isKnownAnthropicModel(effectiveModel)) {
+      env.ANTHROPIC_DEFAULT_OPUS_MODEL = effectiveModel;
+      env.ANTHROPIC_DEFAULT_SONNET_MODEL = effectiveModel;
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = effectiveModel;
+    }
   } else if (mode === 'subscription') {
-    // Subscription mode: explicitly clear inherited key-based env vars.
+    // Subscription mode must not inherit shell-level Anthropic credentials.
+    // Claude CLI should read auth from ~/.claude/settings.json instead.
     env.ANTHROPIC_API_KEY = null;
     env.ANTHROPIC_BASE_URL = null;
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = null;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = null;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = null;
   }
   return env;
 }
@@ -134,6 +162,8 @@ export class ClaudeAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
   private readonly mcpServerPath: string | undefined;
+  /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
+  private mcpConfigFilePath: string | undefined;
 
   constructor(options?: ClaudeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
@@ -157,6 +187,12 @@ export class ClaudeAgentService implements AgentService {
 
     // Profile-level model override (e.g. "opus[1m]") takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.[ANTHROPIC_MODEL_OVERRIDE_KEY]?.trim() || this.model;
+    // For api_key mode with non-Anthropic model names (e.g. glm-5), use a standard
+    // model for --model (env var mapping handles the actual model). This prevents
+    // Claude CLI from rejecting unknown model names.
+    const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
+    const cliModel =
+      isApiKeyMode && !isKnownAnthropicModel(effectiveModel) ? ANTHROPIC_CLI_FALLBACK_MODEL : effectiveModel;
     const args: string[] = [
       '-p',
       effectivePrompt,
@@ -165,14 +201,15 @@ export class ClaudeAgentService implements AgentService {
       '--include-partial-messages',
       '--verbose',
       '--model',
-      effectiveModel,
+      cliModel,
       '--effort',
       getCatEffort(this.catId as string),
       '--permission-mode',
       PERMISSION_MODE,
-      // Skip global user settings to prevent config pollution across sessions
+      // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
+      // subscription mode: include user-level so CLI reads auth from ~/.claude/settings.json.
       '--setting-sources',
-      'project,local',
+      isApiKeyMode ? 'project,local' : 'project,local,user',
       // Enable Chrome MCP integration (built-in, requires Chrome + extension running)
       '--chrome',
     ];
@@ -190,18 +227,34 @@ export class ClaudeAgentService implements AgentService {
     }
 
     // Add MCP server config when callback env is present
+    // On Windows, Claude CLI treats inline JSON as a file path — write to temp file instead.
+    // The file is cached per-instance so concurrent invocations share one file (no temp spam).
     if (options?.callbackEnv && this.mcpServerPath) {
-      args.push(
-        '--mcp-config',
-        JSON.stringify({
-          mcpServers: {
-            'cat-cafe': {
-              command: 'node',
-              args: [this.mcpServerPath],
+      if (IS_WINDOWS) {
+        if (!this.mcpConfigFilePath || !existsSync(this.mcpConfigFilePath)) {
+          const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-'));
+          this.mcpConfigFilePath = join(dir, 'mcp-config.json');
+          writeFileSync(
+            this.mcpConfigFilePath,
+            JSON.stringify({
+              mcpServers: {
+                'cat-cafe': { command: 'node', args: [this.mcpServerPath] },
+              },
+            }),
+            'utf-8',
+          );
+        }
+        args.push('--mcp-config', this.mcpConfigFilePath);
+      } else {
+        args.push(
+          '--mcp-config',
+          JSON.stringify({
+            mcpServers: {
+              'cat-cafe': { command: 'node', args: [this.mcpServerPath] },
             },
-          },
-        }),
-      );
+          }),
+        );
+      }
     }
 
     const metadata: MessageMetadata = { provider: 'anthropic', model: effectiveModel };
@@ -214,7 +267,9 @@ export class ClaudeAgentService implements AgentService {
 
     try {
       const claudeCommand = resolveCliCommand('claude');
+      log.info({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
       if (!claudeCommand) {
+        log.warn({ catId: this.catId }, 'Claude CLI not found');
         yield {
           type: 'error' as const,
           catId: this.catId,
@@ -228,6 +283,31 @@ export class ClaudeAgentService implements AgentService {
 
       let sawResultError = false;
       const envOverrides = buildClaudeEnvOverrides(options?.callbackEnv);
+
+      // Debug: log full invocation details (env values redacted by pino redact paths)
+      const safeEnvSummary: Record<string, string> = {};
+      for (const [k, v] of Object.entries(envOverrides)) {
+        if (v === null) {
+          safeEnvSummary[k] = '(cleared)';
+        } else if (/key|secret|token|password/i.test(k)) {
+          safeEnvSummary[k] = v.slice(0, 6) + '***';
+        } else {
+          safeEnvSummary[k] = v;
+        }
+      }
+      log.debug(
+        {
+          catId: this.catId,
+          command: claudeCommand,
+          model: effectiveModel,
+          sessionId: options?.sessionId,
+          invocationId: options?.invocationId,
+          cwd: options?.workingDirectory,
+          envOverrides: safeEnvSummary,
+          argCount: args.length,
+        },
+        'Invoking Claude CLI',
+      );
 
       const cliOpts = {
         command: claudeCommand,
@@ -243,7 +323,15 @@ export class ClaudeAgentService implements AgentService {
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
 
+      let eventCount = 0;
+      let textEventCount = 0;
       for await (const event of events) {
+        eventCount++;
+        const evtType =
+          typeof event === 'object' && event !== null && 'type' in event
+            ? String((event as Record<string, unknown>).type)
+            : '__unknown';
+        log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
         if (isCliTimeout(event)) {
           // F118 AC-C3: Forward timeout diagnostics before error
           yield {
@@ -309,10 +397,14 @@ export class ClaudeAgentService implements AgentService {
 
         const fromResultError = isResultErrorEvent(event);
         let result = transformClaudeEvent(event, this.catId, streamState);
-        if (result === null) continue;
+        if (result === null) {
+          log.debug({ catId: this.catId, eventIndex: eventCount, rawType: evtType }, 'Event dropped by transform');
+          continue;
+        }
 
         if (Array.isArray(result)) {
           for (const msg of result) {
+            if (msg.type === 'text') textEventCount++;
             // Capture sessionId into metadata
             if (msg.type === 'session_init' && msg.sessionId) {
               metadata.sessionId = msg.sessionId;
@@ -332,10 +424,21 @@ export class ClaudeAgentService implements AgentService {
             }
             sawResultError = true;
           }
+          if (result.type === 'text') textEventCount++;
           yield { ...result, metadata };
         }
       }
 
+      log.info(
+        { catId: this.catId, totalEvents: eventCount, textEvents: textEventCount, sessionId: metadata.sessionId },
+        'Claude CLI invocation completed',
+      );
+      if (textEventCount === 0) {
+        log.warn(
+          { catId: this.catId, totalEvents: eventCount },
+          'Claude CLI produced 0 text events — will show as silent_completion',
+        );
+      }
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
       yield {
