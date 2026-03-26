@@ -117,3 +117,13 @@ export function isPathUnderRoots(absPath: string, allowedRoots: string[], platfo
 export function isUnderAllowedRoot(absPath: string): boolean {
   return isPathUnderRoots(absPath, ALLOWED_ROOTS());
 }
+
+/**
+ * Cross-platform path equality.
+ * Case-insensitive on Windows (NTFS is case-preserving but case-insensitive).
+ * Accepts optional platformName for testability on non-Windows CI.
+ */
+export function pathsEqual(a: string, b: string, platformName = process.platform): boolean {
+  if (platformName !== 'win32') return a === b;
+  return a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
+}

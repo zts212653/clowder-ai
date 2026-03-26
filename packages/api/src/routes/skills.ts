@@ -9,10 +9,11 @@
 import { existsSync } from 'node:fs';
 import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
 import { parse as parseYaml } from 'yaml';
+import { pathsEqual } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 interface SkillMount {
@@ -58,14 +59,14 @@ async function isCorrectSymlink(linkPath: string, expectedTarget: string): Promi
     const stat = await lstat(linkPath);
     if (!stat.isSymbolicLink()) return false;
     const dest = await readlink(linkPath);
-    const absDest = dest.startsWith('/') ? dest : resolve(dirname(linkPath), dest);
+    const absDest = isAbsolute(dest) ? dest : resolve(dirname(linkPath), dest);
     const [realDest, realExpected] = await Promise.all([
       realpath(absDest).catch(() => absDest),
       realpath(expectedTarget).catch(() => expectedTarget),
     ]);
-    const normalizedDest = realDest.replace(/\/$/, '');
-    const normalizedExpected = realExpected.replace(/\/$/, '');
-    return normalizedDest === normalizedExpected;
+    const normalizedDest = realDest.replace(/[/\\]$/, '');
+    const normalizedExpected = realExpected.replace(/[/\\]$/, '');
+    return pathsEqual(normalizedDest, normalizedExpected);
   } catch {
     return false;
   }

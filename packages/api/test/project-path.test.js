@@ -5,8 +5,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-const { validateProjectPath, isUnderAllowedRoot, getAllowedRoots, getDefaultRootsForPlatform, isPathUnderRoots } =
-  await import('../dist/utils/project-path.js');
+const {
+  validateProjectPath,
+  isUnderAllowedRoot,
+  getAllowedRoots,
+  getDefaultRootsForPlatform,
+  isPathUnderRoots,
+  pathsEqual,
+} = await import('../dist/utils/project-path.js');
 
 describe('isUnderAllowedRoot', () => {
   it('accepts path under home directory', () => {
@@ -207,5 +213,29 @@ describe('PROJECT_ALLOWED_ROOTS env var', () => {
     assert.ok(roots.includes(homedir()));
     assert.ok(roots.includes('/tmp'));
     assert.ok(roots.includes('/workspace'));
+  });
+});
+
+describe('pathsEqual', () => {
+  it('exact match on non-Windows platforms', () => {
+    assert.strictEqual(pathsEqual('/a/b', '/a/b', 'linux'), true);
+    assert.strictEqual(pathsEqual('/a/b', '/A/B', 'linux'), false);
+    assert.strictEqual(pathsEqual('/a/b', '/a/b', 'darwin'), true);
+    assert.strictEqual(pathsEqual('/a/b', '/A/B', 'darwin'), false);
+  });
+
+  it('case-insensitive match on win32', () => {
+    assert.strictEqual(pathsEqual('C:\\Users\\Dev\\Project', 'C:\\users\\dev\\project', 'win32'), true);
+    assert.strictEqual(pathsEqual('C:\\Users\\Dev\\Project', 'C:\\USERS\\DEV\\PROJECT', 'win32'), true);
+  });
+
+  it('different paths never match regardless of platform', () => {
+    assert.strictEqual(pathsEqual('/a/b', '/a/c', 'linux'), false);
+    assert.strictEqual(pathsEqual('C:\\a\\b', 'C:\\a\\c', 'win32'), false);
+  });
+
+  it('empty strings match', () => {
+    assert.strictEqual(pathsEqual('', '', 'linux'), true);
+    assert.strictEqual(pathsEqual('', '', 'win32'), true);
   });
 });

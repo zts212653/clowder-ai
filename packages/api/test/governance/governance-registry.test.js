@@ -78,4 +78,21 @@ describe('GovernanceRegistry', () => {
     const all = await registry.listAll();
     assert.strictEqual(all.length, 0);
   });
+
+  it('lookup works with Windows-style backslash paths', async () => {
+    await registry.register('C:\\Users\\Dev\\project', makeMeta('1.0.0'));
+    const entry = await registry.get('C:\\Users\\Dev\\project');
+    assert.ok(entry, 'should find entry with backslash path');
+    assert.strictEqual(entry.packVersion, '1.0.0');
+    // Case-insensitive matching is tested in project-path.test.js via pathsEqual(a, b, 'win32')
+  });
+
+  it('re-register with same path updates entry instead of duplicating', async () => {
+    await registry.register('/projects/alpha', makeMeta('1.0.0'));
+    await registry.register('/projects/alpha', makeMeta('2.0.0'));
+    const all = await registry.listAll();
+    const matches = all.filter((e) => e.projectPath === '/projects/alpha');
+    assert.strictEqual(matches.length, 1, 'should have exactly 1 entry, not duplicate');
+    assert.strictEqual(matches[0].packVersion, '2.0.0');
+  });
 });

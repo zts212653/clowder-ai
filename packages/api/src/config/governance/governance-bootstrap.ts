@@ -9,6 +9,7 @@
 import { lstat, mkdir, readFile, readlink, symlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { BootstrapAction, BootstrapReport } from '@cat-cafe/shared';
+import { pathsEqual } from '../../utils/project-path.js';
 import type { Provider } from './governance-pack.js';
 import {
   computePackChecksum,
@@ -19,6 +20,8 @@ import {
 } from './governance-pack.js';
 import { GovernanceRegistry } from './governance-registry.js';
 import { getMethodologyTemplates } from './methodology-templates.js';
+
+const IS_WIN32 = process.platform === 'win32';
 
 /** Provider instruction file mapping */
 const PROVIDER_FILES: Record<Provider, string> = {
@@ -174,7 +177,7 @@ export class GovernanceBootstrapService {
       if (stat.isSymbolicLink()) {
         const currentTarget = await readlink(targetPath);
         const resolvedCurrent = resolve(dirname(targetPath), currentTarget);
-        if (resolvedCurrent === sourcePath) {
+        if (pathsEqual(resolvedCurrent, sourcePath)) {
           return { file: skillsDir, action: 'skipped', reason: 'symlink already correct' };
         }
       }
@@ -186,9 +189,14 @@ export class GovernanceBootstrapService {
 
     if (!dryRun) {
       await mkdir(dirname(targetPath), { recursive: true });
-      // Use relative path for symlink portability
-      const relPath = relative(dirname(targetPath), sourcePath);
-      await symlink(relPath, targetPath);
+      // Windows: use junction (no admin privileges needed, requires absolute path)
+      // Unix: use relative symlink for portability
+      if (IS_WIN32) {
+        await symlink(sourcePath, targetPath, 'junction');
+      } else {
+        const relPath = relative(dirname(targetPath), sourcePath);
+        await symlink(relPath, targetPath);
+      }
     }
 
     return { file: skillsDir, action: 'symlinked', reason: `linked to ${sourcePath}` };
@@ -218,7 +226,7 @@ export class GovernanceBootstrapService {
       if (stat.isSymbolicLink()) {
         const currentTarget = await readlink(targetPath);
         const resolvedCurrent = resolve(dirname(targetPath), currentTarget);
-        if (resolvedCurrent === sourceHooksPath) {
+        if (pathsEqual(resolvedCurrent, sourceHooksPath)) {
           return { file: hooksDir, action: 'skipped', reason: 'hooks symlink already correct' };
         }
       }
@@ -229,8 +237,12 @@ export class GovernanceBootstrapService {
 
     if (!dryRun) {
       await mkdir(dirname(targetPath), { recursive: true });
-      const relPath = relative(dirname(targetPath), sourceHooksPath);
-      await symlink(relPath, targetPath);
+      if (IS_WIN32) {
+        await symlink(sourceHooksPath, targetPath, 'junction');
+      } else {
+        const relPath = relative(dirname(targetPath), sourceHooksPath);
+        await symlink(relPath, targetPath);
+      }
     }
 
     return { file: hooksDir, action: 'symlinked', reason: `hooks linked to ${sourceHooksPath}` };

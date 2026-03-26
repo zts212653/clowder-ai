@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type {
@@ -40,7 +40,7 @@ import {
   toCapabilityEntry,
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
 
@@ -96,24 +96,24 @@ async function isCorrectSymlink(
     const stat = await lstat(linkPath);
     if (!stat.isSymbolicLink()) return false;
     const dest = await readlink(linkPath);
-    const absDest = dest.startsWith('/') ? dest : resolve(dirname(linkPath), dest);
+    const absDest = isAbsolute(dest) ? dest : resolve(dirname(linkPath), dest);
     const [realDest, realExpected] = await Promise.all([
       realpath(absDest).catch(() => absDest),
       realpath(expectedTarget).catch(() => expectedTarget),
     ]);
-    const normalizedDest = realDest.replace(/\/$/, '');
-    const normalizedExpected = realExpected.replace(/\/$/, '');
-    if (normalizedDest === normalizedExpected) return true;
+    const normalizedDest = realDest.replace(/[/\\]$/, '');
+    const normalizedExpected = realExpected.replace(/[/\\]$/, '');
+    if (pathsEqual(normalizedDest, normalizedExpected)) return true;
 
     if (skillName && fallbackSkillsRoot) {
       const parentDir = dirname(normalizedDest);
-      const nameMatches = normalizedDest.endsWith(`/${skillName}`);
+      const nameMatches = normalizedDest.endsWith(`${sep}${skillName}`);
       const isCatCafeSkillsDir = basename(parentDir) === 'cat-cafe-skills';
       const resolvedFallbackRoot = (await realpath(fallbackSkillsRoot).catch(() => fallbackSkillsRoot)).replace(
-        /\/$/,
+        /[/\\]$/,
         '',
       );
-      const inFallbackRoot = parentDir === resolvedFallbackRoot;
+      const inFallbackRoot = pathsEqual(parentDir, resolvedFallbackRoot);
       if (
         isCatCafeSkillsDir &&
         inFallbackRoot &&

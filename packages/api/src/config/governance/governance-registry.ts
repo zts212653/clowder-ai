@@ -9,6 +9,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import type { GovernanceHealthSummary, GovernancePackMeta } from '@cat-cafe/shared';
+import { pathsEqual } from '../../utils/project-path.js';
 import { GOVERNANCE_PACK_VERSION } from './governance-pack.js';
 
 const REGISTRY_DIR = '.cat-cafe';
@@ -59,7 +60,7 @@ export class GovernanceRegistry {
 
   async register(projectPath: string, meta: GovernancePackMeta): Promise<void> {
     const data = await this.read();
-    const existing = data.entries.findIndex((e) => e.projectPath === projectPath);
+    const existing = data.entries.findIndex((e) => pathsEqual(e.projectPath, projectPath));
     const entry: RegistryEntry = { ...meta, projectPath };
     if (existing >= 0) {
       data.entries[existing] = entry;
@@ -71,7 +72,7 @@ export class GovernanceRegistry {
 
   async get(projectPath: string): Promise<RegistryEntry | undefined> {
     const data = await this.read();
-    return data.entries.find((e) => e.projectPath === projectPath);
+    return data.entries.find((e) => pathsEqual(e.projectPath, projectPath));
   }
 
   async listAll(): Promise<readonly RegistryEntry[]> {

@@ -68,7 +68,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
     }
   }, [projectPath, invocationId]);
 
-  const dirName = projectPath.split('/').pop() ?? projectPath;
+  const dirName = projectPath.split(/[/\\]/).pop() ?? projectPath;
 
   return (
     <div data-testid="governance-blocked-card" className="flex justify-center mb-3">
