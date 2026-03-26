@@ -314,6 +314,8 @@ export async function* routeSerial(
       let firstMetadata: MessageMetadata | undefined;
       let doneMsg: AgentMessage | undefined;
       let hadError = false;
+      // #267: track errors that happened BEFORE abort — only these are real provider failures
+      let hadProviderError = false;
       const collectedToolEvents: StoredToolEvent[] = [];
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
@@ -478,6 +480,8 @@ export async function* routeSerial(
 
         if (msg.type === 'error') {
           hadError = true;
+          // #267: errors before abort are real provider failures; errors after abort are cleanup
+          if (!(signal?.aborted)) hadProviderError = true;
           if (msg.error) {
             textContent += `${textContent ? '\n\n' : ''}[错误] ${msg.error}`;
           }
@@ -693,8 +697,8 @@ export async function* routeSerial(
               await deps.invocationDeps.threadStore.updateParticipantActivity(
                 threadId,
                 catId,
-                // #267: abort/cancel is not a provider failure — treat as healthy
-                !hadError || (signal?.aborted ?? false),
+                // #267: only errors before abort are provider failures
+                !hadProviderError,
               );
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
@@ -937,8 +941,8 @@ export async function* routeSerial(
               await deps.invocationDeps.threadStore.updateParticipantActivity(
                 threadId,
                 catId,
-                // #267: abort/cancel is not a provider failure — treat as healthy
-                !hadError || (signal?.aborted ?? false),
+                // #267: only errors before abort are provider failures
+                !hadProviderError,
               );
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
