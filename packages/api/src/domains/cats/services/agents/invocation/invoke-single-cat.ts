@@ -749,15 +749,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // ocProviderName-based inference. This ensures profiles with explicit protocol
         // (e.g. protocol: 'anthropic' + ocProviderName: 'maas') use the correct SDK adapter.
         const protocol = (resolvedAccount as { protocol?: string }).protocol?.trim();
-        const apiType: 'openai' | 'anthropic' | 'google' = protocol === 'anthropic'
-          ? 'anthropic'
-          : protocol === 'google'
-            ? 'google'
-            : ocProviderName === 'anthropic'
-              ? 'anthropic'
-              : ocProviderName === 'google'
-                ? 'google'
-                : 'openai';
+        const apiType: 'openai' | 'anthropic' | 'google' =
+          protocol === 'anthropic'
+            ? 'anthropic'
+            : protocol === 'google'
+              ? 'google'
+              : ocProviderName === 'anthropic'
+                ? 'anthropic'
+                : ocProviderName === 'google'
+                  ? 'google'
+                  : 'openai';
         // Strip any provider prefix from model IDs — OpenCode runtime config keys
         // must be bare model names, not provider-qualified. Strip any leading segment
         // before '/' (not just ocProviderName/) to handle cross-provider model entries.

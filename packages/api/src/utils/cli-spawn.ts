@@ -64,7 +64,10 @@ export async function* spawnCli(
   // Default timeout is configurable via CLI_TIMEOUT_MS env var; 0 disables timeout.
   const timeoutMs = resolveCliTimeoutMs(options.timeoutMs);
 
-  log.info({ command: options.command, argCount: options.args.length, cwd: options.cwd, timeoutMs }, 'Spawning CLI process');
+  log.info(
+    { command: options.command, argCount: options.args.length, cwd: options.cwd, timeoutMs },
+    'Spawning CLI process',
+  );
 
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
