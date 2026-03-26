@@ -150,6 +150,26 @@ export async function bootstrapMediaHub(): Promise<void> {
   const service = new MediaHubService(registry, jobStore, storage);
   setMediaHubService(service);
 
+  // Schedule periodic cleanup — only when Redis is persistent (in-memory store is empty,
+  // running cleanup against it would misidentify ALL local files as expired and delete them)
+  if (persistent) {
+    const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+    const runCleanup = async () => {
+      try {
+        const result = await service.runCleanup();
+        if (result.deleted > 0) {
+          console.error(`[mediahub] Cleanup: removed ${result.deleted} expired media dir(s)`);
+        }
+      } catch (err) {
+        console.error(`[mediahub] Cleanup error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+    void runCleanup();
+    setInterval(runCleanup, CLEANUP_INTERVAL_MS).unref();
+  } else {
+    console.error('[mediahub] Cleanup disabled: Redis not persistent, skipping to prevent data loss');
+  }
+
   const mode = persistent ? 'persistent' : 'in-memory';
   console.error(`[mediahub] Bootstrap complete. Providers: ${registry.size}, Redis: ${mode}`);
 }

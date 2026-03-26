@@ -72,6 +72,7 @@ const EXPECTED_TOOLS = [
   'mediahub_list_providers',
   'mediahub_generate_video',
   'mediahub_generate_image',
+  'mediahub_send_media',
   'mediahub_get_job_status',
   'mediahub_list_jobs',
 ];

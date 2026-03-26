@@ -5,7 +5,10 @@
 
 export type { RedisClient } from './job-store.js';
 export { JobStore } from './job-store.js';
+export type { CleanupResult, MediaValidation } from './media-lifecycle.js';
+export { cleanupExpiredMedia, guessMimeType, isImageType, isVideoType, validateMediaFile } from './media-lifecycle.js';
 export { MediaStorage } from './media-storage.js';
+export type { JobFilters } from './mediahub-service.js';
 export { MediaHubService } from './mediahub-service.js';
 export { mediahubTools, setMediaHubService } from './mediahub-tools.js';
 export type { MediaProvider } from './provider.js';

@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import type { ToolResult } from '../tools/file-tools.js';
 import { errorResult, successResult } from '../tools/file-tools.js';
+import { guessMimeType, isImageType, validateMediaFile } from './media-lifecycle.js';
 import type { MediaHubService } from './mediahub-service.js';
 import type { GenerationRequest, MediaCapability } from './types.js';
 
@@ -121,6 +122,66 @@ export const generateImageInputSchema = {
   negative_prompt: z.string().optional().describe('What to avoid in the generation'),
 };
 
+// ============ Tool: send_media ============
+
+export const sendMediaInputSchema = {
+  job_id: z.string().describe('Job ID of a succeeded generation job'),
+};
+
+export async function handleSendMedia(args: { job_id: string }): Promise<ToolResult> {
+  try {
+    const job = await getService().getJob(args.job_id);
+    if (!job) return errorResult(`Job "${args.job_id}" not found`);
+    if (job.status !== 'succeeded') {
+      return errorResult(`Job "${args.job_id}" status is "${job.status}" — only succeeded jobs can be sent`);
+    }
+
+    // Validate local file if available (non-blocking when CDN URL exists)
+    let fileValidation: import('./media-lifecycle.js').MediaValidation | undefined;
+    if (job.outputPath) {
+      fileValidation = validateMediaFile(job.outputPath);
+      if (!fileValidation.valid && !job.providerResultUrl) {
+        return errorResult(`Media validation failed: ${fileValidation.error}`);
+      }
+    }
+
+    const url = job.providerResultUrl ?? job.outputPath;
+    if (!url) return errorResult('No media URL or file path available');
+
+    // Deliverability check: IM delivery requires https:// URL
+    if (!url.startsWith('https://')) {
+      return errorResult(
+        `Media not deliverable via IM: URL is not https://. ` +
+          'CDN URL required for OutboundDeliveryHook. Re-poll the job to obtain a provider URL.',
+      );
+    }
+
+    const mime = fileValidation?.valid ? fileValidation.mimeType : guessMimeType(url);
+    const block = isImageType(mime)
+      ? {
+          id: `mh-${job.jobId.slice(0, 8)}`,
+          kind: 'media_gallery',
+          v: 1,
+          title: `Generated: ${job.prompt.slice(0, 60)}`,
+          items: [{ url, alt: job.prompt.slice(0, 100), caption: `${job.providerId} / ${job.model}` }],
+        }
+      : {
+          id: `mh-${job.jobId.slice(0, 8)}`,
+          kind: 'file',
+          v: 1,
+          url,
+          fileName: `${job.providerId}-${job.jobId.slice(0, 8)}${url.match(/\.\w+$/)?.[0] ?? '.mp4'}`,
+          mimeType: mime,
+        };
+
+    return successResult(
+      JSON.stringify({ block, localPath: job.outputPath, cdnUrl: job.providerResultUrl, prompt: job.prompt }, null, 2),
+    );
+  } catch (err) {
+    return errorResult(err instanceof Error ? err.message : String(err));
+  }
+}
+
 // ============ Tool: get_job_status ============
 
 export const getJobStatusInputSchema = {
@@ -139,12 +200,31 @@ export async function handleGetJobStatus(args: { job_id: string }): Promise<Tool
 // ============ Tool: list_jobs ============
 
 export const listJobsInputSchema = {
-  limit: z.number().default(10).describe('Max number of recent jobs to return (default: 10)'),
+  limit: z.number().default(10).describe('Max number of jobs to return (default: 10)'),
+  status: z.enum(['queued', 'running', 'succeeded', 'failed', 'timeout']).optional().describe('Filter by job status'),
+  provider: z.string().optional().describe('Filter by provider ID'),
+  capability: z
+    .enum(['text2video', 'image2video', 'text2image', 'image2image'])
+    .optional()
+    .describe('Filter by generation capability'),
 };
 
-export async function handleListJobs(args: { limit?: number }): Promise<ToolResult> {
+export async function handleListJobs(args: {
+  limit?: number;
+  status?: string;
+  provider?: string;
+  capability?: string;
+}): Promise<ToolResult> {
   try {
-    const jobs = await getService().listJobs(args.limit ?? 10);
+    const filters =
+      args.status || args.provider || args.capability
+        ? {
+            status: args.status as import('./types.js').JobStatus | undefined,
+            provider: args.provider,
+            capability: args.capability as import('./types.js').MediaCapability | undefined,
+          }
+        : undefined;
+    const jobs = await getService().listJobs(args.limit ?? 10, filters);
     if (jobs.length === 0) {
       return successResult('No jobs found. Use mediahub_generate_video to create one.');
     }
@@ -190,6 +270,15 @@ export const mediahubTools = [
     handler: handleGenerateVideo, // same lifecycle as video — capability drives the difference
   },
   {
+    name: 'mediahub_send_media',
+    description:
+      'Prepare a completed MediaHub job for IM delivery. Validates the output file (type/size), ' +
+      'then returns a Rich Block JSON (file or media_gallery) ready for cat_cafe_create_rich_block. ' +
+      'Only works on succeeded jobs.',
+    inputSchema: sendMediaInputSchema,
+    handler: handleSendMedia,
+  },
+  {
     name: 'mediahub_get_job_status',
     description:
       'Check the status of a MediaHub generation job. Polls the provider for progress. ' +
@@ -200,7 +289,7 @@ export const mediahubTools = [
   },
   {
     name: 'mediahub_list_jobs',
-    description: 'List recent MediaHub generation jobs with their status and prompts.',
+    description: 'List recent MediaHub generation jobs. Supports filtering by status, provider, and capability.',
     inputSchema: listJobsInputSchema,
     handler: handleListJobs,
   },

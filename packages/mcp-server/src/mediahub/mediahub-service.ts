@@ -5,9 +5,17 @@
 
 import { randomUUID } from 'node:crypto';
 import type { JobStore } from './job-store.js';
+import type { CleanupResult } from './media-lifecycle.js';
+import { cleanupExpiredMedia } from './media-lifecycle.js';
 import type { MediaStorage } from './media-storage.js';
 import type { ProviderRegistry } from './provider.js';
-import type { GenerationRequest, JobRecord, ProviderInfo, StatusResult } from './types.js';
+import type { GenerationRequest, JobRecord, JobStatus, MediaCapability, ProviderInfo, StatusResult } from './types.js';
+
+export interface JobFilters {
+  status?: JobStatus;
+  provider?: string;
+  capability?: MediaCapability;
+}
 
 export class MediaHubService {
   constructor(
@@ -136,8 +144,32 @@ export class MediaHubService {
     }
   }
 
-  /** List recent jobs */
-  async listJobs(limit = 20): Promise<JobRecord[]> {
-    return this.jobStore.listRecent(limit);
+  /** Get a job record without polling the provider */
+  async getJob(jobId: string): Promise<JobRecord | null> {
+    return this.jobStore.get(jobId);
+  }
+
+  /** Run cleanup of expired media files whose jobs no longer exist */
+  async runCleanup(): Promise<CleanupResult> {
+    return cleanupExpiredMedia(this.storage.getBaseDir(), async (jobId) => {
+      const job = await this.jobStore.get(jobId);
+      return job !== null;
+    });
+  }
+
+  /** List recent jobs with optional filtering */
+  async listJobs(limit = 20, filters?: JobFilters): Promise<JobRecord[]> {
+    const fetchLimit = filters ? limit * 5 : limit;
+    const all = await this.jobStore.listRecent(fetchLimit);
+    if (!filters) return all.slice(0, limit);
+
+    return all
+      .filter((job) => {
+        if (filters.status && job.status !== filters.status) return false;
+        if (filters.provider && job.providerId !== filters.provider) return false;
+        if (filters.capability && job.capability !== filters.capability) return false;
+        return true;
+      })
+      .slice(0, limit);
   }
 }
