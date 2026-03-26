@@ -550,6 +550,7 @@ export class AgentRouter {
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       const healthyReplier = participantsWithActivity.find(
         (p) =>
+          p.messageCount > 0 &&
           p.lastResponseHealthy !== false &&
           this.isRoutableCat(p.catId) &&
           (preferredSet.size === 0 || preferredSet.has(p.catId as string)),
@@ -600,6 +601,7 @@ export class AgentRouter {
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       const healthyReplier = participantsWithActivity.find(
         (p) =>
+          p.messageCount > 0 &&
           p.lastResponseHealthy !== false &&
           this.isRoutableCat(p.catId) &&
           (preferredSet.size === 0 || preferredSet.has(p.catId as string)),
