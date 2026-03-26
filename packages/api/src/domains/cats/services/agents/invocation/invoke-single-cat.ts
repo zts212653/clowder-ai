@@ -745,15 +745,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // Derive apiType from resolved account protocol when available, falling back to
         // ocProviderName-based inference. This ensures profiles with explicit protocol
         // (e.g. protocol: 'anthropic' + ocProviderName: 'maas') use the correct SDK adapter.
-        const protocol = (resolvedAccount as { protocol?: string }).protocol?.trim();
+        const protocol = (resolvedAccount as { protocol?: string }).protocol?.trim()?.toLowerCase();
+        const ocNameLower = ocProviderName.toLowerCase();
         const apiType: 'openai' | 'anthropic' | 'google' =
           protocol === 'anthropic'
             ? 'anthropic'
             : protocol === 'google'
               ? 'google'
-              : ocProviderName === 'anthropic'
+              : ocNameLower === 'anthropic'
                 ? 'anthropic'
-                : ocProviderName === 'google'
+                : ocNameLower === 'google'
                   ? 'google'
                   : 'openai';
         // Strip only the ocProviderName/ prefix from model IDs — namespaced IDs
