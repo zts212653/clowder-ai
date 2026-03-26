@@ -111,6 +111,20 @@ describe('parseGithubReviewSubject', () => {
     assert.strictEqual(result.repository, 'zts212653/cat-cafe');
   });
 
+  it('rejects Re: issue email with cross-referenced PR link (different number)', () => {
+    const subject = 'Re: [zts212653/cat-cafe] Bug: quota overflow (#456)';
+    const source = [
+      'From: GitHub <notifications@github.com>',
+      'Subject: Re: [zts212653/cat-cafe] Bug: quota overflow (#456)',
+      '',
+      'This bug is related to the fix in PR #42.',
+      'https://github.com/zts212653/cat-cafe/pull/42#issuecomment-789',
+    ].join('\n');
+
+    const result = parseGithubReviewFromSubjectAndSource(subject, source);
+    assert.strictEqual(result, null, 'cross-referenced PR link should not match issue email');
+  });
+
   it('rejects Re: ... (#N) issue-thread email (no /pull/ link)', () => {
     const subject = 'Re: [zts212653/cat-cafe] Bug: quota overflow (#456)';
     const source = [
