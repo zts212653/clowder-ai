@@ -248,7 +248,10 @@ const MAX_THREADS = 100;
 export class ThreadStore implements IThreadStore {
   private threads: Map<string, Thread> = new Map();
   /** F032 Phase C: Track participant activity per thread. Key: `${threadId}:${catId}` */
-  private participantActivity: Map<string, { lastMessageAt: number; messageCount: number; lastResponseHealthy?: boolean }> = new Map();
+  private participantActivity: Map<
+    string,
+    { lastMessageAt: number; messageCount: number; lastResponseHealthy?: boolean }
+  > = new Map();
   /** F046 D3: one-shot suppressed mention feedback per thread+cat */
   private mentionRoutingFeedback: Map<string, ThreadMentionRoutingFeedback> = new Map();
   private readonly maxThreads: number;
