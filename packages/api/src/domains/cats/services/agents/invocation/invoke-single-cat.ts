@@ -733,9 +733,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // are both handled identically: generate a per-catId runtime config, assemble provider/model.
     const ocProviderName = catConfig?.ocProviderName?.trim();
     if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && ocProviderName && defaultModel) {
+      // If model already has our provider prefix, keep as-is.
+      // If model has a different provider prefix (e.g. openai/gpt-5.4 with ocProviderName=maas),
+      // strip the foreign prefix and re-prefix with ocProviderName.
+      // If model has no prefix, add ocProviderName/.
       const assembledModel = defaultModel.startsWith(`${ocProviderName}/`)
         ? defaultModel
-        : `${ocProviderName}/${defaultModel}`;
+        : defaultModel.includes('/')
+          ? `${ocProviderName}/${defaultModel.slice(defaultModel.indexOf('/') + 1)}`
+          : `${ocProviderName}/${defaultModel}`;
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
       try {
         // Infer apiType from ocProviderName (not effectiveProtocol — protocol UI was removed).
@@ -745,7 +751,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           ocProviderName === 'anthropic' ? 'anthropic' : ocProviderName === 'google' ? 'google' : 'openai';
         // Strip ocProviderName/ prefix from model IDs — OpenCode runtime config keys
         // must be bare model names (the part after provider/), not provider-qualified.
-        const rawModels = resolvedAccount.models ?? [defaultModel];
+        const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [defaultModel];
         const prefix = `${ocProviderName}/`;
         const bareModels = rawModels.map((m: string) => (m.startsWith(prefix) ? m.slice(prefix.length) : m));
         const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
