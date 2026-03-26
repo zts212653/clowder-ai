@@ -715,6 +715,50 @@ describe('routeParallel resilience', () => {
   });
 });
 
+describe('routeParallel abort marks healthy (#267)', () => {
+  it('abort/cancel writes healthy=true, not false', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const ac = new AbortController();
+    const activityUpdates = [];
+    const threadStore = {
+      get: () => ({ id: 't1', participants: ['opus'], preferredCats: [] }),
+      addParticipants: () => {},
+      getParticipants: () => ['opus'],
+      getParticipantsWithActivity: () => [{ catId: 'opus', lastMessageAt: 1, messageCount: 1 }],
+      consumeMentionRoutingFeedback: () => null,
+      updateParticipantActivity: (threadId, catId, healthy) => {
+        activityUpdates.push({ threadId, catId, healthy });
+      },
+      updateLastActive: () => {},
+    };
+
+    const deps = createMockDeps(
+      {
+        opus: {
+          async *invoke() {
+            yield { type: 'text', catId: 'opus', content: 'working...', timestamp: Date.now() };
+            ac.abort();
+            yield { type: 'error', catId: 'opus', error: 'AbortError', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          },
+        },
+      },
+      null,
+      threadStore,
+    );
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'test', 'user1', 't1', { signal: ac.signal })) {
+      messages.push(msg);
+    }
+
+    const opusUpdate = activityUpdates.find((u) => u.catId === 'opus');
+    assert.ok(opusUpdate, 'should have updated opus activity');
+    assert.equal(opusUpdate.healthy, true, '#267: abort should be treated as healthy, not provider failure');
+  });
+});
+
 describe('routeParallel whisper privacy (F35)', () => {
   it('does NOT inject whisper content for non-recipient cat in parallel mode', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
