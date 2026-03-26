@@ -120,6 +120,7 @@ function createMockThreadStoreWithPreferred(opts = {}) {
       const existing = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
       activity[key] = { lastMessageAt: Date.now(), messageCount: existing.messageCount + 1 };
     },
+    consumeMentionRoutingFeedback: () => null,
     updateLastActive: () => {},
     updatePreferredCats: (threadId, catIds) => {
       if (catIds.length > 0) {

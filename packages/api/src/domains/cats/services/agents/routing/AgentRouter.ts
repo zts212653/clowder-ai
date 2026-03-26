@@ -546,17 +546,24 @@ export class AgentRouter {
       }
 
       // F078 + #58: last-replier takes priority, scoped to preferred cats when set
-      // #267: skip cats whose last response was an error (API failure, capacity, etc.)
+      // #267: two-tier fallback — (1) prefer cats with successful response history,
+      //   (2) then any non-errored participant. This prevents never-responded cats
+      //   from short-circuiting the search for the next healthy responder.
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
+      const matchScope = (p: { catId: CatId }) =>
+        this.isRoutableCat(p.catId) && (preferredSet.size === 0 || preferredSet.has(p.catId as string));
       const healthyReplier = participantsWithActivity.find(
-        (p) =>
-          p.messageCount > 0 &&
-          p.lastResponseHealthy !== false &&
-          this.isRoutableCat(p.catId) &&
-          (preferredSet.size === 0 || preferredSet.has(p.catId as string)),
+        (p) => p.messageCount > 0 && p.lastResponseHealthy !== false && matchScope(p),
       );
       if (healthyReplier) {
         return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
+      }
+      // No cat with successful response — fall back to any non-errored participant
+      const fallbackParticipant = participantsWithActivity.find(
+        (p) => p.lastResponseHealthy !== false && matchScope(p),
+      );
+      if (fallbackParticipant) {
+        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant.catId]);
       }
 
       // No last-replier (or last-replier not in preferred set): use first preferred cat
@@ -597,17 +604,21 @@ export class AgentRouter {
       }
 
       // F078 + #58: last-replier takes priority, scoped to preferred cats when set
-      // #267: skip cats whose last response was an error (API failure, capacity, etc.)
+      // #267: two-tier fallback (same as peekTargets)
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
+      const matchScope = (p: { catId: CatId }) =>
+        this.isRoutableCat(p.catId) && (preferredSet.size === 0 || preferredSet.has(p.catId as string));
       const healthyReplier = participantsWithActivity.find(
-        (p) =>
-          p.messageCount > 0 &&
-          p.lastResponseHealthy !== false &&
-          this.isRoutableCat(p.catId) &&
-          (preferredSet.size === 0 || preferredSet.has(p.catId as string)),
+        (p) => p.messageCount > 0 && p.lastResponseHealthy !== false && matchScope(p),
       );
       if (healthyReplier) {
         return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
+      }
+      const fallbackParticipant = participantsWithActivity.find(
+        (p) => p.lastResponseHealthy !== false && matchScope(p),
+      );
+      if (fallbackParticipant) {
+        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant.catId]);
       }
 
       // No last-replier (or last-replier not in preferred set): use first preferred cat
