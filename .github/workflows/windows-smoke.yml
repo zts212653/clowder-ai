@@ -10,6 +10,11 @@ name: Windows Smoke
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'designs/**'
+      - 'assets/**'
 
 concurrency:
   group: windows-smoke-${{ github.ref }}
