@@ -998,18 +998,8 @@ export async function updateProviderProfile(
     if (!profile) throw new Error('profile not found');
     assertProviderSelector(profile, provider);
     if (profile.kind === 'builtin') {
-      const hasNonModelUpdates =
-        input.name !== undefined ||
-        input.displayName !== undefined ||
-        input.mode !== undefined ||
-        input.authType !== undefined ||
-        input.protocol !== undefined ||
-        input.baseUrl !== undefined ||
-        input.apiKey !== undefined ||
-        input.modelOverride !== undefined;
-      if (hasNonModelUpdates) {
-        throw new Error('builtin accounts only support model updates');
-      }
+      // #264: silently ignore non-model fields for builtin profiles.
+      // UI sends the full payload; only model changes are meaningful here.
       if (input.models !== undefined) {
         profile.models = normalizeModels(input.models);
       }

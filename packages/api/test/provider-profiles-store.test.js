@@ -279,13 +279,16 @@ describe('provider profile store', () => {
     }
   });
 
-  it('builtin accounts only allow model-list updates', async () => {
-    await assert.rejects(
-      updateProviderProfile(projectRoot, 'claude', 'claude', {
-        displayName: 'Nope',
-      }),
-      /builtin accounts only support model updates/i,
-    );
+  it('builtin accounts silently ignore non-model fields (#264)', async () => {
+    // Before fix: this would throw "builtin accounts only support model updates"
+    const result = await updateProviderProfile(projectRoot, 'claude', 'claude', {
+      displayName: 'Nope',
+      models: ['claude-sonnet-4-5-20250514'],
+    });
+    // Non-model field silently ignored; model update applied
+    assert.ok(result);
+    assert.ok(result.models.includes('claude-sonnet-4-5-20250514'));
+    assert.notStrictEqual(result.displayName, 'Nope', 'displayName must not change for builtin');
   });
 
   it('readProviderProfiles and getProviderProfile do not rewrite normalized files', async () => {
