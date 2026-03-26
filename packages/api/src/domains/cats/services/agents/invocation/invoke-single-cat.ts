@@ -756,11 +756,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 : ocProviderName === 'google'
                   ? 'google'
                   : 'openai';
-        // Strip any provider prefix from model IDs — OpenCode runtime config keys
-        // must be bare model names, not provider-qualified. Strip any leading segment
-        // before '/' (not just ocProviderName/) to handle cross-provider model entries.
+        // Strip only the ocProviderName/ prefix from model IDs — namespaced IDs
+        // like "google/gemini-3-flash" must stay intact as config keys so that
+        // `-m maas/google/gemini-3-flash` resolves to models["google/gemini-3-flash"].
         const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [defaultModel];
-        const bareModels = rawModels.map((m: string) => (m.includes('/') ? m.slice(m.indexOf('/') + 1) : m));
+        const prefix = `${ocProviderName}/`;
+        const bareModels = rawModels.map((m: string) => (m.startsWith(prefix) ? m.slice(prefix.length) : m));
         const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
           providerName: ocProviderName,
           models: bareModels,
