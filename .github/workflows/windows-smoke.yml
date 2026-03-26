@@ -1,0 +1,40 @@
+# Windows Smoke Tests
+# Target-owned by the open-source repo — NOT managed by upstream sync.
+# See sync-manifest.yaml target_owned_files.
+#
+# Runs Windows-specific tests that cannot be validated on Linux/macOS CI.
+# Covers: CLI .cmd shim resolution, ProcessLivenessProbe platform guard.
+
+name: Windows Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'designs/**'
+      - 'assets/**'
+
+concurrency:
+  group: windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/api build
+      - name: Windows-relevant tests
+        run: |
+          node --test packages/api/test/cli-spawn-win.test.js
+          node --test packages/api/test/process-liveness-probe.test.js
