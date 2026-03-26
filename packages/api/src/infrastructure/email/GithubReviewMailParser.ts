@@ -120,7 +120,7 @@ export function parseGithubReviewFromSubjectAndSource(subject: string, source: s
     // use Re: format without body action markers. Light PR guard prevents
     // issue-thread emails (Re: [repo] Issue (#N)) from being misclassified.
     const normalized = normalizeLegacyPrMarkerSubject(subject);
-    if (normalized && (!source || /\/pull\/\d+/.test(source))) {
+    if (normalized && /\/pull\/\d+/.test(source)) {
       parsed = parseGithubReviewSubject(normalized);
     }
   }
