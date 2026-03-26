@@ -50,31 +50,39 @@ test(
   },
 );
 
-test('generates alive_but_silent warning at soft threshold', async () => {
-  const probe = new ProcessLivenessProbe(process.pid, {
-    sampleIntervalMs: 20,
-    softWarningMs: 50,
-    stallWarningMs: 200,
-  });
-  probe.start();
-  await new Promise((r) => setTimeout(r, 100));
-  const warnings = probe.drainWarnings();
-  assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
-  probe.stop();
-});
+test(
+  'generates alive_but_silent warning at soft threshold (Unix only)',
+  { skip: process.platform === 'win32' && 'silence warnings require Windows platform guard (PR #250)' },
+  async () => {
+    const probe = new ProcessLivenessProbe(process.pid, {
+      sampleIntervalMs: 20,
+      softWarningMs: 50,
+      stallWarningMs: 200,
+    });
+    probe.start();
+    await new Promise((r) => setTimeout(r, 100));
+    const warnings = probe.drainWarnings();
+    assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
+    probe.stop();
+  },
+);
 
-test('generates suspected_stall warning at stall threshold', async () => {
-  const probe = new ProcessLivenessProbe(process.pid, {
-    sampleIntervalMs: 20,
-    softWarningMs: 30,
-    stallWarningMs: 80,
-  });
-  probe.start();
-  await new Promise((r) => setTimeout(r, 150));
-  const warnings = probe.drainWarnings();
-  assert.ok(warnings.some((w) => w.level === 'suspected_stall'));
-  probe.stop();
-});
+test(
+  'generates suspected_stall warning at stall threshold (Unix only)',
+  { skip: process.platform === 'win32' && 'silence warnings require Windows platform guard (PR #250)' },
+  async () => {
+    const probe = new ProcessLivenessProbe(process.pid, {
+      sampleIntervalMs: 20,
+      softWarningMs: 30,
+      stallWarningMs: 80,
+    });
+    probe.start();
+    await new Promise((r) => setTimeout(r, 150));
+    const warnings = probe.drainWarnings();
+    assert.ok(warnings.some((w) => w.level === 'suspected_stall'));
+    probe.stop();
+  },
+);
 
 test('notifyActivity resets silence timer and clears warning state', async () => {
   const probe = new ProcessLivenessProbe(process.pid, {
