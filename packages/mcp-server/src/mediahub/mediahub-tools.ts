@@ -106,6 +106,21 @@ export async function handleGenerateVideo(args: {
   }
 }
 
+// ============ Tool: generate_image ============
+
+export const generateImageInputSchema = {
+  provider: z.string().describe('Provider ID (e.g. "jimeng"). Use mediahub_list_providers to see available providers.'),
+  prompt: z.string().min(1).describe('Text prompt describing the image to generate'),
+  capability: z
+    .enum(['text2image', 'image2image'])
+    .default('text2image')
+    .describe('Generation type. Default: text2image'),
+  model: z.string().optional().describe('Model name override'),
+  image_url: z.string().optional().describe('Reference image URL for image2image'),
+  aspect_ratio: z.string().optional().describe('Aspect ratio e.g. "16:9", "1:1"'),
+  negative_prompt: z.string().optional().describe('What to avoid in the generation'),
+};
+
 // ============ Tool: get_job_status ============
 
 export const getJobStatusInputSchema = {
@@ -165,6 +180,14 @@ export const mediahubTools = [
       'Video generation is async and typically takes 30s-5min depending on the model.',
     inputSchema: generateVideoInputSchema,
     handler: handleGenerateVideo,
+  },
+  {
+    name: 'mediahub_generate_image',
+    description:
+      'Submit an image generation job to a MediaHub provider. ' +
+      'Returns a job ID for tracking. Use mediahub_get_job_status to poll for completion.',
+    inputSchema: generateImageInputSchema,
+    handler: handleGenerateVideo, // same lifecycle as video — capability drives the difference
   },
   {
     name: 'mediahub_get_job_status',

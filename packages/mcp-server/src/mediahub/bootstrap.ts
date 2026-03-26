@@ -15,6 +15,8 @@ import { MediaHubService } from './mediahub-service.js';
 import { setMediaHubService } from './mediahub-tools.js';
 import { ProviderRegistry } from './provider.js';
 import { createCogVideoXProvider } from './providers/cogvideox.js';
+import { createJimengProvider } from './providers/jimeng.js';
+import { createKlingProvider } from './providers/kling.js';
 
 /** Wrap ioredis instance to our minimal RedisClient interface */
 function wrapIoredis(ioredis: ReturnType<typeof createRedisClient>): RedisClient {
@@ -127,6 +129,18 @@ export async function bootstrapMediaHub(): Promise<void> {
   if (cogvideox) {
     registry.register(cogvideox);
     console.error('[mediahub] Registered provider: CogVideoX');
+  }
+
+  const kling = createKlingProvider();
+  if (kling) {
+    registry.register(kling);
+    console.error('[mediahub] Registered provider: Kling');
+  }
+
+  const jimeng = createJimengProvider();
+  if (jimeng) {
+    registry.register(jimeng);
+    console.error('[mediahub] Registered provider: Jimeng');
   }
 
   const { client: redis, persistent } = await createRedis();

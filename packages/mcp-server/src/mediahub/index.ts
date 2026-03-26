@@ -11,6 +11,8 @@ export { mediahubTools, setMediaHubService } from './mediahub-tools.js';
 export type { MediaProvider } from './provider.js';
 export { ProviderRegistry } from './provider.js';
 export { CogVideoXProvider, createCogVideoXProvider } from './providers/cogvideox.js';
+export { createJimengProvider, JimengProvider } from './providers/jimeng.js';
+export { createKlingProvider, KlingProvider } from './providers/kling.js';
 export type {
   GenerationRequest,
   JobRecord,
