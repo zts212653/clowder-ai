@@ -196,6 +196,16 @@ describe('cat-config-loader', () => {
       assert.throws(() => loadCatConfig(path), /ocProviderName must not be blank/);
     });
 
+    it('trims surrounding whitespace in ocProviderName', () => {
+      const cfg = validConfig();
+      cfg.breeds[0].variants[0].provider = 'opencode';
+      cfg.breeds[0].variants[0].ocProviderName = '  openrouter  ';
+      cfg.breeds[0].variants[0].defaultModel = 'gpt-5';
+      const path = writeTempConfig(cfg);
+      const loaded = loadCatConfig(path);
+      assert.equal(loaded.breeds[0].variants[0].ocProviderName, 'openrouter');
+    });
+
     it('accepts dare provider (F050)', () => {
       const config = validConfig();
       config.breeds.push({

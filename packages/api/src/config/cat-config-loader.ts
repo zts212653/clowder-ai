@@ -72,8 +72,8 @@ const catVariantSchema = z.object({
   cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
   ocProviderName: z
     .string()
-    .min(1)
-    .refine((v) => v.trim().length > 0, 'ocProviderName must not be blank')
+    .trim()
+    .min(1, 'ocProviderName must not be blank')
     .refine((v) => !v.includes('/'), 'ocProviderName must not contain "/"')
     .optional(), // F189: opencode custom provider name (e.g. "maas")
   roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
