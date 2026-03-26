@@ -581,7 +581,7 @@ export async function* routeParallel(
                 threadId,
                 msg.catId as CatId,
                 // #267: abort/cancel is not a provider failure — treat as healthy
-                  !catHadError.has(msg.catId) || (signal?.aborted ?? false),
+                !catHadError.has(msg.catId) || (signal?.aborted ?? false),
               );
             } catch (activityErr) {
               log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
