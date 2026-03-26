@@ -745,15 +745,24 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
       try {
         // Infer apiType from ocProviderName (not effectiveProtocol — protocol UI was removed).
-        // Most third-party APIs are OpenAI-compatible; only "anthropic" and "google" need
-        // their native adapters. This covers maas, deepseek, openrouter, etc. as openai.
-        const apiType: 'openai' | 'anthropic' | 'google' =
-          ocProviderName === 'anthropic' ? 'anthropic' : ocProviderName === 'google' ? 'google' : 'openai';
-        // Strip ocProviderName/ prefix from model IDs — OpenCode runtime config keys
-        // must be bare model names (the part after provider/), not provider-qualified.
+        // Derive apiType from resolved account protocol when available, falling back to
+        // ocProviderName-based inference. This ensures profiles with explicit protocol
+        // (e.g. protocol: 'anthropic' + ocProviderName: 'maas') use the correct SDK adapter.
+        const protocol = (resolvedAccount as { protocol?: string }).protocol?.trim();
+        const apiType: 'openai' | 'anthropic' | 'google' = protocol === 'anthropic'
+          ? 'anthropic'
+          : protocol === 'google'
+            ? 'google'
+            : ocProviderName === 'anthropic'
+              ? 'anthropic'
+              : ocProviderName === 'google'
+                ? 'google'
+                : 'openai';
+        // Strip any provider prefix from model IDs — OpenCode runtime config keys
+        // must be bare model names, not provider-qualified. Strip any leading segment
+        // before '/' (not just ocProviderName/) to handle cross-provider model entries.
         const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [defaultModel];
-        const prefix = `${ocProviderName}/`;
-        const bareModels = rawModels.map((m: string) => (m.startsWith(prefix) ? m.slice(prefix.length) : m));
+        const bareModels = rawModels.map((m: string) => (m.includes('/') ? m.slice(m.indexOf('/') + 1) : m));
         const configPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, {
           providerName: ocProviderName,
           models: bareModels,
