@@ -60,3 +60,4 @@ created: 2026-02-26
 | F139 | Unified Schedule Abstraction — 统一调度抽象 | in-progress | Ragdoll | internal | [F139](features/F139-unified-schedule-abstraction.md) |
 | F140 | GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知 | phase-a-done | Ragdoll | internal | [F140](features/F140-github-pr-automation.md) |
 | F141 | GitHub Repo Inbox — 仓库事件自动发现（webhook + 补偿扫描） | phase-b-done | Ragdoll | internal | [F141](features/F141-github-repo-inbox.md) |
+| F142 | MediaHub — AI Media Generation Gateway | in-progress | 布偶猫 | internal | [F142](features/F142-mediahub.md) |
