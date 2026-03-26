@@ -129,7 +129,16 @@ export class ProcessLivenessProbe {
       return;
     }
 
-    // Sample CPU time via ps
+    // Windows: `ps` is not available. Use process.kill(pid, 0) for liveness
+    // and skip CPU sampling. Conservative: assume idle (cpuGrowing = false)
+    // so that idle-silent → stall detection still works on Windows.
+    if (process.platform === 'win32') {
+      this.cpuGrowing = false;
+      this.emitSilenceWarnings();
+      return;
+    }
+
+    // Sample CPU time via ps (Unix only)
     execFile('ps', ['-o', 'cputime=', '-p', String(this.pid)], (err, stdout) => {
       if (err) {
         // ps failed — process likely dead
@@ -141,16 +150,20 @@ export class ProcessLivenessProbe {
       this.cpuGrowing = this.currCpuTimeMs > this.prevCpuTimeMs;
 
       // Check warning thresholds
-      const silenceMs = Date.now() - this.lastActivityAt;
-
-      if (silenceMs >= this.config.stallWarningMs && !this.stallWarningEmitted) {
-        this.stallWarningEmitted = true;
-        this.warningQueue.push(this.makeWarning('suspected_stall', silenceMs));
-      } else if (silenceMs >= this.config.softWarningMs && !this.softWarningEmitted) {
-        this.softWarningEmitted = true;
-        this.warningQueue.push(this.makeWarning('alive_but_silent', silenceMs));
-      }
+      this.emitSilenceWarnings();
     });
+  }
+
+  /** Emit soft/stall warnings based on silence duration (shared by Windows and Unix paths) */
+  private emitSilenceWarnings(): void {
+    const silenceMs = Date.now() - this.lastActivityAt;
+    if (silenceMs >= this.config.stallWarningMs && !this.stallWarningEmitted) {
+      this.stallWarningEmitted = true;
+      this.warningQueue.push(this.makeWarning('suspected_stall', silenceMs));
+    } else if (silenceMs >= this.config.softWarningMs && !this.softWarningEmitted) {
+      this.softWarningEmitted = true;
+      this.warningQueue.push(this.makeWarning('alive_but_silent', silenceMs));
+    }
   }
 
   private makeWarning(level: 'alive_but_silent' | 'suspected_stall', silenceDurationMs: number): LivenessWarningEvent {
