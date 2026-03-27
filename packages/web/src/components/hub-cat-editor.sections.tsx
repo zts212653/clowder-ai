@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import {
   CLIENT_OPTIONS,
@@ -23,13 +23,24 @@ function safeAvatarSrc(value: string): string | null {
   return null;
 }
 
-function autoSlug(name: string): string {
-  return name
+function autoSlug(name: string, currentId?: string): string {
+  const slug = name
     .trim()
     .toLowerCase()
     .replace(/[\s_]+/g, '-')
-    .replace(/[^a-z0-9\u4e00-\u9fff-]/g, '')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^[^a-z]+/, '')
+    .replace(/-+$/, '')
+    .replace(/-{2,}/g, '-')
     .slice(0, 40);
+
+  if (/^[a-z]/.test(slug)) return slug;
+
+  // Non-ASCII name: keep existing random ID if present
+  if (currentId && /^cat-[a-z0-9]+$/.test(currentId)) return currentId;
+
+  const rand = Math.random().toString(36).substring(2, 10);
+  return `cat-${rand}`;
 }
 
 function currentAliasTags(form: HubCatEditorFormState): string[] {
@@ -64,7 +75,7 @@ export function IdentitySection({
             ariaLabel="Name"
             value={form.name}
             onChange={(value) => {
-              onChange({ name: value, displayName: value, catId: autoSlug(value) });
+              onChange({ name: value, displayName: value, catId: autoSlug(value, form.catId) });
             }}
             required
             placeholder="成员显示名称，如 我的助手"
@@ -209,6 +220,62 @@ export function IdentitySection({
   );
 }
 
+/** Well-known OpenCode provider names (always shown as suggestions). */
+const KNOWN_OC_PROVIDERS = ['anthropic', 'openai', 'openrouter', 'google', 'azure', 'deepseek'];
+
+/** Merge well-known providers with any prefixes extracted from model strings like "openai/gpt-5.4". */
+function buildProviderSuggestions(models: string[]): string[] {
+  const seen = new Set<string>(KNOWN_OC_PROVIDERS);
+  for (const m of models) {
+    const idx = m.indexOf('/');
+    if (idx > 0) seen.add(m.slice(0, idx));
+  }
+  return [...seen].sort();
+}
+
+function ComboField({
+  label,
+  ariaLabel,
+  value,
+  onChange,
+  suggestions,
+  required = false,
+  placeholder,
+}: {
+  label: string;
+  ariaLabel?: string;
+  value: string;
+  onChange: (value: string) => void;
+  suggestions: string[];
+  required?: boolean;
+  placeholder?: string;
+}) {
+  const listId = `combo-${label.replace(/\s+/g, '-').toLowerCase()}`;
+  return (
+    <label className="flex flex-col gap-1.5 text-[#5C4B42] sm:flex-row sm:items-center sm:gap-3">
+      <span className="text-[13px] font-semibold text-[#8A776B] sm:w-[140px] sm:shrink-0">
+        {label}
+        {required && <span className="ml-0.5 text-[#E29578]">*</span>}
+      </span>
+      <div className="min-w-0 flex-1">
+        <input
+          aria-label={ariaLabel ?? label}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          list={listId}
+          className="w-full rounded-[10px] border border-[#E8DCCF] bg-[#F7F3F0] px-3.5 py-2 text-[14px] leading-5 text-[#2D2118] placeholder:text-[#C4B5A8] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+          placeholder={placeholder}
+        />
+        <datalist id={listId}>
+          {suggestions.map((s) => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+      </div>
+    </label>
+  );
+}
+
 // Generate a hint showing what API endpoint the CLI will actually call
 function buildCallHint(client: string, profile: ProfileItem | undefined, model: string): string | null {
   if (!profile || profile.builtin || !profile.baseUrl) return null;
@@ -255,6 +322,10 @@ export function AccountSection({
   const accountOptions = availableProfiles;
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
   const callHint = buildCallHint(form.client, selectedProfile, form.defaultModel);
+  const providerSuggestions = useMemo(
+    () => buildProviderSuggestions(selectedProfile?.models ?? []),
+    [selectedProfile?.models],
+  );
 
   return (
     <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'}>
@@ -263,7 +334,7 @@ export function AccountSection({
           label="Client"
           value={form.client}
           options={CLIENT_OPTIONS}
-          onChange={(value) => onChange({ client: value as HubCatEditorFormState['client'] })}
+          onChange={(value) => onChange({ client: value as HubCatEditorFormState['client'], ocProviderName: '' })}
           required
         />
 
@@ -287,7 +358,7 @@ export function AccountSection({
         ) : (
           <>
             <SelectField
-              label="Provider"
+              label="认证信息"
               value={form.accountRef}
               options={[
                 { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
@@ -302,7 +373,7 @@ export function AccountSection({
                     label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
                   })),
               ]}
-              onChange={(value) => onChange({ accountRef: value, defaultModel: '' })}
+              onChange={(value) => onChange({ accountRef: value, defaultModel: '', ocProviderName: '' })}
               disabled={loadingProfiles}
               required
             />
@@ -311,28 +382,34 @@ export function AccountSection({
                 <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">{callHint}</p>
               </div>
             ) : null}
-            {modelOptions.length > 0 ? (
-              <SelectField
-                label="Model"
-                value={form.defaultModel}
-                options={modelOptions.map((model) => ({ value: model, label: model }))}
-                onChange={(value) => onChange({ defaultModel: value })}
+            <ComboField
+              label="Model"
+              ariaLabel="Model"
+              value={form.defaultModel}
+              onChange={(value) => onChange({ defaultModel: value })}
+              suggestions={modelOptions}
+              required
+              placeholder={
+                form.client === 'opencode'
+                  ? '例如 openai/gpt-5.4 或 openrouter/google/gemini-3-flash-preview'
+                  : '模型标识符，如 claude-sonnet-4-5'
+              }
+            />
+            {form.client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
+              <ComboField
+                label="Provider 名称"
+                ariaLabel="OC Provider Name"
+                value={form.ocProviderName}
+                onChange={(value) => onChange({ ocProviderName: value })}
+                suggestions={providerSuggestions}
                 required
+                placeholder="如 anthropic、openai、openrouter、maas"
               />
-            ) : (
-              <TextField
-                label="Model"
-                value={form.defaultModel}
-                onChange={(value) => onChange({ defaultModel: value })}
-                required
-                placeholder={
-                  form.client === 'opencode'
-                    ? '例如 openai/gpt-5.4 或 openrouter/google/gemini-3-flash-preview'
-                    : '模型标识符，如 claude-sonnet-4-5'
-                }
-              />
-            )}
-            {form.client === 'opencode' && form.defaultModel.trim() && !form.defaultModel.includes('/') ? (
+            ) : null}
+            {form.client === 'opencode' &&
+            form.defaultModel.trim() &&
+            !form.defaultModel.includes('/') &&
+            !form.ocProviderName.trim() ? (
               <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
                 <p className="text-[11px] leading-4 text-[#8A776B]">
                   建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。

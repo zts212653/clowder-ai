@@ -177,10 +177,15 @@ describe('ConfigRegistry', () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    // gemini has highest token budget (200k), opus (150k) > codex (100k)
+    // MAX_PROMPT_TOKENS may flatten prompt budgets via env, so compare the
+    // cat-specific aggregate context budget that still differs by breed.
     assert.ok(
-      snapshot.perCatBudgets.gemini.maxPromptTokens > snapshot.perCatBudgets.opus.maxPromptTokens,
-      'gemini should have higher maxPromptTokens than opus (largest context window)',
+      snapshot.perCatBudgets.gemini.maxContextTokens > snapshot.perCatBudgets.codex.maxContextTokens,
+      'gemini should have higher maxContextTokens than codex',
+    );
+    assert.ok(
+      snapshot.perCatBudgets.codex.maxContextTokens > snapshot.perCatBudgets.opus.maxContextTokens,
+      'codex should have higher maxContextTokens than opus',
     );
   });
 

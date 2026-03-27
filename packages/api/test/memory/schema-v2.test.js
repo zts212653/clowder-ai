@@ -54,24 +54,32 @@ describe('Schema V2 migration', () => {
   });
 
   it('migration is idempotent (running twice does not error)', async () => {
-    const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
+    const { applyMigrations, CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
     applyMigrations(db);
     applyMigrations(db);
     const version = db.prepare('SELECT MAX(version) as v FROM schema_version').get();
-    assert.equal(version.v, 4);
+    assert.equal(
+      version.v,
+      CURRENT_SCHEMA_VERSION,
+      `schema version should be ${CURRENT_SCHEMA_VERSION}, got ${version.v}`,
+    );
   });
 
   it('schema_version table is created even on empty DB (P1 fix)', async () => {
-    const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
+    const { applyMigrations, CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
     const freshDb = new Database(':memory:');
     // This should NOT throw "no such table: schema_version"
     applyMigrations(freshDb);
     const version = freshDb.prepare('SELECT MAX(version) as v FROM schema_version').get();
-    assert.equal(version.v, 4);
+    assert.equal(
+      version.v,
+      CURRENT_SCHEMA_VERSION,
+      `schema version should be ${CURRENT_SCHEMA_VERSION}, got ${version.v}`,
+    );
   });
 
-  it('CURRENT_SCHEMA_VERSION is 4', async () => {
+  it('CURRENT_SCHEMA_VERSION matches expected value', async () => {
     const { CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
-    assert.equal(CURRENT_SCHEMA_VERSION, 4);
+    assert.equal(CURRENT_SCHEMA_VERSION, 7, `expected 7, got ${CURRENT_SCHEMA_VERSION}`);
   });
 });

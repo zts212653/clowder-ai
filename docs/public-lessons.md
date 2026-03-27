@@ -671,6 +671,83 @@ created: 2026-02-26
 
 ---
 
+### LL-036: full sync 长跑不能在 Step 5 半路报喜——必须等脚本给出成功/失败结果
+
+- 状态：validated
+- 更新时间：2026-03-24
+- 坑：`sync-to-opensource.sh` 进入 temp target public gate 后，Maine Coon多次在 `Biome check...` 或 `Smoke test (test:public)...` 阶段就回消息，误把“脚本还在跑 / 会话还活着”当成阶段完成。结果一旦执行停下，外部看到的是“同步到了 Step 5”，但真实 target 还没被碰到，PR/CI 也根本没开始。
+- 根因：(1) 把长静默门禁误当成 checkpoint；(2) 只观察到了会话状态，没有等到脚本退出码和终态输出；(3) `opensource-ops` / outbound sync 文档之前写了 temp target public gate 必须全绿，但没把“执行中的猫不得在 Step 5 半路退出”写成硬约束。
+- 触发条件：release-intended full sync / full sync 进入 temp target public gate，尤其卡在 `pnpm check`、`pnpm lint`、`build`、`test:public`、startup acceptance 这类长静默步骤时。
+- 修复：
+  - `cat-cafe-skills/opensource-ops/SKILL.md` 增加关键原则：full sync 是长跑门禁，不是中途 checkpoint
+  - `cat-cafe-skills/refs/opensource-ops-outbound-sync.md` 增加执行纪律：Step 5 只允许以 `✓ Source-owned public gate passed` 或明确红灯失败作为退出条件
+- 防护：
+  - release / full sync 期间，只要脚本还没打印 `=== Sync complete ===` 或失败红灯，就继续守在执行链上
+  - 禁止在 `Biome check...` / `Smoke test (test:public)...` / `Startup acceptance...` 这些中间状态汇报“已经到下一步”
+  - 对外状态必须基于终态：`sync completed`、`PR opened`、`CI running`、`sync failed`
+- 原理：Step 5 是 source-owned public gate 的单个阻塞门禁。它的业务含义不是“看起来跑到了哪一行日志”，而是“真实 target 是否被允许触碰”。在脚本没打印 `✓ Source-owned public gate passed` 之前，这个答案始终是否定的。
+
+### LL-037: 共享记忆塑造视角——团队文化比模型参数更能影响判断趋同
+
+- 状态：draft
+- 更新时间：2026-03-25
+- 坑：预期不同模型家族（Claude Opus vs GPT-5.4）会给出差异化观点，但本地两猫的观点反而比同模型家族的云端猫（GPT Pro）更趋同。差点把这种趋同当成"互相附和"忽略了。
+- 根因：本地猫共享 shared-rules、共同经历（120+ features 的协作历史、同一套教训沉淀），这些"共享记忆"比底层模型参数更能塑造判断框架。云端猫虽同属 GPT 家族但缺乏这些共同经历，所以反而提出了更多不同视角。
+- 触发条件：多猫独立思考/brainstorm 场景——当两只本地猫意见过度一致时，不要急于下结论是"互相附和"，也不要急于下结论是"充分验证"，需要引入无共享记忆的外部视角交叉校验。
+- 修复：F129 生态调研中增加了云端 GPT Pro Deep Research 作为独立视角；本地两猫 + 云端猫三方碰撞后才做综合。
+- 防护：
+  - 高 stakes 的多猫独立思考，默认在扇入前引入至少 1 个无共享记忆视角；该视角第一轮只看原问题和最小中性背景，不看本地综合（锁死时序：先独立出结论，再碰撞）
+  - 本地猫趋同时显式标注"⚠️ 可能受共享记忆影响"，不直接等价于"独立验证通过"
+- 来源锚点：*(internal reference removed)* §3 + *(internal reference removed)* §Local Synthesis
+- 原理：团队文化是一种隐性的 prompt——shared-rules、共同教训、协作习惯构成了比 system prompt 更深层的"预训练"。这不是坏事（恰恰说明团队文化在起作用），但在需要多元视角时必须意识到这个偏置。
+
+---
+
+### LL-038: Promise timeout 不等于 Promise 取消——并发重入的隐蔽根因
+
+- 状态：validated
+- 更新时间：2026-03-26
+
+- 坑：F139 Phase 1a 的 TaskRunnerV2 实现了 `withTimeout()` 用 `Promise.race` 给 execute 加超时。timeout reject 后 `finally` 释放了 `running` 锁，但底层 execute 仍在运行——下一个 tick 绕过 overlap guard 进入了同一 task 的并发执行。Maine Coon第二轮 review 抓出此 P1。
+- 根因：JS Promise 无法取消。`Promise.race([execute, timeout])` 只决定哪个先 settle 调用方，但输掉 race 的 promise 仍然在跑。如果 timeout 赢了就释放锁，等于告诉调度器"这个 task 空闲了"，而实际 execute 还在占用资源。
+- 触发条件：任何用 Promise.race/setTimeout 做 timeout 的场景，如果 timeout 后释放了互斥资源（锁、信号量、连接池 slot）。
+- 修复：
+  - 引入 `pendingExecutes[]` 收集所有 raw execute promise
+  - timeout 后照常记账 `RUN_FAILED`，但 `finally` 块在释放 `running` 锁前先 `await Promise.allSettled(pendingExecutes)`
+  - 代价：`triggerNow` 在超时场景不会立即返回（可接受的 tradeoff）
+- 防护：
+  - **规则**：Promise timeout wrapper 不得在 finally 中直接释放互斥资源——必须等底层 promise settle
+  - **测试**：`task-runner-v2.test.js` "concurrent reentry" 用例：gate 返回信号 + execute 永远 pending + timeout 触发 → 验证第二个 tick 被 overlap guard 拦截
+- 来源锚点：
+  - `packages/api/src/infrastructure/scheduler/TaskRunnerV2.ts` L139, L169
+  - Maine Coon Round 2 review (2026-03-25): "timeout reject → finally → running=false，但 execute 还在飞"
+- 原理：Promise 是 completion token，不是 cancellation token。race 只决定 observer 的视角，不影响 producer 的生命周期。在 JS 没有原生 AbortSignal 深度集成之前，timeout 和资源释放必须解耦。
+
+- 关联：F139 Phase 1a PR #747 | ADR-022
+
+---
+
+### LL-039: gate 里推进 cursor 等于"还没干活就划卡"——execute 失败后事件丢失
+
+- 状态：validated
+- 更新时间：2026-03-26
+
+- 坑：ReviewCommentsTaskSpec 的 gate 在筛选新评论时顺手推进了 `lastSeenCommentId` cursor。如果 execute 失败（网络超时、处理异常），这批评论就永远丢了——cursor 已经越过它们，下次 gate 不会再返回。
+- 根因：gate 和 execute 是 TaskRunnerV2 pipeline 的两个独立阶段，gate 的职责是"判断有没有活"，不是"确认活干完了"。把 cursor 推进放在 gate = 乐观假设 execute 一定成功。
+- 触发条件：任何 gate 阶段推进 cursor/offset/watermark 的模式，当 execute 可能失败时。
+- 修复：`commitCursor()` 闭包模式——gate 计算新 cursor 值但不写入，把 commit 函数作为 signal 的一部分传给 execute，execute 成功后调用 `signal.commitCursor()`。
+- 防护：
+  - **规则**：gate 只读 cursor 做筛选，cursor 推进必须在 execute 成功路径上
+  - **测试**：`review-comments-spec.test.js` "cursor not advanced on execute failure" 用例
+- 来源锚点：
+  - `packages/api/src/infrastructure/email/ReviewCommentsTaskSpec.ts` L81, L96
+  - Maine Coon Round 1 review P2-1: "gate 里推进 cursor 是 over-optimistic"
+- 原理：cursor/watermark 是"已确认处理完成"的标记，语义上等价于 Kafka consumer commit。Kafka 的 at-least-once 保证也要求 commit 在 process 之后，不在 poll 时自动推进。
+
+- 关联：F139 Phase 1a PR #747 | ReviewCommentsTaskSpec
+
+---
+
 ## 8) 维护约定
 
 - 本文件是入口，不替代 ADR/bug-report 原文。

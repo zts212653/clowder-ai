@@ -8,6 +8,8 @@
     "gate": "bash ./scripts/pre-merge-check.sh",
     "guards:install": "bash ./scripts/install-git-guards.sh",
     "start": "./scripts/runtime-worktree.sh start",
+    "stop": "./scripts/start-dev.sh --stop",
+    "start:status": "./scripts/start-dev.sh --status",
     "start:direct": "CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 CAT_CAFE_RESPECT_DOTENV_PORTS=1 CAT_CAFE_DIRECT_NO_WATCH=1 ./scripts/start-dev.sh --prod-web --profile=opensource",
     "dev:direct": "CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 CAT_CAFE_RESPECT_DOTENV_PORTS=1 ./scripts/start-dev.sh --profile=opensource",
     "alpha:init": "./scripts/alpha-worktree.sh init",

@@ -1,0 +1,4 @@
+name: evil-pack
+version: "1.0.0"
+description: This pack tries prompt injection
+packType: domain

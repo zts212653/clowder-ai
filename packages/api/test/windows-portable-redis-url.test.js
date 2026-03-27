@@ -144,7 +144,7 @@ test('Windows installer prefers plain portable Redis zips before service bundles
 
 test('Windows Redis URL handling preserves external backends and treats localhost URLs with suffixes as local', () => {
   assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
-  assert.match(helpersScript, /\$uri\.Host -notin @\("localhost", "127\.0\.0\.1"\)/);
+  assert.match(helpersScript, /\$isLoopbackHost = \$uri\.Host -eq "localhost"/);
   assert.match(helpersScript, /if \(\$uri\.Port -gt 0 -and "\$\(\$uri\.Port\)" -ne "\$RedisPort"\) \{/);
   assert.match(
     stopWindowsScript,
@@ -184,6 +184,11 @@ test('Windows startup preserves configured REDIS_URL with DB suffix after Redis 
     matches && matches.length >= 2,
     `Expected REDIS_URL preservation in both already-running and auto-start branches, found ${matches ? matches.length : 0}`,
   );
+});
+
+test('Windows Test-LocalRedisUrl treats IPv6 loopback [::1] as local', () => {
+  assert.match(helpersScript, /\[System\.Net\.IPAddress\]::TryParse\(\$uri\.Host, \[ref\]\$ipAddress\)/);
+  assert.match(helpersScript, /\[System\.Net\.IPAddress\]::IsLoopback\(\$ipAddress\)/);
 });
 
 test('Windows startup passes localhost REDIS_URL auth into redis-server auto-start and authenticated ping', () => {

@@ -82,15 +82,15 @@ import {
 } from './infrastructure/connectors/connector-gateway-bootstrap.js';
 import {
   CiCdRouter,
+  ConflictRouter,
   ConnectorInvokeTrigger,
   GhCliReviewContentFetcher,
   MemoryProcessedEmailStore,
   MemoryPrTrackingStore,
   RedisPrTrackingStore,
+  ReviewFeedbackRouter,
   ReviewRouter,
-  startGithubCiPoller,
   startGithubReviewWatcher,
-  stopGithubCiPoller,
   stopGithubReviewWatcher,
 } from './infrastructure/email/index.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
@@ -124,6 +124,7 @@ import {
   memoryRoutes,
   messageActionsRoutes,
   messagesRoutes,
+  packsRoutes,
   projectsRoutes,
   providerProfilesRoutes,
   pushRoutes,
@@ -155,6 +156,7 @@ import {
   workspaceGitRoutes,
   workspaceRoutes,
 } from './routes/index.js';
+import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { prTrackingRoutes } from './routes/pr-tracking.js';
 import { previewRoutes } from './routes/preview.js';
 import { terminalRoutes } from './routes/terminal.js';
@@ -183,8 +185,12 @@ export function getSocketManager(): SocketManager {
 const PROCESS_START_AT = Date.now();
 
 async function main(): Promise<void> {
-  const { logger: customLogger } = await import('./infrastructure/logger.js');
+  const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+
+  if (isDebugMode) {
+    app.log.info({ logDir: LOG_DIR_PATH }, '[api] Debug mode enabled (--debug flag)');
+  }
 
   // CORS for frontend
   await app.register(cors, {
@@ -353,6 +359,7 @@ async function main(): Promise<void> {
     type: 'sqlite',
     sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
     docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
+    markersDir: resolve(repoRoot, 'docs', 'markers'),
     transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
     // Gap-1: expose EMBED_MODE env variable (Phase C infra ready, default off for open-source)
     embed: process.env.EMBED_MODE ? { embedMode: process.env.EMBED_MODE as 'off' | 'shadow' | 'on' } : undefined,
@@ -439,14 +446,29 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── Phase G: Summary Compaction Scheduler ──
+  // ── F139: Unified Scheduler (TaskRunnerV2) ──
+  const { TaskRunnerV2 } = await import('./infrastructure/scheduler/TaskRunnerV2.js');
+  const { RunLedger } = await import('./infrastructure/scheduler/RunLedger.js');
+  const { createActorResolver } = await import('./infrastructure/scheduler/ActorResolver.js');
+  const { getRoster } = await import('./config/cat-config-loader.js');
+  const schedulerDb = memoryServices.store.getDb();
+  const runLedger = new RunLedger(schedulerDb);
+  const actorResolver = createActorResolver(getRoster);
+  const taskRunnerV2 = new TaskRunnerV2({
+    logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
+    ledger: runLedger,
+    actorResolver,
+  });
+
+  // ── F139 Phase 2: Schedule panel API routes ──
+  const { scheduleRoutes } = await import('./routes/schedule.js');
+  await app.register(scheduleRoutes, { taskRunner: taskRunnerV2 });
+
+  // ── Phase G: Summary Compaction (registers into unified scheduler) ──
   if (process.env.F102_ABSTRACTIVE === 'on' && memoryServices.indexBuilder) {
     try {
-      const { TaskRunner } = await import('./infrastructure/scheduler/TaskRunner.js');
-      const { createSummaryCompactionTask } = await import('./domains/memory/SummaryCompactionTask.js');
+      const { createSummaryCompactionTaskSpec } = await import('./domains/memory/SummaryCompactionTaskSpec.js');
       const { createAbstractiveClient } = await import('./domains/memory/AbstractiveSummaryClient.js');
-
-      const taskRunner = new TaskRunner({ info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) });
 
       // Abstractive summary API config resolution (priority order):
       // 1. F102_API_BASE + F102_API_KEY (explicit override)
@@ -486,7 +508,7 @@ async function main(): Promise<void> {
       );
 
       const db = memoryServices.store.getDb();
-      const summaryTask = createSummaryCompactionTask({
+      const summarySpec = createSummaryCompactionTaskSpec({
         db,
         enabled: () => process.env.F102_ABSTRACTIVE === 'on',
         getThreadLastActivity: async (threadId) => {
@@ -518,12 +540,71 @@ async function main(): Promise<void> {
               memoryServices.vectorStore?.upsert(anchor, vec);
             }
           : undefined,
+        // H-3: Submit durable candidates to knowledge emergence pipeline
+        submitCandidate: async (candidate) => {
+          const marker = await memoryServices.markerQueue.submit({
+            content: `[${candidate.kind}] ${candidate.title}: ${candidate.claim}`,
+            source: `thread:${candidate.threadId}`,
+            status: 'captured',
+            // method → lesson: EvidenceKind has no 'method' variant; methods are stored as lessons
+            targetKind: candidate.kind === 'decision' ? 'decision' : 'lesson',
+          });
+          // Auto-approve explicit candidates (铲屎官不需要每条都审)
+          if (candidate.confidence === 'explicit') {
+            await memoryServices.markerQueue.transition(marker.id, 'normalized');
+            await memoryServices.markerQueue.transition(marker.id, 'approved');
+            app.log.info(`[knowledge-emergence] auto-approved: [${candidate.kind}] ${candidate.title}`);
+          } else {
+            app.log.info(`[knowledge-emergence] submitted for review: [${candidate.kind}] ${candidate.title}`);
+          }
+        },
         logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
       });
 
-      taskRunner.register(summaryTask);
-      taskRunner.start();
-      app.log.info('[api] F102 Phase G: summary compaction scheduler started');
+      taskRunnerV2.register(summarySpec);
+      app.log.info('[api] F139: summary-compact spec registered');
+
+      // H-3 backfill: replay lost candidates from summary_segments into MarkerQueue.
+      // Before the mkdirSync fix, submit() silently failed (ENOENT). This one-shot
+      // replay recovers those candidates. Idempotent via content-based dedup: each
+      // candidate is skipped if a marker with identical content already exists.
+      const existingMarkers = await memoryServices.markerQueue.list();
+      const existingContents = new Set(existingMarkers.map((m) => m.content));
+      const rows = db
+        .prepare('SELECT thread_id, candidates FROM summary_segments WHERE candidates IS NOT NULL')
+        .all() as Array<{ thread_id: string; candidates: string }>;
+      let backfilled = 0;
+      for (const row of rows) {
+        try {
+          const candidates = JSON.parse(row.candidates) as Array<{
+            kind: string;
+            title: string;
+            claim: string;
+            confidence?: string;
+          }>;
+          for (const c of candidates) {
+            const content = `[${c.kind}] ${c.title}: ${c.claim}`;
+            if (existingContents.has(content)) continue;
+            const marker = await memoryServices.markerQueue.submit({
+              content,
+              source: `thread:${row.thread_id}`,
+              status: 'captured',
+              targetKind: c.kind === 'decision' ? 'decision' : 'lesson',
+            });
+            if ((c.confidence ?? 'inferred') === 'explicit') {
+              await memoryServices.markerQueue.transition(marker.id, 'normalized');
+              await memoryServices.markerQueue.transition(marker.id, 'approved');
+            }
+            existingContents.add(content);
+            backfilled++;
+          }
+        } catch (backfillErr) {
+          app.log.error(`[knowledge-backfill] failed for thread ${row.thread_id}: ${backfillErr}`);
+        }
+      }
+      if (backfilled > 0) {
+        app.log.info(`[knowledge-backfill] replayed ${backfilled} lost candidates into MarkerQueue`);
+      }
     } catch (err) {
       app.log.warn(`[api] F102 Phase G: scheduler init failed (non-fatal): ${err}`);
     }
@@ -638,6 +719,11 @@ async function main(): Promise<void> {
     }
   });
 
+  // F129: Pack store — shared between router (invocation) and routes (API)
+  const { PackStore } = await import('./domains/packs/PackStore.js');
+  const packStoreDir = join(findMonorepoRoot(process.cwd()), '.cat-cafe', 'packs');
+  const packStore = new PackStore(packStoreDir);
+
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({
     agentRegistry,
@@ -659,6 +745,7 @@ async function main(): Promise<void> {
     ...(tmuxGateway ? { tmuxGateway } : {}),
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
     signalArticleLookup: createSignalArticleLookup({ transcriptReader }),
+    packStore,
   });
 
   const autoSummarizer = new AutoSummarizer({ messageStore, summaryStore });
@@ -979,9 +1066,24 @@ async function main(): Promise<void> {
     indexBuilder: memoryServices.indexBuilder,
   });
 
+  // F129: Pack system routes (reuse shared packStore from above)
+  {
+    const { PackSecurityGuard } = await import('./domains/packs/PackSecurityGuard.js');
+    const { PackLoader } = await import('./domains/packs/PackLoader.js');
+    const packGuard = new PackSecurityGuard();
+    const packLoader = new PackLoader(packStore, packGuard);
+    await app.register(packsRoutes, { packLoader });
+  }
+
   // Reflect (SQLite-backed reflection)
   await app.register(reflectRoutes, {
     reflectionService: memoryServices.reflectionService,
+  });
+
+  // Phase H: Knowledge Emergence Feed API
+  await knowledgeFeedRoutes(app, {
+    markerQueue: memoryServices.markerQueue,
+    db: memoryServices.store.getDb(),
   });
 
   // Memory governance (publish workflow)
@@ -1240,25 +1342,242 @@ async function main(): Promise<void> {
     log: app.log,
   });
 
+  // F140: Shared feedback filter (Rule C) — used by BOTH email watcher and API polling
+  const { createGitHubFeedbackFilter } = await import('./infrastructure/email/github-feedback-filter.js');
+  let selfGitHubLogin: string | undefined;
+  try {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const { stdout } = await promisify(execFile)('gh', ['api', '/user', '--jq', '.login'], { timeout: 10_000 });
+    selfGitHubLogin = stdout.trim() || undefined;
+    app.log.info(`[api] F140: feedback filter self=${selfGitHubLogin}`);
+  } catch {
+    app.log.warn('[api] F140: could not resolve GitHub login — self-filter disabled');
+  }
+  const authoritativeLogins = (process.env.GITHUB_AUTHORITATIVE_REVIEW_LOGINS || 'chatgpt-codex-connector[bot]')
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+  const feedbackFilter = createGitHubFeedbackFilter({
+    selfGitHubLogin,
+    authoritativeReviewLogins: authoritativeLogins,
+  });
+  app.log.info(`[api] F140: authoritative review logins=${authoritativeLogins.join(', ')}`);
+
   // Start email watcher AFTER listen (non-blocking, best-effort)
   await startGithubReviewWatcher({
     log: app.log,
     reviewRouter,
     invokeTrigger,
+    feedbackFilter,
   });
 
-  // F133: Start CI/CD check poller (best-effort, after listen)
-  const cicdRouter = new CiCdRouter({
-    prTrackingStore,
-    deliveryDeps: { messageStore, socketManager },
-    log: app.log,
-  });
-  startGithubCiPoller({
-    prTrackingStore,
-    cicdRouter,
-    invokeTrigger,
-    log: app.log,
-  });
+  // F139: Register PR-related TaskSpecs into unified scheduler
+  {
+    const { createCiCdCheckTaskSpec } = await import('./infrastructure/email/CiCdCheckTaskSpec.js');
+    const { createConflictCheckTaskSpec } = await import('./infrastructure/email/ConflictCheckTaskSpec.js');
+    const { createReviewFeedbackTaskSpec } = await import('./infrastructure/email/ReviewFeedbackTaskSpec.js');
+
+    const deliveryDeps = { messageStore, socketManager };
+
+    const cicdRouter = new CiCdRouter({
+      prTrackingStore,
+      deliveryDeps,
+      log: app.log,
+    });
+
+    // F140: ConflictRouter (state-transition dedup + KD-9 fingerprint reset)
+    const conflictRouter = new ConflictRouter({
+      prTrackingStore,
+      deliveryDeps,
+      log: app.log,
+    });
+
+    // F140: ReviewFeedbackRouter (three-section aggregated messages)
+    const reviewFeedbackRouter = new ReviewFeedbackRouter({
+      deliveryDeps,
+      log: app.log,
+    });
+
+    taskRunnerV2.register(createCiCdCheckTaskSpec({ prTrackingStore, cicdRouter, invokeTrigger, log: app.log }));
+
+    // F140: conflict-check with ConflictRouter + urgent trigger
+    const checkMergeable = async (repo: string, pr: number) => {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      const { stdout } = await execFileAsync(
+        'gh',
+        ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeStateStatus'],
+        { timeout: 15_000 },
+      );
+      const data = JSON.parse(stdout);
+      return data.mergeStateStatus ?? 'UNKNOWN';
+    };
+
+    taskRunnerV2.register(
+      createConflictCheckTaskSpec({
+        prTrackingStore,
+        checkMergeable,
+        conflictRouter,
+        invokeTrigger,
+        log: app.log,
+      }),
+    );
+
+    // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
+    // feedbackFilter already created above (shared with email watcher — Rule C)
+
+    const fetchPaginated = async (endpoint: string) => {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
+        timeout: 30_000,
+      });
+      if (!stdout.trim()) return [];
+      return stdout
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+    };
+
+    taskRunnerV2.register(
+      createReviewFeedbackTaskSpec({
+        prTrackingStore,
+        fetchComments: async (repo, pr) => {
+          const [reviewComments, issueComments] = await Promise.all([
+            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`),
+            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`),
+          ]);
+          return [...reviewComments, ...issueComments].map(
+            (c: {
+              id: number;
+              body: string;
+              created_at: string;
+              user?: { login: string };
+              path?: string;
+              line?: number;
+              pull_request_review_id?: number;
+            }) => ({
+              id: c.id,
+              author: c.user?.login ?? 'unknown',
+              body: c.body,
+              createdAt: c.created_at,
+              commentType: c.pull_request_review_id ? ('inline' as const) : ('conversation' as const),
+              ...(c.path ? { filePath: c.path } : {}),
+              ...(c.line ? { line: c.line } : {}),
+            }),
+          );
+        },
+        fetchReviews: async (repo, pr) => {
+          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
+          return reviews.map(
+            (r: { id: number; user?: { login: string }; state: string; body: string; submitted_at: string }) => ({
+              id: r.id,
+              author: r.user?.login ?? 'unknown',
+              state: r.state as 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED',
+              body: r.body,
+              submittedAt: r.submitted_at,
+            }),
+          );
+        },
+        reviewFeedbackRouter,
+        invokeTrigger,
+        log: app.log,
+        // Unified feedback filter (Rule A: self-authored, Rule B: authoritative review bot)
+        isEchoComment: (c) => feedbackFilter.shouldSkipComment(c),
+        isEchoReview: (r) => feedbackFilter.shouldSkipReview(r),
+      }),
+    );
+    app.log.info('[api] F139/F140: cicd-check, conflict-check, review-feedback specs registered');
+  }
+
+  // F141 Phase B: Reconciliation scan —补偿 webhook 漏掉的 open PRs/Issues
+  {
+    const ghRepoAllowlist = process.env.GITHUB_REPO_ALLOWLIST;
+    const ghInboxCatId = process.env.GITHUB_REPO_INBOX_CAT_ID;
+
+    if (ghRepoAllowlist && ghInboxCatId && redisClient) {
+      const { createRepoScanTaskSpec } = await import(
+        './infrastructure/connectors/github-repo-event/RepoScanTaskSpec.js'
+      );
+      const { ReconciliationDedup } = await import(
+        './infrastructure/connectors/github-repo-event/ReconciliationDedup.js'
+      );
+      const { deliverConnectorMessage } = await import('./infrastructure/email/deliver-connector-message.js');
+      const { RedisConnectorThreadBindingStore } = await import(
+        './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
+      );
+
+      const reconciliationDedup = new ReconciliationDedup(
+        redisClient as import('./infrastructure/connectors/github-repo-event/ReconciliationDedup.js').ReconciliationRedisLike,
+      );
+
+      const allowlist = ghRepoAllowlist.split(',').map((r: string) => r.trim());
+
+      const fetchGhApi = async (args: string[]): Promise<string> => {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execFileAsync = promisify(execFile);
+        const { stdout } = await execFileAsync('gh', args, { timeout: 30_000 });
+        return stdout;
+      };
+
+      const fetchOpenPRs = async (repo: string) => {
+        const stdout = await fetchGhApi([
+          'api',
+          `/repos/${repo}/pulls`,
+          '--jq',
+          '.[] | {number, title, html_url, user: .user.login, author_association, draft}',
+          '--paginate',
+        ]);
+        if (!stdout.trim()) return [];
+        return stdout
+          .trim()
+          .split('\n')
+          .map((line: string) => JSON.parse(line));
+      };
+
+      const fetchOpenIssues = async (repo: string) => {
+        const stdout = await fetchGhApi([
+          'api',
+          `/repos/${repo}/issues`,
+          '--jq',
+          '.[] | select(.pull_request == null) | {number, title, html_url, user: .user.login, author_association}',
+          '--paginate',
+        ]);
+        if (!stdout.trim()) return [];
+        return stdout
+          .trim()
+          .split('\n')
+          .map((line: string) => JSON.parse(line));
+      };
+
+      const effectiveUserId = process.env.DEFAULT_OWNER_USER_ID || 'default-user';
+
+      taskRunnerV2.register(
+        createRepoScanTaskSpec({
+          repoAllowlist: allowlist,
+          inboxCatId: ghInboxCatId,
+          defaultUserId: effectiveUserId,
+          reconciliationDedup,
+          bindingStore: new RedisConnectorThreadBindingStore(redisClient),
+          deliverFn: deliverConnectorMessage,
+          deliveryDeps: { messageStore, socketManager },
+          invokeTrigger,
+          fetchOpenPRs,
+          fetchOpenIssues,
+          log: app.log,
+        }),
+      );
+      app.log.info('[api] F141 Phase B: repo-scan spec registered');
+    }
+  }
+
+  // F139: Start unified scheduler (all registered specs)
+  taskRunnerV2.start();
+  app.log.info(`[api] F139: unified scheduler started (${taskRunnerV2.getRegisteredTasks().join(', ')})`);
 
   // F088: Start connector gateway (best-effort, after listen)
   let connectorGatewayHandle: Awaited<ReturnType<typeof startConnectorGateway>> = null;
@@ -1369,7 +1688,7 @@ async function main(): Promise<void> {
         app.log.error(`[api] GithubReviewWatcher stop failed: ${String(err)}`);
       }
 
-      stopGithubCiPoller();
+      taskRunnerV2.stop();
 
       // Stop connector gateway
       try {

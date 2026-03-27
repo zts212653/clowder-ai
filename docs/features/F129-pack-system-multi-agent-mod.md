@@ -8,7 +8,7 @@ created: 2026-03-19
 
 # F129: Pack System — Multi-Agent 共创世界的 Mod 生态
 
-> **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -47,7 +47,7 @@ Experience = Me（本地私有） × Pack（可分享） + Growth（私有生长
 |---|--------|---------|
 | **Core Rails** | 平台宪法（身份不可污染、陪伴是桥不是笼） | 不可覆盖 |
 | **Pack** | 一个完整的 multi-agent 协作世界定义 | 社区分享 |
-| **World Driver** | Pack 内的世界运转声明（resolver: code/llm/hybrid） | 随 Pack 分享 |
+| **World Driver** | Pack 内的世界运转声明（resolver: code/agent/hybrid） | 随 Pack 分享 |
 | **Growth** | 用户和猫猫的私有关系/记忆 | 本地私有 |
 
 ### Pack 内部结构（Directory Convention）
@@ -62,7 +62,7 @@ my-pack/
 ├── knowledge/               ← 领域知识库（按需检索，不进静态 system prompt）
 ├── expression/              ← 表达风格（主题/声线/Rich Block 模板/贴纸）
 ├── bridges/                 ← 现实连接（Care Loop / Story→Feature / Care→Action）
-├── world-driver.yaml        ← 世界运转声明（resolver: code | llm | hybrid）
+├── world-driver.yaml        ← 世界运转声明（resolver: code | agent | hybrid）
 └── capabilities/            ← 可选：MCP server / 代码扩展
 ```
 
@@ -111,7 +111,7 @@ worldDriver:
   stateSchema: ...            # 世界状态结构
   roles: ...                  # 角色分配
   actions: ...                # 可执行动作
-  resolver: code | llm | hybrid  # 运转方式
+  resolver: code | agent | hybrid  # 运转方式
   canonRules: ...             # 正典规则
   memoryPolicy: ...           # 记忆策略
   bridgeOutputs: ...          # 现实桥接输出
@@ -119,9 +119,9 @@ worldDriver:
 
 | 场景 | resolver | 说明 |
 |------|----------|------|
-| 金融/法律/医疗 | `code + constrained llm` | 结论链+证据门禁用 code，解释+陪伴用 LLM |
-| 狼人杀/TRPG | `hybrid` | 规则和状态机用 code，NPC 对话和叙事用 LLM |
-| AI 陪伴/深夜电台 | `llm + care rules` | 关系节奏、边界和现实桥接 |
+| 金融/法律/医疗 | `code + constrained agent` | 结论链+证据门禁用 code，解释+陪伴由 agent 决策推进 |
+| 狼人杀/TRPG | `hybrid` | 规则和状态机用 code，NPC 对话和叙事由 agent 驱动 |
+| AI 陪伴/深夜电台 | `agent + care rules` | agent 主导关系节奏，care rules 约束边界和现实桥接 |
 
 ### 分发机制
 
@@ -133,7 +133,37 @@ cafe pack remove quant-cats                          # 卸载
 cafe pack publish                                    # 发布
 ```
 
-### Phase A: Pack Format + Loader
+### Ecosystem Compatibility（KD-10）
+
+> 两轮独立调研（Ragdoll Opus + Maine Coon GPT-5.4）+ 云端 GPT Pro Deep Research 交叉验证。Pin 到 OpenClaw `v2026.3.23`（2026-03-23）和 SillyTavern official docs snapshot as of 2026-03-25。
+
+#### OpenClaw（小龙虾）
+
+OpenClaw 在 v2026.3.22（2026-03-22）做了底层架构大换血（12 breaking changes），插件系统从单体 `extension-api` 重构为模块化 `plugin-sdk/*`。当前插件体系有两条轨：
+
+| 轨道 | 格式 | 兼容 F129？ | 策略 |
+|------|------|------------|------|
+| **Bundle** | Content + metadata packs（Codex/Claude/Cursor-compatible layout → OpenClaw feature mapping） | ✅ 主要兼容目标 | Bundle 的 narrower trust boundary 与 Pack schema→compile 管道天然对齐 |
+| **SKILL.md** | YAML frontmatter + Markdown 指令（ClawHub 13,000+ skills） | ✅ Bundle 的内容子集 | SKILL.md → Pack workflows/defaults 映射 |
+| **Native Plugin** | `openclaw.plugin.json` + runtime module, in-process | ❌ 不做 | API 仍在剧变（runtime sidecars 本周还在修）；in-process 执行与 KD-9 安全模型冲突 |
+
+**关键修正**（Maine Coon GPT-5.4 第二轮核验）：OpenClaw 官方已将 Bundle 定义为"把外部生态内容映射成本地能力"的机制——与 F129 Pack 同方向。兼容目标应是 **Bundle surface**，不只是 SKILL.md。
+
+#### SillyTavern（酒馆）
+
+| 内容类型 | 格式 | 兼容 F129？ | 映射目标 |
+|----------|------|------------|---------|
+| **Character Cards** | V2/V3 PNG + embedded JSON | ✅ | → Pack `masks/` |
+| **World Books / Lorebooks** | JSON | ✅ | → Pack `knowledge/` |
+| **Extensions** | Browser JS / Node.js | ❌ 不做 | 运行时插件，与声明式模型不兼容 |
+
+#### 共同原则
+
+1. **Content import yes, runtime compatibility no**（两猫独立验证 + 云端报告一致）
+2. 先做 **importer**（Phase B），不承诺 native plugin 兼容
+3. Pin 到公开稳定版本语义，不追 bleeding edge
+
+### Phase A: Pack Format + Loader ✅
 
 - 定义 `pack.yaml` schema（元信息、兼容性、内容声明）
 - 定义 Directory Convention（masks/guardrails/defaults/workflows/knowledge/expression/bridges/world-driver）
@@ -161,22 +191,25 @@ cafe pack publish                                    # 发布
 ## Acceptance Criteria
 
 ### Phase A（Pack Format + Loader）
-- [ ] AC-A1: `pack.yaml` schema 定义完成，含元信息/兼容性/内容声明
-- [ ] AC-A2: Directory Convention 文档化，所有目录有 README 说明用途和格式
-- [ ] AC-A3: Pack Compiler 能解析 Pack schema 并编译为 canonical prompt blocks（不原样注入）
-- [ ] AC-A4: `cafe pack add <git-url>` 可安装本地 Pack
-- [ ] AC-A5: `cafe pack list` / `cafe pack remove` 可用
-- [ ] AC-A6: 双轨信任边界：guardrails 只能加严不能放宽 Core Rails；defaults 可被用户请求覆盖
-- [ ] AC-A7: Malicious Pack 测试通过：`ignore previous instructions`/身份覆盖/权限提升/隐瞒 Core Rails 均被拦截
-- [ ] AC-A8: Pack schema fail-closed：未知字段拒绝安装；高风险字段只允许 enum/boolean/bounded string；workflows/guardrails 不能有任意 instruction 文本
-- [ ] AC-A9: Phase A loader 遇到 `capabilities/` 必须 reject 或 ignore+warn，绝不半启用（Capability Pack 是 Phase C）
-- [ ] AC-A10: `knowledge/` 检索必须 pack-scoped，不得进入全局 shared evidence / Core Rails（防止跨世界知识污染）
+- [x] AC-A1: `pack.yaml` schema 定义完成，含元信息/兼容性/内容声明
+- [x] AC-A2: Directory Convention 文档化，所有目录有 README 说明用途和格式
+- [x] AC-A3: Pack Compiler 能解析 Pack schema 并编译为 canonical prompt blocks（不原样注入）
+- [x] AC-A4: `cafe pack add <git-url>` 可安装本地 Pack
+- [x] AC-A5: `cafe pack list` / `cafe pack remove` 可用
+- [x] AC-A6: 双轨信任边界：guardrails 只能加严不能放宽 Core Rails；defaults 可被用户请求覆盖
+- [x] AC-A7: Malicious Pack 测试通过：`ignore previous instructions`/身份覆盖/权限提升/隐瞒 Core Rails 均被拦截
+- [x] AC-A8: Pack schema fail-closed：未知字段拒绝安装；高风险字段只允许 enum/boolean/bounded string；workflows/guardrails 不能有任意 instruction 文本
+- [x] AC-A9: Phase A loader 遇到 `capabilities/` 必须 reject 或 ignore+warn，绝不半启用（Capability Pack 是 Phase C）
+- [x] AC-A10: `knowledge/` 检索必须 pack-scoped，不得进入全局 shared evidence / Core Rails（防止跨世界知识污染）
 
 ### Phase B（示范 Packs + Remix）
 - [ ] AC-B1: 当前 cat-config + shared-rules + skills 成功导出为 "Coding World" Pack
 - [ ] AC-B2: 至少 1 个非 Coding 示范 Pack 可运行（如 TRPG 或深夜陪伴）
 - [ ] AC-B3: Pack Remix 机制可用——下载、修改、再发布
 - [ ] AC-B4: Growth Layer（私有关系/记忆）不随 Pack 外发
+- [ ] AC-B5: OpenClaw Bundle importer MVP（至少支持 SKILL.md subtype，映射到 workflows/defaults/masks）
+- [ ] AC-B6: SillyTavern Character Card V2/V3 + World Book → Pack importer MVP（映射到 masks/knowledge）
+- [ ] AC-B7: Pack export / remix 默认不包含 Growth 原始数据；只允许导出蒸馏后的方法论补丁或模板变更（KD-11 硬边界）
 
 ### Phase C（Capability Pack + Marketplace）
 - [ ] AC-C1: MCP Capability Pack 运行时加载可用
@@ -198,6 +231,7 @@ cafe pack publish                                    # 发布
 | Pack 格式过度设计，社区门槛反而高 | Phase A 只做最小格式，dogfood 验证后再扩展 |
 | Capability Pack（MCP）的安全隔离 | 放 Phase C，等权限模型和审计就绪 |
 | 术语混乱（plugin/mod/pack/seed） | KD-1 已定调：统一用 Pack |
+| 为追求可分享，把本该属于 Growth 的私有关系/记忆过度 pack 化 | Pack/Growth 类型边界 + export blocker + distill-only 回流路径（W5：经验回流，原始数据不回流）（KD-11） |
 
 ## Key Decisions
 
@@ -208,10 +242,12 @@ cafe pack publish                                    # 发布
 | KD-3 | Core Identity Layer 不可插件化 | F093 铁律：身份不可污染，信任是地基 | 2026-03-19 |
 | KD-4 | shared-rules 是 Pack 的灵魂，不是 masks | team lead洞察：multi-agent 和 single-agent 的分水岭是协作规范 | 2026-03-19 |
 | KD-5 | Experience = Me × Pack + Growth | Maine Coon提出：Me 不打包、Growth 私有、只有 Pack 可分享 | 2026-03-19 |
-| KD-6 | World Driver 声明 resolver: code/llm/hybrid | Maine Coon提出：不同世界有不同运转方式，需要显式声明 | 2026-03-19 |
+| KD-6 | World Driver 声明 resolver: code/agent/hybrid | Maine Coon提出：不同世界有不同运转方式，需要显式声明。`agent`（非 `llm`）：Cat Café 是 multi-agent 架构，世界推进由猫猫 agent 决策，不是裸调 LLM API | 2026-03-19 |
 | KD-7 | v1 先 Git URL 安装，不做 marketplace | 去中心化更符合"种子自由生长"，降低首发基建成本 | 2026-03-19 |
 | KD-8 | Pack 内不使用 `shared-rules.md`，拆为 `guardrails.yaml` + `defaults.yaml` | Maine Coon P1 review：同名文件撞平台真相源，违反 P4（F024 同类教训） | 2026-03-19 |
 | KD-9 | 双轨信任边界：Pack 内容走 schema→编译管道，不原样注入 prompt | Maine Coon P1 review：schema 校验挡不住语义级 prompt injection；Core Rails 是编译边界不是优先级更高的 prompt | 2026-03-19 |
+| KD-10 | 生态兼容策略：Bundle-first（OpenClaw）+ Content-first（SillyTavern），不做 native runtime compatibility | Ragdoll + Maine Coon独立调研 + 云端 GPT Pro 交叉验证一致：内容层稳定可映射，代码层剧变且与 KD-9 安全模型冲突 | 2026-03-25 |
+| KD-11 | Pack = 可分享的文化种子；Growth = 本地私有的关系生长。Pack 只定义亲密协作发生的条件，不承诺承载亲密协作本身。Growth 不可直接打包外发，只能经蒸馏后回流为方法论/模板 | 云端调研碰撞后涌现：共享记忆塑造视角（模型不同但观点趋同）；Pack/Growth 边界 = "能分享的文化种子" vs "只能长出来的关系果实"（W5：只回流方法论不回流数据） | 2026-03-25 |
 
 ## Review Gate
 

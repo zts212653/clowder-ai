@@ -371,7 +371,7 @@ describe('Callback Routes', () => {
     );
   });
 
-  test('POST post-message targetCats merges with content @mentions (F098-C1)', async () => {
+  test('POST post-message single content @mention ignores extra explicit targetCats (A2A fail-closed)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'opus');
 
@@ -390,11 +390,35 @@ describe('Callback Routes', () => {
 
     const recent = messageStore.getRecent(10);
     assert.equal(recent.length, 1);
-    // Should include both content-parsed codex AND explicit gpt52
+    // Single content mention should win; extras from explicit targetCats are pruned.
     const mentions = recent[0].mentions;
     assert.ok(mentions.includes('codex'), 'content @mention should be included');
-    assert.ok(mentions.includes('gpt52'), 'explicit targetCats should be included');
+    assert.equal(mentions.includes('gpt52'), false, 'extra explicit targetCats should be pruned');
     assert.deepEqual(recent[0].extra?.targetCats, ['gpt52']);
+  });
+
+  test('POST post-message keeps merged targets when content has multiple @mentions', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      payload: {
+        invocationId,
+        callbackToken,
+        content: '同步一下\n@codex\n@gpt52',
+        targetCats: ['gemini'],
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const recent = messageStore.getRecent(10);
+    assert.equal(recent.length, 1);
+    const mentions = recent[0].mentions;
+    assert.ok(mentions.includes('codex'));
+    assert.ok(mentions.includes('gpt52'));
+    assert.ok(mentions.includes('gemini'), 'multi-mention content should still merge explicit targetCats');
   });
 
   test('POST post-message rejects cross-thread send to another user thread', async () => {

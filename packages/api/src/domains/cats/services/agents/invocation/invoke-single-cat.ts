@@ -10,6 +10,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
@@ -34,8 +35,15 @@ import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+import {
+  OC_API_KEY_ENV,
+  OC_BASE_URL_ENV,
+  parseOpenCodeModel,
+  writeOpenCodeRuntimeConfig,
+} from '../providers/opencode-config-template.js';
 
 const log = createModuleLogger('invoke');
+const BUILTIN_OPENCODE_PROVIDERS = new Set(['anthropic', 'openai', 'openrouter', 'google']);
 
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
@@ -260,6 +268,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let didWriteAudit = false;
   let didComplete = false;
   let didResetRestoreFailures = false;
+  let openCodeRuntimeConfigPath: string | undefined;
 
   // Shared-state preflight — covers ALL cats (Claude/Codex/Gemini), vendor-agnostic.
   // Three-layer defense model (shared-rules §14):
@@ -721,6 +730,44 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (provider === 'dare' && resolvedAccount?.authType === 'api_key') {
       if (resolvedAccount.apiKey) callbackEnv.DARE_API_KEY = resolvedAccount.apiKey;
       if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
+    }
+
+    const trimmedDefaultModel = typeof defaultModel === 'string' ? defaultModel.trim() : undefined;
+    const ocProviderName = catConfig?.ocProviderName?.trim() || undefined;
+    const parsedOpenCodeModel =
+      provider === 'opencode' && trimmedDefaultModel ? parseOpenCodeModel(trimmedDefaultModel) : null;
+    // F189: When ocProviderName is set (bare model), assemble composite model for routing
+    const effectiveProviderName = parsedOpenCodeModel?.providerName ?? (ocProviderName || undefined);
+    const effectiveModel = parsedOpenCodeModel
+      ? trimmedDefaultModel!
+      : ocProviderName && trimmedDefaultModel
+        ? `${ocProviderName}/${trimmedDefaultModel}`
+        : undefined;
+    if (
+      provider === 'opencode' &&
+      resolvedAccount?.authType === 'api_key' &&
+      effectiveModel &&
+      effectiveProviderName &&
+      !BUILTIN_OPENCODE_PROVIDERS.has(effectiveProviderName)
+    ) {
+      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = effectiveModel;
+      const apiType: 'openai' | 'anthropic' | 'google' =
+        resolvedAccount.protocol === 'anthropic'
+          ? 'anthropic'
+          : resolvedAccount.protocol === 'google'
+            ? 'google'
+            : 'openai';
+      const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
+      openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, invocationId, {
+        providerName: effectiveProviderName,
+        models: rawModels,
+        defaultModel: effectiveModel,
+        apiType,
+        hasBaseUrl: Boolean(resolvedAccount.baseUrl),
+      });
+      callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
+      if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
+      if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
     }
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new sessions for cats
@@ -1448,6 +1495,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // F118: Release session mutex (idempotent — safe if never acquired)
     sessionMutexRelease?.();
+
+    if (openCodeRuntimeConfigPath) {
+      await rm(openCodeRuntimeConfigPath, { force: true }).catch((err) => {
+        log.warn({ invocationId, path: openCodeRuntimeConfigPath, err }, 'Failed to remove OpenCode runtime config');
+      });
+    }
 
     // F118 AC-C5: Fallback audit for generator .return() path (#99)
     // If generator was force-returned (e.g. AbortController, client disconnect)

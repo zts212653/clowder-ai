@@ -286,8 +286,7 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       const { threadId } = request.params;
       const runtime = await gameStore.getActiveGame(threadId);
       if (!runtime) {
-        reply.status(404);
-        return { error: 'No active game in this thread' };
+        return null; // No active game — normal empty response, not 404
       }
 
       const requestedViewer = (request.query as { viewer?: string }).viewer;

@@ -75,6 +75,15 @@ export class SocketManager {
       const queryUserId = typeof socket.handshake.query.userId === 'string' ? socket.handshake.query.userId.trim() : '';
       const userId = authUserId || queryUserId || 'anonymous';
       log.info({ socketId: socket.id, userId }, 'Client connected');
+      log.debug(
+        {
+          socketId: socket.id,
+          transport: socket.conn.transport.name,
+          remoteAddress: socket.handshake.address,
+          userAgent: socket.handshake.headers['user-agent'],
+        },
+        'Client handshake details',
+      );
 
       // F39: Auto-join user-scoped room for emitToUser (multi-tab support)
       if (userId !== 'anonymous') {
@@ -124,7 +133,7 @@ export class SocketManager {
           // Backward compat: cancel all slots in thread
           this.invocationTracker.cancelAll(data.threadId);
           this.multiMentionOrchestrator?.abortByThread(data.threadId);
-          log.info({ threadId: data.threadId }, 'Cancelled all invocations');
+          log.info({ threadId: data.threadId, socketId: socket.id, userId }, 'Cancelled all invocations');
         }
       });
     });

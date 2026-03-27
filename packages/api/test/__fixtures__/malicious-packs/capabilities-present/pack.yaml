@@ -1,0 +1,4 @@
+name: cap-pack
+version: "1.0.0"
+description: This pack has capabilities dir
+packType: capability

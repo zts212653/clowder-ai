@@ -328,12 +328,16 @@ export class CodexAgentService implements AgentService {
         delete rawEnv.OPENAI_BASE_URL;
         delete rawEnv.OPENAI_API_BASE;
       }
-      // For API Key mode: use temp HOME to prevent OAuth token refresh interference
+      // For API Key mode: use temp HOME to prevent OAuth token refresh interference.
+      // On Windows, Rust/codex uses USERPROFILE (not HOME) for config directory.
       if (authMode === 'api_key' && customBaseUrl) {
         const { mkdtempSync } = await import('node:fs');
         const { tmpdir } = await import('node:os');
         const isolatedHome = mkdtempSync(`${tmpdir()}/codex-apikey-`);
         rawEnv.HOME = isolatedHome;
+        if (process.platform === 'win32') {
+          rawEnv.USERPROFILE = isolatedHome;
+        }
       }
       const codexEnv = applyAuthMode(rawEnv, authMode);
 

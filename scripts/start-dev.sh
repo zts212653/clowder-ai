@@ -3,8 +3,8 @@
 # Cat Cafe 启动脚本（底层实现）
 # 用户入口:
 #   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
-#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + 非 watch API + 优先当前 .env 端口）
-#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，优先当前 .env 端口)
+#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=opensource + 非 watch API + 优先当前 .env 端口）
+#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=opensource)
 #
 # 直接调用脚本:
 #   ./scripts/start-dev.sh            — 开发模式 (next dev + Redis 持久化)
@@ -12,6 +12,9 @@
 #   ./scripts/start-dev.sh --quick    — 仅跳过重复构建；不改变 dev/prod 模式
 #   ./scripts/start-dev.sh --memory   — 使用内存存储 (重启丢数据)
 #   ./scripts/start-dev.sh --no-redis — 同 --memory
+#   ./scripts/start-dev.sh --daemon   — 后台运行 (日志输出到 cat-cafe-daemon.log)
+#   ./scripts/start-dev.sh --stop     — 停止后台 daemon
+#   ./scripts/start-dev.sh --status   — 查看 daemon 状态
 #   ./scripts/start-dev.sh --profile=dev          — 家里开发默认值 (proxy ON, sidecar ON)
 #   ./scripts/start-dev.sh --profile=opensource   — 开源仓默认值 (proxy OFF, sidecar OFF)
 #   ./scripts/start-dev.sh -- --npm-registry=URL --pip-index-url=URL --hf-endpoint=URL
@@ -60,13 +63,17 @@ NC='\033[0m' # No Color
 QUICK_MODE=false
 USE_REDIS=true
 PROD_WEB=false
+DEBUG_MODE=false
 PROFILE=""
+DAEMON_MODE=false
 for arg in "$@"; do
     case $arg in
         --quick|-q) QUICK_MODE=true ;;
         --memory|--no-redis) USE_REDIS=false ;;
         --prod-web) PROD_WEB=true ;;
+        --debug) DEBUG_MODE=true ;;
         --profile=*) PROFILE="${arg#*=}" ;;
+        --daemon|-d) DAEMON_MODE=true ;;
         *)
             parse_manual_download_source_arg "$arg" || true
             ;;
@@ -75,19 +82,6 @@ done
 
 # 加载环境变量 (放最前面，后续函数需要端口号)
 # 默认读取 .env；.env.local 仅用于 DARE 相关白名单键，避免全量覆盖引发配置漂移。
-clear_inherited_profile_env() {
-    [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
-    [ -n "$PROFILE" ] || return 0
-
-    # Public direct-launch wrappers may inherit a dev shell from another checkout.
-    # Clear only profile-controlled vars, then let .env re-apply explicit overrides.
-    unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED
-    unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
-    unset REDIS_PROFILE
-}
-
-clear_inherited_profile_env
-
 CLI_FRONTEND_PORT_OVERRIDE="${FRONTEND_PORT-}"
 CLI_API_SERVER_PORT_OVERRIDE="${API_SERVER_PORT-}"
 CLI_REDIS_PORT_OVERRIDE="${REDIS_PORT-}"
@@ -100,6 +94,19 @@ CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
 CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
 CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
 PREFER_DOTENV_PORTS="${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}"
+
+clear_inherited_profile_env() {
+    [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
+    [ -n "$PROFILE" ] || return 0
+
+    # Public direct-launch wrappers should honor the requested profile rather
+    # than ambient Cat Cafe shell exports leaked from another checkout.
+    unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED
+    unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
+    unset REDIS_PROFILE
+}
+
+clear_inherited_profile_env
 
 if [ -f .env ]; then
     set -a
@@ -138,7 +145,6 @@ load_dare_env_from_local() {
         DARE_ADAPTER \
         DARE_API_KEY \
         DARE_ENDPOINT \
-        CAT_DARE_MODEL \
         OPENROUTER_API_KEY \
         OPENROUTER_BASE_URL \
         OPENAI_API_KEY \
@@ -164,6 +170,21 @@ default_redis_port() {
     else
         echo "6398"
     fi
+}
+
+normalize_raw_dev_redis_defaults() {
+    [ "$USE_REDIS" = true ] || return 0
+    [ "$PROD_WEB" = false ] || return 0
+    [ "$PREFER_DOTENV_PORTS" = "1" ] && return 0
+    [ -n "$CLI_REDIS_PORT_OVERRIDE" ] && return 0
+    [ "${REDIS_PORT:-}" = "6399" ] || return 0
+
+    REDIS_PORT="6398"
+    case "${REDIS_URL:-}" in
+        ""|"redis://localhost:6399"|"redis://127.0.0.1:6399")
+            REDIS_URL="redis://localhost:6398"
+            ;;
+    esac
 }
 
 # Profile 默认值（env 变量优先，profile 作 fallback）
@@ -244,6 +265,7 @@ print_config_summary() {
 API_PORT=${API_SERVER_PORT:-3004}
 WEB_PORT=${FRONTEND_PORT:-3003}
 REDIS_PORT=${REDIS_PORT:-$(default_redis_port)}
+normalize_raw_dev_redis_defaults
 
 # Profile-aware config resolution
 resolve_config "ANTHROPIC_PROXY_ENABLED"
@@ -312,6 +334,10 @@ REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
 CLEANUP_RUNNING=false
 MANAGED_PIDS=()
+DAEMON_STATE_DIR="${HOME}/.cat-cafe"
+DAEMON_PID_FILE="${DAEMON_STATE_DIR}/daemon.pid"
+DAEMON_LOG_PATH_FILE="${DAEMON_STATE_DIR}/daemon.log-path"
+DAEMON_LOG_FILE="${PROJECT_DIR}/cat-cafe-daemon.log"
 
 export MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
 
@@ -561,10 +587,14 @@ background_eval_with_null_stdin() {
 }
 
 api_launch_command() {
+    local env_prefix=""
+    if [ "$DEBUG_MODE" = true ]; then
+        env_prefix="LOG_LEVEL=debug "
+    fi
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
-        printf '%s' "cd packages/api && exec pnpm run start"
+        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run start"
     else
-        printf '%s' "cd packages/api && exec pnpm run dev"
+        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run dev"
     fi
 }
 
@@ -857,6 +887,11 @@ cleanup() {
         echo "  Redis (端口 $REDIS_PORT) 已关闭"
     fi
     wait 2>/dev/null || true
+    # Only remove PID file if we are the daemon that wrote it (avoid orphaning a parallel daemon)
+    if [ -f "$DAEMON_PID_FILE" ] && [ "$(cat "$DAEMON_PID_FILE" 2>/dev/null)" = "$$" ]; then
+        rm -f "$DAEMON_PID_FILE"
+        rm -f "$DAEMON_LOG_PATH_FILE"
+    fi
     echo "再见！🐾"
 }
 
@@ -930,6 +965,14 @@ main() {
     # 2. 清理缓存
     clean_cache
     sanitize_lockfiles
+
+    # 2.5. 自动安装依赖（worktree 等场景 node_modules 可能不存在或不完整）
+    if [ ! -x "$PROJECT_DIR/node_modules/.bin/tsc" ]; then
+        echo ""
+        echo -e "${YELLOW}检测到依赖不完整，自动安装...${NC}"
+        run_logged_step "pnpm install" 5 pnpm install --frozen-lockfile
+        echo -e "${GREEN}  ✓ 依赖安装完成${NC}"
+    fi
 
     # 3. 构建 shared + API (除非 --quick)
     if [ "$QUICK_MODE" = false ]; then
@@ -1110,4 +1153,99 @@ main() {
 
 # Allow sourcing for testing without executing main
 [[ "${1:-}" == "--source-only" ]] && { return 0 2>/dev/null; exit 0; }
+
+if [[ "${1:-}" == "--stop" ]] || [[ "${1:-}" == "stop" ]] || \
+   [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
+    trap - EXIT INT TERM
+fi
+
+# --stop: 停止后台运行的 daemon
+if [[ "${1:-}" == "--stop" ]] || [[ "${1:-}" == "stop" ]]; then
+    if [ ! -f "$DAEMON_PID_FILE" ]; then
+        echo "没有找到运行中的 daemon（$DAEMON_PID_FILE 不存在）"
+        exit 1
+    fi
+    DAEMON_PID=$(cat "$DAEMON_PID_FILE")
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
+        echo "正在停止 Cat Café daemon (PID: $DAEMON_PID)..."
+        kill -TERM "$DAEMON_PID" 2>/dev/null || true
+        for i in $(seq 1 15); do
+            kill -0 "$DAEMON_PID" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 "$DAEMON_PID" 2>/dev/null; then
+            echo "  进程未响应 TERM，发送 KILL..."
+            kill -KILL "$DAEMON_PID" 2>/dev/null || true
+        fi
+        rm -f "$DAEMON_PID_FILE"
+        rm -f "$DAEMON_LOG_PATH_FILE"
+        echo "Cat Café daemon 已停止 🐾"
+    else
+        echo "Daemon 进程 (PID: $DAEMON_PID) 已不存在，清理 PID 文件"
+        rm -f "$DAEMON_PID_FILE"
+        rm -f "$DAEMON_LOG_PATH_FILE"
+    fi
+    exit 0
+fi
+
+if [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
+    if [ ! -f "$DAEMON_PID_FILE" ]; then
+        echo "Cat Café daemon 未运行（无 PID 文件）"
+        exit 1
+    fi
+    DAEMON_PID=$(cat "$DAEMON_PID_FILE")
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
+        REAL_LOG="$DAEMON_LOG_FILE"
+        [ -f "$DAEMON_LOG_PATH_FILE" ] && REAL_LOG=$(cat "$DAEMON_LOG_PATH_FILE")
+        echo -e "${GREEN}Cat Café daemon 运行中${NC} (PID: $DAEMON_PID)"
+        [ -f "$REAL_LOG" ] && echo "  日志: $REAL_LOG"
+        echo "  停止: pnpm stop  或  ./scripts/start-dev.sh --stop"
+        echo "  查看日志: tail -f $REAL_LOG"
+    else
+        echo "Daemon 进程 (PID: $DAEMON_PID) 已不存在，清理 PID 文件"
+        rm -f "$DAEMON_PID_FILE"
+        exit 1
+    fi
+    exit 0
+fi
+
+if [ "$DAEMON_MODE" = true ]; then
+    if [ -f "$DAEMON_PID_FILE" ]; then
+        EXISTING_PID=$(cat "$DAEMON_PID_FILE")
+        if kill -0 "$EXISTING_PID" 2>/dev/null; then
+            echo -e "${RED}Cat Café daemon 已在运行 (PID: $EXISTING_PID)${NC}"
+            echo "  停止: pnpm stop  或  ./scripts/start-dev.sh --stop"
+            echo "  查看日志: tail -f $DAEMON_LOG_FILE"
+            exit 1
+        else
+            rm -f "$DAEMON_PID_FILE"
+        fi
+    fi
+
+    RESTART_ARGS=()
+    for arg in "$@"; do
+        case "$arg" in
+            --daemon|-d) ;;
+            *) RESTART_ARGS+=("$arg") ;;
+        esac
+    done
+
+    mkdir -p "$DAEMON_STATE_DIR"
+    echo "🐱 Cat Café 以后台模式启动..."
+    echo "  日志输出: $DAEMON_LOG_FILE"
+    nohup "$0" "${RESTART_ARGS[@]}" > "$DAEMON_LOG_FILE" 2>&1 &
+    DAEMON_PID=$!
+    disown "$DAEMON_PID"
+    echo "$DAEMON_PID" > "$DAEMON_PID_FILE"
+    echo "$DAEMON_LOG_FILE" > "$DAEMON_LOG_PATH_FILE"
+    echo -e "${GREEN}  Daemon PID: $DAEMON_PID${NC}"
+    echo ""
+    echo "管理命令:"
+    echo "  查看状态: pnpm start:status"
+    echo "  查看日志: tail -f $DAEMON_LOG_FILE"
+    echo "  停止服务: pnpm stop"
+    trap - EXIT INT TERM
+    exit 0
+fi
+
 main "$@"

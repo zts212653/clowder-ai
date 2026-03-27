@@ -98,11 +98,6 @@ export function resolveProviderProfilesRootSync(_projectRoot: string): string {
   return resolveGlobalRoot();
 }
 
-/**
- * Record that a project root has been successfully migrated to global storage.
- * Written to the global config dir (always writable) so that read-only project
- * checkouts do not re-trigger migration on every provider-store read.
- */
 /** Canonicalize a project root (resolve symlinks like /tmp → /private/tmp on macOS). */
 function canonicalizeRoot(root: string): string {
   const abs = resolve(root);
@@ -113,6 +108,11 @@ function canonicalizeRoot(root: string): string {
   }
 }
 
+/**
+ * Record that a project root has been successfully migrated to global storage.
+ * Written to the global config dir (always writable) so that read-only project
+ * checkouts do not re-trigger migration on every provider-store read.
+ */
 export function markProjectRootMigrated(projectRoot: string): void {
   const globalRoot = resolveGlobalRoot();
   const dir = resolve(globalRoot, CAT_CAFE_DIR);

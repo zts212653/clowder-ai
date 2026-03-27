@@ -40,6 +40,7 @@ export interface RuntimeCatInput {
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget;
+  ocProviderName?: string;
 }
 
 export interface RuntimeCatUpdate {
@@ -63,6 +64,7 @@ export interface RuntimeCatUpdate {
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget | null;
+  ocProviderName?: string | null;
   available?: boolean;
 }
 
@@ -221,6 +223,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           : {}),
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.cliConfigArgs && input.cliConfigArgs.length > 0 ? { cliConfigArgs: input.cliConfigArgs } : {}),
+        ...(input.ocProviderName ? { ocProviderName: input.ocProviderName } : {}),
         ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
         ...(input.personality != null && input.personality.trim().length > 0 ? { personality: input.personality } : {}),
         ...(input.teamStrengths != null && input.teamStrengths.trim().length > 0
@@ -406,6 +409,13 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.cliConfigArgs = patch.cliConfigArgs;
     } else {
       delete variant.cliConfigArgs;
+    }
+  }
+  if (patch.ocProviderName !== undefined) {
+    if (patch.ocProviderName) {
+      variant.ocProviderName = patch.ocProviderName;
+    } else {
+      delete variant.ocProviderName;
     }
   }
   if (patch.available !== undefined && catalog.version === 2) {

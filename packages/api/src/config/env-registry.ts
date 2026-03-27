@@ -98,16 +98,24 @@ export const ENV_VARS: EnvDefinition[] = [
   { name: 'UPLOAD_DIR', defaultValue: './uploads', description: '文件上传目录', category: 'server', sensitive: false },
   {
     name: 'PROJECT_ALLOWED_ROOTS',
-    defaultValue: 'home, tmp roots, /workspace, /Volumes (macOS), home-only (Windows)',
+    defaultValue: '(未设置 — 使用 denylist 模式，仅拦截系统目录)',
     description:
-      '允许访问的项目根目录（按系统路径分隔符分隔，设置后覆盖默认值；配合 PROJECT_ALLOWED_ROOTS_APPEND=true 可追加）',
+      'Legacy allowlist 模式：设置后切换为 allowlist，仅允许列出的根目录（按系统路径分隔符分隔；配合 PROJECT_ALLOWED_ROOTS_APPEND=true 可追加默认 roots）。未设置时使用 denylist 模式（见 PROJECT_DENIED_ROOTS）。',
     category: 'server',
     sensitive: false,
   },
   {
     name: 'PROJECT_ALLOWED_ROOTS_APPEND',
     defaultValue: 'false',
-    description: '设为 true 则追加而非覆盖默认根目录',
+    description: '设为 true 则将 PROJECT_ALLOWED_ROOTS 追加到默认根目录（home, /tmp, /workspace 等）而非覆盖',
+    category: 'server',
+    sensitive: false,
+  },
+  {
+    name: 'PROJECT_DENIED_ROOTS',
+    defaultValue: '(平台默认系统目录)',
+    description:
+      'Denylist 模式下额外拦截的目录（按系统路径分隔符分隔，会合并到平台默认拦截列表）。仅在未设置 PROJECT_ALLOWED_ROOTS 时生效。',
     category: 'server',
     sensitive: false,
   },
@@ -498,9 +506,16 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'FEISHU_VERIFICATION_TOKEN',
     defaultValue: '(未设置)',
-    description: '飞书 webhook 验证 token',
+    description: '飞书 webhook 验证 token（仅 webhook 模式需要）',
     category: 'connector',
     sensitive: true,
+  },
+  {
+    name: 'FEISHU_CONNECTION_MODE',
+    defaultValue: 'webhook',
+    description: '飞书连接模式：webhook（需公网 URL）或 websocket（长连接，无需公网）',
+    category: 'connector',
+    sensitive: false,
   },
   {
     name: 'DINGTALK_APP_KEY',
@@ -515,6 +530,37 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '钉钉应用 AppSecret',
     category: 'connector',
     sensitive: true,
+  },
+
+  // --- GitHub Repo Inbox (F141) ---
+  {
+    name: 'GITHUB_WEBHOOK_SECRET',
+    defaultValue: '(未设置 → 不启用)',
+    description: 'GitHub webhook HMAC-SHA256 shared secret（F141 Repo Inbox）',
+    category: 'connector',
+    sensitive: true,
+  },
+  {
+    name: 'GITHUB_REPO_ALLOWLIST',
+    defaultValue: '(未设置)',
+    description: '允许的仓库列表，逗号分隔（如 zts212653/clowder-ai）',
+    category: 'connector',
+    sensitive: false,
+  },
+  {
+    name: 'GITHUB_REPO_INBOX_CAT_ID',
+    defaultValue: '(未设置)',
+    description: '接收 Repo Inbox 事件的猫 ID',
+    category: 'connector',
+    sensitive: false,
+  },
+  {
+    name: 'GITHUB_AUTHORITATIVE_REVIEW_LOGINS',
+    defaultValue: 'chatgpt-codex-connector[bot]',
+    description:
+      'Comma-separated GitHub logins whose review feedback is handled by the email channel (authoritative source). F140 API polling skips these to avoid double-delivery.',
+    category: 'connector',
+    sensitive: false,
   },
 
   // --- codex ---

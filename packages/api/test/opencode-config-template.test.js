@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
-import { generateOpenCodeConfig } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
+import {
+  generateOpenCodeConfig,
+  generateOpenCodeRuntimeConfig,
+  OC_API_KEY_ENV,
+  OC_BASE_URL_ENV,
+  parseOpenCodeModel,
+  writeOpenCodeRuntimeConfig,
+} from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 
 describe('opencode Config Template (AC-9 + AC-10)', () => {
   test('generates valid opencode config with required fields', () => {
@@ -151,5 +161,60 @@ describe('opencode Config Template (AC-9 + AC-10)', () => {
     const json = JSON.stringify(config);
     const parsed = JSON.parse(json);
     assert.deepStrictEqual(parsed, config, 'config must be JSON-serializable');
+  });
+});
+
+describe('parseOpenCodeModel', () => {
+  test('parses provider/model format with nested model namespace', () => {
+    const parsed = parseOpenCodeModel('maas/google/gemini-3-flash');
+    assert.deepStrictEqual(parsed, { providerName: 'maas', modelName: 'google/gemini-3-flash' });
+  });
+
+  test('returns null for bare model names', () => {
+    assert.equal(parseOpenCodeModel('glm-5'), null);
+  });
+});
+
+describe('generateOpenCodeRuntimeConfig', () => {
+  test('generates custom provider config with env placeholders and stripped model keys', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'maas',
+      models: ['maas/glm-5', 'maas/glm-4-plus'],
+      defaultModel: 'maas/glm-5',
+      apiType: 'openai',
+      hasBaseUrl: true,
+    });
+
+    assert.equal(config.model, 'maas/glm-5');
+    assert.deepStrictEqual(config.provider.maas.models, {
+      'glm-5': { name: 'glm-5' },
+      'glm-4-plus': { name: 'glm-4-plus' },
+    });
+    assert.equal(config.provider.maas.npm, '@ai-sdk/openai-compatible');
+    assert.equal(config.provider.maas.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
+    assert.equal(config.provider.maas.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
+  });
+});
+
+describe('writeOpenCodeRuntimeConfig', () => {
+  test('writes invocation-scoped runtime config under .cat-cafe', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-runtime-config-'));
+    try {
+      const configPath = writeOpenCodeRuntimeConfig(tmpRoot, 'opencode-maas', 'inv-123', {
+        providerName: 'maas',
+        models: ['maas/glm-5'],
+        defaultModel: 'maas/glm-5',
+        apiType: 'openai',
+        hasBaseUrl: true,
+      });
+
+      assert.ok(existsSync(configPath), 'runtime config file must exist');
+      assert.match(configPath, /\.cat-cafe\/opencode-runtime-opencode-maas-inv-123\.json$/);
+      const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+      assert.equal(content.model, 'maas/glm-5');
+      assert.deepStrictEqual(content.provider.maas.models, { 'glm-5': { name: 'glm-5' } });
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 });
