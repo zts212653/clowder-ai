@@ -12,9 +12,9 @@ import {
   comparePencilDirs,
   discoverExternalMcpServers,
   generateCliConfigs,
+  getPencilBinarySuffix,
   migrateLegacyCatCafeCapability,
   orchestrate,
-  PENCIL_BINARY_SUFFIX,
   parsePencilVersion,
   readCapabilitiesConfig,
   resolvePencilBinary,
@@ -378,26 +378,37 @@ describe('comparePencilDirs', () => {
 });
 
 describe('resolvePencilBinary', () => {
-  it('PENCIL_BINARY_SUFFIX must not start with / (deterministic regression guard)', () => {
+  it('getPencilBinarySuffix must not start with / (deterministic regression guard)', () => {
+    const suffix = getPencilBinarySuffix();
     assert.ok(
-      !PENCIL_BINARY_SUFFIX.startsWith('/'),
-      `PENCIL_BINARY_SUFFIX is '${PENCIL_BINARY_SUFFIX}' — leading '/' causes path.resolve() to discard all prefix segments`,
+      !suffix.startsWith('/'),
+      `getPencilBinarySuffix() is '${suffix}' — leading '/' causes path.resolve() to discard all prefix segments`,
     );
   });
 
-  it('returns a full path under ~/.antigravity/extensions when Pencil is installed', async () => {
+  it('getPencilBinarySuffix returns platform-appropriate binary name', () => {
+    const suffix = getPencilBinarySuffix();
+    assert.ok(suffix.startsWith('out/mcp-server-'), `unexpected suffix: ${suffix}`);
+    assert.ok(
+      suffix.includes('darwin') || suffix.includes('linux') || suffix.includes('windows'),
+      `suffix should contain platform: ${suffix}`,
+    );
+  });
+
+  it('returns a full path under a known extensions dir when Pencil is installed', async () => {
     const result = await resolvePencilBinary();
     if (result === null) {
-      // No Pencil installation — skip gracefully (CI / environments without Antigravity)
+      // No Pencil installation — skip gracefully (CI / environments without editor)
       return;
     }
     assert.ok(
       !result.startsWith('/out/'),
-      `resolvePencilBinary() returned '${result}' — looks like PENCIL_BINARY_SUFFIX has a leading '/' that breaks path.resolve()`,
+      `resolvePencilBinary() returned '${result}' — looks like binary suffix has a leading '/' that breaks path.resolve()`,
     );
+    // #272: accept any known editor extensions dir, not just .antigravity
     assert.ok(
-      result.includes('.antigravity/extensions'),
-      `resolvePencilBinary() should return a path under ~/.antigravity/extensions, got '${result}'`,
+      result.includes('/extensions/highagency.pencildev-'),
+      `resolvePencilBinary() should return a path under an editor extensions dir, got '${result}'`,
     );
     assert.ok(
       result.includes('/out/mcp-server-'),

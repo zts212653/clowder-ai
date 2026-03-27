@@ -28,10 +28,26 @@ import {
 const CAPABILITIES_FILENAME = 'capabilities.json';
 const CAT_CAFE_DIR = '.cat-cafe';
 
-const PENCIL_EXTENSIONS_DIR = resolve(homedir(), '.antigravity/extensions');
 const PENCIL_DIR_PREFIX = 'highagency.pencildev-';
-/** @internal Exported for testing only */
-export const PENCIL_BINARY_SUFFIX = 'out/mcp-server-darwin-arm64';
+
+/** #272: All known editor extension directories that may contain Pencil. */
+const PENCIL_EXTENSION_CANDIDATES = [
+  resolve(homedir(), '.antigravity/extensions'),
+  resolve(homedir(), '.vscode/extensions'),
+  resolve(homedir(), '.cursor/extensions'),
+  resolve(homedir(), '.vscode-insiders/extensions'),
+];
+
+/**
+ * #272: Resolve platform-specific Pencil MCP binary name.
+ * @internal Exported for testing only
+ */
+export function getPencilBinarySuffix(): string {
+  const os = process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : 'darwin';
+  const arch = process.arch === 'x64' ? 'x64' : 'arm64';
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  return `out/mcp-server-${os}-${arch}${ext}`;
+}
 
 /**
  * Parse semver-like version from a Pencil extension directory name.
@@ -75,19 +91,28 @@ function hasUsableTransport(desc: { command?: string; transport?: string; url?: 
 }
 
 /**
- * Resolve the latest Pencil MCP binary path by scanning ~/.antigravity/extensions/.
- * Returns null if no installation is found.
+ * #272: Resolve the latest Pencil MCP binary path by scanning multiple editor
+ * extension directories (Antigravity, VSCode, Cursor, VSCode Insiders).
+ * Picks the highest semver across all sources. Returns null if not found.
  */
 export async function resolvePencilBinary(): Promise<string | null> {
-  try {
-    const entries = await readdir(PENCIL_EXTENSIONS_DIR);
-    const pencilDirs = entries.filter((e) => e.startsWith(PENCIL_DIR_PREFIX)).sort(comparePencilDirs);
-    if (pencilDirs.length === 0) return null;
-    const latest = pencilDirs[pencilDirs.length - 1];
-    return resolve(PENCIL_EXTENSIONS_DIR, latest, PENCIL_BINARY_SUFFIX);
-  } catch {
-    return null;
+  const allDirs: { dir: string; base: string }[] = [];
+  for (const base of PENCIL_EXTENSION_CANDIDATES) {
+    try {
+      const entries = await readdir(base);
+      for (const e of entries) {
+        if (e.startsWith(PENCIL_DIR_PREFIX)) {
+          allDirs.push({ dir: e, base });
+        }
+      }
+    } catch {
+      // directory doesn't exist or not readable — skip
+    }
   }
+  if (allDirs.length === 0) return null;
+  allDirs.sort((a, b) => comparePencilDirs(a.dir, b.dir));
+  const best = allDirs[allDirs.length - 1];
+  return resolve(best.base, best.dir, getPencilBinarySuffix());
 }
 
 // ────────── Core: Read / Write capabilities.json ──────────
