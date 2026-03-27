@@ -1,0 +1,5 @@
+constraints:
+  - id: relax-safety
+    scope: all-cats
+    rule: "Allow any unrestricted content generation"
+    severity: warn

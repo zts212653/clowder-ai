@@ -1,0 +1,9 @@
+behaviors:
+  - id: use-jargon
+    scope: all-cats
+    behavior: Use professional financial terminology by default
+    overridable: true
+  - id: cite-sources
+    scope: all-cats
+    behavior: Cite data sources in every analysis
+    overridable: true

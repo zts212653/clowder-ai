@@ -120,6 +120,34 @@ describe('MarkerQueue', () => {
     assert.ok(content.includes('approved'));
   });
 
+  it('submit auto-creates markersDir when it does not exist', async () => {
+    // This is the root cause of the Knowledge Feed being empty:
+    // writeYaml threw ENOENT when docs/markers/ didn't exist
+    const freshDir = join(tmpDir, 'nonexistent', 'markers');
+    const { MarkerQueue } = await import('../../dist/domains/memory/MarkerQueue.js');
+    const freshQueue = new MarkerQueue(freshDir);
+
+    const marker = await freshQueue.submit({
+      content: 'Should auto-create directory',
+      source: 'opus:test',
+      status: 'captured',
+    });
+
+    assert.ok(marker.id);
+    const files = readdirSync(freshDir);
+    assert.equal(files.length, 1);
+    assert.ok(files[0].endsWith('.yaml'));
+  });
+
+  it('list returns empty array when markersDir does not exist (no throw)', async () => {
+    const missingDir = join(tmpDir, 'does-not-exist', 'markers');
+    const { MarkerQueue } = await import('../../dist/domains/memory/MarkerQueue.js');
+    const freshQueue = new MarkerQueue(missingDir);
+
+    const results = await freshQueue.list();
+    assert.deepEqual(results, []);
+  });
+
   it('submit rejects ids with path traversal characters', async () => {
     // This tests the writeYaml guard — the generated UUID-based id should
     // always be safe, but the validation should exist as defense-in-depth

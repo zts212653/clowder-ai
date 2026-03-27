@@ -100,7 +100,7 @@ describe('Briefing Capsule Builder', () => {
       assert.ok(!result.includes('狼队友'), 'should NOT contain teammate section');
     });
 
-    it('includes submit_game_action tool usage with correct params', () => {
+    it('includes cat_cafe_submit_game_action tool usage with correct params', () => {
       const rt = makeRuntime();
       const result = buildFirstWakeBriefing({
         gameRuntime: rt,
@@ -108,7 +108,7 @@ describe('Briefing Capsule Builder', () => {
         teammates: [{ catId: 'codex', seatId: 'P2' }],
       });
 
-      assert.ok(result.includes('submit_game_action'), 'should mention the tool');
+      assert.ok(result.includes('cat_cafe_submit_game_action'), 'should mention the tool');
       assert.ok(result.includes('game-test-001'), 'should include gameId');
       assert.ok(result.includes('round: 1'), 'should include round');
       assert.ok(result.includes('night_wolf'), 'should include phase');
@@ -177,7 +177,7 @@ describe('Briefing Capsule Builder', () => {
         seatId: 'P1',
       });
 
-      assert.ok(result.includes('submit_game_action'), 'should include tool usage');
+      assert.ok(result.includes('cat_cafe_submit_game_action'), 'should include tool usage');
       assert.ok(result.includes('action: "vote"'), 'should include vote action');
     });
   });

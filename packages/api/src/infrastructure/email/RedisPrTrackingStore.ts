@@ -1,5 +1,11 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { CiStateFields, IPrTrackingStore, PrTrackingEntry, PrTrackingInput } from './PrTrackingStore.js';
+import type {
+  CiStateFields,
+  ConflictStateFields,
+  IPrTrackingStore,
+  PrTrackingEntry,
+  PrTrackingInput,
+} from './PrTrackingStore.js';
 import { PrTrackingKeys } from './pr-tracking-keys.js';
 
 const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
@@ -96,6 +102,21 @@ export class RedisPrTrackingStore implements IPrTrackingStore {
     await this.redis.eval(PATCH_CI_STATE_LUA, 1, key, ...argv);
   }
 
+  async patchConflictState(repoFullName: string, prNumber: number, conflictFields: ConflictStateFields): Promise<void> {
+    const updates: Record<string, string> = {};
+    if (conflictFields.lastConflictFingerprint !== undefined)
+      updates.lastConflictFingerprint = conflictFields.lastConflictFingerprint;
+    if (conflictFields.lastConflictNotifiedAt !== undefined)
+      updates.lastConflictNotifiedAt = String(conflictFields.lastConflictNotifiedAt);
+    if (conflictFields.mergeState !== undefined) updates.mergeState = conflictFields.mergeState;
+
+    if (Object.keys(updates).length === 0) return;
+
+    const key = PrTrackingKeys.detail(repoFullName, prNumber);
+    const argv = Object.entries(updates).flat();
+    await this.redis.eval(PATCH_CI_STATE_LUA, 1, key, ...argv);
+  }
+
   async listAll(): Promise<PrTrackingEntry[]> {
     const members = await this.redis.zrevrange(PrTrackingKeys.all(), 0, -1);
     if (members.length === 0) return [];
@@ -160,6 +181,10 @@ export class RedisPrTrackingStore implements IPrTrackingStore {
       ...(data.lastCiBucket ? { lastCiBucket: data.lastCiBucket } : {}),
       ...(data.lastCiNotifiedAt ? { lastCiNotifiedAt: parseInt(data.lastCiNotifiedAt, 10) } : {}),
       ...(data.ciTrackingEnabled !== undefined ? { ciTrackingEnabled: data.ciTrackingEnabled === 'true' } : {}),
+      // F140: conflict state
+      ...(data.lastConflictFingerprint ? { lastConflictFingerprint: data.lastConflictFingerprint } : {}),
+      ...(data.lastConflictNotifiedAt ? { lastConflictNotifiedAt: parseInt(data.lastConflictNotifiedAt, 10) } : {}),
+      ...(data.mergeState ? { mergeState: data.mergeState } : {}),
     };
   }
 }

@@ -80,7 +80,7 @@ export class CiCdCheckPoller {
     const routeResult = await cicdRouter.route(pollResult);
 
     if (routeResult.kind === 'notified' && routeResult.bucket === 'fail' && invokeTrigger) {
-      const policy: ConnectorTriggerPolicy = { priority: 'normal', reason: 'github_ci_failure' };
+      const policy: ConnectorTriggerPolicy = { priority: 'urgent', reason: 'github_ci_failure' };
       invokeTrigger.trigger(
         routeResult.threadId,
         routeResult.catId as CatId,

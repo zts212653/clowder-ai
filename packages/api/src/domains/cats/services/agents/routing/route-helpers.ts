@@ -30,6 +30,8 @@ export interface RouteStrategyDeps {
   draftStore?: IDraftStore;
   /** F079 Bug 2: Optional broadcaster for real-time vote result delivery */
   socketManager?: RouteBroadcaster;
+  /** F129: Pack store for loading active packs at invocation time */
+  packStore?: import('../../../../packs/PackStore.js').PackStore;
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.
@@ -252,6 +254,17 @@ export async function fetchAfterCursor(
   return messageStore.getByThreadAfter(threadId, afterId, undefined, userId);
 }
 
+/** Options for caller-specified budget overrides */
+export interface IncrementalContextOptions {
+  /**
+   * When provided, overrides budget.maxContextTokens for the token-trim pass.
+   * The routing layer should calculate this as:
+   *   maxPromptTokens - systemPartsTokens - messageTokens - guard
+   * so the assembled context + system parts never exceed the model's input limit.
+   */
+  effectiveMaxContextTokens?: number;
+}
+
 export async function assembleIncrementalContext(
   deps: RouteStrategyDeps,
   userId: string,
@@ -259,6 +272,7 @@ export async function assembleIncrementalContext(
   catId: CatId,
   currentUserMessageId?: string,
   thinkingMode?: 'debug' | 'play',
+  options?: IncrementalContextOptions,
 ): Promise<IncrementalContextResult> {
   if (!deps.deliveryCursorStore) {
     return { contextText: '', includesCurrentUserMessage: false, currentMessageFilteredOut: false };
@@ -316,24 +330,42 @@ export async function assembleIncrementalContext(
     return `[${m.id}] ${rendered}`;
   });
 
-  // 第二刀: Aggregate token budget — trim oldest lines until within maxContextTokens
+  // 第二刀: Aggregate token budget — trim oldest lines until within effective token limit.
+  // A+ fix: routing layer can pass effectiveMaxContextTokens (= maxPromptTokens minus system parts)
+  // to prevent the assembled context + system prompt from exceeding the model's input limit.
+  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
+
+  // effectiveMaxContextTokens === 0 means system parts already exhausted the entire prompt budget.
+  // Return empty context with degradation rather than skipping the trim (old behavior of `> 0` guard).
+  if (effectiveTokenBudget <= 0) {
+    const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
+    const zeroBoundaryId = capped[capped.length - 1]?.id;
+    return {
+      contextText: '',
+      boundaryId: zeroBoundaryId,
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut,
+      degradation: zeroBudgetDegradation,
+    };
+  }
+
   let tokenTrimmed = false;
   let tokenTrimStart = 0;
-  if (budget.maxContextTokens > 0) {
+  if (effectiveTokenBudget > 0) {
     const perLineTokens = lines.map((l) => estimateTokens(l));
     const totalTokens = perLineTokens.reduce((a, b) => a + b, 0);
-    if (totalTokens > budget.maxContextTokens) {
+    if (totalTokens > effectiveTokenBudget) {
       tokenTrimmed = true;
       // Scan from oldest: accumulate tokens to drop until remainder fits budget
       let dropTokens = 0;
       for (let i = 0; i < perLineTokens.length - 1; i++) {
         dropTokens += perLineTokens[i];
-        if (totalTokens - dropTokens <= budget.maxContextTokens) {
+        if (totalTokens - dropTokens <= effectiveTokenBudget) {
           tokenTrimStart = i + 1;
           break;
         }
       }
-      if (totalTokens - dropTokens > budget.maxContextTokens) {
+      if (totalTokens - dropTokens > effectiveTokenBudget) {
         // Even after dropping all but one message, the last message alone may exceed
         // maxContextTokens (e.g. a single huge message). We still keep it because
         // returning empty context is worse — the cat gets no context at all. The
@@ -360,11 +392,11 @@ export async function assembleIncrementalContext(
 
   let degradation: string | undefined;
   if (wasCapped && tokenTrimmed) {
-    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条经 maxMessages(${budget.maxMessages}) 和 token 预算(${budget.maxContextTokens}) 双重截断，已保留最近 ${finalCapped.length} 条`;
+    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条经 maxMessages(${budget.maxMessages}) 和 token 预算(${effectiveTokenBudget}) 双重截断，已保留最近 ${finalCapped.length} 条`;
   } else if (wasCapped) {
     degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条超出预算 ${budget.maxMessages}，已保留最近 ${finalCapped.length} 条`;
   } else if (tokenTrimmed) {
-    degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${budget.maxContextTokens})，已保留最近 ${finalCapped.length} 条`;
+    degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${effectiveTokenBudget})，已保留最近 ${finalCapped.length} 条`;
   }
 
   const boundaryId = finalCapped[finalCapped.length - 1]?.id;

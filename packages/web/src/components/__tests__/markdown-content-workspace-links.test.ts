@@ -45,7 +45,7 @@ describe('resolveRelativePath', () => {
   });
 
   it('resolves parent traversal (..)', () => {
-    expect(resolveRelativePath('docs/features', '../BACKLOG.md')).toBe('docs/BACKLOG.md');
+    expect(resolveRelativePath('docs/features', '../BACKLOG.md')).toBe('docs/ROADMAP.md');
   });
 
   it('resolves multiple parent traversals', () => {

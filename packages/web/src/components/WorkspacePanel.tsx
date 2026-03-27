@@ -15,8 +15,10 @@ import { CodeViewer } from './workspace/CodeViewer';
 import { FileIcon } from './workspace/FileIcons';
 import { GitPanel } from './workspace/GitPanel';
 import { JsxPreview } from './workspace/JsxPreview';
+import { KnowledgeFeed } from './workspace/KnowledgeFeed';
 import { LinkedRootRemoveButton, LinkedRootsManager } from './workspace/LinkedRootsManager';
 import { ResizeHandle } from './workspace/ResizeHandle';
+import { SchedulePanel } from './workspace/SchedulePanel';
 import { TerminalTab } from './workspace/TerminalTab';
 import { WorkspaceTree } from './workspace/WorkspaceTree';
 
@@ -167,6 +169,9 @@ export function WorkspacePanel() {
   const { createFile, createDir, deleteItem, renameItem, uploadFile } = useFileManagement();
 
   const [viewMode, setViewMode] = useState<'files' | 'changes' | 'git' | 'terminal' | 'browser'>('files');
+  // Phase H: Workspace mode switcher (dev tools vs knowledge feed)
+  const workspaceMode = useChatStore((s) => s.workspaceMode);
+  const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
   const [previewPort, setPreviewPort] = useState<number | undefined>();
   const [previewPath, setPreviewPath] = useState<string>('/');
 
@@ -645,449 +650,498 @@ export function WorkspacePanel() {
         </div>
       </form>
 
-      {/* Files / Changes toggle */}
-      <div className="flex border-b border-cocreator-light/40">
-        {(['files', 'changes', 'git', 'terminal', 'browser'] as const).map((mode) => {
-          const labels: Record<typeof mode, string> = {
-            files: 'Files',
-            changes: 'Changes',
-            git: 'Git',
-            terminal: 'Term',
-            browser: '🌐',
-          };
-          return (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setViewMode(mode)}
-              className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-                viewMode === mode
-                  ? 'text-cocreator-primary border-b-2 border-cocreator-primary'
-                  : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
-              }`}
-            >
-              {labels[mode]}
-            </button>
-          );
-        })}
+      {/* Phase H: Workspace mode switcher */}
+      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/50">
+        <button
+          type="button"
+          onClick={() => setWorkspaceMode('dev')}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+            workspaceMode === 'dev'
+              ? 'bg-cocreator-bg text-cocreator-dark border border-cocreator-light/60'
+              : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
+          }`}
+        >
+          <span className="text-xs">&lt;/&gt;</span> 开发
+        </button>
+        <button
+          type="button"
+          onClick={() => setWorkspaceMode('knowledge')}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+            workspaceMode === 'knowledge'
+              ? 'bg-cocreator-primary/10 text-cocreator-primary border border-cocreator-primary/30'
+              : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
+          }`}
+        >
+          <span className="text-xs">✨</span> 知识
+        </button>
+        <button
+          type="button"
+          onClick={() => setWorkspaceMode('schedule')}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+            workspaceMode === 'schedule'
+              ? 'bg-cocreator-bg text-cocreator-dark border border-cocreator-light/60'
+              : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
+          }`}
+        >
+          <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm0 2a6 6 0 100 12A6 6 0 008 2zm.5 2v4.25l2.85 2.85a.5.5 0 01-.7.7L7.8 8.95A.5.5 0 017.5 8.6V4a.5.5 0 011 0z" />
+          </svg>
+          调度
+        </button>
       </div>
 
-      {/* Error */}
-      {error && <div className="px-3 py-2 text-xs text-red-600 bg-red-50/80 border-b border-red-100">{error}</div>}
-
-      {/* F120: Port Discovery Toast — matches design Scene 2 */}
-      {portDiscoveryToast && (
-        <div className="mx-3 my-2 p-4 rounded-xl bg-white shadow-md border border-[#E8E7E5]">
-          <div className="flex items-start justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <span className="text-[#E29578] text-base">◉</span>
-              <span className="text-sm font-semibold text-[#1A1918]">Dev Server Detected</span>
-            </div>
-            <button
-              type="button"
-              className="text-[#9C9B99] hover:text-[#5a4a42] text-xs"
-              onClick={() => setPortDiscoveryToast(null)}
-            >
-              ✕
-            </button>
-          </div>
-          <p className="text-xs text-[#6D6C6A] ml-6 mb-3">
-            localhost:{portDiscoveryToast.port} is now listening
-            {portDiscoveryToast.framework && portDiscoveryToast.framework !== 'unknown'
-              ? ` (${portDiscoveryToast.framework})`
-              : ''}
-          </p>
-          <div className="flex items-center gap-2 ml-6">
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-md bg-[#E29578] text-white text-xs font-medium hover:bg-[#d4856a] transition-colors"
-              onClick={() => {
-                setPreviewPort(portDiscoveryToast.port);
-                setViewMode('browser');
-                setPortDiscoveryToast(null);
-              }}
-            >
-              Open Preview
-            </button>
-            <button
-              type="button"
-              className="px-3 py-1.5 text-xs text-[#5a4a42]/70 hover:text-[#5a4a42]"
-              onClick={() => setPortDiscoveryToast(null)}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {viewMode === 'browser' ? (
-        <BrowserPanel initialPort={previewPort} initialPath={previewPath} />
-      ) : viewMode === 'terminal' ? (
-        worktreeId ? (
-          <TerminalTab worktreeId={worktreeId} />
-        ) : (
-          <div className="flex items-center justify-center h-full text-sm text-cocreator-dark/50">
-            请先选择一个 Worktree
-          </div>
-        )
-      ) : viewMode === 'git' ? (
-        <GitPanel />
-      ) : viewMode === 'changes' ? (
-        <ChangesPanel worktreeId={worktreeId} basisPct={treeBasis} />
+      {/* Knowledge / Schedule / Dev mode routing */}
+      {workspaceMode === 'knowledge' ? (
+        <KnowledgeFeed />
+      ) : workspaceMode === 'schedule' ? (
+        <SchedulePanel />
       ) : (
         <>
-          {/* Search results — grouped when in 'all' mode */}
-          {searchResults.length > 0 &&
-            (() => {
-              const fileHits = searchResults.filter((r) => r.matchType === 'filename');
-              const contentHits = searchResults.filter((r) => r.matchType === 'content');
-              const isGrouped = fileHits.length > 0 || contentHits.length > 0;
+          {/* Files / Changes toggle */}
+          <div className="flex border-b border-cocreator-light/40">
+            {(['files', 'changes', 'git', 'terminal', 'browser'] as const).map((mode) => {
+              const labels: Record<typeof mode, string> = {
+                files: 'Files',
+                changes: 'Changes',
+                git: 'Git',
+                terminal: 'Term',
+                browser: '🌐',
+              };
               return (
-                <div className="border-b border-cocreator-light/40 max-h-64 overflow-y-auto">
-                  {isGrouped && fileHits.length > 0 && (
-                    <>
-                      <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-                        文件名匹配 ({fileHits.length})
-                      </div>
-                      {fileHits.map((r, i) => (
-                        <SearchResultItem
-                          key={`f:${r.path}:${i}`}
-                          path={r.path}
-                          line={0}
-                          content=""
-                          query={searchQuery}
-                          onClick={() => handleSearchResultClick(r.path, 0)}
-                        />
-                      ))}
-                    </>
-                  )}
-                  {isGrouped && contentHits.length > 0 && (
-                    <>
-                      <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-                        内容匹配 ({contentHits.length})
-                      </div>
-                      {contentHits.map((r, i) => (
-                        <SearchResultItem
-                          key={`c:${r.path}:${r.line}:${i}`}
-                          path={r.path}
-                          line={r.line}
-                          content={r.content}
-                          query={searchQuery}
-                          onClick={() => handleSearchResultClick(r.path, r.line)}
-                        />
-                      ))}
-                    </>
-                  )}
-                  {!isGrouped && (
-                    <>
-                      <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-                        {searchResults.length} 个结果
-                      </div>
-                      {searchResults.map((r, i) => (
-                        <SearchResultItem
-                          key={`${r.path}:${r.line}:${i}`}
-                          path={r.path}
-                          line={r.line}
-                          content={r.content}
-                          query={searchQuery}
-                          onClick={() => handleSearchResultClick(r.path, r.line)}
-                        />
-                      ))}
-                    </>
-                  )}
-                </div>
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode)}
+                  className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                    viewMode === mode
+                      ? 'text-cocreator-primary border-b-2 border-cocreator-primary'
+                      : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
+                  }`}
+                >
+                  {labels[mode]}
+                </button>
               );
-            })()}
+            })}
+          </div>
 
-          {/* File tree */}
-          <WorkspaceTree
-            tree={tree}
-            loading={loading}
-            expandedPaths={expandedPaths}
-            toggleExpand={toggleExpand}
-            onSelect={handleFileSelect}
-            onCite={handleCite}
-            selectedPath={openFilePath}
-            hasFile={!!file}
-            basisPct={treeBasis}
-            callbacks={treeCallbacks}
-          />
+          {/* Error */}
+          {error && <div className="px-3 py-2 text-xs text-red-600 bg-red-50/80 border-b border-red-100">{error}</div>}
 
-          {/* Vertical resize handle + File viewer */}
-          {(file || openTabs.length > 0) && (
-            <>
-              <ResizeHandle direction="vertical" onResize={handleVerticalResize} onDoubleClick={resetTreeBasis} />
-              <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
-                {/* Tab bar */}
-                {openTabs.length > 0 && (
-                  <div className="flex bg-[#1E1E24] border-b border-[#2a2a32] overflow-x-auto scrollbar-none">
-                    {openTabs.map((tab) => (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => setOpenFile(tab)}
-                        className={`group flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono border-r border-[#2a2a32] flex-shrink-0 transition-colors ${
-                          tab === openFilePath
-                            ? 'bg-[#2a2a32] text-gray-200'
-                            : 'text-gray-500 hover:text-gray-300 hover:bg-[#252530]'
-                        }`}
-                        title={tab}
-                      >
-                        <FileIcon name={tab} />
-                        <span className="truncate max-w-[120px]">{tab.split('/').pop()}</span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            closeTab(tab);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.stopPropagation();
-                              closeTab(tab);
-                            }
-                          }}
-                          className="ml-0.5 w-4 h-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-opacity text-gray-500 hover:text-gray-300"
-                          title="关闭"
-                        >
-                          ×
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {file && (
-                  <>
-                    <div className="px-3 py-1 bg-[#1E1E24] flex items-center justify-between">
-                      <div className="flex items-center gap-2 min-w-0">
-                        {file.size > 0 && (
-                          <span className="text-[9px] text-gray-500 font-mono flex-shrink-0">
-                            {file.size < 1024 ? `${file.size}B` : `${Math.round(file.size / 1024)}KB`}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {isMarkdown && !editMode && (
-                          <button
-                            type="button"
-                            onClick={() => setMarkdownRendered((p) => !p)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                              markdownRendered
-                                ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
-                                : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
-                            }`}
-                            title={markdownRendered ? '切换到源码' : '切换到渲染'}
-                          >
-                            {markdownRendered ? 'Rendered' : 'Raw'}
-                          </button>
-                        )}
-                        {isHtml && !editMode && (
-                          <button
-                            type="button"
-                            onClick={() => setHtmlPreview((p) => !p)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                              htmlPreview
-                                ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
-                                : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
-                            }`}
-                            title={htmlPreview ? '切换到源码' : '预览 HTML'}
-                          >
-                            {htmlPreview ? 'Preview' : 'Code'}
-                          </button>
-                        )}
-                        {isJsx && !editMode && (
-                          <button
-                            type="button"
-                            onClick={() => setJsxPreview((p) => !p)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                              jsxPreview
-                                ? 'bg-blue-600/80 text-white hover:bg-blue-500'
-                                : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
-                            }`}
-                            title={jsxPreview ? '切换到源码' : '预览 JSX/TSX'}
-                          >
-                            {jsxPreview ? 'Preview' : 'Code'}
-                          </button>
-                        )}
-
-                        {file?.content != null && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(file.content);
-                            }}
-                            className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
-                            title={file.truncated ? '复制已加载内容（文件已截断，非完整全文）' : '复制文件全文'}
-                          >
-                            {file.truncated ? 'Copy…' : 'Copy'}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!openFilePath) return;
-                            const abs = currentWorktree ? `${currentWorktree.root}/${openFilePath}` : openFilePath;
-                            void navigator.clipboard.writeText(abs);
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
-                          title="复制绝对路径"
-                        >
-                          Path
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (openFilePath) void revealInFinder(openFilePath);
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
-                          title="在 Finder 中显示"
-                        >
-                          Finder
-                        </button>
-                        {canEdit && (
-                          <button
-                            type="button"
-                            onClick={handleToggleEdit}
-                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                              editMode
-                                ? 'bg-green-600/80 text-white hover:bg-green-500'
-                                : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
-                            }`}
-                            title={editMode ? '退出编辑' : '编辑文件'}
-                          >
-                            {editMode ? '编辑中' : '编辑'}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (openFilePath) closeTab(openFilePath);
-                            setEditMode(false);
-                          }}
-                          className="w-5 h-5 flex items-center justify-center rounded text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
-                          title="关闭标签页"
-                        >
-                          <CloseIcon />
-                        </button>
-                      </div>
-                    </div>
-                    {saveError && (
-                      <div className="px-3 py-1.5 text-[10px] text-red-400 bg-red-900/20 border-b border-red-900/30">
-                        {saveError}
-                      </div>
-                    )}
-                    {file.binary ? (
-                      file.mime.startsWith('image/') ? (
-                        <div className="flex-1 flex items-center justify-center bg-[#1E1E24] p-4 overflow-auto">
-                          <img
-                            src={`${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(file.path)}`}
-                            alt={file.path}
-                            className="max-w-full max-h-full object-contain rounded"
-                          />
-                        </div>
-                      ) : file.mime.startsWith('audio/') ? (
-                        <div className="flex-1 flex flex-col items-center justify-center bg-[#1E1E24] p-6 gap-3">
-                          <span className="text-3xl">🎵</span>
-                          <audio
-                            controls
-                            src={`${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(file.path)}`}
-                            className="w-full max-w-md"
-                          >
-                            浏览器不支持音频播放
-                          </audio>
-                          <p className="text-[10px] text-gray-500">
-                            {file.mime} · {Math.round(file.size / 1024)}KB
-                          </p>
-                        </div>
-                      ) : file.mime.startsWith('video/') ? (
-                        <div className="flex-1 flex items-center justify-center bg-[#1E1E24] p-4 overflow-auto">
-                          <video
-                            controls
-                            src={`${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(file.path)}`}
-                            className="max-w-full max-h-full rounded"
-                          >
-                            浏览器不支持视频播放
-                          </video>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center py-8 bg-[#1E1E24] text-gray-500 text-xs">
-                          <span className="text-2xl mb-2">📄</span>
-                          <p>二进制文件</p>
-                          <p className="text-[10px] mt-1">
-                            {file.mime} · {Math.round(file.size / 1024)}KB
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => void revealInFinder(file.path)}
-                            className="mt-2 px-3 py-1 rounded bg-cocreator-light/20 text-cocreator-dark/60 hover:bg-cocreator-light/40 transition-colors text-[10px]"
-                          >
-                            在 Finder 中打开
-                          </button>
-                        </div>
-                      )
-                    ) : isMarkdown && markdownRendered && !editMode ? (
-                      <div className="relative flex-1 overflow-auto bg-cafe-white p-4" ref={mdContainerRef}>
-                        <MarkdownContent
-                          content={file.content}
-                          disableCommandPrefix
-                          basePath={openFilePath ? openFilePath.split('/').slice(0, -1).join('/') : undefined}
-                        />
-                        {mdHasSelection && (
-                          <button
-                            type="button"
-                            onClick={handleMdAddToChat}
-                            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cocreator-primary text-white text-[11px] font-medium shadow-lg hover:bg-cocreator-dark transition-colors z-10 animate-fade-in"
-                            title="引用到聊天"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                              <path d="M1.5 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H5L2.5 11.5V9h-1a1 1 0 0 1-1-1V2.5Z" />
-                              <path d="M13.5 5v4a1 1 0 0 1-1 1H12v2.5L9.5 10H7a1 1 0 0 1-1-1" opacity="0.5" />
-                            </svg>
-                            Add to chat
-                          </button>
-                        )}
-                      </div>
-                    ) : isHtml && htmlPreview && !editMode ? (
-                      <div className="flex-1 min-h-0 flex flex-col">
-                        {/* Sandboxed preview: relative asset paths (images, CSS, JS) cannot resolve
-                    because srcDoc loads as about:srcdoc. A full asset proxy is future scope (P2D). */}
-                        <div className="px-2 py-1 bg-amber-900/20 text-amber-400 text-[10px] border-b border-amber-900/30 flex-shrink-0">
-                          预览模式 — 相对资源路径（图片/CSS/JS）可能无法加载
-                        </div>
-                        <div className="flex-1 min-h-0 bg-white">
-                          <iframe
-                            srcDoc={file.content}
-                            sandbox="allow-scripts"
-                            title="HTML Preview"
-                            className="w-full h-full border-0"
-                          />
-                        </div>
-                      </div>
-                    ) : isJsx && jsxPreview && !editMode ? (
-                      <JsxPreview code={file.content} filePath={openFilePath!} worktreeId={worktreeId} />
-                    ) : (
-                      <CodeViewer
-                        content={file.content}
-                        mime={file.mime}
-                        path={file.path}
-                        scrollToLine={scrollToLine}
-                        editable={editMode}
-                        onSave={handleSave}
-                        branch={currentWorktree?.branch}
-                      />
-                    )}
-                    {file.truncated && (
-                      <div className="px-3 py-1.5 text-[10px] text-amber-400 bg-[#1E1E24] border-t border-amber-900/30">
-                        文件已截断 (超过 1MB)
-                      </div>
-                    )}
-                  </>
-                )}
+          {/* F120: Port Discovery Toast — matches design Scene 2 */}
+          {portDiscoveryToast && (
+            <div className="mx-3 my-2 p-4 rounded-xl bg-white shadow-md border border-[#E8E7E5]">
+              <div className="flex items-start justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[#E29578] text-base">◉</span>
+                  <span className="text-sm font-semibold text-[#1A1918]">Dev Server Detected</span>
+                </div>
+                <button
+                  type="button"
+                  className="text-[#9C9B99] hover:text-[#5a4a42] text-xs"
+                  onClick={() => setPortDiscoveryToast(null)}
+                >
+                  ✕
+                </button>
               </div>
-            </>
+              <p className="text-xs text-[#6D6C6A] ml-6 mb-3">
+                localhost:{portDiscoveryToast.port} is now listening
+                {portDiscoveryToast.framework && portDiscoveryToast.framework !== 'unknown'
+                  ? ` (${portDiscoveryToast.framework})`
+                  : ''}
+              </p>
+              <div className="flex items-center gap-2 ml-6">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-md bg-[#E29578] text-white text-xs font-medium hover:bg-[#d4856a] transition-colors"
+                  onClick={() => {
+                    setPreviewPort(portDiscoveryToast.port);
+                    setViewMode('browser');
+                    setPortDiscoveryToast(null);
+                  }}
+                >
+                  Open Preview
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 text-xs text-[#5a4a42]/70 hover:text-[#5a4a42]"
+                  onClick={() => setPortDiscoveryToast(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
           )}
-        </> /* end viewMode=files */
+
+          {viewMode === 'browser' ? (
+            <BrowserPanel initialPort={previewPort} initialPath={previewPath} />
+          ) : viewMode === 'terminal' ? (
+            worktreeId ? (
+              <TerminalTab worktreeId={worktreeId} />
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-cocreator-dark/50">
+                请先选择一个 Worktree
+              </div>
+            )
+          ) : viewMode === 'git' ? (
+            <GitPanel />
+          ) : viewMode === 'changes' ? (
+            <ChangesPanel worktreeId={worktreeId} basisPct={treeBasis} />
+          ) : (
+            <>
+              {/* Search results — grouped when in 'all' mode */}
+              {searchResults.length > 0 &&
+                (() => {
+                  const fileHits = searchResults.filter((r) => r.matchType === 'filename');
+                  const contentHits = searchResults.filter((r) => r.matchType === 'content');
+                  const isGrouped = fileHits.length > 0 || contentHits.length > 0;
+                  return (
+                    <div className="border-b border-cocreator-light/40 max-h-64 overflow-y-auto">
+                      {isGrouped && fileHits.length > 0 && (
+                        <>
+                          <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                            文件名匹配 ({fileHits.length})
+                          </div>
+                          {fileHits.map((r, i) => (
+                            <SearchResultItem
+                              key={`f:${r.path}:${i}`}
+                              path={r.path}
+                              line={0}
+                              content=""
+                              query={searchQuery}
+                              onClick={() => handleSearchResultClick(r.path, 0)}
+                            />
+                          ))}
+                        </>
+                      )}
+                      {isGrouped && contentHits.length > 0 && (
+                        <>
+                          <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                            内容匹配 ({contentHits.length})
+                          </div>
+                          {contentHits.map((r, i) => (
+                            <SearchResultItem
+                              key={`c:${r.path}:${r.line}:${i}`}
+                              path={r.path}
+                              line={r.line}
+                              content={r.content}
+                              query={searchQuery}
+                              onClick={() => handleSearchResultClick(r.path, r.line)}
+                            />
+                          ))}
+                        </>
+                      )}
+                      {!isGrouped && (
+                        <>
+                          <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                            {searchResults.length} 个结果
+                          </div>
+                          {searchResults.map((r, i) => (
+                            <SearchResultItem
+                              key={`${r.path}:${r.line}:${i}`}
+                              path={r.path}
+                              line={r.line}
+                              content={r.content}
+                              query={searchQuery}
+                              onClick={() => handleSearchResultClick(r.path, r.line)}
+                            />
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
+              {/* File tree */}
+              <WorkspaceTree
+                tree={tree}
+                loading={loading}
+                expandedPaths={expandedPaths}
+                toggleExpand={toggleExpand}
+                onSelect={handleFileSelect}
+                onCite={handleCite}
+                selectedPath={openFilePath}
+                hasFile={!!file}
+                basisPct={treeBasis}
+                callbacks={treeCallbacks}
+              />
+
+              {/* Vertical resize handle + File viewer */}
+              {(file || openTabs.length > 0) && (
+                <>
+                  <ResizeHandle direction="vertical" onResize={handleVerticalResize} onDoubleClick={resetTreeBasis} />
+                  <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
+                    {/* Tab bar */}
+                    {openTabs.length > 0 && (
+                      <div className="flex bg-[#1E1E24] border-b border-[#2a2a32] overflow-x-auto scrollbar-none">
+                        {openTabs.map((tab) => (
+                          <button
+                            key={tab}
+                            type="button"
+                            onClick={() => setOpenFile(tab)}
+                            className={`group flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono border-r border-[#2a2a32] flex-shrink-0 transition-colors ${
+                              tab === openFilePath
+                                ? 'bg-[#2a2a32] text-gray-200'
+                                : 'text-gray-500 hover:text-gray-300 hover:bg-[#252530]'
+                            }`}
+                            title={tab}
+                          >
+                            <FileIcon name={tab} />
+                            <span className="truncate max-w-[120px]">{tab.split('/').pop()}</span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                closeTab(tab);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.stopPropagation();
+                                  closeTab(tab);
+                                }
+                              }}
+                              className="ml-0.5 w-4 h-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-opacity text-gray-500 hover:text-gray-300"
+                              title="关闭"
+                            >
+                              ×
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {file && (
+                      <>
+                        <div className="px-3 py-1 bg-[#1E1E24] flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {file.size > 0 && (
+                              <span className="text-[9px] text-gray-500 font-mono flex-shrink-0">
+                                {file.size < 1024 ? `${file.size}B` : `${Math.round(file.size / 1024)}KB`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {isMarkdown && !editMode && (
+                              <button
+                                type="button"
+                                onClick={() => setMarkdownRendered((p) => !p)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                  markdownRendered
+                                    ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
+                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                }`}
+                                title={markdownRendered ? '切换到源码' : '切换到渲染'}
+                              >
+                                {markdownRendered ? 'Rendered' : 'Raw'}
+                              </button>
+                            )}
+                            {isHtml && !editMode && (
+                              <button
+                                type="button"
+                                onClick={() => setHtmlPreview((p) => !p)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                  htmlPreview
+                                    ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
+                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                }`}
+                                title={htmlPreview ? '切换到源码' : '预览 HTML'}
+                              >
+                                {htmlPreview ? 'Preview' : 'Code'}
+                              </button>
+                            )}
+                            {isJsx && !editMode && (
+                              <button
+                                type="button"
+                                onClick={() => setJsxPreview((p) => !p)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                  jsxPreview
+                                    ? 'bg-blue-600/80 text-white hover:bg-blue-500'
+                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                }`}
+                                title={jsxPreview ? '切换到源码' : '预览 JSX/TSX'}
+                              >
+                                {jsxPreview ? 'Preview' : 'Code'}
+                              </button>
+                            )}
+
+                            {file?.content != null && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(file.content);
+                                }}
+                                className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                                title={file.truncated ? '复制已加载内容（文件已截断，非完整全文）' : '复制文件全文'}
+                              >
+                                {file.truncated ? 'Copy…' : 'Copy'}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!openFilePath) return;
+                                const abs = currentWorktree ? `${currentWorktree.root}/${openFilePath}` : openFilePath;
+                                void navigator.clipboard.writeText(abs);
+                              }}
+                              className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                              title="复制绝对路径"
+                            >
+                              Path
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (openFilePath) void revealInFinder(openFilePath);
+                              }}
+                              className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                              title="在 Finder 中显示"
+                            >
+                              Finder
+                            </button>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={handleToggleEdit}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                  editMode
+                                    ? 'bg-green-600/80 text-white hover:bg-green-500'
+                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                }`}
+                                title={editMode ? '退出编辑' : '编辑文件'}
+                              >
+                                {editMode ? '编辑中' : '编辑'}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (openFilePath) closeTab(openFilePath);
+                                setEditMode(false);
+                              }}
+                              className="w-5 h-5 flex items-center justify-center rounded text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                              title="关闭标签页"
+                            >
+                              <CloseIcon />
+                            </button>
+                          </div>
+                        </div>
+                        {saveError && (
+                          <div className="px-3 py-1.5 text-[10px] text-red-400 bg-red-900/20 border-b border-red-900/30">
+                            {saveError}
+                          </div>
+                        )}
+                        {file.binary ? (
+                          file.mime.startsWith('image/') ? (
+                            <div className="flex-1 flex items-center justify-center bg-[#1E1E24] p-4 overflow-auto">
+                              <img
+                                src={`${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(file.path)}`}
+                                alt={file.path}
+                                className="max-w-full max-h-full object-contain rounded"
+                              />
+                            </div>
+                          ) : file.mime.startsWith('audio/') ? (
+                            <div className="flex-1 flex flex-col items-center justify-center bg-[#1E1E24] p-6 gap-3">
+                              <span className="text-3xl">🎵</span>
+                              <audio
+                                controls
+                                src={`${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(file.path)}`}
+                                className="w-full max-w-md"
+                              >
+                                浏览器不支持音频播放
+                              </audio>
+                              <p className="text-[10px] text-gray-500">
+                                {file.mime} · {Math.round(file.size / 1024)}KB
+                              </p>
+                            </div>
+                          ) : file.mime.startsWith('video/') ? (
+                            <div className="flex-1 flex items-center justify-center bg-[#1E1E24] p-4 overflow-auto">
+                              <video
+                                controls
+                                src={`${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(file.path)}`}
+                                className="max-w-full max-h-full rounded"
+                              >
+                                浏览器不支持视频播放
+                              </video>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center py-8 bg-[#1E1E24] text-gray-500 text-xs">
+                              <span className="text-2xl mb-2">📄</span>
+                              <p>二进制文件</p>
+                              <p className="text-[10px] mt-1">
+                                {file.mime} · {Math.round(file.size / 1024)}KB
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => void revealInFinder(file.path)}
+                                className="mt-2 px-3 py-1 rounded bg-cocreator-light/20 text-cocreator-dark/60 hover:bg-cocreator-light/40 transition-colors text-[10px]"
+                              >
+                                在 Finder 中打开
+                              </button>
+                            </div>
+                          )
+                        ) : isMarkdown && markdownRendered && !editMode ? (
+                          <div className="relative flex-1 overflow-auto bg-cafe-white p-4" ref={mdContainerRef}>
+                            <MarkdownContent
+                              content={file.content}
+                              disableCommandPrefix
+                              basePath={openFilePath ? openFilePath.split('/').slice(0, -1).join('/') : undefined}
+                            />
+                            {mdHasSelection && (
+                              <button
+                                type="button"
+                                onClick={handleMdAddToChat}
+                                className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cocreator-primary text-white text-[11px] font-medium shadow-lg hover:bg-cocreator-dark transition-colors z-10 animate-fade-in"
+                                title="引用到聊天"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                  <path d="M1.5 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H5L2.5 11.5V9h-1a1 1 0 0 1-1-1V2.5Z" />
+                                  <path d="M13.5 5v4a1 1 0 0 1-1 1H12v2.5L9.5 10H7a1 1 0 0 1-1-1" opacity="0.5" />
+                                </svg>
+                                Add to chat
+                              </button>
+                            )}
+                          </div>
+                        ) : isHtml && htmlPreview && !editMode ? (
+                          <div className="flex-1 min-h-0 flex flex-col">
+                            {/* Sandboxed preview: relative asset paths (images, CSS, JS) cannot resolve
+                    because srcDoc loads as about:srcdoc. A full asset proxy is future scope (P2D). */}
+                            <div className="px-2 py-1 bg-amber-900/20 text-amber-400 text-[10px] border-b border-amber-900/30 flex-shrink-0">
+                              预览模式 — 相对资源路径（图片/CSS/JS）可能无法加载
+                            </div>
+                            <div className="flex-1 min-h-0 bg-white">
+                              <iframe
+                                srcDoc={file.content}
+                                sandbox="allow-scripts"
+                                title="HTML Preview"
+                                className="w-full h-full border-0"
+                              />
+                            </div>
+                          </div>
+                        ) : isJsx && jsxPreview && !editMode ? (
+                          <JsxPreview code={file.content} filePath={openFilePath!} worktreeId={worktreeId} />
+                        ) : (
+                          <CodeViewer
+                            content={file.content}
+                            mime={file.mime}
+                            path={file.path}
+                            scrollToLine={scrollToLine}
+                            editable={editMode}
+                            onSave={handleSave}
+                            branch={currentWorktree?.branch}
+                          />
+                        )}
+                        {file.truncated && (
+                          <div className="px-3 py-1.5 text-[10px] text-amber-400 bg-[#1E1E24] border-t border-amber-900/30">
+                            文件已截断 (超过 1MB)
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </> /* end viewMode=files */
+          )}
+        </>
       )}
     </aside>
   );

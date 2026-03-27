@@ -5,7 +5,18 @@
  */
 
 /* ── F26: Task tool detection for real-time progress ─────── */
-export const TASK_TOOL_NAMES = new Set(['TodoWrite', 'write_todos']);
+// F055-fix: Added 'todowrite' (opencode CLI lowercase variant) for multi-provider support
+export const TASK_TOOL_NAMES = new Set(['TodoWrite', 'write_todos', 'todowrite']);
+
+export type NormalizedTaskStatus = 'pending' | 'in_progress' | 'completed';
+
+export function normalizeTaskStatus(raw: unknown): NormalizedTaskStatus {
+  if (typeof raw !== 'string') return 'pending';
+  const lower = raw.trim().toLowerCase();
+  if (lower === 'completed' || lower === 'done' || lower === 'finished') return 'completed';
+  if (lower === 'in_progress' || lower === 'doing' || lower === 'active' || lower === 'running') return 'in_progress';
+  return 'pending';
+}
 
 export function extractTaskProgress(
   toolName: string,
@@ -19,7 +30,7 @@ export function extractTaskProgress(
     tasks: todos.map((t, i) => ({
       id: `task-${i}`,
       subject: (t.content ?? '').slice(0, 120),
-      status: t.status ?? 'pending',
+      status: normalizeTaskStatus(t.status ?? 'pending'),
       ...(t.activeForm ? { activeForm: t.activeForm } : {}),
     })),
   };

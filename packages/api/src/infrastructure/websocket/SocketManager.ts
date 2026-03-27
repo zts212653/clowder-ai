@@ -133,7 +133,7 @@ export class SocketManager {
           // Backward compat: cancel all slots in thread
           this.invocationTracker.cancelAll(data.threadId);
           this.multiMentionOrchestrator?.abortByThread(data.threadId);
-          log.info({ threadId: data.threadId }, 'Cancelled all invocations');
+          log.info({ threadId: data.threadId, socketId: socket.id, userId }, 'Cancelled all invocations');
         }
       });
     });

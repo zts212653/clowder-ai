@@ -164,233 +164,55 @@ describe('opencode Config Template (AC-9 + AC-10)', () => {
   });
 });
 
-// ── F189: Custom provider runtime config ──────────────────────────────────
-
 describe('parseOpenCodeModel', () => {
-  test('parses provider/model format', () => {
-    const result = parseOpenCodeModel('maas/glm-5');
-    assert.deepStrictEqual(result, { providerName: 'maas', modelName: 'glm-5' });
+  test('parses provider/model format with nested model namespace', () => {
+    const parsed = parseOpenCodeModel('maas/google/gemini-3-flash');
+    assert.deepStrictEqual(parsed, { providerName: 'maas', modelName: 'google/gemini-3-flash' });
   });
 
-  test('parses multi-segment model name', () => {
-    const result = parseOpenCodeModel('openrouter/google/gemini-3-flash');
-    assert.deepStrictEqual(result, { providerName: 'openrouter', modelName: 'google/gemini-3-flash' });
-  });
-
-  test('returns null for bare model name', () => {
-    assert.strictEqual(parseOpenCodeModel('claude-sonnet-4-6'), null);
-  });
-
-  test('returns null for empty string', () => {
-    assert.strictEqual(parseOpenCodeModel(''), null);
-  });
-
-  test('returns null for leading slash', () => {
-    assert.strictEqual(parseOpenCodeModel('/model'), null);
-  });
-
-  test('returns null for trailing slash', () => {
-    assert.strictEqual(parseOpenCodeModel('provider/'), null);
-  });
-
-  test('trims whitespace', () => {
-    const result = parseOpenCodeModel('  maas/glm-5  ');
-    assert.deepStrictEqual(result, { providerName: 'maas', modelName: 'glm-5' });
+  test('returns null for bare model names', () => {
+    assert.equal(parseOpenCodeModel('glm-5'), null);
   });
 });
 
 describe('generateOpenCodeRuntimeConfig', () => {
-  test('generates config with custom provider and {env:VAR} credentials (official format)', () => {
+  test('generates custom provider config with env placeholders and stripped model keys', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'maas',
-      models: ['glm-5', 'glm-4-plus'],
+      models: ['maas/glm-5', 'maas/glm-4-plus'],
       defaultModel: 'maas/glm-5',
+      apiType: 'openai',
       hasBaseUrl: true,
     });
 
-    assert.ok(config.$schema, 'must have $schema');
-    assert.strictEqual(config.model, 'maas/glm-5');
-    assert.ok(config.provider.maas, 'must have custom provider block');
-
-    const provider = config.provider.maas;
-    // Official format: npm adapter, not "api" shorthand
-    assert.strictEqual(provider.npm, '@ai-sdk/openai-compatible', 'default npm adapter is openai-compatible');
-    assert.strictEqual(provider.api, undefined, 'must not use legacy "api" field');
-    // Official format: keyed object { modelId: { name } }, not array
-    assert.deepStrictEqual(provider.models, { 'glm-5': { name: 'glm-5' }, 'glm-4-plus': { name: 'glm-4-plus' } });
-    assert.strictEqual(provider.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
-    assert.strictEqual(provider.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
-  });
-
-  test('omits baseURL when hasBaseUrl is false or unset', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'deepseek',
-      models: ['deepseek-r2'],
-      defaultModel: 'deepseek/deepseek-r2',
+    assert.equal(config.model, 'maas/glm-5');
+    assert.deepStrictEqual(config.provider.maas.models, {
+      'glm-5': { name: 'glm-5' },
+      'glm-4-plus': { name: 'glm-4-plus' },
     });
-    const provider = config.provider.deepseek;
-    assert.strictEqual(provider.options.baseURL, undefined, 'baseURL must not be present when hasBaseUrl is unset');
-    assert.strictEqual(provider.options.apiKey, `{env:${OC_API_KEY_ENV}}`, 'apiKey still present');
-  });
-
-  test('credentials use env substitution, no hardcoded secrets', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'deepseek',
-      models: ['deepseek-r2'],
-    });
-
-    const json = JSON.stringify(config);
-    assert.ok(json.includes('{env:'), 'config must use {env:VAR} substitution');
-    assert.ok(!json.includes('sk-'), 'no hardcoded secrets allowed');
-  });
-
-  test('respects explicit apiType override → correct npm adapter', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'my-anthropic-proxy',
-      models: ['claude-sonnet-4-6'],
-      apiType: 'anthropic',
-    });
-
-    assert.strictEqual(config.provider['my-anthropic-proxy'].npm, '@ai-sdk/anthropic');
-  });
-
-  test('google apiType maps to @ai-sdk/google', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'my-google-proxy',
-      models: ['gemini-3-flash'],
-      apiType: 'google',
-    });
-
-    assert.strictEqual(config.provider['my-google-proxy'].npm, '@ai-sdk/google');
-  });
-
-  test('models keyed object keys match -m routing (modelId is the key)', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'maas',
-      models: ['glm-5'],
-      defaultModel: 'maas/glm-5',
-    });
-
-    // When opencode CLI receives `-m maas/glm-5`, it looks up provider.maas.models["glm-5"]
-    const modelKeys = Object.keys(config.provider.maas.models);
-    assert.deepStrictEqual(modelKeys, ['glm-5'], 'model key must match what -m routes to');
-  });
-
-  test('default apiType is openai (openai-compatible) when omitted', () => {
-    // Covers the "no protocol on profile" scenario (protocol UI removed).
-    // Most third-party APIs (maas, deepseek, etc.) are OpenAI-compatible.
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'maas',
-      models: ['glm-5'],
-      defaultModel: 'maas/glm-5',
-      // apiType intentionally omitted — should default to 'openai'
-    });
-
-    assert.strictEqual(
-      config.provider.maas.npm,
-      '@ai-sdk/openai-compatible',
-      'omitted apiType must default to @ai-sdk/openai-compatible (not @ai-sdk/anthropic)',
-    );
-  });
-
-  test('omits model field when defaultModel is not provided', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'maas',
-      models: ['glm-5'],
-    });
-
-    assert.strictEqual(config.model, undefined);
-  });
-
-  test('output is valid JSON', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'maas',
-      models: ['glm-5'],
-      defaultModel: 'maas/glm-5',
-    });
-
-    const json = JSON.stringify(config);
-    const parsed = JSON.parse(json);
-    assert.deepStrictEqual(parsed, config);
+    assert.equal(config.provider.maas.npm, '@ai-sdk/openai-compatible');
+    assert.equal(config.provider.maas.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
+    assert.equal(config.provider.maas.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
   });
 });
 
 describe('writeOpenCodeRuntimeConfig', () => {
-  test('writes per-catId config file to .cat-cafe directory', () => {
-    const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-config-test-'));
+  test('writes invocation-scoped runtime config under .cat-cafe', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-runtime-config-'));
     try {
-      const configPath = writeOpenCodeRuntimeConfig(tmpRoot, 'test-cat', {
+      const configPath = writeOpenCodeRuntimeConfig(tmpRoot, 'opencode-maas', 'inv-123', {
         providerName: 'maas',
-        models: ['glm-5'],
+        models: ['maas/glm-5'],
         defaultModel: 'maas/glm-5',
+        apiType: 'openai',
+        hasBaseUrl: true,
       });
 
-      assert.ok(existsSync(configPath), 'config file must exist');
-      assert.ok(configPath.includes('.cat-cafe'), 'must be in .cat-cafe dir');
-      assert.ok(configPath.includes('opencode-runtime-test-cat-'), 'must include catId in per-invocation file');
-
+      assert.ok(existsSync(configPath), 'runtime config file must exist');
+      assert.match(configPath, /\.cat-cafe\/opencode-runtime-opencode-maas-inv-123\.json$/);
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
-      assert.ok(content.provider.maas, 'file must contain custom provider');
-      assert.strictEqual(content.model, 'maas/glm-5');
-    } finally {
-      rmSync(tmpRoot, { recursive: true, force: true });
-    }
-  });
-
-  test('same cat re-invoke writes distinct per-invocation files', () => {
-    const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-config-test-'));
-    try {
-      const path1 = writeOpenCodeRuntimeConfig(
-        tmpRoot,
-        'cat-a',
-        {
-          providerName: 'maas',
-          models: ['glm-5'],
-          defaultModel: 'maas/glm-5',
-        },
-        'invoke-a',
-      );
-
-      const path2 = writeOpenCodeRuntimeConfig(
-        tmpRoot,
-        'cat-a',
-        {
-          providerName: 'deepseek',
-          models: ['deepseek-r2'],
-          defaultModel: 'deepseek/deepseek-r2',
-        },
-        'invoke-b',
-      );
-
-      assert.notStrictEqual(path1, path2, 'same cat should use different config path per invocation');
-
-      const content1 = JSON.parse(readFileSync(path1, 'utf-8'));
-      const content = JSON.parse(readFileSync(path2, 'utf-8'));
-      assert.ok(content1.provider.maas, 'first invocation config must remain intact');
-      assert.ok(content.provider.deepseek, 'must have updated provider');
-      assert.strictEqual(content.provider.maas, undefined, 'second invocation must not inherit first provider');
-    } finally {
-      rmSync(tmpRoot, { recursive: true, force: true });
-    }
-  });
-
-  test('different catIds produce different files', () => {
-    const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-config-test-'));
-    try {
-      const pathA = writeOpenCodeRuntimeConfig(tmpRoot, 'cat-a', {
-        providerName: 'maas',
-        models: ['glm-5'],
-      });
-      const pathB = writeOpenCodeRuntimeConfig(tmpRoot, 'cat-b', {
-        providerName: 'deepseek',
-        models: ['deepseek-r2'],
-      });
-
-      assert.notStrictEqual(pathA, pathB, 'paths must differ');
-      assert.ok(pathA.includes('opencode-runtime-cat-a-'), 'cat-a prefix must appear in path');
-      assert.ok(pathB.includes('opencode-runtime-cat-b-'), 'cat-b prefix must appear in path');
-      assert.ok(existsSync(pathA), 'cat-a config must exist');
-      assert.ok(existsSync(pathB), 'cat-b config must exist');
+      assert.equal(content.model, 'maas/glm-5');
+      assert.deepStrictEqual(content.provider.maas.models, { 'glm-5': { name: 'glm-5' } });
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }

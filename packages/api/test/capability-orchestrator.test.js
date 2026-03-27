@@ -10,6 +10,7 @@ import {
   bootstrapCapabilities,
   buildCatCafeMcpDescriptor,
   comparePencilDirs,
+  deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
   generateCliConfigs,
   migrateLegacyCatCafeCapability,
@@ -92,6 +93,40 @@ describe('readCapabilitiesConfig', () => {
     await writeFile(join(dir, '.cat-cafe', 'capabilities.json'), JSON.stringify({ version: 99, capabilities: [] }));
     const config = await readCapabilitiesConfig(dir);
     assert.equal(config, null);
+  });
+});
+
+describe('deduplicateDiscoveredMcpServers', () => {
+  it('prefers enabled stdio over streamableHttp with the same name', () => {
+    const deduped = deduplicateDiscoveredMcpServers([
+      { name: 'remote', transport: 'streamableHttp', url: 'https://example.dev/mcp', enabled: true },
+      { name: 'remote', command: 'node', args: ['stdio.js'], enabled: true },
+    ]);
+
+    assert.equal(deduped.length, 1);
+    assert.equal(deduped[0].command, 'node');
+    assert.equal(deduped[0].transport, undefined);
+  });
+
+  it('keeps enabled streamableHttp when duplicate stdio entry is disabled', () => {
+    const deduped = deduplicateDiscoveredMcpServers([
+      { name: 'remote', transport: 'streamableHttp', url: 'https://example.dev/mcp', enabled: true },
+      { name: 'remote', command: 'node', args: ['stdio.js'], enabled: false },
+    ]);
+
+    assert.equal(deduped.length, 1);
+    assert.equal(deduped[0].transport, 'streamableHttp');
+    assert.equal(deduped[0].enabled, true);
+  });
+
+  it('prefers enabled duplicate over disabled duplicate when transport matches', () => {
+    const deduped = deduplicateDiscoveredMcpServers([
+      { name: 'filesystem', command: 'node', args: ['fs.js'], enabled: false },
+      { name: 'filesystem', command: 'node', args: ['fs.js'], enabled: true },
+    ]);
+
+    assert.equal(deduped.length, 1);
+    assert.equal(deduped[0].enabled, true);
   });
 });
 

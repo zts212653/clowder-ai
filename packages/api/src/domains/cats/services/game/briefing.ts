@@ -65,7 +65,7 @@ function toolUsageBlock(runtime: GameRuntime, seatId: SeatId, phase: string): st
 
   const num = seatId.slice(1);
   const lines = [
-    '使用 submit_game_action 工具提交行动：',
+    '使用 cat_cafe_submit_game_action 工具提交行动：',
     `  gameId: "${runtime.gameId}"`,
     `  round: ${runtime.round}`,
     `  phase: "${phase}"`,

@@ -274,6 +274,27 @@ export {
   MIN_TIMEOUT_MINUTES,
   MULTI_MENTION_TERMINAL_STATES,
 } from './multi-mention.js';
+// Pack System types (F129 Multi-Agent Mod)
+export type {
+  CompiledPackBlocks,
+  ConstraintSeverity,
+  MaskActivation,
+  PackBehavior,
+  PackCompatibility,
+  PackConstraint,
+  PackDefaults,
+  PackGuardrails,
+  PackManifest,
+  PackMask,
+  PackOnDisk,
+  PackScope,
+  PackType,
+  PackWorkflow,
+  PackWorkflowStep,
+  PackWorldDriver,
+  ResolverType,
+  WorkflowAction,
+} from './pack.js';
 // Reflux types (F076 Phase 2 — 回流)
 export type {
   CreateRefluxPatternInput,

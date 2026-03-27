@@ -5,7 +5,7 @@
  * 纯函数，无副作用。读取 CAT_CONFIGS 生成身份上下文。
  */
 
-import type { CatConfig, CatId } from '@cat-cafe/shared';
+import type { CatConfig, CatId, CompiledPackBlocks } from '@cat-cafe/shared';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import {
   catHasRole,
@@ -102,6 +102,11 @@ export interface InvocationContext {
    * When present, cats inject bootcamp-guide behavior per phase.
    */
   bootcampState?: BootcampStateV1;
+  /**
+   * F129: Compiled pack blocks from active packs.
+   * Injected into static identity via buildStaticIdentity → packBlocks.
+   */
+  packBlocks?: CompiledPackBlocks | null;
 }
 
 /** Get all cat configs — registry first, fallback to static CAT_CONFIGS */
@@ -323,6 +328,12 @@ export interface StaticIdentityOptions {
    * session history and MAY be lost on compression.
    */
   mcpAvailable?: boolean;
+  /**
+   * F129: Compiled pack blocks to inject.
+   * Dual-track priority (ADR-021):
+   *   Identity (core) > Pack Masks > Governance L0 > Pack Guardrails > Pack Defaults > Workflows
+   */
+  packBlocks?: CompiledPackBlocks | null;
 }
 
 /**
@@ -349,6 +360,11 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     `性格：${config.personality}`,
     '',
   );
+
+  // F129: Pack masks — role overlay (never changes core identity, see KD-3)
+  if (options?.packBlocks?.masksBlock) {
+    lines.push(options.packBlocks.masksBlock, '');
+  }
 
   // A2A collaboration format (always included — cats should know how to @ even in single-cat mode)
   const { mentions: callableMentions, hasDuplicateDisplayNames, uniqueHandleExample } = buildCallableMentions(catId);
@@ -378,6 +394,12 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     lines.push(triggers, '');
   }
 
+  // F129: Pack workflow blocks (after breed workflow triggers)
+  const packBlocks = options?.packBlocks;
+  if (packBlocks?.workflowsBlock) {
+    lines.push(packBlocks.workflowsBlock, '');
+  }
+
   // 铲屎官 reference (session-level, not per-message)
   // F067: Use co-creator config for name + mention handles
   // Note: "不冒充/不编造/身份契约" folded into GOVERNANCE_L0_DIGEST
@@ -389,6 +411,21 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // L0 Governance Digest — always-on principles from shared-rules.md (F086 post-completion fix)
   // Source of truth: cat-cafe-skills/refs/shared-rules.md
   lines.push('', GOVERNANCE_L0_DIGEST);
+
+  // F129: Pack guardrails — hard constraint track (only adds strictness, never relaxes Core Rails)
+  if (packBlocks?.guardrailBlock) {
+    lines.push('', packBlocks.guardrailBlock);
+  }
+
+  // F129: Pack defaults — user-overridable behavior track
+  if (packBlocks?.defaultsBlock) {
+    lines.push('', packBlocks.defaultsBlock);
+  }
+
+  // F129: World driver summary (read-only, informational)
+  if (packBlocks?.worldDriverSummary) {
+    lines.push('', packBlocks.worldDriverSummary);
+  }
 
   // MCP tools documentation — ONLY for Claude (--append-system-prompt survives compression).
   // Non-Claude cats (Codex/Gemini) inject HTTP callback instructions per-message
@@ -681,6 +718,7 @@ export function buildReviewerSection(catId: CatId): string | null {
 export function buildSystemPrompt(context: InvocationContext): string {
   const staticPart = buildStaticIdentity(context.catId, {
     mcpAvailable: context.mcpAvailable,
+    packBlocks: context.packBlocks,
   });
   if (!staticPart) return '';
 

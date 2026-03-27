@@ -584,6 +584,28 @@ describe('QueueProcessor', () => {
       assert.equal(deps.invocationTracker.start.mock.calls.length, 0, 'should not execute user entries');
     });
 
+    it('skips stale queued autoExecute entries older than threshold', async () => {
+      enqueueEntry(deps.queue, {
+        userId: 'system',
+        source: 'agent',
+        targetCats: ['opus'],
+        autoExecute: true,
+        callerCatId: 'codex',
+      });
+      // list() returns shallow-copied array with reference elements — mutating
+      // createdAt here reaches the real entry inside the queue (coupling on purpose).
+      const queued = deps.queue.list('t1', 'system');
+      queued[0].createdAt = Date.now() - 120_000;
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.equal(deps.invocationTracker.start.mock.calls.length, 0, 'stale autoExecute entry must not start');
+      const stillQueued = deps.queue.list('t1', 'system');
+      assert.equal(stillQueued.length, 1);
+      assert.equal(stillQueued[0].status, 'queued');
+    });
+
     it('autoExecute entry bypasses pause state', async () => {
       // Set up a paused state
       enqueueEntry(deps.queue, { userId: 'u1', source: 'user' });
@@ -838,6 +860,49 @@ describe('QueueProcessor', () => {
       assert.equal(deliverCalls[0].content, 'Opus says hi. ', 'opus content should match');
       assert.equal(deliverCalls[1].catId, 'codex', 'second deliver should be for codex');
       assert.equal(deliverCalls[1].content, 'Codex chimes in.', 'codex content should match');
+    });
+
+    it('BUG-5: multi-turn delivers per-turn (no merge needed, token reusable)', async () => {
+      const deliverCalls = [];
+      const outboundHook = {
+        deliver: mock.fn(async (threadId, content, catId) => {
+          deliverCalls.push({ threadId, content, catId });
+        }),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: 'Opus says hi. ', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+            yield { type: 'text', catId: 'codex', content: 'Codex chimes in.', timestamp: Date.now() };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue, { targetCats: ['opus'] });
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => deliverCalls.length >= 2);
+
+      assert.equal(deliverCalls.length, 2, 'Multi-turn delivers per-turn');
+      assert.strictEqual(deliverCalls[0].catId, 'opus');
+      assert.ok(deliverCalls[0].content.includes('Opus says hi.'));
+      assert.strictEqual(deliverCalls[1].catId, 'codex');
+      assert.ok(deliverCalls[1].content.includes('Codex chimes in.'));
     });
 
     it('no outboundHook: execution completes normally without delivery', async () => {

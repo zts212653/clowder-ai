@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 // Phase C: embedding metadata (model/dim version anchor)
 export const SCHEMA_V2 = `
@@ -147,6 +147,32 @@ CREATE TABLE IF NOT EXISTS summary_state (
 );
 `;
 
+// F139 Phase 1a: task run ledger
+export const SCHEMA_V5 = `
+CREATE TABLE IF NOT EXISTS task_run_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  subject_key TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  signal_summary TEXT,
+  duration_ms INTEGER NOT NULL,
+  started_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_run_ledger_task ON task_run_ledger(task_id);
+CREATE INDEX IF NOT EXISTS idx_run_ledger_subject ON task_run_ledger(subject_key);
+`;
+
+// F129 Phase A: pack-scoped knowledge isolation
+export const SCHEMA_V6 = `
+ALTER TABLE evidence_docs ADD COLUMN pack_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_evidence_docs_pack ON evidence_docs(pack_id);
+`;
+
+// F139 Phase 1b: actor receipt tracking
+export const SCHEMA_V7 = `
+ALTER TABLE task_run_ledger ADD COLUMN assigned_cat_id TEXT;
+`;
+
 /**
  * Apply all schema migrations up to CURRENT_SCHEMA_VERSION.
  * Safe to call on empty DB (creates schema_version table first).
@@ -183,6 +209,27 @@ export function applyMigrations(db: Database.Database): void {
   if (currentVersion < 4) {
     db.exec(SCHEMA_V4);
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(4, new Date().toISOString());
+  }
+
+  if (currentVersion < 5) {
+    db.exec(SCHEMA_V5);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(5, new Date().toISOString());
+  }
+
+  if (currentVersion < 6) {
+    // ALTER TABLE cannot be combined; execute each statement separately
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN pack_id TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_evidence_docs_pack ON evidence_docs(pack_id)');
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(6, new Date().toISOString());
+  }
+
+  if (currentVersion < 7) {
+    db.exec(SCHEMA_V7);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(7, new Date().toISOString());
   }
 }
 

@@ -34,6 +34,7 @@ export const EVIDENCE_KINDS = [
   'thread',
   'discussion',
   'research',
+  'pack-knowledge',
 ] as const;
 
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
@@ -54,6 +55,8 @@ export interface EvidenceItem {
   supersededBy?: string;
   materializedFrom?: string;
   updatedAt: string;
+  /** F129: Pack scope — when set, this evidence belongs to a specific pack */
+  packId?: string;
   /** G-4: drill-down hint — tells the cat what tool to use to see full details */
   drillDown?: {
     tool: string;

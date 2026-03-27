@@ -10,6 +10,7 @@ triggers:
   - "review 意见"
   - "reviewer 说"
   - "fix these"
+  - "github-review-feedback"
 ---
 
 > **SOP 位置**: 本 skill 是 `docs/SOP.md` Step 3b 的执行细节。
@@ -18,6 +19,28 @@ triggers:
 # Receive Review
 
 处理 reviewer 反馈的完整流程。核心原则：**技术正确性 > 社交舒适，验证后再实现，禁止表演性同意。**
+
+## 触发入口
+
+| 来源 | 说明 |
+|------|------|
+| 铲屎官/猫猫转述 | 手动告知 review 结果 |
+| `github-review-feedback` connector 通知 | F140 自动投递：review decisions（approved/changes_requested）+ inline/conversation comments |
+| 云端 Codex review | 通过 ReviewRouter 投递的 email review 结果 |
+
+收到 `github-review-feedback` 通知时，按下面的核心知识处理——不区分来源，只区分反馈类型。
+
+### 自动触发处理（F140 Phase B）
+
+当 `github-review-feedback` connector 唤醒你时：
+
+1. 读取通知内容，识别 review decision 类型
+2. `CHANGES_REQUESTED` → 直接进入下方 Red→Green 流程
+3. `APPROVED` → 不需要 receive-review，检查是否可以走 merge-gate
+4. `COMMENTED` → 判断是否需要代码修改，需要则进入 Red→Green 流程
+5. 处理完成后通知铲屎官结果（KD-13: 事后通知）
+
+详见 `refs/pr-signals.md` Phase B 自动响应行为。
 
 ## 核心知识
 

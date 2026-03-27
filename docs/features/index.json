@@ -789,7 +789,7 @@
     {
       "id": "F129",
       "name": "Pack System — Multi-Agent 共创世界的 Mod 生态",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F129-pack-system-multi-agent-mod.md"
     },
     {
@@ -813,13 +813,13 @@
     {
       "id": "F133",
       "name": "GitHub CI/CD Tracking — 已注册 PR 的 CI/CD 执行结果自动追踪",
-      "status": "in-progress | **Owner**: 金渐层 | **Priority**: P2",
+      "status": "done | **Owner**: 金渐层 | **Priority**: P2 | **Completed**: 2026-03-25",
       "file": "F133-cicd-tracking.md"
     },
     {
       "id": "F134",
       "name": "Feishu Group Chat — 飞书群聊多用户支持",
-      "status": "done (Phase A-D) | **Owner**: Ragdoll | **Priority**: P1 | **PR**: #697, #699, #700, #705",
+      "status": "done | **Completed**: 2026-03-26 | **Owner**: Ragdoll | **Priority**: P1 | **PR**: #697, #699, #700, #705, #745",
       "file": "F134-feishu-group-chat.md"
     },
     {
@@ -837,7 +837,7 @@
     {
       "id": "F137",
       "name": "WeChat Personal Gateway — 微信个人号 iLink Bot 接入",
-      "status": "in-progress | **Owner**: 金渐层 | **Priority**: P1",
+      "status": "done | **Completed**: 2026-03-25 | **Owner**: 金渐层 | **Priority**: P1",
       "file": "F137-weixin-personal-gateway.md"
     },
     {
@@ -845,7 +845,25 @@
       "name": "Cat Café Video Studio — AI 视频制作管线",
       "status": "spec | **Owner**: 金渐层 | **Priority**: P1",
       "file": "F138-video-studio.md"
+    },
+    {
+      "id": "F139",
+      "name": "Unified Schedule Abstraction — 统一调度抽象",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F139-unified-schedule-abstraction.md"
+    },
+    {
+      "id": "F140",
+      "name": "GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F140-github-pr-automation.md"
+    },
+    {
+      "id": "F141",
+      "name": "GitHub Repo Inbox — 仓库事件自动发现",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F141-github-repo-inbox.md"
     }
   ],
-  "generated_at": "2026-03-25T03:34:06.623Z"
+  "generated_at": "2026-03-27T01:21:33.952Z"
 }

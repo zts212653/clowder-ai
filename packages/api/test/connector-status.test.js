@@ -10,9 +10,13 @@ describe('buildConnectorStatus', () => {
     const feishu = result.find((p) => p.id === 'feishu');
     assert.ok(feishu);
     assert.equal(feishu.configured, false);
-    assert.equal(feishu.fields.length, 3);
+    assert.equal(feishu.fields.length, 4);
     for (const f of feishu.fields) {
-      assert.equal(f.currentValue, null);
+      if (f.envName === 'FEISHU_CONNECTION_MODE') {
+        assert.equal(f.currentValue, 'webhook', 'CONNECTION_MODE should default to webhook');
+      } else {
+        assert.equal(f.currentValue, null);
+      }
     }
 
     const telegram = result.find((p) => p.id === 'telegram');
@@ -102,6 +106,64 @@ describe('buildConnectorStatus', () => {
     for (const platform of result) {
       assert.ok(platform.docsUrl.startsWith('https://'));
       assert.ok(platform.steps.length >= 3);
+      for (const step of platform.steps) {
+        assert.ok(typeof step.text === 'string' && step.text.length > 0, 'step must have non-empty text');
+      }
     }
+  });
+
+  it('feishu steps are filtered by connection mode', () => {
+    const result = buildConnectorStatus({});
+    const feishu = result.find((p) => p.id === 'feishu');
+    assert.ok(feishu);
+    const webhookOnly = feishu.steps.filter((s) => s.mode === 'webhook');
+    const wsOnly = feishu.steps.filter((s) => s.mode === 'websocket');
+    const common = feishu.steps.filter((s) => !s.mode);
+    assert.ok(webhookOnly.length >= 1, 'Should have webhook-only steps');
+    assert.ok(wsOnly.length >= 1, 'Should have websocket-only steps');
+    assert.ok(common.length >= 2, 'Should have common steps');
+  });
+
+  it('marks feishu as configured in websocket mode without verification token', () => {
+    const result = buildConnectorStatus({
+      FEISHU_APP_ID: 'cli_abcdef123456',
+      FEISHU_APP_SECRET: 'secretvalue123',
+      FEISHU_CONNECTION_MODE: 'websocket',
+    });
+    const feishu = result.find((p) => p.id === 'feishu');
+    assert.ok(feishu);
+    assert.equal(feishu.configured, true, 'Websocket mode should not require FEISHU_VERIFICATION_TOKEN');
+  });
+
+  it('normalizes invalid FEISHU_CONNECTION_MODE to webhook (requires token)', () => {
+    // 'ws' is not a valid mode — runtime normalizes to 'webhook', status page must agree
+    const result = buildConnectorStatus({
+      FEISHU_APP_ID: 'cli_abcdef123456',
+      FEISHU_APP_SECRET: 'secretvalue123',
+      FEISHU_CONNECTION_MODE: 'ws',
+    });
+    const feishu = result.find((p) => p.id === 'feishu');
+    assert.ok(feishu);
+    assert.equal(feishu.configured, false, 'Invalid mode "ws" should normalize to webhook and require token');
+  });
+
+  it('marks feishu as not configured in webhook mode without verification token', () => {
+    const result = buildConnectorStatus({
+      FEISHU_APP_ID: 'cli_abcdef123456',
+      FEISHU_APP_SECRET: 'secretvalue123',
+      FEISHU_CONNECTION_MODE: 'webhook',
+    });
+    const feishu = result.find((p) => p.id === 'feishu');
+    assert.ok(feishu);
+    assert.equal(feishu.configured, false, 'Webhook mode requires FEISHU_VERIFICATION_TOKEN');
+  });
+
+  it('feishu fields include FEISHU_CONNECTION_MODE', () => {
+    const result = buildConnectorStatus({});
+    const feishu = result.find((p) => p.id === 'feishu');
+    assert.ok(feishu);
+    const modeField = feishu.fields.find((f) => f.envName === 'FEISHU_CONNECTION_MODE');
+    assert.ok(modeField, 'FEISHU_CONNECTION_MODE should be in feishu fields');
+    assert.equal(modeField.sensitive, false);
   });
 });

@@ -10,7 +10,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
@@ -35,9 +35,15 @@ import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { OC_API_KEY_ENV, OC_BASE_URL_ENV, writeOpenCodeRuntimeConfig } from '../providers/opencode-config-template.js';
+import {
+  OC_API_KEY_ENV,
+  OC_BASE_URL_ENV,
+  parseOpenCodeModel,
+  writeOpenCodeRuntimeConfig,
+} from '../providers/opencode-config-template.js';
 
 const log = createModuleLogger('invoke');
+const BUILTIN_OPENCODE_PROVIDERS = new Set(['anthropic', 'openai', 'openrouter', 'google']);
 
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
@@ -56,26 +62,6 @@ import {
 } from './invoke-helpers.js';
 import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
-
-/**
- * Strip the provider prefix from a model ID only when it matches ocProviderName
- * (redundant prefix). Otherwise keep the full ID — it is the model's namespace
- * within the provider (e.g. OpenRouter's "z-ai/glm-4.7").
- */
-function stripOwnProviderPrefix(model: string, ocProviderName: string): string {
-  return model.startsWith(`${ocProviderName}/`) ? model.slice(ocProviderName.length + 1) : model;
-}
-
-/** Ensure defaultModel is present in the models list for runtime config generation. */
-function ensureModelInList(models: string[], defaultModel: string, ocProviderName: string): string[] {
-  const bare = stripOwnProviderPrefix(defaultModel, ocProviderName);
-  if (models.includes(bare)) return models;
-  // Replace prefixed form with bare so runtime config key matches provider namespace
-  if (bare !== defaultModel && models.includes(defaultModel)) {
-    return models.map((m) => (m === defaultModel ? bare : m));
-  }
-  return [...models, bare];
-}
 
 /** F118: Module-level singleton — guards per-cliSessionId serialization */
 const sessionMutex = new SessionMutex();
@@ -282,6 +268,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let didWriteAudit = false;
   let didComplete = false;
   let didResetRestoreFailures = false;
+  let openCodeRuntimeConfigPath: string | undefined;
 
   // Shared-state preflight — covers ALL cats (Claude/Codex/Gemini), vendor-agnostic.
   // Three-layer defense model (shared-rules §14):
@@ -441,7 +428,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   // F118: Declared before try so it's accessible in finally
   let sessionMutexRelease: (() => void) | undefined;
-  let openCodeRuntimeConfigPath: string | undefined;
 
   try {
     let sessionId: string | undefined;
@@ -682,9 +668,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
         if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
-        // Pass model override so ClaudeAgentService can use env var mapping
-        // for non-Anthropic model names (e.g. glm-5 on BigModel).
-        if (defaultModel) callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel;
         if (resolvedAccount.baseUrl) {
           const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
           const proxyPortNum = parseInt(proxyPortStr, 10);
@@ -749,53 +732,42 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
     }
 
-    // F189: OpenCode unified custom provider config injection.
-    // All opencode + api_key members go through this path — ocProviderName is always required
-    // by validation. Built-in provider names (anthropic, openai) and custom names (maas, deepseek)
-    // are both handled identically: generate a per-catId runtime config, assemble provider/model.
-    const ocProviderName = catConfig?.ocProviderName?.trim();
-    if (provider === 'opencode' && resolvedAccount?.authType === 'api_key' && ocProviderName && defaultModel) {
-      const bareModel = stripOwnProviderPrefix(defaultModel, ocProviderName);
-      const assembledModel = `${ocProviderName}/${bareModel}`;
-      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = assembledModel;
-      try {
-        // Explicit account protocol takes full precedence over provider-name heuristic.
-        // Only fall back to ocProviderName when no explicit protocol is set.
-        const explicitProtocol = resolvedAccount.protocol;
-        const apiType: 'openai' | 'anthropic' | 'google' = explicitProtocol
-          ? explicitProtocol === 'anthropic'
-            ? 'anthropic'
-            : explicitProtocol === 'google'
-              ? 'google'
-              : 'openai'
-          : ocProviderName === 'anthropic'
-            ? 'anthropic'
-            : ocProviderName === 'google'
-              ? 'google'
-              : 'openai';
-        const configPath = writeOpenCodeRuntimeConfig(
-          projectRoot,
-          catId as string,
-          {
-            providerName: ocProviderName,
-            models: ensureModelInList(resolvedAccount.models ?? [], defaultModel, ocProviderName),
-            defaultModel: assembledModel,
-            apiType,
-            hasBaseUrl: !!resolvedAccount.baseUrl,
-          },
-          invocationId,
-        );
-        openCodeRuntimeConfigPath = configPath;
-        callbackEnv.OPENCODE_CONFIG = configPath;
-        if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
-        if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
-        log.info({ catId, configPath, provider: ocProviderName, apiType }, 'OpenCode runtime config written');
-      } catch (err) {
-        log.error({ catId, err }, 'Failed to write OpenCode runtime config');
-        throw new Error(
-          `OpenCode runtime config write failed for cat "${catId}": ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+    const trimmedDefaultModel = typeof defaultModel === 'string' ? defaultModel.trim() : undefined;
+    const ocProviderName = catConfig?.ocProviderName?.trim() || undefined;
+    const parsedOpenCodeModel =
+      provider === 'opencode' && trimmedDefaultModel ? parseOpenCodeModel(trimmedDefaultModel) : null;
+    // F189: When ocProviderName is set (bare model), assemble composite model for routing
+    const effectiveProviderName = parsedOpenCodeModel?.providerName ?? (ocProviderName || undefined);
+    const effectiveModel = parsedOpenCodeModel
+      ? trimmedDefaultModel!
+      : ocProviderName && trimmedDefaultModel
+        ? `${ocProviderName}/${trimmedDefaultModel}`
+        : undefined;
+    if (
+      provider === 'opencode' &&
+      resolvedAccount?.authType === 'api_key' &&
+      effectiveModel &&
+      effectiveProviderName &&
+      !BUILTIN_OPENCODE_PROVIDERS.has(effectiveProviderName)
+    ) {
+      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = effectiveModel;
+      const apiType: 'openai' | 'anthropic' | 'google' =
+        resolvedAccount.protocol === 'anthropic'
+          ? 'anthropic'
+          : resolvedAccount.protocol === 'google'
+            ? 'google'
+            : 'openai';
+      const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
+      openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, invocationId, {
+        providerName: effectiveProviderName,
+        models: rawModels,
+        defaultModel: effectiveModel,
+        apiType,
+        hasBaseUrl: Boolean(resolvedAccount.baseUrl),
+      });
+      callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
+      if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
+      if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
     }
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new sessions for cats
@@ -872,7 +844,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
 
       if (msg.type === 'session_init' && msg.sessionId) {
-        log.debug(
+        log.info(
           { cliSessionId: msg.sessionId, threadId, catId, userId, invocationId },
           'Session init: binding session',
         );
@@ -1298,10 +1270,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
-      log.debug(
-        { invocationId, catId, promptLength: effectivePrompt.length, sessionId: options.sessionId, attempt },
-        'Dispatching to agent service',
-      );
       const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
       for (;;) {
         const iterResult = await abortableNext(serviceIter, signal);
@@ -1528,6 +1496,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F118: Release session mutex (idempotent — safe if never acquired)
     sessionMutexRelease?.();
 
+    if (openCodeRuntimeConfigPath) {
+      await rm(openCodeRuntimeConfigPath, { force: true }).catch((err) => {
+        log.warn({ invocationId, path: openCodeRuntimeConfigPath, err }, 'Failed to remove OpenCode runtime config');
+      });
+    }
+
     // F118 AC-C5: Fallback audit for generator .return() path (#99)
     // If generator was force-returned (e.g. AbortController, client disconnect)
     // and the catch block didn't fire, write a fallback CAT_ERROR audit entry.
@@ -1551,22 +1525,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     await finalizeTaskProgress();
-
-    // F189 follow-up: per-invocation OPENCODE_CONFIG files must be cleaned after
-    // child process exits to avoid unbounded .cat-cafe file growth.
-    if (openCodeRuntimeConfigPath) {
-      try {
-        await unlink(openCodeRuntimeConfigPath);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException)?.code;
-        if (code !== 'ENOENT') {
-          log.warn(
-            { catId, invocationId, path: openCodeRuntimeConfigPath, err },
-            'Failed to cleanup OpenCode runtime config',
-          );
-        }
-      }
-    }
 
     // F089: Mark agent pane status when invocation completes
     if (deps.agentPaneRegistry?.getByInvocation(invocationId)) {

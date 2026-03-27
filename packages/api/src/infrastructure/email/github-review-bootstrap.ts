@@ -10,6 +10,7 @@ import type { CatId } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ConnectorInvokeTrigger } from './ConnectorInvokeTrigger.js';
 import { GithubReviewWatcher, loadWatcherConfigFromEnv } from './GithubReviewWatcher.js';
+import type { GitHubFeedbackFilter } from './github-feedback-filter.js';
 import type { ReviewRouter } from './ReviewRouter.js';
 
 let watcher: GithubReviewWatcher | null = null;
@@ -19,6 +20,8 @@ export interface GithubReviewBootstrapOptions {
   readonly reviewRouter?: ReviewRouter;
   /** Phase 3b: trigger cat invocation after successful routing */
   readonly invokeTrigger?: ConnectorInvokeTrigger;
+  /** Rule C: shared feedback filter — skip self-authored + authoritative bot reviews */
+  readonly feedbackFilter?: GitHubFeedbackFilter;
 }
 
 /**
@@ -41,6 +44,15 @@ export async function startGithubReviewWatcher(options: GithubReviewBootstrapOpt
     const router = options.reviewRouter;
     const trigger = options.invokeTrigger;
     watcher.onReviewAck(async (event) => {
+      // Rule C + Rule A only: email watcher skips self-authored reviews.
+      // Rule B does NOT apply here — email IS the authoritative source for bot reviews.
+      if (options.feedbackFilter && event.reviewer) {
+        if (options.feedbackFilter.isSelfAuthored(event.reviewer)) {
+          options.log.info(`[GithubReviewWatcher] Skipped self-authored review from ${event.reviewer}`);
+          return;
+        }
+      }
+
       const result = await router.route(event);
       options.log.info(`[GithubReviewWatcher] Route result: ${result.kind}`);
 

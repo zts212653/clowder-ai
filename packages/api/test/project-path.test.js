@@ -162,18 +162,23 @@ describe('validateProjectPath', () => {
 });
 
 describe('PROJECT_ALLOWED_ROOTS legacy mode', () => {
-  let savedEnv;
+  let savedAllowedRootsEnv;
+  let savedAllowedRootsAppendEnv;
 
   before(() => {
-    savedEnv = process.env.PROJECT_ALLOWED_ROOTS;
+    savedAllowedRootsEnv = process.env.PROJECT_ALLOWED_ROOTS;
+    savedAllowedRootsAppendEnv = process.env.PROJECT_ALLOWED_ROOTS_APPEND;
   });
 
   after(() => {
-    if (savedEnv === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
-    else process.env.PROJECT_ALLOWED_ROOTS = savedEnv;
+    if (savedAllowedRootsEnv === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+    else process.env.PROJECT_ALLOWED_ROOTS = savedAllowedRootsEnv;
+    if (savedAllowedRootsAppendEnv === undefined) delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+    else process.env.PROJECT_ALLOWED_ROOTS_APPEND = savedAllowedRootsAppendEnv;
   });
 
   it('switches to allowlist mode when env var is set', () => {
+    delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
     process.env.PROJECT_ALLOWED_ROOTS = '/opt/projects:/srv/data';
     assert.strictEqual(isDenylistMode(), false);
     assert.strictEqual(isUnderAllowedRoot('/opt/projects/my-app'), true);
@@ -183,6 +188,7 @@ describe('PROJECT_ALLOWED_ROOTS legacy mode', () => {
   });
 
   it('handles multiple colon-separated paths', () => {
+    delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
     process.env.PROJECT_ALLOWED_ROOTS = `/opt/a:/opt/b:${homedir()}`;
     assert.strictEqual(isUnderAllowedRoot('/opt/a/x'), true);
     assert.strictEqual(isUnderAllowedRoot('/opt/b/y'), true);
@@ -191,6 +197,7 @@ describe('PROJECT_ALLOWED_ROOTS legacy mode', () => {
   });
 
   it('falls back to denylist when env var is empty', () => {
+    delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
     process.env.PROJECT_ALLOWED_ROOTS = '';
     assert.strictEqual(isDenylistMode(), true);
     assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);

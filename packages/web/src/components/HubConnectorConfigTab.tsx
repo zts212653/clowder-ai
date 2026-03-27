@@ -24,6 +24,11 @@ interface PlatformFieldStatus {
   currentValue: string | null;
 }
 
+interface PlatformStepStatus {
+  text: string;
+  mode?: string;
+}
+
 interface PlatformStatus {
   id: string;
   name: string;
@@ -31,7 +36,7 @@ interface PlatformStatus {
   configured: boolean;
   fields: PlatformFieldStatus[];
   docsUrl: string;
-  steps: string[];
+  steps: PlatformStepStatus[];
 }
 
 export function HubConnectorConfigTab() {
@@ -119,7 +124,13 @@ export function HubConnectorConfigTab() {
       {platforms.map((platform) => {
         const isExpanded = expandedId === platform.id;
         const v = PLATFORM_VISUALS[platform.id] ?? DEFAULT_VISUAL;
-        const guideSteps = platform.steps.slice(0, -1);
+        // Resolve current connection mode for mode-filtered steps
+        const modeField = platform.fields.find((f) => f.envName === 'FEISHU_CONNECTION_MODE');
+        const selectedMode = modeField
+          ? (fieldValues['FEISHU_CONNECTION_MODE'] ?? modeField.currentValue ?? 'webhook')
+          : undefined;
+        const filteredSteps = platform.steps.filter((s) => !s.mode || s.mode === selectedMode);
+        const guideSteps = filteredSteps.slice(0, -1);
 
         return (
           <div
@@ -154,11 +165,11 @@ export function HubConnectorConfigTab() {
 
             {isExpanded && platform.id === 'weixin' && (
               <div className="border-t border-gray-100 px-4 py-4 space-y-3.5">
-                {platform.steps.map((step, idx) => (
+                {filteredSteps.map((step, idx) => (
                   <div key={idx} className="space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <StepBadge num={idx + 1} />
-                      <span className="text-[13px] font-medium text-gray-900">{step}</span>
+                      <span className="text-[13px] font-medium text-gray-900">{step.text}</span>
                     </div>
                     {idx === 0 && (
                       <div className="ml-[26px]">
@@ -176,7 +187,7 @@ export function HubConnectorConfigTab() {
                   <div key={idx} className="space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <StepBadge num={idx + 1} />
-                      <span className="text-[13px] font-medium text-gray-900">{step}</span>
+                      <span className="text-[13px] font-medium text-gray-900">{step.text}</span>
                     </div>
                     {idx === 0 && (
                       <a
@@ -216,6 +227,17 @@ export function HubConnectorConfigTab() {
                             {field.currentValue ?? '••••••••••••••••'}
                             <span className="ml-auto text-[10px] text-amber-600 whitespace-nowrap">编辑 .env</span>
                           </div>
+                        ) : field.envName === 'FEISHU_CONNECTION_MODE' ? (
+                          <select
+                            id={`config-${field.envName}`}
+                            value={fieldValues[field.envName] ?? field.currentValue ?? 'webhook'}
+                            onChange={(e) => setFieldValues((prev) => ({ ...prev, [field.envName]: e.target.value }))}
+                            className="w-full h-9 px-3 text-[13px] bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-colors"
+                            data-testid={`field-${field.envName}`}
+                          >
+                            <option value="webhook">Webhook（需公网 URL）</option>
+                            <option value="websocket">WebSocket 长连接（无需公网）</option>
+                          </select>
                         ) : (
                           <input
                             id={`config-${field.envName}`}
@@ -234,7 +256,7 @@ export function HubConnectorConfigTab() {
 
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <StepBadge num={platform.steps.length} />
+                    <StepBadge num={filteredSteps.length} />
                     <span className="text-[13px] font-medium text-gray-900">测试连接并保存</span>
                   </div>
                   {saveResult && (

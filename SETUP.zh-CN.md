@@ -59,7 +59,10 @@ your-projects/
 | `pnpm start` | 初始化（首次）→ 同步到 origin/main → 构建 → 启动 Redis + API + 前端 |
 | `pnpm start --memory` | 同上，但跳过 Redis（纯内存，重启数据丢失） |
 | `pnpm start --quick` | 同上，但跳过重编译（用已有 `dist/`） |
+| `pnpm start --daemon` | 同上，但后台运行（日志输出到 `cat-cafe-daemon.log`） |
 | `pnpm start:direct` | 跳过 worktree — 直接在当前目录启动 dev server |
+| `pnpm stop` | 停止后台 daemon |
+| `pnpm start:status` | 查看 daemon 是否在运行 |
 | `pnpm runtime:init` | 只创建运行时 worktree（不启动） |
 | `pnpm runtime:sync` | 只同步 worktree 到 origin/main（不启动） |
 | `pnpm runtime:status` | 显示 worktree 路径、分支、HEAD、ahead/behind |
@@ -67,6 +70,64 @@ your-projects/
 首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。
 
 > **自定义运行时路径：** 设置 `CAT_CAFE_RUNTIME_DIR` 使用不同位置：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+
+## 后台 / Daemon 模式
+
+默认情况下 `pnpm start` 在前台运行 — 关闭终端或 SSH 断开后服务会停止。使用 `--daemon` 可以在后台运行：
+
+```bash
+# 后台启动
+pnpm start --daemon
+
+# 可以和其他参数组合
+pnpm start --daemon --memory
+pnpm start --daemon --quick
+
+# 查看状态
+pnpm start:status
+
+# 查看日志
+tail -f cat-cafe-daemon.log
+
+# 停止
+pnpm stop
+```
+
+Daemon 模式将日志输出到项目根目录（或运行时 worktree 根目录）的 `cat-cafe-daemon.log`。PID 文件（`~/.cat-cafe/daemon.pid`）用于追踪运行中的进程。
+
+> **其他后台运行方式**（如果你不想用 `--daemon`）：
+> - **tmux / screen**：`tmux new -s cat-cafe` → `pnpm start` → 按 `Ctrl+B D` 脱离
+> - **nohup**：`nohup pnpm start > cat-cafe.log 2>&1 &`
+> - **systemd**（Linux 生产环境）：创建 service 文件 — 见下方
+
+<details>
+<summary>systemd service 文件示例</summary>
+
+```ini
+# /etc/systemd/system/clowder-ai.service
+[Unit]
+Description=Clowder AI (Cat Café)
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/clowder-ai
+ExecStart=/usr/bin/pnpm start:direct
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now clowder-ai
+sudo journalctl -u clowder-ai -f
+```
+
+</details>
 
 ## 配置
 
@@ -316,7 +377,13 @@ Windows 通过 PowerShell 脚本完整支持。
 pnpm start              # 启动全部（Redis + API + 前端），通过运行时 worktree
 pnpm start --memory     # 无 Redis，纯内存模式
 pnpm start --quick      # 跳过重编译，用已有 dist/
+pnpm start --daemon     # 后台运行（daemon 模式）
 pnpm start:direct       # 直接启动 dev server（跳过 worktree）
+
+# === Daemon 管理 ===
+pnpm stop               # 停止后台 daemon
+pnpm start:status       # 查看 daemon 是否在运行
+                        # 查看日志: tail -f cat-cafe-daemon.log
 
 # === 运行时 Worktree ===
 pnpm runtime:init       # 创建运行时 worktree（仅首次）
@@ -369,6 +436,49 @@ pnpm alpha:start        # 启动 alpha 环境（端口 3011/3012）
 pnpm alpha:status       # 查看 alpha worktree 状态
 pnpm alpha:test         # 运行 alpha 集成测试
 ```
+
+## 远程部署
+
+所有服务都通过环境变量配置 — 远程部署**不需要改代码**。在 `.env` 中添加：
+
+### 必须修改
+
+```bash
+# API 必须监听所有网络接口（默认 127.0.0.1 只允许本机访问）
+API_SERVER_HOST=0.0.0.0
+
+# 前端 URL — 用于 CORS 和重定向
+FRONTEND_URL=https://your-domain.com
+
+# API URL — 前端需要能访问到 API
+NEXT_PUBLIC_API_URL=http://your-domain.com:3004
+
+# Redis — 如果在其他机器上
+REDIS_URL=redis://your-redis-host:6399
+```
+
+### 可选：语音服务
+
+如果语音服务在其他机器上运行，更新对应 URL：
+
+```bash
+WHISPER_URL=http://your-asr-host:9876
+NEXT_PUBLIC_WHISPER_URL=http://your-asr-host:9876
+TTS_URL=http://your-tts-host:9879
+NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://your-llm-host:9878
+```
+
+> **Python 服务**（ASR/TTS/embed）默认绑定 `127.0.0.1`。如果部署在独立机器上，启动时需要加 `--host 0.0.0.0`。
+
+### CORS
+
+API 自动接受以下来源的请求：
+- `localhost` / `127.0.0.1`（任意端口）
+- RFC 1918 内网地址（`10.x.x.x`、`172.16-31.x.x`、`192.168.x.x`）
+- Tailscale IP（`100.x.x.x`）
+- 你设置的 `FRONTEND_URL`
+
+大多数局域网 / VPN 场景不需要额外的 CORS 配置。
 
 ## 常见问题
 

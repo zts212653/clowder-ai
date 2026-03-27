@@ -392,6 +392,32 @@ describe('post_message A2A mention invocation', () => {
     assert.deepEqual(records[0].targetCats, ['codex'], 'Only valid catId (codex) should be in targetCats');
   });
 
+  test('single line-start mention drops polluted explicit targetCats extras (fail-closed)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      payload: {
+        invocationId,
+        callbackToken,
+        content: '请帮忙复核\n@缅因猫',
+        targetCats: ['codex', 'gemini'],
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const records = invocationRecordStore.getRecords();
+    assert.equal(records.length, 1, 'single mention should enqueue exactly one target');
+    assert.deepEqual(records[0].targetCats, ['codex'], 'extra explicit target should be dropped');
+
+    const recent = messageStore.getRecent(10);
+    assert.equal(recent.length, 1);
+    assert.ok(recent[0].mentions.includes('codex'));
+    assert.equal(recent[0].mentions.includes('gemini'), false, 'gemini must not be injected into mentions');
+  });
+
   // Self-mention filter: opus @布偶猫 → no invocation (can't invoke self)
   test('post-message self-mention does NOT trigger invocation', async () => {
     const app = await createApp();

@@ -20,6 +20,10 @@ export interface PrTrackingEntry {
   readonly lastCiBucket?: string;
   readonly lastCiNotifiedAt?: number;
   readonly ciTrackingEnabled?: boolean;
+  // F140: Conflict state fields (optional — absent until first conflict check)
+  readonly lastConflictFingerprint?: string;
+  readonly lastConflictNotifiedAt?: number;
+  readonly mergeState?: string;
 }
 
 export type PrTrackingInput = Omit<PrTrackingEntry, 'registeredAt'>;
@@ -34,6 +38,16 @@ export interface CiStateFields {
   lastCiBucket?: string;
   lastCiNotifiedAt?: number;
   ciTrackingEnabled?: boolean;
+}
+
+/**
+ * F140: Conflict state fields for partial update via patchConflictState().
+ * KD-12: Independent from CiStateFields — CI and conflict are different state domains.
+ */
+export interface ConflictStateFields {
+  lastConflictFingerprint?: string;
+  lastConflictNotifiedAt?: number;
+  mergeState?: string;
 }
 
 export interface IPrTrackingStore {
@@ -51,6 +65,9 @@ export interface IPrTrackingStore {
 
   /** F133: Partial update CI state fields without touching registration data. */
   patchCiState(repoFullName: string, prNumber: number, ciFields: CiStateFields): void | Promise<void>;
+
+  /** F140: Partial update conflict state fields without touching registration data. */
+  patchConflictState(repoFullName: string, prNumber: number, conflictFields: ConflictStateFields): void | Promise<void>;
 }
 
 function makeKey(repoFullName: string, prNumber: number): string {
@@ -89,5 +106,12 @@ export class MemoryPrTrackingStore implements IPrTrackingStore {
     const existing = this.entries.get(key);
     if (!existing) return;
     this.entries.set(key, { ...existing, ...ciFields });
+  }
+
+  patchConflictState(repoFullName: string, prNumber: number, conflictFields: ConflictStateFields): void {
+    const key = makeKey(repoFullName, prNumber);
+    const existing = this.entries.get(key);
+    if (!existing) return;
+    this.entries.set(key, { ...existing, ...conflictFields });
   }
 }

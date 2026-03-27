@@ -400,4 +400,61 @@ describe('ConnectorGateway Bootstrap', () => {
     }
     await handle.stop();
   });
+
+  it('creates gateway with feishu in websocket mode without verificationToken', async () => {
+    const config = {
+      feishuAppId: 'test-app-id',
+      feishuAppSecret: 'test-app-secret',
+      feishuConnectionMode: 'websocket',
+    };
+    const mockWsClient = { started: false, closed: false };
+    const deps = {
+      ...baseDeps,
+      _wsClientFactory: () => ({
+        async start() {
+          mockWsClient.started = true;
+        },
+        close() {
+          mockWsClient.closed = true;
+        },
+      }),
+    };
+    const handle = await startConnectorGateway(config, deps);
+    assert.ok(handle, 'Gateway should be created with websocket mode');
+    assert.equal(handle.webhookHandlers.has('feishu'), false, 'Websocket mode should NOT register webhook handler');
+    assert.ok(mockWsClient.started, 'Mock WSClient should have been started');
+    await handle.stop();
+    assert.ok(mockWsClient.closed, 'Mock WSClient should have been closed on stop');
+  });
+
+  it('feishu websocket mode still allows webhook mode when explicitly set', async () => {
+    const config = {
+      feishuAppId: 'test-app-id',
+      feishuAppSecret: 'test-app-secret',
+      feishuVerificationToken: 'test-token',
+      feishuConnectionMode: 'webhook',
+    };
+    const handle = await startConnectorGateway(config, baseDeps);
+    assert.ok(handle);
+    assert.ok(handle.webhookHandlers.has('feishu'), 'Explicit webhook mode should register webhook handler');
+    await handle.stop();
+  });
+
+  it('loadConnectorGatewayConfig reads FEISHU_CONNECTION_MODE from env', async () => {
+    const { loadConnectorGatewayConfig } = await import(
+      '../dist/infrastructure/connectors/connector-gateway-bootstrap.js'
+    );
+
+    process.env.FEISHU_CONNECTION_MODE = 'websocket';
+    const config = loadConnectorGatewayConfig();
+    assert.equal(config.feishuConnectionMode, 'websocket');
+
+    process.env.FEISHU_CONNECTION_MODE = 'webhook';
+    const config2 = loadConnectorGatewayConfig();
+    assert.equal(config2.feishuConnectionMode, 'webhook');
+
+    delete process.env.FEISHU_CONNECTION_MODE;
+    const config3 = loadConnectorGatewayConfig();
+    assert.equal(config3.feishuConnectionMode, 'webhook', 'Should default to webhook when not set');
+  });
 });

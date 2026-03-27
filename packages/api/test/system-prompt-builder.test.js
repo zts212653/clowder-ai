@@ -1027,4 +1027,122 @@ describe('SystemPromptBuilder', () => {
     assert.ok(codexId.includes('REVIEW READY'), 'codex prompt must include REVIEW READY state');
     assert.ok(codexId.includes('DONE'), 'codex prompt must include DONE state');
   });
+
+  // ─── F129 Pack Block Injection ──────────────────────────────────────
+
+  test('F129: buildStaticIdentity injects all pack blocks', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('opus', {
+      mcpAvailable: false,
+      packBlocks: {
+        packName: 'test-pack',
+        guardrailBlock: '## [Pack: test-pack] 硬约束\n- Never trade without risk disclosure',
+        defaultsBlock: '## [Pack: test-pack] 默认行为\n- Use formal financial terminology',
+        masksBlock: '## [Pack: test-pack] 角色叠加\n- Role: Quantitative Analyst',
+        workflowsBlock: '## [Pack: test-pack] 工作流\n- Trigger: /research',
+        worldDriverSummary: '## [Pack: test-pack] 世界引擎（只读摘要）\nResolver: hybrid',
+      },
+    });
+
+    assert.ok(prompt.includes('硬约束'), 'Should inject guardrail block');
+    assert.ok(prompt.includes('默认行为'), 'Should inject defaults block');
+    assert.ok(prompt.includes('角色叠加'), 'Should inject masks block');
+    assert.ok(prompt.includes('工作流'), 'Should inject workflows block');
+    assert.ok(prompt.includes('世界引擎'), 'Should inject world driver summary');
+  });
+
+  test('F129: pack masks appear after identity, before governance', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('opus', {
+      packBlocks: {
+        packName: 'test-pack',
+        masksBlock: '## PACK_MASK_MARKER',
+        guardrailBlock: '## PACK_GUARD_MARKER',
+        defaultsBlock: null,
+        workflowsBlock: null,
+        worldDriverSummary: null,
+      },
+    });
+
+    const maskPos = prompt.indexOf('PACK_MASK_MARKER');
+    const guardPos = prompt.indexOf('PACK_GUARD_MARKER');
+    const identityPos = prompt.indexOf('布偶猫');
+
+    assert.ok(maskPos > identityPos, 'Masks should appear after identity');
+    assert.ok(guardPos > maskPos, 'Guardrails should appear after masks');
+  });
+
+  test('F129: pack guardrails appear after core governance', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('opus', {
+      packBlocks: {
+        packName: 'test-pack',
+        guardrailBlock: '## PACK_GUARD_MARKER',
+        defaultsBlock: '## PACK_DEFAULT_MARKER',
+        masksBlock: null,
+        workflowsBlock: null,
+        worldDriverSummary: null,
+      },
+    });
+
+    const guardPos = prompt.indexOf('PACK_GUARD_MARKER');
+    const defaultPos = prompt.indexOf('PACK_DEFAULT_MARKER');
+    // Core governance (L0 家规) must come before pack guardrails
+    const coreGovPos = prompt.indexOf('家规');
+
+    assert.ok(coreGovPos > -1, 'Core governance (家规) should exist in prompt');
+    assert.ok(guardPos > coreGovPos, 'Pack guardrails must come AFTER core governance (KD-9)');
+    assert.ok(defaultPos > guardPos, 'Pack defaults must come after pack guardrails');
+  });
+
+  test('F129: buildSystemPrompt passes packBlocks through', async () => {
+    const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildSystemPrompt({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      packBlocks: {
+        packName: 'quant-cats',
+        guardrailBlock: '## [Pack: quant-cats] 硬约束\n- Risk disclosure required',
+        defaultsBlock: '## [Pack: quant-cats] 默认行为\n- Financial terminology',
+        masksBlock: '## [Pack: quant-cats] 角色叠加\n- Quantitative Analyst',
+        workflowsBlock: null,
+        worldDriverSummary: null,
+      },
+    });
+
+    assert.ok(prompt.includes('硬约束'), 'buildSystemPrompt should include guardrail block');
+    assert.ok(prompt.includes('角色叠加'), 'buildSystemPrompt should include masks block');
+    assert.ok(prompt.includes('默认行为'), 'buildSystemPrompt should include defaults block');
+  });
+
+  test('F129: null/undefined packBlocks produce no pack sections', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const withNull = buildStaticIdentity('opus', { packBlocks: null });
+    const withUndef = buildStaticIdentity('opus', {});
+
+    assert.ok(!withNull.includes('角色叠加'), 'null packBlocks should not inject masks');
+    assert.ok(!withNull.includes('硬约束'), 'null packBlocks should not inject guardrails');
+    assert.ok(!withUndef.includes('角色叠加'), 'undefined packBlocks should not inject masks');
+    assert.ok(!withUndef.includes('硬约束'), 'undefined packBlocks should not inject guardrails');
+  });
+
+  test('F129: partial packBlocks only inject present fields', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('opus', {
+      packBlocks: {
+        packName: 'partial-pack',
+        guardrailBlock: '## ONLY_GUARDRAILS_HERE',
+        defaultsBlock: null,
+        masksBlock: null,
+        workflowsBlock: null,
+        worldDriverSummary: null,
+      },
+    });
+
+    assert.ok(prompt.includes('ONLY_GUARDRAILS_HERE'), 'Should inject the one present block');
+    assert.ok(!prompt.includes('角色叠加'), 'Should not inject null masks');
+    assert.ok(!prompt.includes('默认行为'), 'Should not inject null defaults');
+  });
 });

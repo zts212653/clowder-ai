@@ -61,6 +61,17 @@ EOF
 
 # 3. 注册 PR tracking（必做，Email Watcher / review 通知路由依赖）
 # → 调用 MCP: cat_cafe_register_pr_tracking(repoFullName, prNumber, catId)
+# 注册后你会收到三类自动通知（F133 + F140）：
+#   - CI/CD 状态变化（pass/fail）→ github-ci connector
+#   - PR 冲突检测（CONFLICTING）→ github-conflict connector（urgent 唤醒）
+#   - Review feedback（comments + decisions）→ github-review-feedback connector
+# 详见 refs/pr-signals.md
+#
+# 收到冲突通知时（F140 Phase B）：
+# - 暂停当前工作，处理冲突优先（冲突是 merge blocker）
+# - 在对应 worktree 执行 rebase（参见 refs/pr-signals.md Phase B）
+# - rebase 成功后继续原工作流
+# - 复杂冲突 → 通知铲屎官，等指示后再继续
 
 # 4. PR body 防呆检查（禁止任何 @句柄出现在 body）
 PR_BODY="$(gh pr view {PR_NUMBER} --json body --jq '.body')" || \

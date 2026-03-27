@@ -1,0 +1,11 @@
+id: research-flow
+name: Research Workflow
+trigger: user-asks-for-analysis
+steps:
+  - action: apply-mask
+    params:
+      maskId: quant-analyst
+  - action: search-knowledge
+    params:
+      query: latest market data
+  - action: notify-user

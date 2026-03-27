@@ -133,7 +133,14 @@ describe('WeixinAdapter', () => {
             message_id: 1002,
             from_user_id: 'user1',
             context_token: 'ctx-2',
-            item_list: [{ type: 2, image_item: { url: 'https://cdn.weixin.qq.com/image/123' } }],
+            item_list: [
+              {
+                type: 2,
+                image_item: {
+                  media: { encrypt_query_param: 'eqp123', aes_key: 'abc123' },
+                },
+              },
+            ],
           },
         ],
       };
@@ -142,7 +149,28 @@ describe('WeixinAdapter', () => {
       assert.equal(result.messages.length, 1);
       assert.equal(result.messages[0].text, '[图片]');
       assert.equal(result.messages[0].attachments?.[0]?.type, 'image');
-      assert.equal(result.messages[0].attachments?.[0]?.mediaUrl, 'https://cdn.weixin.qq.com/image/123');
+      const mediaKey = JSON.parse(result.messages[0].attachments?.[0]?.mediaUrl ?? '{}');
+      assert.equal(mediaKey.encryptQueryParam, 'eqp123');
+      assert.equal(mediaKey.aesKey, 'abc123');
+    });
+
+    it('parses image without CDN media info (no attachment)', () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const raw = {
+        ret: 0,
+        msgs: [
+          {
+            message_id: 1002,
+            from_user_id: 'user1',
+            context_token: 'ctx-2',
+            item_list: [{ type: 2, image_item: { url: 'https://cdn.weixin.qq.com/image/123' } }],
+          },
+        ],
+      };
+
+      const result = adapter.parseUpdates(raw);
+      assert.equal(result.messages[0].text, '[图片]');
+      assert.equal(result.messages[0].attachments, undefined, 'No CDN media → no attachment');
     });
 
     it('parses voice messages with transcribed text', () => {
@@ -202,7 +230,7 @@ describe('WeixinAdapter', () => {
       assert.equal(result.messages[0].text, '[语音]');
     });
 
-    it('parses file messages with filename', () => {
+    it('parses file messages with filename and CDN media key', () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       const raw = {
         ret: 0,
@@ -211,7 +239,15 @@ describe('WeixinAdapter', () => {
             message_id: 1004,
             from_user_id: 'user1',
             context_token: 'ctx-4',
-            item_list: [{ type: 4, file_item: { file_name: 'report.pdf' } }],
+            item_list: [
+              {
+                type: 4,
+                file_item: {
+                  file_name: 'report.pdf',
+                  media: { encrypt_query_param: 'eqp-file', aes_key: 'filekey123' },
+                },
+              },
+            ],
           },
         ],
       };
@@ -221,6 +257,28 @@ describe('WeixinAdapter', () => {
       assert.equal(result.messages[0].text, '[文件] report.pdf');
       assert.equal(result.messages[0].attachments?.[0]?.type, 'file');
       assert.equal(result.messages[0].attachments?.[0]?.fileName, 'report.pdf');
+      const mediaKey = JSON.parse(result.messages[0].attachments?.[0]?.mediaUrl ?? '{}');
+      assert.equal(mediaKey.encryptQueryParam, 'eqp-file');
+      assert.equal(mediaKey.aesKey, 'filekey123');
+    });
+
+    it('parses file without CDN media info (no attachment)', () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const raw = {
+        ret: 0,
+        msgs: [
+          {
+            message_id: 1005,
+            from_user_id: 'user1',
+            context_token: 'ctx-5',
+            item_list: [{ type: 4, file_item: { file_name: 'notes.txt' } }],
+          },
+        ],
+      };
+
+      const result = adapter.parseUpdates(raw);
+      assert.equal(result.messages[0].text, '[文件] notes.txt');
+      assert.equal(result.messages[0].attachments, undefined, 'No CDN media → no attachment');
     });
 
     it('parses multiple messages in one update', () => {
@@ -310,16 +368,16 @@ describe('WeixinAdapter', () => {
       assert.ok(capturedBody.base_info, 'body must include base_info');
     });
 
-    it('marks token as consumed after successful send', async () => {
+    it('retains token after successful send (BUG-5: token is reusable)', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'ctx-token-1');
       adapter._injectFetch(async () => ({ ok: true, json: async () => ({ ret: 0 }) }));
 
       await sendAndFlush(adapter, 'user-1', 'Hello');
-      assert.ok(adapter._isTokenConsumed('user-1', 'ctx-token-1'));
+      assert.ok(adapter.hasContextToken('user-1'), 'token must be retained after send');
     });
 
-    it('rejects second send with consumed token (does not call iLink API)', async () => {
+    it('allows second send with same token (BUG-5: token is reusable)', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'ctx-token-1');
       let sendCount = 0;
@@ -331,10 +389,9 @@ describe('WeixinAdapter', () => {
       await sendAndFlush(adapter, 'user-1', 'First reply');
       assert.equal(sendCount, 1);
 
-      // Re-inject the same (now consumed) token
-      adapter._injectContextToken('user-1', 'ctx-token-1');
-      await sendAndFlush(adapter, 'user-1', 'Second reply — should be blocked');
-      assert.equal(sendCount, 1, 'iLink API should NOT be called with consumed token');
+      // Same token — second send should succeed (token is reusable)
+      await sendAndFlush(adapter, 'user-1', 'Second reply — should also send');
+      assert.equal(sendCount, 2, 'iLink API should be called twice with reusable token');
     });
 
     it('aggregates multiple sendReply calls within debounce window', async () => {
@@ -457,7 +514,7 @@ describe('WeixinAdapter', () => {
       assert.ok(!calls.some((c) => c.text.includes('reply-B') && c.token === 'token-C'), 'B must NOT be merged into C');
     });
 
-    it('flushReply compare-and-delete does not remove newer token', async () => {
+    it('token-B remains valid after flushing token-A bucket (BUG-5: no consumption)', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'token-A');
       adapter._injectFetch(async () => ({ ok: true, json: async () => ({ ret: 0 }) }));
@@ -468,11 +525,10 @@ describe('WeixinAdapter', () => {
       // New token-B arrives before flush
       adapter._injectContextToken('user-1', 'token-B');
 
-      // Flush old bucket — should consume token-A but NOT delete token-B from contextTokens
+      // Flush old bucket — token-B must still be in contextTokens
       await adapter._flushAllPending();
       await p;
 
-      assert.ok(adapter._isTokenConsumed('user-1', 'token-A'), 'token-A should be consumed');
       assert.ok(adapter.hasContextToken('user-1'), 'token-B must still be in contextTokens');
     });
 
@@ -564,7 +620,7 @@ describe('WeixinAdapter', () => {
       }));
 
       await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'hello'), /sendmessage returned non-JSON response/);
-      assert.equal(adapter._isTokenConsumed('user-1', 'ctx-1'), false);
+      assert.ok(adapter.hasContextToken('user-1'), 'token must survive failed send');
     });
 
     it('throws on empty 200 sendmessage response body', async () => {
@@ -576,7 +632,7 @@ describe('WeixinAdapter', () => {
       }));
 
       await assert.rejects(() => sendAndFlush(adapter, 'user-1', 'hello'), /sendmessage returned empty response body/);
-      assert.equal(adapter._isTokenConsumed('user-1', 'ctx-1'), false);
+      assert.ok(adapter.hasContextToken('user-1'), 'token must survive failed send');
     });
 
     it('sends all content in a single sendmessage call (no chunking)', async () => {
@@ -1157,6 +1213,31 @@ describe('WeixinAdapter', () => {
         // Should have 3 unique transitions: waiting → scanned → confirmed
         assert.deepEqual(statusChanges, ['waiting', 'scanned', 'confirmed']);
       });
+    });
+  });
+
+  describe('sendMedia', () => {
+    it('skips when no context_token', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      let fetchCalled = false;
+      adapter._injectFetch(async () => {
+        fetchCalled = true;
+        return { ok: true, json: async () => ({}) };
+      });
+      await adapter.sendMedia('user-1', { type: 'image', absPath: '/tmp/test.png' });
+      assert.equal(fetchCalled, false);
+    });
+
+    it('skips when no file path', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      adapter._injectContextToken('user-1', 'ctx-1');
+      let fetchCalled = false;
+      adapter._injectFetch(async () => {
+        fetchCalled = true;
+        return { ok: true, json: async () => ({}) };
+      });
+      await adapter.sendMedia('user-1', { type: 'image' });
+      assert.equal(fetchCalled, false);
     });
   });
 });
