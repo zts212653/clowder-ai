@@ -20,6 +20,7 @@ import { FeishuAdapter } from './adapters/FeishuAdapter.js';
 import { FeishuTokenManager } from './adapters/FeishuTokenManager.js';
 import { TelegramAdapter } from './adapters/TelegramAdapter.js';
 import { WeixinAdapter } from './adapters/WeixinAdapter.js';
+import { XiaoyiAdapter } from './adapters/XiaoyiAdapter.js';
 import { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
 import {
   type IConnectorPermissionStore,
@@ -49,6 +50,12 @@ export interface ConnectorGatewayConfig {
   dingtalkAppKey?: string | undefined;
   dingtalkAppSecret?: string | undefined;
   weixinBotToken?: string | undefined;
+  /** F139: XiaoYi A2A credentials */
+  xiaoyiAk?: string | undefined;
+  xiaoyiSk?: string | undefined;
+  xiaoyiAgentId?: string | undefined;
+  xiaoyiWsUrl1?: string | undefined;
+  xiaoyiWsUrl2?: string | undefined;
   /** Override co-creator userId for connector threads. Read from DEFAULT_OWNER_USER_ID env. */
   coCreatorUserId?: string | undefined;
   whisperUrl?: string | undefined;
@@ -156,6 +163,11 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     dingtalkAppKey: process.env.DINGTALK_APP_KEY,
     dingtalkAppSecret: process.env.DINGTALK_APP_SECRET,
     weixinBotToken: process.env.WEIXIN_BOT_TOKEN,
+    xiaoyiAk: process.env.XIAOYI_AK,
+    xiaoyiSk: process.env.XIAOYI_SK,
+    xiaoyiAgentId: process.env.XIAOYI_AGENT_ID,
+    xiaoyiWsUrl1: process.env.XIAOYI_WS_URL1,
+    xiaoyiWsUrl2: process.env.XIAOYI_WS_URL2,
     coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID,
     whisperUrl: process.env.WHISPER_URL,
     connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR,
@@ -172,8 +184,9 @@ export async function startConnectorGateway(
   const hasFeishu = Boolean(config.feishuAppId && config.feishuAppSecret && config.feishuVerificationToken);
   const hasDingTalk = Boolean(config.dingtalkAppKey && config.dingtalkAppSecret);
   const hasWeixin = Boolean(config.weixinBotToken);
+  const hasXiaoyi = Boolean(config.xiaoyiAk && config.xiaoyiSk && config.xiaoyiAgentId);
 
-  if (!hasTelegram && !hasFeishu && !hasDingTalk && !hasWeixin) {
+  if (!hasTelegram && !hasFeishu && !hasDingTalk && !hasWeixin && !hasXiaoyi) {
     log.info('[ConnectorGateway] No pre-configured connectors — gateway created for WeChat QR login support');
   }
 
@@ -487,6 +500,30 @@ export async function startConnectorGateway(
   });
 
   stopFns.push(async () => weixin.stopPolling());
+
+  // ── XiaoYi (华为小艺 A2A WebSocket) ──
+  if (hasXiaoyi) {
+    const xiaoyi = new XiaoyiAdapter(log, {
+      ak: config.xiaoyiAk!,
+      sk: config.xiaoyiSk!,
+      agentId: config.xiaoyiAgentId!,
+      wsUrl1: config.xiaoyiWsUrl1,
+      wsUrl2: config.xiaoyiWsUrl2,
+    });
+    adapters.set('xiaoyi', xiaoyi);
+
+    xiaoyi.startConnection(async (msg) => {
+      const attachments = msg.attachments?.map((a) => ({
+        type: a.type,
+        platformKey: a.url,
+        ...(a.fileName ? { fileName: a.fileName } : {}),
+      }));
+      await connectorRouter.route('xiaoyi', msg.chatId, msg.text, msg.messageId, attachments);
+    });
+
+    stopFns.push(async () => xiaoyi.stopConnection());
+    log.info('[ConnectorGateway] XiaoYi adapter started (WebSocket A2A)');
+  }
 
   // R3-P1: Resolve route URLs to local file paths for real media delivery
   const uploadDir = resolve(process.env.UPLOAD_DIR ?? './uploads');

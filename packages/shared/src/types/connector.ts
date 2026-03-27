@@ -180,6 +180,19 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     },
   },
   {
+    id: 'xiaoyi',
+    displayName: '小艺',
+    icon: '/images/connectors/xiaoyi.png',
+    color: { primary: '#CF0A2C', secondary: '#FEE8EB' },
+    description: '华为小艺智慧助手 A2A',
+    tailwindTheme: {
+      avatar: 'bg-red-100 ring-2 ring-red-200',
+      label: 'text-red-700',
+      labelLink: 'text-red-700 hover:text-red-900',
+      bubble: 'border border-red-200 bg-red-50',
+    },
+  },
+  {
     id: 'system-command',
     displayName: 'Clowder AI',
     icon: 'settings',
