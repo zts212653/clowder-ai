@@ -743,12 +743,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       : ocProviderName && trimmedDefaultModel
         ? `${ocProviderName}/${trimmedDefaultModel}`
         : undefined;
+    // fix(#280): When ocProviderName is explicitly set, bypass the builtin gate so that
+    // builtin provider names (anthropic, openai, …) also enter the F189 config path.
+    // Without ocProviderName, keep the original gate to preserve legacy behaviour
+    // (e.g. prefixed model + no ocProviderName should NOT generate a runtime config).
     if (
       provider === 'opencode' &&
       resolvedAccount?.authType === 'api_key' &&
       effectiveModel &&
       effectiveProviderName &&
-      !BUILTIN_OPENCODE_PROVIDERS.has(effectiveProviderName)
+      (ocProviderName || !BUILTIN_OPENCODE_PROVIDERS.has(effectiveProviderName))
     ) {
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = effectiveModel;
       const apiType: 'openai' | 'anthropic' | 'google' =
