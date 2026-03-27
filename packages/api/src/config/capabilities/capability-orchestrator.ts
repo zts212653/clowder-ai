@@ -9,7 +9,7 @@
  * 连同 Cat Cafe 自有 MCP 一起写入 capabilities.json。
  */
 
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
@@ -110,9 +110,19 @@ export async function resolvePencilBinary(): Promise<string | null> {
     }
   }
   if (allDirs.length === 0) return null;
+  // P2 review: sort descending by semver, then pick the newest binary that
+  // actually exists on disk. Avoids selecting a newer but incomplete install.
   allDirs.sort((a, b) => comparePencilDirs(a.dir, b.dir));
-  const best = allDirs[allDirs.length - 1];
-  return resolve(best.base, best.dir, getPencilBinarySuffix());
+  for (let i = allDirs.length - 1; i >= 0; i--) {
+    const candidate = resolve(allDirs[i].base, allDirs[i].dir, getPencilBinarySuffix());
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // binary missing or not accessible — try next
+    }
+  }
+  return null;
 }
 
 // ────────── Core: Read / Write capabilities.json ──────────
