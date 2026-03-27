@@ -261,7 +261,11 @@ export function useAgentMessages() {
 
   const findCallbackReplacementTarget = useCallback((catId: string, invocationId: string): { id: string } | null => {
     const currentMessages = useChatStore.getState().messages;
-    // #266: First try exact invocationId match
+    // #266: Exact invocationId match only — strict scoping prevents a stale
+    // callback from invocation-1 replacing invocation-2's active bubble.
+    // P1 review (codex): the previous activeRefs fallback was dangerous because
+    // it would grab whatever bubble is currently active regardless of invocation,
+    // allowing late retry callbacks to clobber a new conversation's stream.
     for (let i = currentMessages.length - 1; i >= 0; i -= 1) {
       const msg = currentMessages[i];
       if (
@@ -273,19 +277,8 @@ export function useAgentMessages() {
         return { id: msg.id };
       }
     }
-    // #266 fallback: if exact match fails (e.g. invocationId mismatch),
-    // find the most recent active stream bubble for this cat.
-    // This prevents duplicate messages when the callback's invocationId
-    // doesn't match the stream's stored invocationId.
-    const activeId = activeRefs.current.get(catId)?.id;
-    if (activeId) {
-      const activeMsg = currentMessages.find(
-        (msg) => msg.id === activeId && msg.type === 'assistant' && msg.catId === catId && msg.origin === 'stream',
-      );
-      if (activeMsg) {
-        return { id: activeMsg.id };
-      }
-    }
+    // No match → caller creates a new callback bubble via addMessage.
+    // For stale callbacks the message already exists in DB (deduped by messageId).
     return null;
   }, []);
 
