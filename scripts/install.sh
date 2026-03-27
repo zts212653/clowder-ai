@@ -525,7 +525,7 @@ case "$PLATFORM" in
         DISTRO_FAMILY="darwin"; DISTRO_NAME="macOS"
         if ! command -v brew &>/dev/null; then
             info "  Homebrew not found — installing..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
             # Add Homebrew to PATH for Apple Silicon and Intel Macs
             [[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
             [[ -x /usr/local/bin/brew ]] && eval "$(/usr/local/bin/brew shellenv)"
@@ -653,7 +653,7 @@ if node_needs_install; then
                 brew install node@20 2>/dev/null || true
                 # node@20 is keg-only — Homebrew does not link it into PATH by default.
                 # Add the keg bin to PATH for this session AND persist to shell profile.
-                _keg_bin="$(brew --prefix node@20 2>/dev/null)/bin"
+                _keg_bin="$(brew --prefix node@20 2>/dev/null || true)/bin"
                 if [[ -d "$_keg_bin" ]]; then
                     export PATH="$_keg_bin:$PATH"
                     _profile="${ZDOTDIR:-$HOME}/.zprofile"
@@ -748,7 +748,7 @@ start_redis_if_stopped() {
 }
 if [[ "$MEMORY_MODE" == true ]]; then warn "Memory mode (--memory) — skipping Redis"
 elif command -v redis-server &>/dev/null; then ok "Redis already installed"
-    redis-cli ping &>/dev/null 2>&1 || { warn "Redis not running — starting..."; start_redis_if_stopped; }
+    redis-cli ping &>/dev/null 2>&1 || { warn "Redis not running — starting..."; start_redis_if_stopped; sleep 1; redis-cli ping &>/dev/null 2>&1 || warn "Redis started but not responding to ping"; }
 else
     warn "Redis not found — installing locally"
     install_redis_local
