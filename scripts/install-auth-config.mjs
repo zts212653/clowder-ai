@@ -17,6 +17,7 @@ const BUILTIN_ACCOUNT_SPECS = [
 ];
 
 const DEFAULT_OAUTH_CLIENTS = new Set(['anthropic', 'openai', 'google']);
+const DEFAULT_API_KEY_CLIENTS = new Set(['dare']);
 const LEGACY_BUILTIN_ID_MAP = {
   'claude-oauth': 'anthropic',
   'codex-oauth': 'openai',
@@ -148,6 +149,13 @@ function normalizeClient(rawClient) {
 function defaultBindingForClient(client) {
   if (DEFAULT_OAUTH_CLIENTS.has(client)) {
     return oauthBindingForClient(client);
+  }
+  if (DEFAULT_API_KEY_CLIENTS.has(client)) {
+    return {
+      enabled: true,
+      mode: 'api_key',
+      accountRef: builtinAccountIdForClient(client),
+    };
   }
   return {
     enabled: false,

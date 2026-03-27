@@ -803,7 +803,13 @@
       "name": "Workspace Navigator — 猫猫可编程导航 Workspace 面板",
       "status": "in-progress | **Owner**: 金渐层 | **Priority**: P2",
       "file": "F131-workspace-navigator.md"
+    },
+    {
+      "id": "F135",
+      "name": "狸花猫开箱即用（DARE Out-of-the-Box）",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F135-dare-ootb.md"
     }
   ],
-  "generated_at": "2026-03-22T01:25:29.527Z"
+  "generated_at": "2026-03-23T13:11:20.460Z"
 }

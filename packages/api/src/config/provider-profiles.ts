@@ -100,7 +100,12 @@ const CLIENT_PROTOCOL_MAP: Partial<Record<BuiltinAccountClient, ProviderProfileP
   opencode: 'anthropic',
 };
 
-const DEFAULT_BOOTSTRAP_CLIENTS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google'];
+const DEFAULT_BOOTSTRAP_MODES: Partial<Record<BuiltinAccountClient, 'oauth' | 'api_key'>> = {
+  anthropic: 'oauth',
+  openai: 'oauth',
+  google: 'oauth',
+  dare: 'api_key',
+};
 const ALL_BUILTIN_CLIENTS = BUILTIN_ACCOUNT_SPECS.map((spec) => spec.client) as BuiltinAccountClient[];
 const providerStoreLocks = new Map<string, Promise<void>>();
 
@@ -257,10 +262,11 @@ function createBuiltinProfiles(now = new Date().toISOString()): ProviderProfileM
 function createDefaultBootstrapBindings(): BootstrapBindings {
   const next: BootstrapBindings = {};
   for (const client of ALL_BUILTIN_CLIENTS) {
-    if (DEFAULT_BOOTSTRAP_CLIENTS.includes(client)) {
+    const mode = DEFAULT_BOOTSTRAP_MODES[client];
+    if (mode) {
       next[client] = {
         enabled: true,
-        mode: 'oauth',
+        mode,
         accountRef: BUILTIN_CLIENT_IDS[client],
       };
     } else {
@@ -928,7 +934,7 @@ export async function activateProviderProfile(
     if (profile.kind === 'builtin') {
       meta.bootstrapBindings[client] = {
         enabled: true,
-        mode: 'oauth',
+        mode: DEFAULT_BOOTSTRAP_MODES[client] ?? 'oauth',
         accountRef: builtinAccountIdForClient(client),
       };
     } else {

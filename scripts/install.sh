@@ -658,6 +658,55 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
     done; ok "Skills linked"
 else fail "cat-cafe-skills/ not found"; exit 1; fi
 
+# F135: DARE CLI (狸花猫) — clone + venv setup
+# Pin to a known-good commit for reproducible installs (bump via PR when upgrading DARE).
+DARE_CLI_REF="${DARE_CLI_REF:-6654255f003b2be58c1c75160607b7d7bf0eb957}"
+DARE_VENDOR_DIR="$PROJECT_DIR/vendor/dare-cli"
+if [[ -f "$DARE_VENDOR_DIR/client/__main__.py" ]]; then
+    ok "DARE CLI already present at vendor/dare-cli"
+else
+    info "  Cloning DARE CLI to vendor/dare-cli (ref: ${DARE_CLI_REF:0:7})..."
+    mkdir -p "$PROJECT_DIR/vendor"
+    if git clone https://github.com/clowder-labs/Deterministic-Agent-Runtime-Engine.git \
+           "$DARE_VENDOR_DIR" 2>&1 && \
+       git -C "$DARE_VENDOR_DIR" checkout "$DARE_CLI_REF" 2>&1; then
+        ok "DARE CLI cloned at ${DARE_CLI_REF:0:7}"
+    else
+        warn "DARE clone failed — 狸花猫 will not be available"
+        rm -rf "$DARE_VENDOR_DIR" 2>/dev/null || true
+        DARE_VENDOR_DIR=""
+    fi
+fi
+if [[ -n "$DARE_VENDOR_DIR" && -f "$DARE_VENDOR_DIR/client/__main__.py" ]]; then
+    if [[ ! -f "$DARE_VENDOR_DIR/.venv/bin/python" ]]; then
+        info "  Setting up DARE Python venv..."
+        if command -v uv &>/dev/null; then
+            if uv venv "$DARE_VENDOR_DIR/.venv" 2>&1 && \
+               uv pip install --python "$DARE_VENDOR_DIR/.venv/bin/python" \
+                   -r "$DARE_VENDOR_DIR/requirements.txt" "httpx[socks]" 2>&1; then
+                ok "DARE venv ready"
+            else
+                warn "DARE venv setup failed (uv) — 狸花猫 will not be available"
+                DARE_VENDOR_DIR=""
+            fi
+        elif command -v python3 &>/dev/null; then
+            if python3 -m venv "$DARE_VENDOR_DIR/.venv" 2>&1 && \
+               "$DARE_VENDOR_DIR/.venv/bin/pip" install \
+                   -r "$DARE_VENDOR_DIR/requirements.txt" "httpx[socks]" 2>&1; then
+                ok "DARE venv ready"
+            else
+                warn "DARE venv setup failed (python3) — 狸花猫 will not be available"
+                DARE_VENDOR_DIR=""
+            fi
+        else
+            warn "Neither uv nor python3 found — skipping DARE venv setup"
+            DARE_VENDOR_DIR=""
+        fi
+    else
+        ok "DARE venv already exists"
+    fi
+fi
+
 # ── [6/9] Install AI agent CLI tools ─────────────────────
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
@@ -773,12 +822,33 @@ configure_agent_auth() {
     fi
 }
 
+configure_dare_auth() {
+    # F135: DARE uses API key only (no OAuth / no CLI binary)
+    [[ -f "$DARE_VENDOR_DIR/client/__main__.py" ]] || return 0
+    local key=""
+    tty_read_secret "    Dare (狸花猫) — OpenRouter API Key (Enter = skip): " key
+    if [[ -n "$key" ]]; then
+        _INSTALLER_API_KEY="$key" node scripts/install-auth-config.mjs client-auth set \
+            --project-dir "$PROJECT_DIR" \
+            --client dare \
+            --mode api_key \
+            --model z-ai/glm-4.7
+        ok "Dare (狸花猫): API key configured"
+    else
+        warn "Dare (狸花猫): no key — set OPENROUTER_API_KEY in .env to enable later"
+    fi
+}
+
 if [[ "$HAS_TTY" == true ]]; then
     info "  Configure each agent / 逐个配置每只猫的认证方式："
     configure_agent_auth "Claude (布偶猫)" "claude"; configure_agent_auth "Codex (缅因猫)" "codex"
-    configure_agent_auth "Gemini (暹罗猫)" "gemini"
+    configure_agent_auth "Gemini (暹罗猫)" "gemini"; configure_dare_auth
 else
     info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini"
+    if [[ -n "$DARE_VENDOR_DIR" ]]; then
+        info "  Dare (狸花猫): set OPENROUTER_API_KEY in .env or run:"
+        info "    node scripts/install-auth-config.mjs client-auth set --project-dir $PROJECT_DIR --client dare --mode api_key --api-key YOUR_KEY"
+    fi
 fi
 
 # ── [8/9] Generate .env with all collected config ─────────
