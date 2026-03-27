@@ -653,14 +653,15 @@ if node_needs_install; then
                 brew install node@20 2>/dev/null || true
                 # node@20 is keg-only — Homebrew does not link it into PATH by default.
                 # Add the keg bin to PATH for this session AND persist to shell profile.
-                _keg_bin="$(brew --prefix node@20 2>/dev/null || true)/bin"
-                if [[ -d "$_keg_bin" ]]; then
+                _keg_prefix="$(brew --prefix node@20 2>/dev/null || true)"
+                _keg_bin="${_keg_prefix:+$_keg_prefix/bin}"
+                if [[ -n "$_keg_bin" && -d "$_keg_bin" ]]; then
                     export PATH="$_keg_bin:$PATH"
                     _profile="${ZDOTDIR:-$HOME}/.zprofile"
                     append_to_profile "export PATH=\"$_keg_bin:\$PATH\"  # Homebrew node@20 keg" "$_profile"
                     ok "Node keg PATH added to $_profile"
                 fi
-                unset _keg_bin _profile
+                unset _keg_prefix _keg_bin _profile
                 node_needs_install || NODE_OK=true
             fi
             ;;

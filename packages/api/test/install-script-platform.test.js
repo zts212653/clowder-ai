@@ -118,6 +118,32 @@ rm -rf "$fake_keg"
   assert.match(output, /^FOUND:v20/, 'node should be discoverable after keg bin PATH injection');
 });
 
+test('darwin node@20 keg: prefix failure must NOT write /bin to profile (#174 P1 regression)', () => {
+  // When brew --prefix fails, _keg_prefix is empty and _keg_bin must NOT
+  // degrade to "/bin" (a real system directory).
+  const output = runSourceOnlySnippet(`
+# Stub brew: --prefix FAILS, install is a no-op
+brew() {
+  case "$1" in
+    --prefix) return 1 ;;
+    install) return 0 ;;
+  esac
+}
+
+_keg_prefix="$(brew --prefix node@20 2>/dev/null || true)"
+_keg_bin="\${_keg_prefix:+$_keg_prefix/bin}"
+# Evaluate the conditional expansion
+eval "_keg_bin=$_keg_bin"
+
+if [[ -n "$_keg_bin" && -d "$_keg_bin" ]]; then
+  printf 'BAD:wrote_bin_path'
+else
+  printf 'OK:skipped'
+fi
+`);
+  assert.match(output, /^OK:skipped/, '_keg_bin must be empty when brew --prefix fails — must NOT degrade to /bin');
+});
+
 test('darwin redis install verifies redis-cli ping, not just brew exit code', () => {
   // The install_redis_local function must verify Redis is actually responding
   assert.match(installScriptText, /redis-cli ping/, 'must verify Redis responds to ping after install');
