@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assert, runSourceOnlySnippet, spawnSync } from './install-script-test-helpers.js';
+import { assert, runSourceOnlySnippet } from './install-script-test-helpers.js';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, '..', '..', '..');
