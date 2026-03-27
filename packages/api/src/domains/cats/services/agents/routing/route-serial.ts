@@ -172,7 +172,13 @@ export async function* routeSerial(
       // MCP documentation: Claude's MCP_TOOLS_SECTION → staticIdentity (in -p content).
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
-      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable });
+      // F129: Load active pack blocks (best-effort, failure does not block invocation)
+      let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
+      if (deps.packStore) {
+        const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
+        packBlocks = await getActivePackBlocks(deps.packStore);
+      }
+      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable)
         ? buildMcpCallbackInstructions({
@@ -252,7 +258,31 @@ export async function* routeSerial(
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
-        const inc = await assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode);
+
+        // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
+        // Without this, context (up to maxContextTokens=160k) + system parts (~15-20k) can exceed maxPromptTokens.
+        const catModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const incBudget = getCatContextBudget(catId as string);
+        const incSystemTokens = estimateTokens(
+          [staticIdentity, invocationContext, catModePromptForBudget, bootstrapContext, mcpInstructions]
+            .filter(Boolean)
+            .join('\n'),
+        );
+        const incMessageTokens = estimateTokens(message);
+        const effectiveContextBudget = Math.min(
+          Math.max(0, incBudget.maxPromptTokens - incSystemTokens - incMessageTokens - 200),
+          incBudget.maxContextTokens,
+        );
+
+        const inc = await assembleIncrementalContext(
+          deps,
+          userId,
+          threadId,
+          catId,
+          currentUserMessageId,
+          thinkingMode,
+          { effectiveMaxContextTokens: effectiveContextBudget },
+        );
         deliveryBoundaryId = inc.boundaryId;
         if (inc.degradation) {
           yield {
@@ -275,8 +305,12 @@ export async function* routeSerial(
         if (history && history.length > 0 && !contextHistory) {
           const budget = getCatContextBudget(catId as string);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
+          // A+ fix: include catModePrompt + bootstrapContext in system parts estimate (P2-1)
+          const catModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
           const systemPartsTokens = estimateTokens(
-            [staticIdentity, invocationContext, mcpInstructions].filter(Boolean).join('\n'),
+            [staticIdentity, invocationContext, catModePromptLegacyForBudget, bootstrapContext, mcpInstructions]
+              .filter(Boolean)
+              .join('\n'),
           );
           const promptTokens = estimateTokens(prompt);
           const budgetForContext = Math.max(0, budget.maxPromptTokens - systemPartsTokens - promptTokens - 200);
@@ -749,11 +783,11 @@ export async function* routeSerial(
           const pendingOriginalTargets = targetCats.slice(index + 1);
           for (const nextCat of a2aMentions) {
             if (worklistEntry.a2aCount >= maxDepth) break;
-            // A2A cross-path dedup: skip if this cat was already dispatched via callback (InvocationQueue)
+            // A2A cross-path dedup: skip if this cat is actively processing via callback (InvocationQueue)
             if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
               log.info(
                 { threadId, catId: nextCat, fromCat: catId },
-                'A2A text-scan dedup: cat already in InvocationQueue, skipping',
+                'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
               );
               continue;
             }

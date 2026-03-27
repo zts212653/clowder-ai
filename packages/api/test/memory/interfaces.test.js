@@ -40,6 +40,7 @@ describe('memory interfaces — type exports', () => {
       'thread',
       'discussion',
       'research',
+      'pack-knowledge',
     ]);
   });
 });

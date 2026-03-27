@@ -13,8 +13,10 @@
 import { resolve } from 'node:path';
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ConnectorWebhookHandler, WebhookHandleResult } from '../../routes/connector-webhooks.js';
+import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
 import { DingTalkAdapter } from './adapters/DingTalkAdapter.js';
 import { FeishuAdapter } from './adapters/FeishuAdapter.js';
 import { FeishuTokenManager } from './adapters/FeishuTokenManager.js';
@@ -28,6 +30,9 @@ import {
 } from './ConnectorPermissionStore.js';
 import { ConnectorRouter } from './ConnectorRouter.js';
 import { MemoryConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
+import { GitHubRepoWebhookHandler } from './github-repo-event/GitHubRepoWebhookHandler.js';
+import { ReconciliationDedup } from './github-repo-event/ReconciliationDedup.js';
+import { RedisDeliveryDedup } from './github-repo-event/RedisDeliveryDedup.js';
 import { InboundMessageDedup } from './InboundMessageDedup.js';
 import { ConnectorMediaService } from './media/ConnectorMediaService.js';
 import { MediaCleanupJob } from './media/MediaCleanupJob.js';
@@ -46,6 +51,8 @@ export interface ConnectorGatewayConfig {
   feishuVerificationToken?: string | undefined;
   feishuBotOpenId?: string | undefined;
   feishuAdminOpenIds?: string | undefined;
+  /** F134-E: 'webhook' (default) or 'websocket' (long-connection via WSClient) */
+  feishuConnectionMode?: 'webhook' | 'websocket' | undefined;
   dingtalkAppKey?: string | undefined;
   dingtalkAppSecret?: string | undefined;
   weixinBotToken?: string | undefined;
@@ -133,6 +140,13 @@ export interface ConnectorGatewayDeps {
   readonly redis?: RedisClient | undefined;
   readonly log: FastifyBaseLogger;
   readonly frontendBaseUrl?: string | undefined;
+  /** @internal Test-only: override WSClient factory to avoid real SDK connections */
+  readonly _wsClientFactory?:
+    | ((opts: { appId: string; appSecret: string }) => {
+        start(opts: unknown): Promise<void>;
+        close(opts?: unknown): void;
+      })
+    | undefined;
 }
 
 export interface ConnectorGatewayHandle {
@@ -153,6 +167,7 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     feishuVerificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
     feishuBotOpenId: process.env.FEISHU_BOT_OPEN_ID,
     feishuAdminOpenIds: process.env.FEISHU_ADMIN_OPEN_IDS,
+    feishuConnectionMode: process.env.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook',
     dingtalkAppKey: process.env.DINGTALK_APP_KEY,
     dingtalkAppSecret: process.env.DINGTALK_APP_SECRET,
     weixinBotToken: process.env.WEIXIN_BOT_TOKEN,
@@ -169,7 +184,10 @@ export async function startConnectorGateway(
   const { log } = deps;
 
   const hasTelegram = Boolean(config.telegramBotToken);
-  const hasFeishu = Boolean(config.feishuAppId && config.feishuAppSecret && config.feishuVerificationToken);
+  const feishuWsMode = config.feishuConnectionMode === 'websocket';
+  const hasFeishu = Boolean(
+    config.feishuAppId && config.feishuAppSecret && (feishuWsMode || config.feishuVerificationToken),
+  );
   const hasDingTalk = Boolean(config.dingtalkAppKey && config.dingtalkAppSecret);
   const hasWeixin = Boolean(config.weixinBotToken);
 
@@ -273,12 +291,11 @@ export async function startConnectorGateway(
     log.info('[ConnectorGateway] Telegram adapter started (long polling)');
   }
 
-  // ── Feishu (webhook) ──
+  // ── Feishu (webhook or websocket) ──
   if (hasFeishu) {
     const feishu = new FeishuAdapter(config.feishuAppId!, config.feishuAppSecret!, log, {
       verificationToken: config.feishuVerificationToken,
     });
-    // Inject token manager for native media upload (Feishu /im/v1/images + /im/v1/files)
     const feishuTokenManager = new FeishuTokenManager({
       appId: config.feishuAppId!,
       appSecret: config.feishuAppSecret!,
@@ -328,110 +345,192 @@ export async function startConnectorGateway(
       return Buffer.from(await res.arrayBuffer());
     });
 
-    // Register webhook handler for the route
-    webhookHandlers.set('feishu', {
-      connectorId: 'feishu',
-      async handleWebhook(body, _headers): Promise<WebhookHandleResult> {
-        const eventHeader = (body as Record<string, unknown>)?.header as Record<string, unknown> | undefined;
-        const msgType = ((body as Record<string, unknown>)?.event as Record<string, unknown> | undefined)?.message as
-          | Record<string, unknown>
-          | undefined;
-        log.info(
-          {
-            eventType: eventHeader?.event_type,
-            msgType: msgType?.message_type,
-            chatType: msgType?.chat_type,
-          },
-          '[Feishu] Webhook received',
-        );
+    // Shared routing logic for both webhook and websocket inbound messages
+    async function routeFeishuParsedEvent(parsed: NonNullable<ReturnType<FeishuAdapter['parseEvent']>>) {
+      const attachments = parsed.attachments?.map((a) => ({
+        type: a.type,
+        platformKey: a.feishuKey,
+        messageId: parsed.messageId,
+        ...(a.fileName ? { fileName: a.fileName } : {}),
+        ...(a.duration != null ? { duration: a.duration } : {}),
+      }));
 
-        // Handle verification challenge (no token check — challenge is pre-auth)
-        const challenge = feishu.isVerificationChallenge(body);
-        if (challenge) {
-          return { kind: 'challenge', response: { challenge: challenge.challenge } };
+      let senderName = parsed.senderName;
+      let chatName = parsed.chatName;
+      if (parsed.chatType === 'group') {
+        if (!senderName) {
+          senderName = await feishu.resolveSenderName(parsed.senderId).catch(() => undefined);
         }
-
-        // Verify event token (AC-4: webhook authentication)
-        if (!feishu.verifyEventToken(body)) {
-          log.warn('[Feishu] Webhook rejected: invalid verification token');
-          return { kind: 'error', status: 403, message: 'Invalid verification token' };
+        if (!chatName) {
+          chatName = await feishu.resolveChatName(parsed.chatId).catch(() => undefined);
         }
+      }
+      const sender =
+        parsed.chatType === 'group' && parsed.senderId !== 'unknown'
+          ? { id: parsed.senderId, ...(senderName ? { name: senderName } : {}) }
+          : undefined;
 
-        // AC-14: Check for card action callback
-        const cardAction = feishu.parseCardAction(body);
-        if (cardAction) {
-          // Route card action value as text through ConnectorRouter
-          const actionText = JSON.stringify(cardAction.actionValue);
-          const result = await connectorRouter.route(
-            'feishu',
-            cardAction.chatId,
-            actionText,
-            `card-action-${Date.now()}`,
+      return connectorRouter.route(
+        'feishu',
+        parsed.chatId,
+        parsed.text,
+        parsed.messageId,
+        attachments,
+        sender,
+        parsed.chatType,
+        chatName,
+      );
+    }
+
+    if (feishuWsMode) {
+      // ── Feishu WebSocket (long-connection) mode ──
+      const eventDispatcher = new lark.EventDispatcher({}).register({
+        'im.message.receive_v1': async (data: Record<string, unknown>) => {
+          log.info(
+            {
+              msgType: (data.message as Record<string, unknown> | undefined)?.message_type,
+              chatType: (data.message as Record<string, unknown> | undefined)?.chat_type,
+            },
+            '[Feishu] WS event received',
           );
-          return result.kind === 'skipped'
-            ? { kind: 'skipped', reason: result.reason }
-            : { kind: 'processed', messageId: result.kind === 'routed' ? result.messageId : 'card-action' };
-        }
+          // Wrap into the envelope format parseEvent expects: { header, event }
+          const envelope = {
+            header: { event_type: 'im.message.receive_v1' },
+            event: data,
+          };
+          const parsed = feishu.parseEvent(envelope);
+          if (!parsed) return;
+          await routeFeishuParsedEvent(parsed);
+        },
+      });
 
-        // Parse event
-        const parsed = feishu.parseEvent(body);
-        if (!parsed) {
-          log.warn(
-            { eventType: eventHeader?.event_type, msgType: msgType?.message_type },
-            '[Feishu] Event skipped: parseEvent returned null (unsupported_event)',
+      const wsClient = deps._wsClientFactory
+        ? deps._wsClientFactory({ appId: config.feishuAppId!, appSecret: config.feishuAppSecret! })
+        : new lark.WSClient({
+            appId: config.feishuAppId!,
+            appSecret: config.feishuAppSecret!,
+            loggerLevel: lark.LoggerLevel.info,
+          });
+
+      try {
+        await wsClient.start({ eventDispatcher });
+        log.info('[ConnectorGateway] Feishu adapter started (WebSocket long-connection mode)');
+      } catch (err) {
+        log.warn({ err }, '[Feishu] WSClient initial connection failed — will auto-reconnect');
+      }
+
+      stopFns.push(async () => {
+        try {
+          wsClient.close({ force: true });
+        } catch {
+          // WSClient may already be torn down
+        }
+      });
+    } else {
+      // ── Feishu Webhook mode (default) ──
+      webhookHandlers.set('feishu', {
+        connectorId: 'feishu',
+        async handleWebhook(body, _headers): Promise<WebhookHandleResult> {
+          const eventHeader = (body as Record<string, unknown>)?.header as Record<string, unknown> | undefined;
+          const msgType = ((body as Record<string, unknown>)?.event as Record<string, unknown> | undefined)?.message as
+            | Record<string, unknown>
+            | undefined;
+          log.info(
+            {
+              eventType: eventHeader?.event_type,
+              msgType: msgType?.message_type,
+              chatType: msgType?.chat_type,
+            },
+            '[Feishu] Webhook received',
           );
-          return { kind: 'skipped', reason: 'unsupported_event' };
-        }
 
-        const attachments = parsed.attachments?.map((a) => ({
-          type: a.type,
-          platformKey: a.feishuKey,
-          messageId: parsed.messageId,
-          ...(a.fileName ? { fileName: a.fileName } : {}),
-          ...(a.duration != null ? { duration: a.duration } : {}),
-        }));
-
-        // F134: Enrich sender and chat info for group chats
-        let senderName = parsed.senderName;
-        let chatName = parsed.chatName;
-        if (parsed.chatType === 'group') {
-          if (!senderName) {
-            senderName = await feishu.resolveSenderName(parsed.senderId).catch(() => undefined);
+          const challenge = feishu.isVerificationChallenge(body);
+          if (challenge) {
+            return { kind: 'challenge', response: { challenge: challenge.challenge } };
           }
-          if (!chatName) {
-            chatName = await feishu.resolveChatName(parsed.chatId).catch(() => undefined);
+
+          if (!feishu.verifyEventToken(body)) {
+            log.warn('[Feishu] Webhook rejected: invalid verification token');
+            return { kind: 'error', status: 403, message: 'Invalid verification token' };
           }
-        }
-        // F134 P1 fix: Only attach sender for group chats — DM replies must NOT @sender (AC-C2)
-        const sender =
-          parsed.chatType === 'group' && parsed.senderId !== 'unknown'
-            ? { id: parsed.senderId, ...(senderName ? { name: senderName } : {}) }
-            : undefined;
 
-        const result = await connectorRouter.route(
-          'feishu',
-          parsed.chatId,
-          parsed.text,
-          parsed.messageId,
-          attachments,
-          sender,
-          parsed.chatType,
-          chatName,
-        );
+          const cardAction = feishu.parseCardAction(body);
+          if (cardAction) {
+            const actionText = JSON.stringify(cardAction.actionValue);
+            const result = await connectorRouter.route(
+              'feishu',
+              cardAction.chatId,
+              actionText,
+              `card-action-${Date.now()}`,
+            );
+            return result.kind === 'skipped'
+              ? { kind: 'skipped', reason: result.reason }
+              : { kind: 'processed', messageId: result.kind === 'routed' ? result.messageId : 'card-action' };
+          }
 
-        if (result.kind === 'skipped') {
-          return { kind: 'skipped', reason: result.reason };
-        }
+          const parsed = feishu.parseEvent(body);
+          if (!parsed) {
+            log.warn(
+              { eventType: eventHeader?.event_type, msgType: msgType?.message_type },
+              '[Feishu] Event skipped: parseEvent returned null (unsupported_event)',
+            );
+            return { kind: 'skipped', reason: 'unsupported_event' };
+          }
 
-        if (result.kind === 'command') {
-          return { kind: 'processed', messageId: 'command' };
-        }
+          const result = await routeFeishuParsedEvent(parsed);
 
-        return { kind: 'processed', messageId: result.messageId };
+          if (result.kind === 'skipped') {
+            return { kind: 'skipped', reason: result.reason };
+          }
+
+          if (result.kind === 'command') {
+            return { kind: 'processed', messageId: 'command' };
+          }
+
+          return { kind: 'processed', messageId: result.messageId };
+        },
+      });
+
+      log.info('[ConnectorGateway] Feishu adapter registered (webhook mode)');
+    }
+  }
+
+  // ── F141: GitHub Repo Inbox webhook handler ──
+  const ghWebhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
+  const ghRepoAllowlist = process.env.GITHUB_REPO_ALLOWLIST;
+  const ghInboxCatId = process.env.GITHUB_REPO_INBOX_CAT_ID;
+
+  if (ghWebhookSecret && ghRepoAllowlist && ghInboxCatId && deps.redis) {
+    const ghDedup = new RedisDeliveryDedup(deps.redis as import('./github-repo-event/RedisDeliveryDedup.js').RedisLike);
+    const ghReconciliationDedup = new ReconciliationDedup(
+      deps.redis as import('./github-repo-event/ReconciliationDedup.js').ReconciliationRedisLike,
+    );
+    const ghHandler = new GitHubRepoWebhookHandler(
+      {
+        webhookSecret: ghWebhookSecret,
+        repoAllowlist: ghRepoAllowlist.split(',').map((r) => r.trim()),
+        inboxCatId: ghInboxCatId,
+        defaultUserId: effectiveUserId, // P1-2: use effective owner for thread visibility (F088 pattern)
       },
-    });
-
-    log.info('[ConnectorGateway] Feishu adapter registered (webhook mode)');
+      {
+        bindingStore,
+        threadStore: deps.threadStore,
+        deliverFn: deliverConnectorMessage,
+        invokeTrigger: deps.invokeTrigger,
+        dedup: ghDedup,
+        reconciliationDedup: ghReconciliationDedup, // Phase B bridge (KD-15)
+        redis: deps.redis as import('./github-repo-event/RedisDeliveryDedup.js').RedisLike, // KD-20: inbox thread creation lock
+        deliveryDeps: {
+          messageStore:
+            deps.messageStore as import('../../domains/cats/services/stores/ports/MessageStore.js').IMessageStore,
+          socketManager: deps.socketManager,
+        },
+      },
+    );
+    webhookHandlers.set('github-repo-event', ghHandler);
+    log.info('[F141] GitHub Repo Inbox webhook handler registered');
+  } else if (ghWebhookSecret || ghRepoAllowlist || ghInboxCatId) {
+    log.warn('[F141] GitHub Repo Inbox partially configured — set all 3 env vars + Redis to enable');
   }
 
   // ── DingTalk (Stream mode) ──
@@ -439,8 +538,11 @@ export async function startConnectorGateway(
     const dingtalk = new DingTalkAdapter(log, {
       appKey: config.dingtalkAppKey!,
       appSecret: config.dingtalkAppSecret!,
+      redis: deps.redis,
     });
     adapters.set('dingtalk', dingtalk);
+
+    await dingtalk.hydrateGroupChatIds();
 
     mediaService.setDingtalkDownloadFn(async (downloadCode: string) => {
       const downloadUrl = await dingtalk.downloadMedia(downloadCode);
@@ -456,7 +558,31 @@ export async function startConnectorGateway(
         ...(a.fileName ? { fileName: a.fileName } : {}),
         ...(a.duration != null ? { duration: a.duration } : {}),
       }));
-      await connectorRouter.route('dingtalk', msg.chatId, msg.text, msg.messageId, attachments);
+
+      // F132 A.2: Register group chatId so outbound dispatch survives cold restarts
+      if (msg.chatType === 'group') {
+        dingtalk.registerGroupChatId(msg.chatId);
+      }
+
+      // F132 A.2: Enrich sender and chat info (mirroring F134 Feishu pattern)
+      const senderName = msg.senderNick ?? dingtalk.resolveSenderName(msg.senderId);
+      const chatName = msg.conversationTitle ?? dingtalk.resolveConversationTitle(msg.chatId);
+
+      const sender =
+        msg.chatType === 'group' && msg.senderId !== 'unknown'
+          ? { id: msg.senderId, ...(senderName ? { name: senderName } : {}) }
+          : undefined;
+
+      await connectorRouter.route(
+        'dingtalk',
+        msg.chatId,
+        msg.text,
+        msg.messageId,
+        attachments,
+        sender,
+        msg.chatType,
+        chatName,
+      );
     });
 
     stopFns.push(async () => dingtalk.stopStream());
@@ -471,7 +597,12 @@ export async function startConnectorGateway(
 
   const startWeixinPolling = () => {
     weixin.startPolling(async (msg) => {
-      await connectorRouter.route('weixin', msg.chatId, msg.text, msg.messageId);
+      const attachments = msg.attachments?.map((a) => ({
+        type: a.type,
+        platformKey: a.mediaUrl,
+        ...(a.fileName ? { fileName: a.fileName } : {}),
+      }));
+      await connectorRouter.route('weixin', msg.chatId, msg.text, msg.messageId, attachments);
     });
   };
 
@@ -484,6 +615,16 @@ export async function startConnectorGateway(
 
   weixin.setOnSessionExpired(() => {
     log.warn('[ConnectorGateway] WeChat session expired — user must re-scan QR code');
+  });
+
+  // Register weixin CDN download function for inbound media
+  mediaService.setWeixinDownloadFn(async (platformKey: string) => {
+    const { downloadMediaFromCdn } = await import('./adapters/weixin-cdn.js');
+    return downloadMediaFromCdn({
+      platformKey,
+      cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
+      log,
+    });
   });
 
   stopFns.push(async () => weixin.stopPolling());

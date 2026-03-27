@@ -170,7 +170,7 @@ describe('chatStore multi-thread state', () => {
       expect(messages[0].id).toBe('msg-server-1');
     });
 
-    it('records a bubble lifecycle drop event when canonical id already exists in the active thread', () => {
+    it('TD112: merges duplicate assistant bubble at addMessage time instead of needing replaceMessageId drop', () => {
       configureDebug({ enabled: true });
       useChatStore.getState().addMessage({
         id: 'temp-stream-1',
@@ -191,18 +191,19 @@ describe('chatStore multi-thread state', () => {
         timestamp: Date.now() + 1,
       });
 
-      useChatStore.getState().replaceMessageId('temp-stream-1', 'msg-server-1');
+      // TD112: second addMessage merges into first — only 1 message exists
+      expect(useChatStore.getState().messages).toHaveLength(1);
+      expect(useChatStore.getState().messages[0]!.id).toBe('temp-stream-1');
+      expect(useChatStore.getState().messages[0]!.origin).toBe('callback');
 
+      // The merge event should have been recorded
       expect(dumpBubbleTimeline({ rawThreadId: true }).events).toEqual([
         expect.objectContaining({
           event: 'bubble_lifecycle',
           threadId: 'thread-a',
-          action: 'drop',
-          reason: 'replace_message_id_dedup',
+          action: 'merge',
+          reason: 'td112_store_dedup',
           catId: 'opus',
-          messageId: 'msg-server-1',
-          invocationId: 'inv-1',
-          origin: 'stream',
         }),
       ]);
     });

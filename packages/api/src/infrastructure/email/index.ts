@@ -15,6 +15,13 @@ export {
   type CiRouteResult,
 } from './CiCdRouter.js';
 export {
+  buildConflictMessageContent,
+  type ConflictRouteResult,
+  ConflictRouter,
+  type ConflictRouterOptions,
+  type ConflictSignal,
+} from './ConflictRouter.js';
+export {
   ConnectorInvokeTrigger,
   type ConnectorInvokeTriggerOptions,
 } from './ConnectorInvokeTrigger.js';
@@ -57,6 +64,7 @@ export {
 } from './ProcessedEmailStore.js';
 export {
   type CiStateFields,
+  type ConflictStateFields,
   type IPrTrackingStore,
   MemoryPrTrackingStore,
   type PrTrackingEntry,
@@ -77,6 +85,15 @@ export {
   selectLatestReview,
   type TextFragment,
 } from './ReviewContentFetcher.js';
+export {
+  buildReviewFeedbackContent,
+  type PrFeedbackComment,
+  type PrReviewDecision,
+  type ReviewFeedbackRouteResult,
+  ReviewFeedbackRouter,
+  type ReviewFeedbackRouterOptions,
+  type ReviewFeedbackSignal as ReviewFeedbackRouterSignal,
+} from './ReviewFeedbackRouter.js';
 export {
   buildReviewMessageContent,
   ReviewRouter,

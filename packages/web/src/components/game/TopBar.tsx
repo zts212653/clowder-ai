@@ -26,8 +26,8 @@ export function TopBar({ phaseName, roundInfo, timeLeftMs, isNight, onClose }: T
             data-testid="game-close-btn"
             onClick={onClose}
             className="text-ww-dim hover:text-ww-main transition-colors p-1 -ml-1 rounded"
-            aria-label="退出游戏"
-            title="退出游戏"
+            aria-label="最小化游戏"
+            title="最小化游戏（游戏继续进行）"
           >
             <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
               <path

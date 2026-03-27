@@ -144,7 +144,7 @@ test('Windows installer prefers plain portable Redis zips before service bundles
 
 test('Windows Redis URL handling preserves external backends and treats localhost URLs with suffixes as local', () => {
   assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
-  assert.match(helpersScript, /\$uri\.Host -notin @\("localhost", "127\.0\.0\.1"\)/);
+  assert.match(helpersScript, /\$isLoopbackHost = \$uri\.Host -eq "localhost"/);
   assert.match(helpersScript, /if \(\$uri\.Port -gt 0 -and "\$\(\$uri\.Port\)" -ne "\$RedisPort"\) \{/);
   assert.match(
     stopWindowsScript,

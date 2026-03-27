@@ -223,8 +223,8 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           : {}),
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.cliConfigArgs && input.cliConfigArgs.length > 0 ? { cliConfigArgs: input.cliConfigArgs } : {}),
-        ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
         ...(input.ocProviderName ? { ocProviderName: input.ocProviderName } : {}),
+        ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
         ...(input.personality != null && input.personality.trim().length > 0 ? { personality: input.personality } : {}),
         ...(input.teamStrengths != null && input.teamStrengths.trim().length > 0
           ? { teamStrengths: input.teamStrengths.trim() }

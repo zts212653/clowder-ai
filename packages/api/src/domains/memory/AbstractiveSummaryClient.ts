@@ -59,14 +59,16 @@ A 200-400 character summary of what was discussed, what was decided, risks, and 
 
 ## Durable Knowledge (if any)
 
-[decision] Short title — One-line description of the decision and why it matters
-[lesson] Short title — One-line description of the lesson learned
-[method] Short title — One-line description of the method/technique worth preserving
+[decision!] Short title — Use ! when the human explicitly confirmed or multiple cats reached consensus
+[decision] Short title — Use plain tag when you infer this is durable but it was not explicitly confirmed
+[lesson!] / [lesson] — Same convention: ! = human confirmed, plain = inferred
+[method!] / [method] — Same convention
 
 Rules:
 - The # title line is REQUIRED
 - The summary paragraph is REQUIRED (200-400 chars, after the title)
 - [decision], [lesson], [method] tags are OPTIONAL — only include if there's genuinely durable knowledge
+- Add ! suffix (e.g. [decision!]) ONLY when the human/CVO explicitly confirmed the decision or lesson in the conversation
 - Do NOT extract brainstorm branches, temporary TODOs, or session-local context
 - Keep it concise — this is a summary, not a transcript
 - Write in the same language as the messages (Chinese/English/mixed)`;
@@ -129,8 +131,8 @@ function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): Abst
     .replace(/^-|-$/g, '')
     .slice(0, 60);
 
-  // Extract summary: text between title and [decision]/[lesson]/[method] or end
-  const candidateStart = text.search(/\n##\s+Durable|\n\[(decision|lesson|method)\]/i);
+  // Extract summary: text between title and [decision!?]/[lesson!?]/[method!?] or end
+  const candidateStart = text.search(/\n##\s+Durable|\n\[(decision|lesson|method)!?\]/i);
   const summaryText =
     candidateStart > titleEnd ? text.slice(titleEnd, candidateStart).trim() : text.slice(titleEnd).trim();
 
@@ -161,12 +163,14 @@ function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): Abst
 
 function extractCandidates(text: string, input: AbstractiveInput): DurableCandidate[] {
   const candidates: DurableCandidate[] = [];
-  const candidateRegex = /\[(decision|lesson|method)\]\s*(.+?)(?:\s*[—–-]\s*(.+))?$/gim;
+  // Match [decision!] (explicit) or [decision] (inferred) — the ! suffix signals human confirmation
+  const candidateRegex = /\[(decision|lesson|method)(!?)\]\s*(.+?)(?:\s*[—–-]\s*(.+))?$/gim;
   let match;
   while ((match = candidateRegex.exec(text)) !== null) {
     const kind = match[1].toLowerCase() as 'decision' | 'lesson' | 'method';
-    const title = match[2].trim();
-    const claim = match[3]?.trim() || title;
+    const isExplicit = match[2] === '!';
+    const title = match[3].trim();
+    const claim = match[4]?.trim() || title;
     candidates.push({
       kind,
       title,
@@ -174,7 +178,7 @@ function extractCandidates(text: string, input: AbstractiveInput): DurableCandid
       why_durable: 'Extracted from thread summary',
       evidence: [{ threadId: input.threadId, messageId: input.messages[0]?.id ?? '', span: '' }],
       relatedAnchors: [],
-      confidence: 'inferred',
+      confidence: isExplicit ? 'explicit' : 'inferred',
     });
   }
   return candidates;

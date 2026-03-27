@@ -120,7 +120,13 @@ export async function* routeParallel(
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only.
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
-      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable });
+      // F129: Load active pack blocks (best-effort)
+      let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
+      if (deps.packStore) {
+        const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
+        packBlocks = await getActivePackBlocks(deps.packStore);
+      }
+      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable)
         ? buildMcpCallbackInstructions({
@@ -195,7 +201,29 @@ export async function* routeParallel(
 
       let prompt: string;
       if (incrementalMode) {
-        const inc = await assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode);
+        // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
+        const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const parIncBudget = getCatContextBudget(catId as string);
+        const parIncSystemTokens = estimateTokens(
+          [staticIdentity, invocationContext, parCatModePromptForBudget, bootstrapCtx, mcpInstructions]
+            .filter(Boolean)
+            .join('\n'),
+        );
+        const parIncMessageTokens = estimateTokens(message);
+        const parEffectiveContextBudget = Math.min(
+          Math.max(0, parIncBudget.maxPromptTokens - parIncSystemTokens - parIncMessageTokens - 200),
+          parIncBudget.maxContextTokens,
+        );
+
+        const inc = await assembleIncrementalContext(
+          deps,
+          userId,
+          threadId,
+          catId,
+          currentUserMessageId,
+          thinkingMode,
+          { effectiveMaxContextTokens: parEffectiveContextBudget },
+        );
         boundaryByCat.set(catId, inc.boundaryId);
         if (inc.degradation) {
           degradationMsgs.push({
@@ -218,8 +246,12 @@ export async function* routeParallel(
         if (history && history.length > 0 && !contextHistory) {
           const budget = getCatContextBudget(catId as string);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
+          // A+ fix: include catModePrompt + bootstrapCtx in system parts estimate (P2-1)
+          const parCatModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
           const parSystemTokens = estimateTokens(
-            [staticIdentity, invocationContext, mcpInstructions].filter(Boolean).join('\n'),
+            [staticIdentity, invocationContext, parCatModePromptLegacyForBudget, bootstrapCtx, mcpInstructions]
+              .filter(Boolean)
+              .join('\n'),
           );
           const parPromptTokens = estimateTokens(message);
           const budgetForContext = Math.max(0, budget.maxPromptTokens - parSystemTokens - parPromptTokens - 200);

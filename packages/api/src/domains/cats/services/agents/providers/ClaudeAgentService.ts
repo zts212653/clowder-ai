@@ -84,12 +84,7 @@ function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<s
   if (mode === 'api_key') {
     const apiKey = callbackEnv?.[ANTHROPIC_PROFILE_API_KEY]?.trim();
     const baseUrl = callbackEnv?.[ANTHROPIC_PROFILE_BASE_URL]?.trim();
-    if (apiKey) {
-      env.ANTHROPIC_API_KEY = apiKey;
-      // BigModel/MaaS docs use AUTH_TOKEN instead of API_KEY — set both for compatibility.
-      // Some Claude CLI versions may use different auth headers depending on which var is set.
-      env.ANTHROPIC_AUTH_TOKEN = apiKey;
-    }
+    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
     if (baseUrl) {
       // Claude CLI internally appends /v1 to the base URL.
       // If the user configured it with /v1 already, strip it to prevent
@@ -115,7 +110,6 @@ function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): Record<s
     // Subscription mode must not inherit shell-level Anthropic credentials.
     // Claude CLI should read auth from ~/.claude/settings.json instead.
     env.ANTHROPIC_API_KEY = null;
-    env.ANTHROPIC_AUTH_TOKEN = null;
     env.ANTHROPIC_BASE_URL = null;
     env.ANTHROPIC_DEFAULT_OPUS_MODEL = null;
     env.ANTHROPIC_DEFAULT_SONNET_MODEL = null;

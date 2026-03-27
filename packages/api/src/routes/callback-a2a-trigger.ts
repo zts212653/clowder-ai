@@ -82,6 +82,12 @@ export async function enqueueA2ATargets(
     const MAX_A2A_DEPTH = 10;
 
     const enqueued: CatId[] = [];
+    const queueDiagnostics: Array<{
+      catId: CatId;
+      outcome: string; // enqueue() returns 'enqueued'|'merged'; 'full' unreachable here (depth guard breaks first)
+      entryId?: string;
+      createdAt?: number;
+    }> = [];
     for (const catId of targetCats) {
       // Guard 1: A2A depth limit — re-check per target to prevent multi-target overflow
       const currentDepth = deps.invocationQueue.countAgentEntriesForThread(threadId);
@@ -106,6 +112,12 @@ export async function enqueueA2ATargets(
         intent: 'execute',
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
+      });
+      queueDiagnostics.push({
+        catId,
+        outcome: result.outcome,
+        entryId: result.entry?.id,
+        createdAt: result.entry?.createdAt,
       });
       if (result.outcome === 'enqueued' || result.outcome === 'merged') {
         enqueued.push(catId);
@@ -135,6 +147,17 @@ export async function enqueueA2ATargets(
         action: 'enqueued',
       });
     }
+    log.info(
+      {
+        threadId,
+        triggerMessageId,
+        callerCatId,
+        targetCats,
+        queueDiagnostics,
+        enqueued,
+      },
+      '[DIAG/a2a] enqueueA2ATargets queue scan',
+    );
     // Trigger auto-execute for entries whose target slot is free
     await deps.queueProcessor?.tryAutoExecute?.(threadId);
     log.info({ threadId, triggerMessageId, enqueued, targetCats }, '[F122B] A2A callback: enqueued to InvocationQueue');
