@@ -2,7 +2,7 @@
 // Truth source: docs/markers/*.yaml (git-tracked), not SQLite
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IMarkerQueue, Marker, MarkerFilter, MarkerStatus } from './interfaces.js';
 
@@ -79,8 +79,15 @@ export class MarkerQueue implements IMarkerQueue {
     return markers;
   }
 
+  private ensureDir(): void {
+    if (!existsSync(this.markersDir)) {
+      mkdirSync(this.markersDir, { recursive: true });
+    }
+  }
+
   private writeYaml(marker: Marker): void {
     validateMarkerId(marker.id);
+    this.ensureDir();
     const lines = [
       `id: ${marker.id}`,
       `status: ${marker.status}`,

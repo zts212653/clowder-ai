@@ -12,6 +12,9 @@
 #   ./scripts/start-dev.sh --quick    — 仅跳过重复构建；不改变 dev/prod 模式
 #   ./scripts/start-dev.sh --memory   — 使用内存存储 (重启丢数据)
 #   ./scripts/start-dev.sh --no-redis — 同 --memory
+#   ./scripts/start-dev.sh --daemon   — 后台运行 (日志输出到 cat-cafe-daemon.log)
+#   ./scripts/start-dev.sh --stop     — 停止后台 daemon
+#   ./scripts/start-dev.sh --status   — 查看 daemon 状态
 #   ./scripts/start-dev.sh --profile=dev          — 家里开发默认值 (proxy ON, sidecar ON)
 #   ./scripts/start-dev.sh --profile=opensource   — 开源仓默认值 (proxy OFF, sidecar OFF)
 #   ./scripts/start-dev.sh -- --npm-registry=URL --pip-index-url=URL --hf-endpoint=URL
@@ -62,6 +65,7 @@ USE_REDIS=true
 PROD_WEB=false
 DEBUG_MODE=false
 PROFILE=""
+DAEMON_MODE=false
 for arg in "$@"; do
     case $arg in
         --quick|-q) QUICK_MODE=true ;;
@@ -69,6 +73,7 @@ for arg in "$@"; do
         --prod-web) PROD_WEB=true ;;
         --debug) DEBUG_MODE=true ;;
         --profile=*) PROFILE="${arg#*=}" ;;
+        --daemon|-d) DAEMON_MODE=true ;;
         *)
             parse_manual_download_source_arg "$arg" || true
             ;;
@@ -329,6 +334,10 @@ REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
 CLEANUP_RUNNING=false
 MANAGED_PIDS=()
+DAEMON_STATE_DIR="${HOME}/.cat-cafe"
+DAEMON_PID_FILE="${DAEMON_STATE_DIR}/daemon.pid"
+DAEMON_LOG_PATH_FILE="${DAEMON_STATE_DIR}/daemon.log-path"
+DAEMON_LOG_FILE="${PROJECT_DIR}/cat-cafe-daemon.log"
 
 export MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
 
@@ -491,7 +500,7 @@ kill_managed_ports() {
         kill_port $preview_gateway_port "Preview Gateway"
     fi
     if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
-        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
+        [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
     fi
     if [ "${ASR_ENABLED:-0}" = "1" ]; then
         kill_port ${WHISPER_PORT:-9876} "ASR"
@@ -878,6 +887,11 @@ cleanup() {
         echo "  Redis (端口 $REDIS_PORT) 已关闭"
     fi
     wait 2>/dev/null || true
+    # Only remove PID file if we are the daemon that wrote it (avoid orphaning a parallel daemon)
+    if [ -f "$DAEMON_PID_FILE" ] && [ "$(cat "$DAEMON_PID_FILE" 2>/dev/null)" = "$$" ]; then
+        rm -f "$DAEMON_PID_FILE"
+        rm -f "$DAEMON_LOG_PATH_FILE"
+    fi
     echo "再见！🐾"
 }
 
@@ -1139,4 +1153,99 @@ main() {
 
 # Allow sourcing for testing without executing main
 [[ "${1:-}" == "--source-only" ]] && { return 0 2>/dev/null; exit 0; }
+
+if [[ "${1:-}" == "--stop" ]] || [[ "${1:-}" == "stop" ]] || \
+   [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
+    trap - EXIT INT TERM
+fi
+
+# --stop: 停止后台运行的 daemon
+if [[ "${1:-}" == "--stop" ]] || [[ "${1:-}" == "stop" ]]; then
+    if [ ! -f "$DAEMON_PID_FILE" ]; then
+        echo "没有找到运行中的 daemon（$DAEMON_PID_FILE 不存在）"
+        exit 1
+    fi
+    DAEMON_PID=$(cat "$DAEMON_PID_FILE")
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
+        echo "正在停止 Cat Café daemon (PID: $DAEMON_PID)..."
+        kill -TERM "$DAEMON_PID" 2>/dev/null || true
+        for i in $(seq 1 15); do
+            kill -0 "$DAEMON_PID" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 "$DAEMON_PID" 2>/dev/null; then
+            echo "  进程未响应 TERM，发送 KILL..."
+            kill -KILL "$DAEMON_PID" 2>/dev/null || true
+        fi
+        rm -f "$DAEMON_PID_FILE"
+        rm -f "$DAEMON_LOG_PATH_FILE"
+        echo "Cat Café daemon 已停止 🐾"
+    else
+        echo "Daemon 进程 (PID: $DAEMON_PID) 已不存在，清理 PID 文件"
+        rm -f "$DAEMON_PID_FILE"
+        rm -f "$DAEMON_LOG_PATH_FILE"
+    fi
+    exit 0
+fi
+
+if [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
+    if [ ! -f "$DAEMON_PID_FILE" ]; then
+        echo "Cat Café daemon 未运行（无 PID 文件）"
+        exit 1
+    fi
+    DAEMON_PID=$(cat "$DAEMON_PID_FILE")
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
+        REAL_LOG="$DAEMON_LOG_FILE"
+        [ -f "$DAEMON_LOG_PATH_FILE" ] && REAL_LOG=$(cat "$DAEMON_LOG_PATH_FILE")
+        echo -e "${GREEN}Cat Café daemon 运行中${NC} (PID: $DAEMON_PID)"
+        [ -f "$REAL_LOG" ] && echo "  日志: $REAL_LOG"
+        echo "  停止: pnpm stop  或  ./scripts/start-dev.sh --stop"
+        echo "  查看日志: tail -f $REAL_LOG"
+    else
+        echo "Daemon 进程 (PID: $DAEMON_PID) 已不存在，清理 PID 文件"
+        rm -f "$DAEMON_PID_FILE"
+        exit 1
+    fi
+    exit 0
+fi
+
+if [ "$DAEMON_MODE" = true ]; then
+    if [ -f "$DAEMON_PID_FILE" ]; then
+        EXISTING_PID=$(cat "$DAEMON_PID_FILE")
+        if kill -0 "$EXISTING_PID" 2>/dev/null; then
+            echo -e "${RED}Cat Café daemon 已在运行 (PID: $EXISTING_PID)${NC}"
+            echo "  停止: pnpm stop  或  ./scripts/start-dev.sh --stop"
+            echo "  查看日志: tail -f $DAEMON_LOG_FILE"
+            exit 1
+        else
+            rm -f "$DAEMON_PID_FILE"
+        fi
+    fi
+
+    RESTART_ARGS=()
+    for arg in "$@"; do
+        case "$arg" in
+            --daemon|-d) ;;
+            *) RESTART_ARGS+=("$arg") ;;
+        esac
+    done
+
+    mkdir -p "$DAEMON_STATE_DIR"
+    echo "🐱 Cat Café 以后台模式启动..."
+    echo "  日志输出: $DAEMON_LOG_FILE"
+    nohup "$0" "${RESTART_ARGS[@]}" > "$DAEMON_LOG_FILE" 2>&1 &
+    DAEMON_PID=$!
+    disown "$DAEMON_PID"
+    echo "$DAEMON_PID" > "$DAEMON_PID_FILE"
+    echo "$DAEMON_LOG_FILE" > "$DAEMON_LOG_PATH_FILE"
+    echo -e "${GREEN}  Daemon PID: $DAEMON_PID${NC}"
+    echo ""
+    echo "管理命令:"
+    echo "  查看状态: pnpm start:status"
+    echo "  查看日志: tail -f $DAEMON_LOG_FILE"
+    echo "  停止服务: pnpm stop"
+    trap - EXIT INT TERM
+    exit 0
+fi
+
 main "$@"

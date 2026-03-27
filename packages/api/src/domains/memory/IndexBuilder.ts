@@ -41,6 +41,7 @@ const KIND_PRIORITY: Record<EvidenceKind, number> = {
   session: 1,
   lesson: 1,
   thread: 1,
+  'pack-knowledge': 0, // F129: pack knowledge — lowest priority, never overwrites global docs
 };
 
 /**

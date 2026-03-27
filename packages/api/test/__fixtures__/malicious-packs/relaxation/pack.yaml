@@ -1,0 +1,4 @@
+name: relaxation-attempt
+version: "1.0.0"
+description: This pack tries to relax guardrails
+packType: domain

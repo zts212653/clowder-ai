@@ -117,10 +117,15 @@ export interface GameStoreState {
   godSeats: GodSeat[];
   godNightSteps: GodNightStep[];
 
+  /** When true, game overlay is hidden but game continues running */
+  overlayMinimized: boolean;
+
   setGameView: (view: GameView, gameId: string, threadId: string) => void;
   clearGame: () => void;
   setSelectedTarget: (seatId: SeatId | null) => void;
   setGodScopeFilter: (scope: string) => void;
+  minimizeOverlay: () => void;
+  restoreOverlay: () => void;
 }
 
 function deriveIsNight(phase: string): boolean {
@@ -199,6 +204,7 @@ const CLEAR_STATE = {
   altActionName: null,
   godSeats: [] as GodSeat[],
   godNightSteps: [] as GodNightStep[],
+  overlayMinimized: false,
 };
 
 /** Derive all state fields from a GameView update */
@@ -206,7 +212,10 @@ function deriveFromView(
   view: GameView,
   gameId: string,
   threadId: string,
-): Omit<GameStoreState, 'setGameView' | 'clearGame' | 'setSelectedTarget' | 'setGodScopeFilter'> {
+): Omit<
+  GameStoreState,
+  'setGameView' | 'clearGame' | 'setSelectedTarget' | 'setGodScopeFilter' | 'minimizeOverlay' | 'restoreOverlay'
+> {
   const humanSeat = view.config.humanSeat ?? null;
   const isGodView = view.config.humanRole === 'god-view';
   const isDetective = view.config.humanRole === 'detective';
@@ -243,6 +252,7 @@ function deriveFromView(
     altActionName: view.currentPhase === 'night_witch' ? 'poison' : null,
     godSeats: showInspector ? deriveGodSeats(view) : [],
     godNightSteps: showInspector && isNight ? deriveGodNightSteps(view) : [],
+    overlayMinimized: false,
   };
 }
 
@@ -252,10 +262,17 @@ export const useGameStore = create<GameStoreState>((set) => ({
   setGameView: (view, gameId, threadId) => {
     const derived = deriveFromView(view, gameId, threadId);
     // Preserve user-set fields (selectedTarget, godScopeFilter)
-    set((prev) => ({ ...derived, selectedTarget: prev.selectedTarget, godScopeFilter: prev.godScopeFilter }));
+    set((prev) => ({
+      ...derived,
+      selectedTarget: prev.selectedTarget,
+      godScopeFilter: prev.godScopeFilter,
+      overlayMinimized: prev.overlayMinimized,
+    }));
   },
 
   clearGame: () => set({ ...CLEAR_STATE }),
   setSelectedTarget: (seatId) => set({ selectedTarget: seatId }),
   setGodScopeFilter: (scope) => set({ godScopeFilter: scope }),
+  minimizeOverlay: () => set({ overlayMinimized: true }),
+  restoreOverlay: () => set({ overlayMinimized: false }),
 }));

@@ -647,9 +647,28 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
   // POST /api/workspace/navigate — F131: cat-initiated workspace panel navigation
   app.post<{
-    Body: { worktreeId?: string; path?: string; action?: 'reveal' | 'open'; line?: number; threadId?: string };
+    Body: {
+      worktreeId?: string;
+      path?: string;
+      action?: 'reveal' | 'open' | 'knowledge-feed';
+      line?: number;
+      threadId?: string;
+    };
   }>('/api/workspace/navigate', async (request, reply) => {
     const { worktreeId, path: filePath, action = 'reveal', line, threadId } = request.body ?? {};
+
+    // Phase H: knowledge-feed action switches workspace mode without requiring a file path
+    // threadId is required to avoid broadcasting mode switch to all sessions
+    if (action === 'knowledge-feed') {
+      if (!threadId) {
+        reply.status(400);
+        return { error: 'threadId required for knowledge-feed action' };
+      }
+      const eventData = { path: '', worktreeId: worktreeId ?? '', action, threadId, eventId: randomUUID() };
+      opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
+      return { ok: true, action };
+    }
+
     if (!worktreeId || !filePath) {
       reply.status(400);
       return { error: 'worktreeId and path required' };

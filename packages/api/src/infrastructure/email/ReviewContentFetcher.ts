@@ -122,22 +122,19 @@ export interface SelectedReview {
 
 /**
  * Select the latest review for incremental windowing.
- * Returns the newest review's submittedAt (for since-filtering comments)
- * and the newest review body that has content (for severity scanning).
+ * Returns the absolute latest review's submittedAt (for since-filtering comments)
+ * and only that same review's body for severity scanning.
  *
- * Key: submittedAt always comes from the absolute latest review (even if
- * its body is empty, e.g. an approval), so the since window stays current.
- * Body comes from the latest review that has content to scan.
+ * Important: if the latest review body is empty (common for approvals),
+ * we must NOT fall back to an older non-empty body. Doing so replays stale
+ * P1/P2 findings that may already have been addressed.
  */
 export function selectLatestReview(reviews: RawReview[]): SelectedReview | null {
   if (reviews.length === 0) return null;
   const sorted = [...reviews].sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
-  const latestTimestamp = sorted[0]!.submitted_at;
-  // Find the latest review with actual body content for severity scanning
-  const withBody = sorted.find((r) => r.body != null && r.body !== '');
   return {
-    body: withBody?.body ?? '',
-    submittedAt: latestTimestamp,
+    body: sorted[0]!.body ?? '',
+    submittedAt: sorted[0]!.submitted_at,
   };
 }
 

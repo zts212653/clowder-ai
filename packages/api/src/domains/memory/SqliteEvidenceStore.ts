@@ -71,6 +71,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           ? ('session' as EvidenceKind)
           : undefined);
     const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+    // F129 AC-A10: exclude pack-knowledge from global search unless explicitly requested
+    const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
     // ── Exact-anchor bypass ──────────────────────────────────────────
     // FTS5 unicode61 tokenizer splits "F042" → "F"+"042" and "ADR-005" → "ADR"+"005".
     // For anchor-shaped queries, do a direct lookup so precision isn't lost.
@@ -85,6 +87,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
     if (excludeSession) {
       anchorSql += " AND kind != 'session'";
+    }
+    if (excludePackKnowledge) {
+      anchorSql += " AND kind != 'pack-knowledge'";
     }
     if (options?.status) {
       anchorSql += ' AND status = ?';
@@ -123,6 +128,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
         if (excludeSession) {
           sql += " AND d.kind != 'session'";
+        }
+        if (excludePackKnowledge) {
+          sql += " AND d.kind != 'pack-knowledge'";
         }
         if (options?.status) {
           sql += ' AND d.status = ?';
@@ -163,6 +171,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
         if (excludeSession) {
           kwSql += " AND kind != 'session'";
+        }
+        if (excludePackKnowledge) {
+          kwSql += " AND kind != 'pack-knowledge'";
         }
         if (options?.status) {
           kwSql += ' AND status = ?';
@@ -300,12 +311,16 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       options?.kind ??
       (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
     const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+    const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
     if (effectiveKind) {
       sql += ' AND kind = ?';
       params.push(effectiveKind);
     }
     if (excludeSession) {
       sql += " AND kind != 'session'";
+    }
+    if (excludePackKnowledge) {
+      sql += " AND kind != 'pack-knowledge'";
     }
     if (options?.status) {
       sql += ' AND status = ?';
@@ -372,12 +387,16 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         options?.kind ??
         (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
       const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+      const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
       if (effectiveKind) {
         sql += ' AND kind = ?';
         params.push(effectiveKind);
       }
       if (excludeSession) {
         sql += " AND kind != 'session'";
+      }
+      if (excludePackKnowledge) {
+        sql += " AND kind != 'pack-knowledge'";
       }
       if (options?.status) {
         sql += ' AND status = ?';
@@ -412,8 +431,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const stmt = db.prepare(`
 				INSERT OR REPLACE INTO evidence_docs
 				(anchor, kind, status, title, summary, keywords, source_path, source_hash,
-				 superseded_by, materialized_from, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 superseded_by, materialized_from, updated_at, pack_id)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`);
 
     const tx = db.transaction((items: EvidenceItem[]) => {
@@ -430,6 +449,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           item.supersededBy ?? null,
           item.materializedFrom ?? null,
           item.updatedAt,
+          item.packId ?? null,
         );
       }
     });
@@ -440,6 +460,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   async deleteByAnchor(anchor: string): Promise<void> {
     this.ensureOpen();
     this.db?.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
+  }
+
+  /** F129: Delete all evidence entries for a given pack_id */
+  async deleteByPackId(packId: string): Promise<number> {
+    this.ensureOpen();
+    const result = this.db?.prepare('DELETE FROM evidence_docs WHERE pack_id = ?').run(packId);
+    return result?.changes ?? 0;
   }
 
   async getByAnchor(anchor: string): Promise<EvidenceItem | null> {
@@ -571,6 +598,7 @@ interface RowShape {
   superseded_by: string | null;
   materialized_from: string | null;
   updated_at: string;
+  pack_id: string | null;
 }
 
 function rowToItem(row: RowShape): EvidenceItem {
@@ -587,5 +615,6 @@ function rowToItem(row: RowShape): EvidenceItem {
   if (row.source_hash != null) item.sourceHash = row.source_hash;
   if (row.superseded_by != null) item.supersededBy = row.superseded_by;
   if (row.materialized_from != null) item.materializedFrom = row.materialized_from;
+  if (row.pack_id != null) item.packId = row.pack_id;
   return item;
 }

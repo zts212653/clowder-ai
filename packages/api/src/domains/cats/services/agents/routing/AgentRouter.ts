@@ -162,6 +162,8 @@ export interface AgentRouterOptions {
       relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
     }[]
   >;
+  /** F129: Pack store for loading active packs at invocation time */
+  packStore?: import('../../../../packs/PackStore.js').PackStore;
 }
 
 /**
@@ -200,6 +202,7 @@ export class AgentRouter {
         }[]
       >)
     | undefined;
+  private packStore?: import('../../../../packs/PackStore.js').PackStore;
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
@@ -235,6 +238,7 @@ export class AgentRouter {
     this.tmuxGateway = options.tmuxGateway;
     this.agentPaneRegistry = options.agentPaneRegistry;
     this.signalArticleLookup = options.signalArticleLookup;
+    this.packStore = options.packStore;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -637,6 +641,7 @@ export class AgentRouter {
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.draftStore ? { draftStore: this.draftStore } : {}),
       ...(this.socketManager ? { socketManager: this.socketManager } : {}),
+      ...(this.packStore ? { packStore: this.packStore } : {}),
     };
   }
 

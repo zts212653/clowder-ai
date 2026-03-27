@@ -1,6 +1,5 @@
 /**
  * Cat Config Loader
- *
  * 从 cat-template.json / .cat-cafe/cat-catalog.json 加载 Breed+Variant 配置。
  * Node-only — 前端继续用 shared 包的 CAT_CONFIGS 常量。
  */
@@ -440,8 +439,8 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
           ? { cliConfigArgs: [...variant.cliConfigArgs] }
           : {}),
-        ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
         ...(variant.ocProviderName != null ? { ocProviderName: variant.ocProviderName } : {}),
+        ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
         breedId: breed.id,

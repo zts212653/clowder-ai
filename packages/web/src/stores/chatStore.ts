@@ -1,5 +1,6 @@
 import { CAT_CONFIGS } from '@cat-cafe/shared';
 import { create } from 'zustand';
+import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import type {
   CatInvocationInfo,
@@ -235,6 +236,93 @@ function fireOwnerMentionNotification(msg: ChatMessage) {
   });
 }
 
+/**
+ * TD112: Store-level assistant bubble dedup invariant.
+ *
+ * When an incoming assistant message enters the store, check if a semantically
+ * equivalent bubble already exists. Returns the index of the existing message
+ * to merge into, or -1 if no duplicate found.
+ *
+ * Two-layer strategy (per 砚砚 review):
+ * 1. Hard rule: same catId + invocationId → always merge
+ * 2. Soft rule: callback→stream upgrade — incoming is callback, candidate is
+ *    same catId's latest stream assistant with no invocationId, within 8s,
+ *    matching replyTo/visibility
+ */
+function findAssistantDuplicate(messages: ChatMessage[], incoming: ChatMessage): number {
+  if (incoming.type !== 'assistant' || !incoming.catId) return -1;
+
+  const incomingInvId = getBubbleInvocationId(incoming);
+
+  // Phase 1: Hard rule — scan ALL same-cat assistants for exact invocationId match.
+  // Must run first because bridge/soft rules on a newer message would mis-associate.
+  if (incomingInvId) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const existing = messages[i]!;
+      if (existing.type !== 'assistant' || existing.catId !== incoming.catId) continue;
+      const existingInvId = getBubbleInvocationId(existing);
+      if (existingInvId === incomingInvId) return i;
+    }
+  }
+
+  // Phase 2: Bridge/soft rules — check only the MOST RECENT same-cat assistant.
+  // Bridge: callback(has invocationId) → stream(no invocationId) late-bind upgrade
+  // Soft: callback(no invocationId) → stream(no invocationId) upgrade
+  if (incoming.origin !== 'callback') return -1;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const existing = messages[i]!;
+    if (existing.type !== 'assistant' || existing.catId !== incoming.catId) continue;
+
+    // Skip non-stream messages — bridge/soft only targets stream placeholders.
+    // Cloud review P1: breaking on the first same-cat assistant (which may be
+    // a callback) prevents reaching an older stream placeholder.
+    if (existing.origin !== 'stream') continue;
+
+    const existingInvId = getBubbleInvocationId(existing);
+    if (
+      !existingInvId &&
+      Math.abs((incoming.timestamp ?? 0) - (existing.timestamp ?? 0)) < 8_000 &&
+      incoming.replyTo === existing.replyTo &&
+      (incoming.visibility ?? 'public') === (existing.visibility ?? 'public')
+    ) {
+      return i;
+    }
+    // Checked the most recent same-cat stream — stop scanning
+    break;
+  }
+
+  return -1;
+}
+
+/** Merge incoming message into existing, preferring callback content over stream */
+function mergeAssistantBubble(existing: ChatMessage, incoming: ChatMessage): ChatMessage {
+  // Bridge rule: backfill invocationId from callback into stream placeholder
+  const incomingInvId = getBubbleInvocationId(incoming);
+  const existingInvId = getBubbleInvocationId(existing);
+  const mergedExtra = { ...existing.extra };
+  if (incomingInvId && !existingInvId) {
+    mergedExtra.stream = { ...mergedExtra.stream, invocationId: incomingInvId };
+  }
+  if (incoming.extra?.crossPost) {
+    mergedExtra.crossPost = incoming.extra.crossPost;
+  }
+
+  return {
+    ...existing,
+    // Prefer incoming content if non-empty
+    content: incoming.content || existing.content,
+    // Callback > stream origin
+    origin: incoming.origin === 'callback' ? 'callback' : existing.origin,
+    isStreaming: false,
+    // Merge metadata (incoming takes precedence)
+    ...(incoming.metadata ? { metadata: incoming.metadata } : {}),
+    // Preserve extra from existing (CLI Output) + merge stream identity + crossPost
+    extra: Object.keys(mergedExtra).length > 0 ? mergedExtra : undefined,
+    ...(incoming.mentionsUser ? { mentionsUser: true } : {}),
+  };
+}
+
 function updateThreadMessage(
   state: ChatState,
   threadId: string,
@@ -468,6 +556,10 @@ interface ChatState {
 
   workspaceRevealPath: string | null;
   setWorkspaceRevealPath: (path: string | null, originThreadId?: string | null) => void;
+
+  // Phase H + F139: Workspace mode (dev tools / knowledge feed / schedule panel)
+  workspaceMode: 'dev' | 'knowledge' | 'schedule';
+  setWorkspaceMode: (mode: 'dev' | 'knowledge' | 'schedule') => void;
 
   // ── F120: Preview auto-open (always-mounted listener) ──
   pendingPreviewAutoOpen: { port: number; path: string } | null;
@@ -721,6 +813,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       _workspaceFileSetAt: { ts: Date.now(), threadId: originThreadId ?? state.currentThreadId },
     })),
 
+  // Phase H: Workspace mode
+  workspaceMode: 'dev' as const,
+  setWorkspaceMode: (mode) => set({ workspaceMode: mode, rightPanelMode: 'workspace' }),
+
   // ── F120: Preview auto-open ──
   pendingPreviewAutoOpen: null,
   setPendingPreviewAutoOpen: (data) => set({ pendingPreviewAutoOpen: data, rightPanelMode: 'workspace' }),
@@ -745,6 +841,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
   addMessage: (msg) =>
     set((state) => {
       if (state.messages.some((m) => m.id === msg.id)) return state;
+
+      // TD112: Store-level dedup — merge if semantic duplicate exists
+      const dupIdx = findAssistantDuplicate(state.messages, msg);
+      if (dupIdx >= 0) {
+        const merged = mergeAssistantBubble(state.messages[dupIdx]!, msg);
+        const messages = [...state.messages];
+        messages[dupIdx] = merged;
+        recordDebugEvent({
+          event: 'bubble_lifecycle',
+          threadId: state.currentThreadId,
+          timestamp: Date.now(),
+          action: 'merge',
+          reason: 'td112_store_dedup',
+          catId: msg.catId,
+          messageId: state.messages[dupIdx]!.id,
+          invocationId: getBubbleInvocationId(msg),
+          origin: msg.origin,
+        });
+        // P2 fix: propagate mention notification even on merge
+        if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+          fireOwnerMentionNotification(msg);
+        }
+        return { messages };
+      }
+
       const messages = [...state.messages, msg];
       if (messages.length > MAX_BLOB_MESSAGES) {
         revokeBlobUrls(messages.slice(0, messages.length - MAX_BLOB_MESSAGES));
@@ -1034,6 +1155,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Active thread — delegate to flat state
       if (threadId === state.currentThreadId) {
         if (state.messages.some((m) => m.id === msg.id)) return state;
+
+        // TD112: Store-level dedup for active thread
+        const dupIdx = findAssistantDuplicate(state.messages, msg);
+        if (dupIdx >= 0) {
+          const merged = mergeAssistantBubble(state.messages[dupIdx]!, msg);
+          const messages = [...state.messages];
+          messages[dupIdx] = merged;
+          recordDebugEvent({
+            event: 'bubble_lifecycle',
+            threadId,
+            timestamp: Date.now(),
+            action: 'merge',
+            reason: 'td112_store_dedup_active',
+            catId: msg.catId,
+            messageId: state.messages[dupIdx]!.id,
+            invocationId: getBubbleInvocationId(msg),
+            origin: msg.origin,
+          });
+          // P2 fix: propagate mention notification even on merge
+          if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+            fireOwnerMentionNotification(msg);
+          }
+          return { messages };
+        }
+
         const messages = [...state.messages, msg];
         if (messages.length > MAX_BLOB_MESSAGES) {
           revokeBlobUrls(messages.slice(0, messages.length - MAX_BLOB_MESSAGES));
@@ -1050,6 +1196,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Background thread — update map + increment unread
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
       if (existing.messages.some((m) => m.id === msg.id)) return state;
+
+      // TD112: Store-level dedup for background thread
+      const bgDupIdx = findAssistantDuplicate(existing.messages, msg);
+      if (bgDupIdx >= 0) {
+        const merged = mergeAssistantBubble(existing.messages[bgDupIdx]!, msg);
+        const updatedMessages = [...existing.messages];
+        updatedMessages[bgDupIdx] = merged;
+        recordDebugEvent({
+          event: 'bubble_lifecycle',
+          threadId,
+          timestamp: Date.now(),
+          action: 'merge',
+          reason: 'td112_store_dedup_background',
+          catId: msg.catId,
+          messageId: existing.messages[bgDupIdx]!.id,
+          invocationId: getBubbleInvocationId(msg),
+          origin: msg.origin,
+        });
+        // Cloud review P1: Propagate mention state even on merge
+        if (msg.mentionsUser) fireOwnerMentionNotification(msg);
+        return {
+          threadStates: {
+            ...state.threadStates,
+            [threadId]: {
+              ...existing,
+              messages: updatedMessages,
+              hasUserMention: existing.hasUserMention || !!msg.mentionsUser,
+            },
+          },
+        };
+      }
 
       // F067 Phase 2: Fire macOS notification for @co-creator mention
       if (msg.mentionsUser) fireOwnerMentionNotification(msg);

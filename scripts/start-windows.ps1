@@ -24,8 +24,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# -- UTF-8 encoding (#233) ----------------------------------
-# Ensure main script outputs UTF-8 for CJK locale systems
+# clowder-ai#269: ensure UTF-8 output on CJK locale systems.
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -351,7 +350,6 @@ try {
     Write-Host "  Starting API Server (port $ApiPort)..."
     $apiJob = Start-Job -Name "api" -ScriptBlock {
         param($root, $envFile, $runtimeEnvOverrides, $apiEntry, $debugFlag)
-        # #233: Start-Job runs in isolated runspace; re-set UTF-8 for CJK locales
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
         $OutputEncoding = [System.Text.Encoding]::UTF8
         Set-Location (Join-Path $root "packages/api")
@@ -394,7 +392,6 @@ try {
         Write-Host "  Starting Frontend (port $WebPort, dev)..."
         $webJob = Start-Job -Name "web" -ScriptBlock {
             param($root, $port, $nextCli)
-            # #233: UTF-8 for isolated runspace
             [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
             $OutputEncoding = [System.Text.Encoding]::UTF8
             $env:PORT = $port
@@ -406,7 +403,6 @@ try {
         Write-Host "  Starting Frontend (port $WebPort, production)..."
         $webJob = Start-Job -Name "web" -ScriptBlock {
             param($root, $port, $nextCli)
-            # #233: UTF-8 for isolated runspace
             [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
             $OutputEncoding = [System.Text.Encoding]::UTF8
             $env:PORT = $port

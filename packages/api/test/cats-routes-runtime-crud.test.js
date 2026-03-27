@@ -495,7 +495,6 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
-    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
     const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const crossProtocolProfile = await createProviderProfile(projectRoot, {
       displayName: 'OpenAI Key Profile',
@@ -926,7 +925,6 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
-    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
     const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const apiKeyProfile = await createProviderProfile(projectRoot, {
       displayName: 'Gemini Proxy',
@@ -969,70 +967,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(createBody.error, /only supports builtin Gemini auth/i);
   });
 
-  it('PATCH /api/cats/:id allows models not in the bound profile model list (validated at invocation)', async () => {
-    const projectRoot = createProjectRoot();
-    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
-
-    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-    const boundProfile = await createProviderProfile(projectRoot, {
-      displayName: 'Scoped OpenAI Profile',
-      authType: 'api_key',
-      protocol: 'openai',
-      baseUrl: 'https://api.scoped.example',
-      apiKey: 'sk-scoped-openai',
-      models: ['gpt-5.4-mini'],
-    });
-
-    const Fastify = (await import('fastify')).default;
-    const { catsRoutes } = await import('../dist/routes/cats.js');
-
-    const app = Fastify();
-    await app.register(catsRoutes);
-
-    const createRes = await app.inject({
-      method: 'POST',
-      url: '/api/cats',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({
-        catId: 'runtime-codex-scoped-profile',
-        name: '运行时缅因猫',
-        displayName: '运行时缅因猫',
-        avatar: '/avatars/codex.png',
-        color: { primary: '#16a34a', secondary: '#bbf7d0' },
-        mentionPatterns: ['@runtime-codex-scoped-profile'],
-        roleDescription: '审查',
-        client: 'openai',
-        providerProfileId: boundProfile.id,
-        defaultModel: 'gpt-5.4-mini',
-      }),
-    });
-    assert.equal(createRes.statusCode, 201);
-
-    // Model not in profile's models list — should still succeed (no longer gated at binding level)
-    const patchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-codex-scoped-profile',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({
-        defaultModel: 'gpt-5.4',
-      }),
-    });
-
-    assert.equal(patchRes.statusCode, 200);
-  });
-
   it('PATCH /api/cats/:id validates seed model edits against the active bootstrap account', async () => {
     const projectRoot = createProjectRootFromRepoTemplate();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
-    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
     const { bootstrapCatCatalog } = await import('../dist/config/cat-catalog-store.js');
     const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');
     bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);

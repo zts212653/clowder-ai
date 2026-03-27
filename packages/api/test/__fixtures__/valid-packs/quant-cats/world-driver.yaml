@@ -1,0 +1,11 @@
+resolver: hybrid
+roles:
+  - analyst
+  - reviewer
+actions:
+  - analyze-data
+  - generate-report
+  - peer-review
+canonRules:
+  - All conclusions must cite data sources
+  - Risk assessments require dual review

@@ -11,6 +11,7 @@
 
 import { basename } from 'node:path';
 import type { RichBlock } from '@cat-cafe/shared';
+import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyBaseLogger } from 'fastify';
 import type { MessageEnvelope } from '../ConnectorMessageFormatter.js';
 import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
@@ -26,14 +27,18 @@ export interface DingTalkAttachment {
 }
 
 export interface DingTalkInboundMessage {
-  /** staffId of the sender — used as target for outbound oToMessages/batchSend */
+  /** DM: staffId | Group: openConversationId */
   chatId: string;
   /** DingTalk conversationId — used for AI Card delivery routing */
   conversationId: string;
   text: string;
   messageId: string;
   senderId: string;
-  chatType: string;
+  chatType: 'p2p' | 'group';
+  /** Group: sender's display name from webhook payload */
+  senderNick?: string;
+  /** Group: chat title from webhook payload */
+  conversationTitle?: string;
   attachments?: DingTalkAttachment[];
 }
 
@@ -42,6 +47,8 @@ export interface DingTalkAdapterOptions {
   appSecret: string;
   /** Robot code (used for sending messages), defaults to appKey */
   robotCode?: string;
+  /** Optional Redis client for persisting group chatId set across cold restarts. */
+  redis?: RedisClient | undefined;
 }
 
 /** AI Card streaming state machine */
@@ -67,6 +74,7 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
   private readonly appKey: string;
   private readonly appSecret: string;
   private readonly robotCode: string;
+  private readonly redis: RedisClient | undefined;
 
   // Stream client (dingtalk-stream SDK)
   private streamClient: unknown = null;
@@ -79,10 +87,14 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
   // AI Card delivery needs the real conversationId, but the public layer
   // passes externalChatId (= staffId) for outbound routing.
   private readonly staffToConversation = new Map<string, string>();
+  private readonly groupConversationIds = new Set<string>();
+  private readonly senderNickCache = new Map<string, string>();
+  private readonly conversationTitleCache = new Map<string, string>();
 
   // DI injection points (for testing + runtime override)
-  private sendMessageFn: ((params: { chatId: string; content: string; msgType: string }) => Promise<unknown>) | null =
-    null;
+  private sendMessageFn:
+    | ((params: { chatId: string; content: string; msgType: string; chatType?: 'p2p' | 'group' }) => Promise<unknown>)
+    | null = null;
   private createCardFn:
     | ((params: { outTrackId: string; cardData: Record<string, unknown> }) => Promise<unknown>)
     | null = null;
@@ -91,12 +103,14 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
     | null = null;
   private accessTokenFn: (() => Promise<string>) | null = null;
   private downloadMediaFn: ((downloadCode: string) => Promise<string>) | null = null;
+  private uploadMediaFn: ((params: { filePath: string; type: string }) => Promise<string>) | null = null;
 
   constructor(log: FastifyBaseLogger, options: DingTalkAdapterOptions) {
     this.log = log;
     this.appKey = options.appKey;
     this.appSecret = options.appSecret;
     this.robotCode = options.robotCode ?? options.appKey;
+    this.redis = options.redis;
   }
 
   // ── Inbound: Parse Stream Event ──
@@ -113,23 +127,38 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
 
     const body = eventBody as Record<string, unknown>;
 
-    // DingTalk Stream bot message structure:
-    // { msgtype, text?: { content }, richText?: {...}, ... , conversationId, chatbotUserId, senderStaffId, msgId, ... }
     const msgType = body.msgtype as string | undefined;
     if (!msgType) return null;
 
-    // MVP: DM-only (1-to-1 conversation)
     const conversationType = body.conversationType as string | undefined;
-    if (conversationType !== '1') return null;
+    if (conversationType !== '1' && conversationType !== '2') return null;
 
+    const isGroup = conversationType === '2';
+    const chatType: 'p2p' | 'group' = isGroup ? 'group' : 'p2p';
     const conversationId = (body.conversationId as string) ?? '';
+    const openConversationId = (body.openConversationId as string) ?? '';
+    const conversationTitle = (body.conversationTitle as string) ?? undefined;
     const messageId = (body.msgId as string) ?? '';
     const senderStaffId = (body.senderStaffId as string) ?? (body.senderId as string) ?? 'unknown';
-    const chatType = conversationType === '1' ? 'p2p' : 'group';
+    const senderNick = (body.senderNick as string) ?? undefined;
+    const chatId = isGroup ? openConversationId : senderStaffId;
 
-    const base = { chatId: senderStaffId, conversationId, messageId, senderId: senderStaffId, chatType };
+    const base = {
+      chatId,
+      conversationId,
+      messageId,
+      senderId: senderStaffId,
+      chatType,
+      senderNick,
+      conversationTitle,
+    };
 
     if (conversationId) this.staffToConversation.set(senderStaffId, conversationId);
+    if (isGroup && openConversationId) {
+      this.groupConversationIds.add(openConversationId);
+      if (senderNick) this.senderNickCache.set(senderStaffId, senderNick);
+      if (conversationTitle) this.conversationTitleCache.set(openConversationId, conversationTitle);
+    }
 
     switch (msgType) {
       case 'text': {
@@ -191,21 +220,75 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
     }
   }
 
+  // ── Name Resolution (AC-A2.5) ──
+
+  /**
+   * Resolve sender display name from cached inbound event data.
+   * DingTalk group webhooks include senderNick, so no API call needed.
+   */
+  resolveSenderName(staffId: string): string | undefined {
+    return this.senderNickCache.get(staffId);
+  }
+
+  /**
+   * Resolve group conversation title from cached inbound event data.
+   * DingTalk group webhooks include conversationTitle, so no API call needed.
+   */
+  resolveConversationTitle(openConversationId: string): string | undefined {
+    return this.conversationTitleCache.get(openConversationId);
+  }
+
+  private static readonly REDIS_GROUP_IDS_KEY = 'dingtalk-group-chat-ids';
+
+  registerGroupChatId(chatId: string): void {
+    this.groupConversationIds.add(chatId);
+    this.redis?.sadd(DingTalkAdapter.REDIS_GROUP_IDS_KEY, chatId).catch(() => {});
+  }
+
+  async hydrateGroupChatIds(): Promise<void> {
+    if (!this.redis) return;
+    try {
+      const ids = await this.redis.smembers(DingTalkAdapter.REDIS_GROUP_IDS_KEY);
+      for (const id of ids) this.groupConversationIds.add(id);
+      this.log.info({ count: ids.length }, '[DingTalkAdapter] Hydrated group chatIds from Redis');
+    } catch (err) {
+      this.log.warn({ err }, '[DingTalkAdapter] Failed to hydrate group chatIds from Redis');
+    }
+  }
+
   // ── Outbound: Send Messages ──
+
+  /**
+   * Prepend @sender mention for group chat replies (AC-A2.4).
+   * Only used for group chats — DM replies must NOT @mention (Feishu AC-C2 pattern).
+   */
+  private prependAtSender(content: string, sender: { id: string; name?: string }): string {
+    const name = sender.name ?? this.senderNickCache.get(sender.id) ?? '用户';
+    return `@${name} ${content}`;
+  }
 
   /**
    * Send a plain text reply via DingTalk Robot API.
    * AC-A2: Basic text + markdown sending
    */
-  async sendReply(externalChatId: string, content: string): Promise<void> {
-    await this.sendDingTalkMessage(externalChatId, 'text', { content });
+  async sendReply(externalChatId: string, content: string, metadata?: Record<string, unknown>): Promise<void> {
+    const metaChatType = (metadata as { chatType?: 'p2p' | 'group' } | undefined)?.chatType;
+    const isGroup = metaChatType === 'group' || this.groupConversationIds.has(externalChatId);
+    const sender = (metadata as { replyToSender?: { id: string; name?: string } } | undefined)?.replyToSender;
+    const text = isGroup && sender ? this.prependAtSender(content, sender) : content;
+    await this.sendDingTalkMessage(externalChatId, 'text', { content: text }, isGroup ? 'group' : undefined);
   }
 
   /**
    * Send a markdown reply.
    */
-  async sendMarkdown(externalChatId: string, title: string, text: string): Promise<void> {
-    await this.sendDingTalkMessage(externalChatId, 'markdown', { title, text });
+  async sendMarkdown(
+    externalChatId: string,
+    title: string,
+    text: string,
+    chatTypeOverride?: 'p2p' | 'group',
+  ): Promise<void> {
+    await this.sendDingTalkMessage(externalChatId, 'markdown', { title, text }, chatTypeOverride);
   }
 
   /**
@@ -216,17 +299,24 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
     textContent: string,
     _blocks: RichBlock[],
     catDisplayName: string,
+    metadata?: Record<string, unknown>,
   ): Promise<void> {
-    // DingTalk markdown supports basic formatting
+    const chatTypeOverride = (metadata as { chatType?: 'p2p' | 'group' } | undefined)?.chatType;
     const title = `🐱 ${catDisplayName}`;
-    await this.sendMarkdown(externalChatId, title, textContent);
+    await this.sendMarkdown(externalChatId, title, textContent, chatTypeOverride);
   }
 
   /**
    * Send a formatted reply as AI Card.
    * AC-A3: AI Card with cat name header + body + deep link
    */
-  async sendFormattedReply(externalChatId: string, envelope: MessageEnvelope): Promise<void> {
+  async sendFormattedReply(
+    externalChatId: string,
+    envelope: MessageEnvelope,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    const metaChatType = (metadata as { chatType?: 'p2p' | 'group' } | undefined)?.chatType;
+    const chatTypeOverride = metaChatType === 'group' ? 'group' : undefined;
     const isCallback = envelope.origin === 'callback';
     const headerTitle = isCallback ? `📨 ${envelope.header} · 传话` : envelope.header;
 
@@ -242,10 +332,10 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
 
     // Try AI Card first, fall back to markdown
     try {
-      await this.sendAICard(externalChatId, headerTitle, body);
+      await this.sendAICard(externalChatId, headerTitle, body, chatTypeOverride);
     } catch (err) {
       this.log.warn({ err }, '[DingTalkAdapter] AI Card sendFormattedReply failed, falling back to markdown');
-      await this.sendMarkdown(externalChatId, headerTitle, body);
+      await this.sendMarkdown(externalChatId, headerTitle, body, chatTypeOverride);
     }
   }
 
@@ -334,22 +424,46 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
       url?: string;
       absPath?: string;
       fileName?: string;
+      duration?: number;
       [key: string]: unknown;
     },
   ): Promise<void> {
     const url = typeof payload.url === 'string' && payload.url.length > 0 ? payload.url : undefined;
+    const absPath = typeof payload.absPath === 'string' && payload.absPath.length > 0 ? payload.absPath : undefined;
+
+    // Path 1: Image with URL — direct photoURL fast path (no upload needed)
+    if (payload.type === 'image' && url && !absPath) {
+      await this.sendDingTalkImageMessage(externalChatId, url);
+      return;
+    }
+
+    // Path 2: Has absPath → native media sending via upload
+    if (absPath) {
+      try {
+        const mediaId = await this.uploadToDingTalk(absPath, payload.type);
+        if (mediaId) {
+          await this.sendDingTalkMediaMessage(externalChatId, payload.type, mediaId, {
+            fileName: payload.fileName ?? basename(absPath),
+            duration: payload.duration,
+          });
+          return;
+        }
+      } catch (err) {
+        this.log.warn(
+          { err, type: payload.type, absPath },
+          '[DingTalkAdapter] sendMedia: upload failed, falling through',
+        );
+      }
+    }
+
+    // Path 3: Fallback — text link
     const mediaReference =
       url ??
       (typeof payload.fileName === 'string' && payload.fileName.length > 0
         ? payload.fileName
-        : typeof payload.absPath === 'string' && payload.absPath.length > 0
-          ? basename(payload.absPath)
+        : absPath
+          ? basename(absPath)
           : undefined);
-
-    if (payload.type === 'image' && url) {
-      await this.sendDingTalkImageMessage(externalChatId, url);
-      return;
-    }
 
     if (mediaReference) {
       const label = payload.type === 'image' ? '🖼️' : payload.type === 'audio' ? '🔊' : '📎';
@@ -456,27 +570,33 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
 
   // ── Private: DingTalk OpenAPI Calls ──
 
-  private async sendDingTalkMessage(
-    staffId: string,
-    msgType: string,
-    msgContent: Record<string, unknown>,
+  private async postRobotMessage(
+    chatId: string,
+    msgKey: string,
+    msgParam: Record<string, unknown>,
+    diMsgType: string,
+    errorLabel: string,
+    chatTypeOverride?: 'p2p' | 'group',
   ): Promise<unknown> {
+    const isGroup = chatTypeOverride === 'group' || this.groupConversationIds.has(chatId);
+
     if (this.sendMessageFn) {
       return this.sendMessageFn({
-        chatId: staffId,
-        content: JSON.stringify(msgContent),
-        msgType,
+        chatId,
+        content: JSON.stringify(msgParam),
+        msgType: diMsgType,
+        chatType: isGroup ? 'group' : 'p2p',
       });
     }
 
     const accessToken = await this.getAccessToken();
-    const url = 'https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend';
-    const payload = {
-      robotCode: this.robotCode,
-      userIds: [staffId],
-      msgKey: msgType === 'text' ? 'sampleText' : 'sampleMarkdown',
-      msgParam: JSON.stringify(msgContent),
-    };
+    const url = isGroup
+      ? 'https://api.dingtalk.com/v1.0/robot/orgGroupSend'
+      : 'https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend';
+
+    const payload = isGroup
+      ? { robotCode: this.robotCode, openConversationId: chatId, msgKey, msgParam: JSON.stringify(msgParam) }
+      : { robotCode: this.robotCode, userIds: [chatId], msgKey, msgParam: JSON.stringify(msgParam) };
 
     const res = await fetch(url, {
       method: 'POST',
@@ -489,59 +609,169 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '(unreadable)');
-      throw new Error(`DingTalk API error ${res.status}: ${body}`);
+      throw new Error(`DingTalk ${errorLabel} error ${res.status}: ${body}`);
     }
 
     return res.json();
   }
 
-  private async sendDingTalkImageMessage(staffId: string, photoURL: string): Promise<unknown> {
-    if (this.sendMessageFn) {
-      return this.sendMessageFn({
-        chatId: staffId,
-        content: JSON.stringify({ photoURL }),
-        msgType: 'image',
-      });
+  private async sendDingTalkMessage(
+    chatId: string,
+    msgType: string,
+    msgContent: Record<string, unknown>,
+    chatTypeOverride?: 'p2p' | 'group',
+  ): Promise<unknown> {
+    const msgKey = msgType === 'text' ? 'sampleText' : 'sampleMarkdown';
+    return this.postRobotMessage(chatId, msgKey, msgContent, msgType, 'send', chatTypeOverride);
+  }
+
+  private async sendDingTalkImageMessage(
+    chatId: string,
+    photoURL: string,
+    chatTypeOverride?: 'p2p' | 'group',
+  ): Promise<unknown> {
+    return this.postRobotMessage(chatId, 'sampleImageMsg', { photoURL }, 'image', 'image send', chatTypeOverride);
+  }
+
+  private async uploadToDingTalk(absPath: string, type: string): Promise<string | null> {
+    if (this.uploadMediaFn) {
+      return this.uploadMediaFn({ filePath: absPath, type });
     }
 
     const accessToken = await this.getAccessToken();
-    const url = 'https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend';
-    const payload = {
-      robotCode: this.robotCode,
-      userIds: [staffId],
-      msgKey: 'sampleImageMsg',
-      msgParam: JSON.stringify({ photoURL }),
-    };
+    const uploadUrl = 'https://api.dingtalk.com/v1.0/robot/messageFiles/upload';
 
-    const res = await fetch(url, {
+    const { readFile } = await import('node:fs/promises');
+    const fileBuffer = await readFile(absPath);
+    const fileName = basename(absPath);
+
+    const formData = new FormData();
+    formData.append('robotCode', this.robotCode);
+    formData.append('mediaType', type === 'image' ? 'image' : 'file');
+    formData.append('file', new Blob([fileBuffer]), fileName);
+
+    const res = await fetch(uploadUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-acs-dingtalk-access-token': accessToken,
-      },
-      body: JSON.stringify(payload),
+      headers: { 'x-acs-dingtalk-access-token': accessToken },
+      body: formData,
     });
 
     if (!res.ok) {
       const body = await res.text().catch(() => '(unreadable)');
-      throw new Error(`DingTalk image send error ${res.status}: ${body}`);
+      this.log.warn({ status: res.status, body }, '[DingTalkAdapter] uploadToDingTalk failed');
+      return null;
     }
 
-    return res.json();
+    const data = (await res.json()) as { mediaId?: string };
+    return data.mediaId ?? null;
+  }
+
+  private async sendDingTalkMediaMessage(
+    chatId: string,
+    type: 'image' | 'file' | 'audio',
+    mediaId: string,
+    meta: { fileName?: string; duration?: number },
+    chatTypeOverride?: 'p2p' | 'group',
+  ): Promise<unknown> {
+    const msgKeyMap: Record<string, { msgKey: string; buildParam: () => Record<string, unknown> }> = {
+      audio: {
+        msgKey: 'sampleAudio',
+        buildParam: () => ({ mediaId, duration: String(meta.duration ?? 0) }),
+      },
+      file: {
+        msgKey: 'sampleFile',
+        buildParam: () => ({
+          mediaId,
+          fileName: meta.fileName ?? 'file',
+          fileType: (meta.fileName ?? 'file').split('.').pop() ?? '',
+        }),
+      },
+      image: {
+        msgKey: 'sampleImageMsg',
+        buildParam: () => ({ photoURL: mediaId }),
+      },
+    };
+
+    const entry = msgKeyMap[type];
+    if (!entry) throw new Error(`Unsupported media type for DingTalk: ${type}`);
+
+    return this.postRobotMessage(
+      chatId,
+      entry.msgKey,
+      entry.buildParam(),
+      entry.msgKey,
+      'media send',
+      chatTypeOverride,
+    );
   }
 
   /**
    * Create an AI Card instance and deliver it.
    * POST /v1.0/card/instances/createAndDeliver
    */
-  private async createAICardInstance(staffId: string, outTrackId: string, headerText: string): Promise<void> {
-    const conversationId = this.staffToConversation.get(staffId);
-    if (!conversationId) {
-      throw new Error(`No conversationId mapped for staffId=${staffId}; AI Card requires a prior inbound message`);
+  private async createAICardInstance(
+    chatId: string,
+    outTrackId: string,
+    headerText: string,
+    chatTypeOverride?: 'p2p' | 'group',
+  ): Promise<void> {
+    const isGroup = chatTypeOverride === 'group' || this.groupConversationIds.has(chatId);
+
+    if (!isGroup) {
+      const conversationId = this.staffToConversation.get(chatId);
+      if (!conversationId) {
+        throw new Error(`No conversationId mapped for staffId=${chatId}; AI Card requires a prior inbound message`);
+      }
+
+      if (this.createCardFn) {
+        await this.createCardFn({ outTrackId, cardData: { headerText, conversationId, chatType: 'p2p' } });
+        return;
+      }
+
+      const accessToken = await this.getAccessToken();
+      const url = 'https://api.dingtalk.com/v1.0/card/instances/createAndDeliver';
+
+      const cardData = {
+        outTrackId,
+        cardTemplateId: AI_CARD_TEMPLATE_ID,
+        cardData: {
+          cardParamMap: {
+            title: headerText,
+            content: '...',
+            status: 'PROCESSING',
+          },
+        },
+        imRobotOpenDeliverModel: {
+          spaceType: 'IM_ROBOT',
+          robotCode: this.robotCode,
+          extension: JSON.stringify({
+            conversationType: '1',
+            conversationId,
+          }),
+        },
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-acs-dingtalk-access-token': accessToken,
+        },
+        body: JSON.stringify(cardData),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '(unreadable)');
+        throw new Error(`DingTalk AI Card create error ${res.status}: ${body}`);
+      }
+      return;
     }
 
     if (this.createCardFn) {
-      await this.createCardFn({ outTrackId, cardData: { headerText, conversationId } });
+      await this.createCardFn({
+        outTrackId,
+        cardData: { headerText, chatType: 'group', openConversationId: chatId },
+      });
       return;
     }
 
@@ -558,16 +788,12 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
           status: 'PROCESSING',
         },
       },
-      imRobotOpenDeliverModel: {
-        spaceType: 'IM_ROBOT',
-        robotCode: this.robotCode,
-        extension: JSON.stringify({
-          conversationType: '1',
-          conversationId,
-        }),
+      imGroupOpenSpaceModel: {
+        supportForward: true,
       },
       imGroupOpenDeliverModel: {
         robotCode: this.robotCode,
+        openConversationId: chatId,
       },
     };
 
@@ -582,7 +808,7 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '(unreadable)');
-      throw new Error(`DingTalk AI Card create error ${res.status}: ${body}`);
+      throw new Error(`DingTalk AI Card group create error ${res.status}: ${body}`);
     }
   }
 
@@ -627,9 +853,14 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
   /**
    * Send an AI Card with title and markdown body (non-streaming, single shot).
    */
-  private async sendAICard(staffId: string, title: string, body: string): Promise<void> {
+  private async sendAICard(
+    staffId: string,
+    title: string,
+    body: string,
+    chatTypeOverride?: 'p2p' | 'group',
+  ): Promise<void> {
     const outTrackId = `cc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await this.createAICardInstance(staffId, outTrackId, title);
+    await this.createAICardInstance(staffId, outTrackId, title, chatTypeOverride);
     await this.updateAICardStreaming(outTrackId, body, 'FINISHED');
   }
 
@@ -671,7 +902,9 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
   // ── Test Helpers ──
 
   /** @internal */
-  _injectSendMessage(fn: (params: { chatId: string; content: string; msgType: string }) => Promise<unknown>): void {
+  _injectSendMessage(
+    fn: (params: { chatId: string; content: string; msgType: string; chatType?: 'p2p' | 'group' }) => Promise<unknown>,
+  ): void {
     this.sendMessageFn = fn;
   }
 
@@ -695,5 +928,10 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
   /** @internal */
   _injectDownloadMedia(fn: (downloadCode: string) => Promise<string>): void {
     this.downloadMediaFn = fn;
+  }
+
+  /** @internal */
+  _injectUploadMedia(fn: (params: { filePath: string; type: string }) => Promise<string>): void {
+    this.uploadMediaFn = fn;
   }
 }

@@ -54,45 +54,6 @@ export function parseCpuTime(raw: string): number {
   return 0;
 }
 
-function parseWindowsCpuSeconds(raw: string): number {
-  const normalized = raw.trim().replace(',', '.');
-  if (!normalized) return 0;
-  const seconds = Number(normalized);
-  return Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : 0;
-}
-
-function sampleCpuTimeMs(pid: number, callback: (err: NodeJS.ErrnoException | null, cpuTimeMs: number) => void): void {
-  if (process.platform === 'win32') {
-    const script = `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($null -eq $p) { exit 2 }; [Console]::Out.Write($p.CPU)`;
-    const psArgs = ['-NoProfile', '-NonInteractive', '-Command', script];
-    const psOpts = { windowsHide: true };
-    const handleResult = (err: Error | null, stdout: string) => {
-      if (err) {
-        callback(err as NodeJS.ErrnoException, 0);
-        return;
-      }
-      callback(null, parseWindowsCpuSeconds(stdout));
-    };
-    // Try pwsh (PowerShell 7+) first, fall back to powershell.exe (Windows PowerShell 5.1)
-    execFile('pwsh', psArgs, psOpts, (err, stdout) => {
-      if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-        execFile('powershell.exe', psArgs, psOpts, handleResult);
-        return;
-      }
-      handleResult(err, stdout);
-    });
-    return;
-  }
-
-  execFile('ps', ['-o', 'cputime=', '-p', String(pid)], (err, stdout) => {
-    if (err) {
-      callback(err as NodeJS.ErrnoException, 0);
-      return;
-    }
-    callback(null, parseCpuTime(stdout));
-  });
-}
-
 export class ProcessLivenessProbe {
   readonly config: ProbeConfig;
   private readonly pid: number;
@@ -168,37 +129,40 @@ export class ProcessLivenessProbe {
       return;
     }
 
-    sampleCpuTimeMs(this.pid, (err, cpuTimeMs) => {
+    // Windows: `ps` is not available. Use process.kill(pid, 0) for liveness
+    // and skip CPU sampling. Conservative: assume idle (cpuGrowing = false)
+    // so that idle-silent → stall detection still works on Windows.
+    if (process.platform === 'win32') {
+      this.cpuGrowing = false;
+      this.emitSilenceWarnings();
+      return;
+    }
+
+    // Sample CPU time via ps (Unix only)
+    execFile('ps', ['-o', 'cputime=', '-p', String(this.pid)], (err, stdout) => {
       if (err) {
-        // Sampling backend errors are not proof of process death.
-        // Re-check PID existence and degrade to idle-silent when still alive.
-        try {
-          process.kill(this.pid, 0);
-        } catch {
-          this.pidAlive = false;
-          return;
-        }
-        this.cpuGrowing = false;
-        this.maybeEmitWarnings();
+        // ps failed — process likely dead
+        this.pidAlive = false;
         return;
       }
-
       this.prevCpuTimeMs = this.currCpuTimeMs;
-      this.currCpuTimeMs = cpuTimeMs;
+      this.currCpuTimeMs = parseCpuTime(stdout);
       this.cpuGrowing = this.currCpuTimeMs > this.prevCpuTimeMs;
-      this.maybeEmitWarnings();
+
+      // Check warning thresholds
+      this.emitSilenceWarnings();
     });
   }
 
-  private maybeEmitWarnings(): void {
+  /** Emit soft/stall warnings based on silence duration (shared by Windows and Unix paths) */
+  private emitSilenceWarnings(): void {
     const silenceMs = Date.now() - this.lastActivityAt;
-    if (silenceMs >= this.config.softWarningMs && !this.softWarningEmitted) {
-      this.softWarningEmitted = true;
-      this.warningQueue.push(this.makeWarning('alive_but_silent', silenceMs));
-    }
     if (silenceMs >= this.config.stallWarningMs && !this.stallWarningEmitted) {
       this.stallWarningEmitted = true;
       this.warningQueue.push(this.makeWarning('suspected_stall', silenceMs));
+    } else if (silenceMs >= this.config.softWarningMs && !this.softWarningEmitted) {
+      this.softWarningEmitted = true;
+      this.warningQueue.push(this.makeWarning('alive_but_silent', silenceMs));
     }
   }
 

@@ -334,7 +334,7 @@ export function AccountSection({
           label="Client"
           value={form.client}
           options={CLIENT_OPTIONS}
-          onChange={(value) => onChange({ client: value as HubCatEditorFormState['client'] })}
+          onChange={(value) => onChange({ client: value as HubCatEditorFormState['client'], ocProviderName: '' })}
           required
         />
 

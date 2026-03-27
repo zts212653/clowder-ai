@@ -801,6 +801,148 @@ embedding 无法补救（rerank 只重排已召回的，不发现新文档）。
 
 **KD-44**：三种检索模式各有独立实现路径，semantic 不依赖 BM25 召回。
 
+### Phase H: 知识涌现 Feed — Durable Candidate → Hub 可视化 → 人猫协同审核（✅ H-1/H-2/H-3/H-8 merged）
+
+> **触发**：team lead问"Durable Candidate 怎么审核？需要 UX"。
+> **核心理念**：不是"审核 marker"，而是"知识涌现 feed"——像 GitHub Notifications 一样的集中入口。
+
+**H-1. 知识涌现 Feed（Hub 前端页面）**
+
+Hub 里新增一个"知识动态"页面，集中展示所有从 thread 对话中涌现的 decision/lesson/method：
+
+```
+📋 本周涌现的知识 (5 条)
+
+🔵 [decision] 摘要单元是 thread 不是 session
+   来源：f102 学习 lossless claw thread · 3 只猫共识 · team lead拍板
+   置信度：explicit → 已自动写入 docs/decisions/ADR-020.md ✓
+   [撤回] [编辑]
+
+🟡 [lesson] embedding 不能偷懒用 in-process CPU
+   来源：team lead"你这实现我拒绝" · LL-034
+   置信度：explicit → 已自动写入 docs/lessons-learned.md ✓
+   [撤回] [编辑]
+
+🟢 [method] 让模型说人话程序加格式
+   来源：team lead验证有效
+   置信度：inferred → 待确认
+   [写入 Skills] [写入 Lessons] [忽略]
+```
+
+**核心 UX**：
+- **explicit（team lead拍板/明确共识）**→ 自动沉淀到 docs/，Feed 里标 ✓，team lead只需"撤回"错的
+- **inferred（模型推断）**→ 展示在 Feed 等确认，team lead选去向或忽略
+- **不是每条都审**——默认信任 explicit，异常才介入
+
+**H-2. 自然语言联动（Workspace Navigator 集成）**
+
+team lead说"帮我看看这周有什么新知识" → 猫猫用 workspace-navigator 打开知识 Feed 页面。
+team lead说"把那条 lesson 写入 Skills" → 猫猫调 IMaterializationService 执行。
+
+**H-3. 后端：Candidate → MarkerQueue → Materialization 全链路**
+
+```
+Opus 摘要提取 [decision]/[lesson]/[method]
+  ↓
+parseNaturalLanguageOutput() → DurableCandidate
+  ↓
+MarkerQueue.submit() → status: 'captured'
+  ↓
+自动 normalize → status: 'normalized'
+  ↓
+explicit → auto-approve → materialize → docs/*.md → reindex
+inferred → Hub Feed 展示 → team lead确认/忽略
+  ↓
+approved → IMaterializationService.materialize()
+  → git commit → trigger reindex → evidence.sqlite 更新
+```
+
+**H-4. 用户角色（跨项目终态）**
+
+| 角色 | 体验 |
+|------|------|
+| **项目 Owner（team lead）** | Feed 里看涌现知识 · 一键确认/撤回 · 自然语言操作 |
+| **猫猫团队** | auto-recall 自动引用已沉淀知识 · 不重蹈覆辙 |
+| **新人/新猫** | Onboarding 自动化 · "这个项目的核心决策是什么？" → 搜到 ADR/LL |
+| **跨项目的猫** | 全局层 global_knowledge.sqlite 带着走 · 在新项目搜到旧教训 |
+
+**H-5. 头脑风暴收敛（Ragdoll + Maine Coon，2026-03-22）**
+
+> **产品定义**：Knowledge Emergence Workspace — 让知识从对话里自然浮现 → 被猫整理 → 被人轻确认 → 反哺团队搜索与行动。
+> **不是**：静态 wiki / marker 审核后台 / docs 生成器。
+
+**4 条产品原则**：
+
+| # | 原则 | 含义 |
+|---|------|------|
+| P1 | 单入口 | 所有待确认/已沉淀/高频命中知识，都能从 Hub Feed 到达 |
+| P2 | 先建议后自动 | 除 explicit 高置信度外，系统先给建议，不直接替人拍板 |
+| P3 | 所有自动动作可撤回 | 自动沉淀必须可追溯、可编辑、可撤回 |
+| P4 | 关系服务于行动 | edges 先做上下文增强（卡片内联），不先做大图展示 |
+
+**Feed 按"动作价值"分组**（Maine Coon提出）：
+- **需要你确认** — inferred candidates、冲突更新、低置信高影响
+- **已自动沉淀** — explicit decision/lesson/method，显示来源 + 可撤回
+- **高频命中** — 正在帮助团队的知识（"哪些知识真的活着"）
+- **值得升级的草稿** — 某 lesson 被 3+ thread 提到 → 建议升级为 method/ADR
+
+**每条卡片信息**：标题 · kind · 2-3 句摘要 · 来源 thread/feat · 置信度 · **为什么现在出现** · 建议动作（Approve / Edit / Dismiss）
+
+**team lead隐性需求**（两猫挖掘）：
+1. "为什么现在告诉我？" — 每条要说明触发原因（Maine Coon）
+2. "我想看变化不想重看全文" — 同一知识展示 delta（Maine Coon）
+3. 重要性分级：阻塞型/常用型/背景型（Maine Coon）
+4. "我不想二次录入" — 系统先生成候选，人只做 approve/edit（Maine Coon）
+5. 知识涟漪 — 改了 decision → edges 自动提示关联文档需要更新（Ragdoll）
+6. 知识成长可视化 — 像 GitHub contribution graph 看积累（Ragdoll）
+7. 知识对话 — "我们为什么放弃 Hindsight？" → 综合叙事回答（Ragdoll，IReflectionService 终态）
+
+**猫猫主动提议模式**（两猫一致）：
+- 对话中温和提醒："这条像一个 decision，要沉淀吗？"
+- Feed 里正式处理：结构化 candidate + approve/dismiss
+
+**关系可视化**（两猫一致）：
+- 卡片内联最有用的 3 类：来源 threads · 引用的 decision/lesson · 影响的 feat/docs
+- 详情页里才展开关系图，首页不做大图
+
+**H-6. Workspace 集成方案（team lead确认 2026-03-23）**
+
+入口位置：**Workspace 面板模式切换器**（不加 Tab、不做 Hub 侧边栏）：
+
+```
+Workspace 面板顶部：
+  [<> 开发]  [✨ 知识 ②]     ← 两个 pill 按钮切换模式
+
+开发模式 = 现有 FILES/CHANGES/GIT/TERM/PREVIEW
+知识模式 = 知识涌现 Feed（待确认/已沉淀/高频/升级）
+```
+
+- 设计稿 1：`designs/F102-knowledge-emergence-feed.pen` — Feed 页面全貌（Header + 4 Tab + 两种卡片 + 统计栏 + 自然语言输入栏）
+- 设计稿 2：`designs/F102-knowledge-emergence-workspace-integration.pen` — Workspace Before/After 对比（[开发]/[知识] 模式切换器）
+- SVG/图标资产：Lucide icon set（sparkles/check/file-text/lightbulb/bell/search/send）— 实现前从 .pen 导出
+- 任意页面/任意 thread 都能联动打开知识 Feed（和 Workspace 其他功能一样）
+- team lead说"帮我看看知识"→ 猫猫用 workspace-navigator 切到知识模式
+
+**H-7. 实现前必做清单（team lead铁律：设计 → 代码一致性）**
+
+| 项 | 说明 |
+|---|------|
+| **SVG/图标资产** | 提前从 .pen 导出所有用到的图标，不要到写代码时现画 |
+| **设计对照** | 代码实现后必须截图和 .pen 设计稿逐像素对比 |
+| **风格一致** | 复用现有 Hub 配色/字体/圆角/间距，不引入新风格变量 |
+| **任意页面联动** | 不管在哪个 thread/页面，都能通过自然语言或按钮打开知识 Feed |
+| **配套 Skill** | 猫猫得知道有 Knowledge Feed 能力 → 写 skill 或更新 CLAUDE.md/AGENTS.md |
+
+**H-8. 配套 Skill（让猫猫知道有这个能力）** ✅
+
+猫猫如果不知道 Knowledge Feed 存在，就不会主动提议沉淀知识、不会帮team lead打开 Feed。已完成：
+
+1. ✅ **CLAUDE.md/AGENTS.md 更新** — 在记忆系统段落加"知识涌现 Feed"指引 + 猫猫主动提醒职责
+2. ✅ **workspace-navigator 扩展** — `POST /api/workspace/navigate` 支持 `action: 'knowledge-feed'`，前端 chatStore.setWorkspaceMode 联动
+3. ✅ **猫猫主动提议的 prompt guidance** — CLAUDE.md/AGENTS.md 写明"对话中发现有价值的 decision/lesson 时，主动提醒team lead"
+
+> **待做**：IMaterializationService（approved → docs/*.md 自动写入） · Siamese精细视觉设计
+
 ## Phase D 完成后的预期效果
 
 > team lead指示：做完后要讲清楚"team lead日常使用感受到什么优化"和"猫猫自己感受到什么优化"。跑一段时间才知道做得好不好。
@@ -985,7 +1127,7 @@ embedding 无法补救（rerank 只重排已召回的，不发现新文档）。
 
 ## 实现路线图（F/G/Gap 整体规划）
 
-> **当前状态**：Phase A~E ✅ 完成 + Phase G foundation 🚧 已合入（PR #604）。Phase F + G 运行时验收 + Gap-1 待开。
+> **当前状态**：Phase A~E ✅ 完成 + Phase G foundation ✅ 已合入（PR #604）+ Phase H ✅ 已合入（PR #737）。Phase F + G 运行时验收 + IMaterializationService 待开。
 > **team lead指示**：开源同步时增强功能需要开关，默认 off。
 
 ### 整体顺序

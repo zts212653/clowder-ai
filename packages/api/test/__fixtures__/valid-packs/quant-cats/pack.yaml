@@ -1,0 +1,6 @@
+name: quant-cats
+version: "1.0.0"
+description: Quantitative finance multi-agent collaboration pack
+packType: domain
+author: alice
+license: MIT

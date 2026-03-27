@@ -32,6 +32,7 @@ import { parse as parseYaml } from 'yaml';
 import {
   bootstrapCapabilities,
   type DiscoveryPaths,
+  deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
   generateCliConfigs,
   migrateLegacyCatCafeCapability,
@@ -178,7 +179,7 @@ function getProjectRoot(): string {
 }
 
 /**
- * Resolve Clowder AI skills source from module location (stable), not selected project path.
+ * Resolve Cat Cafe skills source from module location (stable), not selected project path.
  * This avoids false "未挂载" when projectPath points to another repo (e.g. cat-cafe-runtime).
  */
 function resolveCatCafeSkillsSourceDir(): string {
@@ -562,28 +563,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       discoverExternalMcpServers(projectLevelPaths),
       discoverExternalMcpServers(userLevelPaths),
     ]);
-    const allDiscoveredServers = [...projectLevelServers, ...userLevelServers];
-    const discoveredByName = new Map<string, (typeof allDiscoveredServers)[number]>();
-    for (const server of allDiscoveredServers) {
-      const existing = discoveredByName.get(server.name);
-      if (!existing) {
-        discoveredByName.set(server.name, server);
-      } else if (existing.transport === 'streamableHttp' && server.transport !== 'streamableHttp') {
-        // Prefer stdio — but only when the stdio entry is actually enabled,
-        // or when the existing streamableHttp entry is disabled anyway.
-        // Prevents a disabled user-level stdio from replacing an enabled project-level HTTP server.
-        if (server.enabled !== false || existing.enabled !== true) {
-          discoveredByName.set(server.name, server);
-        }
-      } else if (existing.enabled === false && server.enabled !== false) {
-        // Same transport: prefer enabled entry over disabled one.
-        discoveredByName.set(server.name, server);
-      }
-    }
+    const discoveredServers = deduplicateDiscoveredMcpServers([...projectLevelServers, ...userLevelServers]);
     // Skip legacy Cat Cafe names — a stale 'cat-cafe' entry in user config should
     // not be re-added alongside the split 'cat-cafe-*' built-in entries.
     const CAT_CAFE_BUILTIN_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
-    for (const server of discoveredByName.values()) {
+    for (const server of discoveredServers) {
       if (CAT_CAFE_BUILTIN_NAMES.has(server.name)) continue;
       const exists = config.capabilities.some((c) => c.type === 'mcp' && c.id === server.name);
       if (!exists) {

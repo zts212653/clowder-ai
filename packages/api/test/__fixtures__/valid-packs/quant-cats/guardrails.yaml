@@ -1,0 +1,9 @@
+constraints:
+  - id: risk-disclosure
+    scope: all-cats
+    rule: All financial advice must include risk disclosure
+    severity: block
+  - id: no-specific-picks
+    scope: all-cats
+    rule: Never recommend specific investment targets
+    severity: block

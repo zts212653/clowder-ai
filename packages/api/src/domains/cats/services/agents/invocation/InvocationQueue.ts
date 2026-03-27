@@ -368,11 +368,16 @@ export class InvocationQueue {
 
   /** F122B: List all queued autoExecute entries for a thread (for scanning past busy slots). */
   listAutoExecute(threadId: string): QueueEntry[] {
+    const now = Date.now();
     const result: QueueEntry[] = [];
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
-        if (e.status === 'queued' && e.autoExecute) result.push({ ...e });
+        if (e.status !== 'queued' || !e.autoExecute) continue;
+        // Keep auto-execute scan consistent with dedup guard semantics:
+        // stale queued entries must not be picked up indefinitely.
+        if (now - e.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) continue;
+        result.push({ ...e });
       }
     }
     return result;
@@ -403,18 +408,27 @@ export class InvocationQueue {
     return false;
   }
 
-  /** Cross-path dedup: checks both queued AND processing agent entries.
-   *  Used by route-serial to prevent text-scan @mention when callback already dispatched. */
+  /**
+   * Cross-path dedup: checks processing + fresh queued agent entries.
+   * Used by route-serial to prevent text-scan @mention when callback already dispatched.
+   *
+   * 'processing' entries always block (actively executing).
+   * 'queued' entries only block if created within STALE_THRESHOLD_MS — fresh entries
+   * are legitimate pending dispatches that tryAutoExecute will pick up.
+   * Stale queued entries (older than threshold) are ignored — they may never execute
+   * (tryAutoExecute can fail to start them if the slot stays busy), and blocking
+   * on them causes permanent A2A deadlock.
+   */
+  static readonly STALE_QUEUED_THRESHOLD_MS = 60_000;
+
   hasActiveOrQueuedAgentForCat(threadId: string, catId: string): boolean {
+    const now = Date.now();
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
-        if (
-          e.source === 'agent' &&
-          (e.status === 'queued' || e.status === 'processing') &&
-          e.targetCats.includes(catId)
-        )
-          return true;
+        if (e.source !== 'agent' || !e.targetCats.includes(catId)) continue;
+        if (e.status === 'processing') return true;
+        if (e.status === 'queued' && now - e.createdAt < InvocationQueue.STALE_QUEUED_THRESHOLD_MS) return true;
       }
     }
     return false;

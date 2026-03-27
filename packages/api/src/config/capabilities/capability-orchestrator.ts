@@ -74,6 +74,26 @@ function hasUsableTransport(desc: { command?: string; transport?: string; url?: 
   return typeof desc.command === 'string' && desc.command.trim().length > 0;
 }
 
+type DiscoveredMcpLike = Pick<McpServerDescriptor, 'name' | 'enabled' | 'transport'>;
+
+function shouldReplaceDiscoveredMcpServer<T extends DiscoveredMcpLike>(existing: T, incoming: T): boolean {
+  if (existing.transport === 'streamableHttp' && incoming.transport !== 'streamableHttp') {
+    return incoming.enabled !== false || existing.enabled !== true;
+  }
+  return existing.enabled === false && incoming.enabled !== false;
+}
+
+export function deduplicateDiscoveredMcpServers<T extends DiscoveredMcpLike>(servers: readonly T[]): T[] {
+  const byName = new Map<string, T>();
+  for (const server of servers) {
+    const existing = byName.get(server.name);
+    if (!existing || shouldReplaceDiscoveredMcpServer(existing, server)) {
+      byName.set(server.name, server);
+    }
+  }
+  return [...byName.values()];
+}
+
 /**
  * Resolve the latest Pencil MCP binary path by scanning ~/.antigravity/extensions/.
  * Returns null if no installation is found.
@@ -140,27 +160,11 @@ export async function discoverExternalMcpServers(paths: DiscoveryPaths): Promise
     readCodexMcpConfig(paths.codexConfig),
     readGeminiMcpConfig(paths.geminiConfig),
   ]);
-
-  const byName = new Map<string, McpServerDescriptor>();
-
-  for (const server of [...claude, ...codex, ...gemini]) {
-    if (!hasUsableTransport(server)) continue;
-    const existing = byName.get(server.name);
-    if (!existing) {
-      byName.set(server.name, { ...server, source: 'external' });
-    } else if (existing.transport === 'streamableHttp' && server.transport !== 'streamableHttp') {
-      // Prefer stdio over streamableHttp — but only when the stdio entry is actually
-      // enabled, or when the existing streamableHttp entry is disabled anyway.
-      // This prevents a disabled stdio duplicate from replacing an enabled HTTP server.
-      if (server.enabled !== false || existing.enabled !== true) {
-        byName.set(server.name, { ...server, source: 'external' });
-      }
-    } else if (existing.enabled === false && server.enabled !== false) {
-      // Same transport: prefer enabled entry over disabled one.
-      byName.set(server.name, { ...server, source: 'external' });
-    }
-  }
-  return [...byName.values()];
+  return deduplicateDiscoveredMcpServers(
+    [...claude, ...codex, ...gemini]
+      .filter((server) => hasUsableTransport(server))
+      .map((server) => ({ ...server, source: 'external' as const })),
+  );
 }
 
 /**
