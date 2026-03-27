@@ -90,6 +90,8 @@ export function HubMediaHubTab() {
         return;
       }
       await fetchProviders();
+    } catch {
+      setError('网络错误');
     } finally {
       setBusyId(null);
     }

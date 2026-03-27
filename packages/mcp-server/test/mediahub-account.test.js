@@ -356,3 +356,46 @@ describe('JimengProvider.checkHealth', () => {
     }
   });
 });
+
+// ==================== tryAutoLoadProvider (P1 regression) ==================
+
+describe('tryAutoLoadProvider', () => {
+  it('auto-loads provider from Redis when not registered', async () => {
+    const { AccountManager } = await import('../dist/mediahub/account-manager.js');
+    const { ProviderRegistry } = await import('../dist/mediahub/provider.js');
+    const { setAccountRefs, registerProviderFactory, tryAutoLoadProvider } = await import(
+      '../dist/mediahub/account-tools.js'
+    );
+
+    const key = randomBytes(32);
+    const redis = createMockRedis();
+    const manager = new AccountManager(redis, key);
+    const registry = new ProviderRegistry();
+    setAccountRefs(manager, registry);
+
+    // Register factory
+    registerProviderFactory('testprov', (data) => ({
+      info: { id: 'testprov', displayName: 'Test', capabilities: ['text2video'], authMode: 'api_key', models: [] },
+      supports: () => true,
+      submit: async () => ({ jobId: '', providerTaskId: 'x', status: 'queued' }),
+      queryStatus: async () => ({ jobId: '', status: 'running' }),
+    }));
+
+    // Provider not registered yet
+    assert.equal(registry.get('testprov'), undefined);
+
+    // Save credentials to Redis (simulating Console bind)
+    await manager.saveCredential('testprov', 'api_key', { accessKey: 'ak', secretKey: 'sk' });
+
+    // tryAutoLoadProvider should find credentials and register
+    const loaded = await tryAutoLoadProvider('testprov');
+    assert.equal(loaded, true);
+    assert.ok(registry.get('testprov'));
+  });
+
+  it('returns false when no credentials stored', async () => {
+    const { tryAutoLoadProvider } = await import('../dist/mediahub/account-tools.js');
+    const result = await tryAutoLoadProvider('nonexistent');
+    assert.equal(result, false);
+  });
+});

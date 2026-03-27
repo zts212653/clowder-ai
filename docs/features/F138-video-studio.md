@@ -1,6 +1,6 @@
 ---
 feature_ids: [F138]
-related_features: [F054, F093, F139]
+related_features: [F054, F093, F142]
 topics: [video, remotion, waoowaoo, bilibili, tutorial, content-pipeline, schema]
 doc_kind: spec
 created: 2026-03-24
@@ -147,7 +147,7 @@ brief → asset ingest → video-spec → voice-script → preview render → re
 - **Evolved from**: F054（HCI 预热基础设施 — B 站 MCP 调研在 F054 Phase 1）
 - **Related**: F093（Cats & U 世界引擎 — 介绍视频的创意方向）
 - **Related**: F066/F103（Voice Pipeline / Per-Cat Voice Identity — TTS 配音能力）
-- **Related**: F139（MediaHub — Phase 4 "生成式素材"将消费 MediaHub 的 provider-agnostic 接口）
+- **Related**: F142（MediaHub — Phase 4 "生成式素材"将消费 MediaHub 的 provider-agnostic 接口）
 - **External**: [waoowaoo](https://github.com/saturndec/waoowaoo)（参考架构，无 License，仅学习）
 
 ## Risk

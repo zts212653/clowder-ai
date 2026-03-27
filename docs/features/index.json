@@ -867,9 +867,9 @@
     {
       "id": "F142",
       "name": "MediaHub — AI Media Generation Gateway",
-      "status": "in-progress | **Owner**: 布偶猫 | **Priority**: P1",
+      "status": "spec | **Owner**: 布偶猫 | **Priority**: P1",
       "file": "F142-mediahub.md"
     }
   ],
-  "generated_at": "2026-03-27T01:21:33.952Z"
+  "generated_at": "2026-03-27T09:06:54.722Z"
 }

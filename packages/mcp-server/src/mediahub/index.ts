@@ -5,7 +5,7 @@
 
 export type { CredentialSummary } from './account-manager.js';
 export { AccountManager } from './account-manager.js';
-export { accountTools, setAccountRefs } from './account-tools.js';
+export { accountTools, setAccountRefs, tryAutoLoadProvider } from './account-tools.js';
 export type { RedisClient } from './job-store.js';
 export { JobStore } from './job-store.js';
 export type { CleanupResult, MediaValidation } from './media-lifecycle.js';

@@ -31,6 +31,24 @@ export function registerProviderFactory(id: string, factory: ProviderFactory): v
   providerFactories.set(id, factory);
 }
 
+/** Try to auto-load a provider from Redis credentials (lazy activation for Console-bound providers) */
+export async function tryAutoLoadProvider(providerId: string): Promise<boolean> {
+  if (!accountRef || !registryRef) return false;
+  if (registryRef.get(providerId)) return true;
+
+  const data = await accountRef.getCredentialData(providerId);
+  if (!data) return false;
+
+  const factory = providerFactories.get(providerId);
+  if (!factory) return false;
+
+  const provider = factory(data);
+  if (!provider) return false;
+
+  registryRef.register(provider);
+  return true;
+}
+
 function getManager(): AccountManager {
   if (!accountRef) throw new Error('AccountManager not initialized');
   return accountRef;

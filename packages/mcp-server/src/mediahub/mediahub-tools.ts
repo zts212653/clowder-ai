@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import type { ToolResult } from '../tools/file-tools.js';
 import { errorResult, successResult } from '../tools/file-tools.js';
+import { tryAutoLoadProvider } from './account-tools.js';
 import { guessMimeType, isImageType, validateMediaFile } from './media-lifecycle.js';
 import type { MediaHubService } from './mediahub-service.js';
 import type { GenerationRequest, MediaCapability } from './types.js';
@@ -84,6 +85,8 @@ export async function handleGenerateVideo(args: {
       negativePrompt: args.negative_prompt,
     };
 
+    // Lazy-load: if provider was bound via Console but not yet registered in this process
+    await tryAutoLoadProvider(args.provider);
     const job = await getService().generateVideo(request);
     return successResult(
       JSON.stringify(
