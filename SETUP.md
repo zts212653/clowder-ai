@@ -340,6 +340,55 @@ network_access = true
 
 > The project-level `.codex/config.toml` only contains MCP server definitions. Runtime settings like `sandbox_mode` and `approval_policy` must be set in `~/.codex/config.toml`.
 
+### Codex CLI — Bubblewrap Sandbox Errors
+
+If Codex reports `bwrap` errors when trying to execute commands, it's due to system-level restrictions on user namespaces. There are two common errors:
+
+#### Error 1: `bwrap: loopback: Failed RTM_NEWADDR`
+
+**Symptom**: Codex cannot access network or tools.
+
+**Cause**: Bubblewrap network interface setup blocked by sandbox configuration.
+
+**Fix**: Add `network_access = true` to `~/.codex/config.toml`:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+```
+
+#### Error 2: `bwrap: setting up uid map: Permission denied`
+
+**Symptom**: Codex cannot execute any commands, even simple ones like `echo`.
+
+**Cause**: AppArmor is blocking unprivileged user namespace creation.
+
+**Diagnosis**:
+```bash
+# Check if AppArmor is restricting namespaces
+sysctl kernel.apparmor_restrict_unprivileged_userns
+# If output is "1", it's blocked
+```
+
+**Fix** (temporary, until reboot):
+```bash
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+**Fix** (persistent):
+```bash
+echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/99-userns-apparmor.conf
+sudo sysctl --system
+```
+
+**Verify**:
+```bash
+bwrap --ro-bind / / /bin/echo "测试成功"
+# Should print "测试成功"
+```
+
+> **Note**: These changes affect system-wide sandbox security. Only apply on trusted development environments.
+
 ## Windows Setup
 
 Full Windows support is available via PowerShell scripts.
