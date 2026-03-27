@@ -62,7 +62,7 @@ describe('provider profile store', () => {
       anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude' },
       openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
       google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
-      dare: { enabled: true, mode: 'oauth', accountRef: 'dare' },
+      dare: { enabled: true, mode: 'api_key', accountRef: 'dare' },
       opencode: { enabled: false, mode: 'skip' },
     });
   });
@@ -140,7 +140,7 @@ describe('provider profile store', () => {
     assert.equal(runtime.apiKey, 'sk-sponsor-1');
   });
 
-  it('preserves builtin Dare/OpenCode oauth bootstrap bindings across reads', async () => {
+  it('preserves builtin Dare/OpenCode bootstrap bindings across reads', async () => {
     await readProviderProfiles(projectRoot);
     await activateProviderProfile(projectRoot, 'dare', 'dare');
     await activateProviderProfile(projectRoot, 'opencode', 'opencode');
@@ -148,7 +148,7 @@ describe('provider profile store', () => {
     const data = await readProviderProfiles(projectRoot);
     assert.deepEqual(data.bootstrapBindings.dare, {
       enabled: true,
-      mode: 'oauth',
+      mode: 'api_key',
       accountRef: 'dare',
     });
     assert.deepEqual(data.bootstrapBindings.opencode, {

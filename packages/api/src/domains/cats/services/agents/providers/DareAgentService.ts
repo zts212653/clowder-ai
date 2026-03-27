@@ -64,12 +64,18 @@ const ADAPTER_ENDPOINT_ENV: Record<string, string> = {
 
 /**
  * F135: Resolve vendor/dare-cli path from project root (not cwd).
- * Uses import.meta.url to derive the project root from this module's location.
- * packages/api/src/domains/cats/services/agents/providers/ → 8 levels up = project root
+ * Walks up from this module's directory to find the repo root via .git anchor,
+ * which works for both regular repos and git worktrees (.git file).
  */
 export function resolveVendorDarePath(): string {
-  // packages/api/{src|dist}/domains/cats/services/agents/providers → 8 levels to root
-  return join(__dirname, '..', '..', '..', '..', '..', '..', '..', '..', 'vendor', 'dare-cli');
+  let dir = __dirname;
+  for (let i = 0; i < 20; i++) {
+    if (existsSync(join(dir, '.git'))) return join(dir, 'vendor', 'dare-cli');
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('Could not find project root (.git) from DareAgentService location');
 }
 
 /**

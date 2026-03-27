@@ -172,7 +172,7 @@ describe('provider profiles routes', () => {
         anthropic: { enabled: true, mode: 'api_key', accountRef: created.profile.id },
         openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
         google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
-        dare: { enabled: true, mode: 'oauth', accountRef: 'dare' },
+        dare: { enabled: true, mode: 'api_key', accountRef: 'dare' },
         opencode: { enabled: false, mode: 'skip' },
       });
       assert.deepEqual(
