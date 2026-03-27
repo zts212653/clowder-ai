@@ -313,6 +313,8 @@ export async function* routeParallel(
   // F060: Collect inline rich blocks per cat from system_info stream
   const catStreamRichBlocks = new Map<string, import('@cat-cafe/shared').RichBlock[]>();
   const catHadError = new Set<string>();
+  // #267: track errors that happened BEFORE abort — only these are real provider failures
+  const catHadProviderError = new Set<string>();
   // F22 R2 P1-1: Capture own invocationId per cat from stream
   const catInvocationId = new Map<string, string>();
   let completedCount = 0;
@@ -381,6 +383,8 @@ export async function* routeParallel(
     }
     if (msg.type === 'error' && msg.catId) {
       catHadError.add(msg.catId);
+      // #267: errors before abort are real provider failures; errors after abort are cleanup
+      if (!signal?.aborted) catHadProviderError.add(msg.catId);
       if (msg.error) {
         const prev = catText.get(msg.catId) ?? '';
         catText.set(msg.catId, `${prev + (prev ? '\n\n' : '')}[错误] ${msg.error}`);
@@ -609,7 +613,12 @@ export async function* routeParallel(
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(
+                threadId,
+                msg.catId as CatId,
+                // #267: only errors before abort are provider failures
+                !catHadProviderError.has(msg.catId),
+              );
             } catch (activityErr) {
               log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
             }
@@ -683,7 +692,12 @@ export async function* routeParallel(
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
             if (deps.invocationDeps.threadStore) {
               try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
+                await deps.invocationDeps.threadStore.updateParticipantActivity(
+                  threadId,
+                  msg.catId as CatId,
+                  // #267: only errors before abort are provider failures
+                  !catHadProviderError.has(msg.catId),
+                );
               } catch (activityErr) {
                 log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
               }
@@ -741,7 +755,12 @@ export async function* routeParallel(
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
             if (deps.invocationDeps.threadStore) {
               try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, msg.catId as CatId);
+                await deps.invocationDeps.threadStore.updateParticipantActivity(
+                  threadId,
+                  msg.catId as CatId,
+                  // #267: only errors before abort are provider failures
+                  !catHadProviderError.has(msg.catId),
+                );
               } catch (activityErr) {
                 log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
               }

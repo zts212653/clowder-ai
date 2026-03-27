@@ -21,6 +21,8 @@ export interface ThreadParticipantActivity {
   lastMessageAt: number;
   /** Total message count from this cat in the thread */
   messageCount: number;
+  /** #267: false when the cat's last response was an error (API failure, capacity, etc.) */
+  lastResponseHealthy?: boolean;
 }
 
 /**
@@ -191,7 +193,7 @@ export interface IThreadStore {
   /** F032 Phase C: Get participants sorted by activity (lastMessageAt desc) */
   getParticipantsWithActivity(threadId: string): ThreadParticipantActivity[] | Promise<ThreadParticipantActivity[]>;
   /** F032 P1-2 fix: Update participant activity on every message (not just join) */
-  updateParticipantActivity(threadId: string, catId: CatId): void | Promise<void>;
+  updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void | Promise<void>;
   updateTitle(threadId: string, title: string): void | Promise<void>;
   updatePin(threadId: string, pinned: boolean): void | Promise<void>;
   updateFavorite(threadId: string, favorited: boolean): void | Promise<void>;
@@ -246,7 +248,10 @@ const MAX_THREADS = 100;
 export class ThreadStore implements IThreadStore {
   private threads: Map<string, Thread> = new Map();
   /** F032 Phase C: Track participant activity per thread. Key: `${threadId}:${catId}` */
-  private participantActivity: Map<string, { lastMessageAt: number; messageCount: number }> = new Map();
+  private participantActivity: Map<
+    string,
+    { lastMessageAt: number; messageCount: number; lastResponseHealthy?: boolean }
+  > = new Map();
   /** F046 D3: one-shot suppressed mention feedback per thread+cat */
   private mentionRoutingFeedback: Map<string, ThreadMentionRoutingFeedback> = new Map();
   private readonly maxThreads: number;
@@ -343,6 +348,7 @@ export class ThreadStore implements IThreadStore {
         catId,
         lastMessageAt: activity?.lastMessageAt ?? 0,
         messageCount: activity?.messageCount ?? 0,
+        lastResponseHealthy: activity?.lastResponseHealthy,
       };
     });
     // Sort by lastMessageAt descending (most recent first)
@@ -351,7 +357,7 @@ export class ThreadStore implements IThreadStore {
   }
 
   /** F032 P1-2 fix: Update participant activity on every message */
-  updateParticipantActivity(threadId: string, catId: CatId): void {
+  updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void {
     const thread = this.get(threadId);
     if (!thread) return;
 
@@ -366,6 +372,7 @@ export class ThreadStore implements IThreadStore {
     this.participantActivity.set(key, {
       lastMessageAt: Date.now(),
       messageCount: (existing?.messageCount ?? 0) + 1,
+      lastResponseHealthy: healthy ?? true,
     });
   }
 

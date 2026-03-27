@@ -129,20 +129,30 @@ function createMockThreadStore(
         .map((catId) => {
           const key = `${threadId}:${catId}`;
           const data = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
-          return { catId, lastMessageAt: data.lastMessageAt, messageCount: data.messageCount };
+          return {
+            catId,
+            lastMessageAt: data.lastMessageAt,
+            messageCount: data.messageCount,
+            lastResponseHealthy: data.lastResponseHealthy,
+          };
         })
         .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
     },
     consumeMentionRoutingFeedback: () => null,
     // F032 P1-2: Update participant activity on message
-    updateParticipantActivity: (threadId, catId) => {
+    // #267: healthy param tracks whether last response succeeded
+    updateParticipantActivity: (threadId, catId, healthy) => {
       if (!participants[threadId]) participants[threadId] = [];
       if (!participants[threadId].includes(catId)) {
         participants[threadId].push(catId);
       }
       const key = `${threadId}:${catId}`;
       const existing = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
-      activity[key] = { lastMessageAt: Date.now() + ++activitySeq, messageCount: existing.messageCount + 1 };
+      activity[key] = {
+        lastMessageAt: Date.now() + ++activitySeq,
+        messageCount: existing.messageCount + 1,
+        lastResponseHealthy: healthy,
+      };
     },
     updateLastActive: () => {},
     delete: () => true,
@@ -1197,6 +1207,63 @@ describe('AgentRouter', () => {
 
     assert.equal(result.targetCats[0], 'codex', 'Most recently active cat (codex) should be the target');
     assert.equal(result.targetCats.length, 1, 'F078: only last replier, not all participants');
+  });
+
+  test('#267: never-responded cat excluded from healthy replier fallback', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus');
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini');
+
+    // codex is a participant but has never responded (messageCount=0)
+    // opus has responded and is healthy
+    const threadStore = createMockThreadStore({ t_never: ['codex', 'opus'] });
+    threadStore.updateParticipantActivity('t_never', 'opus'); // opus responded
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('hello?', 't_never');
+    assert.equal(result.targetCats[0], 'opus', 'opus selected — codex never responded');
+    assert.equal(result.targetCats.length, 1);
+  });
+
+  test('#267: unhealthy last replier skipped, falls back to next healthy', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus');
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini');
+
+    // codex responded last but errored; opus responded earlier and is healthy
+    const threadStore = createMockThreadStore({ t_err: ['opus', 'codex'] });
+    threadStore.updateParticipantActivity('t_err', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_err', 'codex', false); // unhealthy
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('what happened?', 't_err');
+    assert.equal(result.targetCats[0], 'opus', 'opus selected — codex was unhealthy');
+    assert.equal(result.targetCats.length, 1);
   });
 
   test('no @ mention + no participants defaults to opus', async () => {
