@@ -459,17 +459,17 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
   // Resolve dynamic paths (e.g. pencil binary) once, apply to all providers
   const pencilBinary = await resolvePencilBinary();
   for (const servers of Object.values(perProvider)) {
-    if (pencilBinary) {
-      for (const s of servers) {
-        if (s.name === 'pencil') {
+    for (const s of servers) {
+      if (s.name === 'pencil') {
+        if (pencilBinary) {
           s.command = pencilBinary;
+        } else {
+          // #272: Binary unresolvable — mark disabled so each provider's
+          // writer deletes the stale entry (Gemini merges with existing config,
+          // so splice alone wouldn't remove an already-persisted entry).
+          s.enabled = false;
         }
       }
-    } else {
-      // #272: When pencil binary is unresolvable, remove the project-level
-      // entry so Gemini falls back to its own home-level discovery.
-      const idx = servers.findIndex((s) => s.name === 'pencil');
-      if (idx !== -1) servers.splice(idx, 1);
     }
   }
 
