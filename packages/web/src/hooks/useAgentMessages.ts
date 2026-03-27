@@ -639,13 +639,18 @@ export function useAgentMessages() {
           // was ever created for this cat, text events were lost (socket transport
           // drop, dual-pointer guard mismatch, etc.). Request a history catch-up
           // so the user sees the response without needing F5.
-          // P2: Only trigger if stream data was actually received (avoids false
-          // catch-up on callback-only flows where addMessage handles delivery).
-          if (!messageId && sawStreamDataRef.current.has(msg.catId)) {
+          // #266 ghost-message: Removed the sawStreamDataRef guard — previously
+          // catch-up only fired when stream data was received but no bubble existed.
+          // For fast/simple replies, stream events AND callback can both be lost
+          // during a micro-disconnect while done(isFinal) arrives after reconnect.
+          // The callback path creates its own bubble via addMessage when no stream
+          // placeholder exists, so double-delivery is benign (replace: true dedupes).
+          if (!messageId) {
             const tid = useChatStore.getState().currentThreadId;
             console.warn('[stream-catchup] done(isFinal) with no active bubble — requesting catch-up', {
               catId: msg.catId,
               threadId: tid,
+              hadStreamData: sawStreamDataRef.current.has(msg.catId),
             });
             if (tid) {
               requestStreamCatchUp(tid);
