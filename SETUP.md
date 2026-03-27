@@ -59,7 +59,10 @@ your-projects/
 | `pnpm start` | Init (first time) → sync to origin/main → build → start Redis + API + Frontend |
 | `pnpm start --memory` | Same, but skip Redis (in-memory store, data lost on restart) |
 | `pnpm start --quick` | Same, but skip rebuild (use existing `dist/`) |
+| `pnpm start --daemon` | Same, but run in background (logs to `cat-cafe-daemon.log`) |
 | `pnpm start:direct` | Bypass worktree — run dev server directly in current checkout |
+| `pnpm stop` | Stop background daemon |
+| `pnpm start:status` | Check if daemon is running |
 | `pnpm runtime:init` | Only create the runtime worktree (no start) |
 | `pnpm runtime:sync` | Only sync worktree to origin/main (no start) |
 | `pnpm runtime:status` | Show worktree path, branch, HEAD, ahead/behind |
@@ -67,6 +70,64 @@ your-projects/
 First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast-forward sync then start.
 
 > **Custom runtime path:** Set `CAT_CAFE_RUNTIME_DIR` to use a different location: `CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+
+## Background / Daemon Mode
+
+By default `pnpm start` runs in the foreground — if you close the terminal or SSH disconnects, the services stop. Use `--daemon` to run in the background:
+
+```bash
+# Start in background
+pnpm start --daemon
+
+# Combine with other flags
+pnpm start --daemon --memory
+pnpm start --daemon --quick
+
+# Check status
+pnpm start:status
+
+# View logs
+tail -f cat-cafe-daemon.log
+
+# Stop
+pnpm stop
+```
+
+The daemon writes logs to `cat-cafe-daemon.log` in the project root (or runtime worktree root). A PID file (`~/.cat-cafe/daemon.pid`) tracks the running process.
+
+> **Alternative approaches** (if you prefer not to use `--daemon`):
+> - **tmux / screen**: `tmux new -s cat-cafe` → `pnpm start` → detach with `Ctrl+B D`
+> - **nohup**: `nohup pnpm start > cat-cafe.log 2>&1 &`
+> - **systemd** (Linux production): create a service file — see below
+
+<details>
+<summary>systemd service file example</summary>
+
+```ini
+# /etc/systemd/system/clowder-ai.service
+[Unit]
+Description=Clowder AI (Cat Café)
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/clowder-ai
+ExecStart=/usr/bin/pnpm start:direct
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now clowder-ai
+sudo journalctl -u clowder-ai -f
+```
+
+</details>
 
 ## Configuration
 
@@ -316,7 +377,13 @@ Full Windows support is available via PowerShell scripts.
 pnpm start              # Start everything (Redis + API + Frontend) via runtime worktree
 pnpm start --memory     # No Redis, in-memory mode
 pnpm start --quick      # Skip rebuild, use existing dist/
+pnpm start --daemon     # Start in background (daemon mode)
 pnpm start:direct       # Start dev server directly (bypasses worktree)
+
+# === Daemon Management ===
+pnpm stop               # Stop background daemon
+pnpm start:status       # Check if daemon is running
+                        # View logs: tail -f cat-cafe-daemon.log
 
 # === Runtime Worktree ===
 pnpm runtime:init       # Create runtime worktree (first time only)
@@ -369,6 +436,49 @@ pnpm alpha:start        # Start alpha environment (ports 3011/3012)
 pnpm alpha:status       # Show alpha worktree status
 pnpm alpha:test         # Run alpha integration tests
 ```
+
+## Remote Deployment
+
+All services are configured via environment variables — **no code changes needed** for remote deployment. Add these to your `.env`:
+
+### Required Changes
+
+```bash
+# API must listen on all interfaces (default is 127.0.0.1 = localhost only)
+API_SERVER_HOST=0.0.0.0
+
+# Frontend URL — used for CORS and redirects
+FRONTEND_URL=https://your-domain.com
+
+# API URL — the frontend needs to reach the API
+NEXT_PUBLIC_API_URL=http://your-domain.com:3004
+
+# Redis — if running on a separate host
+REDIS_URL=redis://your-redis-host:6399
+```
+
+### Optional: Voice Services
+
+If voice services run on a different machine, update their URLs:
+
+```bash
+WHISPER_URL=http://your-asr-host:9876
+NEXT_PUBLIC_WHISPER_URL=http://your-asr-host:9876
+TTS_URL=http://your-tts-host:9879
+NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://your-llm-host:9878
+```
+
+> **Python services** (ASR/TTS/embed) bind to `127.0.0.1` by default. Add `--host 0.0.0.0` when starting them on a separate machine.
+
+### CORS
+
+The API automatically accepts requests from:
+- `localhost` / `127.0.0.1` (any port)
+- RFC 1918 private networks (`10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`)
+- Tailscale IPs (`100.x.x.x`)
+- The `FRONTEND_URL` you set
+
+No additional CORS configuration is needed for most LAN / VPN setups.
 
 ## Troubleshooting
 

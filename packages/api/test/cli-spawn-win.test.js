@@ -184,6 +184,55 @@ test('resolveWindowsShimSpawn uses the current Node executable for direct shim l
   });
 });
 
+test('resolveCmdShimScript skips sibling node.exe and resolves the actual script (#247)', () => {
+  // Portable Node installs place node.exe alongside the .cmd shim.
+  // The shim references both %~dp0\node.exe (launcher) and %~dp0\node_modules\...\bin\opencode (script).
+  // The parser must skip .exe targets to avoid `node node.exe` (MZ SyntaxError).
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-exe-skip-'));
+  const shimDir = join(tempRoot, 'npm');
+
+  mkdirSync(join(shimDir, 'node_modules', 'opencode-ai', 'bin'), { recursive: true });
+
+  const cmdPath = join(shimDir, 'opencode.cmd');
+  const fakeNodeExe = join(shimDir, 'node.exe');
+  const scriptPath = join(shimDir, 'node_modules', 'opencode-ai', 'bin', 'opencode');
+
+  // Realistic portable-install shim content (node.exe prelude appears BEFORE the script target)
+  writeFileSync(
+    cmdPath,
+    [
+      '@ECHO off',
+      'GOTO start',
+      ':find_dp0',
+      'SET dp0=%~dp0',
+      'EXIT /b',
+      ':start',
+      'SETLOCAL',
+      'CALL :find_dp0',
+      '',
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ') ELSE (',
+      '  SET "_prog=node"',
+      ')',
+      '',
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\opencode-ai\\bin\\opencode" %*',
+    ].join('\r\n'),
+    'utf8',
+  );
+  // Create BOTH node.exe and the script — the parser must pick the script, not node.exe
+  writeFileSync(fakeNodeExe, 'MZ fake exe', 'utf8');
+  writeFileSync(scriptPath, '#!/usr/bin/env node\nconsole.log("ok");\n', 'utf8');
+
+  try {
+    // Use Strategy 0 (full .cmd path) to bypass `where` — works on all platforms
+    const resolved = resolveCmdShimScript(cmdPath);
+    assert.equal(resolved, scriptPath, 'must resolve to the script, not node.exe');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('escapeCmdArg passes through simple arguments unchanged', () => {
   assert.equal(escapeCmdArg('hello'), 'hello');
   assert.equal(escapeCmdArg('simple-arg'), 'simple-arg');
@@ -246,7 +295,7 @@ test('extractBareName returns bare name unchanged', () => {
 });
 
 test('extractBareName handles forward-slash paths', () => {
-  assert.equal(extractBareName('C:/Users/Admin/AppData/npm/claude.cmd'), 'claude');
+  assert.equal(extractBareName('C:/home/user/claude.cmd'), 'claude');
 });
 
 // --- parseShimFile tests ---

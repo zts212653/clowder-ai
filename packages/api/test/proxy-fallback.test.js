@@ -33,8 +33,10 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const root = await mkdtemp(join(tmpdir(), 'f115-fallback-'));
     const apiDir = join(root, 'packages', 'api');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
     await createProviderProfile(root, {
       provider: 'anthropic',
@@ -89,6 +91,8 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
       );
     } finally {
       process.chdir(previousCwd);
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       if (previousProxyPort === undefined) delete process.env.ANTHROPIC_PROXY_PORT;
@@ -111,8 +115,10 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const root = await mkdtemp(join(tmpdir(), 'f115-nan-port-'));
     const apiDir = join(root, 'packages', 'api');
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
     await createProviderProfile(root, {
       provider: 'anthropic',
@@ -166,6 +172,8 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
       );
     } finally {
       process.chdir(previousCwd);
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
       if (previousProxyPort === undefined) delete process.env.ANTHROPIC_PROXY_PORT;

@@ -150,7 +150,6 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   const canFinish = Boolean(
     client &&
       defaultModel.trim() &&
-      !(client === 'opencode' && !defaultModel.includes('/')) &&
       (client === 'antigravity' ? commandArgs.trim().length > 0 : Boolean(selectedProfile)),
   );
 
@@ -299,9 +298,9 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
                 />
               </label>
             )}
-            {client === 'opencode' && defaultModel.trim() && !defaultModel.includes('/') ? (
+            {client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-2 text-xs leading-5 text-[#8A776B]">
-                建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。
+                OpenCode API Key 认证需要 Provider 名称，下一步编辑器中填写。
               </p>
             ) : null}
           </section>

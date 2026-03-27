@@ -172,7 +172,13 @@ export async function* routeSerial(
       // MCP documentation: Claude's MCP_TOOLS_SECTION → staticIdentity (in -p content).
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
-      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable });
+      // F129: Load active pack blocks (best-effort, failure does not block invocation)
+      let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
+      if (deps.packStore) {
+        const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
+        packBlocks = await getActivePackBlocks(deps.packStore);
+      }
+      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable)
         ? buildMcpCallbackInstructions({
@@ -252,7 +258,31 @@ export async function* routeSerial(
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
-        const inc = await assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode);
+
+        // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
+        // Without this, context (up to maxContextTokens=160k) + system parts (~15-20k) can exceed maxPromptTokens.
+        const catModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const incBudget = getCatContextBudget(catId as string);
+        const incSystemTokens = estimateTokens(
+          [staticIdentity, invocationContext, catModePromptForBudget, bootstrapContext, mcpInstructions]
+            .filter(Boolean)
+            .join('\n'),
+        );
+        const incMessageTokens = estimateTokens(message);
+        const effectiveContextBudget = Math.min(
+          Math.max(0, incBudget.maxPromptTokens - incSystemTokens - incMessageTokens - 200),
+          incBudget.maxContextTokens,
+        );
+
+        const inc = await assembleIncrementalContext(
+          deps,
+          userId,
+          threadId,
+          catId,
+          currentUserMessageId,
+          thinkingMode,
+          { effectiveMaxContextTokens: effectiveContextBudget },
+        );
         deliveryBoundaryId = inc.boundaryId;
         if (inc.degradation) {
           yield {
@@ -275,8 +305,12 @@ export async function* routeSerial(
         if (history && history.length > 0 && !contextHistory) {
           const budget = getCatContextBudget(catId as string);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
+          // A+ fix: include catModePrompt + bootstrapContext in system parts estimate (P2-1)
+          const catModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
           const systemPartsTokens = estimateTokens(
-            [staticIdentity, invocationContext, mcpInstructions].filter(Boolean).join('\n'),
+            [staticIdentity, invocationContext, catModePromptLegacyForBudget, bootstrapContext, mcpInstructions]
+              .filter(Boolean)
+              .join('\n'),
           );
           const promptTokens = estimateTokens(prompt);
           const budgetForContext = Math.max(0, budget.maxPromptTokens - systemPartsTokens - promptTokens - 200);
@@ -314,6 +348,8 @@ export async function* routeSerial(
       let firstMetadata: MessageMetadata | undefined;
       let doneMsg: AgentMessage | undefined;
       let hadError = false;
+      // #267: track errors that happened BEFORE abort — only these are real provider failures
+      let hadProviderError = false;
       const collectedToolEvents: StoredToolEvent[] = [];
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
@@ -336,6 +372,10 @@ export async function* routeSerial(
       let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
 
       // Always pass isLastCat:false — we set isFinal AFTER A2A detection
+      log.debug(
+        { catId: catId as string, threadId, promptLength: prompt.length, index, worklistSize: worklist.length },
+        'Invoking cat via invokeSingleCat',
+      );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service: getService(deps.services, catId),
@@ -474,6 +514,8 @@ export async function* routeSerial(
 
         if (msg.type === 'error') {
           hadError = true;
+          // #267: errors before abort are real provider failures; errors after abort are cleanup
+          if (!signal?.aborted) hadProviderError = true;
           if (msg.error) {
             textContent += `${textContent ? '\n\n' : ''}[错误] ${msg.error}`;
           }
@@ -686,7 +728,12 @@ export async function* routeSerial(
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(
+                threadId,
+                catId,
+                // #267: only errors before abort are provider failures
+                !hadProviderError,
+              );
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }
@@ -736,11 +783,11 @@ export async function* routeSerial(
           const pendingOriginalTargets = targetCats.slice(index + 1);
           for (const nextCat of a2aMentions) {
             if (worklistEntry.a2aCount >= maxDepth) break;
-            // A2A cross-path dedup: skip if this cat was already dispatched via callback (InvocationQueue)
+            // A2A cross-path dedup: skip if this cat is actively processing via callback (InvocationQueue)
             if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
               log.info(
                 { threadId, catId: nextCat, fromCat: catId },
-                'A2A text-scan dedup: cat already in InvocationQueue, skipping',
+                'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
               );
               continue;
             }
@@ -806,6 +853,17 @@ export async function* routeSerial(
         const shouldPersistNoTextMessage =
           hasRichBlocks || collectedToolEvents.length > 0 || Boolean(thinkingContent?.trim().length > 0);
 
+        log.debug(
+          {
+            catId: catId as string,
+            threadId,
+            hasRichBlocks,
+            toolCount: collectedToolEvents.length,
+            shouldPersist: shouldPersistNoTextMessage,
+            thinkingLen: thinkingContent?.length ?? 0,
+          },
+          'Cat produced no text — evaluating silent_completion',
+        );
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
         // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
         if (collectedToolEvents.length > 0 && !hasRichBlocks) {
@@ -854,7 +912,12 @@ export async function* routeSerial(
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
             if (deps.invocationDeps.threadStore) {
               try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+                await deps.invocationDeps.threadStore.updateParticipantActivity(
+                  threadId,
+                  catId,
+                  // #267: only errors before abort are provider failures
+                  !hadProviderError,
+                );
               } catch (activityErr) {
                 log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
               }
@@ -909,7 +972,12 @@ export async function* routeSerial(
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(
+                threadId,
+                catId,
+                // #267: only errors before abort are provider failures
+                !hadProviderError,
+              );
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }

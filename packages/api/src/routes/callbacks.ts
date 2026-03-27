@@ -396,7 +396,45 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
     const mergedTargets = new Set<CatId>([...contentTargets, ...validExplicitTargets]);
+    if (contentTargets.length === 1 && mergedTargets.size > 1) {
+      const [primaryTarget] = contentTargets;
+      if (!primaryTarget) {
+        app.log.warn(
+          { invocationId, threadId: effectiveThreadId, senderCatId, contentTargets, validExplicitTargets },
+          '[A2A/fail-closed] Unexpected empty primary target; skip fail-closed pruning',
+        );
+      } else {
+        const droppedTargets = [...mergedTargets].filter((catId) => catId !== primaryTarget);
+        mergedTargets.clear();
+        mergedTargets.add(primaryTarget);
+        app.log.warn(
+          {
+            invocationId,
+            threadId: effectiveThreadId,
+            senderCatId,
+            contentTargets,
+            validExplicitTargets,
+            droppedTargets,
+            retainedTarget: primaryTarget,
+          },
+          '[A2A/fail-closed] Single line-start mention detected; dropped extra merged targets',
+        );
+      }
+    }
     const mentions: CatId[] = [...mergedTargets];
+    if (contentTargets.length > 0 || validExplicitTargets.length > 0) {
+      app.log.info(
+        {
+          invocationId,
+          threadId: effectiveThreadId,
+          senderCatId,
+          contentTargets,
+          validExplicitTargets,
+          mergedTargets: mentions,
+        },
+        '[DIAG/a2a] post-message target merge',
+      );
+    }
     const mentionsUser = detectUserMention(storedContent);
     const crossPostExtra = isCrossThread
       ? { crossPost: { sourceThreadId: record.threadId, sourceInvocationId: invocationId } }

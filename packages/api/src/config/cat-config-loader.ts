@@ -69,6 +69,12 @@ const catVariantSchema = z.object({
   cli: cliConfigSchema,
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
   cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
+  ocProviderName: z
+    .string()
+    .trim()
+    .min(1, 'ocProviderName must not be blank')
+    .refine((v) => !v.includes('/'), 'ocProviderName must not contain "/"')
+    .optional(), // F189: opencode custom provider name (e.g. "maas")
   roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
   sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
   personality: z.string().optional(),
@@ -433,6 +439,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
           ? { cliConfigArgs: [...variant.cliConfigArgs] }
           : {}),
+        ...(variant.ocProviderName != null ? { ocProviderName: variant.ocProviderName } : {}),
         ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',

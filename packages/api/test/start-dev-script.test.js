@@ -236,6 +236,81 @@ test('direct command mode can prefer current .env ports over ambient shell ports
   }
 });
 
+test('raw dev entry remaps setup-style Redis 6399 defaults to dev Redis 6398', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-dev-default-'));
+  const tempScriptPath = join(tempRoot, 'scripts', 'start-dev.sh');
+  const tempOverridesPath = join(tempRoot, 'scripts', 'download-source-overrides.sh');
+
+  try {
+    mkdirSync(join(tempRoot, 'scripts'), { recursive: true });
+    cpSync(scriptPath, tempScriptPath);
+    cpSync(resolve(process.cwd(), '../../scripts/download-source-overrides.sh'), tempOverridesPath);
+    writeFileSync(join(tempRoot, '.env'), 'REDIS_PORT=6399\nREDIS_URL=redis://localhost:6399\n', 'utf8');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${tempScriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s' "$REDIS_PORT" "$REDIS_URL"`,
+      ],
+      {
+        cwd: tempRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          TERM: process.env.TERM ?? 'xterm-256color',
+        },
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '6398|redis://localhost:6398');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('respect-dotenv mode keeps explicit Redis 6399 defaults intact for wrappers', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-dotenv-keep-'));
+  const tempScriptPath = join(tempRoot, 'scripts', 'start-dev.sh');
+  const tempOverridesPath = join(tempRoot, 'scripts', 'download-source-overrides.sh');
+
+  try {
+    mkdirSync(join(tempRoot, 'scripts'), { recursive: true });
+    cpSync(scriptPath, tempScriptPath);
+    cpSync(resolve(process.cwd(), '../../scripts/download-source-overrides.sh'), tempOverridesPath);
+    writeFileSync(join(tempRoot, '.env'), 'REDIS_PORT=6399\nREDIS_URL=redis://localhost:6399\n', 'utf8');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${tempScriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s|%s' "$REDIS_PORT" "$REDIS_URL"`,
+      ],
+      {
+        cwd: tempRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          TERM: process.env.TERM ?? 'xterm-256color',
+          CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
+        },
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '6399|redis://localhost:6399');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('redis port override also recomputes isolated redis dirs', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const tempHome = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-redis-override-'));

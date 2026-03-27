@@ -9,7 +9,7 @@
  * BACKLOG #97 Phase 3b
  */
 
-import { type CatId, catRegistry, type MessageContent, type RichBlock } from '@cat-cafe/shared';
+import { type CatId, type MessageContent } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../../config/cat-config-loader.js';
 import type { InvocationQueue } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -22,7 +22,6 @@ import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/ty
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
 import { getMultiMentionOrchestrator } from '../../routes/callback-multi-mention-routes.js';
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
-import { renderAllRichBlocksPlaintext } from '../connectors/rich-block-plaintext.js';
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
 
 export interface ConnectorInvokeTriggerOptions {
@@ -473,70 +472,9 @@ export class ConnectorInvokeTrigger {
           // schedule late-success cleanup when a delivery times out but later succeeds.
           const inflightDeliverPromises: Promise<void>[] = [];
 
-          // BUG-4 (F137): WeChat's iLink context_token is single-use — only the first
-          // sendmessage per token gets delivered. When A→B→C relay chains produce multiple
-          // turns, merge all turns into one message before delivery.
-          const SINGLE_TOKEN_CONNECTORS = new Set(['weixin']);
-          let mustMergeTurns = false;
+          // BUG-5 (2026-03-25): iLink context_token is reusable — SINGLE_TOKEN_CONNECTORS
+          // merge logic removed. Each turn now delivers independently for all connectors.
           if (nonEmptyTurns.length > 1) {
-            try {
-              const connectorIds = await this.opts.outboundHook.getConnectorIds(threadId);
-              mustMergeTurns = connectorIds.length > 0 && connectorIds.every((id) => SINGLE_TOKEN_CONNECTORS.has(id));
-            } catch (err) {
-              log.warn({ err, threadId }, '[ConnectorInvokeTrigger] getConnectorIds failed — falling back to per-turn');
-            }
-          }
-
-          if (mustMergeTurns && nonEmptyTurns.length > 1) {
-            const mergedParts: string[] = [];
-            const allRichBlocks: RichBlock[] = [];
-            for (const turn of nonEmptyTurns) {
-              const entry = catRegistry.tryGet(turn.catId as CatId);
-              const catName = entry?.config.displayName ?? turn.catId;
-              const turnTextParts: string[] = [];
-              const textContent = turn.textParts.join('');
-              if (textContent) turnTextParts.push(textContent);
-              // P1 fix: render richBlocks as plaintext so they are not silently lost
-              if (turn.richBlocks && turn.richBlocks.length > 0) {
-                turnTextParts.push(renderAllRichBlocksPlaintext(turn.richBlocks));
-                allRichBlocks.push(...turn.richBlocks);
-              }
-              if (turnTextParts.length > 0) {
-                mergedParts.push(`[${catName}]\n${turnTextParts.join('\n')}`);
-              }
-            }
-            const mergedContent = mergedParts.join('\n\n');
-            log.info(
-              {
-                threadId,
-                turnCount: nonEmptyTurns.length,
-                mergedLen: mergedContent.length,
-                richBlockCount: allRichBlocks.length,
-              },
-              '[ConnectorInvokeTrigger] BUG-4: merging multi-turn for single-token connector',
-            );
-            const deliverPromise = this.opts.outboundHook.deliver(
-              threadId,
-              mergedContent,
-              undefined,
-              undefined,
-              threadMeta,
-              undefined,
-              messageId,
-            );
-            inflightDeliverPromises.push(deliverPromise);
-            try {
-              await Promise.race([
-                deliverPromise,
-                new Promise<void>((_, reject) =>
-                  setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
-                ),
-              ]);
-            } catch (err) {
-              deliveryFailed = true;
-              log.error({ err, threadId }, '[ConnectorInvokeTrigger] Outbound delivery error (merged)');
-            }
-          } else if (nonEmptyTurns.length > 1) {
             for (const turn of nonEmptyTurns) {
               const turnContent = turn.textParts.join('');
               const deliverPromise = this.opts.outboundHook.deliver(

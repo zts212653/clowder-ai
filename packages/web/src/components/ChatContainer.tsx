@@ -7,7 +7,7 @@ import { useAuthorization } from '@/hooks/useAuthorization';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
-import { abortGame, godAction, submitAction } from '@/hooks/useGameApi';
+import { godAction, submitAction } from '@/hooks/useGameApi';
 import { reconnectGame } from '@/hooks/useGameReconnect';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
@@ -90,6 +90,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const godNightSteps = useGameStore((s) => s.godNightSteps);
   const hasTargetedAction = useGameStore((s) => s.hasTargetedAction);
   const altActionName = useGameStore((s) => s.altActionName);
+  const overlayMinimized = useGameStore((s) => s.overlayMinimized);
 
   // Export mode: ?export=true triggers print-friendly layout (no scroll containers)
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -606,10 +607,21 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           uploadError={uploadError}
         />
 
+        {/* F101: "Return to game" banner when overlay is minimized */}
+        {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
+          <button
+            onClick={() => useGameStore.getState().restoreOverlay()}
+            className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-purple-300 bg-purple-50 px-3 py-2 text-sm text-purple-700 hover:bg-purple-100 transition-colors"
+          >
+            🎮 返回游戏
+          </button>
+        )}
+
         {/* F101: Game overlay — renders when a game is active */}
         <GameOverlayConnector
           gameView={gameView}
           isGameActive={isGameActive}
+          overlayMinimized={overlayMinimized}
           currentThreadId={threadId}
           isNight={isNight}
           selectedTarget={selectedTarget}
@@ -626,8 +638,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           myActionHint={myActionHint ?? undefined}
           altActionName={altActionName ?? undefined}
           onClose={() => {
-            abortGame(threadId);
-            useGameStore.getState().clearGame();
+            useGameStore.getState().minimizeOverlay();
           }}
           onSelectTarget={(seatId) => useGameStore.getState().setSelectedTarget(seatId)}
           onGodScopeChange={(scope) => useGameStore.getState().setGodScopeFilter(scope)}

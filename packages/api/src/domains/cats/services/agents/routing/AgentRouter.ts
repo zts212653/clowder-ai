@@ -162,6 +162,8 @@ export interface AgentRouterOptions {
       relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
     }[]
   >;
+  /** F129: Pack store for loading active packs at invocation time */
+  packStore?: import('../../../../packs/PackStore.js').PackStore;
 }
 
 /**
@@ -200,6 +202,7 @@ export class AgentRouter {
         }[]
       >)
     | undefined;
+  private packStore?: import('../../../../packs/PackStore.js').PackStore;
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
@@ -235,6 +238,7 @@ export class AgentRouter {
     this.tmuxGateway = options.tmuxGateway;
     this.agentPaneRegistry = options.agentPaneRegistry;
     this.signalArticleLookup = options.signalArticleLookup;
+    this.packStore = options.packStore;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -546,12 +550,24 @@ export class AgentRouter {
       }
 
       // F078 + #58: last-replier takes priority, scoped to preferred cats when set
+      // #267: two-tier fallback — (1) prefer cats with successful response history,
+      //   (2) then any non-errored participant. This prevents never-responded cats
+      //   from short-circuiting the search for the next healthy responder.
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
-      if (participantsWithActivity.length > 0) {
-        const lastReplier = participantsWithActivity[0]?.catId;
-        if (this.isRoutableCat(lastReplier) && (preferredSet.size === 0 || preferredSet.has(lastReplier as string))) {
-          return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
-        }
+      const matchScope = (p: { catId: CatId }) =>
+        this.isRoutableCat(p.catId) && (preferredSet.size === 0 || preferredSet.has(p.catId as string));
+      const healthyReplier = participantsWithActivity.find(
+        (p) => p.messageCount > 0 && p.lastResponseHealthy !== false && matchScope(p),
+      );
+      if (healthyReplier) {
+        return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
+      }
+      // No cat with successful response — fall back to any non-errored participant
+      const fallbackParticipant = participantsWithActivity.find(
+        (p) => p.lastResponseHealthy !== false && matchScope(p),
+      );
+      if (fallbackParticipant) {
+        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant.catId]);
       }
 
       // No last-replier (or last-replier not in preferred set): use first preferred cat
@@ -592,12 +608,21 @@ export class AgentRouter {
       }
 
       // F078 + #58: last-replier takes priority, scoped to preferred cats when set
+      // #267: two-tier fallback (same as peekTargets)
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
-      if (participantsWithActivity.length > 0) {
-        const lastReplier = participantsWithActivity[0]?.catId;
-        if (this.isRoutableCat(lastReplier) && (preferredSet.size === 0 || preferredSet.has(lastReplier as string))) {
-          return this.applyThreadRoutingPolicy(thread, message, [lastReplier]);
-        }
+      const matchScope = (p: { catId: CatId }) =>
+        this.isRoutableCat(p.catId) && (preferredSet.size === 0 || preferredSet.has(p.catId as string));
+      const healthyReplier = participantsWithActivity.find(
+        (p) => p.messageCount > 0 && p.lastResponseHealthy !== false && matchScope(p),
+      );
+      if (healthyReplier) {
+        return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
+      }
+      const fallbackParticipant = participantsWithActivity.find(
+        (p) => p.lastResponseHealthy !== false && matchScope(p),
+      );
+      if (fallbackParticipant) {
+        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant.catId]);
       }
 
       // No last-replier (or last-replier not in preferred set): use first preferred cat
@@ -637,6 +662,7 @@ export class AgentRouter {
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.draftStore ? { draftStore: this.draftStore } : {}),
       ...(this.socketManager ? { socketManager: this.socketManager } : {}),
+      ...(this.packStore ? { packStore: this.packStore } : {}),
     };
   }
 

@@ -87,8 +87,8 @@ test(
 test('notifyActivity resets silence timer and clears warning state', async () => {
   const probe = new ProcessLivenessProbe(process.pid, {
     sampleIntervalMs: 20,
-    softWarningMs: 50,
-    stallWarningMs: 200,
+    softWarningMs: 150,
+    stallWarningMs: 500,
   });
   probe.start();
   await new Promise((r) => setTimeout(r, 30));

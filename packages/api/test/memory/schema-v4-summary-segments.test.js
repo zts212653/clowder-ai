@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
-import { applyMigrations } from '../../dist/domains/memory/schema.js';
+import { applyMigrations, CURRENT_SCHEMA_VERSION } from '../../dist/domains/memory/schema.js';
 
 describe('Schema V4: summary_segments + summary_state', () => {
   let db;
@@ -11,9 +11,9 @@ describe('Schema V4: summary_segments + summary_state', () => {
     applyMigrations(db);
   });
 
-  it('schema version is 4 after migration', () => {
+  it('schema version matches CURRENT_SCHEMA_VERSION after migration', () => {
     const { v } = db.prepare('SELECT MAX(version) as v FROM schema_version').get();
-    assert.equal(v, 4);
+    assert.equal(v, CURRENT_SCHEMA_VERSION, `schema version should be ${CURRENT_SCHEMA_VERSION}, got ${v}`);
   });
 
   it('summary_segments table exists with correct columns', () => {
@@ -156,6 +156,6 @@ describe('Schema V4: summary_segments + summary_state', () => {
     // Re-run should not throw
     applyMigrations(db2);
     const { v } = db2.prepare('SELECT MAX(version) as v FROM schema_version').get();
-    assert.equal(v, 4);
+    assert.equal(v, CURRENT_SCHEMA_VERSION, `schema version should be ${CURRENT_SCHEMA_VERSION}, got ${v}`);
   });
 });

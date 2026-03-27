@@ -33,6 +33,18 @@ interface ConnectorFieldDef {
   envName: string;
   label: string;
   sensitive: boolean;
+  /** When set, this field is only required if the condition env var has the given value */
+  requiredWhen?: { envName: string; value: string };
+  /** When true, this field is never required for the platform to be "configured" */
+  optional?: boolean;
+  /** Default value used when the env var is not set — aligns status page with runtime normalization */
+  defaultValue?: string;
+}
+
+interface PlatformStepDef {
+  text: string;
+  /** When set, this step only displays when the selected connection mode matches */
+  mode?: string;
 }
 
 interface PlatformDef {
@@ -41,8 +53,8 @@ interface PlatformDef {
   nameEn: string;
   fields: ConnectorFieldDef[];
   docsUrl: string;
-  /** Steps displayed in the guided wizard */
-  steps: string[];
+  /** Steps displayed in the guided wizard — may be mode-filtered */
+  steps: PlatformStepDef[];
 }
 
 export const CONNECTOR_PLATFORMS: PlatformDef[] = [
@@ -53,14 +65,28 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     fields: [
       { envName: 'FEISHU_APP_ID', label: 'App ID', sensitive: false },
       { envName: 'FEISHU_APP_SECRET', label: 'App Secret', sensitive: true },
-      { envName: 'FEISHU_VERIFICATION_TOKEN', label: 'Verification Token', sensitive: true },
+      {
+        envName: 'FEISHU_CONNECTION_MODE',
+        label: '连接模式 (webhook/websocket)',
+        sensitive: false,
+        optional: true,
+        defaultValue: 'webhook',
+      },
+      {
+        envName: 'FEISHU_VERIFICATION_TOKEN',
+        label: 'Verification Token',
+        sensitive: true,
+        requiredWhen: { envName: 'FEISHU_CONNECTION_MODE', value: 'webhook' },
+      },
     ],
     docsUrl:
       'https://open.feishu.cn/document/home/introduction-to-custom-app-development/self-built-application-development-process',
     steps: [
-      '在飞书开放平台创建企业自建应用，获取 App ID 和 App Secret',
-      '在「事件订阅」中配置请求地址并获取 Verification Token',
-      '填写以下配置并保存，重启 API 服务后生效',
+      { text: '在飞书开放平台创建企业自建应用，获取 App ID 和 App Secret' },
+      { text: '选择连接模式：Webhook（需公网 URL）或 WebSocket（无需公网，推荐内网环境）' },
+      { text: '在「事件订阅」中配置请求地址并获取 Verification Token', mode: 'webhook' },
+      { text: '在「事件订阅」中选择「使用长连接接收事件」，无需 Verification Token', mode: 'websocket' },
+      { text: '填写以下配置并保存，重启 API 服务后生效' },
     ],
   },
   {
@@ -70,9 +96,9 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     fields: [{ envName: 'TELEGRAM_BOT_TOKEN', label: 'Bot Token', sensitive: true }],
     docsUrl: 'https://core.telegram.org/bots/tutorial',
     steps: [
-      '在 Telegram 中找到 @BotFather，发送 /newbot 创建机器人',
-      '复制生成的 Bot Token',
-      '填写以下配置并保存，重启 API 服务后生效',
+      { text: '在 Telegram 中找到 @BotFather，发送 /newbot 创建机器人' },
+      { text: '复制生成的 Bot Token' },
+      { text: '填写以下配置并保存，重启 API 服务后生效' },
     ],
   },
   {
@@ -85,9 +111,9 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     ],
     docsUrl: 'https://open.dingtalk.com/document/orgapp/create-an-enterprise-internal-application',
     steps: [
-      '在钉钉开放平台创建企业内部应用，获取 App Key 和 App Secret',
-      '在「机器人与消息推送」中开启机器人能力',
-      '填写以下配置并保存，重启 API 服务后生效',
+      { text: '在钉钉开放平台创建企业内部应用，获取 App Key 和 App Secret' },
+      { text: '在「机器人与消息推送」中开启机器人能力' },
+      { text: '填写以下配置并保存，重启 API 服务后生效' },
     ],
   },
   {
@@ -96,7 +122,11 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     nameEn: 'WeChat Personal',
     fields: [],
     docsUrl: 'https://chatbot.weixin.qq.com/',
-    steps: ['点击「生成二维码」按钮', '使用微信扫描二维码并确认授权', '授权成功后自动连接，无需重启服务'],
+    steps: [
+      { text: '点击「生成二维码」按钮' },
+      { text: '使用微信扫描二维码并确认授权' },
+      { text: '授权成功后自动连接，无需重启服务' },
+    ],
   },
 ];
 
@@ -113,6 +143,11 @@ export interface PlatformFieldStatus {
   currentValue: string | null;
 }
 
+export interface PlatformStepStatus {
+  text: string;
+  mode?: string;
+}
+
 export interface PlatformStatus {
   id: string;
   name: string;
@@ -120,7 +155,7 @@ export interface PlatformStatus {
   configured: boolean;
   fields: PlatformFieldStatus[];
   docsUrl: string;
-  steps: string[];
+  steps: PlatformStepStatus[];
 }
 
 export function buildConnectorStatus(env: Record<string, string | undefined> = process.env): PlatformStatus[] {
@@ -128,15 +163,32 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
     const fields: PlatformFieldStatus[] = platform.fields.map((f) => {
       const raw = env[f.envName];
       const isSet = raw != null && raw !== '' && !raw.startsWith('(未设置');
+      const effectiveValue = isSet ? raw : (f.defaultValue ?? null);
       return {
         envName: f.envName,
         label: f.label,
         sensitive: f.sensitive,
-        currentValue: isSet ? (f.sensitive ? maskSensitiveValue(raw) : raw) : null,
+        currentValue: effectiveValue ? (f.sensitive ? maskSensitiveValue(effectiveValue) : effectiveValue) : null,
       };
     });
-    // WeChat uses QR login (no env fields) — default to false; route handler overrides with live adapter state
-    const configured = platform.fields.length > 0 ? fields.every((f) => f.currentValue !== null) : false;
+
+    let configured: boolean;
+    if (platform.fields.length === 0) {
+      configured = false;
+    } else {
+      configured = platform.fields.every((f) => {
+        if (f.optional) return true;
+        if (f.requiredWhen) {
+          // Normalize to match runtime: only 'websocket' passes through, everything else → 'webhook'
+          const rawCondition = env[f.requiredWhen.envName];
+          const conditionValue = rawCondition === 'websocket' ? 'websocket' : 'webhook';
+          if (conditionValue !== f.requiredWhen.value) return true;
+        }
+        const raw = env[f.envName];
+        return raw != null && raw !== '' && !raw.startsWith('(未设置');
+      });
+    }
+
     return {
       id: platform.id,
       name: platform.name,
@@ -197,7 +249,11 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     try {
       const { WeixinAdapter: WA } = await import('../infrastructure/connectors/adapters/WeixinAdapter.js');
       const result = await WA.fetchQrCode();
-      return { qrUrl: result.qrUrl, qrPayload: result.qrPayload };
+      // iLink returns a webpage URL (https://liteapp.weixin.qq.com/q/...), not an image.
+      // Generate a real QR code data URI from the URL so <img> can render it.
+      const QRCode = await import('qrcode');
+      const qrDataUri = await QRCode.toDataURL(result.qrUrl, { width: 384, margin: 2 });
+      return { qrUrl: qrDataUri, qrPayload: result.qrPayload };
     } catch (err) {
       app.log.error({ err }, '[WeChat QR] Failed to fetch QR code');
       reply.status(502);

@@ -13,6 +13,7 @@ const {
   activateProviderProfile,
   deleteProviderProfile,
   getProviderProfile,
+  mergeLocalProfilesIntoGlobalStore,
   resolveAnthropicRuntimeProfile,
 } = await import('../dist/config/provider-profiles.js');
 const { createRuntimeCat, updateRuntimeCat } = await import('../dist/config/runtime-cat-catalog.js');
@@ -28,6 +29,132 @@ async function seedTemplate(projectRoot) {
   const templateRaw = await readFile(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8');
   await writeFile(join(projectRoot, 'cat-template.json'), templateRaw, 'utf-8');
 }
+
+describe('mergeLocalProfilesIntoGlobalStore', () => {
+  it('re-ids collisions and remaps secrets to the merged ids', () => {
+    const merged = mergeLocalProfilesIntoGlobalStore(
+      {
+        version: 3,
+        providers: [
+          {
+            id: 'claude',
+            displayName: 'Claude (OAuth)',
+            kind: 'builtin',
+            client: 'anthropic',
+            authType: 'oauth',
+            builtin: true,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            models: ['claude-opus-4-6'],
+          },
+          {
+            id: 'acct-alpha',
+            displayName: 'Alpha',
+            kind: 'api_key',
+            authType: 'api_key',
+            builtin: false,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+        bootstrapBindings: {},
+      },
+      {
+        version: 3,
+        profiles: {
+          'acct-alpha': { apiKey: 'sk-alpha' },
+        },
+      },
+      {
+        version: 3,
+        providers: [
+          {
+            id: 'claude',
+            displayName: 'Claude (OAuth)',
+            kind: 'builtin',
+            client: 'anthropic',
+            authType: 'oauth',
+            builtin: true,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            models: ['claude-opus-4-6'],
+          },
+          {
+            id: 'acct-alpha',
+            displayName: 'Existing Alpha',
+            kind: 'api_key',
+            authType: 'api_key',
+            builtin: false,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+        bootstrapBindings: {},
+      },
+      {
+        version: 3,
+        profiles: {
+          'acct-alpha': { apiKey: 'sk-existing-alpha' },
+        },
+      },
+      () => 12345,
+    );
+
+    const migrated = merged.meta.providers.find((profile) => profile.id === 'acct-alpha-migrated-12345');
+    assert.ok(migrated, 'colliding local profile should be re-IDd');
+    assert.equal(migrated.displayName, 'Alpha');
+    assert.equal(merged.secrets.profiles['acct-alpha']?.apiKey, 'sk-existing-alpha');
+    assert.equal(merged.secrets.profiles['acct-alpha-migrated-12345']?.apiKey, 'sk-alpha');
+  });
+
+  it('skips builtin-only local entries during merge', () => {
+    const merged = mergeLocalProfilesIntoGlobalStore(
+      {
+        version: 3,
+        providers: [
+          {
+            id: 'claude',
+            displayName: 'Claude (OAuth)',
+            kind: 'builtin',
+            client: 'anthropic',
+            authType: 'oauth',
+            builtin: true,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            models: ['claude-opus-4-6'],
+          },
+        ],
+        bootstrapBindings: {},
+      },
+      { version: 3, profiles: {} },
+      {
+        version: 3,
+        providers: [
+          {
+            id: 'claude',
+            displayName: 'Claude (OAuth)',
+            kind: 'builtin',
+            client: 'anthropic',
+            authType: 'oauth',
+            builtin: true,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            models: ['claude-opus-4-6'],
+          },
+        ],
+        bootstrapBindings: {},
+      },
+      { version: 3, profiles: {} },
+      () => 12345,
+    );
+
+    assert.deepEqual(
+      merged.meta.providers.map((profile) => profile.id),
+      ['claude'],
+    );
+    assert.deepEqual(merged.secrets.profiles, {});
+  });
+});
 
 describe('provider profile store', () => {
   /** @type {string} */ let projectRoot;
@@ -279,13 +406,15 @@ describe('provider profile store', () => {
     }
   });
 
-  it('builtin accounts only allow model-list updates', async () => {
-    await assert.rejects(
-      updateProviderProfile(projectRoot, 'claude', 'claude', {
-        displayName: 'Nope',
-      }),
-      /builtin accounts only support model updates/i,
-    );
+  it('builtin accounts silently ignore non-model fields (#265)', async () => {
+    const result = await updateProviderProfile(projectRoot, 'claude', 'claude', {
+      displayName: 'Nope',
+      models: ['claude-sonnet-4-5-20250514'],
+    });
+
+    assert.ok(result);
+    assert.ok(result.models.includes('claude-sonnet-4-5-20250514'));
+    assert.notStrictEqual(result.displayName, 'Nope', 'displayName must not change for builtin');
   });
 
   it('readProviderProfiles and getProviderProfile do not rewrite normalized files', async () => {

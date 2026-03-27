@@ -288,7 +288,7 @@ describe('selectLatestReview', () => {
     assert.strictEqual(selectLatestReview([]), null);
   });
 
-  it('uses latest timestamp even when latest body is empty (cloud P1-2 fix)', () => {
+  it('uses latest timestamp and does not replay older body when latest body is empty', () => {
     const reviews = [
       { body: '', submitted_at: '2026-03-18T20:00:00Z' },
       { body: null, submitted_at: '2026-03-18T19:00:00Z' },
@@ -296,7 +296,7 @@ describe('selectLatestReview', () => {
     ];
     const result = selectLatestReview(reviews);
     assert.strictEqual(result?.submittedAt, '2026-03-18T20:00:00Z', 'timestamp from absolute latest');
-    assert.strictEqual(result?.body, 'real content P2', 'body from latest with content');
+    assert.strictEqual(result?.body, '', 'must not fall back to older stale review body');
   });
 
   it('returns empty body when all reviews have empty bodies', () => {

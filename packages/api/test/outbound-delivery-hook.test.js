@@ -113,7 +113,7 @@ describe('OutboundDeliveryHook', () => {
     bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
     await hook.deliver('thread-abc', 'Hello!', 'opus');
     assert.equal(feishuMock.sent.length, 1);
-    assert.match(feishuMock.sent[0].content, /^\[布偶猫🐱\] Hello!$/);
+    assert.match(feishuMock.sent[0].content, /^【布偶猫🐱】\nHello!$/);
   });
 
   it('sends plain content when catId is omitted (backward compat)', async () => {
@@ -164,7 +164,7 @@ describe('OutboundDeliveryHook', () => {
 
     assert.equal(feishuMock.sent.length, 1);
     // Should contain both text prefix and plaintext-rendered block
-    assert.ok(feishuMock.sent[0].content.includes('[布偶猫🐱]'));
+    assert.ok(feishuMock.sent[0].content.includes('【布偶猫🐱】'));
     assert.ok(feishuMock.sent[0].content.includes('Review'));
     assert.ok(feishuMock.sent[0].content.includes('LGTM'));
   });
@@ -173,14 +173,14 @@ describe('OutboundDeliveryHook', () => {
     bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
     await hook.deliver('thread-abc', 'Hello!', 'opus', undefined);
     assert.equal(feishuMock.sent.length, 1);
-    assert.match(feishuMock.sent[0].content, /^\[布偶猫🐱\] Hello!$/);
+    assert.match(feishuMock.sent[0].content, /^【布偶猫🐱】\nHello!$/);
   });
 
   it('sends text via sendReply when rich blocks is empty array', async () => {
     bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
     await hook.deliver('thread-abc', 'Hello!', 'opus', []);
     assert.equal(feishuMock.sent.length, 1);
-    assert.match(feishuMock.sent[0].content, /^\[布偶猫🐱\] Hello!$/);
+    assert.match(feishuMock.sent[0].content, /^【布偶猫🐱】\nHello!$/);
   });
 
   // P1-1: block-only responses (empty content) must still trigger delivery

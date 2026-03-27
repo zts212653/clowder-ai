@@ -198,13 +198,14 @@ describe('Game API Routes', () => {
       assert.equal(body.status, 'playing');
     });
 
-    it('returns 404 if no active game', async () => {
+    it('returns 200 null if no active game', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/threads/nonexistent/game',
       });
 
-      assert.equal(res.statusCode, 404);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json(), null);
     });
   });
 
@@ -276,7 +277,8 @@ describe('Game API Routes', () => {
         method: 'GET',
         url: '/api/threads/thread-route-del/game',
       });
-      assert.equal(getRes.statusCode, 404);
+      assert.equal(getRes.statusCode, 200);
+      assert.equal(getRes.json(), null);
     });
 
     it('returns 404 if no active game to abort', async () => {

@@ -11,7 +11,7 @@ export function shouldAcceptNavigate(sessionThreadId: string | null, eventThread
 export interface NavigateEvent {
   path: string;
   worktreeId?: string;
-  action?: 'reveal' | 'open';
+  action?: 'reveal' | 'open' | 'knowledge-feed';
   line?: number;
   threadId?: string;
   eventId?: string;
@@ -26,10 +26,19 @@ export function handleNavigateEvent(
     setWorkspaceWorktreeId: (id: string | null) => void;
     setWorkspaceRevealPath: (path: string | null) => void;
     setWorkspaceOpenFile: (path: string | null, line: number | null, targetWorktreeId?: string | null) => void;
+    setWorkspaceMode?: (mode: 'dev' | 'knowledge') => void;
   },
   recentOpen?: { path: string; worktreeId?: string; ts: number } | null,
 ): boolean {
+  // Phase H: Switch workspace to knowledge feed mode
+  if (data.action === 'knowledge-feed') {
+    actions.setWorkspaceMode?.('knowledge');
+    return true;
+  }
+
+  // File-oriented actions: auto-switch back to dev mode so the file is visible
   if (data.action === 'open') {
+    actions.setWorkspaceMode?.('dev');
     actions.setWorkspaceOpenFile(data.path, data.line ?? null, data.worktreeId ?? null);
     return true;
   }
@@ -46,6 +55,7 @@ export function handleNavigateEvent(
   if (data.worktreeId && data.worktreeId !== currentWorktreeId) {
     actions.setWorkspaceWorktreeId(data.worktreeId);
   }
+  actions.setWorkspaceMode?.('dev');
   actions.setWorkspaceRevealPath(data.path);
   return true;
 }
@@ -54,6 +64,7 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
   const setWorkspaceWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
   const setWorkspaceRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
   const setWorkspaceOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
+  const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
   const lastEventIdRef = useRef<string | null>(null);
   const recentOpenRef = useRef<{ path: string; worktreeId?: string; ts: number } | null>(null);
 
@@ -82,6 +93,7 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
             setWorkspaceWorktreeId,
             setWorkspaceRevealPath,
             setWorkspaceOpenFile,
+            setWorkspaceMode,
           },
           recentOpenRef.current,
         );
@@ -102,5 +114,5 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
       cancelled = true;
       cleanup?.();
     };
-  }, [worktreeId, threadId, setWorkspaceWorktreeId, setWorkspaceRevealPath, setWorkspaceOpenFile]);
+  }, [worktreeId, threadId, setWorkspaceWorktreeId, setWorkspaceRevealPath, setWorkspaceOpenFile, setWorkspaceMode]);
 }

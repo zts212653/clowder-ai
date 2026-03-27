@@ -79,6 +79,7 @@ describe('parseGithubReviewSubject', () => {
       '',
       'chatgpt-codex-connector[bot] reviewed (zts212653/cat-cafe#182)',
       "Codex Review: Didn't find any major issues.",
+      'https://github.com/zts212653/cat-cafe/pull/182#pullrequestreview-123',
     ].join('\n');
 
     // Subject-only parser should reject legacy marker.
@@ -94,13 +95,44 @@ describe('parseGithubReviewSubject', () => {
     assert.strictEqual(result.reviewer, 'chatgpt-codex-connector[bot]');
   });
 
-  it('keeps rejecting legacy Re: ... (#N) subject without review signal', () => {
+  it('#257 fix: parses legacy Re: ... (#N) subject with PR link in body', () => {
     const subject = 'Re: [zts212653/cat-cafe] fix(quota): browser refresh fallback (#182)';
     const source = [
       'From: GitHub <notifications@github.com>',
       'Subject: Re: [zts212653/cat-cafe] fix(quota): browser refresh fallback (#182)',
       '',
       'Random thread chatter without review markers.',
+      'https://github.com/zts212653/cat-cafe/pull/182#issuecomment-123',
+    ].join('\n');
+
+    const result = parseGithubReviewFromSubjectAndSource(subject, source);
+    assert.notStrictEqual(result, null);
+    assert.strictEqual(result.prNumber, 182);
+    assert.strictEqual(result.repository, 'zts212653/cat-cafe');
+  });
+
+  it('rejects Re: issue email with cross-referenced PR link (different number)', () => {
+    const subject = 'Re: [zts212653/cat-cafe] Bug: quota overflow (#456)';
+    const source = [
+      'From: GitHub <notifications@github.com>',
+      'Subject: Re: [zts212653/cat-cafe] Bug: quota overflow (#456)',
+      '',
+      'This bug is related to the fix in PR #42.',
+      'https://github.com/zts212653/cat-cafe/pull/42#issuecomment-789',
+    ].join('\n');
+
+    const result = parseGithubReviewFromSubjectAndSource(subject, source);
+    assert.strictEqual(result, null, 'cross-referenced PR link should not match issue email');
+  });
+
+  it('rejects Re: ... (#N) issue-thread email (no /pull/ link)', () => {
+    const subject = 'Re: [zts212653/cat-cafe] Bug: quota overflow (#456)';
+    const source = [
+      'From: GitHub <notifications@github.com>',
+      'Subject: Re: [zts212653/cat-cafe] Bug: quota overflow (#456)',
+      '',
+      'Discussion on issue.',
+      'https://github.com/zts212653/cat-cafe/issues/456#issuecomment-789',
     ].join('\n');
 
     const result = parseGithubReviewFromSubjectAndSource(subject, source);
