@@ -36,10 +36,20 @@ warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC}
 step() { echo ""; echo -e "${BOLD}$*${NC}"; }
 USED_FNM=false
 resolve_realpath() { realpath "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || echo "$1"; }
+# P1 review: On Apple Silicon, /usr/local/bin is often not writable without
+# sudo, and we deliberately skip sudo on Darwin. Use ~/.local/bin instead.
+USER_BIN_DIR="/usr/local/bin"
 persist_user_bin() {
     local bin="$1" path=""; path="$(command -v "$bin" 2>/dev/null || true)"
-    [[ -n "$path" ]] || return 0; $SUDO mkdir -p /usr/local/bin
-    $SUDO ln -sfn "$(resolve_realpath "$path")" "/usr/local/bin/$bin"
+    [[ -n "$path" ]] || return 0
+    $SUDO mkdir -p "$USER_BIN_DIR"
+    $SUDO ln -sfn "$(resolve_realpath "$path")" "$USER_BIN_DIR/$bin"
+}
+# Append a line to the user's shell profile (idempotent).
+append_to_profile() {
+    local line="$1" profile="$2"
+    if [[ -f "$profile" ]] && grep -qF "$line" "$profile" 2>/dev/null; then return 0; fi
+    echo "$line" >> "$profile"
 }
 
 # TTY-safe read + pnpm install with registry fallback
@@ -545,6 +555,12 @@ if [[ "$DISTRO_FAMILY" != "darwin" && $EUID -ne 0 ]]; then
     command -v sudo &>/dev/null || { fail "Not root and sudo not found / 请以 root 运行或安装 sudo"; exit 1; }
     SUDO="sudo"
 fi
+# P1 review: On Darwin (especially Apple Silicon), /usr/local/bin often
+# requires sudo which we skip. Use ~/.local/bin for user-local binaries.
+if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+    USER_BIN_DIR="$HOME/.local/bin"
+    mkdir -p "$USER_BIN_DIR"
+fi
 
 resolve_project_dir
 ok "Source tree: $PROJECT_DIR"
@@ -564,7 +580,17 @@ if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
         warn "Xcode Command Line Tools not found — installing..."
         xcode-select --install 2>/dev/null || true
         # Wait for the installer to finish (user-interactive on macOS)
-        until xcode-select -p &>/dev/null; do sleep 5; done
+        # P2 review: add 5-minute timeout to avoid infinite hang if user
+        # cancels the installer or the install fails silently.
+        _xcode_wait=0
+        until xcode-select -p &>/dev/null; do
+            sleep 5; _xcode_wait=$((_xcode_wait + 5))
+            if [[ $_xcode_wait -ge 300 ]]; then
+                fail "Xcode CLT install timed out (5 min). Run manually: xcode-select --install"
+                exit 1
+            fi
+        done
+        unset _xcode_wait
         ok "Xcode Command Line Tools installed"
     else ok "Xcode Command Line Tools present"
     fi
@@ -626,11 +652,15 @@ if node_needs_install; then
             if [[ "$NODE_OK" == false ]]; then
                 brew install node@20 2>/dev/null || true
                 # node@20 is keg-only — Homebrew does not link it into PATH by default.
-                # Add the keg bin to PATH so node/npm are discoverable this session.
-                # NB: no `local` here — this runs at top-level, not inside a function.
+                # Add the keg bin to PATH for this session AND persist to shell profile.
                 _keg_bin="$(brew --prefix node@20 2>/dev/null)/bin"
-                [[ -d "$_keg_bin" ]] && export PATH="$_keg_bin:$PATH"
-                unset _keg_bin
+                if [[ -d "$_keg_bin" ]]; then
+                    export PATH="$_keg_bin:$PATH"
+                    _profile="${ZDOTDIR:-$HOME}/.zprofile"
+                    append_to_profile "export PATH=\"$_keg_bin:\$PATH\"  # Homebrew node@20 keg" "$_profile"
+                    ok "Node keg PATH added to $_profile"
+                fi
+                unset _keg_bin _profile
                 node_needs_install || NODE_OK=true
             fi
             ;;
@@ -653,6 +683,17 @@ if node_needs_install; then
     esac
     node_needs_install && NODE_OK=false
     [[ "$NODE_OK" == false ]] && { fail "Could not install Node.js 20. Install manually: https://nodejs.org"; exit 1; }
+    # P1 review: Persist PATH additions to shell profile for new terminals.
+    if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+        _profile="${ZDOTDIR:-$HOME}/.zprofile"
+        # ~/.local/bin for persist_user_bin symlinks (fnm, pnpm, etc.)
+        append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_profile"
+        # fnm shell init (only if fnm was used)
+        if [[ "$USED_FNM" == true ]]; then
+            append_to_profile 'eval "$(fnm env --shell zsh 2>/dev/null)" 2>/dev/null || true  # fnm' "$_profile"
+        fi
+        unset _profile
+    fi
     ok "Node.js $(node -v) installed"
 else
     ok "Node.js $(node -v) already installed (>= 20)"
