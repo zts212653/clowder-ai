@@ -463,10 +463,17 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
       if (s.name === 'pencil') {
         if (pencilBinary) {
           s.command = pencilBinary;
+        } else if (s.command) {
+          // #272 P2: Auto-discovery failed, but the config already has a command.
+          // Only disable if that command's binary is also gone (stale entry).
+          // Preserves valid manual configs while cleaning actually-stale entries.
+          try {
+            await access(s.command);
+            // Binary exists at configured path — keep the entry as-is.
+          } catch {
+            s.enabled = false;
+          }
         } else {
-          // #272: Binary unresolvable — mark disabled so each provider's
-          // writer deletes the stale entry (Gemini merges with existing config,
-          // so splice alone wouldn't remove an already-persisted entry).
           s.enabled = false;
         }
       }
