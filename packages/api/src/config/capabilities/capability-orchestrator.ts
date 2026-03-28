@@ -13,6 +13,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
+import { resolveCliCommand } from '../../utils/cli-resolve.js';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   readClaudeMcpConfig,
@@ -467,10 +468,11 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
           // #272 P2: Auto-discovery failed, but the config already has a command.
           // Only disable if that command's binary is also gone (stale entry).
           // Preserves valid manual configs while cleaning actually-stale entries.
-          try {
-            await access(s.command);
-            // Binary exists at configured path — keep the entry as-is.
-          } catch {
+          const isPath = s.command.includes('/') || s.command.includes('\\');
+          const commandAlive = isPath
+            ? await access(s.command).then(() => true, () => false)
+            : resolveCliCommand(s.command) !== null;
+          if (!commandAlive) {
             s.enabled = false;
           }
         } else {
