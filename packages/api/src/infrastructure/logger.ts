@@ -20,7 +20,7 @@ import pino from 'pino';
  */
 export const isDebugMode = process.argv.includes('--debug');
 const LOG_LEVEL = (isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info')) as pino.Level;
-const LOG_DIR = resolve(process.cwd(), 'data', 'logs', 'api');
+const LOG_DIR = process.env.LOG_DIR ? resolve(process.env.LOG_DIR) : resolve(process.cwd(), 'data', 'logs', 'api');
 const RETENTION_FILES = 14;
 
 /**
@@ -50,12 +50,18 @@ if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
 
+/**
+ * Transport level is set to 'trace' (pass-through) so the parent logger's
+ * `level` is the sole gate.  This ensures runtime level changes (e.g.
+ * `logger.level = 'debug'`) take effect immediately — Pino transport workers
+ * cache their level at init and ignore later parent-level changes.
+ */
 const transport = pino.transport({
   targets: [
     {
       target: 'pino/file',
       options: { destination: 1 },
-      level: LOG_LEVEL,
+      level: 'trace',
     },
     {
       target: 'pino-roll',
@@ -66,7 +72,7 @@ const transport = pino.transport({
         limit: { count: RETENTION_FILES },
         mkdir: true,
       },
-      level: LOG_LEVEL,
+      level: 'trace',
     },
   ],
 });
@@ -90,32 +96,30 @@ export function createModuleLogger(module: string): pino.Logger {
 export const LOG_DIR_PATH = LOG_DIR;
 
 /**
- * KD-7: Redirect unmigrated console.* to stderr so process-layer `2>>`
- * captures them alongside tsx watch output and crash dumps.
+ * KD-7: Redirect unmigrated console.* to both Pino log file AND stderr.
  *
- * Why: macOS bash `tee` pipelines create orphan processes that
- * `kill $(jobs -p)` cannot clean up. Using `2>>` for process-layer
- * capture is the only orphan-free approach, but it only captures stderr.
- * This monkey-patch bridges the gap until Phase B migrates all console.*
- * to the Pino logger.
+ * - Pino child logger (`module: 'console'`) ensures console.* output is
+ *   persisted in the rotating log file with the same redaction & format.
+ * - stderr write preserved for process-layer `2>>` capture (orphan-free).
  */
-const stderrWrite = (prefix: string, args: unknown[]) => {
-  process.stderr.write(`[console.${prefix}] ${utilFormat(...args)}\n`);
-};
+const consoleLogger = logger.child({ module: 'console' });
 
 const origLog = console.log;
 const origWarn = console.warn;
 const origError = console.error;
 
 console.log = (...args: unknown[]) => {
-  stderrWrite('log', args);
+  const msg = utilFormat(...args);
+  consoleLogger.info(msg);
   origLog.apply(console, args);
 };
 console.warn = (...args: unknown[]) => {
-  stderrWrite('warn', args);
+  const msg = utilFormat(...args);
+  consoleLogger.warn(msg);
   origWarn.apply(console, args);
 };
 console.error = (...args: unknown[]) => {
-  stderrWrite('error', args);
+  const msg = utilFormat(...args);
+  consoleLogger.error(msg);
   origError.apply(console, args);
 };
