@@ -52,6 +52,10 @@ created: 2026-02-26
 | F132 | DingTalk + WeCom Chat Gateway — 钉钉/企微接入 | in-progress | Ragdoll | internal | [F132](features/F132-dingtalk-wecom-gateway.md) |
 | F135 | 狸花猫开箱即用 — DARE Out-of-the-Box | spec | bouillipx | community [#195](https://github.com/zts212653/clowder-ai/issues/195) | [F135](features/F135-dare-ootb.md) |
 | F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |
+| F139 | Unified Schedule Abstraction — 统一调度抽象 | in-progress | Ragdoll | internal | [F139](features/F139-unified-schedule-abstraction.md) |
+| F140 | GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知 | phase-a-done | Ragdoll | internal | [F140](features/F140-github-pr-automation.md) |
+| F141 | GitHub Repo Inbox — 仓库事件自动发现（webhook + 补偿扫描） | phase-b-done | Ragdoll | internal | [F141](features/F141-github-repo-inbox.md) |
+| F142 | Tool / Skill / MCP Usage Statistics API | spec | Ragdoll | internal | [F142](features/F142-tool-usage-stats.md) |
 | F143 | Hostable Agent Runtime — 统一宿主抽象 | spec | Ragdoll | internal | [F143](features/F143-hostable-agent-runtime.md) |
 | F144 | PPT Forge — AI 演示文稿生成引擎 | in-progress | 三猫 | internal | [F144](features/F144-ppt-forge.md) |
 | F146 | MCP Marketplace Control Plane — 一键接入 + 多生态聚合 | spec | Maine Coon + Ragdoll | internal | [F146](features/F146-mcp-marketplace-control-plane.md) |
