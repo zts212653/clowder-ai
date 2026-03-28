@@ -123,11 +123,25 @@ const SENSITIVE_KEYS = new Set(
 /** Recursively redact sensitive keys at any nesting depth. Handles circular refs and throwing getters. */
 function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
   if (val === null || typeof val !== 'object') return val;
-  if (val instanceof Error) return val;
   const visited = seen ?? new WeakSet();
   if (visited.has(val as object)) return '[Circular]';
   visited.add(val as object);
   if (Array.isArray(val)) return val.map((v) => sanitizeArg(v, visited));
+  // Error: preserve name/message/stack but sanitize attached props (e.g. axios .config/.response)
+  if (val instanceof Error) {
+    const cleaned: Record<string, unknown> = { name: val.name, message: val.message, stack: val.stack };
+    try {
+      for (const [k, v] of Object.entries(val)) {
+        cleaned[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v, visited);
+      }
+    } catch {
+      /* ignore throwing getters on error subclasses */
+    }
+    return cleaned;
+  }
+  // Non-plain objects (Date, Map, Set, class instances): return as-is for correct utilFormat
+  const proto = Object.getPrototypeOf(val);
+  if (proto !== null && proto !== Object.prototype) return val;
   try {
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
