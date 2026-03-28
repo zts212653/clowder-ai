@@ -1,9 +1,10 @@
 // @ts-check
-import { describe, it, before, after } from 'node:test';
+
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, mkdirSync, rmSync } from 'node:fs';
-import { resolve, join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { after, before, describe, it } from 'node:test';
 
 /**
  * Regression tests for fix(#185): console.* → Pino redaction + coverage.
@@ -30,11 +31,13 @@ function runLoggerScript(snippet) {
     ${snippet}
     await new Promise(r => setTimeout(r, 1500));
   `;
-  execFileSync('node', ['--input-type=module', '-e', script], {
+  const result = spawnSync('node', ['--input-type=module', '-e', script], {
     cwd: API_DIR,
     timeout: 10000,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    encoding: 'utf-8',
   });
+  if (result.status !== 0) throw new Error(`Script failed: ${result.stderr}`);
+  return { stderr: result.stderr };
 }
 
 function resetLogDir() {
@@ -79,5 +82,20 @@ describe('fix(#185): console→Pino patch', () => {
     assert.ok(content.includes('[REDACTED]'), 'apiKey should be redacted');
     assert.ok(!content.includes('sk-secret-key'), 'raw apiKey must not appear');
     assert.ok(content.includes('User action:'), 'string part should appear as msg');
+  });
+
+  it('P2: stderr capture preserved for 2>> redirection', () => {
+    resetLogDir();
+    const { stderr } = runLoggerScript(`console.log('stderr-marker-185');`);
+    assert.ok(stderr.includes('stderr-marker-185'), 'console.log should write to stderr');
+    assert.ok(stderr.includes('[console.info]'), 'stderr should have [console.level] prefix');
+  });
+
+  it('P2: array containing sensitive object is redacted', () => {
+    resetLogDir();
+    runLoggerScript(`console.log([{ token: 'array-secret-token' }]);`);
+    const content = readAllLogs();
+    assert.ok(content.includes('[REDACTED]'), 'token in array should be redacted');
+    assert.ok(!content.includes('array-secret-token'), 'raw token in array must not appear');
   });
 });

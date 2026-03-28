@@ -96,10 +96,12 @@ export function createModuleLogger(module: string): pino.Logger {
 export const LOG_DIR_PATH = LOG_DIR;
 
 /**
- * KD-7: Redirect unmigrated console.* to Pino log file.
+ * KD-7: Redirect unmigrated console.* to Pino log file AND stderr.
  *
- * Objects are passed as structured merge-objects so Pino redaction applies
- * (token, apiKey, etc. are masked).  Scalar args become the `msg` string.
+ * - Objects (including arrays) are deep-flattened into a merge-object so
+ *   Pino redaction applies (token, apiKey, etc. are masked).
+ * - Errors get their `.message` extracted into redactable fields.
+ * - stderr write preserved for process-layer `2>>` capture (orphan-free).
  */
 const consoleLogger = logger.child({ module: 'console' });
 
@@ -109,6 +111,20 @@ const origError = console.error;
 const origInfo = console.info;
 const origDebug = console.debug;
 
+/** Recursively collect redactable fields from any object-like value. */
+function collectFields(val: unknown, target: Record<string, unknown>): void {
+  if (val === null || typeof val !== 'object') return;
+  if (val instanceof Error) {
+    Object.assign(target, { errorMessage: val.message, errorName: val.name });
+    return;
+  }
+  if (Array.isArray(val)) {
+    for (const item of val) collectFields(item, target);
+    return;
+  }
+  Object.assign(target, val as Record<string, unknown>);
+}
+
 type PinoLevel = 'info' | 'warn' | 'error' | 'debug';
 function consoleToPino(level: PinoLevel, orig: (...a: unknown[]) => void): (...a: unknown[]) => void {
   return (...args: unknown[]) => {
@@ -116,8 +132,8 @@ function consoleToPino(level: PinoLevel, orig: (...a: unknown[]) => void): (...a
     let hasObj = false;
     const parts: string[] = [];
     for (const a of args) {
-      if (a !== null && typeof a === 'object' && !Array.isArray(a) && !(a instanceof Error)) {
-        Object.assign(merged, a as Record<string, unknown>);
+      if (a !== null && typeof a === 'object') {
+        collectFields(a, merged);
         hasObj = true;
       } else {
         parts.push(utilFormat(a));
@@ -125,6 +141,8 @@ function consoleToPino(level: PinoLevel, orig: (...a: unknown[]) => void): (...a
     }
     const msg = parts.join(' ') || `console.${level}`;
     hasObj ? consoleLogger[level](merged, msg) : consoleLogger[level](msg);
+    // Preserve stderr capture for process-layer `2>>` redirection
+    process.stderr.write(`[console.${level}] ${utilFormat(...args)}\n`);
     orig.apply(console, args);
   };
 }
