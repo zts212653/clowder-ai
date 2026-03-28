@@ -46,8 +46,10 @@ $ScriptDir = Split-Path -Parent $ScriptPath
 $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
+$Profile_ = $env:CAT_CAFE_PROFILE  # set by start-entry.mjs when --profile=* is given
 Write-Host "Cat Cafe - Windows Startup" -ForegroundColor Cyan
 Write-Host "=========================="
+if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
 
 # -- Load .env -----------------------------------------------
 $envFile = Join-Path $ProjectRoot ".env"
