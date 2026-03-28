@@ -208,7 +208,13 @@ function buildVariableHint(variable: EnvVar): string | null {
 }
 
 function isEditableVariable(variable: EnvVar): boolean {
-  return variable.runtimeEditable !== false && !variable.sensitive;
+  // Sensitive vars: fail-closed — must explicitly opt in with runtimeEditable: true
+  // Non-sensitive vars: opt-out — editable unless explicitly runtimeEditable: false
+  return variable.sensitive ? variable.runtimeEditable === true : variable.runtimeEditable !== false;
+}
+
+function isSensitiveEditable(variable: EnvVar): boolean {
+  return variable.sensitive && variable.runtimeEditable === true;
 }
 
 function isMaskedUrlVariable(variable: EnvVar): boolean {
@@ -218,6 +224,7 @@ function isMaskedUrlVariable(variable: EnvVar): boolean {
 }
 
 function initialDraftValue(variable: EnvVar): string {
+  if (isSensitiveEditable(variable)) return '';
   if (isMaskedUrlVariable(variable)) return '';
   return variable.currentValue ?? '';
 }
@@ -302,8 +309,18 @@ function EnvVarsSection({
                     <div className="flex items-baseline gap-1.5 min-w-0">
                       <code className="shrink-0 font-mono text-[#6A5A50]">{v.name}</code>
                       <span className="truncate text-[#B59A88]">{v.description}</span>
+                      {isSensitiveEditable(v) && (
+                        <span className={`shrink-0 text-[11px] ${v.currentValue ? 'text-[#77A777]' : 'text-[#D49266]'}`}>
+                          {v.currentValue ? '🔑 已配置' : '⚠️ 未配置'}
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-[#B59A88]">默认: {v.defaultValue}</div>
+                    {isSensitiveEditable(v) && (
+                      <div className="font-mono text-[11px] text-[#B59A88]">
+                        当前: {v.currentValue ?? '未设置'}
+                      </div>
+                    )}
                     {!isEditableVariable(v) && (
                       <div className={`font-mono text-[11px] ${v.currentValue ? 'text-[#6A5A50]' : 'text-[#D4C5BA]'}`}>
                         {v.currentValue ?? '未设置'}
@@ -314,12 +331,19 @@ function EnvVarsSection({
                     <div className="space-y-1">
                       <input
                         aria-label={v.name}
+                        type={isSensitiveEditable(v) ? 'password' : 'text'}
                         value={drafts[v.name] ?? ''}
                         onChange={(e) => onDraftChange(v.name, e.target.value)}
-                        placeholder={isMaskedUrlVariable(v) ? '保持当前值（已脱敏）' : v.defaultValue}
+                        placeholder={
+                          isSensitiveEditable(v)
+                            ? v.currentValue ? '输入新值以替换...' : '输入值以配置...'
+                            : isMaskedUrlVariable(v) ? '保持当前值（已脱敏）' : v.defaultValue
+                        }
                         className="rounded-[10px] border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 font-mono text-xs text-[#6A5A50]"
                       />
-                      {buildVariableHint(v) ? (
+                      {isSensitiveEditable(v) ? (
+                        <div className="text-[11px] leading-5 text-[#5B7A5C]">写入后立即生效，无需重启</div>
+                      ) : buildVariableHint(v) ? (
                         <div className="text-[11px] leading-5 text-[#B59A88]">{buildVariableHint(v)}</div>
                       ) : null}
                     </div>
@@ -411,10 +435,10 @@ export function HubEnvFilesTab() {
       name: variable.name,
       value: drafts[variable.name] ?? '',
       baselineValue: initialDraftValue(variable),
-      maskedUrl: isMaskedUrlVariable(variable),
+      skipIfEmpty: isMaskedUrlVariable(variable) || isSensitiveEditable(variable),
     }))
     .filter((variable) => variable.value !== variable.baselineValue)
-    .filter((variable) => !variable.maskedUrl || variable.value.trim().length > 0)
+    .filter((variable) => !variable.skipIfEmpty || variable.value.trim().length > 0)
     .map(({ name, value }) => ({ name, value }));
 
   const isDirty = changedUpdates.length > 0;
