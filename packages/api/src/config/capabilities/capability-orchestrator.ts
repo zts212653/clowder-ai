@@ -13,8 +13,8 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
-import { resolveCliCommand } from '../../utils/cli-resolve.js';
 import { catRegistry } from '@cat-cafe/shared';
+import { resolveCliCommand } from '../../utils/cli-resolve.js';
 import {
   readClaudeMcpConfig,
   readCodexMcpConfig,
@@ -470,7 +470,10 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
           // Preserves valid manual configs while cleaning actually-stale entries.
           const isPath = s.command.includes('/') || s.command.includes('\\');
           const commandAlive = isPath
-            ? await access(s.command).then(() => true, () => false)
+            ? await access(s.command).then(
+                () => true,
+                () => false,
+              )
             : resolveCliCommand(s.command) !== null;
           if (!commandAlive) {
             s.enabled = false;
