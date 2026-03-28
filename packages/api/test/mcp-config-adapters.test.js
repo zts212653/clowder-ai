@@ -417,34 +417,35 @@ describe('writeGeminiMcpConfig', () => {
     assert.ok(data.mcpServers['cat-cafe'], 'cat-cafe server should still be written');
   });
 
-  it('#272 P1 regression: stale pencil entry removed when binary unresolvable', async () => {
+  it('#272: preserves pencil entry when auto-discovery fails (no silent deletion)', async () => {
     const file = join(dir, '.gemini', 'settings.json');
     await mkdir(join(dir, '.gemini'), { recursive: true });
-    // Seed a stale pencil entry (from a previous run when pencil was installed)
+    // Seed a pencil entry (may be stale or may be a valid manual config)
     await writeFile(
       file,
       JSON.stringify({
         mcpServers: {
-          pencil: { command: '/old/stale/pencil', args: ['--app', 'antigravity'] },
+          pencil: { command: '/custom/pencil', args: ['--app', 'antigravity'] },
           'cat-cafe': { command: 'node', args: ['index.js'] },
         },
       }),
     );
 
-    // Simulate pencil binary unresolvable: enabled=false tells writer to delete
+    // Auto-discovery failed, but pencil stays enabled — leave as-is
     await writeGeminiMcpConfig(file, [
       {
         name: 'pencil',
-        command: '/old/stale/pencil',
+        command: '/custom/pencil',
         args: ['--app', 'antigravity'],
-        enabled: false,
+        enabled: true,
         source: 'external',
       },
       { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
     ]);
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.equal(data.mcpServers.pencil, undefined, 'stale pencil entry must be removed when binary is unresolvable');
+    assert.ok(data.mcpServers.pencil, 'pencil entry must be preserved when auto-discovery fails');
+    assert.equal(data.mcpServers.pencil.command, '/custom/pencil', 'pencil command must not be altered');
     assert.ok(data.mcpServers['cat-cafe'], 'cat-cafe server should be preserved');
   });
 });
