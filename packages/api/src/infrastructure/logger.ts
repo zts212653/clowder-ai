@@ -120,7 +120,7 @@ const SENSITIVE_KEYS = new Set(
   }).filter(Boolean),
 );
 
-/** Recursively redact sensitive keys at any nesting depth. Handles circular refs. */
+/** Recursively redact sensitive keys at any nesting depth. Handles circular refs and throwing getters. */
 function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
   if (val === null || typeof val !== 'object') return val;
   if (val instanceof Error) return val;
@@ -128,11 +128,15 @@ function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
   if (visited.has(val as object)) return '[Circular]';
   visited.add(val as object);
   if (Array.isArray(val)) return val.map((v) => sanitizeArg(v, visited));
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-    result[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v, visited);
+  try {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      result[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v, visited);
+    }
+    return result;
+  } catch {
+    return '[Object]';
   }
-  return result;
 }
 
 type PinoLevel = 'info' | 'warn' | 'error' | 'debug';
