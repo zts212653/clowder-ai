@@ -28,6 +28,7 @@ import {
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
+import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
@@ -50,7 +51,14 @@ let _openCodeKnownModels: Set<string> | null = null;
 export function getOpenCodeKnownModels(): Set<string> {
   if (_openCodeKnownModels !== null) return _openCodeKnownModels;
   try {
-    const stdout = execFileSync('opencode', ['models'], {
+    // #281 P1: use resolveCliCommand so non-PATH installs (e.g. ~/.local/bin)
+    // are discoverable, matching how OpenCodeAgentService resolves the binary.
+    const opencodePath = resolveCliCommand('opencode');
+    if (!opencodePath) {
+      _openCodeKnownModels = new Set();
+      return _openCodeKnownModels;
+    }
+    const stdout = execFileSync(opencodePath, ['models'], {
       encoding: 'utf-8',
       timeout: 5000,
       stdio: ['ignore', 'pipe', 'ignore'],
