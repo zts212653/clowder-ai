@@ -9,7 +9,7 @@
  * 连同 Cat Cafe 自有 MCP 一起写入 capabilities.json。
  */
 
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
@@ -28,10 +28,26 @@ import {
 const CAPABILITIES_FILENAME = 'capabilities.json';
 const CAT_CAFE_DIR = '.cat-cafe';
 
-const PENCIL_EXTENSIONS_DIR = resolve(homedir(), '.antigravity/extensions');
 const PENCIL_DIR_PREFIX = 'highagency.pencildev-';
-/** @internal Exported for testing only */
-export const PENCIL_BINARY_SUFFIX = 'out/mcp-server-darwin-arm64';
+
+/** #272: All known editor extension directories that may contain Pencil. */
+const PENCIL_EXTENSION_CANDIDATES = [
+  resolve(homedir(), '.antigravity/extensions'),
+  resolve(homedir(), '.vscode/extensions'),
+  resolve(homedir(), '.cursor/extensions'),
+  resolve(homedir(), '.vscode-insiders/extensions'),
+];
+
+/**
+ * #272: Resolve platform-specific Pencil MCP binary name.
+ * @internal Exported for testing only
+ */
+export function getPencilBinarySuffix(): string {
+  const os = process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : 'darwin';
+  const arch = process.arch === 'x64' ? 'x64' : 'arm64';
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  return `out/mcp-server-${os}-${arch}${ext}`;
+}
 
 /**
  * Parse semver-like version from a Pencil extension directory name.
@@ -95,19 +111,38 @@ export function deduplicateDiscoveredMcpServers<T extends DiscoveredMcpLike>(ser
 }
 
 /**
- * Resolve the latest Pencil MCP binary path by scanning ~/.antigravity/extensions/.
- * Returns null if no installation is found.
+ * #272: Resolve the latest Pencil MCP binary path by scanning multiple editor
+ * extension directories (Antigravity, VSCode, Cursor, VSCode Insiders).
+ * Picks the highest semver across all sources. Returns null if not found.
  */
 export async function resolvePencilBinary(): Promise<string | null> {
-  try {
-    const entries = await readdir(PENCIL_EXTENSIONS_DIR);
-    const pencilDirs = entries.filter((e) => e.startsWith(PENCIL_DIR_PREFIX)).sort(comparePencilDirs);
-    if (pencilDirs.length === 0) return null;
-    const latest = pencilDirs[pencilDirs.length - 1];
-    return resolve(PENCIL_EXTENSIONS_DIR, latest, PENCIL_BINARY_SUFFIX);
-  } catch {
-    return null;
+  const allDirs: { dir: string; base: string }[] = [];
+  for (const base of PENCIL_EXTENSION_CANDIDATES) {
+    try {
+      const entries = await readdir(base);
+      for (const e of entries) {
+        if (e.startsWith(PENCIL_DIR_PREFIX)) {
+          allDirs.push({ dir: e, base });
+        }
+      }
+    } catch {
+      // directory doesn't exist or not readable — skip
+    }
   }
+  if (allDirs.length === 0) return null;
+  // P2 review: sort descending by semver, then pick the newest binary that
+  // actually exists on disk. Avoids selecting a newer but incomplete install.
+  allDirs.sort((a, b) => comparePencilDirs(a.dir, b.dir));
+  for (let i = allDirs.length - 1; i >= 0; i--) {
+    const candidate = resolve(allDirs[i].base, allDirs[i].dir, getPencilBinarySuffix());
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // binary missing or not accessible — try next
+    }
+  }
+  return null;
 }
 
 // ────────── Core: Read / Write capabilities.json ──────────
@@ -423,12 +458,15 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
 
   // Resolve dynamic paths (e.g. pencil binary) once, apply to all providers
   const pencilBinary = await resolvePencilBinary();
-  if (pencilBinary) {
-    for (const servers of Object.values(perProvider)) {
-      for (const s of servers) {
-        if (s.name === 'pencil') {
+  for (const servers of Object.values(perProvider)) {
+    for (const s of servers) {
+      if (s.name === 'pencil') {
+        if (pencilBinary) {
           s.command = pencilBinary;
         }
+        // #272: When auto-discovery fails, leave the existing entry as-is.
+        // A stale command will fail visibly at MCP startup, which is
+        // preferable to silently deleting a valid manual config.
       }
     }
   }
