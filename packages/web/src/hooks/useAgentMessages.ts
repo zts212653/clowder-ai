@@ -438,8 +438,10 @@ export function useAgentMessages() {
 
         if (msg.origin === 'callback') {
           const invocationId = msg.invocationId ?? getCurrentInvocationIdForCat(msg.catId);
+          // #266 P1: Try strict invocationId match first (prevents cross-invocation race),
+          // then fall back to invocationless placeholder (covers lost invocation_created).
           const replacementTarget = invocationId
-            ? findCallbackReplacementTarget(msg.catId, invocationId)
+            ? (findCallbackReplacementTarget(msg.catId, invocationId) ?? findInvocationlessStreamPlaceholder(msg.catId))
             : findInvocationlessStreamPlaceholder(msg.catId);
 
           if (replacementTarget) {
