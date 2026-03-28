@@ -433,7 +433,13 @@ describe('writeGeminiMcpConfig', () => {
 
     // Simulate pencil binary unresolvable: enabled=false tells writer to delete
     await writeGeminiMcpConfig(file, [
-      { name: 'pencil', command: '/old/stale/pencil', args: ['--app', 'antigravity'], enabled: false, source: 'external' },
+      {
+        name: 'pencil',
+        command: '/old/stale/pencil',
+        args: ['--app', 'antigravity'],
+        enabled: false,
+        source: 'external',
+      },
       { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
     ]);
 
