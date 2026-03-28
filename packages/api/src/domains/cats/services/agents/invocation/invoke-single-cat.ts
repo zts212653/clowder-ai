@@ -9,6 +9,7 @@
  *         消息存储（由调用方在 yield 后累积并存储）。
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -43,7 +44,33 @@ import {
 } from '../providers/opencode-config-template.js';
 
 const log = createModuleLogger('invoke');
-const BUILTIN_OPENCODE_PROVIDERS = new Set(['anthropic', 'openai', 'openrouter', 'google']);
+
+/** Lazy-loaded set of models the opencode CLI can route natively (via `opencode models`). */
+let _openCodeKnownModels: Set<string> | null = null;
+export function getOpenCodeKnownModels(): Set<string> {
+  if (_openCodeKnownModels !== null) return _openCodeKnownModels;
+  try {
+    const stdout = execFileSync('opencode', ['models'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    _openCodeKnownModels = new Set(
+      stdout
+        .trim()
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean),
+    );
+  } catch {
+    _openCodeKnownModels = new Set();
+  }
+  return _openCodeKnownModels;
+}
+/** @internal — reset cache for testing */
+export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
+  _openCodeKnownModels = override ?? null;
+}
 
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
@@ -743,16 +770,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       : ocProviderName && trimmedDefaultModel
         ? `${ocProviderName}/${trimmedDefaultModel}`
         : undefined;
-    // fix(#280): When ocProviderName is explicitly set, bypass the builtin gate so that
-    // builtin provider names (anthropic, openai, …) also enter the F189 config path.
-    // Without ocProviderName, keep the original gate to preserve legacy behaviour
-    // (e.g. prefixed model + no ocProviderName should NOT generate a runtime config).
+    // fix(#280): Generate runtime config when the assembled model is NOT already
+    // routable by the opencode CLI (`opencode models`).  If it IS known, opencode
+    // can handle it natively — no runtime config needed.
     if (
       provider === 'opencode' &&
       resolvedAccount?.authType === 'api_key' &&
       effectiveModel &&
       effectiveProviderName &&
-      (ocProviderName || !BUILTIN_OPENCODE_PROVIDERS.has(effectiveProviderName))
+      !getOpenCodeKnownModels().has(effectiveModel)
     ) {
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = effectiveModel;
       const apiType: 'openai' | 'anthropic' | 'google' =
