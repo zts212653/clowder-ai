@@ -863,7 +863,13 @@
       "name": "GitHub Repo Inbox — 仓库事件自动发现",
       "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F141-github-repo-inbox.md"
+    },
+    {
+      "id": "F142",
+      "name": "Tool / Skill / MCP Usage Statistics API",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P2",
+      "file": "F142-tool-usage-stats.md"
     }
   ],
-  "generated_at": "2026-03-28T11:06:19.718Z"
+  "generated_at": "2026-03-28T16:48:52.079Z"
 }
