@@ -106,4 +106,21 @@ describe('fix(#185): console→Pino patch', () => {
     assert.ok(content.includes('[REDACTED]'), 'token in array should be redacted');
     assert.ok(!content.includes('array-secret-token'), 'raw token in array must not appear');
   });
+
+  it('P1: nested objects have sensitive keys redacted at any depth', () => {
+    resetLogDir();
+    runLoggerScript(`console.log({ context: { token: 'nested-secret' } });`);
+    const content = readAllLogs();
+    assert.ok(content.includes('[REDACTED]'), 'nested token should be redacted');
+    assert.ok(!content.includes('nested-secret'), 'raw nested token must not appear');
+  });
+
+  it('P2: printf + object mix preserves interpolation', () => {
+    resetLogDir();
+    runLoggerScript(`console.log('count=%d', 42, { token: 'mix-secret' });`);
+    const content = readAllLogs();
+    assert.ok(content.includes('count=42'), 'printf should be interpolated');
+    assert.ok(!content.includes('mix-secret'), 'token must be redacted');
+    assert.ok(!content.includes('%d'), '%d should not remain');
+  });
 });

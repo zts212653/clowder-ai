@@ -98,10 +98,10 @@ export const LOG_DIR_PATH = LOG_DIR;
 /**
  * KD-7: Redirect unmigrated console.* to Pino log file AND stderr.
  *
- * - Objects (including arrays) are deep-flattened into a merge-object so
- *   Pino redaction applies (token, apiKey, etc. are masked).
- * - Errors get their `.message` extracted into redactable fields.
- * - stderr write preserved for process-layer `2>>` capture (orphan-free).
+ * Pre-sanitizes args recursively (redacts sensitive keys at any nesting depth)
+ * before formatting, so both the Pino msg and stderr output are safe.
+ * This also preserves printf-style interpolation since we can safely
+ * call utilFormat on the full (sanitized) argument list.
  */
 const consoleLogger = logger.child({ module: 'console' });
 
@@ -111,39 +111,32 @@ const origError = console.error;
 const origInfo = console.info;
 const origDebug = console.debug;
 
-/** Recursively collect redactable fields from any object-like value. */
-function collectFields(val: unknown, target: Record<string, unknown>): void {
-  if (val === null || typeof val !== 'object') return;
-  if (val instanceof Error) {
-    Object.assign(target, { errorMessage: val.message, errorName: val.name });
-    return;
+/** Leaf key names extracted from REDACT_PATHS for recursive pre-sanitization. */
+const SENSITIVE_KEYS = new Set(
+  REDACT_PATHS.map((p) => p.split('.').pop()!)
+    .map((k) => k.replace(/[[\]"]/g, ''))
+    .filter(Boolean),
+);
+
+/** Recursively redact sensitive keys at any nesting depth. */
+function sanitizeArg(val: unknown): unknown {
+  if (val === null || typeof val !== 'object') return val;
+  if (val instanceof Error) return val;
+  if (Array.isArray(val)) return val.map(sanitizeArg);
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+    result[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v);
   }
-  if (Array.isArray(val)) {
-    for (const item of val) collectFields(item, target);
-    return;
-  }
-  Object.assign(target, val as Record<string, unknown>);
+  return result;
 }
 
 type PinoLevel = 'info' | 'warn' | 'error' | 'debug';
 function consoleToPino(level: PinoLevel, orig: (...a: unknown[]) => void): (...a: unknown[]) => void {
   return (...args: unknown[]) => {
-    const merged: Record<string, unknown> = {};
-    const scalarParts: string[] = [];
-    for (const a of args) {
-      if (a !== null && typeof a === 'object') {
-        collectFields(a, merged);
-      } else {
-        scalarParts.push(utilFormat(a));
-      }
-    }
-    const hasFields = Object.keys(merged).length > 0;
-    // When objects contribute redactable fields, use scalar-only msg to avoid
-    // leaking raw values. Otherwise use full utilFormat for printf interpolation.
-    const pinoMsg = hasFields ? scalarParts.join(' ') || `console.${level}` : utilFormat(...args);
-    hasFields ? consoleLogger[level](merged, pinoMsg) : consoleLogger[level](pinoMsg);
-    // stderr always gets full format for human-readable process-layer capture
-    process.stderr.write(`[console.${level}] ${utilFormat(...args)}\n`);
+    const sanitized = args.map(sanitizeArg);
+    const msg = utilFormat(...sanitized);
+    consoleLogger[level](msg);
+    process.stderr.write(`[console.${level}] ${msg}\n`);
     orig.apply(console, args);
   };
 }
