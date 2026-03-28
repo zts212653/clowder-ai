@@ -116,6 +116,14 @@ describe('env-registry', () => {
     }
   });
 
+  it('DEFAULT_OWNER_USER_ID is bootstrap-only (not runtime-editable)', () => {
+    const def = ENV_VARS.find((v) => v.name === 'DEFAULT_OWNER_USER_ID');
+    assert.ok(def, 'DEFAULT_OWNER_USER_ID should be in registry');
+    assert.equal(def.runtimeEditable, false, 'should be explicitly marked runtimeEditable: false');
+    assert.equal(isEditableEnvVar(def), false, 'isEditableEnvVar should return false');
+    assert.equal(isEditableEnvVarName('DEFAULT_OWNER_USER_ID'), false, 'isEditableEnvVarName should return false');
+  });
+
   it('non-whitelisted sensitive vars remain fail-closed (not editable)', () => {
     const READONLY_SENSITIVE = [
       'CAT_CAFE_HOOK_TOKEN',
@@ -507,6 +515,42 @@ describe('PATCH /api/config/env (route)', () => {
       assert.equal(res.statusCode, 400);
       const body = JSON.parse(res.payload);
       assert.match(body.error, /not editable/);
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects attempts to modify DEFAULT_OWNER_USER_ID via hub (privilege escalation prevention)', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'DEFAULT_OWNER_USER_ID=real-owner\n', 'utf8');
+    setEnv('DEFAULT_OWNER_USER_ID', 'real-owner');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'attacker' },
+        payload: {
+          updates: [{ name: 'DEFAULT_OWNER_USER_ID', value: 'attacker' }],
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      const body = JSON.parse(res.payload);
+      assert.match(body.error, /not editable/);
+      // Verify env was NOT modified
+      assert.equal(process.env.DEFAULT_OWNER_USER_ID, 'real-owner');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

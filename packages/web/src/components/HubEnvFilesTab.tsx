@@ -476,7 +476,9 @@ export function HubEnvFilesTab() {
         : data.variables.map((variable) => {
             const update = changedUpdates.find((item) => item.name === variable.name);
             if (!update) return variable;
-            return { ...variable, currentValue: update.value || null };
+            // Mask sensitive values in fallback — never store plaintext secret in UI state
+            const fallbackValue = isSensitiveEditable(variable) ? '***' : update.value || null;
+            return { ...variable, currentValue: fallbackValue };
           });
       setData((prev) => (prev ? { ...prev, variables: nextVariables } : prev));
       setDrafts(

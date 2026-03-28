@@ -143,6 +143,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '默认所有者用户 ID',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'CAT_CAFE_USER_ID',
