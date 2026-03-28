@@ -115,6 +115,22 @@ describe('fix(#185): console→Pino patch', () => {
     assert.ok(!content.includes('nested-secret'), 'raw nested token must not appear');
   });
 
+  it('P1: bracket-path keys (x-api-key, set-cookie) are redacted', () => {
+    resetLogDir();
+    runLoggerScript(`console.log({ headers: { 'x-api-key': 'key-abc', 'set-cookie': 'sess=xyz' } });`);
+    const content = readAllLogs();
+    assert.ok(!content.includes('key-abc'), 'x-api-key value must not appear');
+    assert.ok(!content.includes('sess=xyz'), 'set-cookie value must not appear');
+  });
+
+  it('P1: circular objects do not crash', () => {
+    resetLogDir();
+    runLoggerScript(`const obj = { name: 'test' }; obj.self = obj; console.log(obj);`);
+    const content = readAllLogs();
+    assert.ok(content.includes('Circular'), 'circular ref should be replaced');
+    assert.ok(content.includes('test'), 'non-circular fields should appear');
+  });
+
   it('P2: printf + object mix preserves interpolation', () => {
     resetLogDir();
     runLoggerScript(`console.log('count=%d', 42, { token: 'mix-secret' });`);

@@ -113,19 +113,24 @@ const origDebug = console.debug;
 
 /** Leaf key names extracted from REDACT_PATHS for recursive pre-sanitization. */
 const SENSITIVE_KEYS = new Set(
-  REDACT_PATHS.map((p) => p.split('.').pop()!)
-    .map((k) => k.replace(/[[\]"]/g, ''))
-    .filter(Boolean),
+  REDACT_PATHS.map((p) => {
+    // Handle bracket notation: split on . and [, take last segment, strip quotes/brackets
+    const segments = p.split(/[.[]/);
+    return segments[segments.length - 1].replace(/[\]"]/g, '').trim();
+  }).filter(Boolean),
 );
 
-/** Recursively redact sensitive keys at any nesting depth. */
-function sanitizeArg(val: unknown): unknown {
+/** Recursively redact sensitive keys at any nesting depth. Handles circular refs. */
+function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
   if (val === null || typeof val !== 'object') return val;
   if (val instanceof Error) return val;
-  if (Array.isArray(val)) return val.map(sanitizeArg);
+  const visited = seen ?? new WeakSet();
+  if (visited.has(val as object)) return '[Circular]';
+  visited.add(val as object);
+  if (Array.isArray(val)) return val.map((v) => sanitizeArg(v, visited));
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-    result[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v);
+    result[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v, visited);
   }
   return result;
 }
@@ -133,7 +138,7 @@ function sanitizeArg(val: unknown): unknown {
 type PinoLevel = 'info' | 'warn' | 'error' | 'debug';
 function consoleToPino(level: PinoLevel, orig: (...a: unknown[]) => void): (...a: unknown[]) => void {
   return (...args: unknown[]) => {
-    const sanitized = args.map(sanitizeArg);
+    const sanitized = args.map((a) => sanitizeArg(a));
     const msg = utilFormat(...sanitized);
     consoleLogger[level](msg);
     process.stderr.write(`[console.${level}] ${msg}\n`);
