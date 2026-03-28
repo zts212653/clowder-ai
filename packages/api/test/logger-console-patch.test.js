@@ -131,6 +131,25 @@ describe('fix(#185): console→Pino patch', () => {
     assert.ok(content.includes('test'), 'non-circular fields should appear');
   });
 
+  it('P1: case-insensitive key matching (Authorization, Token)', () => {
+    resetLogDir();
+    runLoggerScript(`console.log({ Authorization: 'Bearer secret', Token: 'caps-token' });`);
+    const content = readAllLogs();
+    assert.ok(!content.includes('Bearer secret'), 'Authorization (capital A) must be redacted');
+    assert.ok(!content.includes('caps-token'), 'Token (capital T) must be redacted');
+  });
+
+  it('P1: class instances with sensitive props are redacted', () => {
+    resetLogDir();
+    runLoggerScript(`
+      class Config { constructor() { this.token = 'class-secret'; this.name = 'safe'; } }
+      console.log(new Config());
+    `);
+    const content = readAllLogs();
+    assert.ok(!content.includes('class-secret'), 'token on class instance must be redacted');
+    assert.ok(content.includes('safe'), 'non-sensitive props should appear');
+  });
+
   it('P2: printf + object mix preserves interpolation', () => {
     resetLogDir();
     runLoggerScript(`console.log('count=%d', 42, { token: 'mix-secret' });`);

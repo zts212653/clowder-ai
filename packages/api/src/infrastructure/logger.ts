@@ -111,14 +111,22 @@ const origError = console.error;
 const origInfo = console.info;
 const origDebug = console.debug;
 
-/** Leaf key names extracted from REDACT_PATHS for recursive pre-sanitization. */
+/** Leaf key names (lowercased) extracted from REDACT_PATHS for case-insensitive pre-sanitization. */
 const SENSITIVE_KEYS = new Set(
   REDACT_PATHS.map((p) => {
-    // Handle bracket notation: split on . and [, take last segment, strip quotes/brackets
     const segments = p.split(/[.[]/);
-    return segments[segments.length - 1].replace(/[\]"]/g, '').trim();
+    return segments[segments.length - 1].replace(/[\]"]/g, '').trim().toLowerCase();
   }).filter(Boolean),
 );
+
+/** Sanitize enumerable own properties of an object, redacting sensitive keys. */
+function sanitizeEntries(obj: object, visited: WeakSet<object>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    result[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : sanitizeArg(v, visited);
+  }
+  return result;
+}
 
 /** Recursively redact sensitive keys at any nesting depth. Handles circular refs and throwing getters. */
 function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
@@ -127,27 +135,17 @@ function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
   if (visited.has(val as object)) return '[Circular]';
   visited.add(val as object);
   if (Array.isArray(val)) return val.map((v) => sanitizeArg(v, visited));
-  // Error: preserve name/message/stack but sanitize attached props (e.g. axios .config/.response)
   if (val instanceof Error) {
     const cleaned: Record<string, unknown> = { name: val.name, message: val.message, stack: val.stack };
     try {
-      for (const [k, v] of Object.entries(val)) {
-        cleaned[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v, visited);
-      }
+      Object.assign(cleaned, sanitizeEntries(val, visited));
     } catch {
-      /* ignore throwing getters on error subclasses */
+      /* throwing getters */
     }
     return cleaned;
   }
-  // Non-plain objects (Date, Map, Set, class instances): return as-is for correct utilFormat
-  const proto = Object.getPrototypeOf(val);
-  if (proto !== null && proto !== Object.prototype) return val;
   try {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-      result[k] = SENSITIVE_KEYS.has(k) ? '[REDACTED]' : sanitizeArg(v, visited);
-    }
-    return result;
+    return sanitizeEntries(val as Record<string, unknown>, visited);
   } catch {
     return '[Object]';
   }
