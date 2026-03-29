@@ -23,6 +23,7 @@ const apiBaseUrl = resolveApiBaseUrl();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: process.env.NEXT_STANDALONE === '1' ? 'standalone' : undefined,
   reactStrictMode: true,
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "Cat Café",
+  "version": "0.1.0",
+  "identifier": "com.cat-cafe.desktop",
+  "build": {
+    "devUrl": "http://localhost:13003",
+    "frontendDist": "./dist",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "Cat Café",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "decorations": true,
+        "transparent": true,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app"],
+    "resources": {
+      "../staging/node": "resources/node",
+      "../staging/web": "resources/web",
+      "../staging/api": "resources/api",
+      "../staging/launch-web.sh": "resources/launch-web.sh",
+      "../staging/launch-api.sh": "resources/launch-api.sh",
+      "../staging/first-run-setup.sh": "resources/first-run-setup.sh"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

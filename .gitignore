@@ -3,6 +3,10 @@ node_modules/
 
 # Build outputs
 dist/
+!packages/desktop/src-tauri/dist/
+
+# Tauri build artifacts
+packages/desktop/src-tauri/target/
 docs/.doc-index.json
 build/
 .next/
