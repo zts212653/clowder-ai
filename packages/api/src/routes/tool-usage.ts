@@ -6,6 +6,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { ToolCategory } from '../domains/cats/services/tool-usage/classify.js';
 import type { ToolUsageCounter, ToolUsageReport } from '../domains/cats/services/tool-usage/ToolUsageCounter.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface ToolUsageRoutesOptions {
   toolUsageCounter: ToolUsageCounter;
@@ -33,6 +34,12 @@ export const toolUsageRoutes: FastifyPluginAsync<ToolUsageRoutesOptions> = async
   app.get<{
     Querystring: { days?: string; catId?: string; category?: string; refresh?: string };
   }>('/api/usage/tools', async (request, reply) => {
+    // Auth: require identity header (consistent with /api/usage/daily)
+    const userId = resolveHeaderUserId(request);
+    if (!userId) {
+      return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
+    }
+
     const counter = opts.toolUsageCounter;
 
     const daysParam = request.query.days;
