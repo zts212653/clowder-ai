@@ -50,6 +50,7 @@ export { summariesRoutes } from './summaries.js';
 export { tasksRoutes } from './tasks.js';
 export { threadBranchRoutes } from './thread-branch.js';
 export { threadsRoutes } from './threads.js';
+export { toolUsageRoutes } from './tool-usage.js';
 export { ttsRoutes } from './tts.js';
 export { uploadsRoutes } from './uploads.js';
 export { usageRoutes } from './usage.js';
