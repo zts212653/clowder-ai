@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import {
+  deriveOpenCodeApiType,
   generateOpenCodeConfig,
   generateOpenCodeRuntimeConfig,
   OC_API_KEY_ENV,
@@ -175,6 +176,55 @@ describe('parseOpenCodeModel', () => {
   });
 });
 
+describe('deriveOpenCodeApiType', () => {
+  test('explicit protocol takes precedence over ocProviderName', () => {
+    const scenarios = [
+      // Explicit protocol always wins
+      { protocol: 'anthropic', ocProviderName: 'anthropic', expected: 'anthropic' },
+      { protocol: 'google', ocProviderName: 'custom-gemini', expected: 'google' },
+      { protocol: 'openai', ocProviderName: 'openrouter', expected: 'openai' },
+      // Conflict: explicit protocol overrides ocProviderName
+      { protocol: 'openai', ocProviderName: 'anthropic', expected: 'openai' },
+      { protocol: 'openai', ocProviderName: 'google', expected: 'openai' },
+      { protocol: 'google', ocProviderName: 'anthropic', expected: 'google' },
+    ];
+    for (const { protocol, ocProviderName, expected } of scenarios) {
+      assert.equal(
+        deriveOpenCodeApiType(protocol, ocProviderName),
+        expected,
+        `protocol=${protocol}, ocProviderName=${ocProviderName} → ${expected}`,
+      );
+    }
+  });
+
+  test('falls back to ocProviderName when protocol is undefined', () => {
+    const scenarios = [
+      { ocProviderName: 'anthropic', expected: 'anthropic' },
+      { ocProviderName: 'google', expected: 'google' },
+      { ocProviderName: 'maas', expected: 'openai' },
+      { ocProviderName: 'deepseek', expected: 'openai' },
+      { ocProviderName: 'minimax', expected: 'openai' },
+      { ocProviderName: undefined, expected: 'openai' },
+    ];
+    for (const { ocProviderName, expected } of scenarios) {
+      assert.equal(
+        deriveOpenCodeApiType(undefined, ocProviderName),
+        expected,
+        `protocol=undefined, ocProviderName=${ocProviderName} → ${expected}`,
+      );
+    }
+  });
+
+  test('openai-responses protocol is reachable and returns openai-responses', () => {
+    assert.equal(deriveOpenCodeApiType('openai-responses', 'maas'), 'openai-responses');
+    assert.equal(deriveOpenCodeApiType('openai-responses', undefined), 'openai-responses');
+  });
+
+  test('unknown protocol values default to openai', () => {
+    assert.equal(deriveOpenCodeApiType('unknown-proto', 'anthropic'), 'openai');
+  });
+});
+
 describe('generateOpenCodeRuntimeConfig', () => {
   test('generates custom provider config with env placeholders and stripped model keys', () => {
     const config = generateOpenCodeRuntimeConfig({
@@ -193,6 +243,32 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.equal(config.provider.maas.npm, '@ai-sdk/openai-compatible');
     assert.equal(config.provider.maas.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
     assert.equal(config.provider.maas.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
+  });
+
+  test('apiType maps to correct npm adapters', () => {
+    const cases = [
+      { apiType: 'openai', expectedNpm: '@ai-sdk/openai-compatible' },
+      { apiType: 'openai-responses', expectedNpm: '@ai-sdk/openai' },
+      { apiType: 'anthropic', expectedNpm: '@ai-sdk/anthropic' },
+      { apiType: 'google', expectedNpm: '@ai-sdk/google' },
+    ];
+    for (const { apiType, expectedNpm } of cases) {
+      const config = generateOpenCodeRuntimeConfig({
+        providerName: 'test-provider',
+        models: ['test-model'],
+        apiType,
+      });
+      assert.equal(config.provider['test-provider'].npm, expectedNpm, `apiType=${apiType} → npm=${expectedNpm}`);
+    }
+  });
+
+  test('unknown apiType falls back to openai-compatible adapter', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'test',
+      models: ['m1'],
+      apiType: 'bogus',
+    });
+    assert.equal(config.provider.test.npm, '@ai-sdk/openai-compatible');
   });
 });
 

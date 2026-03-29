@@ -1,10 +1,14 @@
-export function buildProbeHeaders(protocol: 'anthropic' | 'openai' | 'google', apiKey: string): Record<string, string> {
+export function buildProbeHeaders(
+  protocol: 'anthropic' | 'openai' | 'openai-responses' | 'google',
+  apiKey: string,
+): Record<string, string> {
   switch (protocol) {
     case 'anthropic':
       return { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
     case 'google':
       return { 'x-goog-api-key': apiKey };
     case 'openai':
+    case 'openai-responses':
     default:
       return { authorization: `Bearer ${apiKey}` };
   }

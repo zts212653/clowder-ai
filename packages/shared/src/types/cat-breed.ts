@@ -192,7 +192,7 @@ export interface ReviewPolicy {
 // ── F136 Phase 4: Account config types ──────────────────────────────────
 
 /** Protocol that the LLM endpoint speaks. */
-export type AccountProtocol = 'anthropic' | 'openai' | 'google';
+export type AccountProtocol = 'anthropic' | 'openai' | 'openai-responses' | 'google';
 
 /**
  * Account configuration — lives in cat-catalog.json `accounts` section.

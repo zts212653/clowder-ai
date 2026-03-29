@@ -36,6 +36,7 @@ import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import {
+  deriveOpenCodeApiType,
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
@@ -757,7 +758,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       } else {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
       }
-    } else if (effectiveProtocol === 'openai') {
+    } else if (effectiveProtocol === 'openai' || effectiveProtocol === 'openai-responses') {
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CODEX_AUTH_MODE = 'api_key';
         if (resolvedAccount.apiKey) {
@@ -835,12 +836,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       (hasExplicitOcProvider || !getOpenCodeKnownModels().has(effectiveModel))
     ) {
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = effectiveModel;
-      const apiType: 'openai' | 'anthropic' | 'google' =
-        resolvedAccount.protocol === 'anthropic'
-          ? 'anthropic'
-          : resolvedAccount.protocol === 'google'
-            ? 'google'
-            : 'openai';
+      const apiType = deriveOpenCodeApiType(resolvedAccount.protocol, effectiveProviderName);
       const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
       openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, invocationId, {
         providerName: effectiveProviderName,

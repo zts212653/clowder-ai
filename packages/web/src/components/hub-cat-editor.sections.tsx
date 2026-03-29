@@ -114,7 +114,7 @@ export function IdentitySection({
           onClick={() => fileInputRef.current?.click()}
           className="flex items-center gap-2 rounded-lg border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-1.5 text-sm text-[#5C4B42] transition hover:border-[#D49266]"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-cafe-surface text-[10px] text-[#8A776B]">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
             {avatarSrc ? (
               // biome-ignore lint/performance/noImgElement: avatar path may be runtime upload URL
               <img src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
@@ -276,28 +276,54 @@ function ComboField({
   );
 }
 
+// Derive the opencode endpoint suffix from protocol / ocProviderName.
+// Priority mirrors backend deriveOpenCodeApiType: protocol > ocProviderName > default.
+// Note: model prefix (e.g. google/gemini-*) is NOT used — it can be a namespace
+// within a different provider (e.g. OpenRouter) and would produce misleading hints.
+function resolveOpenCodeEndpoint(protocol: string | undefined, ocProviderName: string): string {
+  // Explicit protocol always wins (same as deriveOpenCodeApiType)
+  if (protocol) {
+    if (protocol === 'anthropic') return '/v1/messages';
+    if (protocol === 'google') return '/models/{model}:generateContent';
+    if (protocol === 'openai-responses') return '/v1/responses';
+    return '/v1/chat/completions';
+  }
+  // Fallback: ocProviderName (authoritative provider binding)
+  if (ocProviderName === 'anthropic') return '/v1/messages';
+  if (ocProviderName === 'google') return '/models/{model}:generateContent';
+  return '/v1/chat/completions';
+}
+
 // Generate a hint showing what API endpoint the CLI will actually call
-function buildCallHint(client: string, profile: ProfileItem | undefined, model: string): string | null {
+function buildCallHint(
+  client: string,
+  profile: ProfileItem | undefined,
+  model: string,
+  ocProviderName: string,
+): string | null {
   if (!profile || profile.builtin || !profile.baseUrl) return null;
   const base = profile.baseUrl.replace(/\/+$/, '');
   const hasV1Suffix = /\/v1$/i.test(base);
+  // Strip trailing /v1 from base to avoid /v1/v1 duplication when pathSuffix already includes /v1
+  const baseWithoutV1 = hasV1Suffix ? base.replace(/\/v1$/i, '') : base;
 
-  // Claude CLI internally adds /v1, so if user already has /v1 it will become /v1/v1
+  // For opencode, derive endpoint dynamically (protocol > ocProviderName > default)
+  const ocPath = client === 'opencode' ? resolveOpenCodeEndpoint(profile.protocol, ocProviderName) : undefined;
+
   const cliEndpoints: Record<string, { cli: string; pathSuffix: string }> = {
     anthropic: { cli: 'claude', pathSuffix: '/v1/messages' },
-    opencode: { cli: 'opencode', pathSuffix: '/messages' },
-    openai: { cli: 'codex', pathSuffix: '/responses' },
+    opencode: { cli: 'opencode', pathSuffix: ocPath ?? '/v1/chat/completions' },
+    openai: { cli: 'codex', pathSuffix: '/v1/responses' },
     google: { cli: 'gemini', pathSuffix: `/models/${model || '...'}:generateContent` },
-    dare: { cli: 'dare', pathSuffix: '/chat/completions' },
+    dare: { cli: 'dare', pathSuffix: '/v1/chat/completions' },
   };
   const info = cliEndpoints[client];
   if (!info) return null;
 
-  const fullUrl = `${base}${info.pathSuffix}`;
+  // Use baseWithoutV1 for paths starting with /v1 to avoid duplication
+  const effectiveBase = info.pathSuffix.startsWith('/v1') ? baseWithoutV1 : base;
+  const fullUrl = `${effectiveBase}${info.pathSuffix}`;
   let warning = '';
-  if (client === 'anthropic' && hasV1Suffix) {
-    warning = `\n注意: base URL 末尾的 /v1 会导致路径重复（/v1/v1/messages），建议去掉 /v1 后缀`;
-  }
   if (client === 'google') {
     warning = `\n注意: Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client`;
   }
@@ -321,7 +347,7 @@ export function AccountSection({
 }) {
   const accountOptions = availableProfiles;
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
-  const callHint = buildCallHint(form.client, selectedProfile, form.defaultModel);
+  const callHint = buildCallHint(form.client, selectedProfile, form.defaultModel, form.ocProviderName);
   const providerSuggestions = useMemo(
     () => buildProviderSuggestions(selectedProfile?.models ?? []),
     [selectedProfile?.models],
@@ -377,11 +403,6 @@ export function AccountSection({
               disabled={loadingProfiles}
               required
             />
-            {callHint ? (
-              <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
-                <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">{callHint}</p>
-              </div>
-            ) : null}
             <ComboField
               label="Model"
               ariaLabel="Model"
@@ -397,32 +418,28 @@ export function AccountSection({
             />
             {form.client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <ComboField
-                label="Provider 名称（可选）"
+                label="Provider 名称"
                 ariaLabel="OC Provider Name"
                 value={form.ocProviderName}
                 onChange={(value) => onChange({ ocProviderName: value })}
                 suggestions={providerSuggestions}
-                placeholder="留空则从 Model 自动推断（如 minimax/MiniMax-M2.7 → minimax）"
+                required
+                placeholder="如 anthropic、openai、openrouter、maas"
               />
             ) : null}
             {form.client === 'opencode' &&
             form.defaultModel.trim() &&
-            (() => {
-              const m = form.defaultModel.trim();
-              const si = m.indexOf('/');
-              const looksLike = si > 0 && si < m.length - 1;
-              if (!looksLike) return true;
-              const known = new Set(['anthropic', 'openai', 'openrouter', 'google']);
-              if (known.has(m.slice(0, si))) return false;
-              const acm = selectedProfile?.models ?? [];
-              const bare = m.slice(si + 1);
-              return acm.includes(m) && !acm.includes(bare);
-            })() &&
+            !form.defaultModel.includes('/') &&
             !form.ocProviderName.trim() ? (
               <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
                 <p className="text-[11px] leading-4 text-[#8A776B]">
-                  建议使用 `providerId/modelId` 格式（例如 `minimax/MiniMax-M2.7`），或填写上方 Provider 名称。
+                  建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。
                 </p>
+              </div>
+            ) : null}
+            {callHint ? (
+              <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
+                <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">{callHint}</p>
               </div>
             ) : null}
           </>
