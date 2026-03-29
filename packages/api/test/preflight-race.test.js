@@ -3,7 +3,9 @@
  * when pre-flight async operations (Redis, session chain) are unresponsive.
  */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 // Static import for tests that don't need a custom timeout
 import { PREFLIGHT_TIMEOUT_MS, preflightRace } from '../dist/domains/cats/services/agents/invocation/invoke-helpers.js';
@@ -65,5 +67,37 @@ describe('preflightRace timeout (short env override)', () => {
   it('rejects with preflight_timeout when promise hangs past timeout', async () => {
     const neverResolves = new Promise(() => {});
     await assert.rejects(shortPreflightRace(neverResolves, 'test-hang'), /preflight_timeout: test-hang/);
+  });
+
+  it('keeps an otherwise idle process alive until preflight timeout fires', () => {
+    const invokeHelpersUrl = new URL(
+      '../dist/domains/cats/services/agents/invocation/invoke-helpers.js',
+      import.meta.url,
+    ).href;
+    const apiDir = fileURLToPath(new URL('..', import.meta.url));
+    const script = `
+const mod = await import(${JSON.stringify(invokeHelpersUrl)});
+try {
+  await mod.preflightRace(new Promise(() => {}), 'child-hang');
+  console.log('resolved');
+  process.exit(2);
+} catch (err) {
+  console.log('rejected', err.message);
+  process.exit(0);
+}
+`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: apiDir,
+      env: { ...process.env, CAT_CAFE_PREFLIGHT_TIMEOUT_MS: '100' },
+      encoding: 'utf8',
+      timeout: 2_000,
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `child must stay alive until timeout rejects; stdout=${result.stdout} stderr=${result.stderr}`,
+    );
+    assert.match(result.stdout, /rejected preflight_timeout: child-hang/);
   });
 });
