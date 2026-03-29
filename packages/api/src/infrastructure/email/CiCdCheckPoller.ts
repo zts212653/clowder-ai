@@ -79,8 +79,12 @@ export class CiCdCheckPoller {
 
     const routeResult = await cicdRouter.route(pollResult);
 
-    if (routeResult.kind === 'notified' && routeResult.bucket === 'fail' && invokeTrigger) {
-      const policy: ConnectorTriggerPolicy = { priority: 'urgent', reason: 'github_ci_failure' };
+    if (routeResult.kind === 'notified' && invokeTrigger) {
+      const isFail = routeResult.bucket === 'fail';
+      const policy: ConnectorTriggerPolicy = {
+        priority: isFail ? 'urgent' : 'normal',
+        reason: isFail ? 'github_ci_failure' : 'github_ci_pass',
+      };
       invokeTrigger.trigger(
         routeResult.threadId,
         routeResult.catId as CatId,
@@ -90,7 +94,7 @@ export class CiCdCheckPoller {
         undefined,
         policy,
       );
-      log.info(`[CiCdCheckPoller] Triggered ${routeResult.catId} for CI failure`);
+      log.info(`[CiCdCheckPoller] Triggered ${routeResult.catId} for CI ${isFail ? 'failure' : 'pass'}`);
     }
   }
 

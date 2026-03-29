@@ -31,7 +31,7 @@ function ToastCard({ toast }: { toast: ToastItem }) {
   return (
     <div
       className={`
-        bg-white rounded-lg shadow-lg border border-gray-100 border-l-4 ${borderColor}
+        bg-cafe-surface rounded-lg shadow-lg border border-cafe-subtle border-l-4 ${borderColor}
         px-4 py-3 max-w-xs pointer-events-auto
         ${toast.exiting ? 'animate-toast-out' : 'animate-toast-in'}
       `}
@@ -42,12 +42,12 @@ function ToastCard({ toast }: { toast: ToastItem }) {
           {toast.type === 'error' ? 'ᓚᘏᗢ' : toast.type === 'success' ? 'ᓚᘏᗢ' : 'ᓚᘏᗢ'}
         </span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-800 truncate">{toast.title}</p>
-          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{toast.message}</p>
+          <p className="text-sm font-medium text-cafe truncate">{toast.title}</p>
+          <p className="text-xs text-cafe-secondary mt-0.5 line-clamp-2">{toast.message}</p>
         </div>
         <button
           onClick={dismiss}
-          className="text-gray-300 hover:text-gray-500 flex-shrink-0 p-0.5"
+          className="text-cafe-muted hover:text-cafe-secondary flex-shrink-0 p-0.5"
           title="关闭"
           aria-label="关闭"
         >

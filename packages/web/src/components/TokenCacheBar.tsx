@@ -41,7 +41,7 @@ export function TokenCacheBar({ percent, catId }: TokenCacheBarProps) {
           }}
         />
       </div>
-      <span className="text-[10px] text-gray-400 tabular-nums w-7 text-right">{percent}%</span>
+      <span className="text-[10px] text-cafe-muted tabular-nums w-7 text-right">{percent}%</span>
     </div>
   );
 }

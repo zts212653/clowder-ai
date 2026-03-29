@@ -60,6 +60,8 @@ export interface CallbackRoutesOptions {
   deliveryCursorStore?: DeliveryCursorStore;
   /** TD091: PR tracking registration via MCP callback */
   prTrackingStore?: IPrTrackingStore;
+  /** Phase D: validates GitHub repo exists before PR tracking registration */
+  validateRepo?: (repoFullName: string) => Promise<boolean>;
   /** F043 P1: feat_index provider override for tests */
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
@@ -288,6 +290,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     invocationTracker,
     deliveryCursorStore,
     prTrackingStore,
+    validateRepo,
     featIndexProvider,
     queueProcessor,
   } = opts;
@@ -510,7 +513,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         content: storedContent,
         origin: 'callback',
         messageId: storedMsg.id,
-        // #266: include invocationId so frontend can match callback to stream bubble
         ...(invocationId ? { invocationId } : {}),
         // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
         ...(isCrossThread || validExplicitTargets.length
@@ -1015,6 +1017,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Use authoritative catId from invocation record, not caller payload.
     // LLMs may pass wrong catId (e.g. tool description examples bias).
     const catId = record.catId;
+
+    // Phase D: validate repo exists and is accessible (AC-D1)
+    if (validateRepo) {
+      let repoOk: boolean;
+      try {
+        repoOk = await validateRepo(repoFullName);
+      } catch {
+        reply.status(503);
+        return { error: 'Repository validation unavailable — try again later' };
+      }
+      if (!repoOk) {
+        reply.status(422);
+        return { error: `Repository ${repoFullName} does not exist or is not accessible` };
+      }
+    }
 
     // Cloud Codex P1-2: ownership protection — reject cross-user overwrites
     const existing = await prTrackingStore.get(repoFullName, prNumber);

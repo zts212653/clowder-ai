@@ -52,6 +52,10 @@ function buildThreadBState(cachedAssistantTs: number) {
     queuePauseReason: undefined,
     queueFull: false,
     queueFullSource: undefined,
+    workspaceWorktreeId: null,
+    workspaceOpenTabs: [],
+    workspaceOpenFilePath: null,
+    workspaceOpenFileLine: null,
   };
 }
 
@@ -368,6 +372,10 @@ describe('useChatHistory replace hydration', () => {
       queuePauseReason: undefined,
       queueFull: false,
       queueFullSource: undefined,
+      workspaceWorktreeId: null,
+      workspaceOpenTabs: [],
+      workspaceOpenFilePath: null,
+      workspaceOpenFileLine: null,
     });
 
     await history.waitUntilPending();

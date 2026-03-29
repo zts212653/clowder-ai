@@ -133,6 +133,67 @@ describe('GET /api/connector/weixin/qrcode-status — adapter not ready', () => 
   });
 });
 
+describe('POST /api/connector/weixin/disconnect', () => {
+  it('returns 401 without auth header', async () => {
+    const { app } = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/connector/weixin/disconnect' });
+    assert.equal(res.statusCode, 401);
+    await app.close();
+  });
+
+  it('returns 503 when adapter is not available', async () => {
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      weixinAdapter: undefined,
+    });
+    await app.ready();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/weixin/disconnect',
+      headers: AUTH_HEADERS,
+    });
+    assert.equal(res.statusCode, 503);
+    await app.close();
+  });
+
+  it('calls disconnect on adapter and returns ok', async () => {
+    let disconnected = false;
+    const mockAdapter = {
+      hasBotToken: () => true,
+      isPolling: () => true,
+      async disconnect() {
+        disconnected = true;
+      },
+    };
+
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      weixinAdapter: mockAdapter,
+    });
+    await app.ready();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/weixin/disconnect',
+      headers: AUTH_HEADERS,
+    });
+    const body = JSON.parse(res.body);
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.ok, true);
+    assert.equal(disconnected, true, 'adapter.disconnect() must be called');
+    await app.close();
+  });
+});
+
 describe('GET /api/connector/hub-threads', () => {
   it('returns 401 when only a spoofed userId query param is provided', async () => {
     const { app } = await buildApp();

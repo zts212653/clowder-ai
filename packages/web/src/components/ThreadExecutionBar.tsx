@@ -65,7 +65,7 @@ export function ThreadExecutionBar() {
 
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 text-xs border-b border-[#9B7EBD]/10">
-      <span className="text-gray-400 font-medium shrink-0">执行中</span>
+      <span className="text-cafe-muted font-medium shrink-0">执行中</span>
       {activeCats.map(({ catId, startedAt }) => {
         const info = catDisplayMap.get(catId) ?? { label: catId, color: '#9B7EBD' };
         return (
@@ -83,7 +83,7 @@ export function ThreadExecutionBar() {
         <button
           type="button"
           onClick={handleStopAll}
-          className="ml-auto text-xs text-gray-400 hover:text-red-500 transition-colors shrink-0"
+          className="ml-auto text-xs text-cafe-muted hover:text-red-500 transition-colors shrink-0"
         >
           全部停止
         </button>
@@ -111,14 +111,14 @@ function CatStatusChip({
   const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
   return (
-    <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/50">
+    <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cafe-surface/50">
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
-      <span className="text-gray-600 font-medium">{label}</span>
-      <span className="text-gray-400 tabular-nums">{timeStr}</span>
+      <span className="text-cafe-secondary font-medium">{label}</span>
+      <span className="text-cafe-muted tabular-nums">{timeStr}</span>
       <button
         type="button"
         onClick={() => onStop(catId)}
-        className="ml-0.5 text-gray-400 hover:text-red-500 transition-colors"
+        className="ml-0.5 text-cafe-muted hover:text-red-500 transition-colors"
         aria-label={`Stop ${catId}`}
       >
         <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">

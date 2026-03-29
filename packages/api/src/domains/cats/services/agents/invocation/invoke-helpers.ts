@@ -74,3 +74,52 @@ export function isPromptTokenLimitExceededError(message: string | undefined): bo
   if (!message) return false;
   return /(prompt token count|input tokens?).*exceeds the limit of \d+/i.test(message);
 }
+
+export function isCliTimeoutError(message: string | undefined): boolean {
+  if (!message) return false;
+  return /CLI (?:响应超时|idle-silent 超时)/i.test(message);
+}
+
+/* ── Pre-flight timeout guard ────────────────────────────── */
+
+/**
+ * Maximum time (ms) for any single pre-flight async operation (Redis reads,
+ * session chain lookups, thread store reads) before the invocation generator
+ * gives up and proceeds with a safe fallback.
+ *
+ * Without this guard, a hung Redis/store operation blocks the generator
+ * indefinitely — the finally block never runs, InvocationTracker never
+ * clears, and the thread is permanently "busy."
+ */
+export const PREFLIGHT_TIMEOUT_MS = Number(process.env.CAT_CAFE_PREFLIGHT_TIMEOUT_MS) || 30_000;
+
+/**
+ * Race a promise against a preflight timeout and an optional AbortSignal.
+ * If the timeout or signal fires first, the returned promise rejects.
+ * The original promise is NOT cancelled (no way to do so generically)
+ * but the caller can proceed instead of hanging forever.
+ */
+export function preflightRace<T>(promise: Promise<T>, label: string, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const cleanup = (): void => {
+    if (timer) clearTimeout(timer);
+  };
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`preflight_timeout: ${label}`)), PREFLIGHT_TIMEOUT_MS);
+    timer.unref();
+  });
+
+  const parts: Promise<T | never>[] = [promise, timeoutPromise];
+  if (signal) {
+    parts.push(
+      new Promise<never>((_, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+    );
+  }
+
+  return Promise.race(parts).finally(cleanup);
+}

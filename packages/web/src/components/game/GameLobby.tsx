@@ -138,7 +138,7 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
                 onClick={() => toggleCat(cat.id)}
                 className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-sm transition-colors border ${
                   selectedCats.has(cat.id)
-                    ? 'border-current bg-white/5 font-medium'
+                    ? 'border-current bg-cafe-surface/5 font-medium'
                     : 'border-ww-subtle text-ww-dim hover:border-ww-active'
                 }`}
                 style={selectedCats.has(cat.id) ? { color: cat.color.primary } : undefined}

@@ -281,7 +281,7 @@ function TreeItem({
         <div className="relative">
           {node.children === undefined ? (
             <div
-              className="py-1 text-[10px] text-gray-400 animate-pulse"
+              className="py-1 text-[10px] text-cafe-muted animate-pulse"
               style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
             >
               加载中...

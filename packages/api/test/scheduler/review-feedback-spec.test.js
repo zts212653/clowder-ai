@@ -453,6 +453,86 @@ describe('ReviewFeedbackTaskSpec', () => {
     assert.equal(result.run, false, 'all-bot batch should be skipped');
   });
 
+  // ── F140 Phase C: review intent routing ──
+
+  it('CHANGES_REQUESTED triggers with suggestedSkill=receive-review (Phase C)', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const triggered = [];
+    const spec = createReviewFeedbackTaskSpec({
+      prTrackingStore: { listAll: async () => [mockEntry] },
+      fetchComments: async () => [],
+      fetchReviews: async () => [
+        { id: 1, author: 'reviewer', state: 'CHANGES_REQUESTED', body: 'Fix the bug', submittedAt: '2026-01-01' },
+      ],
+      reviewFeedbackRouter: {
+        async route() {
+          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'review' };
+        },
+      },
+      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      log: noopLog,
+    });
+    const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(gateResult.run, true);
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    assert.equal(triggered.length, 1);
+    const policy = triggered[0][6];
+    assert.equal(policy.priority, 'urgent');
+    assert.equal(policy.suggestedSkill, 'receive-review');
+  });
+
+  it('APPROVED triggers with suggestedSkill=merge-gate (Phase C)', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const triggered = [];
+    const spec = createReviewFeedbackTaskSpec({
+      prTrackingStore: { listAll: async () => [mockEntry] },
+      fetchComments: async () => [],
+      fetchReviews: async () => [
+        { id: 1, author: 'reviewer', state: 'APPROVED', body: 'LGTM', submittedAt: '2026-01-01' },
+      ],
+      reviewFeedbackRouter: {
+        async route() {
+          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'approved' };
+        },
+      },
+      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      log: noopLog,
+    });
+    const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(gateResult.run, true);
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    assert.equal(triggered.length, 1);
+    const policy = triggered[0][6];
+    assert.equal(policy.priority, 'normal');
+    assert.equal(policy.suggestedSkill, 'merge-gate');
+  });
+
+  it('COMMENTED-only triggers with no suggestedSkill (Phase C)', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const triggered = [];
+    const spec = createReviewFeedbackTaskSpec({
+      prTrackingStore: { listAll: async () => [mockEntry] },
+      fetchComments: async () => [],
+      fetchReviews: async () => [
+        { id: 1, author: 'reviewer', state: 'COMMENTED', body: 'Interesting approach', submittedAt: '2026-01-01' },
+      ],
+      reviewFeedbackRouter: {
+        async route() {
+          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'comment' };
+        },
+      },
+      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      log: noopLog,
+    });
+    const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(gateResult.run, true);
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    assert.equal(triggered.length, 1);
+    const policy = triggered[0][6];
+    assert.equal(policy.priority, 'normal');
+    assert.equal(policy.suggestedSkill, undefined);
+  });
+
   it('non-authoritative bot comment is NOT filtered (Rule B negative)', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();

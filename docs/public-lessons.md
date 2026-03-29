@@ -748,6 +748,99 @@ created: 2026-02-26
 
 ---
 
+### LL-040: AI 写文档日期不能凭内部时间感——必须先 `date` 校准
+
+- 状态：validated
+- 更新时间：2026-03-27
+
+- 坑：金渐层在 5 个文档中写入了 11 处未来日期（2026-06/07），实际当时是 2026-03。这是第二轮修复（第一轮 de2cb42f5 修了 F137）。
+- 根因：LLM 没有可靠的内部时钟。金渐层的训练数据截止日期造成系统性时间偏差（+3~4 个月），在不调用 `date` 命令校准的情况下，凭"内部时间感"直接写入日期 = 幻觉。
+- 触发条件：任何猫在文档中写入日期（timeline、changelog、KD 表、Phase 记录等）且未先确认当前日期时。
+- 偏差模式：稳定 +3~4 个月，不是随机错误，是系统性偏差。
+- 修复：commit `9f87d354e` 批量修正 5 文件 11 处（open-source-status / F048 / F055 / F121 / F134）。
+- 防护：
+  - **铁律：写日期前先 `date`** — 任何猫在文档中写入日期时，必须先执行 `date` 或从系统 prompt 中确认当前日期，禁止凭感觉写
+  - **Review 检查项**：reviewer 核对文档中新增日期是否在合理范围内（不超过当前日期）
+- 来源锚点：
+  - 金渐层自述根因：内部时间感知幻觉 + 训练截止日期偏差
+  - 第一轮修复：de2cb42f5（F137）、第二轮修复：9f87d354e（F048/F055/F121/F134/open-source-status）
+- 原理：LLM 的时间感知是从训练数据中学到的统计分布，不是真实时钟。没有外部锚定（系统 prompt 日期注入或 `date` 命令），任何模型都可能产出偏移日期。这跟"内容幻觉"本质相同——模型生成看起来合理但事实错误的信息。
+
+- 关联：金渐层日期幻觉 | 5 文件 11 处 | 两轮修复
+
+### LL-041: 写完产物不主动打开 = 做了菜不端上桌
+
+- 状态：validated
+- 更新时间：2026-03-28
+
+- 坑：Ragdoll写完诊断报告后只报了文件路径，没有帮铲屎官打开。铲屎官反问："我们有打开的能力，但你写完了竟然不帮我打开！"
+- 根因：猫的工作流在"产出文件"这一步就画了句号，没有编码"呈现给铲屎官"这一步。workspace-navigator、browser-preview、rich block 等展示能力都存在，但只在铲屎官明确要求时才被动使用——缺少"何时主动展示"的触发时机。
+- 触发条件：任何猫写完文件/跑完测试/改完前端/生成报告后，没有主动打开或展示给铲屎官。
+- 修复：当次手动用 Navigate API 打开了报告。
+- 防护：
+  - **shared-rules W8 共享视图** — 将"产物端上桌"编码为世界观级规则，通过 GOVERNANCE_L0_DIGEST 注入所有猫的每次调用
+  - **判断标准**：写完产物后问"铲屎官需要看到这个吗？"——是 → 按场景用 navigate / preview / rich block 打开
+- 来源锚点：
+  - 铲屎官原话："写完竟然不帮我打开！就和写完前端不帮我打开 preview 一样"
+  - shared-rules.md W8 新增
+  - SystemPromptBuilder.ts GOVERNANCE_L0_DIGEST W8 新增
+- 原理：人猫协作是双向共享感知，不是单向任务完成汇报。愿景写的是"共享家园"——家人做了饭会端上桌，不会只喊一声"厨房锅里有饭"。猫的能力边界不只是"能做"，还包括"做完后展示"。这是人猫协作和人用 API 的本质区别（W1）。
+
+- 关联：shared-rules W8 | workspace-navigator skill | browser-preview skill | 三天产品化诊断
+
+---
+
+### LL-042: 配置真相源不加门禁就会漂移——env 变量三处不同步
+- 状态：validated
+- 更新时间：2026-03-28
+- 坑：`env-registry.ts`（Hub 用）、`.env.example`（新用户用）、代码里的 `process.env.XXX`（实际真相）三处各自为政，无任何自动化检查。结果：25+ 个变量代码里用了但 Hub 看不到，`.env.example` 只有 21 条 vs 实际 100+，8 个 HINDSIGHT 变量在 `.env.example` 里但代码从未引用。
+- 根因：配置注册是纯文档契约（"新增 env 必须注册"写在注释里），但没有机器强制执行。人工纪律在 feature 交付压力下必然失守。
+- 触发条件：任何新增 `process.env.XXX` 时忘记在 `env-registry.ts` 注册 + 没人发现。
+- 修复：(1) 补齐 35 个漏网变量 (2) 新增 `check:env-registry`（扫描代码→registry 完整性）和 `check:env-example`（双向一致性） (3) 接入 `pnpm check` 硬门禁 (4) 新增 `exampleRecommended` 字段确保关键变量出现在 `.env.example`。
+- 防护：`pnpm check` 现在覆盖 env 注册完整性，CI / gate 自动拦截遗漏。
+- 来源锚点：
+  - TD117 in `docs/TECH-DEBT.md`
+  - `scripts/check-env-registry.test.mjs`
+  - `scripts/check-env-example.test.mjs`
+  - LL-030（同根问题：proxy 默认值改了没同步 .env）
+- 原理：**多真相源必须有机器强制同步**。注释里写"请手动保持一致"等于没写。代价最低的时间点是新增代码时立即拦截，而不是部署后发现 Hub 里看不到变量。
+
+- 关联：LL-030 | TD117 | env-registry.ts
+
+---
+
+### LL-043: 删旧层前必须证明迁移已落成，否则 startup 不能静默成功
+- 状态：validated
+- 更新时间：2026-03-28
+- 坑：F136 Phase 4 删除了旧 `provider-profiles.ts` 读取层（PR #824, -2032 行），但迁移函数（PR #818）被 best-effort `try/catch` 包裹。当迁移未执行时，旧读取层已不在、新 `accounts` 也为空，服务静默带病启动。铲屎官在 runtime 上看到账号配置页全部"暂无模型"、API key 丢失。
+- 根因：删除旧层与迁移成功之间没有 startup invariant 门禁。`accountStartupHook` 只做"迁移 + conflict scan"，不校验"旧源在但新数据缺"的不变量。非 HC-5 异常被 `index.ts:1444` 吞为 warn。
+- 触发条件：迁移因任何原因失败（构建未更新、import 报错、文件系统异常等）+ 旧读取层已被同批或先前 PR 删除。
+- 修复：(1) 手动触发迁移恢复数据 (2) PR #831 修复 per-project detection + credential clear 语义 (3) 记录 P2 follow-up: startup invariant guard（旧源在 + accounts 缺 → error/readiness fail）。
+- 防护（待实施）：`accountStartupHook` 返回前增加不变量校验——`provider-profiles.json` 存在 + `catalog.accounts` 缺失 → 至少 error 级别暴露，理想为 startup hard fail。补回归测试覆盖此场景。
+- 来源锚点：
+  - F136 spec follow-up 章节
+  - `packages/api/src/config/account-startup.ts`
+  - `packages/api/src/index.ts:1436-1452`
+  - 反思胶囊：*(internal reference removed)*
+- 原理：**删除旧读取路径和迁移成功是原子操作的两端**。只删不验 = 中间态数据丢失。删旧层的 PR 必须同时包含：迁移成功回归测试 + legacy source 存在且新数据缺失时的 startup guard。
+
+- 关联：LL-042 | F136 | account-startup.ts
+
+### LL-044: Chrome IME 回车误提交——`e.nativeEvent.isComposing` 对 Enter 无效
+- 状态：validated
+- 更新时间：2026-03-28
+- 坑：中文输入法按 Enter 选词时，Chrome 的事件顺序是 `compositionend` → `keydown(Enter, isComposing: false)`。与 Firefox 相反（Firefox 是 `keydown(isComposing: true)` → `compositionend`）。因此 `e.nativeEvent.isComposing` 守卫在 Chrome 上对 Enter 键无效，导致中文输入时按回车选词会直接提交表单。
+- 根因：Web 规范未强制 `compositionend` 与 `keydown` 的顺序，Chrome 和 Firefox 实现不同。项目内 19 个输入组件全部使用了不可靠的 `e.nativeEvent.isComposing` 守卫，包括主聊天输入框。
+- 影响范围：ChatInput（主聊天）、ActionDock（游戏发言）、ThreadItem/SectionGroup（重命名）、HistorySearchModal、SignalArticleDetail、StudyFoldArea、VoiceSettingsPanel、InlineTreeInput、BrakeModal、VoteConfigModal、BindNewSessionSection、SessionChainInputs、DirectoryBrowser、DirectoryPickerModal、InteractiveBlock、BrowserToolbar（URL 输入）、HubPermissionsTab（完全无守卫）。
+- 修复：创建 `useIMEGuard` hook（`packages/web/src/hooks/useIMEGuard.ts`）。核心思路：用 `compositionstart/end` 事件驱动 ref，在 `compositionend` 后通过 `requestAnimationFrame` 延迟一帧清除 composing 状态，使得 Chrome 紧随其后的 `keydown(Enter)` 仍能被拦截。全量替换 19 个组件。
+- 检查清单（新增 Enter 输入点必须遵守）：
+  1. 禁止裸用 `e.nativeEvent.isComposing` 或 `e.key === 'Enter'` 无守卫
+  2. 必须使用 `useIMEGuard` hook 并绑定 `onCompositionStart/End` + `ime.isComposing()` 守卫
+  3. 测试 IME 场景时，模拟 `compositionstart` → `keydown(Enter)` 序列，不要用 `Object.defineProperty(event, 'isComposing', { value: true })`
+- 关联：F080（输入历史）| ChatInput | ThreadItem
+
+---
+
 ## 8) 维护约定
 
 - 本文件是入口，不替代 ADR/bug-report 原文。

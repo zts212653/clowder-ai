@@ -187,7 +187,7 @@ export function RangeField({
       </div>
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold text-[#5B7A5C]">
+          <span className="rounded-full bg-cafe-surface/80 px-2 py-0.5 text-xs font-semibold text-[#5B7A5C]">
             {(safeValue * 100).toFixed(0)}%
           </span>
         </div>

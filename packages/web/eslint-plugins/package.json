@@ -1,0 +1,7 @@
+{
+  "name": "eslint-plugin-cafe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cat Café design system governance rules (F056)",
+  "main": "index.js"
+}

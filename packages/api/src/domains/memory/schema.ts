@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 // Phase C: embedding metadata (model/dim version anchor)
 export const SCHEMA_V2 = `
@@ -173,6 +173,21 @@ export const SCHEMA_V7 = `
 ALTER TABLE task_run_ledger ADD COLUMN assigned_cat_id TEXT;
 `;
 
+// F139 Phase 3A: dynamic task definitions + error tracking
+export const SCHEMA_V8_DYNAMIC_TASKS = `
+CREATE TABLE IF NOT EXISTS dynamic_task_defs (
+  id TEXT PRIMARY KEY,
+  template_id TEXT NOT NULL,
+  trigger_json TEXT NOT NULL,
+  params_json TEXT NOT NULL,
+  display_json TEXT NOT NULL,
+  delivery_thread_id TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
 /**
  * Apply all schema migrations up to CURRENT_SCHEMA_VERSION.
  * Safe to call on empty DB (creates schema_version table first).
@@ -230,6 +245,72 @@ export function applyMigrations(db: Database.Database): void {
   if (currentVersion < 7) {
     db.exec(SCHEMA_V7);
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(7, new Date().toISOString());
+  }
+
+  if (currentVersion < 8) {
+    db.exec(SCHEMA_V8_DYNAMIC_TASKS);
+    try {
+      db.exec('ALTER TABLE task_run_ledger ADD COLUMN error_summary TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(8, new Date().toISOString());
+  }
+
+  if (currentVersion < 9) {
+    // F139 Phase 3B: governance (global control + task overrides) + emissions + pack templates
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduler_global_control (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        reason TEXT,
+        updated_by TEXT NOT NULL DEFAULT 'system',
+        updated_at TEXT NOT NULL
+      );
+      INSERT OR IGNORE INTO scheduler_global_control (id, enabled, updated_by, updated_at)
+        VALUES (1, 1, 'system', datetime('now'));
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduler_task_overrides (
+        task_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        updated_by TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduler_emissions (
+        emission_id TEXT PRIMARY KEY,
+        origin_task_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        suppression_until TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_emissions_thread
+        ON scheduler_emissions(thread_id, suppression_until);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pack_template_defs (
+        template_id TEXT PRIMARY KEY,
+        pack_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        description TEXT NOT NULL,
+        category TEXT NOT NULL,
+        subject_kind TEXT NOT NULL,
+        default_trigger_json TEXT NOT NULL,
+        param_schema_json TEXT NOT NULL,
+        builtin_template_ref TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pack_templates_pack
+        ON pack_template_defs(pack_id);
+    `);
+
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(9, new Date().toISOString());
   }
 }
 

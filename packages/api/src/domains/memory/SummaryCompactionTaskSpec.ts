@@ -129,5 +129,11 @@ export function createSummaryCompactionTaskSpec(deps: SummaryCompactionDeps): Ta
     outcome: { whenNoSignal: 'drop' },
     enabled: deps.enabled,
     actor: { role: 'memory-curator', costTier: 'deep' },
+    display: {
+      label: '记忆压缩',
+      category: 'thread',
+      description: '自动压缩过长的对话记忆',
+      subjectKind: 'thread',
+    },
   };
 }

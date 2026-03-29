@@ -14,6 +14,8 @@ export interface McpServerDescriptor {
   name: string;
   /** Transport type (default: 'stdio'). TD104: 'streamableHttp' for URL-based servers. */
   transport?: McpTransport;
+  /** Optional local resolver hint for machine-specific stdio servers (e.g. pencil). */
+  resolver?: string;
   /** Command to spawn (e.g. 'node') — required for stdio, empty for streamableHttp */
   command: string;
   /** Command arguments — stdio only */

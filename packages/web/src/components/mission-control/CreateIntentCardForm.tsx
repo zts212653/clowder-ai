@@ -92,7 +92,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           onChange={(e) => setOriginalText(e.target.value)}
           rows={3}
           placeholder="粘贴 PRD 原文片段..."
-          className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-white px-3 py-2 text-xs text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
+          className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-cafe-surface px-3 py-2 text-xs text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
         />
       </label>
 
@@ -113,7 +113,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
               value={f.value}
               onChange={(e) => f.set(e.target.value)}
               placeholder={f.ph}
-              className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-white px-2 py-1 text-xs focus:border-[#8B6F47] focus:outline-none"
+              className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-cafe-surface px-2 py-1 text-xs focus:border-[#8B6F47] focus:outline-none"
             />
           </label>
         ))}
@@ -126,7 +126,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           <select
             value={sourceTag}
             onChange={(e) => setSourceTag(e.target.value as SourceTag)}
-            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-white px-2 py-1 text-xs"
+            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-cafe-surface px-2 py-1 text-xs"
           >
             <option value="Q">Q — 客户口述</option>
             <option value="O">O — 现场观察</option>
@@ -140,7 +140,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
           <select
             value={confidence}
             onChange={(e) => setConfidence(Number(e.target.value))}
-            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-white px-2 py-1 text-xs"
+            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-cafe-surface px-2 py-1 text-xs"
           >
             <option value={1}>1 — 低</option>
             <option value={2}>2 — 中</option>
@@ -158,7 +158,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
             value={sourceDetail}
             onChange={(e) => setSourceDetail(e.target.value)}
             placeholder="PRD section 3.2"
-            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-white px-2 py-1 text-xs focus:border-[#8B6F47] focus:outline-none"
+            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-cafe-surface px-2 py-1 text-xs focus:border-[#8B6F47] focus:outline-none"
           />
         </label>
         <label className="block">
@@ -168,7 +168,7 @@ export function CreateIntentCardForm({ projectId, onCreated, onCancel }: CreateI
             value={decisionOwner}
             onChange={(e) => setDecisionOwner(e.target.value)}
             placeholder="Product Owner"
-            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-white px-2 py-1 text-xs focus:border-[#8B6F47] focus:outline-none"
+            className="mt-0.5 w-full rounded border border-[#D8C6AD] bg-cafe-surface px-2 py-1 text-xs focus:border-[#8B6F47] focus:outline-none"
           />
         </label>
       </div>

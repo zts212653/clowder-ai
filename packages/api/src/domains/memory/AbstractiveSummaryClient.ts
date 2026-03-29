@@ -71,7 +71,37 @@ Rules:
 - Add ! suffix (e.g. [decision!]) ONLY when the human/CVO explicitly confirmed the decision or lesson in the conversation
 - Do NOT extract brainstorm branches, temporary TODOs, or session-local context
 - Keep it concise — this is a summary, not a transcript
-- Write in the same language as the messages (Chinese/English/mixed)`;
+- Write in the same language as the messages (Chinese/English/mixed)
+- Maximum 2 candidates per summary — if you find more, keep only the most durable ones
+
+## Knowledge Admission Standards
+
+Before tagging anything as [decision], [lesson], or [method], ask yourself these 3 questions.
+If ANY answer is "no", do NOT extract it:
+1. Would a new team member benefit from knowing this 3 months from now?
+2. Does this hold true independent of the specific code/file/PR being discussed?
+3. Can this prevent future repeated debates or repeated mistakes?
+
+General rule: if it loses meaning outside the current file/PR/bug, it is NOT durable knowledge.
+
+| Kind | MUST contain | MUST NOT be |
+|------|-------------|-------------|
+| decision | Choice rationale, tradeoffs, long-term constraint | A code change, debug step, or implementation detail |
+| lesson | Recurrence risk, avoidance strategy | A one-time error, single incident symptom |
+| method | Reusable principle applicable to other features | A one-off implementation technique |
+
+BAD (do NOT extract these):
+- [decision] Rewrote JSON parser to use parseNaturalLanguageOutput
+- [decision] Added mkdirSync before writeFileSync to fix ENOENT
+- [lesson] writeFileSync throws ENOENT when directory does not exist
+- [lesson] regex needs !? suffix for optional exclamation mark
+- [method] Used JSON.parse to extract candidates from summary_segments
+
+GOOD (these ARE durable knowledge):
+- [decision] Knowledge Feed uses YAML files as truth source, not SQLite — for git-trackability
+- [decision!] Entry point hierarchy follows usage frequency: high-freq exposed, low-freq nested
+- [lesson!] Fail-open catch blocks must log errors, not silently swallow — silent failures cause "looks OK but actually empty" bugs
+- [method] Let the model output natural language; program adds structural fields afterward`;
 
 // ─── Build user prompt ──────────────────────────────────────────
 function buildUserPrompt(input: AbstractiveInput): string {
@@ -161,6 +191,30 @@ function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): Abst
   return buildSingleSegment(topicLabel, topicKey, summary, candidates, input);
 }
 
+// Reject gate: candidates that are implementation details, not durable knowledge
+const CODE_ACTION_RE =
+  /^(加了?|改了?|删除?了?|重写|修复|调整|更新|移除|添加|replaced|rewrote|added|removed|changed|fixed|updated|moved)[\s\u4e00-\u9fff]/i;
+const CODE_ARTIFACT_RE =
+  /\b(regex|parser|schema|route|component|endpoint|middleware|handler|migration|refactor|writeFile|readFile|mkdir|JSON\.parse|tsc|lint)\b/i;
+const FILE_EXT_RE = /\w+\.(tsx?|jsx?|mjs|cjs)\b/;
+const CODE_IDENT_RE = /\b[a-z]+[A-Z]\w*/;
+const MIN_TITLE_LENGTH = 8;
+
+/** @internal Exported for testing only */
+export function isImplementationNoise(title: string, claim: string): boolean {
+  const text = `${title} ${claim}`;
+  if (title.length < MIN_TITLE_LENGTH) return true;
+  if (CODE_ACTION_RE.test(title)) return true;
+  if (FILE_EXT_RE.test(title)) return true;
+  if (CODE_IDENT_RE.test(title)) return true;
+  // If title+claim contain multiple code artifacts, reject
+  const artifactHits = (text.match(new RegExp(CODE_ARTIFACT_RE.source, 'gi')) || []).length;
+  return artifactHits >= 2;
+}
+
+/** @internal Exported for testing only */
+export const MAX_CANDIDATES_PER_SEGMENT = 2;
+
 function extractCandidates(text: string, input: AbstractiveInput): DurableCandidate[] {
   const candidates: DurableCandidate[] = [];
   // Match [decision!] (explicit) or [decision] (inferred) — the ! suffix signals human confirmation
@@ -171,6 +225,8 @@ function extractCandidates(text: string, input: AbstractiveInput): DurableCandid
     const isExplicit = match[2] === '!';
     const title = match[3].trim();
     const claim = match[4]?.trim() || title;
+    // Lightweight reject gate: skip implementation noise
+    if (isImplementationNoise(title, claim)) continue;
     candidates.push({
       kind,
       title,
@@ -180,6 +236,11 @@ function extractCandidates(text: string, input: AbstractiveInput): DurableCandid
       relatedAnchors: [],
       confidence: isExplicit ? 'explicit' : 'inferred',
     });
+  }
+  // Cap: keep only the most confident candidates (explicit first, then by order)
+  if (candidates.length > MAX_CANDIDATES_PER_SEGMENT) {
+    candidates.sort((a, b) => (a.confidence === 'explicit' ? 0 : 1) - (b.confidence === 'explicit' ? 0 : 1));
+    candidates.length = MAX_CANDIDATES_PER_SEGMENT;
   }
   return candidates;
 }

@@ -33,7 +33,7 @@ function StoryBubble({ msg }: { msg: StoryMessage }) {
     <div className={`flex gap-2 mb-4 items-start ${isUser ? 'flex-row-reverse' : ''}`}>
       {/* Avatar */}
       <div
-        className="rounded-full ring-2 overflow-hidden flex-shrink-0 bg-gray-100 flex items-center justify-center"
+        className="rounded-full ring-2 overflow-hidden flex-shrink-0 bg-cafe-surface-elevated flex items-center justify-center"
         style={{
           width: 32,
           height: 32,
@@ -60,7 +60,7 @@ function StoryBubble({ msg }: { msg: StoryMessage }) {
             <div className="mb-1">
               <button
                 onClick={() => setThinkingExpanded((v) => !v)}
-                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors mb-1"
+                className="flex items-center gap-1.5 text-xs text-cafe-secondary hover:text-cafe-secondary transition-colors mb-1"
               >
                 <span
                   className="text-[10px]"
@@ -75,7 +75,7 @@ function StoryBubble({ msg }: { msg: StoryMessage }) {
                 <span>&#128173; 心里话</span>
               </button>
               {thinkingExpanded && (
-                <div className="border-l-2 border-gray-300 pl-3 opacity-80">
+                <div className="border-l-2 border-cafe pl-3 opacity-80">
                   <MarkdownContent content={msg.thinking} className={style.font} />
                 </div>
               )}
@@ -87,13 +87,13 @@ function StoryBubble({ msg }: { msg: StoryMessage }) {
 
         {/* Annotation */}
         {msg.annotation && (
-          <div className={`mt-1 text-[11px] text-gray-400 ${isUser ? 'text-right' : ''}`}>{msg.annotation}</div>
+          <div className={`mt-1 text-[11px] text-cafe-muted ${isUser ? 'text-right' : ''}`}>{msg.annotation}</div>
         )}
         {/* Reaction row */}
         {msg.reactions && (
           <div className={`mt-1 flex gap-1 ${isUser ? 'justify-end' : ''}`}>
             {msg.reactions.map((r, ri) => (
-              <span key={ri} className="text-xs bg-gray-100 rounded-full px-1.5 py-0.5">
+              <span key={ri} className="text-xs bg-cafe-surface-elevated rounded-full px-1.5 py-0.5">
                 {r}
               </span>
             ))}
@@ -119,9 +119,9 @@ function StoryCardView({ card, index }: { card: StoryCardType; index: number }) 
     <div className="mb-8">
       {/* Card divider / header */}
       <div className="mb-6 text-center">
-        <div className="text-xs text-gray-400 mb-1">#{index + 1}</div>
-        <h2 className="text-xl font-bold text-gray-800">{card.title}</h2>
-        {card.subtitle && <p className="text-sm text-gray-500 mt-1">{card.subtitle}</p>}
+        <div className="text-xs text-cafe-muted mb-1">#{index + 1}</div>
+        <h2 className="text-xl font-bold text-cafe">{card.title}</h2>
+        {card.subtitle && <p className="text-sm text-cafe-secondary mt-1">{card.subtitle}</p>}
         <div className="mt-3 mx-auto w-16 h-0.5 bg-gray-200 rounded-full" />
       </div>
 
@@ -137,12 +137,12 @@ function StoryCardView({ card, index }: { card: StoryCardType; index: number }) 
 
 export default function StoryExportPage() {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-cafe-surface-elevated">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 py-6 text-center">
-        <h1 className="text-2xl font-bold text-gray-800">猫猫杀名场面集锦</h1>
-        <p className="text-sm text-gray-500 mt-1">当 AI 猫猫们互相贴标签猜词 · 一个铲屎官的恶趣味编年史</p>
-        <p className="text-xs text-gray-400 mt-2">七届 · 三只猫 · 无数名场面</p>
+      <div className="bg-cafe-surface border-b border-cafe py-6 text-center">
+        <h1 className="text-2xl font-bold text-cafe">猫猫杀名场面集锦</h1>
+        <p className="text-sm text-cafe-secondary mt-1">当 AI 猫猫们互相贴标签猜词 · 一个铲屎官的恶趣味编年史</p>
+        <p className="text-xs text-cafe-muted mt-2">七届 · 三只猫 · 无数名场面</p>
       </div>
 
       {/* Cards */}
@@ -152,9 +152,9 @@ export default function StoryExportPage() {
         ))}
 
         {/* Footer */}
-        <div className="text-center py-8 border-t border-gray-200 mt-4">
-          <p className="text-sm text-gray-500">Clowder AI</p>
-          <p className="text-xs text-gray-400 mt-1">三只 AI 猫猫 + 一个恶趣味铲屎官</p>
+        <div className="text-center py-8 border-t border-cafe mt-4">
+          <p className="text-sm text-cafe-secondary">Clowder AI</p>
+          <p className="text-xs text-cafe-muted mt-1">三只 AI 猫猫 + 一个恶趣味铲屎官</p>
         </div>
       </div>
     </div>

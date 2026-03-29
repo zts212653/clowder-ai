@@ -103,6 +103,7 @@ export async function* spawnCli(
 
   let killed = false;
   let timedOut = false;
+  let stallKilled = false; // #774: set when idle-silent stall triggers auto-kill
   // F118 P1-fix: Snapshot process liveness at the moment timeout fires,
   // BEFORE killChild() — otherwise childExited is always true by yield time.
   let processAliveAtTimeout = false;
@@ -199,12 +200,28 @@ export async function* spawnCli(
     const ndjson = parseNDJSON(child.stdout)[Symbol.asyncIterator]();
     let pendingNext = ndjson.next();
 
+    // #774 R2: Deferred stall-kill — only execute when probe timer wins the race,
+    // meaning no NDJSON event arrived. If NDJSON wins, the pending kill is cancelled
+    // because CLI has recovered. This prevents the stale-warning race condition where
+    // a recovery event is pending in the stream but hasn't been consumed yet.
+    let pendingStallKill = false;
+
     for (;;) {
       if (spawnError) throw spawnError;
 
       // F118: Drain probe warnings and check for dead process
       if (probe) {
-        for (const warning of probe.drainWarnings()) yield warning;
+        for (const warning of probe.drainWarnings()) {
+          yield warning;
+          // #774: Mark for deferred kill — don't kill here (recovery NDJSON may be pending)
+          if (
+            options.livenessProbe?.stallAutoKill &&
+            warning.level === 'suspected_stall' &&
+            warning.state === 'idle-silent'
+          ) {
+            pendingStallKill = true;
+          }
+        }
         if (probe.getState() === 'dead') {
           killChild();
           break;
@@ -225,7 +242,21 @@ export async function* spawnCli(
           ])
         : { source: 'ndjson' as const, result: await pendingNext };
 
-      if (raceResult.source === 'probe') continue;
+      if (raceResult.source === 'probe') {
+        // No NDJSON arrived — if stall-kill is pending, execute it now
+        if (pendingStallKill) {
+          stallKilled = true;
+          timedOut = true;
+          processAliveAtTimeout = !childExited;
+          killChild();
+          break;
+        }
+        continue;
+      }
+
+      // NDJSON event arrived — CLI is alive, cancel any pending stall-kill
+      pendingStallKill = false;
+
       const { done, value } = raceResult.result;
       if (done) break;
 
@@ -300,11 +331,14 @@ export async function* spawnCli(
           'CLI stderr on timeout (debug only)',
         );
       }
+      const stallWarningMs = probe?.config.stallWarningMs;
       yield {
         __cliTimeout: true,
-        timeoutMs,
+        timeoutMs: stallKilled && stallWarningMs ? stallWarningMs : timeoutMs,
         // Sanitized message — no raw stderr exposed to users
-        message: `CLI 响应超时 (${Math.round(timeoutMs / 1000)}s)`,
+        message: stallKilled
+          ? `CLI idle-silent 超时 (${Math.round((stallWarningMs ?? timeoutMs) / 1000)}s — stall auto-kill)`
+          : `CLI 响应超时 (${Math.round(timeoutMs / 1000)}s)`,
         command: options.command,
         // F118: Diagnostic enrichment
         firstEventAt,
@@ -312,6 +346,7 @@ export async function* spawnCli(
         lastEventType,
         silenceDurationMs: lastEventAt ? Date.now() - lastEventAt : timeoutMs,
         processAlive: processAliveAtTimeout,
+        ...(stallKilled ? { stallKill: true } : {}),
         ...(options.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options.rawArchivePath ? { rawArchivePath: options.rawArchivePath } : {}),

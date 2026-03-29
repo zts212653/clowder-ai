@@ -37,7 +37,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
         type="button"
         disabled={busy}
         onClick={() => void doBatch('update', 'read')}
-        className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 disabled:opacity-50"
+        className="rounded border border-cafe px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
       >
         标记已读
       </button>
@@ -45,7 +45,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
         type="button"
         disabled={busy}
         onClick={() => void doBatch('update', 'archived')}
-        className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-100 disabled:opacity-50"
+        className="rounded border border-cafe px-2 py-1 hover:bg-cafe-surface-elevated disabled:opacity-50"
       >
         归档
       </button>
@@ -57,7 +57,7 @@ export function BatchActionBar({ selectedIds, onClear, onComplete }: BatchAction
       >
         删除
       </button>
-      <button type="button" onClick={onClear} className="ml-auto text-gray-500 hover:text-gray-700">
+      <button type="button" onClick={onClear} className="ml-auto text-cafe-secondary hover:text-cafe-secondary">
         取消选择
       </button>
     </div>

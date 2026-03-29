@@ -1,6 +1,7 @@
 import type { SignalArticleStatus, StudyMeta } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import type { SignalArticleDetail } from '@/utils/signals-api';
 import { fetchStudyMeta, linkSignalThread, unlinkSignalThread } from '@/utils/signals-api';
@@ -53,6 +54,7 @@ export function SignalArticleDetail({
   const [expandContent, setExpandContent] = useState(false);
   const pendingTagInputRef = useRef<HTMLInputElement>(null);
   const normalizedPendingTag = pendingTag.trim();
+  const ime = useIMEGuard();
 
   // Sync noteText when article changes
   const prevArticleId = useRef<string | null>(null);
@@ -180,7 +182,7 @@ export function SignalArticleDetail({
 
   if (isLoading) {
     return (
-      <aside className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500 shadow-sm">
+      <aside className="rounded-xl border border-cafe bg-cafe-surface p-6 text-sm text-cafe-secondary shadow-sm">
         正在加载文章详情...
       </aside>
     );
@@ -188,20 +190,22 @@ export function SignalArticleDetail({
 
   if (!article) {
     return (
-      <aside className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
+      <aside className="rounded-xl border border-dashed border-cafe bg-cafe-surface p-6 text-sm text-cafe-secondary">
         选择一篇文章查看详情。
       </aside>
     );
   }
 
   return (
-    <aside className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <aside className="rounded-xl border border-cafe bg-cafe-surface p-5 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <SignalTierBadge tier={article.tier} />
-        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{article.status}</span>
+        <span className="rounded bg-cafe-surface-elevated px-2 py-0.5 text-xs font-medium text-cafe-secondary">
+          {article.status}
+        </span>
       </div>
       <h2 className="mt-2 text-lg font-semibold text-cafe-black">{article.title}</h2>
-      <p className="mt-1 text-xs text-gray-500">
+      <p className="mt-1 text-xs text-cafe-secondary">
         {article.source} · {formatDate(article.fetchedAt)}
       </p>
       <div className="mt-2 flex flex-wrap gap-2">
@@ -243,7 +247,7 @@ export function SignalArticleDetail({
       />
       <section className="mt-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-gray-600">正文</h3>
+          <h3 className="text-xs font-semibold text-cafe-secondary">正文</h3>
           <button
             type="button"
             onClick={() => setExpandContent((prev) => !prev)}
@@ -253,16 +257,16 @@ export function SignalArticleDetail({
           </button>
         </div>
         <div
-          className={`mt-1 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px]'}`}
+          className={`mt-1 overflow-y-auto rounded-lg border border-cafe bg-cafe-surface-elevated p-3 text-sm text-cafe-black ${expandContent ? '' : 'max-h-[300px]'}`}
         >
           <MarkdownContent content={article.content || '（无正文）'} />
         </div>
       </section>
       <section className="mt-4">
-        <h3 className="text-xs font-semibold text-gray-600">标签</h3>
+        <h3 className="text-xs font-semibold text-cafe-secondary">标签</h3>
         <div className="mt-2 flex flex-wrap gap-2">
           {article.tags.length === 0 ? (
-            <span className="text-xs text-gray-500">暂无标签</span>
+            <span className="text-xs text-cafe-secondary">暂无标签</span>
           ) : (
             article.tags.map((tag) => (
               <span
@@ -279,15 +283,17 @@ export function SignalArticleDetail({
             ref={pendingTagInputRef}
             value={pendingTag}
             onChange={(event) => setPendingTag(event.target.value)}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing) return;
+              if (ime.isComposing()) return;
               if (event.key === 'Enter') {
                 event.preventDefault();
                 void addPendingTag();
               }
             }}
             placeholder="添加标签"
-            className="flex-1 rounded-md border border-gray-200 px-2 py-1.5 text-xs"
+            className="flex-1 rounded-md border border-cafe px-2 py-1.5 text-xs"
           />
           <button
             type="button"
@@ -303,7 +309,7 @@ export function SignalArticleDetail({
           <button
             type="button"
             onClick={() => setNoteOpen((prev) => !prev)}
-            className="flex items-center gap-1 text-xs font-semibold text-gray-600"
+            className="flex items-center gap-1 text-xs font-semibold text-cafe-secondary"
           >
             <span>{noteOpen ? '▾' : '▸'}</span>
             <span>备注{article.note ? ' ✎' : ''}</span>
@@ -316,7 +322,7 @@ export function SignalArticleDetail({
                 onBlur={() => void saveNote()}
                 placeholder="写下你的笔记..."
                 rows={3}
-                className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                className="w-full rounded-md border border-cafe px-3 py-2 text-sm"
               />
               <button
                 type="button"
@@ -340,7 +346,7 @@ export function SignalArticleDetail({
         <button
           type="button"
           onClick={() => void onStatusChange(article.id, 'read')}
-          className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+          className="rounded-md border border-cafe px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated"
         >
           标记已读
         </button>
@@ -365,7 +371,7 @@ export function SignalArticleDetail({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                className="rounded-md border border-cafe px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated"
               >
                 取消
               </button>

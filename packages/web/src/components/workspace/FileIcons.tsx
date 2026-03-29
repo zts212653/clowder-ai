@@ -21,7 +21,7 @@ export function FileIcon({ name }: { name: string }) {
   const icon = FILE_ICONS[ext];
   if (!icon) {
     return (
-      <span className="w-4 h-4 rounded text-[8px] font-bold flex items-center justify-center bg-gray-200 text-gray-500 flex-shrink-0">
+      <span className="w-4 h-4 rounded text-[8px] font-bold flex items-center justify-center bg-gray-200 text-cafe-secondary flex-shrink-0">
         F
       </span>
     );

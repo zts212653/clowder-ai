@@ -83,6 +83,34 @@ export function splitIntoActiveAndArchived(
   return { active, archived };
 }
 
+// F095 Phase F: Custom project display names
+export const PROJECT_NAME_KEY = 'cat-cafe:sidebar:project-names';
+
+/** Read custom project display names from storage. */
+export function readProjectNames(storage: StorageLike): Map<string, string> {
+  try {
+    const raw = storage.getItem(PROJECT_NAME_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return new Map(Object.entries(parsed as Record<string, string>));
+      }
+    }
+  } catch {
+    // storage unavailable or corrupted
+  }
+  return new Map();
+}
+
+/** Persist custom project display names to storage. */
+export function writeProjectNames(names: Map<string, string>, storage: StorageLike): void {
+  try {
+    storage.setItem(PROJECT_NAME_KEY, JSON.stringify(Object.fromEntries(names)));
+  } catch {
+    // Best effort
+  }
+}
+
 /** Read pinned project paths from storage. */
 export function readPinnedProjects(storage: StorageLike): Set<string> {
   try {

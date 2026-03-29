@@ -11,7 +11,9 @@
  * - 10s timeout per call; fallback to null on failure (caller handles fallback).
  */
 
+import type { AccountProtocol } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
+import { resolveForClient } from '../../../../config/account-resolver.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import type { AIActionResponse, AIProvider } from '../game/werewolf/WerewolfAIPlayer.js';
 
@@ -62,9 +64,20 @@ export class LlmAIProvider implements AIProvider {
     }
   }
 
+  /** Resolve API key for a given protocol through the unified resolver chain (F136 Phase 4b). */
+  private resolveApiKey(protocol: AccountProtocol, ...envFallbacks: string[]): string | undefined {
+    const profile = resolveForClient(process.cwd(), protocol);
+    if (profile?.apiKey) return profile.apiKey;
+    for (const envKey of envFallbacks) {
+      const val = process.env[envKey];
+      if (val) return val;
+    }
+    return undefined;
+  }
+
   private async callAnthropic(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
+    const apiKey = this.resolveApiKey('anthropic', 'ANTHROPIC_API_KEY');
+    if (!apiKey) throw new Error('No Anthropic API key in credentials or ANTHROPIC_API_KEY env');
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -91,8 +104,8 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callOpenAI(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('OPENAI_API_KEY not set');
+    const apiKey = this.resolveApiKey('openai', 'OPENAI_API_KEY');
+    if (!apiKey) throw new Error('No OpenAI API key in credentials or OPENAI_API_KEY env');
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -118,8 +131,8 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callGoogle(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GOOGLE_AI_API_KEY not set');
+    const apiKey = this.resolveApiKey('google', 'GOOGLE_AI_API_KEY', 'GEMINI_API_KEY');
+    if (!apiKey) throw new Error('No Google API key in credentials or GOOGLE_AI_API_KEY env');
 
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`,

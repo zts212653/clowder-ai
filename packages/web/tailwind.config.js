@@ -37,6 +37,13 @@ module.exports = {
         cafe: {
           white: 'var(--color-base-white)',
           black: 'var(--color-base-black)',
+          surface: 'var(--cafe-surface)',
+          'surface-elevated': 'var(--cafe-surface-elevated)',
+          'surface-sunken': 'var(--cafe-surface-sunken)',
+          accent: 'var(--cafe-accent)',
+          'accent-hover': 'var(--cafe-accent-hover)',
+          crosspost: 'var(--cafe-crosspost)',
+          interactive: 'var(--cafe-interactive)',
         },
         /* F101 AC-D5: Werewolf Cute theme tokens */
         ww: {
@@ -60,6 +67,11 @@ module.exports = {
         },
       },
       textColor: {
+        cafe: {
+          DEFAULT: 'var(--cafe-text)',
+          secondary: 'var(--cafe-text-secondary)',
+          muted: 'var(--cafe-text-muted)',
+        },
         ww: {
           main: 'var(--ww-text-main)',
           muted: 'var(--ww-text-muted)',
@@ -67,6 +79,10 @@ module.exports = {
         },
       },
       borderColor: {
+        cafe: {
+          DEFAULT: 'var(--cafe-border)',
+          subtle: 'var(--cafe-border-subtle)',
+        },
         ww: {
           subtle: 'var(--ww-border-subtle)',
           active: 'var(--ww-border-active)',

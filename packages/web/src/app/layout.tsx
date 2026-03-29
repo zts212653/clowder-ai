@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { BrakeModal } from '@/components/BrakeModal';
+import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
 import './globals.css';
@@ -32,11 +33,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
       <body className="min-h-screen">
-        <ConfirmProvider>{children}</ConfirmProvider>
-        <BrakeModal />
-        <ToastContainer />
+        <ThemeProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+          <BrakeModal />
+          <ToastContainer />
+        </ThemeProvider>
       </body>
     </html>
   );

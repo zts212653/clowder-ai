@@ -54,9 +54,32 @@ team lead打开 Cat Café Hub：
 
 ## What
 
+### 五层夹心架构总览（2026-03-27 扩展，基于 GPT Pro 咨询 + 三方共识）
+
+```
+Layer 4: Enterprise Kit — theme presets / tenant.config / terminology overrides / next-intl
+Layer 3: Patterns — CatBubble / AgentBadge / ThreadItem 等品牌组合件
+Layer 2: Primitives — Button / Input / Card / Modal / Tabs / Dialog（Radix headless）
+Layer 1: Design Tokens — semantic token contract + Tailwind alias utilities
+Layer 0: Governance — ESLint gate + visual baseline + "迁移完成"定义
+```
+
+### Phase A-0：治理门禁 + 审计（Governance & Audit）
+
+**目标**：止血——冻结新增设计债，建立迁移基线。对应 Layer 0。
+
+- 颜色/类名审计：产出"现状热力图"（审计结果：**3993 处**硬编码——1383 inline hex + 1570 TW neutral + 1040 TW color，198/328 个文件有问题）
+- ESLint `cafe/no-hardcoded-colors` 规则：禁止新增 raw hex / `bg-white` / `text-gray-*` 等非语义类（本地插件 `eslint-plugin-cafe`，`warn` 级别）
+- "迁移完成"定义（per file）：
+  1. `cafe/no-hardcoded-colors` 规则零 warning
+  2. 所有色彩走 semantic token（`bg-surface`、`text-primary`、`border-default` 等）或 cat token（`bg-opus-primary` 等）
+  3. 所有 UI 组件使用 DS primitive/pattern，不自建
+  4. 有 Storybook stories（light + dark 双版本）
+  5. Playwright 截图基线 light/dark 都通过
+
 ### Phase A：设计基础（Design Foundation）
 
-**目标**：建立 Cat Café 设计语言的基础规范，让三猫设计新功能时有章可循。
+**目标**：建立 Cat Café 设计语言的基础规范，让三猫设计新功能时有章可循。对应 Layer 1-2。
 
 #### A1: 设计语言收敛（三猫打样竞赛 → team lead定调）
 
@@ -104,12 +127,22 @@ Maine Coon发散了 5 个方向后收敛为一套：
   - Dark mode：Phase A 就把 `data-theme="dark"` 的 semantic token 留好（不做全量 UI）
 - 输出：CSS 变量 / Tailwind config (`cafe.surface/text/border/accent`) / Pencil 变量
 
-#### A3: 核心组件库
+#### A2.5: Codemod Round 1（高置信色值迁移）
 
-基于 design token 重做最常用的组件：
+Token contract 落地后，分桶跑 codemod：
+- **高置信自动**：`bg-white→bg-surface`、`text-black→text-primary`、`border-gray-200→border-default` 等
+- **中置信 PR 建议**：`text-gray-700` 可能是 secondary/muted，需人工确认
+- **低置信手动**：context-dependent hex（ThinkingIndicator、leaderboard 等）
+- 工具：ast-grep + jscodeshift 组合拳，目标消除 ~40% 硬编码颜色
+
+#### A3: 核心组件库 + Storybook 基建
+
+基于 design token 重做最常用的组件（Radix headless 打底，自有 Tailwind styling）：
+- 8-12 个 Primitives（Button/Input/Card/Badge/Modal/Tabs/Dialog/Select/Tooltip）— 对应 Layer 2
+- 5-8 个 Patterns（CatBubble/AgentBadge/ThreadItem/MissionPanel）— 对应 Layer 3
+- **从零搭建 Storybook**：每个 primitive/pattern 写 stories（light/dark 双版本）
+- Playwright 视觉回归测试：10-15 个关键页面截图基线（P4 阶段搭建）
 - 消息气泡（含跨线程变体 — **F052 Phase C 已完成打样**）
-- 按钮/输入框
-- 卡片
 - 导航（参考猫爪导航概念）
 - 状态指示器（参考咖啡香气进度条）
 
@@ -145,14 +178,37 @@ Maine Coon发散了 5 个方向后收敛为一套：
 - 猫猫状态动画（关联 F014）
 - 点击猫猫头像 → 猫猫名片弹窗（生活照、当前心情、个性简介 — "伙伴不是打工猫"）
 
+### Phase D：主题系统 + 企业定制（Theme System & Enterprise Kit）
+
+**目标**：运行时主题切换 + 企业 fork 低成本定制。对应 Layer 4。
+
+#### D1: Theme System
+- ThemeProvider + useTheme context + useCatTheme hook（品牌 token resolver，替代组件直接吃 `catData.color.primary` hex）
+- Dark mode 可切换（基于 Phase A 留好的 `data-theme="dark"` token）
+- 狼人杀模块 `GameShell.tsx` 是已验证的样板间
+
+#### D2: Enterprise Kit
+- **next-intl 接入**（需按 Next 14 验证，当前 `next:^14.1.0`）
+- **术语覆写**（仅 UI glossary override，**不含** route/API/schema rename — 那是独立 Feature）
+- **tenant.config**：logo/favicon/品牌名/配色 preset/圆角/动效密度
+- **壳层资产**：`viewport.themeColor`（当前硬编码 `#E29578`）、manifest.json、PWA metadata
+
+> ⚠️ "thread→conversation" 等术语：只做前端显示文案覆写。路由 `/thread/`、API 字段、Redis key 不在 F056 范围内。
+
 ## Acceptance Criteria
+
+### Phase A-0 ✅
+- [x] AC-A0-1: 颜色审计报告产出（热力图：按文件/按色值分类统计）
+- [x] AC-A0-2: ESLint 自定义规则上线 CI，新增 raw hex / `bg-white` 等 → CI 报错
+- [x] AC-A0-3: "迁移完成"标准文档化
 
 ### Phase A
 - [x] AC-A1: 设计原则文档 (四大宪章) 确立
 - [x] AC-A2: Design Token (奶油猫咖色板) 在 Pencil 变量落地
-- [ ] AC-A3: ≥ 5 个核心组件有猫猫化版本的 Pencil 设计稿 + React 代码（进行中: 消息气泡、Pill、头像角标）
-- [ ] AC-A5: Token 三层架构落地（base palette → semantic tokens → Tailwind config）
-- [ ] AC-A6: Semantic token 色板通过 WCAG AA 对比度检查
+- [x] AC-A2.5: 高置信 codemod 完成（~40% 硬编码颜色消除）
+- [ ] AC-A3: ≥ 8 个 Primitives + ≥ 5 个 Patterns 有 Storybook stories（light/dark 双版本）
+- [x] AC-A5: Token 三层架构落地（base palette → semantic tokens → Tailwind config）
+- [x] AC-A6: Semantic token 色板通过 WCAG AA 对比度检查
 - [x] AC-A4: F052 跨线程气泡作为"打样参考"收入设计原则文档
 
 ### Phase B-0
@@ -169,6 +225,12 @@ Maine Coon发散了 5 个方向后收敛为一套：
 - [ ] AC-C1: ≥ 3 个猫猫彩蛋微交互上线
 - [ ] AC-C2: 点击猫猫头像弹出名片（生活照/心情/简介）
 
+### Phase D
+- [x] AC-D1: ThemeProvider + useTheme + useCafeTheme hook 落地，组件不再直接吃 hex
+- [ ] AC-D2: Dark mode 全站可切换，light/dark 截图对比无视觉异常
+- [ ] AC-D3: next-intl 接入 + 术语词表独立文件，fork 改一张表即可换术语
+- [ ] AC-D4: tenant.config 可配品牌资产（logo/favicon/themeColor/配色 preset）
+
 ## 需求点 Checklist
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
@@ -180,6 +242,7 @@ Maine Coon发散了 5 个方向后收敛为一套：
 | R5 | "对齐设计语言" | AC-A2 | Token 体系 + 组件库 | [/] |
 | R6 | "猫猫头像点击出信息/生活照/心情"（不是工卡，是伙伴名片） | AC-C2 | manual | [ ] |
 | R7 | "飞书系统消息充满丑陋的emoji！你自己画过svg的！"（2026-03-18）→ 回调：CafeIcons Lucide 风格"又丑又突兀"，需二次审计（KD-9） | AC-B0-W1, AC-B0-W2 | 截图对比 + grep 验证 | [/] |
+| R8 | "不是脚手架而是一次前端的重构，组件化起来"，"fork后编辑不要烦我们"（2026-03-27） | AC-A0-1~3, AC-A3, AC-D1~4 | 审计报告 + Storybook + dark mode 截图 + fork 定制验证 | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -199,6 +262,11 @@ Maine Coon发散了 5 个方向后收敛为一套：
 | KD-7 | 动效上限机制：只在 hover/首次/低频触发 | Maine Coon提醒，防止灵动细节拖垮性能 | 2026-03-04 |
 | KD-8 | 禁止新硬编码 hex，组件只用 `bg-cafe-surface` 等 semantic class | Tailwind 映射统一入口 | 2026-03-04 |
 | KD-9 | Icon 风格修正：CafeIcons Lucide monoline 风格与设计语言冲突，Apple emoji 在用户可见 UI 反而更贴合 Cozy Swiss 底盘。方向：用户可见处优先 Apple emoji/filled-rounded SVG，Lucide monoline 仅后台/开发工具 | team lead反馈"又丑又突兀"，社区 PR (F127) 又引入了大量 emoji，触发全面审计 | 2026-03-22 |
+| KD-10 | 五层夹心架构：Layer 0 治理 → Layer 1 tokens → Layer 2 primitives → Layer 3 patterns → Layer 4 enterprise | 三方共识（Ragdoll+Maine Coon+GPT Pro），详见 GPT Pro 咨询报告 | 2026-03-27 |
+| KD-11 | 在 TW3 上做，不叠加 TW4 升级风险 | 当前 Tailwind 3.4.0，TW3→TW4 迁移是正交风险源 | 2026-03-27 |
+| KD-12 | Radix headless 做 a11y 密集型控件（Dialog/Select/Menu），shadcn 当参考不当宪法 | GPT Pro + Maine Coon共识，a11y/focus 管理自建风险高 | 2026-03-27 |
+| KD-13 | 术语覆写只做 UI glossary，route/API/schema rename 不在 F056 范围 | Maine Coon review：thread 已进路由/API/Redis key，scope 边界必须写死 | 2026-03-27 |
+| KD-14 | cat-config.json 消费加 brand token resolver（useCatTheme），组件不直吃 hex | GPT Pro 建议 + codebase 验证：当前无抽象层 | 2026-03-27 |
 
 ## Dependencies
 
@@ -215,8 +283,12 @@ Maine Coon发散了 5 个方向后收敛为一套：
 | 色板对比度不足（好看但看不清） | Phase A 必须做 WCAG 对比度检查 |
 | 存量改造工作量大 | Phase B 按使用频率排序，高频先改 |
 | 三猫设计风格不统一 | Phase A 的 design token 和组件库统一标准 |
+| ~1000 处硬编码颜色迁移引入视觉回归 | codemod 三桶分级 + Storybook stories + Playwright 截图基线 |
+| 术语抽象 scope 失控（thread 已进路由/API/Redis） | KD-13 写死边界：F056 只做 UI glossary override |
+| Storybook/Playwright 从零搭建成本 | 明确归入 Phase A3 预算，不低估 |
 
 ## Review Gate
 
 - Phase A: team lead + Siamese视觉 review（设计语言必须三猫+team lead认可）
 - Phase B/C: 常规跨家族 review
+- Phase D: team lead拍板企业定制边界 + 跨家族 review

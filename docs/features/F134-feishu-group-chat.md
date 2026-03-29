@@ -137,7 +137,7 @@ export interface FeishuInboundMessage {
 
 ### Phase E: WebSocket 长连接模式支持（双模式共存）
 
-> team lead 2026-07-24 提出：飞书应同时支持 Webhook 和 WebSocket 长连接两种模式，由team lead在 IM Hub 配置面板选择，而不是非此即彼推翻现有实现。
+> team lead 2026-03-25 提出：飞书应同时支持 Webhook 和 WebSocket 长连接两种模式，由team lead在 IM Hub 配置面板选择，而不是非此即彼推翻现有实现。
 
 **背景**：
 - 当前 Cat Café 飞书接入仅支持 **Webhook 模式**（需要公网 IP / 反向代理）
@@ -290,7 +290,7 @@ if (connectionMode === 'websocket') {
 | KD-10 | Contact API + Chat API 放在 FeishuAdapter，不预抽服务 | `resolveSenderName(openId)` + `resolveChatName(chatId)` 带 TTL Map cache，直接放在 FeishuAdapter 内。只有第二个 connector 也需要时才抽 `FeishuContactService`。需权限：`contact:user.base:readonly` + `im:chat:readonly`（team lead已配） | 2026-03-25 |
 | KD-11 | Connector source 队列禁止 merge | `source === 'connector'` 的消息直接禁止 merge（快速稳妥方案）。QueueEntry 新增可选 `senderMeta` 字段用于 UI 展示，但不参与 merge 判断。这避免群聊中不同 sender 的消息被合并 | 2026-03-25 |
 | KD-12 | Phase D 三层权限模型 | 第一层：群白名单（`/allow-group` `/deny-group`）；第二层：@bot 对话全开放不限制；第三层：/command 管理命令仅管理员可用（`FEISHU_ADMIN_OPEN_IDS` env）。team lead场景：演示时防别人刷 token、乱切 thread | 2026-03-25 |
-| KD-13 | WebSocket 长连接 + Webhook 双模式共存 | 飞书官方支持 WebSocket 长连接（不需要公网 IP），`@larksuiteoapi/node-sdk` 原生支持 `WSClient`。team lead明确要求两种模式都支持、在 IM Hub 配置面板可选（不能只藏在 env）、默认 webhook 向后兼容。Lark 国际版不支持长连接，webhook 必须保留 | 2026-07-24 |
+| KD-13 | WebSocket 长连接 + Webhook 双模式共存 | 飞书官方支持 WebSocket 长连接（不需要公网 IP），`@larksuiteoapi/node-sdk` 原生支持 `WSClient`。team lead明确要求两种模式都支持、在 IM Hub 配置面板可选（不能只藏在 env）、默认 webhook 向后兼容。Lark 国际版不支持长连接，webhook 必须保留 | 2026-03-25 |
 
 ## Design Gate Results（2026-03-25）
 

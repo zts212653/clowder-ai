@@ -7,7 +7,7 @@ export interface ConsoleEntry {
 }
 
 const LEVEL_STYLES: Record<ConsoleEntry['level'], string> = {
-  log: 'text-gray-600 dark:text-gray-400',
+  log: 'text-cafe-secondary dark:text-gray-400',
   info: 'text-blue-600 dark:text-blue-400',
   warn: 'text-amber-600 dark:text-amber-400',
   error: 'text-red-600 dark:text-red-400',
@@ -27,7 +27,7 @@ interface ConsolePanelProps {
 
 export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
   return (
-    <div className="flex flex-col border-t border-[#FFDDD2] bg-white/80 text-[11px] font-mono">
+    <div className="flex flex-col border-t border-[#FFDDD2] bg-cafe-surface/80 text-[11px] font-mono">
       {/* Header bar */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-[#FFDDD2] bg-[#FDF8F3]">
         <div className="flex items-center gap-1.5">

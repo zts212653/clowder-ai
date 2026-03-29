@@ -47,7 +47,7 @@ function fmtDuration(ms: number): string {
 const ROLE_STYLES: Record<string, string> = {
   user: 'bg-blue-50 text-blue-800',
   assistant: 'bg-purple-50 text-purple-800',
-  system: 'bg-gray-50 text-gray-600',
+  system: 'bg-cafe-surface-elevated text-cafe-secondary',
 };
 
 export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerProps) {
@@ -109,29 +109,29 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white">
+    <div className="rounded-lg border border-cafe bg-cafe-surface">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-        <span className="text-xs font-semibold text-gray-700">Session 事件</span>
+      <div className="flex items-center justify-between px-3 py-2 border-b border-cafe-subtle">
+        <span className="text-xs font-semibold text-cafe-secondary">Session 事件</span>
         <button
           type="button"
           data-testid="session-viewer-close"
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 text-sm"
+          className="text-cafe-muted hover:text-cafe-secondary text-sm"
         >
           ✕
         </button>
       </div>
 
       {/* View mode tabs */}
-      <div className="flex border-b border-gray-100">
+      <div className="flex border-b border-cafe-subtle">
         {(['chat', 'handoff', 'raw'] as const).map((m) => (
           <button
             type="button"
             key={m}
             onClick={() => setView(m)}
             className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors
-              ${view === m ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+              ${view === m ? 'text-blue-600 border-b-2 border-blue-600' : 'text-cafe-muted hover:text-cafe-secondary'}`}
           >
             {m === 'chat' ? 'Chat' : m === 'handoff' ? 'Handoff' : 'Raw'}
           </button>
@@ -140,7 +140,7 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
 
       {/* Content */}
       <div className="max-h-72 overflow-y-auto p-2">
-        {loading && <div className="text-xs text-gray-400 py-2">加载中...</div>}
+        {loading && <div className="text-xs text-cafe-muted py-2">加载中...</div>}
         {error && <div className="text-xs text-red-500 py-2">加载失败</div>}
 
         {!loading && !error && view === 'chat' && (
@@ -148,7 +148,7 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
             {(data as ChatMessage[]).map((msg, i) => (
               <div
                 key={`${msg.role}-${msg.timestamp}-${i}`}
-                className={`rounded px-2 py-1.5 text-[11px] ${ROLE_STYLES[msg.role] ?? 'bg-gray-50 text-gray-600'}`}
+                className={`rounded px-2 py-1.5 text-[11px] ${ROLE_STYLES[msg.role] ?? 'bg-cafe-surface-elevated text-cafe-secondary'}`}
               >
                 <span className="font-medium">{msg.role}</span>
                 <p className="mt-0.5 whitespace-pre-wrap break-words">{msg.content}</p>
@@ -160,21 +160,24 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
         {!loading && !error && view === 'handoff' && (
           <div className="space-y-1.5">
             {(data as HandoffSummary[]).map((inv) => (
-              <div key={inv.invocationId} className="rounded border border-gray-100 px-2 py-1.5 text-[11px]">
+              <div key={inv.invocationId} className="rounded border border-cafe-subtle px-2 py-1.5 text-[11px]">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-gray-500">{inv.invocationId}</span>
-                  <span className="text-gray-400">{fmtDuration(inv.durationMs)}</span>
+                  <span className="font-mono text-cafe-secondary">{inv.invocationId}</span>
+                  <span className="text-cafe-muted">{fmtDuration(inv.durationMs)}</span>
                   {inv.errors > 0 && <span className="text-red-500">{inv.errors} err</span>}
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {(inv.toolCalls ?? []).map((t) => (
-                    <span key={t} className="bg-gray-100 text-gray-600 px-1 py-0.5 rounded text-[10px]">
+                    <span
+                      key={t}
+                      className="bg-cafe-surface-elevated text-cafe-secondary px-1 py-0.5 rounded text-[10px]"
+                    >
                       {t}
                     </span>
                   ))}
                 </div>
                 {(inv.keyMessages ?? []).length > 0 && (
-                  <p className="text-gray-500 mt-1 truncate">{(inv.keyMessages ?? [])[0]}</p>
+                  <p className="text-cafe-secondary mt-1 truncate">{(inv.keyMessages ?? [])[0]}</p>
                 )}
               </div>
             ))}
@@ -184,9 +187,9 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
         {!loading && !error && view === 'raw' && (
           <div className="space-y-1">
             {(data as RawEvent[]).map((evt) => (
-              <div key={evt.eventNo} className="text-[10px] font-mono bg-gray-50 rounded px-1.5 py-1">
-                <span className="text-gray-400">#{evt.eventNo}</span>{' '}
-                <span className="text-gray-600">{JSON.stringify(evt.event)}</span>
+              <div key={evt.eventNo} className="text-[10px] font-mono bg-cafe-surface-elevated rounded px-1.5 py-1">
+                <span className="text-cafe-muted">#{evt.eventNo}</span>{' '}
+                <span className="text-cafe-secondary">{JSON.stringify(evt.event)}</span>
               </div>
             ))}
           </div>
@@ -194,7 +197,7 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-100 text-[10px] text-gray-400">
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-cafe-subtle text-[10px] text-cafe-muted">
         <span>{total} 条事件</span>
         <div className="flex gap-2">
           {cursorHistory.length > 0 && (

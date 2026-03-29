@@ -28,7 +28,7 @@ function FeatureNode({ data }: NodeProps<Node<FeatureNodeData>>) {
 
   return (
     <div
-      className={`rounded-xl border-2 bg-white px-3 py-2 shadow-sm transition-shadow hover:shadow-md ${isDone ? 'opacity-50' : ''}`}
+      className={`rounded-xl border-2 bg-cafe-surface px-3 py-2 shadow-sm transition-shadow hover:shadow-md ${isDone ? 'opacity-50' : ''}`}
       style={{
         borderColor: colors.border,
         backgroundColor: colors.bg,
@@ -214,7 +214,7 @@ function NodeDetailPanel({ data, onClose }: { data: FeatureNodeData; onClose: ()
       {data.related.length > 0 && (
         <div className="mt-1">
           <span className="text-[10px] font-medium text-[#9A866F]">关联：</span>
-          <span className="text-[11px] text-gray-600">{data.related.join(', ')}</span>
+          <span className="text-[11px] text-cafe-secondary">{data.related.join(', ')}</span>
         </div>
       )}
     </div>

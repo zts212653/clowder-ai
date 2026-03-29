@@ -47,13 +47,13 @@ export default function ShowcaseF052CrossThreadAuthorLabel() {
   return (
     <div className="mx-auto max-w-4xl p-6">
       <h1 className="text-xl font-semibold">F052 — Cross-thread Author Label</h1>
-      <p className="mt-2 text-sm text-gray-600">
+      <p className="mt-2 text-sm text-cafe-secondary">
         Fixture: one message is <code className="font-mono">type=&quot;user&quot;</code> but still has a{' '}
         <code className="font-mono">catId</code>. UI should render it as a cat message (avatar/name/color), not as
         &quot;铲屎官&quot;.
       </p>
 
-      <div className="relative mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="relative mt-4 overflow-hidden rounded-xl border border-cafe bg-cafe-surface">
         <div ref={scrollContainerRef} className="relative max-h-[520px] overflow-y-auto p-4 space-y-3">
           {messages.map((message) => (
             <ChatMessage key={message.id} message={message} getCatById={getCatById} />

@@ -165,6 +165,10 @@ const updateThreadSchema = z
     voiceMode: z.boolean().optional(),
     /** F087: Update bootcamp state. null clears. */
     bootcampState: bootcampStateSchema.nullable().optional(),
+    /** Bubble display overrides: thinking block expand/collapse. */
+    bubbleThinking: z.enum(['global', 'expanded', 'collapsed']).optional(),
+    /** Bubble display overrides: CLI output block expand/collapse. */
+    bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
   })
   .strict()
   .refine(
@@ -176,7 +180,9 @@ const updateThreadSchema = z
       data.preferredCats !== undefined ||
       data.routingPolicy !== undefined ||
       data.voiceMode !== undefined ||
-      data.bootcampState !== undefined,
+      data.bootcampState !== undefined ||
+      data.bubbleThinking !== undefined ||
+      data.bubbleCli !== undefined,
     {
       message: 'At least one field must be provided',
     },
@@ -402,8 +408,18 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
 
-    const { title, pinned, favorited, thinkingMode, preferredCats, routingPolicy, voiceMode, bootcampState } =
-      parseResult.data;
+    const {
+      title,
+      pinned,
+      favorited,
+      thinkingMode,
+      preferredCats,
+      routingPolicy,
+      voiceMode,
+      bootcampState,
+      bubbleThinking,
+      bubbleCli,
+    } = parseResult.data;
     if (title !== undefined) await threadStore.updateTitle(id, title);
     if (pinned !== undefined) await threadStore.updatePin(id, pinned);
     if (favorited !== undefined) await threadStore.updateFavorite(id, favorited);
@@ -416,6 +432,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     if (bootcampState !== undefined) {
       await threadStore.updateBootcampState(id, bootcampState as BootcampStateV1 | null);
     }
+    if (bubbleThinking !== undefined) await threadStore.updateBubbleDisplay(id, 'bubbleThinking', bubbleThinking);
+    if (bubbleCli !== undefined) await threadStore.updateBubbleDisplay(id, 'bubbleCli', bubbleCli);
 
     const updated = await threadStore.get(id);
     if (!updated) {
@@ -448,6 +466,20 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     try {
       const thread = await threadStore.get(id);
+
+      // F095 Phase G: Protect system threads (connectorHubState) from casual deletion.
+      // Requires explicit ?force=true query param to proceed.
+      if (thread?.connectorHubState) {
+        const { force } = request.query as { force?: string };
+        if (force !== 'true') {
+          reply.status(403);
+          return {
+            error: 'System thread protected',
+            detail: '系统级 thread 需要确认才能删除',
+            code: 'SYSTEM_THREAD_PROTECTED',
+          };
+        }
+      }
 
       // F095 Phase D: Soft-delete instead of hard delete — data preserved for trash bin
       const deleted = await threadStore.softDelete(id);

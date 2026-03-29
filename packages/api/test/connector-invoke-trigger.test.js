@@ -1313,4 +1313,24 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(queue.list('thread-1', 'user-1').length, 0);
     });
   });
+
+  describe('F140 Phase C: suggestedSkill through urgent path', () => {
+    it('urgent preempt passes suggestedSkill to routeExecution promptTags (P1-2 regression)', async () => {
+      // Setup: active invocation so trigger takes urgent path
+      trackerMock.setActive('thread-1', 'user-1');
+      const trigger = createTrigger();
+      const policy = { priority: 'urgent', reason: 'github_ci_failure', suggestedSkill: 'merge-gate' };
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'CI failed', 'msg-urgent', undefined, policy);
+      await waitForTrigger();
+
+      assert.strictEqual(routerMock.calls.length, 1, 'routeExecution should be called');
+      const intent = routerMock.calls[0].intent;
+      assert.ok(intent, 'intent should exist');
+      assert.ok(Array.isArray(intent.promptTags), 'promptTags should be an array');
+      assert.ok(
+        intent.promptTags.includes('skill:merge-gate'),
+        `promptTags should include 'skill:merge-gate' but got: ${JSON.stringify(intent.promptTags)}`,
+      );
+    });
+  });
 });

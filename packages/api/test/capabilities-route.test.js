@@ -7,7 +7,7 @@
  */
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -545,6 +545,41 @@ describe('GET /api/capabilities (Fastify)', () => {
     assert.ok(!(body.skillHealth.unregistered ?? []).includes('refs'), 'refs should not be reported as unregistered');
 
     await app.close();
+  });
+
+  it('ignores broken project skill symlinks for deleted skills', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    // Use a dir under cwd (not /tmp/) so PROJECT_ALLOWED_ROOTS validation passes in public gate
+    const projectDir = join(process.cwd(), `.test-tmp-broken-skill-${Date.now()}`);
+    const staleSkill = `ghost-skill-${Date.now()}`;
+    const skillsDir = join(projectDir, '.claude', 'skills');
+    const brokenLink = join(skillsDir, staleSkill);
+
+    await mkdir(skillsDir, { recursive: true });
+    await symlink('../../cat-cafe-skills/parallel-execution', brokenLink);
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+
+      const staleItem = (body.items ?? []).find((i) => i.type === 'skill' && i.id === staleSkill);
+      assert.equal(staleItem, undefined, 'broken project symlink should not resurrect a deleted skill');
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
   });
 
   it('accepts ?projectPath query param for multi-project support', async () => {

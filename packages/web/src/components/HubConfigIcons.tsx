@@ -48,6 +48,22 @@ export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
       <img src="/images/connectors/dingtalk.png" alt="DingTalk" className="w-[18px] h-[18px]" />
     ),
   },
+  'wecom-bot': {
+    iconBg: '#E0E7FF',
+    iconColor: '#4F46E5',
+    icon: (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src="/images/connectors/wecom-bot.png" alt="WeCom" className="w-[18px] h-[18px]" />
+    ),
+  },
+  'wecom-agent': {
+    iconBg: '#EDE9FE',
+    iconColor: '#7C3AED',
+    icon: (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src="/images/connectors/wecom-agent.png" alt="WeCom Agent" className="w-[18px] h-[18px]" />
+    ),
+  },
 };
 
 export const DEFAULT_VISUAL: PlatformVisual = {
@@ -96,7 +112,7 @@ export function ExternalLinkIcon() {
 
 export function WifiIcon() {
   return (
-    <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+    <svg className="w-3.5 h-3.5 text-cafe-secondary" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
       <path d="M5 13a10 10 0 0 1 14 0" />
       <path d="M8.5 16.5a5 5 0 0 1 7 0" />
       <path d="M2 8.82a15 15 0 0 1 20 0" />

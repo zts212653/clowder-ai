@@ -77,8 +77,8 @@ function SearchResultItem({
         <span className="text-xs font-medium text-cafe-black truncate">{fileName}</span>
         {line > 0 && <span className="text-[10px] text-cocreator-dark/50 font-mono">:{line}</span>}
       </div>
-      {dir && <div className="text-[10px] text-gray-400 truncate ml-5">{dir}</div>}
-      {content && <div className="text-[10px] text-gray-500 truncate font-mono ml-5 mt-0.5">{highlighted}</div>}
+      {dir && <div className="text-[10px] text-cafe-muted truncate ml-5">{dir}</div>}
+      {content && <div className="text-[10px] text-cafe-secondary truncate font-mono ml-5 mt-0.5">{highlighted}</div>}
     </button>
   );
 }
@@ -138,6 +138,7 @@ export function WorkspacePanel() {
     file,
     searchResults,
     loading,
+    searchLoading,
     error,
     search,
     setSearchResults,
@@ -152,7 +153,6 @@ export function WorkspacePanel() {
   const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
   const openTabs = useChatStore((s) => s.workspaceOpenTabs);
   const closeTab = useChatStore((s) => s.closeWorkspaceTab);
-  const restoreWorkspaceTabs = useChatStore((s) => s.restoreWorkspaceTabs);
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
   const scrollToLine = useChatStore((s) => s.workspaceOpenFileLine);
   const setRightPanelMode = useChatStore((s) => s.setRightPanelMode);
@@ -188,6 +188,7 @@ export function WorkspacePanel() {
   const [portDiscoveryToast, setPortDiscoveryToast] = useState<{ port: number; framework?: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'content' | 'filename' | 'all'>('all');
+  const [didSearch, setDidSearch] = useState(false);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   /** Progressive reveal: store target path, expand ancestors as tree loads deeper. */
   const [pendingRevealPath, setPendingRevealPath] = useState<string | null>(null);
@@ -199,37 +200,22 @@ export function WorkspacePanel() {
     setStoreRevealPath(null);
   }, [storeRevealPath, setStoreRevealPath]);
 
-  // G7-2: Per-thread workspace state — save/restore expandedPaths on thread switch
-  const threadStateCache = useRef<Map<string, { expanded: Set<string>; tabs: string[]; openFile: string | null }>>(
-    new Map(),
-  );
+  // G7-2: Per-thread expandedPaths cache — tabs/openFile are now in store-level ThreadState
+  // (snapshotActive/flattenThread handle save/restore automatically on setCurrentThread)
+  const expandedPathsCache = useRef<Map<string, Set<string>>>(new Map());
   const prevThreadRef = useRef<string | null>(null);
   useEffect(() => {
     const prevThread = prevThreadRef.current;
-    // Save previous thread's state
     if (prevThread && prevThread !== currentThreadId) {
-      threadStateCache.current.set(prevThread, {
-        expanded: new Set(expandedPaths),
-        tabs: [...openTabs],
-        openFile: openFilePath,
-      });
+      expandedPathsCache.current.set(prevThread, new Set(expandedPaths));
     }
-    // Restore current thread's state (atomic replace, not additive)
     if (currentThreadId && currentThreadId !== prevThread) {
-      const cached = threadStateCache.current.get(currentThreadId);
-      if (cached) {
-        setExpandedPaths(cached.expanded);
-        restoreWorkspaceTabs(cached.tabs, cached.openFile);
-      } else {
-        setExpandedPaths(new Set());
-        restoreWorkspaceTabs([], null);
-      }
-      // Clear any in-flight reveal so it doesn't leak into the new thread
+      const cached = expandedPathsCache.current.get(currentThreadId);
+      setExpandedPaths(cached ?? new Set());
       setPendingRevealPath(null);
     }
     prevThreadRef.current = currentThreadId;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only trigger on thread change
-  }, [currentThreadId, expandedPaths, openFilePath, openTabs, restoreWorkspaceTabs]);
+  }, [currentThreadId]); // eslint-disable-line react-hooks/exhaustive-deps
   // F120: Listen for port discovery via Socket.IO
   useEffect(() => {
     let cancelled = false;
@@ -304,6 +290,7 @@ export function WorkspacePanel() {
     (path: string) => {
       setOpenFile(path);
       setSearchResults([]);
+      setDidSearch(false);
       setEditMode(false);
     },
     [setOpenFile, setSearchResults],
@@ -312,9 +299,16 @@ export function WorkspacePanel() {
   const handleSearchSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (searchQuery.trim()) search(searchQuery.trim(), searchMode);
+      const trimmedQuery = searchQuery.trim();
+      if (!trimmedQuery) {
+        setDidSearch(false);
+        setSearchResults([]);
+        return;
+      }
+      setDidSearch(true);
+      void search(trimmedQuery, searchMode);
     },
-    [searchQuery, searchMode, search],
+    [searchQuery, searchMode, search, setSearchResults],
   );
 
   const revealInTree = useCallback((filePath: string) => {
@@ -357,6 +351,7 @@ export function WorkspacePanel() {
     (path: string, line: number) => {
       setOpenFile(path, line);
       setSearchResults([]);
+      setDidSearch(false);
       setEditMode(false);
       revealInTree(path);
     },
@@ -595,7 +590,7 @@ export function WorkspacePanel() {
               <select
                 value={worktreeId ?? ''}
                 onChange={(e) => setWorktreeId(e.target.value || null)}
-                className="flex-1 text-[10px] border border-cocreator-light rounded-md px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
+                className="flex-1 text-[10px] border border-cocreator-light rounded-md px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
               >
                 {worktrees.map((w) => (
                   <option key={w.id} value={w.id}>
@@ -612,12 +607,16 @@ export function WorkspacePanel() {
 
       {/* Search bar */}
       <form onSubmit={handleSearchSubmit} className="px-3 py-2 border-b border-cocreator-light/40">
-        <div className="flex items-center gap-1.5 bg-white/80 border border-cocreator-light rounded-lg px-2.5 py-1.5 focus-within:border-cocreator-primary focus-within:ring-1 focus-within:ring-cocreator-primary/20 transition-all">
+        <div className="flex items-center gap-1.5 bg-cafe-surface/80 border border-cocreator-light rounded-lg px-2.5 py-1.5 focus-within:border-cocreator-primary focus-within:ring-1 focus-within:ring-cocreator-primary/20 transition-all">
           <SearchIcon />
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setDidSearch(false);
+              if (!e.target.value.trim()) setSearchResults([]);
+            }}
             placeholder={
               searchMode === 'content'
                 ? '搜索代码内容...'
@@ -651,7 +650,7 @@ export function WorkspacePanel() {
       </form>
 
       {/* Phase H: Workspace mode switcher */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/50">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-cafe-surface/50">
         <button
           type="button"
           onClick={() => setWorkspaceMode('dev')}
@@ -729,7 +728,7 @@ export function WorkspacePanel() {
 
           {/* F120: Port Discovery Toast — matches design Scene 2 */}
           {portDiscoveryToast && (
-            <div className="mx-3 my-2 p-4 rounded-xl bg-white shadow-md border border-[#E8E7E5]">
+            <div className="mx-3 my-2 p-4 rounded-xl bg-cafe-surface shadow-md border border-[#E8E7E5]">
               <div className="flex items-start justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <span className="text-[#E29578] text-base">◉</span>
@@ -788,64 +787,87 @@ export function WorkspacePanel() {
             <ChangesPanel worktreeId={worktreeId} basisPct={treeBasis} />
           ) : (
             <>
+              {/* Search loading indicator */}
+              {searchLoading && (
+                <div className="border-b border-cocreator-light/40 px-3 py-3 text-xs text-cocreator-dark/70 flex items-center gap-2">
+                  <span className="inline-block w-3 h-3 border-2 border-cocreator-primary border-t-transparent rounded-full animate-spin" />
+                  搜索中...
+                </div>
+              )}
               {/* Search results — grouped when in 'all' mode */}
-              {searchResults.length > 0 &&
+              {(didSearch || searchResults.length > 0) &&
+                !searchLoading &&
+                !error &&
                 (() => {
                   const fileHits = searchResults.filter((r) => r.matchType === 'filename');
                   const contentHits = searchResults.filter((r) => r.matchType === 'content');
                   const isGrouped = fileHits.length > 0 || contentHits.length > 0;
                   return (
                     <div className="border-b border-cocreator-light/40 max-h-64 overflow-y-auto">
-                      {isGrouped && fileHits.length > 0 && (
+                      {searchResults.length > 0 ? (
                         <>
-                          <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-                            文件名匹配 ({fileHits.length})
-                          </div>
-                          {fileHits.map((r, i) => (
-                            <SearchResultItem
-                              key={`f:${r.path}:${i}`}
-                              path={r.path}
-                              line={0}
-                              content=""
-                              query={searchQuery}
-                              onClick={() => handleSearchResultClick(r.path, 0)}
-                            />
-                          ))}
+                          {isGrouped && fileHits.length > 0 && (
+                            <>
+                              <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                                文件名匹配 ({fileHits.length})
+                              </div>
+                              {fileHits.map((r, i) => (
+                                <SearchResultItem
+                                  key={`f:${r.path}:${i}`}
+                                  path={r.path}
+                                  line={0}
+                                  content=""
+                                  query={searchQuery}
+                                  onClick={() => handleSearchResultClick(r.path, 0)}
+                                />
+                              ))}
+                            </>
+                          )}
+                          {isGrouped && contentHits.length > 0 && (
+                            <>
+                              <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                                内容匹配 ({contentHits.length})
+                              </div>
+                              {contentHits.map((r, i) => (
+                                <SearchResultItem
+                                  key={`c:${r.path}:${r.line}:${i}`}
+                                  path={r.path}
+                                  line={r.line}
+                                  content={r.content}
+                                  query={searchQuery}
+                                  onClick={() => handleSearchResultClick(r.path, r.line)}
+                                />
+                              ))}
+                            </>
+                          )}
+                          {!isGrouped && (
+                            <>
+                              <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
+                                {searchResults.length} 个结果
+                              </div>
+                              {searchResults.map((r, i) => (
+                                <SearchResultItem
+                                  key={`${r.path}:${r.line}:${i}`}
+                                  path={r.path}
+                                  line={r.line}
+                                  content={r.content}
+                                  query={searchQuery}
+                                  onClick={() => handleSearchResultClick(r.path, r.line)}
+                                />
+                              ))}
+                            </>
+                          )}
                         </>
-                      )}
-                      {isGrouped && contentHits.length > 0 && (
-                        <>
-                          <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-                            内容匹配 ({contentHits.length})
+                      ) : (
+                        <div className="px-3 py-3 text-xs text-cocreator-dark/70">
+                          <div className="font-medium text-cafe-black">
+                            未在 {currentWorktree?.branch ?? '当前工作区'} 中找到 “{searchQuery.trim()}”
                           </div>
-                          {contentHits.map((r, i) => (
-                            <SearchResultItem
-                              key={`c:${r.path}:${r.line}:${i}`}
-                              path={r.path}
-                              line={r.line}
-                              content={r.content}
-                              query={searchQuery}
-                              onClick={() => handleSearchResultClick(r.path, r.line)}
-                            />
-                          ))}
-                        </>
-                      )}
-                      {!isGrouped && (
-                        <>
-                          <div className="px-3 py-1.5 text-[10px] text-cocreator-dark/50 font-semibold uppercase tracking-wider sticky top-0 bg-cafe-white/95 backdrop-blur-sm">
-                            {searchResults.length} 个结果
+                          <div className="mt-1 text-[11px] text-cocreator-dark/55">
+                            当前模式：{searchMode === 'all' ? '全部' : searchMode === 'filename' ? '文件名' : '内容'}
+                            {searchMode === 'content' ? '。可以试试切到 File 或 All。' : '。'}
                           </div>
-                          {searchResults.map((r, i) => (
-                            <SearchResultItem
-                              key={`${r.path}:${r.line}:${i}`}
-                              path={r.path}
-                              line={r.line}
-                              content={r.content}
-                              query={searchQuery}
-                              onClick={() => handleSearchResultClick(r.path, r.line)}
-                            />
-                          ))}
-                        </>
+                        </div>
                       )}
                     </div>
                   );
@@ -881,7 +903,7 @@ export function WorkspacePanel() {
                             className={`group flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono border-r border-[#2a2a32] flex-shrink-0 transition-colors ${
                               tab === openFilePath
                                 ? 'bg-[#2a2a32] text-gray-200'
-                                : 'text-gray-500 hover:text-gray-300 hover:bg-[#252530]'
+                                : 'text-cafe-secondary hover:text-cafe-muted hover:bg-[#252530]'
                             }`}
                             title={tab}
                           >
@@ -900,7 +922,7 @@ export function WorkspacePanel() {
                                   closeTab(tab);
                                 }
                               }}
-                              className="ml-0.5 w-4 h-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-opacity text-gray-500 hover:text-gray-300"
+                              className="ml-0.5 w-4 h-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-cafe-surface/10 transition-opacity text-cafe-secondary hover:text-cafe-muted"
                               title="关闭"
                             >
                               ×
@@ -914,7 +936,7 @@ export function WorkspacePanel() {
                         <div className="px-3 py-1 bg-[#1E1E24] flex items-center justify-between">
                           <div className="flex items-center gap-2 min-w-0">
                             {file.size > 0 && (
-                              <span className="text-[9px] text-gray-500 font-mono flex-shrink-0">
+                              <span className="text-[9px] text-cafe-secondary font-mono flex-shrink-0">
                                 {file.size < 1024 ? `${file.size}B` : `${Math.round(file.size / 1024)}KB`}
                               </span>
                             )}
@@ -927,7 +949,7 @@ export function WorkspacePanel() {
                                 className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                                   markdownRendered
                                     ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
-                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                    : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
                                 }`}
                                 title={markdownRendered ? '切换到源码' : '切换到渲染'}
                               >
@@ -941,7 +963,7 @@ export function WorkspacePanel() {
                                 className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                                   htmlPreview
                                     ? 'bg-cocreator-primary/80 text-white hover:bg-cocreator-primary'
-                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                    : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
                                 }`}
                                 title={htmlPreview ? '切换到源码' : '预览 HTML'}
                               >
@@ -955,7 +977,7 @@ export function WorkspacePanel() {
                                 className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                                   jsxPreview
                                     ? 'bg-blue-600/80 text-white hover:bg-blue-500'
-                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                    : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
                                 }`}
                                 title={jsxPreview ? '切换到源码' : '预览 JSX/TSX'}
                               >
@@ -969,7 +991,7 @@ export function WorkspacePanel() {
                                 onClick={() => {
                                   void navigator.clipboard.writeText(file.content);
                                 }}
-                                className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                                className="px-2 py-0.5 rounded text-[10px] font-medium text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10 transition-colors"
                                 title={file.truncated ? '复制已加载内容（文件已截断，非完整全文）' : '复制文件全文'}
                               >
                                 {file.truncated ? 'Copy…' : 'Copy'}
@@ -982,7 +1004,7 @@ export function WorkspacePanel() {
                                 const abs = currentWorktree ? `${currentWorktree.root}/${openFilePath}` : openFilePath;
                                 void navigator.clipboard.writeText(abs);
                               }}
-                              className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                              className="px-2 py-0.5 rounded text-[10px] font-medium text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10 transition-colors"
                               title="复制绝对路径"
                             >
                               Path
@@ -992,7 +1014,7 @@ export function WorkspacePanel() {
                               onClick={() => {
                                 if (openFilePath) void revealInFinder(openFilePath);
                               }}
-                              className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                              className="px-2 py-0.5 rounded text-[10px] font-medium text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10 transition-colors"
                               title="在 Finder 中显示"
                             >
                               Finder
@@ -1004,7 +1026,7 @@ export function WorkspacePanel() {
                                 className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                                   editMode
                                     ? 'bg-green-600/80 text-white hover:bg-green-500'
-                                    : 'text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                                    : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
                                 }`}
                                 title={editMode ? '退出编辑' : '编辑文件'}
                               >
@@ -1017,7 +1039,7 @@ export function WorkspacePanel() {
                                 if (openFilePath) closeTab(openFilePath);
                                 setEditMode(false);
                               }}
-                              className="w-5 h-5 flex items-center justify-center rounded text-gray-500 hover:text-gray-300 hover:bg-white/10 transition-colors"
+                              className="w-5 h-5 flex items-center justify-center rounded text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10 transition-colors"
                               title="关闭标签页"
                             >
                               <CloseIcon />
@@ -1048,7 +1070,7 @@ export function WorkspacePanel() {
                               >
                                 浏览器不支持音频播放
                               </audio>
-                              <p className="text-[10px] text-gray-500">
+                              <p className="text-[10px] text-cafe-secondary">
                                 {file.mime} · {Math.round(file.size / 1024)}KB
                               </p>
                             </div>
@@ -1063,7 +1085,7 @@ export function WorkspacePanel() {
                               </video>
                             </div>
                           ) : (
-                            <div className="flex flex-col items-center justify-center py-8 bg-[#1E1E24] text-gray-500 text-xs">
+                            <div className="flex flex-col items-center justify-center py-8 bg-[#1E1E24] text-cafe-secondary text-xs">
                               <span className="text-2xl mb-2">📄</span>
                               <p>二进制文件</p>
                               <p className="text-[10px] mt-1">
@@ -1079,12 +1101,15 @@ export function WorkspacePanel() {
                             </div>
                           )
                         ) : isMarkdown && markdownRendered && !editMode ? (
-                          <div className="relative flex-1 overflow-auto bg-cafe-white p-4" ref={mdContainerRef}>
-                            <MarkdownContent
-                              content={file.content}
-                              disableCommandPrefix
-                              basePath={openFilePath ? openFilePath.split('/').slice(0, -1).join('/') : undefined}
-                            />
+                          <div className="relative flex-1 min-h-0">
+                            <div className="h-full overflow-auto bg-cafe-white p-4" ref={mdContainerRef}>
+                              <MarkdownContent
+                                content={file.content}
+                                disableCommandPrefix
+                                basePath={openFilePath ? openFilePath.split('/').slice(0, -1).join('/') : undefined}
+                                worktreeId={worktreeId ?? undefined}
+                              />
+                            </div>
                             {mdHasSelection && (
                               <button
                                 type="button"
@@ -1107,7 +1132,7 @@ export function WorkspacePanel() {
                             <div className="px-2 py-1 bg-amber-900/20 text-amber-400 text-[10px] border-b border-amber-900/30 flex-shrink-0">
                               预览模式 — 相对资源路径（图片/CSS/JS）可能无法加载
                             </div>
-                            <div className="flex-1 min-h-0 bg-white">
+                            <div className="flex-1 min-h-0 bg-cafe-surface">
                               <iframe
                                 srcDoc={file.content}
                                 sandbox="allow-scripts"

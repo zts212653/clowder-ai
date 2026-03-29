@@ -535,9 +535,9 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector('.border-gray-300\\/40');
+    const card = container.querySelector('.border-cafe\\/40');
     expect(card).not.toBeNull();
-    const badge = container.querySelector('.bg-gray-200.text-gray-600');
+    const badge = container.querySelector('.bg-gray-200.text-cafe-secondary');
     expect(badge).not.toBeNull();
     expect(badge?.textContent).toContain('unknown-cat');
   });

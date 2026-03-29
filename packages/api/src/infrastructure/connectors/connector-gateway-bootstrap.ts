@@ -10,26 +10,30 @@
  * F088 Multi-Platform Chat Gateway
  */
 
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import { CAT_CONFIGS, type CatId, type ConnectorSource } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
+import { isCatAvailable } from '../../config/cat-config-loader.js';
 import type { ConnectorWebhookHandler, WebhookHandleResult } from '../../routes/connector-webhooks.js';
 import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
 import { DingTalkAdapter } from './adapters/DingTalkAdapter.js';
 import { FeishuAdapter } from './adapters/FeishuAdapter.js';
 import { FeishuTokenManager } from './adapters/FeishuTokenManager.js';
 import { TelegramAdapter } from './adapters/TelegramAdapter.js';
+import { WeComAgentAdapter } from './adapters/WeComAgentAdapter.js';
+import { WeComBotAdapter } from './adapters/WeComBotAdapter.js';
 import { WeixinAdapter } from './adapters/WeixinAdapter.js';
-import { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
+import { ConnectorCommandLayer, type ConnectorCommandLayerDeps } from './ConnectorCommandLayer.js';
 import {
   type IConnectorPermissionStore,
   MemoryConnectorPermissionStore,
   RedisConnectorPermissionStore,
 } from './ConnectorPermissionStore.js';
 import { ConnectorRouter } from './ConnectorRouter.js';
-import { MemoryConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
+import { type IConnectorThreadBindingStore, MemoryConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { GitHubRepoWebhookHandler } from './github-repo-event/GitHubRepoWebhookHandler.js';
 import { ReconciliationDedup } from './github-repo-event/ReconciliationDedup.js';
 import { RedisDeliveryDedup } from './github-repo-event/RedisDeliveryDedup.js';
@@ -56,6 +60,13 @@ export interface ConnectorGatewayConfig {
   dingtalkAppKey?: string | undefined;
   dingtalkAppSecret?: string | undefined;
   weixinBotToken?: string | undefined;
+  wecomBotId?: string | undefined;
+  wecomBotSecret?: string | undefined;
+  wecomCorpId?: string | undefined;
+  wecomAgentId?: string | undefined;
+  wecomAgentSecret?: string | undefined;
+  wecomToken?: string | undefined;
+  wecomEncodingAesKey?: string | undefined;
   /** Override co-creator userId for connector threads. Read from DEFAULT_OWNER_USER_ID env. */
   coCreatorUserId?: string | undefined;
   whisperUrl?: string | undefined;
@@ -112,6 +123,12 @@ export interface ConnectorGatewayDeps {
       threadId: string,
       state: { v: 1; connectorId: string; externalChatId: string; createdAt: number; lastCommandAt?: number } | null,
     ): void | Promise<void>;
+    /** F142: participant activity for /cats and /status */
+    getParticipantsWithActivity?(
+      threadId: string,
+    ):
+      | Array<{ catId: string; lastMessageAt: number; messageCount: number }>
+      | Promise<Array<{ catId: string; lastMessageAt: number; messageCount: number }>>;
   };
   /** Phase D: optional backlog store for feat-number matching in /use */
   readonly backlogStore?: {
@@ -140,6 +157,12 @@ export interface ConnectorGatewayDeps {
   readonly redis?: RedisClient | undefined;
   readonly log: FastifyBaseLogger;
   readonly frontendBaseUrl?: string | undefined;
+  /** F142: agent service registry for /cats command */
+  readonly agentRegistry?: { has(catId: string): boolean };
+  /** F142-B: unified command registry for /commands listing + audit */
+  readonly commandRegistry?: import('../commands/CommandRegistry.js').CommandRegistry;
+  /** F142: shared binding store — if provided, gateway reuses it instead of creating a new instance */
+  readonly bindingStore?: IConnectorThreadBindingStore;
   /** @internal Test-only: override WSClient factory to avoid real SDK connections */
   readonly _wsClientFactory?:
     | ((opts: { appId: string; appSecret: string }) => {
@@ -171,6 +194,13 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     dingtalkAppKey: process.env.DINGTALK_APP_KEY,
     dingtalkAppSecret: process.env.DINGTALK_APP_SECRET,
     weixinBotToken: process.env.WEIXIN_BOT_TOKEN,
+    wecomBotId: process.env.WECOM_BOT_ID,
+    wecomBotSecret: process.env.WECOM_BOT_SECRET,
+    wecomCorpId: process.env.WECOM_CORP_ID,
+    wecomAgentId: process.env.WECOM_AGENT_ID,
+    wecomAgentSecret: process.env.WECOM_AGENT_SECRET,
+    wecomToken: process.env.WECOM_TOKEN,
+    wecomEncodingAesKey: process.env.WECOM_ENCODING_AES_KEY,
     coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID,
     whisperUrl: process.env.WHISPER_URL,
     connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR,
@@ -189,15 +219,23 @@ export async function startConnectorGateway(
     config.feishuAppId && config.feishuAppSecret && (feishuWsMode || config.feishuVerificationToken),
   );
   const hasDingTalk = Boolean(config.dingtalkAppKey && config.dingtalkAppSecret);
+  const hasWeComBot = Boolean(config.wecomBotId && config.wecomBotSecret);
+  const hasWeComAgent = Boolean(
+    config.wecomCorpId &&
+      config.wecomAgentId &&
+      config.wecomAgentSecret &&
+      config.wecomToken &&
+      config.wecomEncodingAesKey,
+  );
   const hasWeixin = Boolean(config.weixinBotToken);
 
-  if (!hasTelegram && !hasFeishu && !hasDingTalk && !hasWeixin) {
+  if (!hasTelegram && !hasFeishu && !hasDingTalk && !hasWeComBot && !hasWeComAgent && !hasWeixin) {
     log.info('[ConnectorGateway] No pre-configured connectors — gateway created for WeChat QR login support');
   }
 
-  const bindingStore = deps.redis
-    ? new RedisConnectorThreadBindingStore(deps.redis)
-    : new MemoryConnectorThreadBindingStore();
+  const bindingStore =
+    deps.bindingStore ??
+    (deps.redis ? new RedisConnectorThreadBindingStore(deps.redis) : new MemoryConnectorThreadBindingStore());
   const dedup = new InboundMessageDedup();
   log.info({ store: deps.redis ? 'redis' : 'memory' }, '[ConnectorGateway] Binding store initialized');
   const adapters = new Map<string, IOutboundAdapter>();
@@ -233,12 +271,28 @@ export async function startConnectorGateway(
     }
   }
 
+  // F142: build catRoster from config for /cats and /status display names + availability
+  // F142: build catRoster from CAT_CONFIGS (displayName) + roster (available)
+  const catRoster = Object.fromEntries(
+    Object.entries(CAT_CONFIGS).map(([id, config]) => [
+      id,
+      { displayName: config.displayName, available: isCatAvailable(id) },
+    ]),
+  );
+
   const commandLayer = new ConnectorCommandLayer({
     bindingStore,
     threadStore: deps.threadStore,
     ...(deps.backlogStore ? { backlogStore: deps.backlogStore } : {}),
     frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003',
     permissionStore,
+    // F142: wire /cats and /status deps (threadStore has getParticipantsWithActivity at runtime)
+    ...(deps.threadStore.getParticipantsWithActivity
+      ? { participantStore: deps.threadStore as unknown as ConnectorCommandLayerDeps['participantStore'] }
+      : {}),
+    agentRegistry: deps.agentRegistry,
+    catRoster,
+    commandRegistry: deps.commandRegistry,
   });
 
   // Phase 5+6: Media service + STT provider (optional)
@@ -590,6 +644,133 @@ export async function startConnectorGateway(
     log.info('[ConnectorGateway] DingTalk adapter started (Stream mode)');
   }
 
+  // ── WeCom Bot (WebSocket mode via @wecom/aibot-node-sdk) ──
+  if (hasWeComBot) {
+    const wecomBot = new WeComBotAdapter(log, {
+      botId: config.wecomBotId!,
+      secret: config.wecomBotSecret!,
+      redis: deps.redis,
+    });
+    adapters.set('wecom-bot', wecomBot);
+
+    await wecomBot.hydrateGroupChatIds();
+
+    mediaService.setWeComBotDownloadFn(async (url: string, aesKey?: string) => {
+      const { buffer } = await wecomBot.downloadMedia(url, aesKey);
+      return buffer;
+    });
+
+    await wecomBot.startStream(async (msg) => {
+      const attachments = msg.attachments
+        ?.filter((a) => a.url)
+        .map((a) => ({
+          type: (a.type === 'voice' ? 'audio' : a.type) as 'image' | 'file' | 'audio',
+          platformKey: `${a.url}${a.aesKey ? `|aeskey=${a.aesKey}` : ''}`,
+          ...(a.fileName ? { fileName: a.fileName } : {}),
+        }));
+
+      // F132 B.2: Register group chatId so outbound dispatch survives cold restarts
+      if (msg.chatType === 'group') {
+        wecomBot.registerGroupChatId(msg.chatId);
+      }
+
+      await connectorRouter.route(
+        'wecom-bot',
+        msg.chatId,
+        msg.text,
+        msg.messageId,
+        attachments,
+        msg.chatType === 'group' && msg.senderId !== 'unknown' ? { id: msg.senderId } : undefined,
+        msg.chatType,
+      );
+    });
+
+    stopFns.push(async () => wecomBot.stopStream());
+
+    log.info('[ConnectorGateway] WeCom Bot adapter started (WebSocket mode)');
+  }
+
+  // ── WeCom Agent (HTTP callback via webhook) ──
+  if (hasWeComAgent) {
+    const wecomAgent = new WeComAgentAdapter(log, {
+      corpId: config.wecomCorpId!,
+      agentId: config.wecomAgentId!,
+      agentSecret: config.wecomAgentSecret!,
+      token: config.wecomToken!,
+      encodingAesKey: config.wecomEncodingAesKey!,
+    });
+    adapters.set('wecom-agent', wecomAgent);
+
+    mediaService.setWeComAgentDownloadFn(async (mediaId: string) => {
+      return wecomAgent.downloadMedia(mediaId);
+    });
+
+    webhookHandlers.set('wecom-agent', {
+      connectorId: 'wecom-agent',
+      async handleWebhook(body, headers, _rawBody, query): Promise<WebhookHandleResult> {
+        const q = (query ?? {}) as Record<string, string>;
+        const msgSig = q.msg_signature ?? '';
+        const timestamp = q.timestamp ?? '';
+        const nonce = q.nonce ?? '';
+        const echostr = q.echostr;
+
+        // GET echostr challenge (URL verification)
+        if (echostr) {
+          const plainEcho = wecomAgent.verifyCallback({
+            msg_signature: msgSig,
+            timestamp,
+            nonce,
+            echostr,
+          });
+          if (plainEcho !== null) {
+            return { kind: 'challenge', response: plainEcho };
+          }
+          return { kind: 'error', status: 403, message: 'echostr verification failed' };
+        }
+
+        // POST encrypted message
+        const rawBody = typeof body === 'string' ? body : JSON.stringify(body);
+        const decryptedXml = wecomAgent.decryptInbound(rawBody, {
+          msg_signature: msgSig,
+          timestamp,
+          nonce,
+        });
+        if (!decryptedXml) {
+          return { kind: 'error', status: 403, message: 'Signature verification or decryption failed' };
+        }
+
+        const parsed = wecomAgent.parseEvent(decryptedXml);
+        if (!parsed) {
+          return { kind: 'skipped', reason: 'unsupported_event' };
+        }
+
+        const attachments = parsed.attachments?.map((a) => ({
+          type: (a.type === 'video' ? 'file' : a.type === 'audio' ? 'audio' : a.type) as 'image' | 'file' | 'audio',
+          platformKey: a.mediaId,
+          ...(a.fileName ? { fileName: a.fileName } : {}),
+        }));
+
+        const result = await connectorRouter.route(
+          'wecom-agent',
+          parsed.chatId,
+          parsed.text,
+          parsed.messageId,
+          attachments,
+        );
+
+        if (result.kind === 'skipped') {
+          return { kind: 'skipped', reason: result.reason };
+        }
+        if (result.kind === 'command') {
+          return { kind: 'processed', messageId: 'command' };
+        }
+        return { kind: 'processed', messageId: result.messageId };
+      },
+    });
+
+    log.info('[ConnectorGateway] WeCom Agent adapter registered (webhook mode)');
+  }
+
   // ── WeChat Personal (iLink Bot long polling) ──
   // Always create the adapter instance (for QR login routes); only start polling if we have a token.
   const weixin = new WeixinAdapter(config.weixinBotToken ?? '', log);
@@ -633,16 +814,19 @@ export async function startConnectorGateway(
   const uploadDir = resolve(process.env.UPLOAD_DIR ?? './uploads');
   const ttsCacheDir = resolve(process.env.TTS_CACHE_DIR ?? './data/tts-cache');
   const resolvedMediaDir = resolve(mediaDir);
+  const webPublicDir = resolve(process.env.WEB_PUBLIC_DIR ?? '../web/public');
   const mediaPathResolver = (url: string): string | undefined => {
     // Phase J P1: guard against path traversal (e.g. /uploads/../../etc/passwd)
     const safeResolve = (base: string, suffix: string): string | undefined => {
       const resolved = resolve(base, suffix);
-      return resolved.startsWith(base + '/') || resolved === base ? resolved : undefined;
+      if (!(resolved.startsWith(base + '/') || resolved === base)) return undefined;
+      return existsSync(resolved) ? resolved : undefined;
     };
     if (url.startsWith('/uploads/')) return safeResolve(uploadDir, url.slice('/uploads/'.length));
     if (url.startsWith('/api/tts/audio/')) return safeResolve(ttsCacheDir, url.slice('/api/tts/audio/'.length));
     if (url.startsWith('/api/connector-media/'))
       return safeResolve(resolvedMediaDir, url.slice('/api/connector-media/'.length));
+    if (url.startsWith('/avatars/')) return safeResolve(webPublicDir, url.slice(1));
     return undefined;
   };
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { CheckCircleIcon, QrCodeIcon, SpinnerIcon } from './HubConfigIcons';
 
-type QrState = 'idle' | 'fetching' | 'waiting' | 'scanned' | 'confirmed' | 'error' | 'expired';
+type QrState = 'idle' | 'fetching' | 'waiting' | 'scanned' | 'confirmed' | 'error' | 'expired' | 'disconnecting';
 
 const QR_POLL_INTERVAL_MS = 2500;
 const QR_EXPIRE_MS = 60_000;
@@ -67,6 +67,20 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
     [stopPolling],
   );
 
+  const handleDisconnect = async () => {
+    setQrState('disconnecting');
+    try {
+      const res = await apiFetch('/api/connector/weixin/disconnect', { method: 'POST' });
+      if (!res.ok) {
+        setQrState('confirmed');
+        return;
+      }
+      setQrState('idle');
+    } catch {
+      setQrState('confirmed');
+    }
+  };
+
   const handleFetchQr = async () => {
     setQrState('fetching');
     setErrorMsg(null);
@@ -88,16 +102,39 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
     }
   };
 
-  if (qrState === 'confirmed') {
+  if (qrState === 'confirmed' || qrState === 'disconnecting') {
     return (
-      <div
-        className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5"
-        data-testid="weixin-connected"
-      >
-        <span className="text-green-600">
-          <CheckCircleIcon />
-        </span>
-        <span className="text-sm font-medium text-green-700">WeChat connected</span>
+      <div className="space-y-2" data-testid="weixin-connected">
+        <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-green-600">
+              <CheckCircleIcon />
+            </span>
+            <span className="text-sm font-medium text-green-700">WeChat connected</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleDisconnect}
+            disabled={qrState === 'disconnecting'}
+            className="text-xs text-cafe-secondary hover:text-red-600 transition-colors disabled:opacity-50"
+            data-testid="weixin-disconnect"
+          >
+            {qrState === 'disconnecting' ? 'Disconnecting...' : 'Disconnect'}
+          </button>
+        </div>
+        <p className="text-xs text-cafe-tertiary leading-relaxed">
+          To fully unbind this WeChat account: WeChat &rarr; Settings &rarr; Account &amp; Security &rarr; Login Device
+          Management. You can also revoke authorization at{' '}
+          <a
+            href="https://liteapp.weixin.qq.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-cafe-accent hover:underline"
+          >
+            liteapp.weixin.qq.com
+          </a>
+          .
+        </p>
       </div>
     );
   }
@@ -124,17 +161,17 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
       )}
 
       {qrState === 'fetching' && (
-        <div className="flex items-center gap-2 text-gray-500 text-sm">
+        <div className="flex items-center gap-2 text-cafe-secondary text-sm">
           <SpinnerIcon />
           <span>Generating QR code...</span>
         </div>
       )}
 
       {(qrState === 'waiting' || qrState === 'scanned') && qrUrl && (
-        <div className="flex flex-col items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl p-4">
+        <div className="flex flex-col items-center gap-3 bg-cafe-surface-elevated border border-cafe rounded-xl p-4">
           <img src={qrUrl} alt="WeChat login QR code" className="w-48 h-48 rounded-lg" data-testid="weixin-qr-image" />
           {qrState === 'waiting' && (
-            <div className="flex items-center gap-2 text-gray-500 text-xs">
+            <div className="flex items-center gap-2 text-cafe-secondary text-xs">
               <SpinnerIcon />
               <span>Scan the QR code with WeChat</span>
             </div>

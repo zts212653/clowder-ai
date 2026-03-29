@@ -182,10 +182,10 @@ export function CatCafeHub() {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-4 pb-3" style={{ flexShrink: 0 }}>
-          <h2 className="text-base font-bold text-gray-900">Cat Caf&eacute; Hub</h2>
+          <h2 className="text-base font-bold text-cafe">Cat Caf&eacute; Hub</h2>
           <button
             onClick={closeHub}
-            className="text-gray-400 hover:text-gray-600 text-lg"
+            className="text-cafe-muted hover:text-cafe-secondary text-lg"
             title="关闭"
             aria-label="关闭"
           >
@@ -211,7 +211,7 @@ export function CatCafeHub() {
           </div>
 
           {/* Tab content */}
-          <div className="rounded-xl bg-white shadow-[0_1px_8px_rgba(0,0,0,0.03)] p-4">
+          <div className="rounded-xl bg-cafe-surface shadow-[0_1px_8px_rgba(0,0,0,0.03)] p-4">
             {(tab === 'capabilities' || capTabEverOpened) && (
               <div className={tab === 'capabilities' ? '' : 'hidden'}>
                 <HubCapabilityTab />
@@ -229,13 +229,13 @@ export function CatCafeHub() {
                   togglingCatId={togglingCatId}
                 />
               ) : !fetchError ? (
-                <p className="text-sm text-gray-400">加载中...</p>
+                <p className="text-sm text-cafe-muted">加载中...</p>
               ) : null)}
             {tab === 'system' &&
               (config ? (
-                <SystemTab config={config} />
+                <SystemTab config={config} onConfigChange={fetchData} />
               ) : !fetchError ? (
-                <p className="text-sm text-gray-400">加载中...</p>
+                <p className="text-sm text-cafe-muted">加载中...</p>
               ) : null)}
             {tab === 'commands' && <HubCommandsTab />}
             {tab === 'routing' && <HubRoutingPolicyTab />}

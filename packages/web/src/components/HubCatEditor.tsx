@@ -80,6 +80,14 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     setHasUnsavedChanges(false);
   }, [open, cat, draft]);
 
+  // Re-fetch profiles when Provider Profiles page creates/saves/deletes an account.
+  const [profilesVersion, setProfilesVersion] = useState(0);
+  useEffect(() => {
+    const handler = () => setProfilesVersion((v) => v + 1);
+    window.addEventListener('provider-profiles-changed', handler);
+    return () => window.removeEventListener('provider-profiles-changed', handler);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -101,7 +109,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, profilesVersion]);
 
   useEffect(() => {
     if (!open || !cat) {
@@ -281,9 +289,26 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       if (!form.defaultModel.trim()) {
         errors.account = true;
         errorMessages.push('Model');
-      } else if (form.client === 'opencode' && selectedProfile?.authType === 'api_key' && !form.ocProviderName.trim()) {
+      } else if (
+        form.client === 'opencode' &&
+        selectedProfile?.authType === 'api_key' &&
+        !form.ocProviderName.trim() &&
+        (() => {
+          const m = form.defaultModel.trim();
+          const si = m.indexOf('/');
+          const looksLike = si > 0 && si < m.length - 1;
+          if (!looksLike) return true; // bare model, need provider
+          // Known provider prefix → canonical (synced with BUILTIN_OPENCODE_PROVIDERS)
+          const known = new Set(['anthropic', 'openai', 'openrouter', 'google']);
+          if (known.has(m.slice(0, si))) return false;
+          // Non-builtin: "x/y" in account list + bare "y" absent → namespace
+          const acm = selectedProfile?.models ?? [];
+          const bare = m.slice(si + 1);
+          return acm.includes(m) && !acm.includes(bare);
+        })()
+      ) {
         errors.account = true;
-        errorMessages.push('OpenCode API Key 认证需填写 Provider 名称');
+        errorMessages.push('请使用 provider/model 格式（如 minimax/MiniMax-M2.7），或填写 Provider 名称');
       }
       if (splitMentionPatterns(form.mentionPatterns).length === 0) {
         errors.routing = true;

@@ -24,7 +24,7 @@ export function TtsPlayButton({
     <button
       onClick={() => onSynthesize(messageId, text, catId)}
       disabled={isLoading}
-      className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 p-0.5 rounded hover:bg-black/5 text-gray-400 hover:text-gray-600"
+      className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 p-0.5 rounded hover:bg-black/5 text-cafe-muted hover:text-cafe-secondary"
       title={isPlaying ? '停止' : '播放语音'}
     >
       {isLoading ? (

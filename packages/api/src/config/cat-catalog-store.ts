@@ -1,14 +1,38 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, Roster } from '@cat-cafe/shared';
+import { type BuiltinAccountClient, builtinAccountIdForClient } from './account-resolver.js';
+import { readCatalogAccounts } from './catalog-accounts.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
-import { builtinAccountIdForClient, readBootstrapBindingsSync } from './provider-profiles.js';
-import type { BootstrapBinding, BuiltinAccountClient } from './provider-profiles.types.js';
-import { resolveProviderProfilesRootSync } from './provider-profiles-root.js';
+
+type BootstrapBindingMode = 'oauth' | 'api_key' | 'skip';
+interface BootstrapBinding {
+  enabled: boolean;
+  mode: BootstrapBindingMode;
+  accountRef?: string;
+}
+type BootstrapBindings = Partial<Record<BuiltinAccountClient, BootstrapBinding>>;
 
 const CAT_CAFE_DIR = '.cat-cafe';
-const META_FILENAME = 'provider-profiles.json';
 const CAT_CATALOG_FILENAME = 'cat-catalog.json';
+const LEGACY_META_FILENAME = 'provider-profiles.json';
+
+/**
+ * F136 Phase 4d: Read bootstrap bindings from legacy provider-profiles.json.
+ * Returns empty bindings when the old file doesn't exist (post-migration steady state).
+ */
+function readBootstrapBindingsLegacy(projectRoot: string): BootstrapBindings {
+  try {
+    const globalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT ?? homedir();
+    const metaPath = resolve(globalRoot, CAT_CAFE_DIR, LEGACY_META_FILENAME);
+    if (!existsSync(metaPath)) return {};
+    const raw = JSON.parse(readFileSync(metaPath, 'utf-8'));
+    return (raw?.bootstrapBindings as BootstrapBindings) ?? {};
+  } catch {
+    return {};
+  }
+}
 
 function safePath(projectRoot: string, ...segments: string[]): string {
   const root = resolve(projectRoot);
@@ -64,13 +88,19 @@ function resolveExplicitVariantAccountRef(variant: Record<string, unknown>): str
 
 function readProfileModelsSync(projectRoot: string, accountRef: string): string[] | null {
   try {
-    const storageRoot = resolveProviderProfilesRootSync(projectRoot);
-    const metaPath = resolve(storageRoot, CAT_CAFE_DIR, META_FILENAME);
+    // Try new catalog accounts first
+    const accounts = readCatalogAccounts(projectRoot);
+    const account = accounts[accountRef];
+    if (account?.models) return [...account.models];
+
+    // Fall back to legacy provider-profiles.json (used during bootstrap before migration)
+    const globalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT ?? homedir();
+    const metaPath = resolve(globalRoot, CAT_CAFE_DIR, LEGACY_META_FILENAME);
     if (!existsSync(metaPath)) return null;
     const raw = JSON.parse(readFileSync(metaPath, 'utf-8'));
-    const providers = raw?.providers ?? raw?.profiles ?? [];
-    const profile = (providers as Array<{ id?: string; models?: string[] }>).find((p) => p.id === accountRef);
-    return profile?.models ?? null;
+    const profiles = Array.isArray(raw?.providers) ? raw.providers : [];
+    const legacyProfile = profiles.find((p: { id?: string }) => p.id === accountRef);
+    return legacyProfile?.models ? [...legacyProfile.models] : null;
   } catch {
     return null;
   }
@@ -241,7 +271,7 @@ function migrateExistingCatalogBindings(
   projectRoot: string,
   catalog: CatCafeConfig,
 ): { catalog: CatCafeConfig; dirty: boolean } {
-  const bootstrapBindings = readBootstrapBindingsSync(projectRoot);
+  const bootstrapBindings = readBootstrapBindingsLegacy(projectRoot);
   const legacySeedBindingBackfill = resolveLegacySeedBindingBackfill(projectRoot, catalog, bootstrapBindings);
   let dirty = false;
   const nextCatalog = structuredClone(catalog) as CatCafeConfig;
@@ -278,7 +308,7 @@ function migrateExistingCatalogBindings(
 }
 
 function filterBootstrapCatalog(template: CatCafeConfig, projectRoot: string): CatCafeConfig {
-  const bootstrapBindings = readBootstrapBindingsSync(projectRoot);
+  const bootstrapBindings = readBootstrapBindingsLegacy(projectRoot);
   const selectedBreeds: Record<string, unknown>[] = [];
   const selectedCatIds = new Set<string>();
 

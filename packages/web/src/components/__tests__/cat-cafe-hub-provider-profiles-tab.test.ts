@@ -376,7 +376,7 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).not.toContain('绑定范围');
   });
 
-  it('renders API key creation form inline without protocol or verify controls', async () => {
+  it('renders API key creation form inline with protocol selector', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/provider-profiles')) {
         return Promise.resolve(
@@ -468,6 +468,11 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     expect(container.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
+    // Protocol selector should exist with default 'openai'
+    const protocolSelect = container.querySelector('select') as HTMLSelectElement | null;
+    expect(protocolSelect).toBeTruthy();
+    expect(protocolSelect?.value).toBe('openai');
+    expect(container.textContent).toContain('API 协议');
     const createApiKeyInput = container.querySelector('input[placeholder*="sk-"]') as HTMLInputElement | null;
     expect(createApiKeyInput).toBeTruthy();
     expect(createApiKeyInput?.type).toBe('password');

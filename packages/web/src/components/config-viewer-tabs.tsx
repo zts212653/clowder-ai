@@ -1,5 +1,7 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useCallback, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import { HubCoCreatorOverviewCard, HubMemberOverviewCard, HubOverviewToolbar } from './HubMemberOverviewCard';
 
@@ -7,8 +9,8 @@ export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './confi
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
-      <h3 className="text-xs font-semibold text-gray-700 mb-2">{title}</h3>
+    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+      <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{title}</h3>
       {children}
     </section>
   );
@@ -17,7 +19,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function KV({ label, value }: { label: string; value: string | number | boolean }) {
   const display = typeof value === 'boolean' ? (value ? '是' : '否') : String(value);
   return (
-    <div className="flex justify-between text-xs text-gray-700">
+    <div className="flex justify-between text-xs text-cafe-secondary">
       <span>{label}</span>
       <span className="font-medium text-right">{display}</span>
     </div>
@@ -59,14 +61,85 @@ export function CatOverviewTab({
         ))}
       </div>
       <p className="text-[13px] text-[#B59A88]">点击任意卡片进入成员配置 →</p>
-      {cats.length === 0 && <p className="text-sm text-gray-400">未找到成员配置数据</p>}
+      {cats.length === 0 && <p className="text-sm text-cafe-muted">未找到成员配置数据</p>}
     </div>
   );
 }
 
-export function SystemTab({ config }: { config: ConfigData }) {
+type BubbleDefault = 'expanded' | 'collapsed';
+
+function BubbleToggle({
+  label,
+  value,
+  configKey,
+  onChanged,
+}: {
+  label: string;
+  value: BubbleDefault;
+  configKey: string;
+  onChanged: () => void;
+}) {
+  const pendingRef = useRef(false);
+  const [optimistic, setOptimistic] = useState<BubbleDefault | null>(null);
+  const display = optimistic ?? value;
+
+  const toggle = useCallback(async () => {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    const next: BubbleDefault = display === 'collapsed' ? 'expanded' : 'collapsed';
+    setOptimistic(next);
+    try {
+      const res = await apiFetch('/api/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: configKey, value: next }),
+      });
+      if (res.ok) {
+        setOptimistic(null);
+        onChanged();
+        void useChatStore.getState().fetchGlobalBubbleDefaults();
+      } else setOptimistic(null);
+    } catch {
+      setOptimistic(null);
+    } finally {
+      pendingRef.current = false;
+    }
+  }, [display, configKey, onChanged]);
+
+  return (
+    <div className="flex items-center justify-between text-xs text-cafe-secondary">
+      <span>{label}</span>
+      <button
+        onClick={toggle}
+        className="text-[11px] px-2 py-0.5 rounded-full border border-cafe hover:border-gray-400 hover:bg-cafe-surface-elevated transition-colors"
+      >
+        {display === 'expanded' ? '展开' : '折叠'}
+      </button>
+    </div>
+  );
+}
+
+export function SystemTab({ config, onConfigChange }: { config: ConfigData; onConfigChange?: () => void }) {
+  const handleChanged = useCallback(() => onConfigChange?.(), [onConfigChange]);
+
   return (
     <>
+      <Section title="气泡显示">
+        <div className="space-y-1.5">
+          <BubbleToggle
+            label="Thinking 默认"
+            value={config.ui?.bubbleDefaults?.thinking ?? 'collapsed'}
+            configKey="ui.bubble.thinking"
+            onChanged={handleChanged}
+          />
+          <BubbleToggle
+            label="CLI 气泡默认"
+            value={config.ui?.bubbleDefaults?.cliOutput ?? 'collapsed'}
+            configKey="ui.bubble.cliOutput"
+            onChanged={handleChanged}
+          />
+        </div>
+      </Section>
       <Section title="A2A 猫猫互调">
         <div className="space-y-1.5">
           <KV label="启用" value={config.a2a.enabled} />

@@ -60,14 +60,14 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
         placeholder="Name (e.g. studio-flow)"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="w-full text-[10px] border border-cocreator-light rounded px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
+        className="w-full text-[10px] border border-cocreator-light rounded px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
       />
       <input
         type="text"
         placeholder="Absolute path (e.g. /home/user/projects/studio-flow)"
         value={path}
         onChange={(e) => setPath(e.target.value)}
-        className="w-full text-[10px] border border-cocreator-light rounded px-2 py-1 bg-white/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
+        className="w-full text-[10px] border border-cocreator-light rounded px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cocreator-primary"
       />
       {error && <div className="text-[10px] text-red-500">{error}</div>}
       <div className="flex gap-1.5">

@@ -12,7 +12,7 @@ export function HubButton() {
       title="Clowder AI Hub"
     >
       <svg
-        className="w-5 h-5 text-gray-500"
+        className="w-5 h-5 text-cafe-secondary"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"

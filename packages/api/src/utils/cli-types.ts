@@ -33,6 +33,8 @@ export interface CliSpawnOptions {
     softWarningMs?: number;
     stallWarningMs?: number;
     boundedExtensionFactor?: number;
+    /** #774: Auto-kill on idle-silent suspected_stall instead of waiting for full timeout */
+    stallAutoKill?: boolean;
   };
   /** F118 Phase B: Provider-scoped raw archive path for diagnostic enrichment */
   rawArchivePath?: string;

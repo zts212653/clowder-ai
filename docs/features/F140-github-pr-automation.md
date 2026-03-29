@@ -8,7 +8,7 @@ created: 2026-03-26
 
 # F140: GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-27
 
 ## 三层架构定位
 
@@ -94,7 +94,7 @@ team lead补充：
 
 > **注**：Phase B 是引导层——猫看到 action hint 后仍需按 Skill 流程手动执行操作。真正的零点击自动执行器（代码层面自动 rebase + push + 处理 review）见 Phase C。
 
-### Phase C: 自动执行器 (Auto-executor)（未开工）
+### Phase C: 自动执行器 (Auto-executor) ✅
 
 猫收到通知后**零人工干预自动执行**：
 
@@ -106,6 +106,16 @@ team lead补充：
 **2. Review feedback 自动处理**
 - 猫收到 review feedback 通知 → 自动加载 receive-review 模式 → 逐项处理
 - 区分 review decision：requested changes / approve / comment → 不同自动处理策略
+
+### Phase D: 注册校验护栏
+
+> **愿景**：PR tracking 是面向开源社区的通用功能——社区小伙伴在自己的项目里也能用。注册接口不能假设仓库是哪个，但也不能接受不存在的仓库名（脏数据会让 F139 轮询器查错 repo）。
+>
+> **守护**：不硬编码 `zts212653/cat-cafe`，用 `gh repo view` 动态校验。合法 repo 全放行，非法 repo 全拦截。
+>
+> **根因**：2026-03-25 一次 merge-gate 注册了 `anthropic-cat-cafe/cat-cafe#743`（repo 不存在），脏数据驻留导致 CI/CD Check 轮询假仓库。
+
+**改动**：`callbacks.ts` 和 `pr-tracking.ts` 的两条注册路径，在 `prTrackingStore.register()` 前加 `gh repo view` 校验
 
 ## Acceptance Criteria
 
@@ -127,12 +137,18 @@ team lead补充：
 - [x] AC-B2: pr-signals.md 定义简单/复杂冲突分级（≤3 文件 vs 复杂）
 - [x] AC-B3: Review feedback 消息按 decision 类型附带分流 action hint
 
-- [ ] AC-C1: 猫收到冲突通知后零人工干预自动 rebase + push（clean rebase 场景）
-- [ ] AC-C2: 简单冲突（≤3 文件，non-binary）自动 resolve，复杂冲突通知team lead附冲突文件列表
-- [ ] AC-C3: 猫收到 review feedback 后自动加载 receive-review 模式处理（CHANGES_REQUESTED 场景）
-- [ ] AC-C4: TriggerIntent 流水线——intent 从 trigger → AgentRouter → SystemPromptBuilder 贯通
-- [ ] AC-C5: ConflictAutoExecutor 测试覆盖：clean / simple-conflict / complex-escalation / worktree-not-found
-- [ ] AC-C6: 安全护栏——只操作 feature worktree，绝不碰 main/runtime，操作超时 abort
+- [x] AC-C1: 猫收到冲突通知后零人工干预自动 rebase + push（clean rebase 场景）
+- [x] AC-C2: 简单冲突（≤3 文件，non-binary）自动 resolve，复杂冲突通知team lead附冲突文件列表
+- [x] AC-C3: 猫收到 review feedback 后自动加载 receive-review 模式处理（CHANGES_REQUESTED 场景）— suggestedSkill routing wired，full auto-processing deferred（intent is hint not constraint）
+- [x] AC-C4: TriggerIntent 流水线——intent 从 trigger → AgentRouter → SystemPromptBuilder 贯通
+- [x] AC-C5: ConflictAutoExecutor 测试覆盖：clean / simple-conflict / complex-escalation / worktree-not-found
+- [x] AC-C6: 安全护栏——只操作 feature worktree，绝不碰 main/runtime，操作超时 abort
+
+### Phase D（注册校验护栏）✅ — PR #773 merged 2026-03-27
+- [x] AC-D1: `register-pr-tracking` 写入前校验 `repoFullName` 指向真实存在且调用者有权限的 GitHub 仓库（`gh repo view` 可解析）
+- [x] AC-D2: 校验不硬编码当前仓库——任何合法 GitHub 仓库都可注册，只拦截不存在/无权限的
+- [x] AC-D3: 两条注册路径（`/api/pr-tracking` + `/api/callbacks/register-pr-tracking`）都加校验
+- [x] AC-D4: 测试覆盖：合法 repo 通过、不存在 repo 拒绝、格式错误 repo 拒绝
 
 ## Dependencies
 
@@ -191,3 +207,5 @@ team lead补充：
 - Phase A: Maine Coon (codex/gpt52) cross-family review
 - Phase B: Maine Coon (codex/spark) cross-family review — 放行, 无 P1/P2
 - Phase B+ dedup fix: Maine Coon (codex/spark) cross-family review — 三审放行（P1×2 修复后）, 无 P1/P2
+- Phase C: Maine Coon (codex/spark) R1 review — 3 P1 发现 + 修复确认放行。云端 Codex R2 — "No major issues"
+- Phase D: Maine Coon (codex/spark) cross-family review — 放行, 无 P1/P2。云端 Codex R1 1 P1（catch-all→区分 infra failure）修复后 R2 通过

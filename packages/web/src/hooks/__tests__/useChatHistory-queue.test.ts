@@ -191,4 +191,93 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     expect(state.queue).toHaveLength(0);
     expect(state.queuePaused).toBe(false);
   });
+
+  it('F108B P1-2: hydrates activeInvocations record from queue response', async () => {
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: ['opus'] }), { status: 200 }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+    });
+
+    const state = useChatStore.getState();
+    // hasActiveInvocation boolean must be set
+    expect(state.hasActiveInvocation).toBe(true);
+    // activeInvocations record must contain synthetic entry for ThreadExecutionBar
+    const entries = Object.entries(state.activeInvocations);
+    expect(entries.length).toBe(1);
+    const [key, value] = entries[0];
+    expect(key).toBe('hydrated-thread-q-opus');
+    expect(value).toMatchObject({ catId: 'opus', mode: 'execute' });
+  });
+
+  it('F108B P1-2: replaces stale slots — no ghost cats in ThreadExecutionBar', async () => {
+    // Pre-populate with stale codex invocation (from snapshot restore)
+    useChatStore.setState({
+      activeInvocations: {
+        'stale-codex': { catId: 'codex', mode: 'execute', startedAt: Date.now() },
+      },
+      hasActiveInvocation: true,
+    });
+
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/queue')) {
+        // Server says only opus is active — codex should be gone
+        return Promise.resolve(
+          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: ['opus'] }), { status: 200 }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+    });
+
+    const state = useChatStore.getState();
+    const entries = Object.entries(state.activeInvocations);
+    // Only opus — no ghost codex
+    expect(entries.length).toBe(1);
+    expect(entries[0][1]).toMatchObject({ catId: 'opus' });
+    // Verify codex is gone
+    const catIds = entries.map(([, v]) => v.catId);
+    expect(catIds).not.toContain('codex');
+  });
+
+  it('F108B P1-2: clears activeInvocations record when server reports none', async () => {
+    // Pre-populate with stale activeInvocations
+    useChatStore.setState({
+      activeInvocations: {
+        'stale-inv': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      },
+      hasActiveInvocation: true,
+    });
+
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+    });
+
+    const state = useChatStore.getState();
+    expect(state.hasActiveInvocation).toBe(false);
+    expect(Object.keys(state.activeInvocations)).toHaveLength(0);
+  });
 });

@@ -2,6 +2,7 @@ import type { CatId } from '@cat-cafe/shared';
 
 export interface ParsedMention {
   targetCatId: CatId;
+  matched: boolean;
 }
 
 // ASCII + CJK full-width punctuation + brackets that can follow a mention
@@ -33,5 +34,5 @@ export function parseMentions(text: string, allPatterns: Map<string, string[]>, 
     }
   }
 
-  return { targetCatId: (bestCatId ?? defaultCatId) as CatId };
+  return { targetCatId: (bestCatId ?? defaultCatId) as CatId, matched: Boolean(bestCatId) };
 }

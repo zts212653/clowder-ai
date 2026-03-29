@@ -457,13 +457,8 @@ export class QueueProcessor {
         status: 'running',
       });
 
-      // 5. Broadcast invocation state for queued execution.
-      socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
-        threadId,
-        mode: intent,
-        targetCats,
-        invocationId,
-      });
+      // 5. intent_mode deferred to first CLI event (#768: avoid "replying" when CLI never starts)
+      let intentModeBroadcast = false;
 
       // 6. Emit queue_updated (processing)
       socketManager.emitToUser(userId, 'queue_updated', {
@@ -575,6 +570,16 @@ export class QueueProcessor {
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
         },
       )) {
+        // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
+        if (!intentModeBroadcast) {
+          socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
+            threadId,
+            mode: intent,
+            targetCats,
+            invocationId,
+          });
+          intentModeBroadcast = true;
+        }
         if (hook && msg.catId === primaryCat && msg.type === 'text' && (msg as { content?: string }).content) {
           responseText += (msg as { content?: string }).content;
         }

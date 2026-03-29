@@ -165,7 +165,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
                 onClick={() => fileInputRef.current?.click()}
                 className="flex items-center gap-2 rounded-lg border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-1.5 text-sm text-[#5C4B42] transition hover:border-[#D49266]"
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-cafe-surface text-[10px] text-[#8A776B]">
                   {avatar ? (
                     // biome-ignore lint/performance/noImgElement: co-creator avatar may be runtime upload URL
                     <img src={avatar} alt="Owner avatar preview" className="h-full w-full object-cover" />
@@ -263,7 +263,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-white px-4 py-2 text-sm text-[#6A5A50] transition hover:bg-[#F7EEE6]"
+            className="rounded-xl bg-cafe-surface px-4 py-2 text-sm text-[#6A5A50] transition hover:bg-[#F7EEE6]"
           >
             取消
           </button>

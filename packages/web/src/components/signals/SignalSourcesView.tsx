@@ -87,11 +87,11 @@ export function SignalSourcesView() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-codex-bg/30 via-cafe-white to-cafe-white">
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6">
-        <header className="rounded-2xl border border-codex-light bg-white p-4 shadow-sm">
+        <header className="rounded-2xl border border-codex-light bg-cafe-surface p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-bold text-cafe-black">Signal Sources</h1>
-              <p className="text-sm text-gray-500">集中管理信号源开关，无需手改 yaml。</p>
+              <p className="text-sm text-cafe-secondary">集中管理信号源开关，无需手改 yaml。</p>
             </div>
             <SignalNav active="sources" />
           </div>
@@ -108,7 +108,7 @@ export function SignalSourcesView() {
           <button
             type="button"
             onClick={() => void setAllEnabled(false)}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            className="rounded-lg border border-cafe px-3 py-2 text-sm text-cafe-secondary hover:bg-cafe-surface-elevated"
           >
             全部关闭
           </button>
@@ -136,22 +136,22 @@ export function SignalSourcesView() {
             <span className="font-semibold">{fetchResult.sourceId}</span>: {fetchResult.message}
           </div>
         )}
-        {loading && <p className="text-sm text-gray-500">加载中...</p>}
+        {loading && <p className="text-sm text-cafe-secondary">加载中...</p>}
 
         <section className="space-y-4">
           {groupedSources.map((group) => (
             <div
               key={`${group.tier}-${group.category}`}
-              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+              className="rounded-2xl border border-cafe bg-cafe-surface p-4 shadow-sm"
             >
               <div className="mb-3 flex items-center gap-2">
                 <SignalTierBadge tier={group.tier} />
                 <h2 className="text-sm font-semibold text-cafe-black">{group.category}</h2>
-                <span className="text-xs text-gray-500">({group.sources.length})</span>
+                <span className="text-xs text-cafe-secondary">({group.sources.length})</span>
               </div>
               <ul className="space-y-2">
                 {group.sources.map((source) => (
-                  <li key={source.id} className="rounded-xl border border-gray-200 p-3">
+                  <li key={source.id} className="rounded-xl border border-cafe p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-cafe-black">{source.name}</p>
@@ -173,7 +173,7 @@ export function SignalSourcesView() {
                             访问 ↗
                           </a>
                         </div>
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-cafe-secondary">
                           {source.fetch.method} · {source.schedule.frequency}
                         </p>
                       </div>
@@ -194,7 +194,7 @@ export function SignalSourcesView() {
                             'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
                             source.enabled
                               ? 'border-codex-light bg-codex-bg text-codex-dark'
-                              : 'border-gray-300 bg-gray-100 text-gray-600',
+                              : 'border-cafe bg-cafe-surface-elevated text-cafe-secondary',
                           ].join(' ')}
                         >
                           {updatingId === source.id ? '更新中...' : source.enabled ? 'ON' : 'OFF'}

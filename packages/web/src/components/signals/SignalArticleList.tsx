@@ -12,8 +12,8 @@ interface SignalArticleListProps {
 
 const statusClassMap: Record<SignalArticleStatus, string> = {
   inbox: 'text-cocreator-dark bg-cocreator-bg',
-  read: 'text-gray-600 bg-gray-100',
-  archived: 'text-gray-600 bg-gray-100',
+  read: 'text-cafe-secondary bg-cafe-surface-elevated',
+  archived: 'text-cafe-secondary bg-cafe-surface-elevated',
   starred: 'text-amber-800 bg-amber-100',
 };
 
@@ -40,7 +40,7 @@ export function SignalArticleList({
 }: SignalArticleListProps) {
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+      <div className="rounded-xl border border-dashed border-cafe bg-cafe-surface p-8 text-center text-sm text-cafe-secondary">
         当前筛选条件下没有文章。
       </div>
     );
@@ -64,10 +64,10 @@ export function SignalArticleList({
                 }
               }}
               className={[
-                'w-full rounded-xl border bg-white p-4 text-left shadow-sm transition-colors',
+                'w-full rounded-xl border bg-cafe-surface p-4 text-left shadow-sm transition-colors',
                 selected
                   ? 'border-cocreator-primary ring-1 ring-cocreator-primary/40'
-                  : 'border-gray-200 hover:border-cocreator-light',
+                  : 'border-cafe hover:border-cocreator-light',
               ].join(' ')}
             >
               <div className="flex items-start gap-3">
@@ -92,9 +92,9 @@ export function SignalArticleList({
                     <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusClassMap[article.status]}`}>
                       {article.status}
                     </span>
-                    <span className="text-xs text-gray-400">·</span>
-                    <span className="text-xs text-gray-500">{article.source}</span>
-                    <span className="text-xs text-gray-500">{formatDate(article.fetchedAt)}</span>
+                    <span className="text-xs text-cafe-muted">·</span>
+                    <span className="text-xs text-cafe-secondary">{article.source}</span>
+                    <span className="text-xs text-cafe-secondary">{formatDate(article.fetchedAt)}</span>
                     {article.note && (
                       <span title="有备注" className="text-opus-dark">
                         ✎
@@ -117,7 +117,7 @@ export function SignalArticleList({
                       event.stopPropagation();
                       void onStatusChange(article.id, 'read');
                     }}
-                    className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:border-codex-light hover:text-codex-dark"
+                    className="rounded-md border border-cafe px-2 py-1 text-xs text-cafe-secondary hover:border-codex-light hover:text-codex-dark"
                   >
                     已读
                   </button>

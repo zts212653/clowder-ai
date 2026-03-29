@@ -9,7 +9,7 @@ const CAT_VOICE_COLORS: Record<string, { bg: string; bar: string }> = {
   codex: { bg: 'bg-[var(--color-codex-bg)]', bar: 'bg-[var(--color-codex-primary)]' },
   gemini: { bg: 'bg-[var(--color-gemini-bg)]', bar: 'bg-[var(--color-gemini-primary)]' },
 };
-const DEFAULT_VOICE_COLORS = { bg: 'bg-gray-100 dark:bg-gray-800', bar: 'bg-gray-400' };
+const DEFAULT_VOICE_COLORS = { bg: 'bg-cafe-surface-elevated dark:bg-gray-800', bar: 'bg-gray-400' };
 
 interface Props {
   request: TtsStreamRequest;
@@ -113,12 +113,12 @@ export function StreamingAudioBlock({ request, catId, autoPlay = true }: Props) 
         </div>
 
         {state.totalChunks > 0 && (
-          <span className="text-[10px] text-gray-400 flex-shrink-0 tabular-nums">{formatChunkInfo()}</span>
+          <span className="text-[10px] text-cafe-muted flex-shrink-0 tabular-nums">{formatChunkInfo()}</span>
         )}
       </button>
 
       {request.text && (
-        <div className="text-[11px] text-gray-400 dark:text-gray-500 pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
+        <div className="text-[11px] text-cafe-muted dark:text-gray-500 pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
           {request.text}
         </div>
       )}

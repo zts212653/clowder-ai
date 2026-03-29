@@ -294,11 +294,10 @@ describe('ChatInput history completion', () => {
       searchInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    // Simulate Enter during IME composition
+    // Simulate Enter during IME composition: compositionstart → keydown(Enter)
     act(() => {
-      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-      Object.defineProperty(event, 'isComposing', { value: true });
-      searchInput.dispatchEvent(event);
+      searchInput.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+      searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
     // Search modal should still be open (not dismissed by IME Enter)

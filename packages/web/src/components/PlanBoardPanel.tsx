@@ -41,7 +41,7 @@ function TaskStatusIcon({ status }: { status: 'completed' | 'in_progress' | 'pen
     );
   }
   return (
-    <svg className="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg className="w-3.5 h-3.5 text-cafe-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="5" y="5" width="14" height="14" rx="2" />
     </svg>
   );
@@ -75,7 +75,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
         ? 'bg-rose-100 text-rose-700'
         : status === 'running'
           ? 'bg-blue-100 text-blue-700'
-          : 'bg-gray-100 text-gray-600';
+          : 'bg-cafe-surface-elevated text-cafe-secondary';
 
   return (
     <div className="py-1.5">
@@ -85,15 +85,15 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
             className={`inline-block h-2 w-2 rounded-full ${status === 'running' ? 'animate-pulse' : ''}`}
             style={{ backgroundColor: dotColor }}
           />
-          <span className="text-[11px] font-medium text-gray-700">{cat ? formatCatName(cat) : catId}</span>
-          <span className="text-[10px] text-gray-400">
+          <span className="text-[11px] font-medium text-cafe-secondary">{cat ? formatCatName(cat) : catId}</span>
+          <span className="text-[10px] text-cafe-muted">
             {completed}/{tasks.length}
           </span>
           {statusLabel && <span className={`text-[9px] px-1 py-0.5 rounded ${statusTone}`}>{statusLabel}</span>}
         </div>
         {status === 'interrupted' && (
           <button
-            className="text-[10px] px-2 py-0.5 rounded-full border border-gray-300 hover:border-gray-400 hover:bg-gray-100 transition-colors"
+            className="text-[10px] px-2 py-0.5 rounded-full border border-cafe hover:border-gray-400 hover:bg-cafe-surface-elevated transition-colors"
             onClick={async () => {
               if (await confirm({ title: '继续任务', message: '确认继续上次任务？' })) {
                 void handleSend(buildContinueMessage(catId, tp), undefined, threadId);
@@ -113,7 +113,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
               <span className="mt-px flex-shrink-0" aria-hidden="true">
                 <TaskStatusIcon status={t.status} />
               </span>
-              <span className={t.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-700'}>
+              <span className={t.status === 'completed' ? 'text-cafe-muted line-through' : 'text-cafe-secondary'}>
                 {taskText}
               </span>
             </div>
@@ -163,9 +163,9 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
   if (totalCats === 0) return null;
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-gray-700">猫猫祟祟 ({totalCats})</h3>
+        <h3 className="text-xs font-semibold text-cafe-secondary">猫猫祟祟 ({totalCats})</h3>
       </div>
 
       {/* Running cats */}
@@ -180,10 +180,10 @@ export function PlanBoardPanel({ threadId, catInvocations }: PlanBoardPanelProps
 
       {/* Completed cats — folded */}
       {completedCats.length > 0 && (
-        <div className="mt-2 border-t border-gray-200 pt-2">
+        <div className="mt-2 border-t border-cafe pt-2">
           <button
             onClick={() => setCompletedOpen((v) => !v)}
-            className="w-full flex items-center justify-between text-[10px] text-gray-500 hover:text-gray-700"
+            className="w-full flex items-center justify-between text-[10px] text-cafe-secondary hover:text-cafe-secondary"
           >
             <span>已完成 ({completedCats.length})</span>
             <span>{completedOpen ? '▲' : '▼'}</span>

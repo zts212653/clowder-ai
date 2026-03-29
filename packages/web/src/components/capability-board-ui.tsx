@@ -179,8 +179,8 @@ function CapabilityCard({
     <div
       className={`rounded-xl border transition-all duration-300 overflow-hidden ${
         expanded
-          ? 'border-indigo-300 shadow-md ring-1 ring-indigo-100 bg-white/60 backdrop-blur-sm'
-          : 'border-slate-200/60 hover:border-indigo-200 hover:shadow shadow-sm bg-white/40'
+          ? 'border-indigo-300 shadow-md ring-1 ring-indigo-100 bg-cafe-surface/60 backdrop-blur-sm'
+          : 'border-slate-200/60 hover:border-indigo-200 hover:shadow shadow-sm bg-cafe-surface/40'
       }`}
     >
       {/* Header */}
@@ -261,13 +261,13 @@ function CapabilityCard({
               {/* MCP tools */}
               {item.type === 'mcp' && item.tools && item.tools.length > 0 && (
                 <div>
-                  <span className="font-medium text-gray-500">Tools ({item.tools.length}):</span>
+                  <span className="font-medium text-cafe-secondary">Tools ({item.tools.length}):</span>
                   <ul className="mt-1 space-y-0.5 ml-3">
                     {item.tools.map((tool) => (
                       <li key={tool.name} className="flex gap-2">
                         <code className="text-purple-600">{tool.name}</code>
                         {tool.description && (
-                          <span className="text-gray-400 leading-relaxed break-words">{tool.description}</span>
+                          <span className="text-cafe-muted leading-relaxed break-words">{tool.description}</span>
                         )}
                       </li>
                     ))}
@@ -292,7 +292,7 @@ function CapabilityCard({
                     {item.triggers.map((t) => (
                       <span
                         key={t}
-                        className="px-2 py-1 bg-white border border-indigo-100/50 text-indigo-600 rounded-md text-[11px] font-medium shadow-sm"
+                        className="px-2 py-1 bg-cafe-surface border border-indigo-100/50 text-indigo-600 rounded-md text-[11px] font-medium shadow-sm"
                       >
                         &quot;{t}&quot;
                       </span>
@@ -347,7 +347,7 @@ function CatFamilyToggles({
           if (item.type === 'skill' && relevantCatIds.length === 0) return null;
           const enabledCount = relevantCatIds.filter((c) => item.cats[c]).length;
           return (
-            <div key={family.id} className="rounded-lg border border-slate-100 bg-white/50">
+            <div key={family.id} className="rounded-lg border border-slate-100 bg-cafe-surface/50">
               <button
                 type="button"
                 onClick={() => setOpenFamily(isOpen ? null : family.id)}
@@ -455,7 +455,7 @@ function ToggleSwitch({
       } ${enabled ? 'bg-indigo-500' : 'bg-slate-200'} ${isSm ? 'w-7 h-3.5' : 'w-10 h-5'}`}
     >
       <span
-        className={`absolute top-0 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-300 ease-in-out flex items-center justify-center ${isSm ? 'w-3.5 h-3.5' : 'w-5 h-5'} ${
+        className={`absolute top-0 rounded-full bg-cafe-surface shadow-sm ring-1 ring-black/5 transition-transform duration-300 ease-in-out flex items-center justify-center ${isSm ? 'w-3.5 h-3.5' : 'w-5 h-5'} ${
           enabled ? (isSm ? 'translate-x-[14px]' : 'translate-x-[20px]') : 'translate-x-0'
         }`}
       >
@@ -584,7 +584,7 @@ export function FilterChips({
 }) {
   return (
     <div className="flex items-center gap-1">
-      <span className="text-xs text-gray-500">{label}:</span>
+      <span className="text-xs text-cafe-secondary">{label}:</span>
       {options.map((opt) => (
         <button
           key={opt.value}
@@ -593,7 +593,7 @@ export function FilterChips({
           className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
             value === opt.value
               ? 'bg-blue-50 border-blue-300 text-blue-700'
-              : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              : 'border-cafe text-cafe-secondary hover:border-cafe'
           }`}
         >
           {opt.label}

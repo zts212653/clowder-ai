@@ -1,24 +1,63 @@
+/**
+ * Provider Profiles API Routes — F136 Phase 4d
+ *
+ * Reads/writes exclusively through cat-catalog.json accounts + credentials.json.
+ * The legacy provider-profiles.json store has been retired.
+ */
 import { realpath, stat } from 'node:fs/promises';
 import { relative, resolve, win32 } from 'node:path';
+import type { AccountConfig, AccountProtocol } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import {
-  activateProviderProfile,
-  createProviderProfile,
-  deleteProviderProfile,
-  getProviderProfile,
-  type ProviderProfileAuthType,
-  type ProviderProfileMode,
-  type ProviderProfileProvider,
-  readProviderProfiles,
-  resolveRuntimeProviderProfileById,
-  updateProviderProfile,
-} from '../config/provider-profiles.js';
+import { validateAccountWrite } from '../config/account-conflict-guard.js';
+import { resolveByAccountRef } from '../config/account-resolver.js';
+import { deleteCatalogAccount, readCatalogAccounts, writeCatalogAccount } from '../config/catalog-accounts.js';
+import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
+import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { buildProbeHeaders, isInvalidModelProbeError, readProbeError } from './provider-profiles-probe.js';
+
+/** Synthesize a ProviderProfileView-compatible object from AccountConfig (backward compat for Hub UI). */
+function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolean) {
+  const isBuiltin = account.authType === 'oauth';
+  // Non-standard builtins (dare, opencode) use standard protocols (openai, anthropic)
+  // but have their own distinct client identity for the Hub UI.
+  const NON_STANDARD_BUILTIN_CLIENTS = new Set(['dare', 'opencode']);
+  const builtinClient = NON_STANDARD_BUILTIN_CLIENTS.has(id) ? id : account.protocol;
+  return {
+    id,
+    name: account.displayName ?? id,
+    displayName: account.displayName ?? id,
+    kind: isBuiltin ? 'builtin' : ('api_key' as const),
+    authType: account.authType,
+    builtin: isBuiltin,
+    ...(isBuiltin ? { client: builtinClient } : {}),
+    protocol: account.protocol,
+    ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
+    models: account.models ? [...account.models] : [],
+    hasApiKey: apiKeyPresent,
+    mode: isBuiltin ? ('subscription' as const) : ('api_key' as const),
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
+/** Derive a slug-like ID from display name, avoiding collisions with existing accounts. */
+function deriveAccountId(displayName: string, existingIds: Set<string>): string {
+  const seed =
+    displayName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || `account-${Date.now()}`;
+  if (!existingIds.has(seed)) return seed;
+  let counter = 2;
+  while (existingIds.has(`${seed}-${counter}`)) counter += 1;
+  return `${seed}-${counter}`;
+}
 
 const MONOREPO_ROOT = findMonorepoRoot();
 
@@ -110,14 +149,10 @@ function probeUrl(baseUrl: string, path: string): string {
   return `${normalizeBaseUrl(baseUrl)}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-function resolveProviderSelector(selector: string | undefined, fallback: string): ProviderProfileProvider {
-  return (selector?.trim() || fallback) as ProviderProfileProvider;
-}
-
 function inferProbeProtocol(
   baseUrl: string | undefined,
   selector: string | undefined,
-  models: string[] | undefined = [],
+  models: readonly string[] | undefined = [],
   ...nameHints: Array<string | undefined>
 ): 'anthropic' | 'openai' | 'google' {
   const normalizedSelector = selector?.trim().toLowerCase();
@@ -197,10 +232,13 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };
     }
 
-    const data = await readProviderProfiles(projectRoot);
+    const accounts = readCatalogAccounts(projectRoot);
+    const providers = Object.entries(accounts).map(([id, account]) => accountToView(id, account, hasCredential(id)));
     return {
       projectPath: projectRoot,
-      ...data,
+      activeProfileId: null,
+      providers,
+      bootstrapBindings: {},
     };
   });
 
@@ -224,21 +262,33 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
 
     const body = parsed.data;
     try {
-      const profile = await createProviderProfile(projectRoot, {
-        ...(body.provider != null ? { provider: body.provider } : {}),
-        ...(body.name != null ? { name: body.name } : {}),
-        ...(body.displayName != null ? { displayName: body.displayName } : {}),
-        ...(body.mode != null ? { mode: body.mode as ProviderProfileMode } : {}),
-        ...(body.authType != null ? { authType: body.authType as ProviderProfileAuthType } : {}),
-        ...(body.protocol != null ? { protocol: body.protocol } : {}),
+      const protocol = (body.protocol ??
+        inferProbeProtocol(body.baseUrl, body.provider, body.models, body.name, body.displayName)) as AccountProtocol;
+      const account: AccountConfig = {
+        authType: (body.authType as 'oauth' | 'api_key') ?? 'api_key',
+        protocol,
         ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
-        ...(body.apiKey ? { apiKey: body.apiKey } : {}),
-        ...(body.models != null ? { models: body.models } : {}),
-        ...(body.setActive != null ? { setActive: body.setActive } : {}),
+        ...(body.models ? { models: body.models } : {}),
+        ...((body.displayName ?? body.name) ? { displayName: body.displayName ?? body.name } : {}),
+      };
+      const existingAccounts = readCatalogAccounts(projectRoot);
+      const profileId = deriveAccountId(
+        body.displayName ?? body.name ?? body.provider ?? 'custom',
+        new Set(Object.keys(existingAccounts)),
+      );
+      validateAccountWrite(projectRoot, profileId, account);
+      writeCatalogAccount(projectRoot, profileId, account);
+      if (body.apiKey) writeCredential(profileId, { apiKey: body.apiKey });
+      configEventBus.emitChange({
+        source: 'accounts',
+        scope: 'key',
+        changedKeys: [profileId],
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
       });
       return {
         projectPath: projectRoot,
-        profile,
+        profile: accountToView(profileId, account, !!body.apiKey),
       };
     } catch (err) {
       reply.status(400);
@@ -266,22 +316,55 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     const params = request.params as { profileId: string };
 
     try {
-      const profile = await updateProviderProfile(
-        projectRoot,
-        resolveProviderSelector(parsed.data.provider, params.profileId),
-        params.profileId,
-        {
-          ...(parsed.data.name != null ? { name: parsed.data.name } : {}),
-          ...(parsed.data.displayName != null ? { displayName: parsed.data.displayName } : {}),
-          ...(parsed.data.mode != null ? { mode: parsed.data.mode as ProviderProfileMode } : {}),
-          ...(parsed.data.authType != null ? { authType: parsed.data.authType as ProviderProfileAuthType } : {}),
-          ...(parsed.data.protocol != null ? { protocol: parsed.data.protocol } : {}),
-          ...(parsed.data.baseUrl != null ? { baseUrl: parsed.data.baseUrl } : {}),
-          ...(parsed.data.apiKey != null ? { apiKey: parsed.data.apiKey } : {}),
-          ...(parsed.data.models != null ? { models: parsed.data.models } : {}),
-        },
-      );
-      return { projectPath: projectRoot, profile };
+      const existing = readCatalogAccounts(projectRoot)[params.profileId];
+      if (!existing) {
+        reply.status(404);
+        return { error: `Account "${params.profileId}" not found` };
+      }
+      const baseUrlChanged =
+        parsed.data.baseUrl != null &&
+        normalizeBaseUrl(parsed.data.baseUrl) !== normalizeBaseUrl(existing.baseUrl ?? '');
+      const effectiveProtocol: AccountProtocol = parsed.data.protocol
+        ? (parsed.data.protocol as AccountProtocol)
+        : baseUrlChanged
+          ? inferProbeProtocol(parsed.data.baseUrl, undefined)
+          : existing.protocol;
+      const account: AccountConfig = {
+        authType: (parsed.data.authType as 'oauth' | 'api_key') ?? existing.authType,
+        protocol: effectiveProtocol,
+        ...(parsed.data.baseUrl != null
+          ? { baseUrl: parsed.data.baseUrl || undefined }
+          : existing.baseUrl
+            ? { baseUrl: existing.baseUrl }
+            : {}),
+        ...(parsed.data.models != null
+          ? { models: parsed.data.models }
+          : existing.models
+            ? { models: [...existing.models] }
+            : {}),
+        displayName: parsed.data.displayName ?? parsed.data.name ?? existing.displayName ?? params.profileId,
+      };
+      validateAccountWrite(projectRoot, params.profileId, account);
+      writeCatalogAccount(projectRoot, params.profileId, account);
+      if (parsed.data.apiKey != null) {
+        if (parsed.data.apiKey) {
+          writeCredential(params.profileId, { apiKey: parsed.data.apiKey });
+        } else {
+          // Empty string or explicit null → clear credential
+          deleteCredential(params.profileId);
+        }
+      }
+      configEventBus.emitChange({
+        source: 'accounts',
+        scope: 'key',
+        changedKeys: [params.profileId],
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      });
+      return {
+        projectPath: projectRoot,
+        profile: accountToView(params.profileId, account, hasCredential(params.profileId)),
+      };
     } catch (err) {
       reply.status(400);
       return { error: err instanceof Error ? err.message : String(err) };
@@ -308,11 +391,15 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     const params = request.params as { profileId: string };
 
     try {
-      await deleteProviderProfile(
-        projectRoot,
-        resolveProviderSelector(parsed.data.provider, params.profileId),
-        params.profileId,
-      );
+      deleteCatalogAccount(projectRoot, params.profileId);
+      deleteCredential(params.profileId);
+      configEventBus.emitChange({
+        source: 'accounts',
+        scope: 'key',
+        changedKeys: [params.profileId],
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      });
       return { ok: true };
     } catch (err) {
       reply.status(400);
@@ -339,17 +426,8 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     }
     const params = request.params as { profileId: string };
 
-    try {
-      await activateProviderProfile(
-        projectRoot,
-        resolveProviderSelector(parsed.data.provider, params.profileId),
-        params.profileId,
-      );
-      return { ok: true, profileId: params.profileId };
-    } catch (err) {
-      reply.status(400);
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
+    // F136 Phase 4d: activate is a legacy no-op — cats use direct accountRef now
+    return { ok: true, profileId: params.profileId };
   });
 
   app.post('/api/provider-profiles/:profileId/test', async (request, reply) => {
@@ -371,28 +449,7 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
     }
     const params = request.params as { profileId: string };
 
-    let profile;
-    try {
-      profile = await getProviderProfile(
-        projectRoot,
-        resolveProviderSelector(parsed.data.provider, params.profileId),
-        params.profileId,
-      );
-    } catch (err) {
-      reply.status(400);
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
-    if (!profile) {
-      reply.status(404);
-      return { error: 'Profile not found' };
-    }
-
-    if (profile.authType !== 'api_key') {
-      reply.status(400);
-      return { error: 'Only api_key providers can be tested' };
-    }
-
-    const runtime = await resolveRuntimeProviderProfileById(projectRoot, params.profileId);
+    const runtime = resolveByAccountRef(projectRoot, params.profileId);
     if (!runtime || runtime.authType !== 'api_key' || !runtime.baseUrl || !runtime.apiKey) {
       reply.status(400);
       return { error: 'Only api_key providers can be tested' };
@@ -405,10 +462,7 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
         runtime.baseUrl,
         parsed.data.protocol ?? parsed.data.provider,
         runtime.models,
-        profile.displayName,
-        profile.name,
-        profile.provider,
-        profile.id,
+        params.profileId,
       );
     const modelProbePaths = probeProtocol === 'google' ? ['/v1beta/models', '/models', '/v1/models'] : ['/v1/models'];
     let modelsRes: Response | null = null;

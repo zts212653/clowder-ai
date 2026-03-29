@@ -8,6 +8,7 @@
 
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import { DEFAULT_CLI_TIMEOUT_MS, readCliTimeoutMsFromEnv } from '../utils/cli-timeout.js';
+import { configStore } from './ConfigStore.js';
 import { getAllCatBudgets } from './cat-budgets.js';
 import { getCoCreatorConfig } from './cat-config-loader.js';
 import { getCatModel } from './cat-models.js';
@@ -92,6 +93,14 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   const codexExecutionAuthMode = parseEnum<CodexAuthMode>(env.CODEX_AUTH_MODE, ['oauth', 'api_key', 'auto'], 'oauth');
   const codexExecutionPassModelArg = parseBoolean(env.CAT_CODEX_PASS_MODEL_ARG, true);
 
+  // UI bubble display defaults (hot-updatable via ConfigStore)
+  const bubbleThinking = (configStore.get('ui.bubble.thinking') ?? env.UI_BUBBLE_THINKING_DEFAULT ?? 'collapsed') as
+    | 'expanded'
+    | 'collapsed';
+  const bubbleCli = (configStore.get('ui.bubble.cliOutput') ?? env.UI_BUBBLE_CLI_OUTPUT_DEFAULT ?? 'collapsed') as
+    | 'expanded'
+    | 'collapsed';
+
   return {
     coCreator: {
       name: coCreator.name,
@@ -129,6 +138,12 @@ export function collectConfigSnapshot(): ConfigSnapshot {
       model: codexExecutionModel,
       authMode: codexExecutionAuthMode,
       passModelArg: codexExecutionPassModelArg,
+    },
+    ui: {
+      bubbleDefaults: {
+        thinking: bubbleThinking,
+        cliOutput: bubbleCli,
+      },
     },
   };
 }

@@ -184,5 +184,11 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
     outcome: { whenNoSignal: 'record' },
     enabled: () => opts.repoAllowlist.length > 0,
     actor: { role: 'repo-watcher', costTier: 'cheap' },
+    display: {
+      label: '仓库巡检',
+      category: 'repo',
+      description: '补偿扫描：发现 webhook 漏掉的新 PR/Issue',
+      subjectKind: 'repo',
+    },
   };
 }

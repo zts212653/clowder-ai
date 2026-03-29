@@ -5,7 +5,7 @@ import { buildConnectorStatus } from '../dist/routes/connector-hub.js';
 describe('buildConnectorStatus', () => {
   it('returns all platforms as not configured when env is empty', () => {
     const result = buildConnectorStatus({});
-    assert.equal(result.length, 4);
+    assert.equal(result.length, 6);
 
     const feishu = result.find((p) => p.id === 'feishu');
     assert.ok(feishu);
@@ -26,6 +26,16 @@ describe('buildConnectorStatus', () => {
     const dingtalk = result.find((p) => p.id === 'dingtalk');
     assert.ok(dingtalk);
     assert.equal(dingtalk.configured, false);
+
+    const wecomBot = result.find((p) => p.id === 'wecom-bot');
+    assert.ok(wecomBot);
+    assert.equal(wecomBot.configured, false);
+    assert.equal(wecomBot.fields.length, 2);
+
+    const wecomAgent = result.find((p) => p.id === 'wecom-agent');
+    assert.ok(wecomAgent);
+    assert.equal(wecomAgent.configured, false);
+    assert.equal(wecomAgent.fields.length, 5);
 
     const weixin = result.find((p) => p.id === 'weixin');
     assert.ok(weixin);
@@ -165,5 +175,36 @@ describe('buildConnectorStatus', () => {
     const modeField = feishu.fields.find((f) => f.envName === 'FEISHU_CONNECTION_MODE');
     assert.ok(modeField, 'FEISHU_CONNECTION_MODE should be in feishu fields');
     assert.equal(modeField.sensitive, false);
+  });
+
+  it('marks wecom-agent as configured when all 5 fields are set', () => {
+    const result = buildConnectorStatus({
+      WECOM_CORP_ID: 'ww_test_corp',
+      WECOM_AGENT_ID: '1000002',
+      WECOM_AGENT_SECRET: 'secret123',
+      WECOM_TOKEN: 'callback_token',
+      WECOM_ENCODING_AES_KEY: 'a'.repeat(43),
+    });
+    const wecomAgent = result.find((p) => p.id === 'wecom-agent');
+    assert.ok(wecomAgent);
+    assert.equal(wecomAgent.configured, true);
+
+    const corpId = wecomAgent.fields.find((f) => f.envName === 'WECOM_CORP_ID');
+    assert.ok(corpId);
+    assert.equal(corpId.sensitive, false);
+
+    const secret = wecomAgent.fields.find((f) => f.envName === 'WECOM_AGENT_SECRET');
+    assert.ok(secret);
+    assert.equal(secret.currentValue, '••••••••');
+  });
+
+  it('marks wecom-agent as not configured when partial fields set', () => {
+    const result = buildConnectorStatus({
+      WECOM_CORP_ID: 'ww_test_corp',
+      WECOM_AGENT_ID: '1000002',
+    });
+    const wecomAgent = result.find((p) => p.id === 'wecom-agent');
+    assert.ok(wecomAgent);
+    assert.equal(wecomAgent.configured, false);
   });
 });

@@ -8,7 +8,7 @@ created: 2026-03-26
 
 # F141: GitHub Repo Inbox — 仓库事件自动发现
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-27
 
 ## 三层架构定位
 
@@ -89,7 +89,7 @@ GitHub webhook POST → /api/connectors/github-repo-event/webhook
 - `opensource-ops` SKILL.md：maintainer 收到 Repo Inbox 通知后的 triage 流程
 - `refs/repo-inbox.md`：新增——Repo Inbox 通知格式、webhook 配置指南
 
-### Phase B: Reconciliation 补偿扫描
+### Phase B: Reconciliation 补偿扫描 ✅
 
 **1. RepoScanTaskSpec**（基于 F139 TaskSpec_P1，Phase 1a/1b 已 merged）
 

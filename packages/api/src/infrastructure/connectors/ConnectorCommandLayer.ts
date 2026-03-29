@@ -1,5 +1,19 @@
+import { parseCommand } from '@cat-cafe/shared';
+import type { CommandRegistry } from '../commands/CommandRegistry.js';
 import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
+import {
+  auditSlashCommand,
+  buildCatsInfo,
+  buildCommandsList,
+  buildStatusInfo,
+  extractFeatIds,
+  matchByFeatId,
+  matchByIdPrefix,
+  matchByListIndex,
+  matchByTitle,
+  resolveFeatBadges,
+} from './connector-command-helpers.js';
 
 export interface CommandResult {
   readonly kind:
@@ -11,6 +25,9 @@ export interface CommandResult {
     | 'unbind'
     | 'allow-group'
     | 'deny-group'
+    | 'commands'
+    | 'cats'
+    | 'status'
     | 'not-command';
   readonly response?: string;
   readonly newActiveThreadId?: string;
@@ -49,6 +66,20 @@ export interface ConnectorCommandLayerDeps {
   };
   readonly frontendBaseUrl: string;
   readonly permissionStore?: IConnectorPermissionStore | undefined;
+  /** F142: participant activity for /cats and /status */
+  readonly participantStore?: {
+    getParticipantsWithActivity(
+      threadId: string,
+    ):
+      | Array<{ catId: string; lastMessageAt: number; messageCount: number }>
+      | Promise<Array<{ catId: string; lastMessageAt: number; messageCount: number }>>;
+  };
+  /** F142: agent service registry for /cats */
+  readonly agentRegistry?: { has(catId: string): boolean };
+  /** F142: cat roster for display names + availability. Keys = catIds. */
+  readonly catRoster?: Record<string, { displayName: string; available?: boolean }>;
+  /** F142-B: unified command registry for /commands listing + skill detection + audit */
+  readonly commandRegistry?: CommandRegistry;
 }
 
 export class ConnectorCommandLayer {
@@ -64,26 +95,48 @@ export class ConnectorCommandLayer {
     const trimmed = text.trim();
     if (!trimmed.startsWith('/')) return { kind: 'not-command' };
 
-    const [rawCmd, ...args] = trimmed.split(/\s+/);
-    const cmd = rawCmd?.toLowerCase();
+    const t0 = Date.now();
+    const result = await this.dispatch(connectorId, externalChatId, userId, trimmed, senderId);
+    if (result.kind !== 'not-command') auditSlashCommand(trimmed, Date.now() - t0, this.deps.commandRegistry);
+    return result;
+  }
+
+  private async dispatch(
+    connectorId: string,
+    externalChatId: string,
+    userId: string,
+    trimmed: string,
+    senderId?: string,
+  ): Promise<CommandResult> {
+    // F142-B AC-B6: unified parser (longest-match, subcommand-aware)
+    const registry = this.deps.commandRegistry;
+    const parsed = registry ? parseCommand(trimmed, registry.getAll()) : null;
+    const cmd = parsed?.name ?? trimmed.split(/\s+/)[0]?.toLowerCase();
+    const cmdArgs = parsed?.args ?? trimmed.split(/\s+/).slice(1).join(' ');
     switch (cmd) {
       case '/where':
         return this.handleWhere(connectorId, externalChatId);
       case '/new':
-        return this.handleNew(connectorId, externalChatId, userId, args.join(' '));
+        return this.handleNew(connectorId, externalChatId, userId, cmdArgs);
       case '/threads':
         return this.handleThreads(connectorId, externalChatId, userId);
       case '/use':
-        return this.handleUse(connectorId, externalChatId, userId, args.join(' '));
+        return this.handleUse(connectorId, externalChatId, userId, cmdArgs);
       case '/thread':
-        return this.handleThread(connectorId, externalChatId, userId, args);
+        return this.handleThread(connectorId, externalChatId, userId, cmdArgs.split(/\s+/));
+      case '/commands':
+        return buildCommandsList(this.deps.commandRegistry);
+      case '/cats':
+        return this.handleCats(connectorId, externalChatId);
+      case '/status':
+        return this.handleStatus(connectorId, externalChatId);
       case '/unbind':
         return this.handleUnbind(connectorId, externalChatId);
       case '/allow-group':
-        return this.handleAllowGroup(connectorId, externalChatId, senderId, args.join(' '));
+        return this.handleAllowGroup(connectorId, externalChatId, senderId, cmdArgs);
       case '/deny-group':
-        return this.handleDenyGroup(connectorId, externalChatId, senderId, args.join(' '));
-      default:
+        return this.handleDenyGroup(connectorId, externalChatId, senderId, cmdArgs);
+      default: // F142-B: unrecognized commands flow to cat (AC-B4)
         return { kind: 'not-command' };
     }
   }
@@ -126,16 +179,13 @@ export class ConnectorCommandLayer {
   }
 
   private async handleThreads(connectorId: string, externalChatId: string, userId: string): Promise<CommandResult> {
-    // Phase C: cross-platform thread view — show ALL user threads, not just current connector
     const allThreads = await this.deps.threadStore.list(userId);
     const threads = allThreads.slice(0, 10);
-    // Look up current binding so the command exchange lands in the right thread
     const binding = await this.deps.bindingStore.getByExternal(connectorId, externalChatId);
     if (threads.length === 0) {
       return { kind: 'threads', response: '📋 还没有 thread。发送消息或用 /new 创建一个吧！' };
     }
-    // Phase D: resolve feat badges for threads with backlogItemId
-    const featBadges = await this.resolveFeatBadges(threads, userId);
+    const featBadges = await resolveFeatBadges(threads, userId, this.deps.backlogStore);
     const lines = threads.map((t, i) => {
       const title = t.title ?? '(无标题)';
       const badge = featBadges.get(t.id);
@@ -145,10 +195,7 @@ export class ConnectorCommandLayer {
       kind: 'threads',
       response: `📋 最近的 threads:\n\n${lines.join('\n')}\n\n用 /use F088 或 /use 关键词 或 /use 3 切换`,
     };
-    if (binding) {
-      return { ...result, contextThreadId: binding.threadId };
-    }
-    return result;
+    return binding ? { ...result, contextThreadId: binding.threadId } : result;
   }
 
   private async handleUse(
@@ -164,13 +211,11 @@ export class ConnectorCommandLayer {
       };
     }
     const allThreads = await this.deps.threadStore.list(userId);
-
-    // Phase D: cascade matching (feat号 → 列表序号 → ID前缀 → title关键词)
     const match =
-      (await this.matchByFeatId(input, allThreads, userId)) ??
-      this.matchByListIndex(input, allThreads) ??
-      this.matchByIdPrefix(input, allThreads) ??
-      this.matchByTitle(input, allThreads);
+      (await matchByFeatId(input, allThreads, userId, this.deps.backlogStore)) ??
+      matchByListIndex(input, allThreads) ??
+      matchByIdPrefix(input, allThreads) ??
+      matchByTitle(input, allThreads);
 
     if (!match) {
       return { kind: 'use', response: `❌ 找不到匹配 "${input}" 的 thread。用 /threads 查看可用列表。` };
@@ -200,8 +245,6 @@ export class ConnectorCommandLayer {
     }
     const [threadIdOrPrefix, ...msgParts] = args;
     const message = msgParts.join(' ');
-
-    // Match only within user's own threads (exact ID → prefix)
     const allThreads = await this.deps.threadStore.list(userId);
     const match =
       allThreads.find((t) => t.id === threadIdOrPrefix) ?? allThreads.find((t) => t.id.startsWith(threadIdOrPrefix!));
@@ -218,6 +261,26 @@ export class ConnectorCommandLayer {
       forwardContent: message,
       response: `📨 → ${title} [${match.id}]`,
     };
+  }
+
+  private async handleCats(connectorId: string, externalChatId: string): Promise<CommandResult> {
+    const binding = await this.deps.bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) {
+      return { kind: 'cats', response: '⚠️ 当前没有绑定 thread，请先用 /new 创建或 /use 切换。' };
+    }
+    return buildCatsInfo(binding.threadId, this.deps);
+  }
+
+  private async handleStatus(connectorId: string, externalChatId: string): Promise<CommandResult> {
+    const binding = await this.deps.bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) {
+      return { kind: 'status', response: '⚠️ 当前没有绑定 thread，请先用 /new 创建或 /use 切换。' };
+    }
+    const thread = await this.deps.threadStore.get(binding.threadId);
+    if (!thread) {
+      return { kind: 'status', response: '⚠️ 绑定的 thread 已不存在。' };
+    }
+    return buildStatusInfo(binding.threadId, thread, this.deps);
   }
 
   private async handleUnbind(connectorId: string, externalChatId: string): Promise<CommandResult> {
@@ -284,73 +347,5 @@ export class ConnectorCommandLayer {
         ? `🚫 群 ${targetChatId.slice(-8)} 已从白名单移除`
         : `⚠️ 群 ${targetChatId.slice(-8)} 不在白名单中`,
     };
-  }
-
-  // --- Phase D: matching helpers ---
-
-  /** Match by feature number (e.g., /use F088). Async because it needs backlogStore. */
-  private async matchByFeatId(input: string, threads: ThreadEntry[], userId: string): Promise<ThreadEntry | null> {
-    if (!/^F\d+$/i.test(input)) return null;
-    const { backlogStore } = this.deps;
-    if (!backlogStore) return null;
-    const targetFeat = input.toUpperCase();
-    const matches: ThreadEntry[] = [];
-    for (const t of threads) {
-      if (!t.backlogItemId) continue;
-      const item = await backlogStore.get(t.backlogItemId, userId);
-      if (!item) continue;
-      const featTags = this.extractFeatIds(item.tags);
-      if (featTags.includes(targetFeat)) matches.push(t);
-    }
-    if (matches.length === 0) return null;
-    // Multiple threads for same feat → pick most recently active
-    return matches.reduce((a, b) => ((a.lastActiveAt ?? 0) >= (b.lastActiveAt ?? 0) ? a : b));
-  }
-
-  /** Match by 1-based index from /threads listing (e.g., /use 3). */
-  private matchByListIndex(input: string, threads: ThreadEntry[]): ThreadEntry | null {
-    if (!/^\d+$/.test(input)) return null;
-    const idx = parseInt(input, 10);
-    const list = threads.slice(0, 10); // Same slice as /threads output
-    if (idx < 1 || idx > list.length) return null;
-    return list[idx - 1] ?? null;
-  }
-
-  /** Match by thread ID prefix (existing Phase C behavior). */
-  private matchByIdPrefix(input: string, threads: ThreadEntry[]): ThreadEntry | null {
-    return threads.find((t) => t.id.startsWith(input)) ?? null;
-  }
-
-  /** Match by thread title substring (case-insensitive). */
-  private matchByTitle(input: string, threads: ThreadEntry[]): ThreadEntry | null {
-    const query = input.toLowerCase();
-    const matches = threads.filter((t) => t.title?.toLowerCase().includes(query));
-    if (matches.length === 0) return null;
-    // Multiple matches → pick most recently active
-    return matches.reduce((a, b) => ((a.lastActiveAt ?? 0) >= (b.lastActiveAt ?? 0) ? a : b));
-  }
-
-  /** Extract ALL normalized feat IDs from backlog item tags. Returns e.g. ['F066', 'F088'] or empty array. */
-  private extractFeatIds(tags: readonly string[]): string[] {
-    const feats: string[] = [];
-    for (const tag of tags) {
-      if (tag.startsWith('feature:')) feats.push(tag.slice('feature:'.length).toUpperCase());
-    }
-    return feats;
-  }
-
-  /** Resolve feat badges for threads (used by /threads display). */
-  private async resolveFeatBadges(threads: ThreadEntry[], userId: string): Promise<Map<string, string>> {
-    const badges = new Map<string, string>();
-    const { backlogStore } = this.deps;
-    if (!backlogStore) return badges;
-    for (const t of threads) {
-      if (!t.backlogItemId) continue;
-      const item = await backlogStore.get(t.backlogItemId, userId);
-      if (!item) continue;
-      const featIds = this.extractFeatIds(item.tags);
-      if (featIds.length > 0) badges.set(t.id, featIds.join(','));
-    }
-    return badges;
   }
 }

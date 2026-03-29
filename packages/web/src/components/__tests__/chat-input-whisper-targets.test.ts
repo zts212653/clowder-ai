@@ -25,6 +25,8 @@ vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.re
 
 // Two cats: one with mentionPatterns, one without (non-default variant)
 vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
   useCatData: () => ({
     cats: [
       {
@@ -91,16 +93,17 @@ describe('ChatInput whisper targets with empty mentionPatterns', () => {
     expect(whisperBtn).not.toBeNull();
     act(() => whisperBtn?.click());
 
-    // Whisper section should show "悄悄话发给:" with target buttons
-    expect(container.textContent).toContain('悄悄话发给');
+    // F108 Scene 2 v2: floating popup with "悄悄话目标 · 可多选"
+    expect(container.textContent).toContain('悄悄话目标');
 
-    // Collect whisper target button texts (rounded-full pill buttons)
-    const targetButtons = [...container.querySelectorAll('button')].filter((b) => b.className.includes('rounded-full'));
-    const targetNames = targetButtons.map((b) => b.textContent);
+    // Both cats should appear as rows inside the floating popup (absolute bottom-full)
+    const popup = container.querySelector('.absolute.bottom-full');
+    expect(popup).not.toBeNull();
+    const selectorRows = [...popup!.querySelectorAll('button')];
+    const rowTexts = selectorRows.map((b) => b.textContent);
 
-    // Both cats should be available as whisper targets
-    expect(targetNames).toContain('布偶猫');
-    expect(targetNames).toContain('布偶猫(快)');
+    expect(rowTexts.some((t) => t?.includes('布偶猫'))).toBe(true);
+    expect(rowTexts.some((t) => t?.includes('布偶猫(快)'))).toBe(true);
   });
 
   it('can toggle a whisper target with empty mentionPatterns', () => {
@@ -112,20 +115,28 @@ describe('ChatInput whisper targets with empty mentionPatterns', () => {
     const whisperBtn = container.querySelector<HTMLButtonElement>('[aria-label="Whisper mode"]');
     act(() => whisperBtn?.click());
 
-    // Find the opus-fast target button and click to deselect
-    const targetButtons = [...container.querySelectorAll('button')].filter((b) => b.className.includes('rounded-full'));
-    const fastBtn = targetButtons.find((b) => b.textContent === '布偶猫(快)');
+    // Find the opus-fast row in the floating popup
+    const popup = container.querySelector('.absolute.bottom-full')!;
+    const getRows = () => [...popup.querySelectorAll('button')];
+    let fastBtn = getRows().find((b) => b.textContent?.includes('布偶猫(快)'));
     expect(fastBtn).toBeDefined();
 
-    // Initially auto-selected (border-current bg-amber-50)
-    expect(fastBtn?.className).toContain('bg-amber-50');
+    // F108B P1-1: default is NO cats selected — no elevated background
+    expect(fastBtn?.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated');
 
-    // Click to deselect
-    act(() => fastBtn?.click());
-    expect(fastBtn?.className).not.toContain('bg-amber-50');
+    // mousedown to select — should show elevated background
+    act(() => fastBtn?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    fastBtn = getRows().find((b) => b.textContent?.includes('布偶猫(快)'));
+    expect(fastBtn?.className.split(/\s+/)).toContain('bg-cafe-surface-elevated');
 
-    // Click again to re-select
-    act(() => fastBtn?.click());
-    expect(fastBtn?.className).toContain('bg-amber-50');
+    // mousedown to deselect
+    act(() => fastBtn?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    fastBtn = getRows().find((b) => b.textContent?.includes('布偶猫(快)'));
+    expect(fastBtn?.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated');
+
+    // mousedown again to re-select
+    act(() => fastBtn?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    fastBtn = getRows().find((b) => b.textContent?.includes('布偶猫(快)'));
+    expect(fastBtn?.className.split(/\s+/)).toContain('bg-cafe-surface-elevated');
   });
 });

@@ -3,6 +3,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { ExportButton } from './ExportButton';
 import { HubButton } from './HubButton';
 import { CatCafeLogo } from './icons/CatCafeLogo';
+import { ThemeToggle } from './ThemeToggle';
 import { VoiceCompanionButton } from './VoiceCompanionButton';
 
 interface ChatContainerHeaderProps {
@@ -43,7 +44,7 @@ export function ChatContainerHeader({
           title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
           aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
-          <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"
@@ -64,7 +65,7 @@ export function ChatContainerHeader({
           title="Signal Inbox"
           aria-label="Signal Inbox"
         >
-          <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M5.05 3.636a1 1 0 010 1.414 7 7 0 000 9.9 1 1 0 11-1.414 1.414 9 9 0 010-12.728 1 1 0 011.414 0zm9.9 0a9 9 0 010 12.728 1 1 0 01-1.414-1.414 7 7 0 000-9.9 1 1 0 011.414-1.414zM7.879 6.464a1 1 0 010 1.414 3 3 0 000 4.243 1 1 0 11-1.415 1.414 5 5 0 010-7.07 1 1 0 011.415 0zm4.242 0a5 5 0 010 7.072 1 1 0 01-1.415-1.415 3 3 0 000-4.242 1 1 0 011.415-1.415zM10 9a1 1 0 100 2 1 1 0 000-2z"
@@ -80,6 +81,8 @@ export function ChatContainerHeader({
             🔐 {authPendingCount}
           </span>
         )}
+        {/* F056 Phase D: Theme toggle */}
+        <ThemeToggle />
         {/* F099 P1-2: Hub gear in top bar — always reachable even when right panel shows workspace */}
         <HubButton />
         {/* Mobile/tablet: status sheet trigger */}
@@ -89,7 +92,7 @@ export function ChatContainerHeader({
           title="打开状态面板"
           aria-label="打开状态面板"
         >
-          <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
@@ -110,7 +113,7 @@ function ThreadIndicator({ threadId }: { threadId: string }) {
   const currentThread = threads.find((t) => t.id === threadId);
 
   if (threadId === 'default') {
-    return <p className="text-xs text-gray-500">大厅 · Your AI team collaboration space</p>;
+    return <p className="text-xs text-cafe-secondary">大厅 · Your AI team collaboration space</p>;
   }
 
   const title = currentThread?.title ?? '未命名对话';
@@ -123,9 +126,9 @@ function ThreadIndicator({ threadId }: { threadId: string }) {
   const projectName = INTERNAL_BASENAMES.includes(rawBasename) && brandName ? brandName : rawBasename;
 
   return (
-    <p className="text-xs text-gray-500 truncate" title={`${title}${projectName ? ` · ${projectName}` : ''}`}>
-      <span className="font-medium text-gray-700">{title}</span>
-      {projectName && <span className="text-gray-400"> · {projectName}</span>}
+    <p className="text-xs text-cafe-secondary truncate" title={`${title}${projectName ? ` · ${projectName}` : ''}`}>
+      <span className="font-medium text-cafe-secondary">{title}</span>
+      {projectName && <span className="text-cafe-muted"> · {projectName}</span>}
     </p>
   );
 }
@@ -178,12 +181,12 @@ function RightPanelToggle({
     <button
       onClick={handleClick}
       className={`p-1 rounded-lg hover:bg-cocreator-light transition-colors ml-1 hidden lg:block ${
-        statusPanelOpen ? (isWorkspace ? 'bg-blue-50 text-blue-600' : 'bg-gray-100') : ''
+        statusPanelOpen ? (isWorkspace ? 'bg-blue-50 text-blue-600' : 'bg-cafe-surface-elevated') : ''
       }`}
       aria-label={label}
       title={label}
     >
-      <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+      <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
         <path
           fillRule="evenodd"
           d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 0v12h10V4H5z"

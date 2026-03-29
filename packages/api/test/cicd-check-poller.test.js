@@ -77,11 +77,13 @@ describe('CiCdCheckPoller trigger policy', () => {
     assert.strictEqual(capturedPolicy.reason, 'github_ci_failure');
   });
 
-  it('CI success does not trigger invocation', async () => {
+  it('CI success triggers invocation with normal priority (F140 Phase C)', async () => {
     let triggerCalled = false;
+    let triggerPolicy = null;
     const mockTrigger = {
-      trigger: () => {
+      trigger: (...args) => {
         triggerCalled = true;
+        triggerPolicy = args[6]; // policy is 7th arg
       },
     };
 
@@ -137,7 +139,10 @@ describe('CiCdCheckPoller trigger policy', () => {
 
     await poller.pollAll();
 
-    assert.strictEqual(triggerCalled, false, 'CI success should NOT trigger invocation');
+    // F140 Phase C: CI pass now triggers with normal priority (was: no trigger)
+    assert.strictEqual(triggerCalled, true, 'CI success should trigger invocation (normal priority)');
+    assert.strictEqual(triggerPolicy.priority, 'normal');
+    assert.strictEqual(triggerPolicy.reason, 'github_ci_pass');
   });
 });
 

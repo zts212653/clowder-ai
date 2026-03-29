@@ -1,10 +1,21 @@
 /**
- * Message Visibility — F35 Whisper
+ * Message Visibility — F35 Whisper + System-user exemption
  * Pure functions for determining whether a message is visible to a given viewer.
  */
 
 import type { CatId } from '@cat-cafe/shared';
 import type { StoredMessage } from './ports/MessageStore.js';
+
+/**
+ * System-level userIds whose messages are visible to ALL thread participants
+ * regardless of the per-user filter (scheduler, system, etc.).
+ */
+export const SYSTEM_USER_IDS: ReadonlySet<string> = new Set(['scheduler', 'system']);
+
+/** Returns true if a message was authored by a trusted system-level source (dual check: userId + catId). */
+export function isSystemUserMessage(msg: Pick<StoredMessage, 'userId' | 'catId'>): boolean {
+  return SYSTEM_USER_IDS.has(msg.userId) && msg.catId === 'system';
+}
 
 /** Who is viewing */
 export type Viewer = { readonly type: 'user' } | { readonly type: 'cat'; readonly catId: CatId };

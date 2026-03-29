@@ -44,6 +44,7 @@ import {
   assembleIncrementalContext,
   detectContextDegradation,
   getService,
+  isUserFacingSystemInfoContent,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   toStoredToolEvent,
@@ -348,6 +349,7 @@ export async function* routeSerial(
       let firstMetadata: MessageMetadata | undefined;
       let doneMsg: AgentMessage | undefined;
       let hadError = false;
+      let sawUserFacingSystemInfo = false;
       // #267: track errors that happened BEFORE abort — only these are real provider failures
       let hadProviderError = false;
       const collectedToolEvents: StoredToolEvent[] = [];
@@ -437,6 +439,9 @@ export async function* routeSerial(
         }
         // F045: Accumulate thinking blocks for persistence (F5 recovery)
         if (msg.type === 'system_info' && msg.content) {
+          if (isUserFacingSystemInfoContent(msg.content)) {
+            sawUserFacingSystemInfo = true;
+          }
           try {
             const parsed = JSON.parse(msg.content);
             if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
@@ -858,6 +863,7 @@ export async function* routeSerial(
             catId: catId as string,
             threadId,
             hasRichBlocks,
+            sawUserFacingSystemInfo,
             toolCount: collectedToolEvents.length,
             shouldPersist: shouldPersistNoTextMessage,
             thinkingLen: thinkingContent?.length ?? 0,
@@ -866,7 +872,7 @@ export async function* routeSerial(
         );
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
         // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
-        if (collectedToolEvents.length > 0 && !hasRichBlocks) {
+        if (collectedToolEvents.length > 0 && !hasRichBlocks && !sawUserFacingSystemInfo) {
           yield {
             type: 'system_info' as AgentMessageType,
             catId,
@@ -932,7 +938,7 @@ export async function* routeSerial(
               });
             }
           }
-        } else {
+        } else if (!sawUserFacingSystemInfo) {
           yield {
             type: 'system_info' as AgentMessageType,
             catId,
@@ -947,6 +953,8 @@ export async function* routeSerial(
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
+        } else if (deps.draftStore && ownInvocationId) {
+          deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
         }
       } else if (collectedToolEvents.length > 0) {
         // hadError && textContent === '' but toolEvents exist — persist tool record so

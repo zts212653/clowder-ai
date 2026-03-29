@@ -119,7 +119,7 @@ export function HubClaudeRescueSection() {
               void scanSessions();
             }}
             disabled={loading || rescuing}
-            className="px-2.5 py-1 rounded border border-amber-300 bg-white text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+            className="px-2.5 py-1 rounded border border-amber-300 bg-cafe-surface text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
           >
             {loading ? '扫描中...' : '重新扫描'}
           </button>
@@ -160,7 +160,7 @@ export function HubClaudeRescueSection() {
               return (
                 <label
                   key={session.sessionId}
-                  className="flex items-start gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-gray-700"
+                  className="flex items-start gap-2 rounded-lg border border-amber-200 bg-cafe-surface px-3 py-2 text-xs text-cafe-secondary"
                 >
                   <input
                     type="checkbox"
@@ -169,10 +169,10 @@ export function HubClaudeRescueSection() {
                     className="mt-0.5"
                   />
                   <span className="space-y-0.5">
-                    <span className="block font-medium text-gray-900">{session.sessionId}</span>
+                    <span className="block font-medium text-cafe">{session.sessionId}</span>
                     <span className="block text-amber-800">纯 thinking turn：{session.removableThinkingTurns} 条</span>
-                    <span className="block break-all text-gray-500">{session.transcriptPath}</span>
-                    <span className="block text-gray-500">{describeDetection(session)}</span>
+                    <span className="block break-all text-cafe-secondary">{session.transcriptPath}</span>
+                    <span className="block text-cafe-secondary">{describeDetection(session)}</span>
                   </span>
                 </label>
               );

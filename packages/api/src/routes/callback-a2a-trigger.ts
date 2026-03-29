@@ -353,7 +353,8 @@ export async function triggerA2AInvocation(
         status: 'running',
       });
 
-      socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', { threadId, mode: intent.intent, targetCats });
+      // #768: Defer intent_mode broadcast until CLI produces first event.
+      let intentModeBroadcast = false;
 
       // F070: track governance block errorCode for recoverable failure marking
       let governanceErrorCode: string | undefined;
@@ -362,6 +363,16 @@ export async function triggerA2AInvocation(
         ...(controller?.signal ? { signal: controller.signal } : {}),
         parentInvocationId: createResult.invocationId,
       })) {
+        // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
+        if (!intentModeBroadcast) {
+          socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
+            threadId,
+            mode: intent.intent,
+            targetCats,
+            invocationId: createResult.invocationId,
+          });
+          intentModeBroadcast = true;
+        }
         if (controller?.signal.aborted) break;
         if (msg.type === 'done' && msg.errorCode) {
           governanceErrorCode = msg.errorCode;

@@ -272,6 +272,61 @@ describe('QueueProcessor', () => {
     );
   });
 
+  // ── #768: intent_mode deferred until CLI is alive ──
+
+  it('#768 regression: intent_mode is NOT broadcast when routeExecution throws before yielding', async () => {
+    const failDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          throw new Error('CLI spawn failed');
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const failProcessor = new QueueProcessor(failDeps);
+
+    const entry = enqueueEntry(failDeps.queue);
+    failDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    await failProcessor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 100));
+
+    const intentCall = failDeps.socketManager.broadcastToRoom.mock.calls.find((c) => c.arguments[1] === 'intent_mode');
+    assert.equal(intentCall, undefined, 'intent_mode must NOT be broadcast when CLI fails before producing events');
+  });
+
+  it('#768 regression: intent_mode IS broadcast once CLI produces first event', async () => {
+    const entry = enqueueEntry(deps.queue, { targetCats: ['codex'], intent: 'execute' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    await processor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const intentCall = deps.socketManager.broadcastToRoom.mock.calls.find((c) => c.arguments[1] === 'intent_mode');
+    assert.ok(intentCall, 'intent_mode should be broadcast after first CLI event');
+  });
+
+  it('#768 regression: intent_mode is NOT broadcast when routeExecution yields nothing (empty generator)', async () => {
+    const emptyDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          // Generator completes without yielding any events
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const emptyProcessor = new QueueProcessor(emptyDeps);
+
+    const entry = enqueueEntry(emptyDeps.queue);
+    emptyDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    await emptyProcessor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 100));
+
+    const intentCall = emptyDeps.socketManager.broadcastToRoom.mock.calls.find((c) => c.arguments[1] === 'intent_mode');
+    assert.equal(intentCall, undefined, 'intent_mode must NOT be broadcast when CLI produces zero events');
+  });
+
   // ── P1 fix: executeEntry failure marks InvocationRecord ──
 
   it('executeEntry failure marks InvocationRecord as failed', async () => {

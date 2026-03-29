@@ -9,6 +9,7 @@ import type { CapabilityEntry, McpToolInfo } from '@cat-cafe/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
 
 export interface McpProbeResult {
   connectionStatus: 'connected' | 'disconnected' | 'unknown';
@@ -102,13 +103,23 @@ export async function probeMcpCapability(
   },
 ): Promise<McpProbeResult> {
   if (capability.type !== 'mcp') return { connectionStatus: 'unknown' };
-  if (!capability.mcpServer?.command) return { connectionStatus: 'unknown' };
+  if (!capability.mcpServer) return { connectionStatus: 'unknown' };
+
+  let command = capability.mcpServer.command;
+  let args = capability.mcpServer.args;
+  if ((!command || command.trim().length === 0) && capability.mcpServer.resolver === 'pencil') {
+    const resolved = await resolvePencilCommand();
+    if (!resolved) return { connectionStatus: 'unknown' };
+    command = resolved.command;
+    args = resolved.args;
+  }
+  if (!command || command.trim().length === 0) return { connectionStatus: 'unknown' };
 
   const timeoutMs = resolveProbeTimeoutMs(capability, options.timeoutMs);
   const deadlineMs = Date.now() + timeoutMs;
   const serverParams: StdioServerParameters = {
-    command: capability.mcpServer.command,
-    args: capability.mcpServer.args,
+    command,
+    args,
     cwd: capability.mcpServer.workingDir ?? options.projectRoot,
     // Probe only needs tools/list result; discard stderr to avoid pipe backpressure.
     stderr: 'ignore',

@@ -131,10 +131,9 @@ describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC
       const pkg = JSON.parse(readFileSync(resolve(exportDir, 'package.json'), 'utf8'));
       const runtimeScript = readFileSync(resolve(exportDir, 'scripts/runtime-worktree.sh'), 'utf8');
 
-      assert.match(pkg.scripts['dev:direct'], /CAT_CAFE_STRICT_PROFILE_DEFAULTS=1/);
-      assert.match(pkg.scripts['start:direct'], /CAT_CAFE_STRICT_PROFILE_DEFAULTS=1/);
-      assert.match(pkg.scripts['dev:direct'], /--profile=opensource/);
-      assert.match(pkg.scripts['start:direct'], /--profile=opensource/);
+      assert.match(pkg.scripts['dev:direct'], /start-entry\.mjs dev:direct --profile=opensource/);
+      assert.match(pkg.scripts['start:direct'], /start-entry\.mjs start:direct --profile=opensource/);
+      assert.equal(existsSync(resolve(exportDir, 'scripts/start-entry.mjs')), true);
       assert.equal(
         pkg.scripts['check:start-profile-isolation'],
         'node --test scripts/start-dev-profile-isolation.test.mjs',

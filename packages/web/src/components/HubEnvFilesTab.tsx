@@ -146,7 +146,7 @@ function HubDirLink({ relPath, label }: { relPath: string; label: string }) {
 
 function RestrictedPathLabel({ absPath, reason }: { absPath: string; reason: string }) {
   return (
-    <span className="text-xs text-gray-400 shrink-0 cursor-default" title={`${reason}\n${absPath}`}>
+    <span className="text-xs text-cafe-muted shrink-0 cursor-default" title={`${reason}\n${absPath}`}>
       受保护
     </span>
   );
@@ -208,7 +208,15 @@ function buildVariableHint(variable: EnvVar): string | null {
 }
 
 function isEditableVariable(variable: EnvVar): boolean {
-  return variable.runtimeEditable !== false && !variable.sensitive;
+  // Must stay in sync with env-registry.ts isEditableEnvVar()
+  if (variable.runtimeEditable === true) return true;
+  if (variable.runtimeEditable === false) return false;
+  return !variable.sensitive;
+}
+
+/** Sensitive var explicitly opted into runtime editing (needs password input + masked display). */
+function isSensitiveEditable(variable: EnvVar): boolean {
+  return variable.sensitive && variable.runtimeEditable === true;
 }
 
 function isMaskedUrlVariable(variable: EnvVar): boolean {
@@ -218,6 +226,8 @@ function isMaskedUrlVariable(variable: EnvVar): boolean {
 }
 
 function initialDraftValue(variable: EnvVar): string {
+  // Sensitive editable vars: always start empty (current value is masked as ***)
+  if (isSensitiveEditable(variable)) return '';
   if (isMaskedUrlVariable(variable)) return '';
   return variable.currentValue ?? '';
 }
@@ -242,7 +252,7 @@ function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
           return (
             <div
               key={f.name}
-              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2"
+              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-cafe-surface px-3 py-2"
             >
               <code className="shrink-0 rounded bg-[#F7F3F0] px-1.5 py-0.5 font-mono text-xs text-[#6A5A50]">
                 {f.name}
@@ -296,7 +306,7 @@ function EnvVarsSection({
               {group.vars.map((v) => (
                 <div
                   key={v.name}
-                  className="grid gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2 text-xs md:grid-cols-[minmax(0,1fr)_220px]"
+                  className="grid gap-2 rounded-[12px] border border-[#F3E8DE] bg-cafe-surface px-3 py-2 text-xs md:grid-cols-[minmax(0,1fr)_220px]"
                 >
                   <div className="min-w-0 space-y-1">
                     <div className="flex items-baseline gap-1.5 min-w-0">
@@ -314,9 +324,19 @@ function EnvVarsSection({
                     <div className="space-y-1">
                       <input
                         aria-label={v.name}
+                        type={isSensitiveEditable(v) ? 'password' : 'text'}
+                        autoComplete={isSensitiveEditable(v) ? 'off' : undefined}
                         value={drafts[v.name] ?? ''}
                         onChange={(e) => onDraftChange(v.name, e.target.value)}
-                        placeholder={isMaskedUrlVariable(v) ? '保持当前值（已脱敏）' : v.defaultValue}
+                        placeholder={
+                          isSensitiveEditable(v)
+                            ? v.currentValue
+                              ? '已设置（留空不修改）'
+                              : '输入密钥'
+                            : isMaskedUrlVariable(v)
+                              ? '保持当前值（已脱敏）'
+                              : v.defaultValue
+                        }
                         className="rounded-[10px] border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 font-mono text-xs text-[#6A5A50]"
                       />
                       {buildVariableHint(v) ? (
@@ -360,7 +380,7 @@ function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs; projec
           return (
             <div
               key={d.name}
-              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-white px-3 py-2"
+              className="flex items-baseline gap-2 rounded-[12px] border border-[#F3E8DE] bg-cafe-surface px-3 py-2"
             >
               <span className="shrink-0 text-xs font-medium text-[#6A5A50]">{d.name}</span>
               <span className="text-xs text-[#8A776B]">{d.desc}</span>
@@ -403,7 +423,7 @@ export function HubEnvFilesTab() {
   }, []);
 
   if (error) return <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>;
-  if (!data) return <p className="text-sm text-gray-400">加载中...</p>;
+  if (!data) return <p className="text-sm text-cafe-muted">加载中...</p>;
 
   const editableVariables = data.variables.filter(isEditableVariable);
   const changedUpdates = editableVariables
@@ -448,6 +468,10 @@ export function HubEnvFilesTab() {
         : data.variables.map((variable) => {
             const update = changedUpdates.find((item) => item.name === variable.name);
             if (!update) return variable;
+            // Never store plaintext for sensitive vars in client state
+            if (isSensitiveEditable(variable)) {
+              return { ...variable, currentValue: update.value ? '***' : null };
+            }
             return { ...variable, currentValue: update.value || null };
           });
       setData((prev) => (prev ? { ...prev, variables: nextVariables } : prev));

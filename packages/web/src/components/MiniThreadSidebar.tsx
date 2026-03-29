@@ -67,24 +67,24 @@ export function MiniThreadSidebar({ onAssignToPane }: MiniThreadSidebarProps) {
 
   return (
     <aside
-      className="relative flex-shrink-0 border-r border-cocreator-light bg-white flex flex-col h-full"
+      className="relative flex-shrink-0 border-r border-cocreator-light bg-cafe-surface flex flex-col h-full"
       style={{ width }}
     >
       <div className="flex-1 overflow-y-auto py-2 px-1 space-y-0.5">
         {assigned.length > 0 && (
           <div className="px-1 mb-1">
-            <span className="text-[9px] text-gray-400 uppercase tracking-wider">{isCollapsed ? '' : '窗格中'}</span>
+            <span className="text-[9px] text-cafe-muted uppercase tracking-wider">{isCollapsed ? '' : '窗格中'}</span>
           </div>
         )}
         {assigned.map((t) => (
           <MiniThreadRow key={t.id} thread={t} isInPane isCollapsed={isCollapsed} getThreadState={getThreadState} />
         ))}
 
-        {assigned.length > 0 && available.length > 0 && <div className="mx-1 border-t border-gray-200 my-1.5" />}
+        {assigned.length > 0 && available.length > 0 && <div className="mx-1 border-t border-cafe my-1.5" />}
 
         {available.length > 0 && (
           <div className="px-1 mb-1">
-            <span className="text-[9px] text-gray-400 uppercase tracking-wider">{isCollapsed ? '' : '可添加'}</span>
+            <span className="text-[9px] text-cafe-muted uppercase tracking-wider">{isCollapsed ? '' : '可添加'}</span>
           </div>
         )}
         {available.map((t) => (
@@ -142,7 +142,7 @@ function MiniThreadRow({
     <button
       onClick={onClick}
       className={`relative w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors ${
-        isInPane ? 'bg-cocreator-bg/60' : 'hover:bg-gray-100'
+        isInPane ? 'bg-cocreator-bg/60' : 'hover:bg-cafe-surface-elevated'
       } ${onClick ? 'cursor-pointer' : 'cursor-default'}`}
       title={title}
     >
@@ -150,11 +150,11 @@ function MiniThreadRow({
         {firstCat ? (
           <CatAvatar catId={firstCat} size={20} />
         ) : (
-          <span className="text-xs font-medium text-gray-500">{title.charAt(0).toUpperCase()}</span>
+          <span className="text-xs font-medium text-cafe-secondary">{title.charAt(0).toUpperCase()}</span>
         )}
         {dotColor && <span className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ${dotColor}`} />}
       </div>
-      {!isCollapsed && <span className="text-xs text-gray-700 truncate flex-1 min-w-0">{title}</span>}
+      {!isCollapsed && <span className="text-xs text-cafe-secondary truncate flex-1 min-w-0">{title}</span>}
       {ts.unreadCount > 0 && (
         <span
           className={`text-[8px] ${ts.hasUserMention ? 'bg-red-500' : 'bg-amber-500'} text-white rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}

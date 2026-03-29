@@ -30,20 +30,20 @@ export function BrakeSettingsPanel() {
   );
 
   if (settingsLoading) {
-    return <p className="text-sm text-gray-500 py-4">加载中…</p>;
+    return <p className="text-sm text-cafe-secondary py-4">加载中…</p>;
   }
 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-gray-900">🐾 健康守护</h3>
-        <p className="text-sm text-gray-500 mt-1">三猫会在你连续工作一段时间后提醒你休息</p>
+        <h3 className="text-base font-semibold text-cafe">🐾 健康守护</h3>
+        <p className="text-sm text-cafe-secondary mt-1">三猫会在你连续工作一段时间后提醒你休息</p>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-4 space-y-4">
+      <div className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-4 space-y-4">
         {/* Toggle */}
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-700">启用健康守护</span>
+          <span className="text-sm font-medium text-cafe-secondary">启用健康守护</span>
           <button
             type="button"
             role="switch"
@@ -54,7 +54,7 @@ export function BrakeSettingsPanel() {
             }`}
           >
             <span
-              className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform duration-200 ${
+              className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-cafe-surface shadow ring-0 transition-transform duration-200 ${
                 settingsEnabled ? 'translate-x-5' : 'translate-x-0'
               }`}
             />
@@ -64,8 +64,8 @@ export function BrakeSettingsPanel() {
         {/* Threshold slider */}
         <div className={settingsEnabled ? '' : 'opacity-50 pointer-events-none'}>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-sm text-gray-600">提醒间隔</span>
-            <span className="text-sm font-mono font-semibold text-gray-900">{settingsThreshold} 分钟</span>
+            <span className="text-sm text-cafe-secondary">提醒间隔</span>
+            <span className="text-sm font-mono font-semibold text-cafe">{settingsThreshold} 分钟</span>
           </div>
           <input
             type="range"
@@ -76,7 +76,7 @@ export function BrakeSettingsPanel() {
             onChange={handleThresholdChange}
             className="w-full accent-blue-600"
           />
-          <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+          <div className="flex justify-between text-xs text-cafe-muted mt-0.5">
             <span>30 min</span>
             <span>240 min</span>
           </div>

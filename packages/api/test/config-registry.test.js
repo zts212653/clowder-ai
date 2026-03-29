@@ -216,7 +216,7 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.deliberate.status, 'types_only');
   });
 
-  it('snapshot contains all 11 categories (Phase 5.1, post-Hindsight)', async () => {
+  it('snapshot contains all config categories', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
@@ -233,6 +233,7 @@ describe('ConfigRegistry', () => {
       'governance',
       'deliberate',
       'codexExecution',
+      'ui',
     ];
     for (const cat of categories) {
       assert.ok(snapshot[cat], `has ${cat}`);

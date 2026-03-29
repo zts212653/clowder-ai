@@ -30,22 +30,47 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
   });
 
   it('falls back to direct upstream when proxy port is unreachable', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const root = await mkdtemp(join(tmpdir(), 'f115-fallback-'));
     const apiDir = join(root, 'packages', 'api');
+    const catCafeDir = join(root, '.cat-cafe');
     const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     await mkdir(apiDir, { recursive: true });
+    await mkdir(catCafeDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
-    await createProviderProfile(root, {
-      provider: 'anthropic',
-      name: 'test-gateway',
-      mode: 'api_key',
-      baseUrl: 'https://api.test-gateway.example',
-      apiKey: 'sk-test-fallback',
-      setActive: true,
-    });
+    // F136 Phase 4d: create account via cat-catalog.json + credentials.json
+    await writeFile(
+      join(catCafeDir, 'cat-catalog.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          breeds: [],
+          accounts: {
+            'test-gateway': {
+              authType: 'api_key',
+              protocol: 'anthropic',
+              baseUrl: 'https://api.test-gateway.example',
+              displayName: 'test-gateway',
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+    await writeFile(
+      join(catCafeDir, 'credentials.json'),
+      JSON.stringify(
+        {
+          'test-gateway': { apiKey: 'sk-test-fallback' },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
 
     const optionsSeen = [];
     const service = {
@@ -112,22 +137,47 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
   });
 
   it('falls back to direct upstream when ANTHROPIC_PROXY_PORT is non-numeric (not subscription)', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
     const root = await mkdtemp(join(tmpdir(), 'f115-nan-port-'));
     const apiDir = join(root, 'packages', 'api');
+    const catCafeDir = join(root, '.cat-cafe');
     const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     await mkdir(apiDir, { recursive: true });
+    await mkdir(catCafeDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
-    await createProviderProfile(root, {
-      provider: 'anthropic',
-      name: 'nan-port-gateway',
-      mode: 'api_key',
-      baseUrl: 'https://api.nan-port.example',
-      apiKey: 'sk-nan-port',
-      setActive: true,
-    });
+    // F136 Phase 4d: create account via cat-catalog.json + credentials.json
+    await writeFile(
+      join(catCafeDir, 'cat-catalog.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          breeds: [],
+          accounts: {
+            'nan-port-gateway': {
+              authType: 'api_key',
+              protocol: 'anthropic',
+              baseUrl: 'https://api.nan-port.example',
+              displayName: 'nan-port-gateway',
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+    await writeFile(
+      join(catCafeDir, 'credentials.json'),
+      JSON.stringify(
+        {
+          'nan-port-gateway': { apiKey: 'sk-nan-port' },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
 
     const optionsSeen = [];
     const service = {

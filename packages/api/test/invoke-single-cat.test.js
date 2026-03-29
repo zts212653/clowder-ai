@@ -49,8 +49,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // Dynamic import AFTER env is set — singleton will use this dir
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     invokeSingleCat = mod.invokeSingleCat;
-    // Default: no models known to opencode → all models enter F189 path (deterministic for CI)
-    mod._resetOpenCodeKnownModels(new Set());
   });
 
   function makeDeps() {
@@ -2589,7 +2587,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F127 P1: falls back to CAT_TEMPLATE_PATH project when thread projectPath is absent', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const templateRoot = await mkdtemp(join(tmpdir(), 'f127-active-template-'));
     await writeFile(join(templateRoot, 'cat-template.json'), '{}', 'utf-8');
     const boundProfile = await createProviderProfile(templateRoot, {
@@ -2655,7 +2653,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F127 P2: ignores unreadable CAT_TEMPLATE_PATH before switching account roots', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const staleTemplateRoot = await mkdtemp(join(tmpdir(), 'f127-stale-template-'));
     const isolatedRepoRoot = await mkdtemp(join(tmpdir(), 'f127-isolated-repo-'));
     const isolatedApiDir = join(isolatedRepoRoot, 'packages', 'api');
@@ -2719,7 +2717,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('F127 P2: bootstrapped seed cats follow the current bootstrap binding after activation', async () => {
     const { bootstrapCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
-    const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { activateProviderProfile, createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-seed-bootstrap-binding-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -2795,7 +2793,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F127 P1: prefers member-bound openai profile over protocol active profile', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-openai-profile-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -3009,7 +3007,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F127: ignores legacy api_key protocol metadata when the member explicitly selected the client', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-bound-mismatch-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -3078,7 +3076,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F127: injects OPENROUTER_API_KEY for opencode members bound to openai api_key profiles', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-openrouter-key-injection-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -3148,7 +3146,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F189: writes invocation-scoped OPENCODE_CONFIG for custom opencode providers and cleans it up', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f189-opencode-custom-provider-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -3228,7 +3226,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F189: bare model + ocProviderName assembles composite model for custom provider routing', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f189-oc-bare-model-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -3307,12 +3305,91 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     await assert.rejects(readFile(seenConfigPath, 'utf-8'));
   });
 
-  it('fix(#280): builtin ocProviderName (anthropic) assembles model and writes runtime config', async () => {
-    const { _resetOpenCodeKnownModels } = await import(
-      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
-    );
-    _resetOpenCodeKnownModels(new Set()); // no models known → F189 path
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+  it('F189-fix: builtin ocProviderName with custom baseUrl still generates OPENCODE_CONFIG', async () => {
+    // Regression: ocProviderName="anthropic" + baseUrl="https://api.minimax.io/v1"
+    // was skipped by BUILTIN_OPENCODE_PROVIDERS guard, leaving opencode without custom config.
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'f189-builtin-ocprovider-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const customProfile = await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'minimax-anthropic-compat',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.minimax.io/v1',
+      apiKey: 'sk-minimax-key',
+      models: ['MiniMax-M2.7'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-minimax-builtin-oc';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'opencode',
+      providerProfileId: customProfile.id,
+      defaultModel: 'MiniMax-M2.7',
+      ocProviderName: 'anthropic',
+    });
+
+    let seenConfigPath;
+    let seenRuntimeConfig;
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        assert.ok(seenConfigPath, 'builtin ocProviderName + custom baseUrl must still receive OPENCODE_CONFIG');
+        seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test builtin provider with custom baseUrl',
+          userId: 'user-f189-builtin-fix',
+          threadId: 'thread-f189-builtin-fix',
+          isLastCat: true,
+        }),
+      );
+      assert.ok(messages.some((m) => m.type === 'done'));
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, 'anthropic/MiniMax-M2.7');
+    assert.ok(callbackEnv.OPENCODE_CONFIG, 'OPENCODE_CONFIG must be set for custom endpoint');
+    assert.equal(callbackEnv.CAT_CAFE_OC_API_KEY, 'sk-minimax-key');
+    assert.equal(callbackEnv.CAT_CAFE_OC_BASE_URL, 'https://api.minimax.io/v1');
+    assert.equal(seenRuntimeConfig?.model, 'anthropic/MiniMax-M2.7');
+    assert.ok(seenRuntimeConfig?.provider?.anthropic);
+    assert.ok(seenRuntimeConfig?.provider?.anthropic?.models?.['MiniMax-M2.7']);
+    await assert.rejects(readFile(seenConfigPath, 'utf-8'));
+  });
+
+  it('fix(#280): builtin ocProviderName without baseUrl still generates OPENCODE_CONFIG', async () => {
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'fix280-builtin-oc-provider-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -3320,13 +3397,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const anthropicProfile = await createProviderProfile(root, {
       provider: 'anthropic',
-      name: 'claude-api',
+      name: 'anthropic-api',
       mode: 'api_key',
       authType: 'api_key',
       protocol: 'anthropic',
-      baseUrl: 'https://api.anthropic.com',
       apiKey: 'sk-ant-test-key',
-      models: ['claude-opus-4-6', 'claude-sonnet-4-6'],
+      models: ['claude-opus-4-6'],
       setActive: false,
     });
 
@@ -3374,7 +3450,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.ok(messages.some((m) => m.type === 'done'));
     } finally {
       process.chdir(previousCwd);
-      _resetOpenCodeKnownModels(null);
       catRegistry.reset();
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
@@ -3383,137 +3458,52 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    // Model should be assembled as anthropic/claude-opus-4-6
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, 'anthropic/claude-opus-4-6');
     assert.equal(callbackEnv.CAT_CAFE_OC_API_KEY, 'sk-ant-test-key');
     assert.equal(seenRuntimeConfig?.model, 'anthropic/claude-opus-4-6');
     assert.equal(seenRuntimeConfig?.provider?.anthropic?.npm, '@ai-sdk/anthropic');
     assert.ok(seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6']);
-    // Config file should be cleaned up after invocation
     await assert.rejects(readFile(seenConfigPath, 'utf-8'));
   });
 
-  it('fix(#280): openai builtin ocProviderName also assembles model correctly', async () => {
-    const { _resetOpenCodeKnownModels } = await import(
-      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
-    );
-    _resetOpenCodeKnownModels(new Set()); // no models known → F189 path
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-    const root = await mkdtemp(join(tmpdir(), 'fix280-openai-oc-provider-'));
+  it('fix(#280): known legacy model without ocProviderName skips runtime config', async () => {
+    const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
+    mod._resetOpenCodeKnownModels(new Set(['anthropic/claude-opus-4-6']));
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'fix280-known-legacy-model-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
 
-    const openaiProfile = await createProviderProfile(root, {
-      provider: 'openai',
-      name: 'openai-api',
+    const anthropicProfile = await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'claude-api-known',
       mode: 'api_key',
       authType: 'api_key',
-      protocol: 'openai',
-      baseUrl: 'https://api.openai.com/v1',
-      apiKey: 'sk-openai-test-key',
-      models: ['gpt-5.4'],
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-ant-known-key',
+      models: ['claude-opus-4-6'],
       setActive: false,
     });
 
     const registrySnapshot = catRegistry.getAllConfigs();
     const originalConfig = catRegistry.tryGet('opencode')?.config;
     assert.ok(originalConfig, 'opencode config should exist in registry');
-    const boundCatId = 'opencode-openai-builtin-test';
+    const boundCatId = 'opencode-known-legacy-model-test';
     catRegistry.register(boundCatId, {
       ...originalConfig,
       id: boundCatId,
       mentionPatterns: [`@${boundCatId}`],
       provider: 'opencode',
-      providerProfileId: openaiProfile.id,
-      defaultModel: 'gpt-5.4',
-      ocProviderName: 'openai',
-    });
-
-    const optionsSeen = [];
-    let seenRuntimeConfig;
-    const service = {
-      async *invoke(_prompt, options) {
-        optionsSeen.push(options ?? {});
-        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
-        assert.ok(configPath, 'openai ocProviderName should receive OPENCODE_CONFIG');
-        seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
-        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
-      },
-    };
-
-    const deps = makeDeps();
-    const previousCwd = process.cwd();
-    try {
-      process.chdir(apiDir);
-      await collect(
-        invokeSingleCat(deps, {
-          catId: boundCatId,
-          service,
-          prompt: 'test openai routing',
-          userId: 'user-fix280-openai',
-          threadId: 'thread-fix280-openai',
-          isLastCat: true,
-        }),
-      );
-    } finally {
-      process.chdir(previousCwd);
-      _resetOpenCodeKnownModels(null);
-      catRegistry.reset();
-      for (const [id, config] of Object.entries(registrySnapshot)) {
-        catRegistry.register(id, config);
-      }
-      await rm(root, { recursive: true, force: true });
-    }
-
-    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, 'openai/gpt-5.4');
-    assert.equal(seenRuntimeConfig?.model, 'openai/gpt-5.4');
-    assert.equal(seenRuntimeConfig?.provider?.openai?.npm, '@ai-sdk/openai-compatible');
-  });
-
-  it('fix(#280): model already in opencode models list skips F189 runtime config', async () => {
-    const { _resetOpenCodeKnownModels } = await import(
-      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
-    );
-    // Simulate: opencode already knows about this model
-    _resetOpenCodeKnownModels(new Set(['openrouter/anthropic/claude-opus-4-6']));
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-    const root = await mkdtemp(join(tmpdir(), 'fix280-known-model-'));
-    const apiDir = join(root, 'packages', 'api');
-    await mkdir(apiDir, { recursive: true });
-    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
-
-    const profile = await createProviderProfile(root, {
-      provider: 'openai',
-      name: 'openrouter-profile',
-      mode: 'api_key',
-      authType: 'api_key',
-      protocol: 'openai',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      apiKey: 'sk-or-test-key',
-      models: ['openrouter/anthropic/claude-opus-4-6'],
-      setActive: false,
-    });
-
-    const registrySnapshot = catRegistry.getAllConfigs();
-    const originalConfig = catRegistry.tryGet('opencode')?.config;
-    assert.ok(originalConfig);
-    const boundCatId = 'opencode-known-model-test';
-    catRegistry.register(boundCatId, {
-      ...originalConfig,
-      id: boundCatId,
-      mentionPatterns: [`@${boundCatId}`],
-      provider: 'opencode',
-      providerProfileId: profile.id,
-      defaultModel: 'openrouter/anthropic/claude-opus-4-6',
+      providerProfileId: anthropicProfile.id,
+      defaultModel: 'anthropic/claude-opus-4-6',
     });
 
     const optionsSeen = [];
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        // Model is known to opencode → OPENCODE_CONFIG should NOT be set
         assert.equal(options?.callbackEnv?.OPENCODE_CONFIG, undefined);
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
@@ -3527,15 +3517,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         invokeSingleCat(deps, {
           catId: boundCatId,
           service,
-          prompt: 'test known model skip',
-          userId: 'user-fix280-known',
-          threadId: 'thread-fix280-known',
+          prompt: 'test known legacy model skip',
+          userId: 'user-fix280-known-legacy',
+          threadId: 'thread-fix280-known-legacy',
           isLastCat: true,
         }),
       );
     } finally {
       process.chdir(previousCwd);
-      _resetOpenCodeKnownModels(null);
+      mod._resetOpenCodeKnownModels(null);
       catRegistry.reset();
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
@@ -3544,59 +3534,55 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    // Known model → no F189 injection
     assert.equal(callbackEnv.OPENCODE_CONFIG, undefined);
-    // Credentials still flow via protocol injection (openai protocol → OPENROUTER_API_KEY)
-    assert.equal(callbackEnv.OPENROUTER_API_KEY, 'sk-or-test-key');
+    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, undefined);
   });
 
-  it('fix(#280): prefixed model NOT in opencode models still gets F189 config', async () => {
-    const { _resetOpenCodeKnownModels } = await import(
-      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
-    );
-    _resetOpenCodeKnownModels(new Set()); // empty → model not known
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-    const root = await mkdtemp(join(tmpdir(), 'fix280-no-ocprovider-'));
+  it('F189-P1: ocProviderName takes priority over parseOpenCodeModel for namespaced models', async () => {
+    // Regression (砚砚 review): defaultModel="z-ai/glm-4.7" + ocProviderName="openrouter"
+    // parseOpenCodeModel parses "z-ai" as providerName, but the real provider is "openrouter".
+    // ocProviderName must take priority when set — the "/" in the model is a namespace separator.
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'f189-namespace-priority-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
 
-    const anthropicProfile = await createProviderProfile(root, {
+    const orProfile = await createProviderProfile(root, {
       provider: 'anthropic',
-      name: 'claude-api-legacy',
+      name: 'openrouter-profile',
       mode: 'api_key',
       authType: 'api_key',
-      protocol: 'anthropic',
-      baseUrl: 'https://api.anthropic.com',
-      apiKey: 'sk-ant-legacy-key',
-      models: ['claude-opus-4-6'],
+      protocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api',
+      apiKey: 'sk-or-key',
+      models: ['z-ai/glm-4.7'],
       setActive: false,
     });
 
     const registrySnapshot = catRegistry.getAllConfigs();
     const originalConfig = catRegistry.tryGet('opencode')?.config;
     assert.ok(originalConfig, 'opencode config should exist in registry');
-    const boundCatId = 'opencode-legacy-no-ocprovider';
+    const boundCatId = 'opencode-or-namespace';
     catRegistry.register(boundCatId, {
       ...originalConfig,
       id: boundCatId,
       mentionPatterns: [`@${boundCatId}`],
       provider: 'opencode',
-      providerProfileId: anthropicProfile.id,
-      defaultModel: 'anthropic/claude-opus-4-6',
-      // Note: NO ocProviderName — legacy member without F189 field
+      providerProfileId: orProfile.id,
+      defaultModel: 'z-ai/glm-4.7',
+      ocProviderName: 'openrouter',
     });
 
-    let seenConfigPath;
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        // Model NOT in opencode list → F189 runtime config SHOULD be written
-        seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
-        assert.ok(seenConfigPath, 'unknown model should receive OPENCODE_CONFIG');
-        seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        if (configPath) {
+          seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+        }
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -3609,15 +3595,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         invokeSingleCat(deps, {
           catId: boundCatId,
           service,
-          prompt: 'test unknown model gets F189',
-          userId: 'user-fix280-legacy',
-          threadId: 'thread-fix280-legacy',
+          prompt: 'test namespace model priority',
+          userId: 'user-f189-ns',
+          threadId: 'thread-f189-ns',
           isLastCat: true,
         }),
       );
     } finally {
       process.chdir(previousCwd);
-      _resetOpenCodeKnownModels(null);
       catRegistry.reset();
       for (const [id, config] of Object.entries(registrySnapshot)) {
         catRegistry.register(id, config);
@@ -3626,15 +3611,93 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    // Model not in opencode list → F189 config generated
-    assert.ok(callbackEnv.OPENCODE_CONFIG);
-    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, 'anthropic/claude-opus-4-6');
-    assert.equal(callbackEnv.CAT_CAFE_OC_API_KEY, 'sk-ant-legacy-key');
-    assert.equal(seenRuntimeConfig?.provider?.anthropic?.npm, '@ai-sdk/anthropic');
+    // Key assertions: ocProviderName "openrouter" must win over parsed "z-ai"
+    assert.equal(
+      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE,
+      'openrouter/z-ai/glm-4.7',
+      'effective model must use ocProviderName as provider prefix, not parsed z-ai',
+    );
+    assert.ok(callbackEnv.OPENCODE_CONFIG, 'OPENCODE_CONFIG must be set');
+    assert.equal(seenRuntimeConfig?.model, 'openrouter/z-ai/glm-4.7');
+    assert.ok(seenRuntimeConfig?.provider?.openrouter, 'runtime config provider must be openrouter, not z-ai');
+  });
+
+  it('F189-P1-2: same-provider prefix in defaultModel + ocProviderName must NOT double-prefix', async () => {
+    // Regression (砚砚 review R2): defaultModel="openai/gpt-5.4" + ocProviderName="openai"
+    // Must produce effectiveModel="openai/gpt-5.4", NOT "openai/openai/gpt-5.4".
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'f189-double-prefix-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const oaiProfile = await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'openai-compat',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai-key',
+      models: ['gpt-5.4'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig);
+    const boundCatId = 'opencode-double-prefix-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'opencode',
+      providerProfileId: oaiProfile.id,
+      defaultModel: 'openai/gpt-5.4',
+      ocProviderName: 'openai',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test double prefix',
+          userId: 'user-f189-dp',
+          threadId: 'thread-f189-dp',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(
+      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE,
+      'openai/gpt-5.4',
+      'must NOT double-prefix to openai/openai/gpt-5.4',
+    );
   });
 
   it('F062-fix: skips auto-seal for api_key mode when context health is approx', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f062-approx-no-seal-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -3751,7 +3814,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F062-fix: skips auto-seal for api_key + compress strategy even when context health is exact', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
       '../dist/config/session-strategy.js'
     );
@@ -3878,7 +3941,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('F062-fix: keeps auto-seal for api_key + handoff strategy on exact budget overflow', async () => {
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
       '../dist/config/session-strategy.js'
     );

@@ -261,7 +261,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
 
     const { bootstrapCatCatalog } = await import('../dist/config/cat-catalog-store.js');
-    const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { activateProviderProfile, createProviderProfile } = await import('./helpers/create-test-account.js');
     bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
     const sponsorProfile = await createProviderProfile(projectRoot, {
       displayName: 'Codex Sponsor',

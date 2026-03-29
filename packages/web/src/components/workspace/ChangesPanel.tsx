@@ -20,12 +20,12 @@ const statusLabels: Record<string, { label: string; color: string }> = {
   A: { label: 'A', color: 'text-green-400' },
   D: { label: 'D', color: 'text-red-400' },
   R: { label: 'R', color: 'text-blue-400' },
-  '?': { label: 'U', color: 'text-gray-400' },
-  '??': { label: 'U', color: 'text-gray-400' },
+  '?': { label: 'U', color: 'text-cafe-muted' },
+  '??': { label: 'U', color: 'text-cafe-muted' },
 };
 
 function getStatusInfo(status: string) {
-  return statusLabels[status] ?? { label: status, color: 'text-gray-400' };
+  return statusLabels[status] ?? { label: status, color: 'text-cafe-muted' };
 }
 
 interface ChangesPanelProps {
@@ -63,7 +63,7 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
   }, [fetchDiff]);
 
   if (!worktreeId) {
-    return <div className="p-4 text-center text-gray-500 text-xs">No worktree selected</div>;
+    return <div className="p-4 text-center text-cafe-secondary text-xs">No worktree selected</div>;
   }
 
   return (
@@ -102,14 +102,14 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
               <span className={`text-[10px] font-mono font-bold w-3 ${info.color}`}>{info.label}</span>
               <FileIcon name={f.path} />
               <span className="text-[11px] text-cafe-black truncate">{f.path.split('/').pop()}</span>
-              <span className="text-[9px] text-gray-400 truncate ml-auto">
+              <span className="text-[9px] text-cafe-muted truncate ml-auto">
                 {f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''}
               </span>
             </button>
           );
         })}
         {data && data.changedFiles.length === 0 && (
-          <div className="px-3 py-4 text-center text-gray-400 text-xs">No uncommitted changes</div>
+          <div className="px-3 py-4 text-center text-cafe-muted text-xs">No uncommitted changes</div>
         )}
       </div>
 
@@ -118,7 +118,7 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
         {data?.diff ? (
           <DiffViewer diff={data.diff} filePath={selectedFile ?? undefined} />
         ) : (
-          <div className="p-4 text-center text-gray-500 text-xs">
+          <div className="p-4 text-center text-cafe-secondary text-xs">
             {loading ? 'Loading...' : 'Select a file to view diff'}
           </div>
         )}

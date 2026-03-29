@@ -68,7 +68,7 @@ export function ExportButton({ threadId }: { threadId: string }) {
           <svg
             viewBox="0 0 24 24"
             fill="none"
-            className="w-5 h-5 animate-spin text-gray-500"
+            className="w-5 h-5 animate-spin text-cafe-secondary"
             stroke="currentColor"
             strokeWidth="2"
           >
@@ -76,7 +76,7 @@ export function ExportButton({ threadId }: { threadId: string }) {
             <path d="M12 2a10 10 0 019.8 8" />
           </svg>
         ) : (
-          <DownloadIcon className="w-5 h-5 text-gray-500" />
+          <DownloadIcon className="w-5 h-5 text-cafe-secondary" />
         )}
       </button>
 
@@ -89,7 +89,7 @@ export function ExportButton({ threadId }: { threadId: string }) {
               className="w-full text-left px-3 py-2 text-sm hover:bg-cocreator-light transition-colors flex items-center justify-between"
             >
               <span className="text-cafe-black">{opt.label}</span>
-              <span className="text-xs text-gray-400">{opt.description}</span>
+              <span className="text-xs text-cafe-muted">{opt.description}</span>
             </button>
           ))}
         </div>

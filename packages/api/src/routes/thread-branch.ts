@@ -127,7 +127,7 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       reply.status(404);
       return { error: '对话不存在', code: 'THREAD_NOT_FOUND' };
     }
-    if (sourceThread.createdBy !== userId) {
+    if (sourceThread.createdBy !== userId && sourceThread.createdBy !== 'system') {
       reply.status(403);
       return { error: '无权对此对话创建分支', code: 'UNAUTHORIZED' };
     }

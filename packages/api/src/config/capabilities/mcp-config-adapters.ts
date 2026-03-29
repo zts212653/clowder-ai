@@ -33,15 +33,6 @@ function ensureGeminiCatCafeEnv(name: string, env?: Record<string, string>): Rec
   };
 }
 
-function shouldSkipGeminiProjectServer(_name: string): boolean {
-  // #272: Previously skipped pencil because "Gemini CLI discovers it at home level".
-  // But home-level discovery only works for Antigravity — when the user installs
-  // Pencil in VSCode/Cursor, Gemini's own discovery misses it. Since the capability
-  // orchestrator now resolves the correct binary path across editors (PR #277),
-  // let the project-level config carry the resolved path for all editors.
-  return false;
-}
-
 // ────────── Readers ──────────
 
 /** Read Claude .mcp.json → McpServerDescriptor[] */
@@ -115,6 +106,8 @@ export async function writeClaudeMcpConfig(filePath: string, servers: McpServerD
         const entry: Record<string, unknown> = { type: 'http', url: s.url };
         if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
         existingServers[s.name] = entry;
+      } else if (!s.command || s.command.trim().length === 0) {
+        delete existingServers[s.name];
       } else {
         const entry: Record<string, unknown> = { command: s.command, args: s.args };
         if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
@@ -186,9 +179,6 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
       ? { ...(existing.mcpServers as Record<string, unknown>) }
       : {};
 
-  // #272: Previously deleted pencil unconditionally ("should not shadow home-level").
-  // Removed — the capability orchestrator now resolves the correct multi-editor path.
-
   // Update/add managed entries; remove disabled managed; preserve user's own
   for (const s of servers) {
     // Skip URL-based servers — Gemini only supports stdio transport.
@@ -197,7 +187,7 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
       delete existingMcp[s.name];
       continue;
     }
-    if (shouldSkipGeminiProjectServer(s.name)) {
+    if (!s.command || s.command.trim().length === 0) {
       delete existingMcp[s.name];
       continue;
     }

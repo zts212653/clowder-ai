@@ -675,13 +675,14 @@ export class AgentRouter {
     message: string,
     threadId?: string,
     options?: { persist?: boolean },
-  ): Promise<{ targetCats: CatId[]; intent: IntentResult }> {
+  ): Promise<{ targetCats: CatId[]; intent: IntentResult; hasMentions: boolean }> {
     const resolvedThreadId = threadId ?? DEFAULT_THREAD_ID;
+    const hasMentions = (await this.parseAllMentions(message, resolvedThreadId)).length > 0;
     const targetCats = options?.persist
       ? await this.resolveTargets(message, resolvedThreadId)
       : await this.peekTargets(message, resolvedThreadId);
     const intent = parseIntent(message, targetCats.length);
-    return { targetCats, intent };
+    return { targetCats, intent, hasMentions };
   }
 
   /**

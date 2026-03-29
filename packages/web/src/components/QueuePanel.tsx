@@ -158,10 +158,10 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-amber-100/60' : 'bg-[#9B7EBD]/10'}`}
       >
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" />
           </svg>
-          <span className="text-xs font-medium text-gray-600">{queuePaused ? '队列已暂停' : '排队中'}</span>
+          <span className="text-xs font-medium text-cafe-secondary">{queuePaused ? '队列已暂停' : '排队中'}</span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
               queuePaused ? 'bg-amber-200 text-amber-700' : 'bg-[#9B7EBD]/20 text-[#9B7EBD]'
@@ -179,7 +179,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
               继续
             </button>
           )}
-          <button onClick={handleClear} className="text-xs text-gray-400 hover:text-red-500 transition-colors">
+          <button onClick={handleClear} className="text-xs text-cafe-muted hover:text-red-500 transition-colors">
             清空
           </button>
         </div>
@@ -267,11 +267,11 @@ function QueueEntryRow({
       } ${isAgent ? 'bg-[#F3EEFA]' : ''}`}
     >
       {/* Number */}
-      <span className="text-xs text-gray-400 w-5 text-center shrink-0">{index + 1}</span>
+      <span className="text-xs text-cafe-muted w-5 text-center shrink-0">{index + 1}</span>
 
       {/* Content preview */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-700 truncate">{entry.content}</p>
+        <p className="text-sm text-cafe-secondary truncate">{entry.content}</p>
         <div className="flex items-center gap-1 mt-0.5">
           {isAgent ? (
             <svg className="w-2.5 h-2.5 text-[#9B7EBD]" viewBox="0 0 24 24" fill="currentColor">
@@ -280,12 +280,12 @@ function QueueEntryRow({
           ) : (
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
           )}
-          <span className={`text-xs ${isAgent ? 'text-[#9B7EBD] font-medium' : 'text-gray-400'}`}>{sourceLabel}</span>
+          <span className={`text-xs ${isAgent ? 'text-[#9B7EBD] font-medium' : 'text-cafe-muted'}`}>{sourceLabel}</span>
           {isAgent && entry.autoExecute && (
             <span className="text-[9px] px-1 py-px rounded bg-[#9B7EBD]/15 text-[#9B7EBD] font-medium">自动</span>
           )}
           {imageCount > 0 && (
-            <span className="flex items-center gap-0.5 text-xs text-gray-400 ml-1">
+            <span className="flex items-center gap-0.5 text-xs text-cafe-muted ml-1">
               <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
                 <path
                   fillRule="evenodd"
@@ -307,7 +307,7 @@ function QueueEntryRow({
             {!isFirst && (
               <button
                 onClick={() => onMove(entry.id, 'up')}
-                className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+                className="p-0.5 text-cafe-muted hover:text-cafe-secondary transition-colors"
                 title="上移"
                 aria-label="Move up"
               >
@@ -323,7 +323,7 @@ function QueueEntryRow({
             {!isLast && (
               <button
                 onClick={() => onMove(entry.id, 'down')}
-                className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
+                className="p-0.5 text-cafe-muted hover:text-cafe-secondary transition-colors"
                 title="下移"
                 aria-label="Move down"
               >
@@ -352,7 +352,7 @@ function QueueEntryRow({
           {/* Remove button */}
           <button
             onClick={() => onRemove(entry.id)}
-            className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+            className="p-1 text-cafe-muted hover:text-red-500 transition-colors shrink-0"
             title="撤回"
             aria-label="撤回"
           >

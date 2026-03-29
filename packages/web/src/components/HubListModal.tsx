@@ -14,6 +14,8 @@ const CONNECTOR_LABELS: Record<string, string> = {
   wechat: '微信',
   slack: 'Slack',
   discord: 'Discord',
+  'wecom-bot': '企业微信',
+  'wecom-agent': '企微自建应用',
 };
 
 type HubTab = 'threads' | 'config' | 'permissions';
@@ -82,16 +84,16 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
       }}
       data-testid="hub-list-modal"
     >
-      <div className="bg-white rounded-2xl shadow-xl w-[520px] max-h-[80vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+      <div className="bg-cafe-surface rounded-2xl shadow-xl w-[520px] max-h-[80vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-cafe-subtle">
           <div className="flex items-center gap-2.5">
             <HubIcon className="w-5 h-5 text-blue-600" />
-            <span className="text-lg font-semibold text-gray-900">IM Hub</span>
+            <span className="text-lg font-semibold text-cafe">IM Hub</span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-cafe-muted hover:text-cafe-secondary transition-colors"
             data-testid="hub-list-close"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -100,12 +102,12 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
           </button>
         </div>
 
-        <div className="flex border-b border-gray-100 px-6" data-testid="hub-tabs">
+        <div className="flex border-b border-cafe-subtle px-6" data-testid="hub-tabs">
           <button
             type="button"
             onClick={() => setActiveTab('threads')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-              activeTab === 'threads' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'
+              activeTab === 'threads' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-threads"
           >
@@ -118,7 +120,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
             type="button"
             onClick={() => setActiveTab('config')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-              activeTab === 'config' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'
+              activeTab === 'config' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-config"
           >
@@ -131,7 +133,7 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
             type="button"
             onClick={() => setActiveTab('permissions')}
             className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-              activeTab === 'permissions' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'
+              activeTab === 'permissions' ? 'text-blue-600' : 'text-cafe-secondary hover:text-cafe-secondary'
             }`}
             data-testid="hub-tab-permissions"
           >
@@ -148,15 +150,15 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
           ) : activeTab === 'threads' ? (
             <div className="space-y-4">
               {isLoading ? (
-                <p className="text-center text-gray-400 py-8 text-sm">加载中...</p>
+                <p className="text-center text-cafe-muted py-8 text-sm">加载中...</p>
               ) : hubThreads.length === 0 ? (
-                <p className="text-center text-gray-400 py-8 text-sm">
+                <p className="text-center text-cafe-muted py-8 text-sm">
                   还没有 IM Hub。从飞书/Telegram 发送消息建立绑定后，命令将自动路由到专用 Hub thread。
                 </p>
               ) : (
                 Array.from(grouped.entries()).map(([connectorId, threads]) => (
                   <div key={connectorId}>
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    <div className="text-xs font-semibold text-cafe-secondary uppercase tracking-wide mb-2">
                       {CONNECTOR_LABELS[connectorId] ?? connectorId} Hub
                     </div>
                     <div className="space-y-2">
@@ -171,12 +173,12 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                             className={`w-full text-left p-3 rounded-xl border transition-colors ${
                               isCurrent
                                 ? 'border-blue-300 bg-blue-50 opacity-60 cursor-default'
-                                : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                                : 'border-cafe bg-cafe-surface-elevated hover:bg-cafe-surface-elevated'
                             }`}
                             data-testid={`hub-item-${t.id}`}
                           >
                             <div className="flex items-center justify-between">
-                              <span className="text-[15px] font-medium text-gray-900">
+                              <span className="text-[15px] font-medium text-cafe">
                                 {t.title ?? `${CONNECTOR_LABELS[connectorId] ?? connectorId} IM Hub`}
                               </span>
                               {isCurrent && (
@@ -186,10 +188,10 @@ export function HubListModal({ open, onClose, currentThreadId }: HubListModalPro
                               )}
                             </div>
                             {t.externalChatId && (
-                              <div className="text-xs text-gray-400 mt-1 truncate">{t.externalChatId}</div>
+                              <div className="text-xs text-cafe-muted mt-1 truncate">{t.externalChatId}</div>
                             )}
                             {t.lastCommandAt && (
-                              <div className="text-xs text-gray-400 mt-0.5">
+                              <div className="text-xs text-cafe-muted mt-0.5">
                                 最近命令 {formatRelativeTime(t.lastCommandAt)}
                               </div>
                             )}

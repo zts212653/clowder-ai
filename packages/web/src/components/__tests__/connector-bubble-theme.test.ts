@@ -265,4 +265,27 @@ describe('ConnectorBubble theme', () => {
     expect(html).toContain('bg-blue-100');
     expect(html).toContain('border-blue-200');
   });
+
+  it('uses indigo theme for wecom-bot connector', () => {
+    const message: ChatMessage = {
+      id: 'm-wecom',
+      type: 'connector',
+      content: '来自企微的消息',
+      timestamp: Date.now(),
+      source: {
+        connector: 'wecom-bot',
+        label: '企业微信',
+        icon: '/images/connectors/wecom-bot.png',
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('bg-indigo-100');
+    expect(html).toContain('border-indigo-200');
+    expect(html).not.toContain('bg-blue-100');
+  });
 });
