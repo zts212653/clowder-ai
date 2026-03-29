@@ -87,18 +87,18 @@ export class ToolUsageCounter {
       totalCalls += e.count;
     }
 
-    // Top tools (aggregate by toolName across dates/cats)
-    const toolTotals = new Map<string, { category: ToolCategory; count: number }>();
+    // Top tools (aggregate by category:toolName to avoid cross-category collision)
+    const toolTotals = new Map<string, { name: string; category: ToolCategory; count: number }>();
     for (const e of filtered) {
-      const existing = toolTotals.get(e.toolName);
+      const aggKey = `${e.category}:${e.toolName}`;
+      const existing = toolTotals.get(aggKey);
       if (existing) {
         existing.count += e.count;
       } else {
-        toolTotals.set(e.toolName, { category: e.category, count: e.count });
+        toolTotals.set(aggKey, { name: e.toolName, category: e.category, count: e.count });
       }
     }
-    const topTools = [...toolTotals.entries()]
-      .map(([name, info]) => ({ name, ...info }))
+    const topTools = [...toolTotals.values()]
       .sort((a, b) => b.count - a.count)
       .slice(0, 20);
 
