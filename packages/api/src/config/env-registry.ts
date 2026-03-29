@@ -339,6 +339,20 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'LOG_DIR',
+    defaultValue: './data/logs/api',
+    description: 'API 日志目录（Pino 滚动日志写入路径）',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
+    name: 'LOG_LEVEL',
+    defaultValue: 'info',
+    description: '日志级别（trace/debug/info/warn/error/fatal），--debug 覆盖为 debug',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
     name: 'AUDIT_LOG_DIR',
     defaultValue: './data/audit-logs',
     description: '审计日志目录',

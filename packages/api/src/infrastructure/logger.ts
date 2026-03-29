@@ -20,7 +20,7 @@ import pino from 'pino';
  */
 export const isDebugMode = process.argv.includes('--debug');
 const LOG_LEVEL = (isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info')) as pino.Level;
-const LOG_DIR = resolve(process.cwd(), 'data', 'logs', 'api');
+const LOG_DIR = process.env.LOG_DIR ? resolve(process.env.LOG_DIR) : resolve(process.cwd(), 'data', 'logs', 'api');
 const RETENTION_FILES = 14;
 
 /**
@@ -50,12 +50,18 @@ if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
 
+/**
+ * Transport level is set to 'trace' (pass-through) so the parent logger's
+ * `level` is the sole gate.  This ensures runtime level changes (e.g.
+ * `logger.level = 'debug'`) take effect immediately — Pino transport workers
+ * cache their level at init and ignore later parent-level changes.
+ */
 const transport = pino.transport({
   targets: [
     {
       target: 'pino/file',
       options: { destination: 1 },
-      level: LOG_LEVEL,
+      level: 'trace',
     },
     {
       target: 'pino-roll',
@@ -66,7 +72,7 @@ const transport = pino.transport({
         limit: { count: RETENTION_FILES },
         mkdir: true,
       },
-      level: LOG_LEVEL,
+      level: 'trace',
     },
   ],
 });
@@ -90,32 +96,75 @@ export function createModuleLogger(module: string): pino.Logger {
 export const LOG_DIR_PATH = LOG_DIR;
 
 /**
- * KD-7: Redirect unmigrated console.* to stderr so process-layer `2>>`
- * captures them alongside tsx watch output and crash dumps.
+ * KD-7: Redirect unmigrated console.* to Pino log file AND stderr.
  *
- * Why: macOS bash `tee` pipelines create orphan processes that
- * `kill $(jobs -p)` cannot clean up. Using `2>>` for process-layer
- * capture is the only orphan-free approach, but it only captures stderr.
- * This monkey-patch bridges the gap until Phase B migrates all console.*
- * to the Pino logger.
+ * Pre-sanitizes args recursively (redacts sensitive keys at any nesting depth)
+ * before formatting, so both the Pino msg and stderr output are safe.
+ * This also preserves printf-style interpolation since we can safely
+ * call utilFormat on the full (sanitized) argument list.
  */
-const stderrWrite = (prefix: string, args: unknown[]) => {
-  process.stderr.write(`[console.${prefix}] ${utilFormat(...args)}\n`);
-};
+const consoleLogger = logger.child({ module: 'console' });
 
 const origLog = console.log;
 const origWarn = console.warn;
 const origError = console.error;
+const origInfo = console.info;
+const origDebug = console.debug;
 
-console.log = (...args: unknown[]) => {
-  stderrWrite('log', args);
-  origLog.apply(console, args);
-};
-console.warn = (...args: unknown[]) => {
-  stderrWrite('warn', args);
-  origWarn.apply(console, args);
-};
-console.error = (...args: unknown[]) => {
-  stderrWrite('error', args);
-  origError.apply(console, args);
-};
+/** Leaf key names (lowercased) extracted from REDACT_PATHS for case-insensitive pre-sanitization. */
+const SENSITIVE_KEYS = new Set(
+  REDACT_PATHS.map((p) => {
+    const segments = p.split(/[.[]/);
+    return segments[segments.length - 1].replace(/[\]"]/g, '').trim().toLowerCase();
+  }).filter(Boolean),
+);
+
+/** Sanitize enumerable own properties of an object, redacting sensitive keys. */
+function sanitizeEntries(obj: object, visited: WeakSet<object>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    result[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : sanitizeArg(v, visited);
+  }
+  return result;
+}
+
+/** Recursively redact sensitive keys at any nesting depth. Handles circular refs and throwing getters. */
+function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
+  if (val === null || typeof val !== 'object') return val;
+  const visited = seen ?? new WeakSet();
+  if (visited.has(val as object)) return '[Circular]';
+  visited.add(val as object);
+  if (Array.isArray(val)) return val.map((v) => sanitizeArg(v, visited));
+  if (ArrayBuffer.isView(val)) return val;
+  if (val instanceof Error) {
+    const cleaned: Record<string, unknown> = { name: val.name, message: val.message, stack: val.stack };
+    try {
+      Object.assign(cleaned, sanitizeEntries(val, visited));
+    } catch {
+      /* throwing getters */
+    }
+    return cleaned;
+  }
+  try {
+    return sanitizeEntries(val as Record<string, unknown>, visited);
+  } catch {
+    return '[Object]';
+  }
+}
+
+type PinoLevel = 'info' | 'warn' | 'error' | 'debug';
+function consoleToPino(level: PinoLevel, orig: (...a: unknown[]) => void): (...a: unknown[]) => void {
+  return (...args: unknown[]) => {
+    const sanitized = args.map((a) => sanitizeArg(a));
+    const msg = utilFormat(...sanitized);
+    consoleLogger[level](msg);
+    process.stderr.write(`[console.${level}] ${msg}\n`);
+    orig.apply(console, args);
+  };
+}
+
+console.log = consoleToPino('info', origLog);
+console.warn = consoleToPino('warn', origWarn);
+console.error = consoleToPino('error', origError);
+console.info = consoleToPino('info', origInfo);
+console.debug = consoleToPino('debug', origDebug);
