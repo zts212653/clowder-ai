@@ -1,10 +1,12 @@
 # Rich Blocks Reference
 
-> 降级自 `using-rich-blocks` skill。按需查阅。
+> 降级自 `rich-messaging` skill。按需查阅。
 
 ## 何时用 Rich Block
 
 结构化信息默认用 rich block；随意聊天用纯文本。发 block 前先写 1-2 句自然语言摘要。
+
+**适用场景**：不只是对话！定时任务唤醒、主动触发、connector 通知等场景中，猫同样拥有全部 rich block 能力。
 
 ### 用 rich block
 
@@ -13,10 +15,10 @@
 | card | Review 结论、状态报告、决策摘要 |
 | diff | 代码修改建议、重构前后对比 |
 | checklist | 待办项、检查清单、验证步骤 |
-| media_gallery | 截图、设计稿、多图对比 |
-| audio | 问候、情感表达（系统自动合成语音） |
+| media_gallery | 发送已有图片（头像、照片）、截图、设计稿、多图对比 — 不需要现场生成！ |
+| audio | 问候、情感表达、定时播报（系统自动合成语音） |
 | interactive | 需要用户选择/确认的场景（选方案、选猫、确认操作） |
-| html_widget | 数据可视化、交互 demo、mini 工具（沙盒 iframe） |
+| html_widget | 数据可视化、自己写的 HTML 面板、交互 demo、mini 工具（沙盒 iframe） |
 
 ### 不用 rich block
 

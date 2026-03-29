@@ -246,12 +246,14 @@ describe('cat-catalog-store', () => {
     const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
     const runtimeCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
 
+    // F136 Phase 4d: without explicit bootstrap bindings, raw template variants
+    // pass through as-is. accountRef is filled in on first read via migration.
     assert.deepEqual(
       runtimeCatalog.breeds.map((breed) => [breed.id, breed.variants.map((variant) => variant.accountRef ?? null)]),
       [
-        ['ragdoll', ['claude', 'claude']],
-        ['maine-coon', ['codex', 'codex']],
-        ['siamese', ['gemini']],
+        ['ragdoll', [null, null]],
+        ['maine-coon', [null, null]],
+        ['siamese', [null]],
         ['dragon-li', [null]],
         ['golden-chinchilla', [null]],
       ],
@@ -318,7 +320,9 @@ describe('cat-catalog-store', () => {
     const runtimeCodexBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'codex');
     const runtimeCodexVariant = runtimeCodexBreed?.variants[0];
 
-    assert.equal(runtimeCodexVariant?.accountRef, 'codex-pinned');
+    // F136 Phase 4d: without bootstrap bindings, raw variant passes through.
+    // providerProfileId is preserved; accountRef is derived on first migrating read.
+    assert.equal(runtimeCodexVariant?.accountRef, undefined);
     assert.equal(runtimeCodexVariant?.providerProfileId, 'codex-pinned');
   });
 
@@ -332,17 +336,9 @@ describe('cat-catalog-store', () => {
     assert.equal(catalogPath, resolveCatCatalogPath(projectRoot));
     assert.ok(existsSync(catalogPath), 'runtime catalog should be created');
     const runtimeCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
-    assert.deepEqual(runtimeCatalog.breeds[0]?.variants[0]?.accountRef, 'claude');
-    assert.deepEqual(
-      {
-        ...runtimeCatalog,
-        breeds: runtimeCatalog.breeds.map((breed) => ({
-          ...breed,
-          variants: breed.variants.map(({ accountRef, ...variant }) => variant),
-        })),
-      },
-      template,
-    );
+    // F136 Phase 4d: fresh bootstrap without bindings → no accountRef on raw catalog
+    assert.deepEqual(runtimeCatalog.breeds[0]?.variants[0]?.accountRef, undefined);
+    assert.deepEqual(runtimeCatalog, template);
   });
 
   it('keeps existing .cat-cafe/cat-catalog.json runtime edits while backfilling missing accountRef bindings', () => {
@@ -358,6 +354,7 @@ describe('cat-catalog-store', () => {
     const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
     const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     assert.equal(hydrated.breeds[0]?.displayName, '运行时布偶猫');
+    // F136 Phase 4d: migration backfills 'claude' (legacy builtin ID for anthropic)
     assert.equal(hydrated.breeds[0]?.variants[0]?.accountRef, 'claude');
   });
 
@@ -549,6 +546,8 @@ describe('cat-catalog-store', () => {
     writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
     bootstrapCatCatalog(projectRoot, templatePath);
 
+    // Trigger eager migration (F136 Phase 4d backfills accountRef on first read)
+    readRuntimeCatCatalog(projectRoot);
     const catalogPath = resolveCatCatalogPath(projectRoot);
     const beforeRaw = readFileSync(catalogPath, 'utf-8');
 
@@ -566,6 +565,8 @@ describe('cat-catalog-store', () => {
     writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
     bootstrapCatCatalog(projectRoot, templatePath);
 
+    // Trigger eager migration (F136 Phase 4d backfills accountRef on first read)
+    readRuntimeCatCatalog(projectRoot);
     const catalogPath = resolveCatCatalogPath(projectRoot);
     const beforeRaw = readFileSync(catalogPath, 'utf-8');
 

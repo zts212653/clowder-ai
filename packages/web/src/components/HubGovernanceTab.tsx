@@ -12,7 +12,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }>
   healthy: { bg: 'bg-green-50', text: 'text-green-700', label: '正常' },
   stale: { bg: 'bg-yellow-50', text: 'text-yellow-700', label: '过期' },
   missing: { bg: 'bg-red-50', text: 'text-red-700', label: '缺失' },
-  'never-synced': { bg: 'bg-gray-50', text: 'text-gray-500', label: '未同步' },
+  'never-synced': { bg: 'bg-cafe-surface-elevated', text: 'text-cafe-secondary', label: '未同步' },
 };
 
 export function HubGovernanceTab() {
@@ -105,7 +105,7 @@ export function HubGovernanceTab() {
   );
 
   if (loading) {
-    return <p className="text-sm text-gray-400">加载治理状态中...</p>;
+    return <p className="text-sm text-cafe-muted">加载治理状态中...</p>;
   }
 
   if (error) {
@@ -114,7 +114,7 @@ export function HubGovernanceTab() {
 
   if (projects.length === 0) {
     return (
-      <div className="text-center py-8 text-gray-400">
+      <div className="text-center py-8 text-cafe-muted">
         <p className="text-sm">暂无外部项目治理记录</p>
         <p className="text-xs mt-1">当猫猫首次被派遣到外部项目时，治理规则会自动同步</p>
       </div>
@@ -124,7 +124,7 @@ export function HubGovernanceTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">外部项目治理状态</h3>
+        <h3 className="text-sm font-semibold text-cafe-secondary">外部项目治理状态</h3>
         <button type="button" onClick={fetchHealth} className="text-xs text-blue-500 hover:text-blue-700">
           刷新
         </button>
@@ -132,13 +132,13 @@ export function HubGovernanceTab() {
 
       <div className="border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left">
+          <thead className="bg-cafe-surface-elevated text-left">
             <tr>
-              <th className="px-3 py-2 font-medium text-gray-600">项目路径</th>
-              <th className="px-3 py-2 font-medium text-gray-600">状态</th>
-              <th className="px-3 py-2 font-medium text-gray-600">版本</th>
-              <th className="px-3 py-2 font-medium text-gray-600">上次同步</th>
-              <th className="px-3 py-2 font-medium text-gray-600">操作</th>
+              <th className="px-3 py-2 font-medium text-cafe-secondary">项目路径</th>
+              <th className="px-3 py-2 font-medium text-cafe-secondary">状态</th>
+              <th className="px-3 py-2 font-medium text-cafe-secondary">版本</th>
+              <th className="px-3 py-2 font-medium text-cafe-secondary">上次同步</th>
+              <th className="px-3 py-2 font-medium text-cafe-secondary">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -150,7 +150,7 @@ export function HubGovernanceTab() {
               const syncDate = p.lastSyncedAt ? new Date(p.lastSyncedAt).toLocaleDateString('zh-CN') : '—';
 
               return (
-                <tr key={p.projectPath} className="hover:bg-gray-50">
+                <tr key={p.projectPath} className="hover:bg-cafe-surface-elevated">
                   <td className="px-3 py-2 font-mono text-xs" title={p.projectPath}>
                     {shortPath}
                   </td>
@@ -159,8 +159,8 @@ export function HubGovernanceTab() {
                       {style.label}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-500">{p.packVersion ?? '—'}</td>
-                  <td className="px-3 py-2 text-xs text-gray-500">{syncDate}</td>
+                  <td className="px-3 py-2 text-xs text-cafe-secondary">{p.packVersion ?? '—'}</td>
+                  <td className="px-3 py-2 text-xs text-cafe-secondary">{syncDate}</td>
                   <td className="px-3 py-2">
                     {(p.status === 'stale' || p.status === 'never-synced') && (
                       <button

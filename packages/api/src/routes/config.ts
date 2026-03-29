@@ -12,8 +12,15 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
 import { configStore } from '../config/ConfigStore.js';
+import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import type { ConfigSnapshot } from '../config/config-snapshot.js';
-import { buildEnvSummary, ENV_CATEGORIES, isEditableEnvVarName } from '../config/env-registry.js';
+import {
+  buildEnvSummary,
+  ENV_CATEGORIES,
+  filterSensitiveEditableKeys,
+  hasSensitiveEditableVars,
+  isEditableEnvVarName,
+} from '../config/env-registry.js';
 import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
@@ -71,7 +78,7 @@ function resolveOperator(raw: unknown): string | null {
   return null;
 }
 
-function formatEnvFileValue(value: string): string {
+export function formatEnvFileValue(value: string): string {
   const escapedControlChars = value.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
   if (/^[A-Za-z0-9_./:@-]+$/.test(escapedControlChars)) return escapedControlChars;
   return `"${escapedControlChars
@@ -81,7 +88,7 @@ function formatEnvFileValue(value: string): string {
     .replace(/`/g, '\\`')}"`;
 }
 
-function applyEnvUpdatesToFile(contents: string, updates: Map<string, string | null>): string {
+export function applyEnvUpdatesToFile(contents: string, updates: Map<string, string | null>): string {
   const lines = contents === '' ? [] : contents.split(/\r?\n/);
   const seen = new Set<string>();
   const nextLines: string[] = [];
@@ -269,6 +276,26 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       updates.set(update.name, update.value);
     }
 
+    // Owner gate: sensitive-editable vars require configured owner identity
+    const touchesSensitive = hasSensitiveEditableVars(updates.keys());
+    if (touchesSensitive) {
+      const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
+      if (!ownerId) {
+        reply.status(403);
+        return { error: 'Sensitive env write requires DEFAULT_OWNER_USER_ID to be configured' };
+      }
+      if (operator !== ownerId) {
+        reply.status(403);
+        return { error: 'Sensitive env vars can only be modified by the owner' };
+      }
+    }
+
+    // Snapshot old values for no-op detection
+    const oldValues = new Map<string, string | undefined>();
+    for (const name of updates.keys()) {
+      oldValues.set(name, process.env[name]);
+    }
+
     const current = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf8') : '';
     const next = applyEnvUpdatesToFile(current, updates);
     writeFileSync(envFilePath, next, 'utf8');
@@ -276,6 +303,20 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     for (const [name, value] of updates) {
       if (value == null || value === '') delete process.env[name];
       else process.env[name] = value;
+    }
+
+    // Only emit if at least one key actually changed
+    const changedKeys = [...updates.entries()]
+      .filter(([name, value]) => (value ?? '') !== (oldValues.get(name) ?? ''))
+      .map(([name]) => name);
+    if (changedKeys.length > 0) {
+      configEventBus.emitChange({
+        source: 'env',
+        scope: 'key',
+        changedKeys,
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      });
     }
 
     try {
@@ -287,6 +328,16 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
           operator,
         },
       });
+      // Separate audit trail for sensitive env writes (sensitive keys only, no values)
+      if (touchesSensitive) {
+        await auditLog.append({
+          type: AuditEventTypes.ENV_SENSITIVE_WRITE,
+          data: {
+            keys: filterSensitiveEditableKeys(updates.keys()),
+            operator,
+          },
+        });
+      }
     } catch (err) {
       request.log.warn({ err, keys: [...updates.keys()] }, 'env config audit append failed');
     }

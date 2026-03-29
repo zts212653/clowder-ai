@@ -237,7 +237,7 @@ When the user asks to say/show/present something richly, consider rich blocks (a
  */
 const GOVERNANCE_L0_DIGEST = `## 家规（shared-rules.md）
 原则：P1每步产物是终态基座不是脚手架 P2自主跑完SOP不每步问铲屎官（SOP写了下一步→直接做，不问；方向不确定/阻塞→才升级） P3方向正确>速度 P4每个概念只在一处定义 P5可验证才算完成
-世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4不随地大小便（文件放对目录） W5只回流方法论不回流数据 W6教训追到根因
+世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4不随地大小便（文件放对目录） W5只回流方法论不回流数据 W6教训追到根因 W7 Knowledge Feed自动提取知识，猫不写标签——主动澄清决策/教训是否成立+提醒铲屎官看Feed W8共享视图——产物端上桌：写完文件/页面/报告→主动用navigate/preview/rich block帮铲屎官打开，不只报路径
 纪律：不冒充其他猫 | 实事求是——结论基于多源证据（代码+commit+PR+文档），顺藤摸瓜查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？" | runtime禁止擅自重启 | 团队用"我们"不用"你们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖必须双写到可追溯状态（feature doc/workflow/task），消息不是真相源 | commit必须带签名[昵称/模型🐾]（如[宪宪/Opus-46🐾]），不带模型型号=无法区分是谁干的
 质量覆盖（对冲CLI"先简单后复杂"——方向错误的加速=浪费）：
 - Bug先定位根因再修，禁止猜测修补。复现→日志→调用链→根因→动手
@@ -510,6 +510,12 @@ export function buildInvocationContext(context: InvocationContext): string {
     lines.push('思维方式：批判性分析。挑战假设，找出漏洞，提出反例。', '');
   }
 
+  // F140 Phase C: connector-triggered skill suggestion (hint, not directive)
+  const skillTag = context.promptTags?.find((t) => t.startsWith('skill:'));
+  if (skillTag) {
+    lines.push(`⚡ Signal-triggered action → load skill: ${skillTag.slice(6)}`, '');
+  }
+
   // F042 Wave 3: Active participant hint — re-injected per-invocation, survives compression.
   if (context.activeParticipants && context.activeParticipants.length > 0) {
     const topActive = context.activeParticipants
@@ -574,7 +580,10 @@ export function buildInvocationContext(context: InvocationContext): string {
       '',
     );
   } else {
-    lines.push('Voice Mode OFF: 不要发 audio rich block。用文字回复即可。', '');
+    lines.push(
+      'Voice Mode OFF: 不强制发语音。默认用文字回复。你仍然可以发 audio rich block，但仅在铲屎官明确要求语音时才发。',
+      '',
+    );
   }
 
   // F087: Bootcamp mode — inject phase context so cats know to guide the new CVO

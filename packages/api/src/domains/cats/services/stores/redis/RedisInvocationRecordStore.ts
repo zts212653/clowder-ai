@@ -258,6 +258,36 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     return records;
   }
 
+  /** Reassign invocation ownership to a different userId (repair helper for scheduler backfill). */
+  async reassignUserId(id: string, nextUserId: string): Promise<InvocationRecord | null> {
+    const record = await this.get(id);
+    if (!record) return null;
+    if (record.userId === nextUserId) return record;
+
+    const key = InvocationKeys.detail(id);
+    await this.redis.hset(key, {
+      userId: nextUserId,
+      updatedAt: String(Date.now()),
+    });
+
+    const oldIdempKey = InvocationKeys.idempotency(record.threadId, record.userId, record.idempotencyKey);
+    const newIdempKey = InvocationKeys.idempotency(record.threadId, nextUserId, record.idempotencyKey);
+    const claimedId = await this.redis.get(oldIdempKey);
+    if (claimedId === id) {
+      const ttl = await this.redis.ttl(oldIdempKey);
+      const pipeline = this.redis.multi();
+      pipeline.del(oldIdempKey);
+      if (ttl > 0) {
+        pipeline.set(newIdempKey, id, 'EX', ttl);
+      } else {
+        pipeline.set(newIdempKey, id);
+      }
+      await pipeline.exec();
+    }
+
+    return this.get(id);
+  }
+
   private hydrateRecord(data: Record<string, string>): InvocationRecord {
     const errorValue = data.error;
     const hasError = errorValue !== undefined && errorValue !== '';

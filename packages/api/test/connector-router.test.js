@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import { ConnectorRouter } from '../dist/infrastructure/connectors/ConnectorRouter.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { InboundMessageDedup } from '../dist/infrastructure/connectors/InboundMessageDedup.js';
@@ -32,9 +33,11 @@ function mockMessageStore() {
 function mockThreadStore() {
   let counter = 0;
   const threads = new Map();
+  const participantActivity = new Map();
   return {
     threads,
-    create(userId, title) {
+    participantActivity,
+    create(userId, title, projectPath) {
       counter++;
       const thread = {
         id: `thread-${counter}`,
@@ -43,7 +46,7 @@ function mockThreadStore() {
         participants: [],
         lastActiveAt: Date.now(),
         createdAt: Date.now(),
-        projectPath: 'default',
+        projectPath: projectPath ?? 'default',
       };
       threads.set(thread.id, thread);
       return thread;
@@ -59,6 +62,13 @@ function mockThreadStore() {
       } else {
         thread.connectorHubState = state;
       }
+    },
+    async getParticipantsWithActivity(threadId) {
+      return participantActivity.get(threadId) ?? [];
+    },
+    updateProjectPath(threadId, projectPath) {
+      const thread = threads.get(threadId);
+      if (thread) thread.projectPath = projectPath;
     },
   };
 }
@@ -83,6 +93,39 @@ function mockSocketManager() {
   };
 }
 
+function ensureMentionRegistry() {
+  if (!catRegistry.tryGet('opus')) {
+    catRegistry.register('opus', {
+      id: 'opus',
+      name: 'opus',
+      displayName: '布偶猫',
+      avatar: '/avatars/opus.png',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@opus', '@布偶猫', '@布偶', '@宪宪'],
+      provider: 'anthropic',
+      defaultModel: 'test-model',
+      mcpSupport: false,
+      roleDescription: 'test role',
+      personality: 'test personality',
+    });
+  }
+  if (!catRegistry.tryGet('codex')) {
+    catRegistry.register('codex', {
+      id: 'codex',
+      name: 'codex',
+      displayName: '缅因猫',
+      avatar: '/avatars/codex.png',
+      color: { primary: '#111', secondary: '#eee' },
+      mentionPatterns: ['@codex', '@缅因猫', '@缅因', '@砚砚'],
+      provider: 'openai',
+      defaultModel: 'test-model',
+      mcpSupport: false,
+      roleDescription: 'test role',
+      personality: 'test personality',
+    });
+  }
+}
+
 describe('ConnectorRouter', () => {
   let bindingStore;
   let dedup;
@@ -93,6 +136,7 @@ describe('ConnectorRouter', () => {
   let router;
 
   beforeEach(() => {
+    ensureMentionRegistry();
     bindingStore = new MemoryConnectorThreadBindingStore();
     dedup = new InboundMessageDedup();
     messageStore = mockMessageStore();
@@ -125,6 +169,22 @@ describe('ConnectorRouter', () => {
     assert.equal(binding.threadId, result.threadId);
   });
 
+  it('ISSUE-16: lazy-heals projectPath on existing thread with default', async () => {
+    // Simulate a legacy thread created before the fix (projectPath='default')
+    const legacyThread = threadStore.create('owner-1', 'Legacy IM');
+    assert.equal(legacyThread.projectPath, 'default');
+    bindingStore.bind('feishu', 'chat-legacy', legacyThread.id, 'owner-1');
+
+    // Route a message through the existing binding
+    const result = await router.route('feishu', 'chat-legacy', 'hello', 'ext-heal-1');
+    assert.equal(result.kind, 'routed');
+    assert.equal(result.threadId, legacyThread.id);
+
+    // projectPath should have been healed
+    const healed = threadStore.threads.get(legacyThread.id);
+    assert.notEqual(healed.projectPath, 'default', 'projectPath should be lazy-healed from "default"');
+  });
+
   it('reuses existing thread for same external chat', async () => {
     const r1 = await router.route('feishu', 'chat-123', 'msg 1', 'ext-1');
     const r2 = await router.route('feishu', 'chat-123', 'msg 2', 'ext-2');
@@ -145,6 +205,45 @@ describe('ConnectorRouter', () => {
     assert.ok(trigger.calls[0].threadId);
   });
 
+  it('routes to last-active cat when no @mention is present', async () => {
+    const thread = threadStore.create('owner-1', 'existing');
+    bindingStore.bind('feishu', 'chat-last-active', thread.id, 'owner-1');
+    threadStore.participantActivity.set(thread.id, [
+      { catId: 'codex', lastMessageAt: Date.now() - 100, messageCount: 2 },
+      { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 10 },
+    ]);
+
+    await router.route('feishu', 'chat-last-active', '继续', 'ext-last-active-1');
+
+    assert.equal(trigger.calls.length, 1);
+    assert.equal(trigger.calls[0].catId, 'codex');
+    assert.deepEqual(messageStore.messages[0].mentions, ['codex']);
+  });
+
+  it('keeps explicit @mention priority over last-active cat', async () => {
+    const thread = threadStore.create('owner-1', 'existing');
+    bindingStore.bind('feishu', 'chat-mention-priority', thread.id, 'owner-1');
+    threadStore.participantActivity.set(thread.id, [{ catId: 'codex', lastMessageAt: Date.now(), messageCount: 5 }]);
+
+    await router.route('feishu', 'chat-mention-priority', '@opus 请看', 'ext-mention-priority-1');
+
+    assert.equal(trigger.calls.length, 1);
+    assert.equal(trigger.calls[0].catId, 'opus');
+    assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
+  });
+
+  it('falls back to default cat when no @mention and no participant activity', async () => {
+    const thread = threadStore.create('owner-1', 'existing');
+    bindingStore.bind('feishu', 'chat-default-fallback', thread.id, 'owner-1');
+    threadStore.participantActivity.set(thread.id, []);
+
+    await router.route('feishu', 'chat-default-fallback', '没人被@', 'ext-default-fallback-1');
+
+    assert.equal(trigger.calls.length, 1);
+    assert.equal(trigger.calls[0].catId, 'opus');
+    assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
+  });
+
   it('skips duplicate messages', async () => {
     const r1 = await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
     const r2 = await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
@@ -153,10 +252,42 @@ describe('ConnectorRouter', () => {
     assert.equal(messageStore.messages.length, 1);
   });
 
+  it('ISSUE-16: new thread gets monorepo root as projectPath (not default)', async () => {
+    const result = await router.route('feishu', 'chat-new-pp', 'Hello', 'ext-pp-1');
+    assert.equal(result.kind, 'routed');
+    const thread = threadStore.threads.get(result.threadId);
+    assert.ok(thread, 'thread should exist');
+    assert.notEqual(
+      thread.projectPath,
+      'default',
+      'projectPath must not be "default" — cat cwd would fall back to packages/api',
+    );
+    assert.ok(thread.projectPath.length > 1, 'projectPath should be a real filesystem path');
+  });
+
   it('broadcasts connector message to websocket', async () => {
     await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
     assert.ok(socketManager.broadcasts.length > 0);
     assert.equal(socketManager.broadcasts[0].event, 'connector_message');
+  });
+
+  it('emits nested message protocol (threadId + message.{id,type,content,source,timestamp})', async () => {
+    await router.route('feishu', 'chat-123', 'Hi from IM', 'ext-proto-1');
+    const bc = socketManager.broadcasts.find((b) => b.event === 'connector_message');
+    assert.ok(bc, 'should have a connector_message broadcast');
+    const { data } = bc;
+    // Must have nested message — frontend guard: if (!data?.message?.id) return;
+    assert.ok(data.threadId, 'data.threadId must exist');
+    assert.ok(data.message, 'data.message must exist (nested protocol)');
+    assert.ok(data.message.id, 'data.message.id must exist');
+    assert.equal(data.message.type, 'connector');
+    assert.equal(data.message.content, 'Hi from IM');
+    assert.ok(data.message.source, 'data.message.source must exist');
+    assert.equal(data.message.source.connector, 'feishu');
+    assert.equal(typeof data.message.timestamp, 'number');
+    // Must NOT have flat legacy fields
+    assert.equal(data.messageId, undefined, 'legacy messageId must not exist');
+    assert.equal(data.connectorId, undefined, 'legacy connectorId must not exist');
   });
 
   describe('command interception', () => {
@@ -234,6 +365,36 @@ describe('ConnectorRouter', () => {
       assert.equal(adapterSendCalls.length, 1);
       assert.ok(adapterSendCalls[0].content.includes('Thread created'));
       assert.equal(cmdTrigger.calls.length, 0);
+    });
+
+    it('command exchange broadcasts nested protocol (not legacy flat fields)', async () => {
+      // Pre-route a normal message so a binding + hub thread exist for chat-cmd-proto
+      await commandRouter.route('feishu', 'chat-cmd-proto', 'setup', 'ext-cmd-setup');
+      socketManager.broadcasts.length = 0; // clear setup broadcasts
+
+      await commandRouter.route('feishu', 'chat-cmd-proto', '/where', 'ext-cmd-proto-1');
+      const cmdBroadcasts = socketManager.broadcasts.filter((b) => b.event === 'connector_message');
+      assert.equal(cmdBroadcasts.length, 2, 'should emit command + response');
+
+      // Command message
+      const cmd = cmdBroadcasts[0].data;
+      assert.ok(cmd.message, 'command broadcast must use nested protocol');
+      assert.ok(cmd.message.id, 'command message.id');
+      assert.equal(cmd.message.type, 'connector');
+      assert.equal(cmd.message.content, '/where');
+      assert.equal(cmd.message.source.connector, 'feishu');
+      assert.equal(typeof cmd.message.timestamp, 'number');
+      assert.equal(cmd.messageId, undefined, 'no legacy messageId');
+
+      // Response message
+      const res = cmdBroadcasts[1].data;
+      assert.ok(res.message, 'response broadcast must use nested protocol');
+      assert.ok(res.message.id, 'response message.id');
+      assert.equal(res.message.type, 'connector');
+      assert.equal(res.message.content, 'You are here');
+      assert.equal(res.message.source.connector, 'system-command');
+      assert.ok(res.message.timestamp >= cmd.message.timestamp, 'response timestamp >= command');
+      assert.equal(res.messageId, undefined, 'no legacy messageId');
     });
 
     it('uses sendFormattedReply (MessageEnvelope) when adapter supports it', async () => {
@@ -347,9 +508,9 @@ describe('ConnectorRouter', () => {
       assert.notEqual(hubThreadId, 'thread-conv-bc');
       assert.equal(ctxSocket.broadcasts.length, 2);
       assert.equal(ctxSocket.broadcasts[0].room, `thread:${hubThreadId}`);
-      assert.equal(ctxSocket.broadcasts[0].data.connectorId, 'feishu');
+      assert.equal(ctxSocket.broadcasts[0].data.message.source.connector, 'feishu');
       assert.equal(ctxSocket.broadcasts[1].room, `thread:${hubThreadId}`);
-      assert.equal(ctxSocket.broadcasts[1].data.connectorId, 'system-command');
+      assert.equal(ctxSocket.broadcasts[1].data.message.source.connector, 'system-command');
     });
 
     it('/thread command forwards message to target thread and triggers invocation', async () => {
@@ -469,6 +630,29 @@ describe('ConnectorRouter', () => {
 
       const binding = bindingStore.getByExternal('feishu', 'chat-reuse');
       assert.equal(binding.hubThreadId, hubThreadId);
+    });
+
+    it('ISSUE-16: Hub thread gets monorepo root as projectPath', async () => {
+      bindingStore.bind('feishu', 'chat-hub-pp', 'thread-conv-pp', 'owner-1');
+      const hubRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore,
+        threadStore,
+        invokeTrigger: cmdTrigger,
+        socketManager,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/where': { kind: 'where', response: 'info' },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+      const result = await hubRouter.route('feishu', 'chat-hub-pp', '/where', 'ext-hub-pp-1');
+      const hubThread = threadStore.threads.get(result.threadId);
+      assert.ok(hubThread);
+      assert.notEqual(hubThread.projectPath, 'default', 'Hub thread projectPath must not be "default"');
     });
 
     it('Hub thread title includes connector display name (ISSUE-8 8A)', async () => {

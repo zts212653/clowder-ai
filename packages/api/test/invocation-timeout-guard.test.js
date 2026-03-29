@@ -210,4 +210,36 @@ describe('invocation-level hard timeout (F089)', () => {
       'cancel should produce error event',
     );
   });
+
+  it('active invocations with steady progress should not hit invocation_timeout', async () => {
+    const progressiveService = {
+      async *invoke() {
+        yield { type: 'text', catId: 'codex', content: 'tick-1', timestamp: Date.now() };
+        await new Promise((r) => setTimeout(r, 150));
+        yield { type: 'text', catId: 'codex', content: 'tick-2', timestamp: Date.now() };
+        await new Promise((r) => setTimeout(r, 150));
+        yield { type: 'text', catId: 'codex', content: 'tick-3', timestamp: Date.now() };
+        await new Promise((r) => setTimeout(r, 150));
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    const msgs = await withKeepAlive(
+      collect(
+        invokeSingleCat(makeDeps(), {
+          catId: 'codex',
+          service: progressiveService,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-progress',
+          isLastCat: true,
+        }),
+      ),
+      2_000,
+    );
+
+    const hasInvocationError = msgs.some((m) => m.type === 'error' && m.error?.includes?.('invocation_timeout'));
+    assert.ok(!hasInvocationError, 'steady progress should keep invocation alive');
+    assert.equal(msgs.filter((m) => m.type === 'text').length, 3, 'should receive all progress events before done');
+  });
 });

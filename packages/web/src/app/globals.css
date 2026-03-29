@@ -2,54 +2,102 @@
 @tailwind components;
 @tailwind utilities;
 
-/* === Cat Cafe Design System Variables (from 暹罗猫) === */
-:root {
-  /* Base Colors */
-  --color-base-white: #fdf8f3;
-  --color-base-black: #1e1e24;
+/* === Cat Cafe Design System — F056 Three-Layer Token Architecture === */
 
-  /* Opus (The Architect) - Purple */
+/* --- Layer 1: Base Palette (raw colors, never used directly in components) --- */
+:root {
+  --cat-cream-white: #fdf8f3;
+  --cat-soft-blue: #81d4fa;
+  --cat-warm-brown: #8d6e63;
+  --cat-paw-pink: #ffab91;
+  --cat-deep-ink: #1e1e24;
+  --cat-muted-stone: #666666;
+  --cat-light-sand: #f5ede3;
+  --cat-border-tan: #e0d5c7;
+
+  /* --- Layer 2: Semantic Tokens (what components use) --- */
+  --cafe-surface: var(--cat-cream-white);
+  --cafe-surface-elevated: var(--cat-light-sand);
+  --cafe-surface-sunken: #f0e8dd;
+  --cafe-text: var(--cat-deep-ink);
+  --cafe-text-secondary: var(--cat-muted-stone);
+  --cafe-text-muted: #888888;
+  --cafe-border: var(--cat-border-tan);
+  --cafe-border-subtle: #ebe3d9;
+  --cafe-accent: var(--cat-paw-pink);
+  --cafe-accent-hover: #ff9a7a;
+  --cafe-crosspost: var(--cat-soft-blue);
+  --cafe-interactive: #85655a;
+
+  /* --- Layer 3: Agent Persona (cat identity colors) --- */
+  --color-base-white: var(--cat-cream-white);
+  --color-base-black: var(--cat-deep-ink);
+
   --color-opus-primary: #9b7ebd;
   --color-opus-light: #d4c1ec;
   --color-opus-dark: #6d5a8c;
   --color-opus-bg: #f3eaf8;
 
-  /* Codex (The Engineer) - Green */
   --color-codex-primary: #5b8c5a;
   --color-codex-light: #8fb98e;
   --color-codex-dark: #3a5f39;
   --color-codex-bg: #eaf6ea;
 
-  /* Gemini (The Creative) - Blue */
   --color-gemini-primary: #5b9bd5;
   --color-gemini-light: #9cc0e7;
   --color-gemini-dark: #3a6fa5;
   --color-gemini-bg: #eaf4fb;
 
-  /* DARE / 狸花猫 (Dragon Li) - Amber */
   --color-dare-primary: #d4a76a;
   --color-dare-light: #e8c99b;
   --color-dare-dark: #8b6f47;
   --color-dare-bg: #fbf5ec;
 
-  /* Co-Creator (铲屎官) - Coffee/Latte */
   --color-cocreator-primary: #e29578;
   --color-cocreator-light: #ffddd2;
   --color-cocreator-dark: #815b5b;
   --color-cocreator-bg: #fff5f2;
 
-  /* UI Tokens */
-  --bg-app: var(--color-base-white);
-  --text-primary: var(--color-base-black);
-  --text-secondary: #666666;
+  /* Legacy aliases (consumed by body selector + existing components) */
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
   --border-radius-base: 16px;
   --spacing-unit: 8px;
 }
 
+/* --- Dark Mode: override semantic tokens only --- */
 [data-theme="dark"] {
-  --bg-app: var(--color-base-black);
-  --text-primary: var(--color-base-white);
-  --text-secondary: #aaaaaa;
+  /* Warm dark surfaces — NOT pure black, Cozy Swiss warmth preserved */
+  --cafe-surface: #1c1917;
+  --cafe-surface-elevated: #292524;
+  --cafe-surface-sunken: #0c0a09;
+  --cafe-text: #faf9f7;
+  --cafe-text-secondary: #a8a29e;
+  --cafe-text-muted: #78716c;
+  --cafe-border: #44403c;
+  --cafe-border-subtle: #33302c;
+  --cafe-accent: #ffb899;
+  --cafe-accent-hover: #ffc5aa;
+  --cafe-crosspost: #64b5f6;
+  --cafe-interactive: #b0937a;
+
+  /* Legacy aliases auto-update via semantic layer */
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+
+  /* Cocreator brand colors — adapted for dark mode */
+  --color-cocreator-primary: #e29578;
+  --color-cocreator-light: #44403c;
+  --color-cocreator-dark: #d4a494;
+  --color-cocreator-bg: var(--cafe-surface-elevated);
+
+  /* Invert base tokens for dark mode (text-cafe-black → light, bg-cafe-white → dark) */
+  --color-base-white: var(--cafe-surface);
+  --color-base-black: var(--cafe-text);
+
+  /* Agent persona bg overrides for dark */
   --color-opus-bg: rgba(155, 126, 189, 0.15);
   --color-codex-bg: rgba(91, 140, 90, 0.15);
   --color-gemini-bg: rgba(91, 155, 213, 0.15);

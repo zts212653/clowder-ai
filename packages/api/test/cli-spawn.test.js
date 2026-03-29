@@ -1037,3 +1037,204 @@ test('Group A: lingering process is killed after grace period expires', async ()
     `Should wait for grace period (~${SEMANTIC_COMPLETION_GRACE_MS}ms), took ${elapsedMs}ms`,
   );
 });
+
+// === Issue #774: stallAutoKill — fast-fail on idle-silent stall ===
+
+test('#774: stallAutoKill kills process on suspected_stall + idle-silent instead of waiting for full timeout', async () => {
+  // Use a genuinely idle process PID so probe sees flat CPU (idle-silent),
+  // even when the test runner itself is busy under concurrent test execution.
+  const { execFileSync } = await import('node:child_process');
+  const sleeper = (await import('node:child_process')).spawn('sleep', ['60']);
+  const sleeperPid = sleeper.pid;
+
+  try {
+    const proc = createMockProcess({ pid: sleeperPid });
+    const spawnFn = createMockSpawnFn(proc);
+
+    // Simulate Codex pattern: one event then total silence
+    proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+
+    const startMs = Date.now();
+    const promise = collect(
+      spawnCli(
+        {
+          command: 'codex',
+          args: [],
+          timeoutMs: 10_000, // 10s "full" timeout (would normally wait this long)
+          livenessProbe: {
+            sampleIntervalMs: 30,
+            softWarningMs: 80,
+            stallWarningMs: 200, // stall detected at 200ms
+            stallAutoKill: true, // #774: enable fast-fail
+          },
+        },
+        { spawnFn },
+      ),
+    );
+
+    // Wait for stall detection to fire + kill
+    await new Promise((r) => setTimeout(r, 600));
+    if (!proc.stdout.writableEnded) proc.stdout.end();
+
+    const results = await promise;
+    const elapsedMs = Date.now() - startMs;
+
+    // Should finish much faster than the 10s timeout
+    assert.ok(elapsedMs < 3000, `Should stall-kill quickly (${elapsedMs}ms), not wait 10s`);
+
+    // Should have yielded __cliTimeout with stallKill flag
+    const timeout = results.find((r) => r?.__cliTimeout);
+    assert.ok(timeout, 'should yield __cliTimeout event');
+    assert.equal(timeout.stallKill, true, 'should have stallKill: true');
+
+    // Should have killed the process
+    assert.ok(proc.kill.mock.callCount() >= 1, 'should kill process on stall');
+  } finally {
+    sleeper.kill();
+  }
+});
+
+test('#774: stallAutoKill=false (default) does NOT kill on stall — waits for full timeout', async () => {
+  const proc = createMockProcess({ pid: process.pid });
+  const spawnFn = createMockSpawnFn(proc);
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+
+  const startMs = Date.now();
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: [],
+        timeoutMs: 300, // short timeout for test speed
+        livenessProbe: {
+          sampleIntervalMs: 30,
+          softWarningMs: 50,
+          stallWarningMs: 100,
+          // stallAutoKill NOT set — should NOT kill early
+        },
+      },
+      { spawnFn },
+    ),
+  );
+
+  await new Promise((r) => setTimeout(r, 500));
+  if (!proc.stdout.writableEnded) proc.stdout.end();
+
+  const results = await promise;
+  const elapsedMs = Date.now() - startMs;
+
+  // Should wait for the full 300ms timeout, not the 100ms stall
+  assert.ok(elapsedMs >= 250, `Should wait for full timeout (${elapsedMs}ms), not stall-kill early`);
+
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.ok(timeout, 'should yield __cliTimeout from normal timeout');
+  assert.equal(timeout.stallKill, undefined, 'should NOT have stallKill flag');
+});
+
+test('#774: stallAutoKill does NOT fire when stderr keeps probe alive', async () => {
+  const proc = createMockProcess({ pid: process.pid });
+  const spawnFn = createMockSpawnFn(proc);
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'claude',
+        args: [],
+        timeoutMs: 1000,
+        livenessProbe: {
+          sampleIntervalMs: 30,
+          softWarningMs: 80,
+          stallWarningMs: 150,
+          stallAutoKill: true,
+        },
+      },
+      { spawnFn },
+    ),
+  );
+
+  // Simulate Claude pattern: stderr thinking keeps probe alive
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 40));
+    proc.stderr.write(`thinking step ${i}...\n`);
+  }
+
+  // Now produce valid output and finish
+  proc.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+
+  const results = await promise;
+
+  // Should NOT have stall-killed — stderr kept the probe alive
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.equal(timeout, undefined, 'should NOT timeout when stderr is active');
+  assert.ok(
+    results.some((r) => r?.type === 'turn.completed'),
+    'should yield the completion event',
+  );
+});
+
+test('#774 R2: deferred stall-kill is cancelled when NDJSON recovery arrives before next probe timer', async () => {
+  // The deferred pattern: stall warning drained → pendingStallKill=true → race.
+  // If NDJSON wins the race → pendingStallKill=false (kill cancelled).
+  // If probe timer wins → kill fires.
+  //
+  // Key: sampleIntervalMs must be wide enough that recovery NDJSON reliably
+  // arrives within the race window. Using 100ms intervals gives a 100ms window.
+  //
+  // Timeline:
+  //   T=0:    turn.started processed
+  //   T=100:  probe samples → stall queued (silence=100ms > stallWarningMs=40ms)
+  //   T=200:  race timer wins → drains stall → pendingStallKill=true → race (100ms timer)
+  //   T=250:  recovery NDJSON arrives → NDJSON wins race → pendingStallKill=false
+  //   T=300+: session completes normally
+  const sleeper = (await import('node:child_process')).spawn('sleep', ['60']);
+  try {
+    const proc = createMockProcess({ pid: sleeper.pid });
+    const spawnFn = createMockSpawnFn(proc);
+
+    proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+
+    const promise = collect(
+      spawnCli(
+        {
+          command: 'codex',
+          args: [],
+          timeoutMs: 5000,
+          livenessProbe: {
+            sampleIntervalMs: 100, // wide race window for reliable test
+            softWarningMs: 20,
+            stallWarningMs: 40,
+            stallAutoKill: true,
+          },
+        },
+        { spawnFn },
+      ),
+    );
+
+    // Wait for stall to be detected + drained + pendingStallKill set (~200ms)
+    // then send recovery within the 100ms race window
+    await new Promise((r) => setTimeout(r, 250));
+    proc.stdout.write(JSON.stringify({ type: 'item.completed', id: 'recovered' }) + '\n');
+
+    // Immediately complete the session so no further stall warnings can fire
+    await new Promise((r) => setTimeout(r, 20));
+    proc.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\n');
+    proc.stdout.end();
+    proc._emitter.emit('exit', 0, null);
+
+    const results = await promise;
+
+    const timeout = results.find((r) => r?.__cliTimeout);
+    assert.equal(timeout, undefined, 'deferred stall-kill must be cancelled by recovery NDJSON');
+    assert.ok(
+      results.some((r) => r?.type === 'turn.completed'),
+      'should yield turn.completed from the recovered session',
+    );
+  } finally {
+    sleeper.kill();
+  }
+});

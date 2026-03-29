@@ -117,6 +117,40 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     ],
   },
   {
+    id: 'wecom-bot',
+    name: '企业微信',
+    nameEn: 'WeCom Bot',
+    fields: [
+      { envName: 'WECOM_BOT_ID', label: 'Bot ID', sensitive: false },
+      { envName: 'WECOM_BOT_SECRET', label: 'Bot Secret', sensitive: true },
+    ],
+    docsUrl: 'https://developer.work.weixin.qq.com/document/path/105120',
+    steps: [
+      { text: '在企业微信管理后台创建智能机器人，获取 Bot ID 和 Bot Secret' },
+      { text: '启用「长连接」模式（WebSocket），无需公网 URL' },
+      { text: '填写以下配置并保存，重启 API 服务后生效' },
+    ],
+  },
+  {
+    id: 'wecom-agent',
+    name: '企微自建应用',
+    nameEn: 'WeCom Agent',
+    fields: [
+      { envName: 'WECOM_CORP_ID', label: 'Corp ID (企业 ID)', sensitive: false },
+      { envName: 'WECOM_AGENT_ID', label: 'Agent ID (应用 ID)', sensitive: false },
+      { envName: 'WECOM_AGENT_SECRET', label: 'Agent Secret', sensitive: true },
+      { envName: 'WECOM_TOKEN', label: '回调 Token', sensitive: true },
+      { envName: 'WECOM_ENCODING_AES_KEY', label: 'EncodingAESKey (43 字符)', sensitive: true },
+    ],
+    docsUrl: 'https://developer.work.weixin.qq.com/document/path/90238',
+    steps: [
+      { text: '在企业微信管理后台创建自建应用，获取 AgentId 和 Secret' },
+      { text: '在「API 接收消息」中设置回调 URL、Token 和 EncodingAESKey' },
+      { text: '回调 URL 需通过公网访问（可使用 Cloudflare Tunnel）' },
+      { text: '填写以下配置并保存，重启 API 服务后生效' },
+    ],
+  },
+  {
     id: 'weixin',
     name: '微信',
     nameEn: 'WeChat Personal',
@@ -315,6 +349,23 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     app.log.info('[WeChat QR] Manual activate — polling started');
 
     return { ok: true, polling: adapter.isPolling() };
+  });
+
+  // F137 Phase D: Disconnect WeChat — stop polling + clear token + clear state
+  app.post('/api/connector/weixin/disconnect', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    const adapter = opts.weixinAdapter;
+    if (!adapter) {
+      reply.status(503);
+      return { error: 'WeChat adapter not available (connector gateway not started)' };
+    }
+
+    await adapter.disconnect();
+    app.log.info({ userId }, '[WeChat] Disconnected by user');
+
+    return { ok: true };
   });
 
   // ── F134 Phase D: Connector Permission API ──

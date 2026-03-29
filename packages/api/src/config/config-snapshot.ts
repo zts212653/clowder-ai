@@ -86,4 +86,11 @@ export interface ConfigSnapshot {
     embedMode: string;
     abstractiveEnabled: boolean;
   };
+  /** UI display preferences (bubble expand/collapse defaults) */
+  ui: {
+    bubbleDefaults: {
+      thinking: 'expanded' | 'collapsed';
+      cliOutput: 'expanded' | 'collapsed';
+    };
+  };
 }

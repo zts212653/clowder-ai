@@ -201,7 +201,7 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
 
   if (building) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[#1E1E24] text-gray-400 text-xs">
+      <div className="flex-1 flex items-center justify-center bg-[#1E1E24] text-cafe-muted text-xs">
         Bundling JSX/TSX...
       </div>
     );
@@ -225,7 +225,7 @@ export function JsxPreview({ code, filePath, worktreeId }: JsxPreviewProps) {
       <div className="px-2 py-1 bg-blue-900/20 text-blue-400 text-[10px] border-b border-blue-900/30 flex-shrink-0">
         JSX Preview (esbuild-wasm) — local imports resolved, npm packages via esm.sh
       </div>
-      <div className="flex-1 min-h-0 bg-white">
+      <div className="flex-1 min-h-0 bg-cafe-surface">
         <iframe srcDoc={html} sandbox="allow-scripts" title="JSX Preview" className="w-full h-full border-0" />
       </div>
     </div>

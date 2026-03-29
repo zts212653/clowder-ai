@@ -1,4 +1,13 @@
 {
   "root": true,
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "plugins": ["cafe"],
+  "rules": {
+    "cafe/no-hardcoded-colors": "warn"
+  },
+  "settings": {
+    "cafe": {
+      "note": "F056 Phase A-0: Design system governance. See docs/features/F056-cat-cafe-design-language.md"
+    }
+  }
 }

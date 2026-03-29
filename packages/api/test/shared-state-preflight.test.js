@@ -221,6 +221,33 @@ describe('checkSharedStatePreflight (integration)', () => {
     assert.deepEqual(result, { ok: true }, 'behind-only should NOT report unpushed files');
   });
 
+  it('ignores upstream-only shared-state drift when branch is both ahead and behind', () => {
+    const repo = createTempRepo('diverged');
+    const bare = addBareRemote(repo);
+    tempDirs.push(repo, bare);
+
+    // Remote adds shared-state drift after local clone point.
+    const cloneA = mkdtempSync(join(tmpdir(), 'ss-test-diverged-remote-'));
+    tempDirs.push(cloneA);
+    execSync(`git clone ${bare} .`, { cwd: cloneA, stdio: 'ignore' });
+    execSync('git config user.email "a@test.com"', { cwd: cloneA, stdio: 'ignore' });
+    execSync('git config user.name "A"', { cwd: cloneA, stdio: 'ignore' });
+    mkdirSync(join(cloneA, 'docs'), { recursive: true });
+    writeFileSync(join(cloneA, 'docs/ROADMAP.md'), '# remote shared-state drift');
+    execSync('git add docs/ROADMAP.md && git commit -m "remote backlog drift" && git push', {
+      cwd: cloneA,
+      stdio: 'ignore',
+    });
+
+    // Local repo makes an unrelated commit and fetches remote, producing ahead+behind.
+    writeFileSync(join(repo, 'notes.txt'), 'local only');
+    execSync('git add notes.txt && git commit -m "local unrelated change"', { cwd: repo, stdio: 'ignore' });
+    execSync('git fetch origin', { cwd: repo, stdio: 'ignore' });
+
+    const result = checkSharedStatePreflight(repo);
+    assert.deepEqual(result, { ok: true }, 'diverged branch should ignore shared-state files changed only on upstream');
+  });
+
   it('returns ok:true when no upstream + no origin/<branch> + no merge-base (fail-open)', () => {
     // Create a completely isolated repo with no remote at all
     const repo = createTempRepo('isolated');

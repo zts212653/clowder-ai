@@ -68,6 +68,17 @@ export {
   richBlockRulesTools,
 } from './rich-block-rules-tool.js';
 export {
+  handleListScheduleTemplates,
+  handlePreviewScheduledTask,
+  handleRegisterScheduledTask,
+  handleRemoveScheduledTask,
+  listScheduleTemplatesInputSchema,
+  previewScheduledTaskInputSchema,
+  registerScheduledTaskInputSchema,
+  removeScheduledTaskInputSchema,
+  scheduleTools,
+} from './schedule-tools.js';
+export {
   handleListSessionChain,
   handleReadInvocationDetail,
   handleReadSessionDigest,

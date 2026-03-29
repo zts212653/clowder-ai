@@ -24,6 +24,11 @@ function getOrCreateManager(): PlaybackManager {
   useVoiceSessionStore.getState().registerStopCallback('playback-manager', () => {
     managerInstance?.interrupt();
   });
+  useVoiceSessionStore.getState().registerPlaybackControl('playback-manager', {
+    pause: () => managerInstance?.pause(),
+    resume: () => managerInstance?.resume(),
+    skip: () => managerInstance?.skip(),
+  });
   return managerInstance;
 }
 

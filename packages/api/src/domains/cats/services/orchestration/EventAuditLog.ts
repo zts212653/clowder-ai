@@ -199,6 +199,8 @@ export const AuditEventTypes = {
   SERVER_SHUTDOWN: 'server_shutdown',
   /** 运行时配置被更新 */
   CONFIG_UPDATED: 'config_updated',
+  /** 敏感环境变量被写入（owner-only, keys-only audit） */
+  ENV_SENSITIVE_WRITE: 'env_sensitive_write',
 
   // === 消息级审计 (茶话会夺魂 bug fix #37) ===
 

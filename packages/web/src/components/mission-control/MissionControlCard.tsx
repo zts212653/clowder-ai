@@ -69,7 +69,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.related?.map((id) => (
             <span
               key={`rel-${id}`}
-              className="inline-block rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] font-medium text-gray-600"
+              className="inline-block rounded-md border border-cafe bg-cafe-surface-elevated px-1.5 py-0.5 text-[10px] font-medium text-cafe-secondary"
             >
               ↔ {id.toUpperCase()}
             </span>

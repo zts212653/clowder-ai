@@ -142,9 +142,15 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         if (opts.invokeTrigger) {
           try {
             const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');
+            const hasApproved = !hasChangesRequested && signal.newDecisions.some((d) => d.state === 'APPROVED');
+
+            // F140 Phase C: map review decision → suggestedSkill
+            const suggestedSkill = hasChangesRequested ? 'receive-review' : hasApproved ? 'merge-gate' : undefined;
+
             const policy: ConnectorTriggerPolicy = {
               priority: hasChangesRequested ? 'urgent' : 'normal',
               reason: 'github_review_feedback',
+              suggestedSkill,
             };
             opts.invokeTrigger.trigger(
               routeResult.threadId,
@@ -167,5 +173,11 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
     outcome: { whenNoSignal: 'record' },
     enabled: () => true,
     actor: { role: 'repo-watcher', costTier: 'cheap' },
+    display: {
+      label: 'Review 反馈',
+      category: 'pr',
+      description: '聚合 PR review comments 通知猫猫',
+      subjectKind: 'pr',
+    },
   };
 }

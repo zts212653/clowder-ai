@@ -20,6 +20,8 @@ import { resolveUserId } from '../utils/request-identity.js';
 
 export interface PrTrackingRoutesOptions {
   readonly prTrackingStore: IPrTrackingStore;
+  /** Validates that a GitHub repo exists and is accessible. Injected for testability. */
+  readonly validateRepo?: (repoFullName: string) => Promise<boolean>;
 }
 
 const RegisterBodySchema = z.object({
@@ -35,7 +37,7 @@ const RegisterBodySchema = z.object({
 });
 
 export const prTrackingRoutes: FastifyPluginAsync<PrTrackingRoutesOptions> = async (app, opts) => {
-  const { prTrackingStore } = opts;
+  const { prTrackingStore, validateRepo } = opts;
 
   // Register a PR for tracking (auth required)
   app.post('/api/pr-tracking', async (request, reply) => {
@@ -56,6 +58,19 @@ export const prTrackingRoutes: FastifyPluginAsync<PrTrackingRoutesOptions> = asy
     // Validate catId is a known cat
     if (!catRegistry.has(catId)) {
       return reply.status(400).send({ error: `Unknown catId: ${catId}` });
+    }
+
+    // Phase D: validate repo exists and is accessible (AC-D1)
+    if (validateRepo) {
+      let repoOk: boolean;
+      try {
+        repoOk = await validateRepo(repoFullName);
+      } catch {
+        return reply.status(503).send({ error: 'Repository validation unavailable — try again later' });
+      }
+      if (!repoOk) {
+        return reply.status(422).send({ error: `Repository ${repoFullName} does not exist or is not accessible` });
+      }
     }
 
     // P1 fix: prevent cross-user overwrite

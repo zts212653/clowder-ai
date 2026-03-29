@@ -114,7 +114,7 @@ export function IdentitySection({
           onClick={() => fileInputRef.current?.click()}
           className="flex items-center gap-2 rounded-lg border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-1.5 text-sm text-[#5C4B42] transition hover:border-[#D49266]"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-white text-[10px] text-[#8A776B]">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-cafe-surface text-[10px] text-[#8A776B]">
             {avatarSrc ? (
               // biome-ignore lint/performance/noImgElement: avatar path may be runtime upload URL
               <img src={avatarSrc} alt="Avatar preview" className="h-full w-full object-cover" />
@@ -397,22 +397,31 @@ export function AccountSection({
             />
             {form.client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <ComboField
-                label="Provider 名称"
+                label="Provider 名称（可选）"
                 ariaLabel="OC Provider Name"
                 value={form.ocProviderName}
                 onChange={(value) => onChange({ ocProviderName: value })}
                 suggestions={providerSuggestions}
-                required
-                placeholder="如 anthropic、openai、openrouter、maas"
+                placeholder="留空则从 Model 自动推断（如 minimax/MiniMax-M2.7 → minimax）"
               />
             ) : null}
             {form.client === 'opencode' &&
             form.defaultModel.trim() &&
-            !form.defaultModel.includes('/') &&
+            (() => {
+              const m = form.defaultModel.trim();
+              const si = m.indexOf('/');
+              const looksLike = si > 0 && si < m.length - 1;
+              if (!looksLike) return true;
+              const known = new Set(['anthropic', 'openai', 'openrouter', 'google']);
+              if (known.has(m.slice(0, si))) return false;
+              const acm = selectedProfile?.models ?? [];
+              const bare = m.slice(si + 1);
+              return acm.includes(m) && !acm.includes(bare);
+            })() &&
             !form.ocProviderName.trim() ? (
               <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
                 <p className="text-[11px] leading-4 text-[#8A776B]">
-                  建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。
+                  建议使用 `providerId/modelId` 格式（例如 `minimax/MiniMax-M2.7`），或填写上方 Provider 名称。
                 </p>
               </div>
             ) : null}

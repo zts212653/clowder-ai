@@ -3,12 +3,13 @@ feature_ids: [F109]
 related_features: [F068, F069]
 topics: [chat, ux, message-actions]
 doc_kind: spec
+status: in-progress
 created: 2026-03-12
 ---
 
 # F109: Message Actions 修复与增强 — 软删除/Branch/编辑/通知
 
-> **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -74,15 +75,15 @@ team lead测试消息操作功能时发现一系列问题：
 
 ## Acceptance Criteria
 
-### Phase A（Bug Fix）
-- [ ] AC-A1: 软删除后，当前 tab 的消息气泡立即消失
-- [ ] AC-A2: 软删除后，其他已连接 client / 切线程后气泡也消失（WebSocket + threadState 同步）
-- [ ] AC-A3: 刷新页面后，已软删除的消息不再出现
-- [ ] AC-A4: hard delete 复用同一 thread-scoped remove，不回归
-- [ ] AC-A5: restore 跨客户端同步（socket 到达后 refetch）
-- [ ] AC-A6: team lead可以在任何 thread 中 Branch From 任意消息（含 system thread）
-- [ ] AC-A7: Branch/Delete 失败时前端显示 toast 错误提示
-- [ ] AC-A8: 已有测试不回归 + 新增 5 个最小测试边界
+### Phase A（Bug Fix）✅
+- [x] AC-A1: 软删除后，当前 tab 的消息气泡立即消失
+- [x] AC-A2: 软删除后，其他已连接 client / 切线程后气泡也消失（WebSocket + threadState 同步）
+- [x] AC-A3: 刷新页面后，已软删除的消息不再出现
+- [x] AC-A4: hard delete 复用同一 thread-scoped remove，不回归
+- [x] AC-A5: restore 跨客户端同步（socket 到达后 refetch via requestStreamCatchUp）
+- [x] AC-A6: team lead可以在任何 thread 中 Branch From 任意消息（含 system thread）
+- [x] AC-A7: Branch/Delete 失败时前端显示 toast 错误提示
+- [x] AC-A8: 已有测试不回归 + 新增 15 个测试（socket wiring + toast 4路径 + branch permission + restore + identity fix）
 
 ### Phase B1（编辑安全子集）
 - [ ] AC-B1-1: 最新一条用户消息（无后续回复）可真编辑

@@ -138,3 +138,5 @@ evidence.sqlite-wal
 forzadata-*.txt
 __pycache__/
 *.pyc
+.claude/skills/browser-automation
+.claude/skills/browser-preview

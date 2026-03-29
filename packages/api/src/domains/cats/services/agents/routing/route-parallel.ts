@@ -33,6 +33,7 @@ import {
   assembleIncrementalContext,
   detectContextDegradation,
   getService,
+  isUserFacingSystemInfoContent,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   toStoredToolEvent,
@@ -309,6 +310,7 @@ export async function* routeParallel(
   const catText = new Map<string, string>();
   const catThinking = new Map<string, string>();
   const catMeta = new Map<string, MessageMetadata>();
+  const catSawUserFacingSystemInfo = new Map<string, boolean>();
   const catToolEvents = new Map<string, StoredToolEvent[]>();
   // F060: Collect inline rich blocks per cat from system_info stream
   const catStreamRichBlocks = new Map<string, import('@cat-cafe/shared').RichBlock[]>();
@@ -365,6 +367,9 @@ export async function* routeParallel(
     }
     // F045: Accumulate thinking blocks per cat for persistence (F5 recovery)
     if (msg.type === 'system_info' && msg.content && msg.catId) {
+      if (isUserFacingSystemInfoContent(msg.content)) {
+        catSawUserFacingSystemInfo.set(msg.catId, true);
+      }
       try {
         const parsed = JSON.parse(msg.content);
         if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
@@ -642,12 +647,13 @@ export async function* routeParallel(
         const thinking = catThinking.get(msg.catId);
         const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
         const hasRichBlocks = noTextBlocks.length > 0;
+        const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
         const shouldPersistNoTextMessage =
           hasRichBlocks || (catTools?.length ?? 0) > 0 || Boolean(thinking?.trim().length ?? 0);
 
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
         // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
-        if (catTools && catTools.length > 0 && !hasRichBlocks) {
+        if (catTools && catTools.length > 0 && !hasRichBlocks && !sawUserFacingSystemInfo) {
           yield {
             type: 'system_info' as AgentMessageType,
             catId: msg.catId,
@@ -712,7 +718,7 @@ export async function* routeParallel(
               });
             }
           }
-        } else {
+        } else if (!sawUserFacingSystemInfo) {
           yield {
             type: 'system_info' as AgentMessageType,
             catId: msg.catId,
@@ -727,6 +733,8 @@ export async function* routeParallel(
           if (deps.draftStore && ownInvId) {
             deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
           }
+        } else if (deps.draftStore && ownInvId) {
+          deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
         }
       } else {
         // hadError but toolEvents exist — persist tool record so refresh shows what was attempted

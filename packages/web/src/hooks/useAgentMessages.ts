@@ -261,11 +261,6 @@ export function useAgentMessages() {
 
   const findCallbackReplacementTarget = useCallback((catId: string, invocationId: string): { id: string } | null => {
     const currentMessages = useChatStore.getState().messages;
-    // #266: Exact invocationId match only — strict scoping prevents a stale
-    // callback from invocation-1 replacing invocation-2's active bubble.
-    // P1 review (codex): the previous activeRefs fallback was dangerous because
-    // it would grab whatever bubble is currently active regardless of invocation,
-    // allowing late retry callbacks to clobber a new conversation's stream.
     for (let i = currentMessages.length - 1; i >= 0; i -= 1) {
       const msg = currentMessages[i];
       if (
@@ -277,8 +272,6 @@ export function useAgentMessages() {
         return { id: msg.id };
       }
     }
-    // No match → caller creates a new callback bubble via addMessage.
-    // For stale callbacks the message already exists in DB (deduped by messageId).
     return null;
   }, []);
 
@@ -438,10 +431,8 @@ export function useAgentMessages() {
 
         if (msg.origin === 'callback') {
           const invocationId = msg.invocationId ?? getCurrentInvocationIdForCat(msg.catId);
-          // #266 P1: Try strict invocationId match first (prevents cross-invocation race),
-          // then fall back to invocationless placeholder (covers lost invocation_created).
           const replacementTarget = invocationId
-            ? (findCallbackReplacementTarget(msg.catId, invocationId) ?? findInvocationlessStreamPlaceholder(msg.catId))
+            ? findCallbackReplacementTarget(msg.catId, invocationId)
             : findInvocationlessStreamPlaceholder(msg.catId);
 
           if (replacementTarget) {
@@ -608,13 +599,21 @@ export function useAgentMessages() {
         setCatInvocation(msg.catId, { invocationId: undefined });
         if (msg.isFinal) {
           clearDoneTimeout();
-          setLoading(false);
           // F108: Remove specific invocation slot; fall back to cat-scoped lookup.
           // Steer/force cancel broadcasts done(isFinal) without invocationId — find and
           // remove only this cat's latest active slot to avoid clearing other cats' slots
           // during multi-cat concurrent dispatch.
           if (msg.invocationId) {
             removeActiveInvocation(msg.invocationId);
+            // Hydrated synthetic IDs (hydrated-${threadId}-${catId}) won't match the real
+            // invocationId from the server. Only clean up hydrated- prefixed orphans to
+            // avoid accidentally deleting a NEW invocation's slot during same-cat preempt
+            // (where old done arrives after new invocation starts).
+            const stateAfter = useChatStore.getState();
+            const orphan = findLatestActiveInvocationIdForCat(stateAfter.activeInvocations, msg.catId);
+            if (orphan?.startsWith('hydrated-')) {
+              removeActiveInvocation(orphan);
+            }
           } else {
             const catSlot = findLatestActiveInvocationIdForCat(useChatStore.getState().activeInvocations, msg.catId);
             if (catSlot) {
@@ -623,8 +622,15 @@ export function useAgentMessages() {
               setHasActiveInvocation(false);
             }
           }
-          setIntentMode(null);
-          clearCatStatuses();
+          // F108 P1 fix: Only clear global state when the LAST active invocation ends.
+          // During concurrent multi-cat execution, cancelling one cat must not wipe
+          // the execution state (loading/intentMode/catStatuses) of remaining cats.
+          const remainingInvocations = Object.keys(useChatStore.getState().activeInvocations ?? {}).length;
+          if (remainingInvocations === 0) {
+            setLoading(false);
+            setIntentMode(null);
+            clearCatStatuses();
+          }
           // Note: do NOT clear replacedInvocationsRef here. The suppression guard
           // is designed to persist until a *different* invocationId is observed
           // (F123 PR #465, symptom-fixture-matrix.md:23). Clearing on done(isFinal)
@@ -634,18 +640,13 @@ export function useAgentMessages() {
           // was ever created for this cat, text events were lost (socket transport
           // drop, dual-pointer guard mismatch, etc.). Request a history catch-up
           // so the user sees the response without needing F5.
-          // #266 ghost-message: Removed the sawStreamDataRef guard — previously
-          // catch-up only fired when stream data was received but no bubble existed.
-          // For fast/simple replies, stream events AND callback can both be lost
-          // during a micro-disconnect while done(isFinal) arrives after reconnect.
-          // The callback path creates its own bubble via addMessage when no stream
-          // placeholder exists, so double-delivery is benign (replace: true dedupes).
-          if (!messageId) {
+          // P2: Only trigger if stream data was actually received (avoids false
+          // catch-up on callback-only flows where addMessage handles delivery).
+          if (!messageId && sawStreamDataRef.current.has(msg.catId)) {
             const tid = useChatStore.getState().currentThreadId;
             console.warn('[stream-catchup] done(isFinal) with no active bubble — requesting catch-up', {
               catId: msg.catId,
               threadId: tid,
-              hadStreamData: sawStreamDataRef.current.has(msg.catId),
             });
             if (tid) {
               requestStreamCatchUp(tid);
@@ -991,10 +992,15 @@ export function useAgentMessages() {
         // Only stop loading on isFinal; size===0 would false-positive in serial gaps
         if (msg.isFinal) {
           clearDoneTimeout(); // prevent 5-min timer from firing timeout text after error
-          setLoading(false);
           // F108: clear this cat's invocation slot on terminal error
           if (msg.invocationId) {
             removeActiveInvocation(msg.invocationId);
+            // Same hydrated-only orphan cleanup as the done(isFinal) path above.
+            const stateAfter = useChatStore.getState();
+            const orphan = findLatestActiveInvocationIdForCat(stateAfter.activeInvocations, msg.catId);
+            if (orphan?.startsWith('hydrated-')) {
+              removeActiveInvocation(orphan);
+            }
           } else {
             const catSlot = findLatestActiveInvocationIdForCat(useChatStore.getState().activeInvocations, msg.catId);
             if (catSlot) {
@@ -1003,13 +1009,19 @@ export function useAgentMessages() {
               setHasActiveInvocation(false);
             }
           }
-          setIntentMode(null);
-          // Clear ALL remaining streaming refs — global catch uses catId='opus' which may
-          // not match the cat that was actually running (e.g. codex/gemini)
-          for (const ref of activeRefs.current.values()) {
-            setStreaming(ref.id, false);
+          // F108 P1 fix: Only clear global state when the LAST active invocation ends.
+          const remainingInvocations = Object.keys(useChatStore.getState().activeInvocations ?? {}).length;
+          if (remainingInvocations === 0) {
+            setLoading(false);
+            setIntentMode(null);
+            clearCatStatuses();
+            // Clear ALL remaining streaming refs — global catch uses catId='opus' which may
+            // not match the cat that was actually running (e.g. codex/gemini)
+            for (const ref of activeRefs.current.values()) {
+              setStreaming(ref.id, false);
+            }
+            activeRefs.current.clear();
           }
-          activeRefs.current.clear();
         }
       }
     },

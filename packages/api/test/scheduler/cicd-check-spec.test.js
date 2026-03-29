@@ -43,6 +43,68 @@ describe('CiCdCheckTaskSpec', () => {
     assert.equal(result.workItems[1].subjectKey, 'pr-c/d#42');
   });
 
+  // ── F140 Phase C: CI pass now triggers cat (not just CI fail) ──
+
+  it('execute triggers invokeTrigger for CI pass with normal priority', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const spec = createCiCdCheckTaskSpec({
+      prTrackingStore: {
+        listAll: async () => [{ repoFullName: 'a/b', prNumber: 1, userId: 'u1', ciTrackingEnabled: true }],
+      },
+      cicdRouter: {
+        route: async () => ({
+          kind: 'notified',
+          bucket: 'pass',
+          threadId: 't1',
+          catId: 'opus',
+          messageId: 'm1',
+          content: 'CI passed',
+        }),
+      },
+      fetchPrStatus: async () => ({ checks: [], headSha: 'sha1', prNumber: 1, repoFullName: 'a/b' }),
+      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    assert.equal(gateResult.run, true);
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    assert.equal(triggered.length, 1);
+    const policy = triggered[0][6];
+    assert.equal(policy.priority, 'normal');
+    assert.equal(policy.reason, 'github_ci_pass');
+    assert.equal(policy.suggestedSkill, 'merge-gate');
+  });
+
+  it('execute triggers invokeTrigger for CI fail with urgent priority (unchanged)', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const spec = createCiCdCheckTaskSpec({
+      prTrackingStore: {
+        listAll: async () => [{ repoFullName: 'a/b', prNumber: 1, userId: 'u1', ciTrackingEnabled: true }],
+      },
+      cicdRouter: {
+        route: async () => ({
+          kind: 'notified',
+          bucket: 'fail',
+          threadId: 't1',
+          catId: 'opus',
+          messageId: 'm1',
+          content: 'CI failed',
+        }),
+      },
+      fetchPrStatus: async () => ({ checks: [], headSha: 'sha1', prNumber: 1, repoFullName: 'a/b' }),
+      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    assert.equal(triggered.length, 1);
+    const policy = triggered[0][6];
+    assert.equal(policy.priority, 'urgent');
+    assert.equal(policy.reason, 'github_ci_failure');
+  });
+
   it('gate filters out ciTrackingEnabled=false', async () => {
     const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
     const mockPrs = [

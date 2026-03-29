@@ -91,16 +91,16 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
         <PawIcon className="w-6 h-6 text-cocreator-primary" />
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
-          <p className="text-xs text-gray-500">分屏模式</p>
+          <p className="text-xs text-cafe-secondary">分屏模式</p>
         </div>
-        <span className="text-[10px] text-gray-400 hidden sm:inline mr-1">⌘\ 切换</span>
+        <span className="text-[10px] text-cafe-muted hidden sm:inline mr-1">⌘\ 切换</span>
         <button
           onClick={handleBackToSingle}
           className="p-1 rounded-lg hover:bg-cocreator-light transition-colors"
           aria-label="切换单屏模式"
           title="返回单屏"
         >
-          <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <rect x="2" y="2" width="16" height="16" rx="2" />
           </svg>
         </button>
@@ -132,9 +132,9 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
           </div>
 
           {/* Shared input bar */}
-          <div className="border-t border-cocreator-light bg-white px-3 py-2">
+          <div className="border-t border-cocreator-light bg-cafe-surface px-3 py-2">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] text-gray-400">
+              <span className="text-[10px] text-cafe-muted">
                 {splitPaneTargetId
                   ? `发往: ${threadMap.get(splitPaneTargetId)?.title ?? splitPaneTargetId}`
                   : '请选择一个窗格'}

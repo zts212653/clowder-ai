@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '../utils/api-client';
 
 interface GroupEntry {
@@ -31,6 +32,7 @@ export default function HubPermissionsTab() {
   const [newGroupId, setNewGroupId] = useState('');
   const [newGroupLabel, setNewGroupLabel] = useState('');
   const [newAdminId, setNewAdminId] = useState('');
+  const ime = useIMEGuard();
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -102,17 +104,17 @@ export default function HubPermissionsTab() {
     saveConfig({ adminOpenIds: updated });
   };
 
-  if (loading) return <div className="p-6 text-gray-400 text-sm">加载权限配置...</div>;
+  if (loading) return <div className="p-6 text-cafe-muted text-sm">加载权限配置...</div>;
 
   return (
     <div className="space-y-4">
-      <div className="text-xs text-gray-400 flex items-center gap-1">
+      <div className="text-xs text-cafe-muted flex items-center gap-1">
         <span className="text-blue-500 cursor-pointer">飞书 Feishu</span>
         <span>›</span>
         <span>群聊权限</span>
       </div>
 
-      <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <div className="border border-cafe dark:border-gray-700 rounded-xl overflow-hidden">
         {/* Header */}
         <div className="bg-green-50 dark:bg-green-900/20 px-4 py-3 flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-green-200 dark:bg-green-800 flex items-center justify-center text-green-600 dark:text-green-400">
@@ -126,7 +128,7 @@ export default function HubPermissionsTab() {
           </div>
           <div>
             <div className="font-semibold text-sm">群聊权限管理</div>
-            <div className="text-xs text-gray-500">控制谁能用 bot、谁能用管理命令</div>
+            <div className="text-xs text-cafe-secondary">控制谁能用 bot、谁能用管理命令</div>
           </div>
         </div>
 
@@ -146,18 +148,18 @@ export default function HubPermissionsTab() {
                 disabled={saving}
               >
                 <div
-                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${config.whitelistEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-cafe-surface transition-transform ${config.whitelistEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}
                 />
               </button>
             </div>
-            <p className="text-xs text-gray-500">开启后，仅白名单内的群可使用 bot</p>
+            <p className="text-xs text-cafe-secondary">开启后，仅白名单内的群可使用 bot</p>
 
             {config.whitelistEnabled && (
               <div className="space-y-1.5">
                 {config.allowedGroups.map((g) => (
                   <div
                     key={g.externalChatId}
-                    className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs"
+                    className="flex items-center gap-2 px-3 py-2 bg-cafe-surface-elevated dark:bg-gray-800 rounded-lg text-xs"
                   >
                     <svg
                       className="w-3.5 h-3.5 text-blue-500"
@@ -172,9 +174,9 @@ export default function HubPermissionsTab() {
                         d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z"
                       />
                     </svg>
-                    <span className="flex-1 truncate text-gray-700 dark:text-gray-300">
+                    <span className="flex-1 truncate text-cafe-secondary dark:text-gray-300">
                       {g.label || g.externalChatId}{' '}
-                      {g.label ? <span className="text-gray-400">{g.externalChatId.slice(-8)}</span> : null}
+                      {g.label ? <span className="text-cafe-muted">{g.externalChatId.slice(-8)}</span> : null}
                     </span>
                     <button onClick={() => removeGroup(g.externalChatId)} className="text-red-400 hover:text-red-600">
                       ✕
@@ -186,13 +188,13 @@ export default function HubPermissionsTab() {
                     value={newGroupId}
                     onChange={(e) => setNewGroupId(e.target.value)}
                     placeholder="chat_id"
-                    className="flex-1 px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+                    className="flex-1 px-2 py-1.5 text-xs border border-cafe dark:border-gray-700 rounded-lg bg-transparent"
                   />
                   <input
                     value={newGroupLabel}
                     onChange={(e) => setNewGroupLabel(e.target.value)}
                     placeholder="群名（可选）"
-                    className="flex-1 px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
+                    className="flex-1 px-2 py-1.5 text-xs border border-cafe dark:border-gray-700 rounded-lg bg-transparent"
                   />
                   <button
                     onClick={addGroup}
@@ -206,7 +208,7 @@ export default function HubPermissionsTab() {
             )}
           </div>
 
-          <hr className="border-gray-100 dark:border-gray-800" />
+          <hr className="border-cafe-subtle dark:border-gray-800" />
 
           {/* Section 2: Admin List */}
           <div className="space-y-2">
@@ -216,13 +218,13 @@ export default function HubPermissionsTab() {
               </span>
               <span className="font-semibold text-sm">管理员</span>
             </div>
-            <p className="text-xs text-gray-500">管理员可使用 /allow-group、/deny-group、/new、/use 等管理命令</p>
+            <p className="text-xs text-cafe-secondary">管理员可使用 /allow-group、/deny-group、/new、/use 等管理命令</p>
 
             <div className="space-y-1.5">
               {config.adminOpenIds.map((id, i) => (
                 <div
                   key={id}
-                  className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs"
+                  className="flex items-center gap-2 px-3 py-2 bg-cafe-surface-elevated dark:bg-gray-800 rounded-lg text-xs"
                 >
                   <svg className="w-3.5 h-3.5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
                     <path
@@ -231,7 +233,7 @@ export default function HubPermissionsTab() {
                       clipRule="evenodd"
                     />
                   </svg>
-                  <span className="flex-1 truncate text-gray-700 dark:text-gray-300">{id}</span>
+                  <span className="flex-1 truncate text-cafe-secondary dark:text-gray-300">{id}</span>
                   {i === 0 && (
                     <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-semibold">
                       Owner
@@ -247,8 +249,10 @@ export default function HubPermissionsTab() {
                   value={newAdminId}
                   onChange={(e) => setNewAdminId(e.target.value)}
                   placeholder="open_id (ou_xxxx...)"
-                  className="flex-1 px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-transparent"
-                  onKeyDown={(e) => e.key === 'Enter' && addAdmin()}
+                  className="flex-1 px-2 py-1.5 text-xs border border-cafe dark:border-gray-700 rounded-lg bg-transparent"
+                  onCompositionStart={ime.onCompositionStart}
+                  onCompositionEnd={ime.onCompositionEnd}
+                  onKeyDown={(e) => e.key === 'Enter' && !ime.isComposing() && addAdmin()}
                 />
                 <button
                   onClick={addAdmin}
@@ -261,7 +265,7 @@ export default function HubPermissionsTab() {
             </div>
           </div>
 
-          <hr className="border-gray-100 dark:border-gray-800" />
+          <hr className="border-cafe-subtle dark:border-gray-800" />
 
           {/* Section 3: Command Admin Only */}
           <div className="space-y-2">
@@ -278,11 +282,11 @@ export default function HubPermissionsTab() {
                 disabled={saving}
               >
                 <div
-                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${config.commandAdminOnly ? 'translate-x-5' : 'translate-x-0.5'}`}
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-cafe-surface transition-transform ${config.commandAdminOnly ? 'translate-x-5' : 'translate-x-0.5'}`}
                 />
               </button>
             </div>
-            <p className="text-xs text-gray-500">开启后，非管理员在群聊发 /threads /new /use 会收到提示</p>
+            <p className="text-xs text-cafe-secondary">开启后，非管理员在群聊发 /threads /new /use 会收到提示</p>
             {config.commandAdminOnly && (
               <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-xs text-red-700 dark:text-red-400">
                 <svg
@@ -322,7 +326,7 @@ export default function HubPermissionsTab() {
           保存失败
         </div>
       )}
-      {saving && <div className="text-xs text-gray-400">保存中...</div>}
+      {saving && <div className="text-xs text-cafe-muted">保存中...</div>}
     </div>
   );
 }

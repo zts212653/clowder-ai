@@ -36,14 +36,18 @@ const STATUS_CONFIG: Record<
     badge?: string;
   }
 > = {
-  draft: { label: '草稿', className: 'border-dashed opacity-80', badge: 'bg-gray-100 text-gray-500 border-gray-200' },
+  draft: {
+    label: '草稿',
+    className: 'border-dashed opacity-80',
+    badge: 'bg-cafe-surface-elevated text-cafe-secondary border-cafe',
+  },
   pending: {
     label: '待审',
     className: 'ring-1 ring-amber-400/30',
     badge: 'bg-amber-100 text-amber-700 border-amber-200 animate-pulse',
   },
   published: { label: '正式', className: '', badge: '' },
-  archived: { label: '归档', className: 'grayscale-[0.5] opacity-60', badge: 'bg-gray-200 text-gray-600' },
+  archived: { label: '归档', className: 'grayscale-[0.5] opacity-60', badge: 'bg-gray-200 text-cafe-secondary' },
 };
 
 const CONFIDENCE_STYLES: Record<
@@ -106,8 +110,8 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
 
         <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700">
           <span className="text-[10px] text-slate-400 font-bold">{source.label}</span>
-          <span className="text-[10px] text-gray-300">·</span>
-          <span className="text-[10px] text-gray-400 truncate font-mono opacity-70 italic">{result.anchor}</span>
+          <span className="text-[10px] text-cafe-muted">·</span>
+          <span className="text-[10px] text-cafe-muted truncate font-mono opacity-70 italic">{result.anchor}</span>
         </div>
       </div>
     </div>

@@ -33,7 +33,7 @@ export function statusLabel(status: CatStatus): string {
 export function statusTone(status: CatStatus): string {
   switch (status) {
     case 'pending':
-      return 'text-gray-500';
+      return 'text-cafe-secondary';
     case 'streaming':
       return 'text-green-600';
     case 'done':
@@ -45,7 +45,7 @@ export function statusTone(status: CatStatus): string {
     case 'suspected_stall':
       return 'text-orange-600';
     default:
-      return 'text-gray-500';
+      return 'text-cafe-secondary';
   }
 }
 

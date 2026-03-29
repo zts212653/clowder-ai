@@ -614,6 +614,73 @@ describe('InvocationQueue', () => {
     assert.equal(queue.hasActiveOrQueuedAgentForCat('t1', 'codex'), false);
   });
 
+  it('hasActiveOrQueuedAgentForCat still blocks for fresh processing entry (< STALE_PROCESSING_THRESHOLD)', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    queue.markProcessing('t1', 'system');
+    // Backdate processingStartedAt to 5 minutes — well within the 10-minute threshold
+    const listed = queue.list('t1', 'system');
+    listed[0].processingStartedAt = Date.now() - 5 * 60_000;
+    assert.equal(
+      queue.hasActiveOrQueuedAgentForCat('t1', 'codex'),
+      true,
+      'fresh processing entry (5 min) must still block text-scan dedup',
+    );
+  });
+
+  it('hasActiveOrQueuedAgentForCat still blocks when entry queued long ago but just started processing', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    // Backdate createdAt to 11 minutes ago (sat in queue a long time)
+    const listed = queue.list('t1', 'system');
+    listed[0].createdAt = Date.now() - 11 * 60_000;
+    // NOW start processing — processingStartedAt should be fresh
+    queue.markProcessing('t1', 'system');
+    assert.equal(
+      queue.hasActiveOrQueuedAgentForCat('t1', 'codex'),
+      true,
+      'entry queued 11 min ago but just started processing must still block (P1 regression)',
+    );
+  });
+
+  it('hasActiveOrQueuedAgentForCat returns false for stale processing entry (> STALE_PROCESSING_THRESHOLD)', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    queue.markProcessing('t1', 'system');
+    // Backdate processingStartedAt to 11 minutes — beyond the 10-minute threshold
+    const listed = queue.list('t1', 'system');
+    listed[0].processingStartedAt = Date.now() - 11 * 60_000;
+    assert.equal(
+      queue.hasActiveOrQueuedAgentForCat('t1', 'codex'),
+      false,
+      'stale processing entry (11 min) must NOT block text-scan — zombie defense',
+    );
+  });
+
   // ── hasQueuedUserMessagesForThread: fairness gate must only count user-sourced entries ──
 
   it('hasQueuedUserMessagesForThread returns false when only agent entries are queued', () => {

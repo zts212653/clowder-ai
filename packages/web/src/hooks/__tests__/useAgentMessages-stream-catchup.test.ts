@@ -192,7 +192,7 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
     expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
   });
 
-  it('requests catch-up for callback-only flow when no active bubble (#266 ghost-message)', () => {
+  it('does NOT request catch-up for callback-only flow (P2: no stream data)', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -207,10 +207,7 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
       });
     });
 
-    // done(isFinal) arrives — callback created a bubble via addMessage but
-    // activeRefs was never set, so getOrRecoverActiveAssistantMessageId
-    // returns null. #266: catch-up now fires unconditionally when no active
-    // bubble exists (benign — replace:true dedupes the fetch result).
+    // done(isFinal) arrives — no streaming bubble, but also no stream data was seen
     act(() => {
       captured?.handleAgentMessage({
         type: 'done',
@@ -219,27 +216,8 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
       });
     });
 
-    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
-  });
-
-  it('requests catch-up when done(isFinal) arrives with no events at all (#266 ghost-message)', () => {
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    // Simulate the ghost-message scenario: socket micro-disconnect caused all
-    // stream events and callback to be lost. Only done(isFinal) arrives after
-    // reconnect. No sawStreamData, no active bubble.
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'done',
-        catId: 'opus',
-        isFinal: true,
-      });
-    });
-
-    // #266: catch-up should fire so user doesn't need F5
-    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+    // P2: should NOT trigger catch-up because no stream chunks were received
+    expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
   });
 
   it('requests catch-up when stream data was seen but bubble is lost', () => {

@@ -65,7 +65,7 @@ export function CardBlock({ block, messageId }: { block: RichCardBlock; messageI
     <div className={`border-l-4 rounded-r-lg p-3 ${toneStyle}`}>
       <div className="font-medium text-sm">{block.title}</div>
       {block.bodyMarkdown && (
-        <div className="mt-1 text-xs text-gray-600 dark:text-gray-300 [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
+        <div className="mt-1 text-xs text-cafe-secondary dark:text-gray-300 [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
           <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
         </div>
       )}
@@ -73,7 +73,8 @@ export function CardBlock({ block, messageId }: { block: RichCardBlock; messageI
         <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
           {block.fields.map((f, i) => (
             <div key={i} className="text-xs">
-              <span className="text-gray-500">{f.label}:</span> <span className="font-mono break-all">{f.value}</span>
+              <span className="text-cafe-secondary">{f.label}:</span>{' '}
+              <span className="font-mono break-all">{f.value}</span>
             </div>
           ))}
         </div>

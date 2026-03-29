@@ -80,10 +80,62 @@ describe('HubProviderProfileItem', () => {
     const payload = onSave.mock.calls[0]![1] as ProfileEditPayload;
     expect(payload).toMatchObject({
       displayName: 'Claude API',
+      protocol: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       models: ['claude-opus-4-1'],
     });
     expect(Object.hasOwn(payload, 'modelOverride')).toBe(false);
+  });
+
+  it('displays protocol badge and sends protocol change from dropdown', async () => {
+    const profile: ProfileItem = {
+      id: 'minimax-api',
+      provider: 'minimax-api',
+      displayName: 'MiniMax',
+      name: 'MiniMax',
+      authType: 'api_key',
+      protocol: 'openai',
+      kind: 'api_key',
+      builtin: false,
+      mode: 'api_key',
+      baseUrl: 'https://api.minimaxi.com/anthropic',
+      models: ['MiniMax-M2.7'],
+      hasApiKey: true,
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:00.000Z',
+    };
+    const onSave = vi.fn<(profileId: string, payload: ProfileEditPayload) => Promise<void>>(async () => {});
+
+    await act(async () => {
+      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
+    });
+
+    // Protocol badge should be visible in read-only view
+    expect(container.textContent).toContain('OpenAI');
+
+    // Enter edit mode
+    await act(async () => {
+      queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Protocol dropdown should exist with current value
+    const select = container.querySelector('select') as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe('openai');
+
+    // Change protocol to anthropic
+    await act(async () => {
+      select!.value = 'anthropic';
+      select!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    await act(async () => {
+      queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const payload = onSave.mock.calls[0]![1] as ProfileEditPayload;
+    expect(payload.protocol).toBe('anthropic');
   });
 
   it('sends empty baseUrl when clearing an API-key account base URL', async () => {

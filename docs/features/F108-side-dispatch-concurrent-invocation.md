@@ -8,7 +8,7 @@ created: 2026-03-12
 
 # F108: Side-Dispatch — 同一 Thread 多猫并发执行
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-28
 
 ## Why
 
@@ -85,14 +85,14 @@ team lead发消息有两种模式：
 - [x] AC-A4: InvocationRecord 存储结构支持 per-thread 多条并发记录
 - [x] AC-A5: 现有 multi_mention 等编排工具继续正常工作（向后兼容）
 
-### Phase B（双模发送 UX）
-- [ ] AC-B1: 锁头按钮 → 猫选择器 → 悄悄话发送，不打断当前执行猫
-- [ ] AC-B2: 猫选择器灰掉当前正在执行的猫（强制不能选）
-- [ ] AC-B3: 广播消息（不点锁头）不打断当前执行猫，排队到下次拉起
-- [ ] AC-B4: 广播消息中 @ 特定猫，该猫开始旁路执行
-- [ ] AC-B5: Thread 执行状态指示（头像 + 活跃状态）
-- [ ] AC-B6: Stop 按钮精确到每只猫（不再整 thread 清零）
-- [ ] AC-B7: 输入框状态：给空闲猫发消息直接发送，不显示 Queue/Force
+### Phase B（双模发送 UX）✅
+- [x] AC-B1: 锁头按钮 → 猫选择器 → 悄悄话发送，不打断当前执行猫
+- [x] AC-B2: 猫选择器灰掉当前正在执行的猫（强制不能选）
+- [x] AC-B3: 广播消息（不点锁头）不打断当前执行猫，排队到下次拉起
+- [x] AC-B4: 广播消息中 @ 特定猫，该猫开始旁路执行
+- [x] AC-B5: Thread 执行状态指示（头像 + 活跃状态）
+- [x] AC-B6: Stop 按钮精确到每只猫（不再整 thread 清零）
+- [x] AC-B7: 输入框状态：给空闲猫发消息直接发送，不显示 Queue/Force
 
 ## Dependencies
 
@@ -116,6 +116,28 @@ team lead发消息有两种模式：
 |---|------|------|------|
 | KD-1 | 锁粒度从 per-thread 改为 per-thread-per-cat（不是完全无锁） | 保留同一猫的串行语义，避免自己和自己竞争 | 2026-03-12 |
 
+## UX Fidelity Gap（功能闭环 vs UX 闭环）
+
+> **功能闭环**：Phase A+B 运行时能力全部交付（AC-A1~A5, AC-B1~B7 ✅）。
+> **UX 闭环**：前端实现与设计稿 `F108-side-dispatch-phase-b-ux.pen` 逐 Scene 对齐。
+
+### Scene-by-Scene 对照
+
+| Scene | 设计稿内容 | 实现状态 | Gap |
+|-------|-----------|---------|-----|
+| Scene 1: Whisper Mode | 锁头 toggle → 猫选择 chips，默认不选 | ✅ ALIGNED | PR #837 修复默认选中问题 |
+| Scene 2: Cat Selector | **下拉列表**：头像 + 全名 + radio + 状态徽章 | ✅ ALIGNED | PR #846 v2: @ mention 风格浮动弹窗（头像 + formatCatName 唯一标识 + 职责 + 执行中徽章） |
+| Scene 3: Execution Bar | "执行中" + 猫色点 + 名称 + 计时 | ✅ ALIGNED | PR #837 修复 hydration |
+| Scene 4: Per-Cat Stop | × 按钮 + "全部停止" | ✅ ALIGNED | — |
+| Scene 5A: Idle Input | 橙色发送按钮 | ✅ ALIGNED | — |
+| Scene 5B: Busy Input | 紫色排队按钮 | ✅ ALIGNED | — |
+| Scene 5C: Force Send | 黄色 "⚡ 强制" 标签按钮 | ⚠️ MINOR | 实现为小红色闪电图标，无黄色背景无文字标签 |
+
+### 待决策
+
+- ~~Scene 2 下拉选择器~~：✅ 已实现（PR #842）
+- ~~Scene 5C 强制按钮~~：team lead已接受现状（"小闪电可以用 原本的 这个无所谓 原本也挺好"）
+
 ## Review Gate
 
 - Phase A: 跨家族 review（架构级改动），Maine Coon review 运行时安全性
@@ -124,16 +146,16 @@ team lead发消息有两种模式：
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R1 | "让你修复问题，并发让Maine Coon反思" — 同一 thread 同时派两只猫干不同的事 | AC-A1 | integration test: 两猫并发 invocation 互不 abort | [ ] |
-| R2 | "给Maine Coon一直发悄悄话避免影响你的修复" — 锁头 → 选猫 → 悄悄话 | AC-B1, AC-B2 | test: 锁头模式发消息不打断当前猫 + 不能选执行中的猫 | [ ] |
-| R3 | 相关但不同的任务在同一 feat/thread 里，结果都可见 | AC-A2 | test: 旁路消息在 thread 中可见 | [ ] |
-| R4 | 涉及 A2A 并发调整，安全性需要强评估 | AC-A5 | 向后兼容测试 + Maine Coon安全 review | [ ] |
-| R5 | 不点锁头直接发 = 广播，不打断执行猫，下次拉起时收到 | AC-B3, AC-B4 | test: 广播排队 + @ 路由旁路执行 | [ ] |
+| R1 | "让你修复问题，并发让Maine Coon反思" — 同一 thread 同时派两只猫干不同的事 | AC-A1 | integration test: 两猫并发 invocation 互不 abort | [x] |
+| R2 | "给Maine Coon一直发悄悄话避免影响你的修复" — 锁头 → 选猫 → 悄悄话 | AC-B1, AC-B2 | test: 锁头模式发消息不打断当前猫 + 不能选执行中的猫 | [x] |
+| R3 | 相关但不同的任务在同一 feat/thread 里，结果都可见 | AC-A2 | test: 旁路消息在 thread 中可见 | [x] |
+| R4 | 涉及 A2A 并发调整，安全性需要强评估 | AC-A5 | 向后兼容测试 + Maine Coon安全 review | [x] |
+| R5 | 不点锁头直接发 = 广播，不打断执行猫，下次拉起时收到 | AC-B3, AC-B4 | test: 广播排队 + @ 路由旁路执行 | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
 - [x] 每个 AC 都有验证方式
-- [ ] 前端需求已准备需求→证据映射表（Phase B 适用）
+- [x] 前端需求已准备需求→证据映射表（Phase B 适用）
 
 ## team lead用例示例
 

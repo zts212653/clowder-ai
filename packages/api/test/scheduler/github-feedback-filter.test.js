@@ -11,14 +11,31 @@ describe('createGitHubFeedbackFilter', () => {
     assert.equal(filter.shouldSkipReview({ author: 'alice' }), false);
   });
 
-  it('skips authoritative review bot', async () => {
+  it('skips authoritative review bot inline comments and reviews', async () => {
     const { createGitHubFeedbackFilter } = await import('../../dist/infrastructure/email/github-feedback-filter.js');
     const filter = createGitHubFeedbackFilter({
       selfGitHubLogin: 'me',
       authoritativeReviewLogins: ['chatgpt-codex-connector[bot]'],
     });
-    assert.equal(filter.shouldSkipComment({ author: 'chatgpt-codex-connector[bot]' }), true);
+    // Rule B applies to inline comments (tied to review submissions the email watcher handles)
+    assert.equal(filter.shouldSkipComment({ author: 'chatgpt-codex-connector[bot]', commentType: 'inline' }), true);
     assert.equal(filter.shouldSkipReview({ author: 'chatgpt-codex-connector[bot]' }), true);
+  });
+
+  it('does NOT skip authoritative bot conversation comments — email watcher cannot handle issue comments', async () => {
+    const { createGitHubFeedbackFilter } = await import('../../dist/infrastructure/email/github-feedback-filter.js');
+    const filter = createGitHubFeedbackFilter({
+      selfGitHubLogin: 'me',
+      authoritativeReviewLogins: ['chatgpt-codex-connector[bot]'],
+    });
+    // Rule B must NOT apply to conversation comments (issue comments).
+    // The email watcher only parses review submission emails — it cannot handle
+    // issue comments like Codex R2 "pass" results posted to /issues/N/comments.
+    assert.equal(
+      filter.shouldSkipComment({ author: 'chatgpt-codex-connector[bot]', commentType: 'conversation' }),
+      false,
+      'conversation comments from authoritative bot must pass through F140',
+    );
   });
 
   it('does NOT skip non-authoritative bots', async () => {
@@ -36,8 +53,13 @@ describe('createGitHubFeedbackFilter', () => {
     const filter = createGitHubFeedbackFilter({ authoritativeReviewLogins: ['chatgpt-codex-connector[bot]'] });
     // self-filter disabled → no false negatives
     assert.equal(filter.shouldSkipComment({ author: 'zts212653' }), false);
-    // authoritative bot still works
-    assert.equal(filter.shouldSkipComment({ author: 'chatgpt-codex-connector[bot]' }), true);
+    // authoritative bot inline still skipped
+    assert.equal(filter.shouldSkipComment({ author: 'chatgpt-codex-connector[bot]', commentType: 'inline' }), true);
+    // authoritative bot conversation still passes through
+    assert.equal(
+      filter.shouldSkipComment({ author: 'chatgpt-codex-connector[bot]', commentType: 'conversation' }),
+      false,
+    );
   });
 
   // ── Rule C: email watcher uses isSelfAuthored (Rule A only) ──

@@ -55,7 +55,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
 
   if (!hasDetailed && !hasTotalOnly) return null;
 
-  const textColor = CAT_TEXT_COLORS[catId] ?? 'text-gray-700';
+  const textColor = CAT_TEXT_COLORS[catId] ?? 'text-cafe-secondary';
   const cachePct = cachePercent(usage);
   const hasExactContextSummary =
     usage.contextUsedTokens != null && usage.contextWindowSize != null && usage.contextWindowSize > 0;
@@ -77,13 +77,13 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
             {usage.inputTokens != null && (
               <span className={textColor}>
                 <AnimatedTokenCount value={usage.inputTokens} label="Input" />
-                <span className="text-gray-400 ml-0.5">↓</span>
+                <span className="text-cafe-muted ml-0.5">↓</span>
               </span>
             )}
             {usage.outputTokens != null && (
-              <span className="text-gray-600">
+              <span className="text-cafe-secondary">
                 <AnimatedTokenCount value={usage.outputTokens} label="Output" />
-                <span className="text-gray-400 ml-0.5">↑</span>
+                <span className="text-cafe-muted ml-0.5">↑</span>
               </span>
             )}
           </>
@@ -91,7 +91,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
         {hasTotalOnly && usage.totalTokens != null && (
           <span className={textColor}>
             <AnimatedTokenCount value={usage.totalTokens} label="Total" />
-            <span className="text-gray-400 ml-0.5">tok</span>
+            <span className="text-cafe-muted ml-0.5">tok</span>
           </span>
         )}
       </div>
@@ -99,7 +99,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
       {/* Cache bar */}
       {cachePct > 0 && (
         <div>
-          <div className="text-[10px] text-gray-400 mb-0.5">缓存命中</div>
+          <div className="text-[10px] text-cafe-muted mb-0.5">缓存命中</div>
           <TokenCacheBar percent={cachePct} catId={catId} />
         </div>
       )}
@@ -109,23 +109,25 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
         {usage.costUsd != null && (
           <span className="text-amber-600 font-medium tabular-nums animate-cost-glow">{formatCost(usage.costUsd)}</span>
         )}
-        {usage.numTurns != null && usage.numTurns > 1 && <span className="text-gray-400">{usage.numTurns} turns</span>}
+        {usage.numTurns != null && usage.numTurns > 1 && (
+          <span className="text-cafe-muted">{usage.numTurns} turns</span>
+        )}
         {usage.durationApiMs != null && (
-          <span className="text-gray-400">API {formatDuration(usage.durationApiMs)}</span>
+          <span className="text-cafe-muted">API {formatDuration(usage.durationApiMs)}</span>
         )}
       </div>
 
       {contextSummary && (
-        <div className="text-[10px] text-gray-500 font-mono">
+        <div className="text-[10px] text-cafe-secondary font-mono">
           {contextSummary}
-          {contextResetLabel && <span className="text-gray-400 ml-1">{contextResetLabel}</span>}
+          {contextResetLabel && <span className="text-cafe-muted ml-1">{contextResetLabel}</span>}
         </div>
       )}
 
       {/* F24: Context health bar */}
       {contextHealth && (
         <div>
-          <div className="text-[10px] text-gray-400 mb-0.5">上下文占用</div>
+          <div className="text-[10px] text-cafe-muted mb-0.5">上下文占用</div>
           <ContextHealthBar catId={catId} health={contextHealth} />
         </div>
       )}

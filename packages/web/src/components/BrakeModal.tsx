@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useTts } from '@/hooks/useTts';
 import { useBrakeStore } from '@/stores/brakeStore';
 import { CatAvatar } from './CatAvatar';
@@ -45,6 +46,7 @@ export function BrakeModal() {
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState('');
   const lastTriggerRef = useRef<number>(0);
+  const ime = useIMEGuard();
 
   // Reset local state when modal opens
   useEffect(() => {
@@ -117,7 +119,7 @@ export function BrakeModal() {
           <h2 className={`text-lg font-bold ${nightMode ? 'text-indigo-200' : ''}`}>
             {nightMode ? '深夜了，猫猫们想你休息' : style.title}
           </h2>
-          <p className="text-sm text-gray-500 mt-1">已专注工作 {activeMinutes} 分钟</p>
+          <p className="text-sm text-cafe-secondary mt-1">已专注工作 {activeMinutes} 分钟</p>
         </div>
 
         {/* Cat messages (AC30: enlarged avatars + urgency badge) */}
@@ -126,13 +128,13 @@ export function BrakeModal() {
             <div key={msg.catId} className="flex items-start gap-3">
               <div className="relative shrink-0">
                 <CatAvatar catId={msg.catId} size={48} />
-                <span className="absolute -bottom-1 -right-1 text-[10px] px-1 py-0.5 rounded bg-white/90 border border-gray-200">
+                <span className="absolute -bottom-1 -right-1 text-[10px] px-1 py-0.5 rounded bg-cafe-surface/90 border border-cafe">
                   {alertBadge}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-semibold text-gray-600">{msg.nickname}</span>
-                <p className="text-sm text-gray-700 mt-0.5">{msg.text}</p>
+                <span className="text-xs font-semibold text-cafe-secondary">{msg.nickname}</span>
+                <p className="text-sm text-cafe-secondary mt-0.5">{msg.text}</p>
               </div>
             </div>
           ))}
@@ -143,7 +145,7 @@ export function BrakeModal() {
           <button
             type="button"
             onClick={handleTtsRetry}
-            className="w-full text-xs text-gray-500 hover:text-gray-700 underline py-1"
+            className="w-full text-xs text-cafe-secondary hover:text-cafe-secondary underline py-1"
           >
             点击播放猫猫语音
           </button>
@@ -153,16 +155,18 @@ export function BrakeModal() {
         {showReason && (
           <div className="space-y-2">
             {/* biome-ignore lint/a11y/noLabelWithoutControl: label wraps adjacent input */}
-            <label className="text-xs text-gray-500">为什么需要继续？（必填）</label>
+            <label className="text-xs text-cafe-secondary">为什么需要继续？（必填）</label>
             <input
               ref={(el) => el?.focus()}
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="例：正在修复线上 P0 故障"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+              className="w-full border border-cafe rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+              onCompositionStart={ime.onCompositionStart}
+              onCompositionEnd={ime.onCompositionEnd}
               onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing) return;
+                if (ime.isComposing()) return;
                 if (e.key === 'Enter' && reason.trim()) handleContinue();
               }}
             />
@@ -192,7 +196,7 @@ export function BrakeModal() {
               type="button"
               onClick={handleContinue}
               disabled={submitting || (showReason && !reason.trim())}
-              className="w-full py-2 rounded-xl text-sm text-gray-500 hover:bg-gray-100 transition-colors disabled:opacity-50"
+              className="w-full py-2 rounded-xl text-sm text-cafe-secondary hover:bg-cafe-surface-elevated transition-colors disabled:opacity-50"
             >
               {showReason ? '确认继续' : '我有紧急情况（需要理由）'}
             </button>
@@ -205,7 +209,7 @@ export function BrakeModal() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-xs text-gray-400">
+        <p className="text-center text-xs text-cafe-muted">
           {nightMode ? '深夜了，身体比代码更重要喵~' : '适当的暂停是为了更好的出发喵~'}
         </p>
       </div>

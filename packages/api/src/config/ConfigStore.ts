@@ -6,6 +6,7 @@
  */
 
 import { clearBudgetCache } from './cat-budgets.js';
+import { configEventBus, createChangeSetId } from './config-event-bus.js';
 
 export type ConfigSnapshotPath = readonly [string, ...string[]];
 
@@ -59,6 +60,18 @@ const CONFIG_KEY_DEFINITIONS: Record<string, ConfigKeyDefinition> = {
     validate: (value) => ['true', 'false'].includes(value),
     riskLevel: 'high',
   },
+  'ui.bubble.thinking': {
+    envKey: 'UI_BUBBLE_THINKING_DEFAULT',
+    snapshotPath: ['ui', 'bubbleDefaults', 'thinking'],
+    validate: (value) => ['expanded', 'collapsed'].includes(value),
+    riskLevel: 'standard',
+  },
+  'ui.bubble.cliOutput': {
+    envKey: 'UI_BUBBLE_CLI_OUTPUT_DEFAULT',
+    snapshotPath: ['ui', 'bubbleDefaults', 'cliOutput'],
+    validate: (value) => ['expanded', 'collapsed'].includes(value),
+    riskLevel: 'standard',
+  },
 };
 
 class ConfigStoreImpl {
@@ -80,9 +93,19 @@ class ConfigStoreImpl {
     if (!definition.validate(normalized)) {
       throw new Error(`invalid value for key '${key}': ${normalized}`);
     }
+    const oldValue = this.overlay.get(key) ?? process.env[definition.envKey];
     this.overlay.set(key, normalized);
     process.env[definition.envKey] = normalized;
     clearBudgetCache();
+    if (normalized !== oldValue) {
+      configEventBus.emitChange({
+        source: 'config-store',
+        scope: 'key',
+        changedKeys: [definition.envKey],
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      });
+    }
   }
 
   /** Get a config key value (overlay first, then env). */

@@ -280,6 +280,11 @@ export class RedisThreadStore implements IThreadStore {
     await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'title', title);
   }
 
+  async updateProjectPath(threadId: string, projectPath: string): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'projectPath', projectPath);
+  }
+
   async updatePin(threadId: string, pinned: boolean): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.redis.eval(
@@ -437,6 +442,19 @@ export class RedisThreadStore implements IThreadStore {
       await this.redis.hdel(key, 'connectorHubState');
     } else {
       await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'connectorHubState', JSON.stringify(state));
+    }
+  }
+
+  async updateBubbleDisplay(
+    threadId: string,
+    field: 'bubbleThinking' | 'bubbleCli',
+    value: 'global' | 'expanded' | 'collapsed',
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (value === 'global') {
+      await this.redis.hdel(key, field);
+    } else {
+      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, field, value);
     }
   }
 
@@ -646,6 +664,12 @@ export class RedisThreadStore implements IThreadStore {
     }
     if (data.voiceMode === '1') {
       result.voiceMode = true;
+    }
+    if (data.bubbleThinking === 'expanded' || data.bubbleThinking === 'collapsed') {
+      result.bubbleThinking = data.bubbleThinking;
+    }
+    if (data.bubbleCli === 'expanded' || data.bubbleCli === 'collapsed') {
+      result.bubbleCli = data.bubbleCli;
     }
     const deletedAt = parseInt(data.deletedAt ?? '0', 10);
     if (deletedAt > 0) {

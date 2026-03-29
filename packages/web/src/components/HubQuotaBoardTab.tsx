@@ -241,7 +241,7 @@ function PoolGroupSection({ group }: { group: AccountQuotaPoolGroup }) {
             />
           ))
         ) : (
-          <div className="rounded-[14px] bg-white/80 px-4 py-3 text-xs text-[#8A776B]">暂无 API Key 账号</div>
+          <div className="rounded-[14px] bg-cafe-surface/80 px-4 py-3 text-xs text-[#8A776B]">暂无 API Key 账号</div>
         )}
       </div>
     </section>
@@ -261,7 +261,7 @@ function PoolSection({
 }) {
   // Compute worst utilization for group header dot
   const worstUtil = items.length > 0 ? Math.max(...items.map(toUtilization)) : -1;
-  const dotClass = worstUtil >= 0 ? riskDotClass(worstUtil) : 'text-gray-300';
+  const dotClass = worstUtil >= 0 ? riskDotClass(worstUtil) : 'text-cafe-muted';
 
   return (
     <div className="rounded-[16px] border border-[#F1E7DF] bg-[#FFFCF8] px-4 py-3">

@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubProviderProfileItem, type ProfileEditPayload } from './HubProviderProfileItem';
-import { CreateApiKeyProfileSection, ProviderProfilesSummaryCard } from './hub-provider-profiles.sections';
+import {
+  type ApiProtocol,
+  CreateApiKeyProfileSection,
+  ProviderProfilesSummaryCard,
+} from './hub-provider-profiles.sections';
 import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
 import { ensureBuiltinProviderProfiles, resolveAccountActionId } from './hub-provider-profiles.view';
 
@@ -13,6 +17,7 @@ export function HubProviderProfilesTab() {
   const [data, setData] = useState<ProviderProfilesResponse | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [createDisplayName, setCreateDisplayName] = useState('');
+  const [createProtocol, setCreateProtocol] = useState<ApiProtocol>('openai');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
   const [createModels, setCreateModels] = useState<string[]>([]);
@@ -71,6 +76,7 @@ export function HubProviderProfilesTab() {
         method: 'POST',
         body: JSON.stringify({
           displayName: createDisplayName.trim(),
+          protocol: createProtocol,
           authType: 'api_key',
           baseUrl: createBaseUrl.trim(),
           apiKey: createApiKey.trim(),
@@ -78,16 +84,18 @@ export function HubProviderProfilesTab() {
         }),
       });
       setCreateDisplayName('');
+      setCreateProtocol('openai');
       setCreateBaseUrl('');
       setCreateApiKey('');
       setCreateModels([]);
       await fetchProfiles();
+      window.dispatchEvent(new CustomEvent('provider-profiles-changed'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyId(null);
     }
-  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, fetchProfiles]);
+  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, createProtocol, fetchProfiles]);
 
   const deleteProfile = useCallback(
     async (profileId: string) => {
@@ -96,6 +104,7 @@ export function HubProviderProfilesTab() {
       try {
         await callApi(`/api/provider-profiles/${profileId}`, { method: 'DELETE' });
         await fetchProfiles();
+        window.dispatchEvent(new CustomEvent('provider-profiles-changed'));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -115,6 +124,7 @@ export function HubProviderProfilesTab() {
           body: JSON.stringify(payload),
         });
         await fetchProfiles();
+        window.dispatchEvent(new CustomEvent('provider-profiles-changed'));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -129,8 +139,8 @@ export function HubProviderProfilesTab() {
   const customProfiles = useMemo(() => displayProfiles.filter((profile) => !profile.builtin), [displayProfiles]);
   const displayCards = useMemo(() => [...builtinProfiles, ...customProfiles], [builtinProfiles, customProfiles]);
 
-  if (loading) return <p className="text-sm text-gray-400">加载中...</p>;
-  if (!data) return <p className="text-sm text-gray-400">暂无数据</p>;
+  if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
+  if (!data) return <p className="text-sm text-cafe-muted">暂无数据</p>;
 
   return (
     <div className="space-y-4">
@@ -152,11 +162,13 @@ export function HubProviderProfilesTab() {
 
       <CreateApiKeyProfileSection
         displayName={createDisplayName}
+        protocol={createProtocol}
         baseUrl={createBaseUrl}
         apiKey={createApiKey}
         models={createModels}
         busy={busyId === 'create'}
         onDisplayNameChange={setCreateDisplayName}
+        onProtocolChange={setCreateProtocol}
         onBaseUrlChange={setCreateBaseUrl}
         onApiKeyChange={setCreateApiKey}
         onModelsChange={setCreateModels}

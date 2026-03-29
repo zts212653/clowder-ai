@@ -189,6 +189,35 @@ export interface ReviewPolicy {
   readonly excludeUnavailable: boolean;
 }
 
+// ── F136 Phase 4: Account config types ──────────────────────────────────
+
+/** Protocol that the LLM endpoint speaks. */
+export type AccountProtocol = 'anthropic' | 'openai' | 'google';
+
+/**
+ * Account configuration — lives in cat-catalog.json `accounts` section.
+ * Maps an accountRef to its LLM endpoint metadata (no secrets).
+ */
+export interface AccountConfig {
+  readonly authType: 'oauth' | 'api_key';
+  readonly protocol: AccountProtocol;
+  readonly baseUrl?: string;
+  readonly models?: readonly string[];
+  readonly displayName?: string;
+}
+
+/**
+ * Credential entry — lives in ~/.cat-cafe/credentials.json (global keychain).
+ * HC-1: Object structure supporting both api_key and oauth token with TTL + refresh.
+ */
+export interface CredentialEntry {
+  readonly apiKey?: string;
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  /** Token expiry as epoch milliseconds. */
+  readonly expiresAt?: number;
+}
+
 /**
  * Root config v1: breeds only (legacy)
  */
@@ -222,6 +251,8 @@ export interface CatCafeConfigV2 {
   readonly roster: Roster;
   readonly reviewPolicy: ReviewPolicy;
   readonly coCreator?: CoCreatorConfig;
+  /** F136 Phase 4: Account metadata (accountRef → config). HC-2: runtime write source. */
+  readonly accounts?: Readonly<Record<string, AccountConfig>>;
 }
 
 /**

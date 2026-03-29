@@ -4,6 +4,7 @@
  * Calls GET /api/projects/browse to list directories.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 
 interface BrowseEntry {
@@ -82,6 +83,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [pathInput, setPathInput] = useState('');
+  const ime = useIMEGuard();
 
   const fetchDirectory = useCallback(async (path?: string, fallbackOnForbidden = false) => {
     setIsLoading(true);
@@ -167,7 +169,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5 min-h-0">
         {isLoading && (
           <div className="flex items-center justify-center py-8">
-            <span className="text-xs text-gray-400 animate-pulse">Loading...</span>
+            <span className="text-xs text-cafe-muted animate-pulse">Loading...</span>
           </div>
         )}
 
@@ -185,7 +187,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
 
         {!isLoading && browseResult && browseResult.entries.length === 0 && (
           <div className="flex items-center justify-center py-8">
-            <span className="text-xs text-gray-400">No subdirectories</span>
+            <span className="text-xs text-cafe-muted">No subdirectories</span>
           </div>
         )}
 
@@ -230,8 +232,10 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
             type="text"
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.nativeEvent.isComposing) handlePathSubmit();
+              if (e.key === 'Enter' && !ime.isComposing()) handlePathSubmit();
             }}
             placeholder="Enter path..."
             className="flex-1 text-xs px-3 py-2 rounded-lg border border-[#e8d9cf] bg-cafe-white focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
@@ -240,7 +244,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
             <button
               type="button"
               onClick={handlePathSubmit}
-              className="px-2.5 py-2 rounded-lg border border-[#e8d9cf] bg-cafe-white text-gray-600 hover:bg-cocreator-bg transition-colors"
+              className="px-2.5 py-2 rounded-lg border border-[#e8d9cf] bg-cafe-white text-cafe-secondary hover:bg-cocreator-bg transition-colors"
               aria-label="Go to path"
             >
               <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -257,14 +261,14 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
         {/* ── Action bar ── */}
         <div className="flex items-center gap-2 pt-1">
           {browseResult && (
-            <span className="text-[11px] text-gray-500 truncate flex-1" title={browseResult.current}>
+            <span className="text-[11px] text-cafe-secondary truncate flex-1" title={browseResult.current}>
               {browseResult.current}
             </span>
           )}
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded-lg border border-[#e8d9cf] text-gray-600 text-xs font-medium transition-colors hover:bg-gray-50"
+            className="px-4 py-2 rounded-lg border border-[#e8d9cf] text-cafe-secondary text-xs font-medium transition-colors hover:bg-cafe-surface-elevated"
           >
             取消
           </button>
@@ -305,7 +309,7 @@ function FolderIcon({ className }: { className?: string }) {
 
 function TerminalIcon() {
   return (
-    <svg aria-hidden="true" className="w-3.5 h-3.5 text-gray-400 mt-2.5" viewBox="0 0 20 20" fill="currentColor">
+    <svg aria-hidden="true" className="w-3.5 h-3.5 text-cafe-muted mt-2.5" viewBox="0 0 20 20" fill="currentColor">
       <path
         fillRule="evenodd"
         d="M2 4.25A2.25 2.25 0 014.25 2h11.5A2.25 2.25 0 0118 4.25v11.5A2.25 2.25 0 0115.75 18H4.25A2.25 2.25 0 012 15.75V4.25zM7.664 6.23a.75.75 0 00-1.078 1.04l2.705 2.805-2.705 2.805a.75.75 0 001.078 1.04l3.25-3.37a.75.75 0 000-1.04l-3.25-3.28zM11 13a.75.75 0 000 1.5h3a.75.75 0 000-1.5h-3z"

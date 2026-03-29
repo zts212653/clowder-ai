@@ -7,7 +7,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import { CiCdCheckPoller } from './CiCdCheckPoller.js';
-import type { CiCdRouter } from './CiCdRouter.js';
+import type { CiCdRouter, CiPollResult } from './CiCdRouter.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 import type { IPrTrackingStore, PrTrackingEntry } from './PrTrackingStore.js';
 
@@ -15,6 +15,8 @@ export interface CiCdCheckTaskSpecOptions {
   readonly prTrackingStore: IPrTrackingStore;
   readonly cicdRouter: CiCdRouter;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
+  /** Injectable for testing — defaults to CiCdCheckPoller.fetchPrStatus */
+  readonly fetchPrStatus?: (repoFullName: string, prNumber: number) => Promise<CiPollResult | null>;
   readonly log: {
     info: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
@@ -24,7 +26,7 @@ export interface CiCdCheckTaskSpecOptions {
 }
 
 export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpec_P1<PrTrackingEntry> {
-  // Reuse fetchPrStatus from CiCdCheckPoller (public method)
+  // Reuse fetchPrStatus from CiCdCheckPoller (public method) unless overridden
   const poller = new CiCdCheckPoller({
     prTrackingStore: opts.prTrackingStore,
     cicdRouter: opts.cicdRouter,
@@ -32,6 +34,7 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
     log: opts.log as never,
     pollIntervalMs: opts.pollIntervalMs,
   });
+  const fetchPrStatus = opts.fetchPrStatus ?? poller.fetchPrStatus.bind(poller);
 
   return {
     id: 'cicd-check',
@@ -60,13 +63,18 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
       timeoutMs: 30_000,
       async execute(entry: PrTrackingEntry, _subjectKey: string, _ctx: ExecuteContext) {
         // Replicate pollOne logic: fetch → route → optional trigger
-        const pollResult = await poller.fetchPrStatus(entry.repoFullName, entry.prNumber);
+        const pollResult = await fetchPrStatus(entry.repoFullName, entry.prNumber);
         if (!pollResult) return;
 
         const routeResult = await opts.cicdRouter.route(pollResult);
 
-        if (routeResult.kind === 'notified' && routeResult.bucket === 'fail' && opts.invokeTrigger) {
-          const policy: ConnectorTriggerPolicy = { priority: 'urgent', reason: 'github_ci_failure' };
+        if (routeResult.kind === 'notified' && opts.invokeTrigger) {
+          const isFail = routeResult.bucket === 'fail';
+          const policy: ConnectorTriggerPolicy = {
+            priority: isFail ? 'urgent' : 'normal',
+            reason: isFail ? 'github_ci_failure' : 'github_ci_pass',
+            suggestedSkill: isFail ? undefined : 'merge-gate',
+          };
           opts.invokeTrigger.trigger(
             routeResult.threadId,
             routeResult.catId as CatId,
@@ -76,7 +84,7 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
             undefined,
             policy,
           );
-          opts.log.info(`[cicd-check] Triggered ${routeResult.catId} for CI failure`);
+          opts.log.info(`[cicd-check] Triggered ${routeResult.catId} for CI ${isFail ? 'failure' : 'pass'}`);
         }
       },
     },
@@ -84,5 +92,11 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
     outcome: { whenNoSignal: 'record' },
     enabled: () => true,
     actor: { role: 'repo-watcher', costTier: 'cheap' },
+    display: {
+      label: 'CI/CD 检查',
+      category: 'pr',
+      description: '监控 tracked PR 的 CI 状态变化',
+      subjectKind: 'pr',
+    },
   };
 }

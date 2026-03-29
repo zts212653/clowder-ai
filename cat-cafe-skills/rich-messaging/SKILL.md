@@ -36,6 +36,8 @@ triggers:
 
 你可以发送富媒体消息——语音、图片、卡片、清单、代码 diff、交互选择。不只是打字！
 
+**不只是对话**：定时任务唤醒你后，你依然拥有全部 rich block 能力——发图、发语音、发 HTML 面板、发交互选择，都可以。
+
 ## 首次使用
 
 **每个 session 首次发 rich block 前，先调 `get_rich_block_rules` 获取完整字段规格。**
@@ -45,13 +47,13 @@ triggers:
 
 | Kind | 什么时候用 | 关键字段 |
 |------|-----------|---------|
-| **audio** | 打招呼、表达情感、庆祝、鼓励 | `text`（短句口语化） |
+| **audio** | 打招呼、表达情感、庆祝、鼓励、定时播报 | `text`（短句口语化） |
 | **card** | 状态报告、决策摘要、review 结论 | `title` + `tone` |
 | **checklist** | 待办、验证步骤、行动项 | `items` |
 | **diff** | 代码修改建议、重构对比 | `filePath` + `diff` |
-| **media_gallery** | 截图、设计稿、多图对比 | `items` (url) |
+| **media_gallery** | 发送已有图片（头像、照片）、截图、设计稿、多图对比 | `items` (url) |
 | **interactive** | 让用户选方案、勾选项、确认操作 | `interactiveType` + `options` (id+label) |
-| **html_widget** | 简单可视化：图表、计算器、CSS 动画、可交互 HTML 组件 | `html`（完整 HTML/JS/CSS 代码字符串） |
+| **html_widget** | 你写的 HTML 直接挂上去：图表、计算器、CSS 动画、数据面板 | `html`（完整 HTML/JS/CSS 代码字符串） |
 
 ## 最小工作示例
 
@@ -121,6 +123,7 @@ triggers:
 | 错误 | 后果 | 正确做法 |
 |------|------|----------|
 | 不知道自己能发语音 | 铲屎官说"发语音"你说"我是文字猫" | 你可以！用 audio block |
+| "发图"只想到 image-generation | 走 Chrome MCP 现场生成，慢且不稳定 | 先看家里有没有已有图片（`/avatars/`、`/uploads/`），有就 media_gallery 直接发 |
 | audio 写长段话 | 合成效果差 | 短句口语化，1-2 句 |
 | 只发 block 不写文字 | 猫猫朋友看不懂上下文 | 先 post_message 再 block |
 | `"type"` 而不是 `"kind"` | block 创建失败 | 字段是 `kind` 不是 `type` |

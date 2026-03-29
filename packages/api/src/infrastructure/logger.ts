@@ -50,12 +50,6 @@ if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
 
-/**
- * Transport level is set to 'trace' (pass-through) so the parent logger's
- * `level` is the sole gate.  This ensures runtime level changes (e.g.
- * `logger.level = 'debug'`) take effect immediately — Pino transport workers
- * cache their level at init and ignore later parent-level changes.
- */
 const transport = pino.transport({
   targets: [
     {
@@ -96,75 +90,67 @@ export function createModuleLogger(module: string): pino.Logger {
 export const LOG_DIR_PATH = LOG_DIR;
 
 /**
- * KD-7: Redirect unmigrated console.* to Pino log file AND stderr.
- *
- * Pre-sanitizes args recursively (redacts sensitive keys at any nesting depth)
- * before formatting, so both the Pino msg and stderr output are safe.
- * This also preserves printf-style interpolation since we can safely
- * call utilFormat on the full (sanitized) argument list.
+ * KD-7: Redirect unmigrated console.* to both Pino and stderr.
+ * Sanitize args before utilFormat so secrets cannot leak through msg strings.
  */
 const consoleLogger = logger.child({ module: 'console' });
 
-const origLog = console.log;
-const origWarn = console.warn;
-const origError = console.error;
-const origInfo = console.info;
-const origDebug = console.debug;
-
-/** Leaf key names (lowercased) extracted from REDACT_PATHS for case-insensitive pre-sanitization. */
 const SENSITIVE_KEYS = new Set(
-  REDACT_PATHS.map((p) => {
-    const segments = p.split(/[.[]/);
+  REDACT_PATHS.map((path) => {
+    const segments = path.split(/[.[]/);
     return segments[segments.length - 1].replace(/[\]"]/g, '').trim().toLowerCase();
   }).filter(Boolean),
 );
 
-/** Sanitize enumerable own properties of an object, redacting sensitive keys. */
 function sanitizeEntries(obj: object, visited: WeakSet<object>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    result[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : sanitizeArg(v, visited);
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = SENSITIVE_KEYS.has(key.toLowerCase()) ? '[REDACTED]' : sanitizeArg(value, visited);
   }
   return result;
 }
 
-/** Recursively redact sensitive keys at any nesting depth. Handles circular refs and throwing getters. */
-function sanitizeArg(val: unknown, seen?: WeakSet<object>): unknown {
-  if (val === null || typeof val !== 'object') return val;
-  const visited = seen ?? new WeakSet();
-  if (visited.has(val as object)) return '[Circular]';
-  visited.add(val as object);
-  if (Array.isArray(val)) return val.map((v) => sanitizeArg(v, visited));
-  if (ArrayBuffer.isView(val)) return val;
-  if (val instanceof Error) {
-    const cleaned: Record<string, unknown> = { name: val.name, message: val.message, stack: val.stack };
+function sanitizeArg(value: unknown, seen?: WeakSet<object>): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  const visited = seen ?? new WeakSet<object>();
+  if (visited.has(value as object)) return '[Circular]';
+  visited.add(value as object);
+  if (Array.isArray(value)) return value.map((item) => sanitizeArg(item, visited));
+  if (ArrayBuffer.isView(value)) return value;
+  if (value instanceof Error) {
+    const cleaned: Record<string, unknown> = {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    };
     try {
-      Object.assign(cleaned, sanitizeEntries(val, visited));
+      Object.assign(cleaned, sanitizeEntries(value, visited));
     } catch {
-      /* throwing getters */
+      /* ignore throwing getters */
     }
     return cleaned;
   }
   try {
-    return sanitizeEntries(val as Record<string, unknown>, visited);
+    return sanitizeEntries(value as Record<string, unknown>, visited);
   } catch {
     return '[Object]';
   }
 }
 
-type PinoLevel = 'info' | 'warn' | 'error' | 'debug';
-function consoleToPino(level: PinoLevel, orig: (...a: unknown[]) => void): (...a: unknown[]) => void {
+type ConsolePinoLevel = 'info' | 'warn' | 'error' | 'debug';
+type ConsoleMethodLabel = 'log' | 'warn' | 'error' | 'info' | 'debug';
+
+function consoleToPino(level: ConsolePinoLevel, stderrLabel: ConsoleMethodLabel): (...args: unknown[]) => void {
   return (...args: unknown[]) => {
-    const sanitized = args.map((a) => sanitizeArg(a));
+    const sanitized = args.map((arg) => sanitizeArg(arg));
     const msg = utilFormat(...sanitized);
     consoleLogger[level](msg);
-    process.stderr.write(`[console.${level}] ${msg}\n`);
-    orig.apply(console, args);
+    process.stderr.write(`[console.${stderrLabel}] ${msg}\n`);
   };
 }
 
-console.log = consoleToPino('info', origLog);
-console.warn = consoleToPino('warn', origWarn);
-console.error = consoleToPino('error', origError);
-console.info = consoleToPino('info', origInfo);
-console.debug = consoleToPino('debug', origDebug);
+console.log = consoleToPino('info', 'log');
+console.warn = consoleToPino('warn', 'warn');
+console.error = consoleToPino('error', 'error');
+console.info = consoleToPino('info', 'info');
+console.debug = consoleToPino('debug', 'debug');

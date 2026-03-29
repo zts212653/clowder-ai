@@ -4,7 +4,7 @@ const tierClassMap: Record<SignalTier, string> = {
   1: 'bg-opus-bg text-opus-dark border-opus-light',
   2: 'bg-codex-bg text-codex-dark border-codex-light',
   3: 'bg-gemini-bg text-gemini-dark border-gemini-light',
-  4: 'bg-gray-100 text-gray-600 border-gray-300',
+  4: 'bg-cafe-surface-elevated text-cafe-secondary border-cafe',
 };
 
 interface SignalTierBadgeProps {

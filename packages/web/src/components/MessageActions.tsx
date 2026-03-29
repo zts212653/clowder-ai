@@ -4,9 +4,19 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
+
+function showErrorToast(title: string, body?: Record<string, unknown>) {
+  useToastStore.getState().addToast({
+    type: 'error',
+    title,
+    message: (body?.error as string) ?? '操作未成功，请重试',
+    duration: 4000,
+  });
+}
 
 type DialogState =
   | { type: 'none' }
@@ -24,7 +34,7 @@ interface MessageActionsProps {
 
 export function MessageActions({ message, threadId, children }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
-  const removeMessage = useChatStore((s) => s.removeMessage);
+  const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   const router = useRouter();
 
   const isUser = message.type === 'user' && !message.catId;
@@ -58,11 +68,16 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: getUserId(), mode: 'soft' }),
       });
-      if (res.ok) removeMessage(message.id);
+      if (res.ok) {
+        removeThreadMessage(threadId, message.id);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        showErrorToast('删除失败', body);
+      }
     } catch {
-      /* socket event will sync if needed */
+      showErrorToast('删除失败');
     }
-  }, [message.id, removeMessage]);
+  }, [message.id, threadId, removeThreadMessage]);
 
   const confirmHardDelete = useCallback(async () => {
     if (dialog.type !== 'hard-delete') return;
@@ -74,11 +89,16 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: getUserId(), mode: 'hard', confirmTitle }),
       });
-      if (res.ok) removeMessage(message.id);
+      if (res.ok) {
+        removeThreadMessage(threadId, message.id);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        showErrorToast('删除失败', body);
+      }
     } catch {
-      /* socket event will sync if needed */
+      showErrorToast('删除失败');
     }
-  }, [dialog, message.id, removeMessage]);
+  }, [dialog, message.id, threadId, removeThreadMessage]);
 
   const handleBranchConfirm = useCallback(() => {
     if (dialog.type !== 'edit') return;
@@ -102,9 +122,12 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       if (res.ok) {
         const { threadId: newThreadId } = await res.json();
         router.push(`/thread/${newThreadId}`);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        showErrorToast('分支创建失败', body);
       }
     } catch {
-      /* show error in future */
+      showErrorToast('分支创建失败');
     }
   }, [dialog, message.id, message.content, threadId, router]);
 
@@ -122,9 +145,12 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       if (res.ok) {
         const { threadId: newThreadId } = await res.json();
         router.push(`/thread/${newThreadId}`);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        showErrorToast('分支创建失败', body);
       }
     } catch {
-      /* show error in future */
+      showErrorToast('分支创建失败');
     } finally {
       branchingRef.current = false;
     }
@@ -138,11 +164,11 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
 
       {canAct && (
         <div
-          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 flex gap-0.5 transition-opacity bg-white/90 rounded-lg shadow-sm border border-gray-200 px-1 py-0.5`}
+          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
         >
           <button
             onClick={handleSoftDelete}
-            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-500 transition-colors"
+            className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-red-500 transition-colors"
             title="删除"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -156,7 +182,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
           </button>
           <button
             onClick={handleBranchDirect}
-            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-green-600 transition-colors"
+            className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-green-600 transition-colors"
             title="从这里分支"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -166,7 +192,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
           {isUser && (
             <button
               onClick={handleEdit}
-              className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-blue-500 transition-colors"
+              className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-blue-500 transition-colors"
               title="编辑 (创建分支)"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -181,7 +207,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
           )}
           <button
             onClick={handleHardDelete}
-            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-600 transition-colors"
+            className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-red-600 transition-colors"
             title="永久删除"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -223,15 +249,21 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       {/* Edit: inline textarea */}
       {dialog.type === 'edit' && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={close}>
-          <div className="bg-white rounded-xl shadow-xl p-6 max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="bg-cafe-surface rounded-xl shadow-xl p-6 max-w-lg w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-base font-semibold mb-2">编辑消息</h3>
             <textarea
               value={dialog.editedContent}
               onChange={(e) => setDialog({ ...dialog, editedContent: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 h-32 resize-y focus:outline-none focus:ring-2 focus:ring-blue-300"
+              className="w-full border border-cafe rounded-lg px-3 py-2 text-sm mb-4 h-32 resize-y focus:outline-none focus:ring-2 focus:ring-blue-300"
             />
             <div className="flex justify-end gap-2">
-              <button onClick={close} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
+              <button
+                onClick={close}
+                className="px-4 py-2 text-sm text-cafe-secondary hover:bg-cafe-surface-elevated rounded-lg"
+              >
                 取消
               </button>
               <button

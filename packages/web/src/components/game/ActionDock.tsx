@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 
 interface ActionDockProps {
   onVote: () => void;
@@ -10,6 +11,7 @@ interface ActionDockProps {
 
 export function ActionDock({ onVote, onSpeak, disabled = false }: ActionDockProps) {
   const [input, setInput] = useState('');
+  const ime = useIMEGuard();
 
   const handleSend = () => {
     const trimmed = input.trim();
@@ -34,8 +36,10 @@ export function ActionDock({ onVote, onSpeak, disabled = false }: ActionDockProp
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}
+        onCompositionStart={ime.onCompositionStart}
+        onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') handleSend();
+          if (e.key === 'Enter' && !ime.isComposing()) handleSend();
         }}
         placeholder="输入发言内容..."
         disabled={disabled}

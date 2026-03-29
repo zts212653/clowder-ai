@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { type CustomTerm, useVoiceSettingsStore } from '@/stores/voiceSettingsStore';
 import builtInTerms from '@/utils/voice-terms.json';
 
@@ -10,8 +11,8 @@ const BUILT_IN_ENTRIES = Object.entries(builtInTerms as Record<string, string>).
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
-      <h3 className="text-xs font-semibold text-gray-700 mb-2">{title}</h3>
+    <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
+      <h3 className="text-xs font-semibold text-cafe-secondary mb-2">{title}</h3>
       {children}
     </section>
   );
@@ -21,6 +22,7 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const toRef = useRef<HTMLInputElement>(null);
+  const ime = useIMEGuard();
 
   const handleAdd = () => {
     if (!from.trim() || !to.trim()) return;
@@ -30,11 +32,11 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleAdd();
+    if (e.key === 'Enter' && !ime.isComposing()) handleAdd();
   };
 
   const handleFromKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.nativeEvent.isComposing && from.trim() && !to.trim()) {
+    if (e.key === 'Enter' && !ime.isComposing() && from.trim() && !to.trim()) {
       toRef.current?.focus();
     } else {
       handleKeyDown(e);
@@ -48,17 +50,21 @@ function AddTermRow({ onAdd }: { onAdd: (from: string, to: string) => void }) {
         value={from}
         onChange={(e) => setFrom(e.target.value)}
         placeholder="误识别词"
-        className="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+        className="flex-1 text-xs border border-cafe rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+        onCompositionStart={ime.onCompositionStart}
+        onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={handleFromKeyDown}
       />
-      <span className="text-gray-400 text-xs">&rarr;</span>
+      <span className="text-cafe-muted text-xs">&rarr;</span>
       <input
         ref={toRef}
         type="text"
         value={to}
         onChange={(e) => setTo(e.target.value)}
         placeholder="正确词"
-        className="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+        className="flex-1 text-xs border border-cafe rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+        onCompositionStart={ime.onCompositionStart}
+        onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={handleKeyDown}
       />
       <button
@@ -86,6 +92,7 @@ function CustomTermRow({
   const [editing, setEditing] = useState(false);
   const [editFrom, setEditFrom] = useState(term.from);
   const [editTo, setEditTo] = useState(term.to);
+  const ime = useIMEGuard();
 
   const startEdit = () => {
     setEditFrom(term.from);
@@ -102,7 +109,7 @@ function CustomTermRow({
   const cancelEdit = () => setEditing(false);
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return;
+    if (ime.isComposing()) return;
     if (e.key === 'Enter') saveEdit();
     if (e.key === 'Escape') cancelEdit();
   };
@@ -114,14 +121,18 @@ function CustomTermRow({
           type="text"
           value={editFrom}
           onChange={(e) => setEditFrom(e.target.value)}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
           onKeyDown={handleEditKeyDown}
           className="flex-1 border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500"
         />
-        <span className="text-gray-400">&rarr;</span>
+        <span className="text-cafe-muted">&rarr;</span>
         <input
           type="text"
           value={editTo}
           onChange={(e) => setEditTo(e.target.value)}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
           onKeyDown={handleEditKeyDown}
           className="flex-1 border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500"
         />
@@ -133,7 +144,7 @@ function CustomTermRow({
         >
           &#10003;
         </button>
-        <button onClick={cancelEdit} className="text-gray-400 hover:text-gray-600" title="取消">
+        <button onClick={cancelEdit} className="text-cafe-muted hover:text-cafe-secondary" title="取消">
           &#10005;
         </button>
       </div>
@@ -143,15 +154,15 @@ function CustomTermRow({
   return (
     <div className="flex items-center gap-2 text-xs">
       <code className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{term.from}</code>
-      <span className="text-gray-400">&rarr;</span>
+      <span className="text-cafe-muted">&rarr;</span>
       <code className="bg-green-50 text-green-700 px-1.5 py-0.5 rounded">{term.to}</code>
       <div className="ml-auto flex items-center gap-1">
-        <button onClick={startEdit} className="text-gray-400 hover:text-blue-500 transition-colors" title="编辑">
+        <button onClick={startEdit} className="text-cafe-muted hover:text-blue-500 transition-colors" title="编辑">
           &#9998;
         </button>
         <button
           onClick={() => onRemove(index)}
-          className="text-gray-400 hover:text-red-500 transition-colors"
+          className="text-cafe-muted hover:text-red-500 transition-colors"
           title="删除"
         >
           &times;
@@ -169,7 +180,7 @@ export function VoiceSettingsPanel() {
     <>
       {/* Custom terms */}
       <Section title="自定义术语纠正">
-        <p className="text-[11px] text-gray-500 mb-2">添加你自己的纠正规则。自定义规则优先于内置词典。</p>
+        <p className="text-[11px] text-cafe-secondary mb-2">添加你自己的纠正规则。自定义规则优先于内置词典。</p>
         {settings.customTerms.length > 0 ? (
           <div className="space-y-1.5 mb-1">
             {settings.customTerms.map((term, i) => (
@@ -183,7 +194,7 @@ export function VoiceSettingsPanel() {
             ))}
           </div>
         ) : (
-          <p className="text-[11px] text-gray-400 italic">暂无自定义规则</p>
+          <p className="text-[11px] text-cafe-muted italic">暂无自定义规则</p>
         )}
         <AddTermRow onAdd={addTerm} />
       </Section>
@@ -199,10 +210,10 @@ export function VoiceSettingsPanel() {
         {showBuiltIn && (
           <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
             {BUILT_IN_ENTRIES.map(([from, to]) => (
-              <div key={from} className="flex items-center gap-2 text-xs text-gray-500">
-                <code className="bg-gray-100 px-1.5 py-0.5 rounded">{from}</code>
+              <div key={from} className="flex items-center gap-2 text-xs text-cafe-secondary">
+                <code className="bg-cafe-surface-elevated px-1.5 py-0.5 rounded">{from}</code>
                 <span>&rarr;</span>
-                <code className="bg-gray-100 px-1.5 py-0.5 rounded">{to}</code>
+                <code className="bg-cafe-surface-elevated px-1.5 py-0.5 rounded">{to}</code>
               </div>
             ))}
           </div>
@@ -212,11 +223,11 @@ export function VoiceSettingsPanel() {
       {/* Language selection */}
       <Section title="语言设置">
         <div className="flex items-center gap-3">
-          <label className="text-xs text-gray-600">转写语言</label>
+          <label className="text-xs text-cafe-secondary">转写语言</label>
           <select
             value={settings.language}
             onChange={(e) => setLanguage(e.target.value as typeof settings.language)}
-            className="text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+            className="text-xs border border-cafe rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
           >
             <option value="zh">中文</option>
             <option value="en">English</option>
@@ -227,7 +238,7 @@ export function VoiceSettingsPanel() {
 
       {/* Custom prompt (advanced) */}
       <Section title="Whisper 上下文提示（高级）">
-        <p className="text-[11px] text-gray-500 mb-2">
+        <p className="text-[11px] text-cafe-secondary mb-2">
           自定义发给 Whisper 的上下文提示词。模型会偏向识别提示中出现的术语。留空使用默认值。
         </p>
         <textarea
@@ -235,13 +246,13 @@ export function VoiceSettingsPanel() {
           onChange={(e) => setCustomPrompt(e.target.value || null)}
           placeholder="使用默认提示词"
           rows={3}
-          className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400 resize-vertical font-mono"
+          className="w-full text-xs border border-cafe rounded px-2 py-1.5 focus:outline-none focus:border-blue-400 resize-vertical font-mono"
         />
       </Section>
 
       {/* Reset */}
       <div className="flex justify-end">
-        <button onClick={resetAll} className="text-xs text-gray-400 hover:text-red-500 transition-colors">
+        <button onClick={resetAll} className="text-xs text-cafe-muted hover:text-red-500 transition-colors">
           重置所有设置
         </button>
       </div>

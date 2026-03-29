@@ -10,7 +10,7 @@ function SourceBadge({ source }: { source: string }) {
   return (
     <span
       className={`inline-block text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-        isOverride ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+        isOverride ? 'bg-blue-100 text-blue-700' : 'bg-cafe-surface-elevated text-cafe-secondary'
       }`}
     >
       {SOURCE_LABELS[source] ?? source}
@@ -96,37 +96,37 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+    <div className="rounded-lg border border-cafe bg-cafe-surface p-3 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">{entry.displayName}</span>
-          <span className="text-[10px] text-gray-400 font-mono">{entry.catId}</span>
-          <span className="text-[10px] text-gray-400">{entry.provider}</span>
+          <span className="text-[10px] text-cafe-muted font-mono">{entry.catId}</span>
+          <span className="text-[10px] text-cafe-muted">{entry.provider}</span>
         </div>
         {entry.sessionChainEnabled ? (
           <SourceBadge source={entry.source} />
         ) : (
-          <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-400">
+          <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-cafe-surface-elevated text-cafe-muted">
             Session Chain 未启用
           </span>
         )}
       </div>
 
       {!entry.sessionChainEnabled && (
-        <p className="text-xs text-gray-400">此猫的 session chain 已关闭，策略配置不适用。</p>
+        <p className="text-xs text-cafe-muted">此猫的 session chain 已关闭，策略配置不适用。</p>
       )}
 
       {entry.sessionChainEnabled && !editing && (
         <div className="space-y-1">
-          <div className="text-xs text-gray-600">
+          <div className="text-xs text-cafe-secondary">
             <span className="font-medium">策略:</span> {STRATEGY_LABELS[entry.effective.strategy]}
           </div>
-          <div className="text-xs text-gray-600">
+          <div className="text-xs text-cafe-secondary">
             <span className="font-medium">阈值:</span> 警告 {(entry.effective.thresholds.warn * 100).toFixed(0)}% / 行动{' '}
             {(entry.effective.thresholds.action * 100).toFixed(0)}%
           </div>
           {entry.effective.strategy === 'hybrid' && entry.effective.hybrid && (
-            <div className="text-xs text-gray-600">
+            <div className="text-xs text-cafe-secondary">
               <span className="font-medium">最大压缩次数:</span> {entry.effective.hybrid.maxCompressions}
             </div>
           )}
@@ -136,7 +136,7 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
           <div className="flex gap-2 pt-1">
             <button
               onClick={() => setEditing(true)}
-              className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+              className="text-xs px-2 py-1 rounded bg-cafe-surface-elevated hover:bg-gray-200 text-cafe-secondary transition-colors"
             >
               编辑
             </button>
@@ -156,11 +156,11 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
       {entry.sessionChainEnabled && editing && (
         <div className="space-y-3 pt-1">
           <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">策略</label>
+            <label className="text-xs font-medium text-cafe-secondary block mb-1">策略</label>
             <select
               value={strategy}
               onChange={(e) => setStrategy(e.target.value as StrategyType)}
-              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+              className="w-full text-xs border border-cafe rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
             >
               <option value="handoff">{STRATEGY_LABELS.handoff}</option>
               <option value="compress">{STRATEGY_LABELS.compress}</option>
@@ -170,7 +170,7 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">
+              <label className="text-xs font-medium text-cafe-secondary block mb-1">
                 警告阈值: {(warnThreshold * 100).toFixed(0)}%
               </label>
               <input
@@ -188,7 +188,7 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">
+              <label className="text-xs font-medium text-cafe-secondary block mb-1">
                 行动阈值: {(actionThreshold * 100).toFixed(0)}%
               </label>
               <input
@@ -209,7 +209,9 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
 
           {strategy === 'hybrid' && (
             <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">最大压缩次数: {maxCompressions}</label>
+              <label className="text-xs font-medium text-cafe-secondary block mb-1">
+                最大压缩次数: {maxCompressions}
+              </label>
               <input
                 type="range"
                 min="1"
@@ -237,7 +239,7 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
             <button
               onClick={handleCancel}
               disabled={saving}
-              className="text-xs px-3 py-1.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-40"
+              className="text-xs px-3 py-1.5 rounded bg-cafe-surface-elevated hover:bg-gray-200 text-cafe-secondary transition-colors disabled:opacity-40"
             >
               取消
             </button>

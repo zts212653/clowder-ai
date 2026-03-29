@@ -7,6 +7,7 @@ import {
   limbTools,
   reflectTools,
   richBlockRulesTools,
+  scheduleTools,
   sessionChainTools,
   signalStudyTools,
   signalsTools,
@@ -19,7 +20,12 @@ type ToolDef = {
   handler: (args: never) => Promise<unknown>;
 };
 
-const collabTools: readonly ToolDef[] = [...callbackTools, ...richBlockRulesTools, ...gameActionTools];
+const collabTools: readonly ToolDef[] = [
+  ...callbackTools,
+  ...richBlockRulesTools,
+  ...gameActionTools,
+  ...scheduleTools,
+];
 
 const memoryTools: readonly ToolDef[] = [
   ...callbackMemoryTools,

@@ -30,7 +30,7 @@ export function ThreadCatStatus({
   if (status === 'idle' && unreadCount === 0 && !hasUserMention) return null;
 
   const statusClasses: Record<string, string> = {
-    idle: 'text-gray-400',
+    idle: 'text-cafe-muted',
     working: 'text-amber-500 animate-cat-bounce',
     done: 'text-green-500',
     error: 'text-red-500 animate-cat-shake',

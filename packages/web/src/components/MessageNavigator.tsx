@@ -251,7 +251,7 @@ function NavTooltip({
       <div className="font-medium">
         {senderName} · {formatTime(message.timestamp)}
       </div>
-      <div className="text-gray-300 truncate mt-0.5">{truncateContent(message.content, 40)}</div>
+      <div className="text-cafe-muted truncate mt-0.5">{truncateContent(message.content, 40)}</div>
     </div>
   );
 }

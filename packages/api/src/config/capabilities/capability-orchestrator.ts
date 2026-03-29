@@ -27,26 +27,49 @@ import {
 
 const CAPABILITIES_FILENAME = 'capabilities.json';
 const CAT_CAFE_DIR = '.cat-cafe';
+const MCP_RESOLVED_FILENAME = 'mcp-resolved.json';
 
+const PENCIL_EXTENSIONS_DIR = resolve(homedir(), '.antigravity/extensions');
+const VSCODE_EXTENSIONS_DIR = resolve(homedir(), '.vscode/extensions');
+const CURSOR_EXTENSIONS_DIR = resolve(homedir(), '.cursor/extensions');
+const VSCODE_INSIDERS_EXTENSIONS_DIR = resolve(homedir(), '.vscode-insiders/extensions');
 const PENCIL_DIR_PREFIX = 'highagency.pencildev-';
-
-/** #272: All known editor extension directories that may contain Pencil. */
-const PENCIL_EXTENSION_CANDIDATES = [
-  resolve(homedir(), '.antigravity/extensions'),
-  resolve(homedir(), '.vscode/extensions'),
-  resolve(homedir(), '.cursor/extensions'),
-  resolve(homedir(), '.vscode-insiders/extensions'),
-];
-
-/**
- * #272: Resolve platform-specific Pencil MCP binary name.
- * @internal Exported for testing only
- */
+/** @internal Exported for testing only */
 export function getPencilBinarySuffix(): string {
   const os = process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : 'darwin';
   const arch = process.arch === 'x64' ? 'x64' : 'arm64';
   const ext = process.platform === 'win32' ? '.exe' : '';
   return `out/mcp-server-${os}-${arch}${ext}`;
+}
+/** @internal Exported for testing only */
+export const PENCIL_BINARY_SUFFIX = getPencilBinarySuffix();
+
+type ResolvedMcpStatus = 'resolved' | 'unresolved';
+
+export interface ResolvedMcpStateEntry {
+  resolver: string;
+  status: ResolvedMcpStatus;
+  command?: string;
+  args?: string[];
+}
+
+export type ResolvedMcpState = Record<string, ResolvedMcpStateEntry>;
+
+interface PencilResolveOptions {
+  env?: NodeJS.ProcessEnv;
+  antigravityDir?: string;
+  vscodeDir?: string;
+  cursorDir?: string;
+  vscodeInsidersDir?: string;
+}
+
+type PencilCommandResolution = { command: string; args: string[] } | null;
+type PencilCommandResolver = (options?: PencilResolveOptions) => Promise<PencilCommandResolution>;
+type PencilApp = 'antigravity' | 'vscode';
+interface PencilInstallCandidate {
+  app: PencilApp;
+  binaryPath: string;
+  dirName: string;
 }
 
 /**
@@ -82,12 +105,70 @@ const PROVIDER_WRITERS = {
   google: writeGeminiMcpConfig,
 } as const;
 
-/** Check if a descriptor has a usable transport (stdio command or streamableHttp URL). */
-function hasUsableTransport(desc: { command?: string; transport?: string; url?: string }): boolean {
+/** Check if a descriptor has a usable transport (stdio command, local resolver, or streamableHttp URL). */
+export function hasUsableTransport(desc: {
+  command?: string;
+  resolver?: string;
+  transport?: string;
+  url?: string;
+}): boolean {
   if (desc.transport === 'streamableHttp') {
     return typeof desc.url === 'string' && desc.url.trim().length > 0;
   }
+  if (typeof desc.resolver === 'string' && desc.resolver.trim().length > 0) {
+    return true;
+  }
   return typeof desc.command === 'string' && desc.command.trim().length > 0;
+}
+
+export interface RequiredMcpStatus {
+  id: string;
+  status: 'ready' | 'missing' | 'unresolved';
+  reason: string;
+}
+
+export async function resolveRequiredMcpStatus(
+  mcpId: string,
+  options: {
+    capabilities?: CapabilitiesConfig | null;
+    env?: NodeJS.ProcessEnv;
+  } = {},
+): Promise<RequiredMcpStatus> {
+  const capability = options.capabilities?.capabilities?.find((entry) => entry.id === mcpId && entry.type === 'mcp');
+  if (!capability || capability.enabled === false || !capability.mcpServer) {
+    return {
+      id: mcpId,
+      status: 'missing',
+      reason:
+        capability?.enabled === false
+          ? 'declared but disabled in capabilities.json'
+          : 'not declared in capabilities.json',
+    };
+  }
+
+  if (capability.mcpServer.resolver === 'pencil') {
+    const resolved = await resolvePencilCommand({ env: options.env });
+    return resolved
+      ? { id: mcpId, status: 'ready', reason: `resolved via ${resolved.args?.[1] ?? 'resolver'}` }
+      : { id: mcpId, status: 'unresolved', reason: 'resolver declared but no local Pencil installation found' };
+  }
+
+  if (hasUsableTransport(capability.mcpServer)) {
+    return {
+      id: mcpId,
+      status: 'ready',
+      reason:
+        capability.mcpServer.transport === 'streamableHttp'
+          ? `remote ${capability.mcpServer.url?.trim() ?? ''}`.trim()
+          : `stdio ${capability.mcpServer.command?.trim() ?? ''}`.trim(),
+    };
+  }
+
+  return {
+    id: mcpId,
+    status: 'unresolved',
+    reason: 'declared but missing usable command/url',
+  };
 }
 
 type DiscoveredMcpLike = Pick<McpServerDescriptor, 'name' | 'enabled' | 'transport'>;
@@ -110,39 +191,88 @@ export function deduplicateDiscoveredMcpServers<T extends DiscoveredMcpLike>(ser
   return [...byName.values()];
 }
 
-/**
- * #272: Resolve the latest Pencil MCP binary path by scanning multiple editor
- * extension directories (Antigravity, VSCode, Cursor, VSCode Insiders).
- * Picks the highest semver across all sources. Returns null if not found.
- */
-export async function resolvePencilBinary(): Promise<string | null> {
-  const allDirs: { dir: string; base: string }[] = [];
-  for (const base of PENCIL_EXTENSION_CANDIDATES) {
-    try {
-      const entries = await readdir(base);
-      for (const e of entries) {
-        if (e.startsWith(PENCIL_DIR_PREFIX)) {
-          allDirs.push({ dir: e, base });
-        }
+function inferPencilApp(command: string, envApp?: string): PencilApp {
+  const explicit = envApp?.trim().toLowerCase();
+  if (explicit === 'vscode' || explicit === 'cursor' || explicit === 'vscode-insiders') return 'vscode';
+  if (explicit === 'antigravity') return 'antigravity';
+  if (
+    command.includes(`${sep}.vscode${sep}extensions${sep}`) ||
+    command.includes(`${sep}.cursor${sep}extensions${sep}`) ||
+    command.includes(`${sep}.vscode-insiders${sep}extensions${sep}`) ||
+    command.includes('/.vscode/extensions/') ||
+    command.includes('/.cursor/extensions/') ||
+    command.includes('/.vscode-insiders/extensions/')
+  ) {
+    return 'vscode';
+  }
+  return 'antigravity';
+}
+
+async function collectAccessiblePencilCandidates(
+  extensionsDir: string,
+  app: PencilApp,
+): Promise<PencilInstallCandidate[]> {
+  try {
+    const entries = await readdir(extensionsDir);
+    const pencilDirs = entries.filter((e) => e.startsWith(PENCIL_DIR_PREFIX)).sort(comparePencilDirs);
+    const candidates: PencilInstallCandidate[] = [];
+    for (const dirName of pencilDirs) {
+      const binaryPath = resolve(extensionsDir, dirName, PENCIL_BINARY_SUFFIX);
+      try {
+        await access(binaryPath);
+        candidates.push({ app, binaryPath, dirName });
+      } catch {
+        // Skip incomplete installs; a newer directory may exist without a usable binary.
       }
-    } catch {
-      // directory doesn't exist or not readable — skip
     }
+    return candidates;
+  } catch {
+    return [];
   }
-  if (allDirs.length === 0) return null;
-  // P2 review: sort descending by semver, then pick the newest binary that
-  // actually exists on disk. Avoids selecting a newer but incomplete install.
-  allDirs.sort((a, b) => comparePencilDirs(a.dir, b.dir));
-  for (let i = allDirs.length - 1; i >= 0; i--) {
-    const candidate = resolve(allDirs[i].base, allDirs[i].dir, getPencilBinarySuffix());
+}
+
+export async function resolvePencilCommand(
+  options: PencilResolveOptions = {},
+): Promise<{ command: string; args: string[] } | null> {
+  const env = options.env ?? process.env;
+  const explicitCommand = env.PENCIL_MCP_BIN?.trim();
+  if (explicitCommand) {
     try {
-      await access(candidate);
-      return candidate;
+      await access(explicitCommand);
     } catch {
-      // binary missing or not accessible — try next
+      return null;
     }
+    const app = inferPencilApp(explicitCommand, env.PENCIL_MCP_APP);
+    return { command: explicitCommand, args: ['--app', app] };
   }
+
+  const candidates = (
+    await Promise.all([
+      collectAccessiblePencilCandidates(options.antigravityDir ?? PENCIL_EXTENSIONS_DIR, 'antigravity'),
+      collectAccessiblePencilCandidates(options.vscodeDir ?? VSCODE_EXTENSIONS_DIR, 'vscode'),
+      collectAccessiblePencilCandidates(options.cursorDir ?? CURSOR_EXTENSIONS_DIR, 'vscode'),
+      collectAccessiblePencilCandidates(options.vscodeInsidersDir ?? VSCODE_INSIDERS_EXTENSIONS_DIR, 'vscode'),
+    ])
+  )
+    .flat()
+    .sort((a, b) => comparePencilDirs(a.dirName, b.dirName));
+
+  const latest = candidates[candidates.length - 1];
+  if (latest) {
+    return { command: latest.binaryPath, args: ['--app', latest.app] };
+  }
+
   return null;
+}
+
+/**
+ * Resolve the latest Pencil MCP binary path by scanning env override,
+ * ~/.antigravity/extensions/, then ~/.vscode/extensions/.
+ * Returns null if no installation is found.
+ */
+export async function resolvePencilBinary(options: PencilResolveOptions = {}): Promise<string | null> {
+  const resolved = await resolvePencilCommand(options);
+  return resolved?.command ?? null;
 }
 
 // ────────── Core: Read / Write capabilities.json ──────────
@@ -175,6 +305,24 @@ export async function writeCapabilitiesConfig(projectRoot: string, config: Capab
   await mkdir(dir, { recursive: true });
   const filePath = safePath(projectRoot, CAT_CAFE_DIR, CAPABILITIES_FILENAME);
   await writeFile(filePath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+}
+
+export async function readResolvedMcpState(projectRoot: string): Promise<ResolvedMcpState> {
+  const filePath = safePath(projectRoot, CAT_CAFE_DIR, MCP_RESOLVED_FILENAME);
+  try {
+    const raw = await readFile(filePath, 'utf-8');
+    const data = JSON.parse(raw) as ResolvedMcpState;
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function writeResolvedMcpState(projectRoot: string, state: ResolvedMcpState): Promise<void> {
+  const dir = safePath(projectRoot, CAT_CAFE_DIR);
+  await mkdir(dir, { recursive: true });
+  const filePath = safePath(projectRoot, CAT_CAFE_DIR, MCP_RESOLVED_FILENAME);
+  await writeFile(filePath, `${JSON.stringify(state, null, 2)}\n`, 'utf-8');
 }
 
 // ────────── Discovery: Bootstrap from existing CLI configs ──────────
@@ -257,6 +405,7 @@ export function toCapabilityEntry(server: McpServerDescriptor): CapabilityEntry 
     },
   };
   if (server.transport) entry.mcpServer!.transport = server.transport;
+  if (server.resolver) entry.mcpServer!.resolver = server.resolver;
   if (server.url) entry.mcpServer!.url = server.url;
   if (server.headers) entry.mcpServer!.headers = server.headers;
   if (server.env) entry.mcpServer!.env = server.env;
@@ -326,6 +475,37 @@ export function migrateLegacyCatCafeCapability(
   };
 }
 
+export function migrateResolverBackedCapabilities(config: CapabilitiesConfig): {
+  migrated: boolean;
+  config: CapabilitiesConfig;
+} {
+  let migrated = false;
+  const capabilities = config.capabilities.map((cap) => {
+    if (cap.type !== 'mcp' || cap.id !== 'pencil') return cap;
+
+    const current = cap.mcpServer;
+    const nextServer = {
+      ...(current ?? {}),
+      resolver: 'pencil',
+      command: '',
+      args: [],
+    };
+
+    const changed =
+      current?.resolver !== 'pencil' ||
+      current?.command !== '' ||
+      (current?.args?.length ?? 0) > 0 ||
+      current === undefined;
+
+    if (!changed) return cap;
+    migrated = true;
+    return { ...cap, mcpServer: nextServer };
+  });
+
+  if (!migrated) return { migrated: false, config };
+  return { migrated: true, config: { ...config, capabilities } };
+}
+
 // ────────── Bootstrap: Create initial capabilities.json ──────────
 
 /**
@@ -356,8 +536,9 @@ export async function bootstrapCapabilities(
   }
 
   const config: CapabilitiesConfig = { version: 1, capabilities };
-  await writeCapabilitiesConfig(projectRoot, config);
-  return config;
+  const resolverMigrated = migrateResolverBackedCapabilities(config);
+  await writeCapabilitiesConfig(projectRoot, resolverMigrated.config);
+  return resolverMigrated.config;
 }
 
 // ────────── Orchestrate: Generate CLI configs from capabilities.json ──────────
@@ -406,6 +587,7 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
         source: cap.source,
       };
       if (mcpServer.transport) desc.transport = mcpServer.transport;
+      if (mcpServer.resolver) desc.resolver = mcpServer.resolver;
       if (mcpServer.url) desc.url = mcpServer.url;
       if (mcpServer.headers) desc.headers = mcpServer.headers;
       if (mcpServer.env) desc.env = mcpServer.env;
@@ -447,6 +629,51 @@ function collectServersPerProvider(config: CapabilitiesConfig): Record<string, M
   return result;
 }
 
+export async function resolveMachineSpecificServers(
+  perProvider: Record<string, McpServerDescriptor[]>,
+  options: {
+    projectRoot?: string;
+    env?: NodeJS.ProcessEnv;
+    resolvePencilCommandFn?: PencilCommandResolver;
+  } = {},
+): Promise<void> {
+  const resolvedState: ResolvedMcpState = {};
+  const resolvePencil = options.resolvePencilCommandFn ?? resolvePencilCommand;
+  const needsPencilResolution = Object.values(perProvider).some((servers) =>
+    servers.some((server) => server.name === 'pencil' || server.resolver === 'pencil'),
+  );
+  const pencilResolved = needsPencilResolution ? await resolvePencil({ env: options.env }) : null;
+
+  for (const servers of Object.values(perProvider)) {
+    for (const server of servers) {
+      if (server.name !== 'pencil' && server.resolver !== 'pencil') continue;
+
+      if (!pencilResolved) {
+        server.command = '';
+        server.args = [];
+        server.enabled = false;
+        server.resolver = 'pencil';
+        resolvedState[server.name] = { resolver: 'pencil', status: 'unresolved' };
+        continue;
+      }
+
+      server.command = pencilResolved.command;
+      server.args = pencilResolved.args;
+      server.resolver = 'pencil';
+      resolvedState[server.name] = {
+        resolver: 'pencil',
+        status: 'resolved',
+        command: pencilResolved.command,
+        args: pencilResolved.args,
+      };
+    }
+  }
+
+  if (options.projectRoot) {
+    await writeResolvedMcpState(options.projectRoot, resolvedState);
+  }
+}
+
 /**
  * Generate all 3 CLI config files from capabilities.json.
  *
@@ -455,21 +682,7 @@ function collectServersPerProvider(config: CapabilitiesConfig): Record<string, M
  */
 export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliConfigPaths): Promise<void> {
   const perProvider = collectServersPerProvider(config);
-
-  // Resolve dynamic paths (e.g. pencil binary) once, apply to all providers
-  const pencilBinary = await resolvePencilBinary();
-  for (const servers of Object.values(perProvider)) {
-    for (const s of servers) {
-      if (s.name === 'pencil') {
-        if (pencilBinary) {
-          s.command = pencilBinary;
-        }
-        // #272: When auto-discovery fails, leave the existing entry as-is.
-        // A stale command will fail visibly at MCP startup, which is
-        // preferable to silently deleting a valid manual config.
-      }
-    }
-  }
+  await resolveMachineSpecificServers(perProvider, { projectRoot: resolve(paths.anthropic, '..') });
 
   const writes: Promise<void>[] = [];
   for (const [provider, servers] of Object.entries(perProvider)) {
@@ -502,8 +715,9 @@ export async function orchestrate(
       config,
       opts?.catCafeRepoRoot ? { projectRoot, catCafeRepoRoot: opts.catCafeRepoRoot } : { projectRoot },
     );
-    if (migrated.migrated) {
-      config = migrated.config;
+    const resolverMigrated = migrateResolverBackedCapabilities(migrated.config);
+    config = resolverMigrated.config;
+    if (migrated.migrated || resolverMigrated.migrated) {
       await writeCapabilitiesConfig(projectRoot, config);
     }
   }

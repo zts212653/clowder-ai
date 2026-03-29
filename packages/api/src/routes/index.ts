@@ -49,6 +49,7 @@ export { sliceRoutes } from './slice-routes.js';
 export { summariesRoutes } from './summaries.js';
 export { tasksRoutes } from './tasks.js';
 export { threadBranchRoutes } from './thread-branch.js';
+export { threadCatsRoutes } from './thread-cats.js';
 export { threadsRoutes } from './threads.js';
 export { ttsRoutes } from './tts.js';
 export { uploadsRoutes } from './uploads.js';

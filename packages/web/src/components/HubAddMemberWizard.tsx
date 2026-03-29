@@ -227,7 +227,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
             </div>
 
             {!client ? (
-              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-cafe-surface/80 px-4 py-3 text-sm text-[#8A776B]">
                 先在 Step 1 选择 Client。
               </p>
             ) : client === 'antigravity' ? (
@@ -257,7 +257,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
                 </div>
               </>
             ) : (
-              <p className="rounded-2xl border border-[#F1E7DF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+              <p className="rounded-2xl border border-[#F1E7DF] bg-cafe-surface/80 px-4 py-3 text-sm text-[#8A776B]">
                 当前 Client 还没有可用 Provider。
               </p>
             )}
@@ -269,11 +269,11 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
             </div>
 
             {!client ? (
-              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-cafe-surface/80 px-4 py-3 text-sm text-[#8A776B]">
                 先选择 Client。
               </p>
             ) : client !== 'antigravity' && !selectedProfile ? (
-              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-3 text-sm text-[#8A776B]">
+              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-cafe-surface/80 px-4 py-3 text-sm text-[#8A776B]">
                 先在 Step 2 选择 Provider。
               </p>
             ) : selectableModels.length > 0 ? (
@@ -299,7 +299,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
               </label>
             )}
             {client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
-              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-white/80 px-4 py-2 text-xs leading-5 text-[#8A776B]">
+              <p className="rounded-2xl border border-dashed border-[#E8DCCF] bg-cafe-surface/80 px-4 py-2 text-xs leading-5 text-[#8A776B]">
                 OpenCode API Key 认证需要 Provider 名称，下一步编辑器中填写。
               </p>
             ) : null}
@@ -312,7 +312,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-white px-4 py-2 text-sm text-[#6A5A50] transition hover:bg-[#F7EEE6]"
+            className="rounded-xl bg-cafe-surface px-4 py-2 text-sm text-[#6A5A50] transition hover:bg-[#F7EEE6]"
           >
             取消
           </button>

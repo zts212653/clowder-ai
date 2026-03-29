@@ -44,4 +44,10 @@ export interface ConfigData {
     passModelArg: boolean;
   };
   governance: { degradationEnabled: boolean; doneTimeoutMs: number; heartbeatIntervalMs: number };
+  ui?: {
+    bubbleDefaults: {
+      thinking: 'expanded' | 'collapsed';
+      cliOutput: 'expanded' | 'collapsed';
+    };
+  };
 }

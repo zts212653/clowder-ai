@@ -5,6 +5,7 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import { truncateId } from './status-helpers';
 
@@ -20,6 +21,7 @@ export function BindSessionInput({
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState('');
   const [status, setStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle');
+  const ime = useIMEGuard();
 
   const handleBind = async () => {
     const trimmed = value.trim();
@@ -52,7 +54,7 @@ export function BindSessionInput({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-[9px] text-gray-400 hover:text-gray-600 transition-colors"
+        className="text-[9px] text-cafe-muted hover:text-cafe-secondary transition-colors"
       >
         bind...
       </button>
@@ -64,8 +66,10 @@ export function BindSessionInput({
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        onCompositionStart={ime.onCompositionStart}
+        onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return;
+          if (ime.isComposing()) return;
           if (e.key === 'Enter') void handleBind();
           if (e.key === 'Escape') {
             setOpen(false);
@@ -74,7 +78,7 @@ export function BindSessionInput({
         }}
         placeholder="CLI session ID"
         maxLength={500}
-        className="flex-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
+        className="flex-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-cafe bg-cafe-surface-elevated focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
         // biome-ignore lint/a11y/noAutofocus: intentional UX — focus input immediately on open
         autoFocus
       />
@@ -92,7 +96,7 @@ export function BindSessionInput({
           setOpen(false);
           setStatus('idle');
         }}
-        className="text-[9px] text-gray-400 hover:text-gray-600"
+        className="text-[9px] text-cafe-muted hover:text-cafe-secondary"
       >
         ✕
       </button>
@@ -110,7 +114,7 @@ export function SessionIdTag({ id }: { id: string }) {
   return (
     <button
       type="button"
-      className="text-[9px] font-mono text-gray-400 hover:text-gray-600 cursor-pointer transition-colors"
+      className="text-[9px] font-mono text-cafe-muted hover:text-cafe-secondary cursor-pointer transition-colors"
       title={`点击复制: ${id}`}
       onClick={handleCopy}
     >

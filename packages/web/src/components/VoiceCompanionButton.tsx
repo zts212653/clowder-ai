@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { type PlaybackState, useVoiceSessionStore } from '@/stores/voiceSessionStore';
 
 /**
@@ -107,14 +106,16 @@ interface VoiceCompanionButtonProps {
 }
 
 function VoicePlaybackControls({ playbackState }: { playbackState: PlaybackState }) {
-  const { pause, resume, skip } = useVoiceStream();
+  const pauseAudio = useVoiceSessionStore((s) => s.pauseAudio);
+  const resumeAudio = useVoiceSessionStore((s) => s.resumeAudio);
+  const skipAudio = useVoiceSessionStore((s) => s.skipAudio);
   const isPaused = playbackState === 'paused';
 
   return (
     <>
       <button
         type="button"
-        onClick={isPaused ? resume : pause}
+        onClick={isPaused ? resumeAudio : pauseAudio}
         className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
         aria-label={isPaused ? '继续播放' : '暂停'}
         title={isPaused ? '继续播放' : '暂停'}
@@ -131,7 +132,7 @@ function VoicePlaybackControls({ playbackState }: { playbackState: PlaybackState
       </button>
       <button
         type="button"
-        onClick={skip}
+        onClick={skipAudio}
         className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
         aria-label="跳过当前"
         title="跳过当前"
@@ -174,7 +175,7 @@ export function VoiceCompanionButton({ threadId, defaultCatId }: VoiceCompanionB
           ${
             isActive
               ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'
-              : 'text-gray-500 hover:bg-cocreator-light'
+              : 'text-cafe-secondary hover:bg-cocreator-light'
           }
         `}
         aria-label={isActive ? '停止语音陪伴' : '语音陪伴'}

@@ -3,19 +3,20 @@ feature_ids: [F137]
 related_features: [F088, F132]
 topics: [gateway, connector, weixin, wechat, personal-im, ilink-bot, chat-platform]
 doc_kind: spec
-created: 2026-07-19
+status: done
+created: 2026-03-23
 ---
 
 # F137: WeChat Personal Gateway — 微信个人号 iLink Bot 接入
 
-> **Status**: done | **Completed**: 2026-03-25 | **Owner**: 金渐层 | **Priority**: P1
+> **Status**: done | **Completed**: 2026-03-28 | **Owner**: 金渐层 | **Priority**: P1
 >
 > **分工**：金渐层（@opencode）实现 → Maine Coon（@codex）review → Ragdoll（@opus）愿景守护
 > 实现过程中不 @ Ragdoll，保持 owner 上下文干净。每个 Phase PR merge 后触发愿景守护。
 
 ## Why
 
-F088 + F132 覆盖了**企业级 IM**（飞书、Telegram、钉钉、企业微信），但team lead的个人微信——12 亿用户量级的国民级 IM——一直无法接入。2026 年 7 月，腾讯微信正式开放 **iLink Bot 协议**（灰度中），允许个人微信号直接与 AI Bot 交互（扫码登录、长轮询收消息、HTTP 发消息），无需企业资质、无需公网 URL、无需 XML/AES 加解密。
+F088 + F132 覆盖了**企业级 IM**（飞书、Telegram、钉钉、企业微信），但team lead的个人微信——12 亿用户量级的国民级 IM——一直无法接入。2026 年 3 月，腾讯微信正式开放 **iLink Bot 协议**（灰度中），允许个人微信号直接与 AI Bot 交互（扫码登录、长轮询收消息、HTTP 发消息），无需企业资质、无需公网 URL、无需 XML/AES 加解密。
 
 team experience：*"那我们是不是可以学习 @tencent-weixin/openclaw-weixin 这个的实现模式！把我们的猫猫接入微信！！？"*
 
@@ -101,7 +102,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 - 入站图片: CDN 下载 → AES-128-ECB 解密
 - 实现 `sendMedia?(externalChatId, payload)` 接口
 
-### 富媒体能力调研（2026-07-25）
+### 富媒体能力调研（2026-03-25）
 
 > team lead提问：*"个人微信能接入和飞书那样超级多的富文本包括文件的传输 音频 图片等等吗？"*
 
@@ -251,6 +252,16 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 - Pencil 绘制 SVG 图标，无 emoji
 - Maine Coon (codex) R2 放行 + 云端 Codex review 无 P1/P2
 
+### Phase D（断开连接 + 解绑）✅
+
+> **反思**：Phase A-C 只做了"连接"方向，没有做"断开"。能连接就必须能断开——这是 UX 完整性的基本功。立项时应该主动挖掘这类隐含需求，而不是等team lead发现了才补。
+
+- [x] AC-D1: IM Hub 配置卡片在已连接状态下显示"断开连接"按钮
+- [x] AC-D2: 点击"断开连接"后停止长轮询 + 清除 bot_token/context_tokens + 状态回到"未配置"
+- [x] AC-D3: 断开后微信端不再收到 bot 消息（session 自然过期或主动 revoke）
+- [x] AC-D4: 配置卡片展示解绑说明文案（微信端操作路径：设置 → 账号与安全 → 登录设备管理）
+- [x] AC-D5: 断开连接不影响已有 thread 和历史消息
+
 ## 需求点 Checklist
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
@@ -260,11 +271,13 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 | R3 | "也得接入我们的消息管线，都得是一样的" | AC-A5, AC-A6 | /new /threads /use /where 可用 | [x] |
 | R4 | "如果有配置需要配置...在那边能够显示" | AC-C1 | IM Hub 配置向导可见 | [x] |
 | R5 | "按照我们的开发速度，不需要一天" | Phase A 优先 | Phase A 独立可用 | [x] |
+| R6 | "我们这里是不是可以写清楚怎么样不绑定？" + "我们可以做一个按钮？" | AC-D1~D5 | IM Hub 断开按钮 + 解绑说明 | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
 - [x] 每个 AC 都有验证方式
 - [x] 前端需求已准备需求→证据映射表（若适用）— Phase C IM Hub AC-C1 已完成
+- [x] Phase D 需求已覆盖（断开连接 + 解绑说明）
 
 ## Dependencies
 
@@ -288,7 +301,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 
 **状态**: 🟢 Fixed — PR #701 squash merge (40639bd4)
 
-**现象**（2026-07-24 Alpha 实测，3 次复现）：
+**现象**（2026-03-24 Alpha 实测，3 次复现）：
 - ✅ 微信扫码登录成功 → 长轮询启动
 - ✅ 微信发消息 → iLink `getupdates` 正常接收 → ConnectorRouter 路由 → 创建 thread + binding → 猫猫 invocation 创建 → 猫猫处理完成
 - ❌ 猫猫回复 **从未** 到达微信端 — 微信 DM 窗口无任何新消息
@@ -407,11 +420,11 @@ cat-cafe:connector-binding:weixin:o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 独立 Feature（不合入 F132） | 个人微信 vs 企业微信：协议（iLink HTTP vs WS/callback）、认证（扫码 vs appKey）、能力完全不同 | 2026-07-19 |
-| KD-2 | 直接实现 iLink 协议，不引入 `weixin-agent-sdk` | SDK 太薄（仅封装 fetch），我们需要完整控制长轮询生命周期 + ConnectorRouter 集成 | 2026-07-19 |
-| KD-3 | 仅实现 `IOutboundAdapter`，不实现 `IStreamableOutboundAdapter` | iLink Bot 不支持消息编辑/流式更新，`message_state: GENERATING` 在 bot 窗口无效。用 typing 状态 + final 发送 | 2026-07-19 |
-| KD-4 | adapter-only 扩展，公共层零改动 | F088/F132 已验证，duck typing 能力发现天然支持 | 2026-07-19 |
-| KD-5 | Phase A 优先文本双向，媒体和 IM Hub 放后续 Phase | team lead期望快速可用（"两小时后就能用"），文本覆盖 90% 日常场景 | 2026-07-19 |
+| KD-1 | 独立 Feature（不合入 F132） | 个人微信 vs 企业微信：协议（iLink HTTP vs WS/callback）、认证（扫码 vs appKey）、能力完全不同 | 2026-03-23 |
+| KD-2 | 直接实现 iLink 协议，不引入 `weixin-agent-sdk` | SDK 太薄（仅封装 fetch），我们需要完整控制长轮询生命周期 + ConnectorRouter 集成 | 2026-03-23 |
+| KD-3 | 仅实现 `IOutboundAdapter`，不实现 `IStreamableOutboundAdapter` | iLink Bot 不支持消息编辑/流式更新，`message_state: GENERATING` 在 bot 窗口无效。用 typing 状态 + final 发送 | 2026-03-23 |
+| KD-4 | adapter-only 扩展，公共层零改动 | F088/F132 已验证，duck typing 能力发现天然支持 | 2026-03-23 |
+| KD-5 | Phase A 优先文本双向，媒体和 IM Hub 放后续 Phase | team lead期望快速可用（"两小时后就能用"），文本覆盖 90% 日常场景 | 2026-03-23 |
 
 ## Review Gate
 

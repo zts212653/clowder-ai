@@ -176,7 +176,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 3350, `Prompt is ${prompt.length} chars, expected < 3350`);
+    assert.ok(prompt.length < 3500, `Prompt is ${prompt.length} chars, expected < 3500`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -449,7 +449,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 4250, `Full runtime prompt is ${prompt.length} chars, expected < 4250`);
+      assert.ok(prompt.length < 4400, `Full runtime prompt is ${prompt.length} chars, expected < 4400`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -706,7 +706,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 3400, `Prompt with activity is ${prompt.length} chars, expected < 3400`);
+    assert.ok(prompt.length < 3500, `Prompt with activity is ${prompt.length} chars, expected < 3500`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -906,7 +906,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 3450, `Prompt with SOP hint is ${prompt.length} chars, expected < 3450`);
+    assert.ok(prompt.length < 3550, `Prompt with SOP hint is ${prompt.length} chars, expected < 3550`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -953,7 +953,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 3600, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3600`);
+    assert.ok(prompt.length < 3650, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 3650`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -1144,5 +1144,37 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('ONLY_GUARDRAILS_HERE'), 'Should inject the one present block');
     assert.ok(!prompt.includes('角色叠加'), 'Should not inject null masks');
     assert.ok(!prompt.includes('默认行为'), 'Should not inject null defaults');
+  });
+
+  // ── Drift guard: shared-rules.md ↔ GOVERNANCE_L0_DIGEST ──────
+  test('GOVERNANCE_L0_DIGEST stays in sync with shared-rules.md world-view headings', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const { createHash } = await import('node:crypto');
+
+    // Extract world-view / principle section headings from shared-rules.md
+    const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
+    const rulesText = readFileSync(rulesPath, 'utf8');
+    const headings = rulesText
+      .split('\n')
+      .filter((l) => /^###?\s+(P\d|W\d)/.test(l))
+      .sort()
+      .join('\n');
+    const hash = createHash('sha256').update(headings).digest('hex').slice(0, 16);
+
+    // Pin: update this hash whenever you add/remove/rename P* or W* sections
+    // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
+    const PINNED_HASH = '81d995fc963e0067';
+    if (PINNED_HASH === '${PLACEHOLDER}') {
+      // First run — print hash for pinning
+      console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);
+      return; // skip assertion on first run
+    }
+    assert.equal(
+      hash,
+      PINNED_HASH,
+      `shared-rules.md P*/W* headings changed (got ${hash}, pinned ${PINNED_HASH}). ` +
+        'Update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts to match, then update PINNED_HASH here.',
+    );
   });
 });

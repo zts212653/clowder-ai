@@ -7,7 +7,7 @@ const BUCKET_STYLES: Record<TriageBucket, { bg: string; text: string; label: str
   clarify_first: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Clarify First' },
   validate_first: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Validate First' },
   challenge: { bg: 'bg-red-100', text: 'text-red-800', label: 'Challenge' },
-  later: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Later' },
+  later: { bg: 'bg-cafe-surface-elevated', text: 'text-cafe-secondary', label: 'Later' },
 };
 
 const SOURCE_STYLES: Record<SourceTag, { bg: string; text: string }> = {

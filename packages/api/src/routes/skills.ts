@@ -13,6 +13,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
 import { parse as parseYaml } from 'yaml';
+import { readCapabilitiesConfig, resolveRequiredMcpStatus } from '../config/capabilities/capability-orchestrator.js';
 import { pathsEqual } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -27,6 +28,12 @@ interface SkillEntry {
   category: string;
   trigger: string;
   mounts: SkillMount;
+  requiresMcp?: SkillMcpDependency[];
+}
+
+interface SkillMcpDependency {
+  id: string;
+  status: 'ready' | 'missing' | 'unresolved';
 }
 
 interface SkillsSummary {
@@ -101,6 +108,7 @@ interface BootstrapEntry {
 interface SkillMeta {
   description?: string;
   triggers?: string[];
+  requiresMcp?: string[];
 }
 
 /** Parse BOOTSTRAP.md to extract skill entries with categories and triggers. */
@@ -139,7 +147,7 @@ async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string,
   try {
     const content = await readFile(manifestPath, 'utf-8');
     const parsed = parseYaml(content) as {
-      skills?: Record<string, { description?: unknown; triggers?: unknown }>;
+      skills?: Record<string, { description?: unknown; triggers?: unknown; requires_mcp?: unknown }>;
     } | null;
     if (!parsed?.skills || typeof parsed.skills !== 'object') return result;
 
@@ -151,10 +159,17 @@ async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string,
             .map((s) => s.trim())
             .filter(Boolean)
         : undefined;
-      if (description || (triggers && triggers.length > 0)) {
+      const requiresMcp = Array.isArray(meta?.requires_mcp)
+        ? meta.requires_mcp
+            .filter((value): value is string => typeof value === 'string')
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : undefined;
+      if (description || (triggers && triggers.length > 0) || (requiresMcp && requiresMcp.length > 0)) {
         result.set(name, {
           ...(description ? { description } : {}),
           ...(triggers && triggers.length > 0 ? { triggers } : {}),
+          ...(requiresMcp && requiresMcp.length > 0 ? { requiresMcp } : {}),
         });
       }
     }
@@ -162,6 +177,25 @@ async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string,
     // manifest missing or invalid
   }
   return result;
+}
+
+async function resolveSkillMcpStatuses(
+  repoRoot: string,
+  manifestMeta: Map<string, SkillMeta>,
+): Promise<Map<string, SkillMcpDependency>> {
+  const capabilities = await readCapabilitiesConfig(repoRoot);
+  const requiredIds = new Set<string>();
+  for (const meta of manifestMeta.values()) {
+    for (const id of meta.requiresMcp ?? []) requiredIds.add(id);
+  }
+
+  const statuses = new Map<string, SkillMcpDependency>();
+  for (const id of requiredIds) {
+    const resolved = await resolveRequiredMcpStatus(id, { capabilities, env: process.env });
+    statuses.set(id, { id, status: resolved.status });
+  }
+
+  return statuses;
 }
 
 export const skillsRoutes: FastifyPluginAsync = async (app) => {
@@ -172,6 +206,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
     }
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
+    const repoRoot = dirname(skillsSrc);
     const bootstrapPath = join(skillsSrc, 'BOOTSTRAP.md');
     const home = homedir();
 
@@ -186,6 +221,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
       parseBootstrap(bootstrapPath),
       parseManifestSkillMeta(skillsSrc),
     ]);
+    const mcpStatuses = await resolveSkillMcpStatuses(repoRoot, manifestMeta);
 
     // Build mount status lookup for each source skill
     const sourceSet = new Set(sourceSkills);
@@ -206,6 +242,11 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
           category: entry?.category ?? '未分类',
           trigger,
           mounts: { claude, codex, gemini },
+          ...(meta?.requiresMcp?.length
+            ? {
+                requiresMcp: meta.requiresMcp.map((id) => mcpStatuses.get(id) ?? { id, status: 'missing' }),
+              }
+            : {}),
         });
       }),
     );

@@ -151,7 +151,7 @@ export function HubCapabilityTab() {
     return groups;
   }, [filtered]);
 
-  if (loading) return <p className="text-sm text-gray-400">加载中...</p>;
+  if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
 
   return (
     <div className="space-y-4">
@@ -281,23 +281,23 @@ function ProjectSelector({
 
   if (allPaths.length <= 1) {
     return (
-      <div className="text-xs text-gray-400 flex items-center gap-1.5">
+      <div className="text-xs text-cafe-muted flex items-center gap-1.5">
         <span>项目:</span>
-        <span className="text-gray-600 font-medium">{projectDisplayName(resolvedPath)}</span>
+        <span className="text-cafe-secondary font-medium">{projectDisplayName(resolvedPath)}</span>
       </div>
     );
   }
 
   return (
     <div className="flex items-center gap-2 text-xs">
-      <label htmlFor="project-select" className="text-gray-400 whitespace-nowrap">
+      <label htmlFor="project-select" className="text-cafe-muted whitespace-nowrap">
         项目:
       </label>
       <select
         id="project-select"
         value={currentSelection ?? ''}
         onChange={(e) => onSwitch(e.target.value || null)}
-        className="flex-1 min-w-0 px-2 py-1 rounded border border-gray-200 bg-white text-gray-700 text-xs truncate"
+        className="flex-1 min-w-0 px-2 py-1 rounded border border-cafe bg-cafe-surface text-cafe-secondary text-xs truncate"
       >
         <option value="">{projectDisplayName(resolvedPath)}</option>
         {allPaths

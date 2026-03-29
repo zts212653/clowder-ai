@@ -37,7 +37,10 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid grid-cols-12 gap-2 rounded-xl border border-[#E8DCCB] bg-white p-3">
+    <form
+      onSubmit={handleSubmit}
+      className="grid grid-cols-12 gap-2 rounded-xl border border-[#E8DCCB] bg-cafe-surface p-3"
+    >
       <label htmlFor="mc-create-title" className="col-span-3">
         <span className="sr-only">任务标题</span>
         <input
@@ -66,7 +69,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
           id="mc-create-priority"
           value={priority}
           onChange={(event) => setPriority(event.target.value as BacklogPriority)}
-          className="w-full rounded-lg border border-[#E6D7C3] bg-white px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
+          className="w-full rounded-lg border border-[#E6D7C3] bg-cafe-surface px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-priority"
         >
           <option value="p0">P0</option>

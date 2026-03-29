@@ -90,9 +90,9 @@ export function ScrollToBottomButton({
   const classes = useMemo(
     () =>
       'absolute bottom-3 right-8 z-20 ' +
-      'rounded-full border border-gray-200 bg-white/90 shadow-sm ' +
-      'px-3 py-1.5 text-xs text-gray-700 ' +
-      'hover:bg-white hover:border-gray-300 transition-colors',
+      'rounded-full border border-cafe bg-cafe-surface/90 shadow-sm ' +
+      'px-3 py-1.5 text-xs text-cafe-secondary ' +
+      'hover:bg-cafe-surface hover:border-cafe transition-colors',
     [],
   );
 

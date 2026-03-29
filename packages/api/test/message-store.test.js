@@ -437,4 +437,93 @@ describe('MessageStore', () => {
     assert.ok(deleted);
     assert.equal(deleted.thinking, undefined, 'thinking must be cleared on hard delete');
   });
+
+  // --- System-user visibility (scheduler messages must be visible to all) ---
+
+  test('getByThread() includes scheduler messages when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append({ userId: 'user-1', catId: 'opus', content: 'hello', mentions: [], timestamp: 1, threadId: 'th' });
+    store.append({
+      userId: 'scheduler',
+      catId: 'system',
+      content: '[定时任务] reminder',
+      mentions: [],
+      timestamp: 2,
+      threadId: 'th',
+    });
+    store.append({ userId: 'user-2', catId: null, content: 'other user', mentions: [], timestamp: 3, threadId: 'th' });
+
+    const msgs = store.getByThread('th', 50, 'user-1');
+    assert.equal(msgs.length, 2, 'should include own message + scheduler message');
+    assert.equal(msgs[0].content, 'hello');
+    assert.equal(msgs[1].content, '[定时任务] reminder');
+  });
+
+  test('getByThreadBefore() includes scheduler messages when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append({ userId: 'user-1', catId: 'opus', content: 'hello', mentions: [], timestamp: 100, threadId: 'th' });
+    store.append({
+      userId: 'scheduler',
+      catId: 'system',
+      content: '[定时任务] reminder',
+      mentions: [],
+      timestamp: 200,
+      threadId: 'th',
+    });
+    store.append({ userId: 'user-1', catId: null, content: 'follow-up', mentions: [], timestamp: 300, threadId: 'th' });
+
+    const msgs = store.getByThreadBefore('th', 350, 50, undefined, 'user-1');
+    assert.equal(msgs.length, 3, 'should include all own messages + scheduler');
+    assert.equal(msgs[1].userId, 'scheduler');
+  });
+
+  test('getByThreadAfter() includes scheduler messages when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const first = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'start',
+      mentions: [],
+      timestamp: 100,
+      threadId: 'th',
+    });
+    store.append({
+      userId: 'scheduler',
+      catId: 'system',
+      content: '[定时任务] digest',
+      mentions: [],
+      timestamp: 200,
+      threadId: 'th',
+    });
+    store.append({ userId: 'user-2', catId: null, content: 'other', mentions: [], timestamp: 300, threadId: 'th' });
+
+    const msgs = store.getByThreadAfter('th', first.id, undefined, 'user-1');
+    assert.equal(msgs.length, 1, 'should include scheduler message after cursor');
+    assert.equal(msgs[0].userId, 'scheduler');
+  });
+
+  test('P1: forged userId=scheduler with non-system catId does NOT bypass filter', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append({ userId: 'user-1', catId: 'opus', content: 'legit', mentions: [], timestamp: 1, threadId: 'th' });
+    store.append({
+      userId: 'scheduler',
+      catId: 'opus',
+      content: 'forged system message',
+      mentions: [],
+      timestamp: 2,
+      threadId: 'th',
+    });
+
+    const msgs = store.getByThread('th', 50, 'user-1');
+    assert.equal(msgs.length, 1, 'forged scheduler message must NOT bypass userId filter');
+    assert.equal(msgs[0].content, 'legit');
+  });
 });

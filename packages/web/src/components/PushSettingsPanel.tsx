@@ -76,7 +76,7 @@ export function PushSettingsPanel() {
   if (!isSupported) {
     return (
       <div className="space-y-3">
-        <h3 className="text-base font-semibold text-gray-800">推送通知</h3>
+        <h3 className="text-base font-semibold text-cafe">推送通知</h3>
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 space-y-2">
           <p className="text-sm text-amber-900 font-medium">{environmentHint ?? '当前浏览器不支持推送通知。'}</p>
           <p className="text-xs text-amber-700">
@@ -94,50 +94,50 @@ export function PushSettingsPanel() {
   return (
     <div className="space-y-5">
       <div className="space-y-1">
-        <h3 className="text-base font-semibold text-gray-800">推送通知</h3>
-        <p className="text-sm text-gray-600">
+        <h3 className="text-base font-semibold text-cafe">推送通知</h3>
+        <p className="text-sm text-cafe-secondary">
           开启后，猫猫回复、权限请求等会推送到系统通知栏（即使不在 Clowder AI 页面）。
         </p>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-        <div className="text-sm font-medium text-gray-800">通知能力矩阵</div>
+      <div className="rounded-xl border border-cafe bg-cafe-surface p-4 space-y-3">
+        <div className="text-sm font-medium text-cafe">通知能力矩阵</div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">浏览器支持</div>
+          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+            <div className="text-cafe-secondary">浏览器支持</div>
             <div className="font-semibold text-emerald-700">已支持</div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">权限状态</div>
+          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+            <div className="text-cafe-secondary">权限状态</div>
             <div
               className={`font-semibold ${permission === 'granted' ? 'text-emerald-700' : permission === 'denied' ? 'text-rose-700' : 'text-amber-700'}`}
             >
               {describePermission(permission)}
             </div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">推送服务</div>
+          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+            <div className="text-cafe-secondary">推送服务</div>
             <div className={`font-semibold ${status?.capability.enabled ? 'text-emerald-700' : 'text-amber-700'}`}>
               {status?.capability.enabled ? '已启用' : '未启用'}
             </div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">设备订阅</div>
+          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+            <div className="text-cafe-secondary">设备订阅</div>
             <div className={`font-semibold ${status?.subscription.count ? 'text-emerald-700' : 'text-amber-700'}`}>
               {status?.subscription.count ?? 0} 台
             </div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">最近投递</div>
+          <div className="rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-2">
+            <div className="text-cafe-secondary">最近投递</div>
             <div
-              className={`font-semibold ${status?.delivery.lastResult === 'ok' ? 'text-emerald-700' : status?.delivery.lastResult === 'error' ? 'text-rose-700' : 'text-gray-700'}`}
+              className={`font-semibold ${status?.delivery.lastResult === 'ok' ? 'text-emerald-700' : status?.delivery.lastResult === 'error' ? 'text-rose-700' : 'text-cafe-secondary'}`}
             >
               {describeDelivery(status?.delivery.lastResult ?? 'not_attempted', status?.delivery.lastError ?? null)}
             </div>
           </div>
         </div>
         {status && (
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-cafe-secondary">
             服务状态：{status.capability.enabled ? '已启用' : '未启用'}
             {' · '}VAPID：{status.capability.vapidPublicKeyConfigured ? '已配置' : '未配置'}
             {' · '}PushService：{status.capability.pushServiceConfigured ? '可用' : '不可用'}
@@ -159,9 +159,9 @@ export function PushSettingsPanel() {
       )}
 
       {status?.subscription.targets && status.subscription.targets.length > 0 && (
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-          <div className="text-sm font-medium text-gray-800">已绑定设备</div>
-          <ul className="mt-2 space-y-1 text-xs text-gray-600">
+        <div className="rounded-xl border border-cafe bg-cafe-surface px-4 py-3">
+          <div className="text-sm font-medium text-cafe">已绑定设备</div>
+          <ul className="mt-2 space-y-1 text-xs text-cafe-secondary">
             {status.subscription.targets.slice(0, 3).map((target) => (
               <li key={`${target.endpoint}-${target.createdAt}`} className="flex items-center justify-between gap-2">
                 <span>{target.uaFamily.toUpperCase()}</span>
@@ -194,16 +194,20 @@ export function PushSettingsPanel() {
         </div>
       )}
 
-      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+      <div className="flex items-center justify-between rounded-xl border border-cafe bg-cafe-surface-elevated px-4 py-3">
         <div>
-          <p className="text-sm font-medium text-gray-700">{isSubscribed ? '已开启推送' : '推送已关闭'}</p>
-          <p className="text-xs text-gray-500">{isSubscribed ? '猫猫消息会推送到通知栏' : '点击开启接收猫猫推送'}</p>
+          <p className="text-sm font-medium text-cafe-secondary">{isSubscribed ? '已开启推送' : '推送已关闭'}</p>
+          <p className="text-xs text-cafe-secondary">
+            {isSubscribed ? '猫猫消息会推送到通知栏' : '点击开启接收猫猫推送'}
+          </p>
         </div>
         <button
           onClick={isSubscribed ? unsubscribe : subscribe}
           disabled={isLoading}
           className={`px-4 py-1.5 text-sm rounded-lg font-medium transition-colors ${
-            isSubscribed ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' : 'bg-blue-600 text-white hover:bg-blue-700'
+            isSubscribed
+              ? 'bg-gray-200 text-cafe-secondary hover:bg-gray-300'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
           } disabled:opacity-50`}
         >
           {isLoading ? '处理中...' : isSubscribed ? '关闭' : '开启'}
@@ -222,7 +226,9 @@ export function PushSettingsPanel() {
           {isTesting ? '发送中...' : '发送测试通知'}
         </button>
       )}
-      <p className="text-[11px] text-gray-500">iPhone 路线（Phase 3）：PWA Web Push。请先“添加到主屏幕”再开启通知。</p>
+      <p className="text-[11px] text-cafe-secondary">
+        iPhone 路线（Phase 3）：PWA Web Push。请先“添加到主屏幕”再开启通知。
+      </p>
     </div>
   );
 }

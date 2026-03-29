@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { reconnectGame } from '@/hooks/useGameReconnect';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode } from '@/stores/chat-types';
@@ -13,14 +14,7 @@ import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
 import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputMenus } from './ChatInputMenus';
-import {
-  buildCatOptions,
-  buildWhisperOptions,
-  type CatOption,
-  detectMenuTrigger,
-  GAME_LIST,
-  WEREWOLF_MODES,
-} from './chat-input-options';
+import { buildCatOptions, type CatOption, detectMenuTrigger, GAME_LIST, WEREWOLF_MODES } from './chat-input-options';
 import { deriveImageLifecycleStatus, isImageLifecycleBlockingSend } from './chat-input-upload-state';
 import { GameLobby, type GameStartPayload } from './game/GameLobby';
 import { HistorySearchModal } from './HistorySearchModal';
@@ -28,6 +22,7 @@ import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
+import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
 export const threadDrafts = new Map<string, string>();
@@ -55,8 +50,10 @@ export function ChatInput({
   uploadError = null,
 }: ChatInputProps) {
   const { cats } = useCatData();
+  const ime = useIMEGuard();
   const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
-  const whisperOptions = useMemo(() => buildWhisperOptions(cats), [cats]);
+  // F108 Scene 2: whisper-eligible cats (CatData[] for WhisperCatSelector)
+  const whisperCats = useMemo(() => cats.filter((c) => c.roster?.available !== false), [cats]);
 
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const activeInvocations = useChatStore((s) => s.activeInvocations);
@@ -85,6 +82,14 @@ export function ChatInput({
   const [isPreparingImages, setIsPreparingImages] = useState(false);
   const [whisperMode, setWhisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
+
+  // F108B AC-B7: In whisper mode, check if SELECTED targets are busy (not thread-level).
+  // When all whisper targets are idle → show Send button, not Queue.
+  const whisperTargetsAllIdle = useMemo(() => {
+    if (!whisperMode || whisperTargets.size === 0) return false;
+    return ![...whisperTargets].some((catId) => activeCatIds.has(catId));
+  }, [whisperMode, whisperTargets, activeCatIds]);
+
   const [mobileToolbar, setMobileToolbar] = useState(false);
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
@@ -270,7 +275,7 @@ export function ChatInput({
   );
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.nativeEvent.isComposing) return;
+    if (ime.isComposing()) return;
 
     // F080: Ctrl+R opens history search (clear any active menus first)
     if (e.ctrlKey && e.key === 'r') {
@@ -381,8 +386,8 @@ export function ChatInput({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // F39: Enter while cat running → queue send; normal otherwise
-      if (hasActiveInvocation) handleQueueSend();
+      // F39+F108B: Enter while cat running → queue send; whisper to idle targets → normal send
+      if (hasActiveInvocation && !whisperTargetsAllIdle) handleQueueSend();
       else handleSend();
     }
   };
@@ -458,12 +463,12 @@ export function ChatInput({
   // Reconcile whisperTargets: remove invalid ids + remove newly-active cats (B10)
   useEffect(() => {
     if (!whisperMode) return;
-    const validIds = new Set(whisperOptions.map((c) => c.id));
+    const validIds = new Set(whisperCats.map((c) => c.id));
     setWhisperTargets((prev) => {
       const filtered = new Set([...prev].filter((id) => validIds.has(id) && !activeCatIds.has(id)));
       return filtered.size === prev.size ? prev : filtered;
     });
-  }, [whisperOptions, whisperMode, activeCatIds]);
+  }, [whisperCats, whisperMode, activeCatIds]);
 
   const handleGameClick = useCallback(() => {
     setShowMentions(false);
@@ -476,12 +481,12 @@ export function ChatInput({
   const handleWhisperToggle = useCallback(() => {
     setWhisperMode((prev) => {
       if (!prev) {
-        // Entering whisper mode — auto-select idle cats only (B10: executing cats excluded)
-        setWhisperTargets(new Set(whisperOptions.filter((c) => !activeCatIds.has(c.id)).map((c) => c.id)));
+        // F108B P1-1: Default to NO cats selected (design spec Scene 1: "默认都不选")
+        setWhisperTargets(new Set());
       }
       return !prev;
     });
-  }, [whisperOptions, activeCatIds]);
+  }, []);
 
   // Sync input text to module-level draft map (covers all sources: typing, voice, mentions)
   // useLayoutEffect runs synchronously before browser paint and before unmount,
@@ -533,7 +538,7 @@ export function ChatInput({
         <div className="px-4 pt-2 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-[#9B7EBD] animate-pulse" />
           <span className="text-xs text-[#9B7EBD] font-medium">猫猫正在回复中...</span>
-          <span className="text-xs text-gray-400">继续输入，消息会排队</span>
+          <span className="text-xs text-cafe-muted">继续输入，消息会排队</span>
         </div>
       )}
 
@@ -572,8 +577,17 @@ export function ChatInput({
         menuRef={menuRef}
       />
 
+      {whisperMode && !showMentions && !showGameMenu && (
+        <WhisperCatSelector
+          cats={whisperCats}
+          selected={whisperTargets}
+          activeCatIds={activeCatIds}
+          onToggle={toggleWhisperTarget}
+        />
+      )}
+
       {imageLifecycleStatus === 'preparing' && (
-        <div className="px-4 pt-2 text-xs text-gray-500" role="status">
+        <div className="px-4 pt-2 text-xs text-cafe-secondary" role="status">
           图片处理中，完成后可发送
         </div>
       )}
@@ -589,33 +603,7 @@ export function ChatInput({
       )}
 
       {whisperMode && (
-        <div className="px-4 pt-2 flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-amber-600 font-medium">悄悄话发给:</span>
-          {whisperOptions.map((cat) => {
-            const isActive = activeCatIds.has(cat.id);
-            const isSelected = whisperTargets.has(cat.id);
-            return (
-              <button
-                key={cat.id}
-                onClick={() => !isActive && toggleWhisperTarget(cat.id)}
-                disabled={isActive}
-                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                  isActive
-                    ? 'text-gray-300 border-gray-200 bg-gray-50 cursor-not-allowed'
-                    : isSelected
-                      ? 'border-current bg-amber-50 font-medium'
-                      : 'text-gray-400 border-gray-200 hover:border-gray-400'
-                }`}
-                style={!isActive && isSelected ? { color: cat.color } : undefined}
-                title={isActive ? `${cat.label.replace('@', '')} 执行中，不可选` : undefined}
-              >
-                {cat.label.replace('@', '')}
-                {isActive && ' ⏳'}
-              </button>
-            );
-          })}
-          {whisperTargets.size === 0 && <span className="text-xs text-red-400">请至少选一只猫猫</span>}
-        </div>
+        <WhisperTargetChips cats={whisperCats} selected={whisperTargets} onToggle={toggleWhisperTarget} />
       )}
 
       <ImagePreview files={images} onRemove={handleRemoveImage} />
@@ -650,7 +638,7 @@ export function ChatInput({
           className={`p-3 rounded-xl transition-all md:hidden ${
             mobileToolbar
               ? 'text-cocreator-primary bg-cocreator-light rotate-45'
-              : 'text-gray-400 hover:text-cocreator-primary hover:bg-white'
+              : 'text-cafe-muted hover:text-cocreator-primary hover:bg-cafe-surface'
           }`}
           aria-label="展开工具栏"
         >
@@ -667,7 +655,7 @@ export function ChatInput({
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
-          className="hidden md:block p-3 rounded-xl text-gray-400 hover:text-cocreator-primary hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="hidden md:block p-3 rounded-xl text-cafe-muted hover:text-cocreator-primary hover:bg-cafe-surface disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           aria-label="Attach images"
         >
           <AttachIcon className="w-5 h-5" />
@@ -679,7 +667,7 @@ export function ChatInput({
           className={`hidden md:block p-3 rounded-xl transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
             whisperMode
               ? 'text-amber-500 bg-amber-50 ring-1 ring-amber-300'
-              : 'text-gray-400 hover:text-amber-500 hover:bg-white'
+              : 'text-cafe-muted hover:text-amber-500 hover:bg-cafe-surface'
           }`}
           aria-label="Whisper mode"
           title="悄悄话模式"
@@ -697,7 +685,7 @@ export function ChatInput({
           ref={gameBtnRef}
           onClick={handleGameClick}
           disabled={disabled || sendTemporarilyDisabled}
-          className="hidden md:block p-3 rounded-xl text-gray-400 hover:text-indigo-500 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="hidden md:block p-3 rounded-xl text-cafe-muted hover:text-indigo-500 hover:bg-cafe-surface disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           aria-label="Game mode"
           title="游戏模式"
         >
@@ -712,14 +700,20 @@ export function ChatInput({
             value={input}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onPaste={handlePaste}
             placeholder={
-              whisperMode ? '悄悄话...' : hasActiveInvocation ? '继续输入，消息会排队...' : '输入消息... (@ 召唤猫猫)'
+              whisperMode
+                ? '悄悄话...'
+                : hasActiveInvocation && !whisperTargetsAllIdle
+                  ? '继续输入，消息会排队...'
+                  : '输入消息... (@ 召唤猫猫)'
             }
             className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-gray-400 ${
               whisperMode
                 ? 'border-amber-300 bg-amber-50/50 focus:ring-amber-400'
-                : 'border-cocreator-light bg-white focus:ring-cocreator-primary'
+                : 'border-cocreator-light bg-cafe-surface focus:ring-cocreator-primary'
             }`}
             rows={1}
             disabled={disabled}
@@ -731,7 +725,7 @@ export function ChatInput({
               aria-hidden="true"
             >
               <span className="invisible">{input}</span>
-              <span className="text-gray-400">{ghostSuggestion.slice(input.length)}</span>
+              <span className="text-cafe-muted">{ghostSuggestion.slice(input.length)}</span>
             </div>
           )}
         </div>
@@ -744,7 +738,7 @@ export function ChatInput({
           onForceSend={handleForceSend}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
-          hasActiveInvocation={hasActiveInvocation}
+          hasActiveInvocation={whisperTargetsAllIdle ? false : hasActiveInvocation}
           hasText={!!input.trim()}
         />
       </div>

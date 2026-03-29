@@ -1,5 +1,6 @@
 import type { StudyMeta } from '@cat-cafe/shared';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import { PodcastPlayer } from './PodcastPlayer';
 
@@ -61,6 +62,7 @@ export function StudyFoldArea({
   const [linkInput, setLinkInput] = useState('');
   const [newCollectionName, setNewCollectionName] = useState('');
   const linkInputRef = useRef<HTMLInputElement>(null);
+  const ime = useIMEGuard();
 
   const handleLinkThread = useCallback(async () => {
     const tid = linkInput.trim();
@@ -119,18 +121,18 @@ export function StudyFoldArea({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center justify-between rounded-t-lg border border-gray-200 bg-gray-50 px-3 py-2 text-left text-xs font-semibold text-gray-700"
+        className="flex w-full items-center justify-between rounded-t-lg border border-cafe bg-cafe-surface-elevated px-3 py-2 text-left text-xs font-semibold text-cafe-secondary"
       >
         <span>
           {open ? '▾' : '▸'} 学习区
           {studyCount > 0 && <span className="ml-1 text-opus-dark">({studyCount})</span>}
         </span>
         {studyMeta?.lastStudiedAt && (
-          <span className="text-xs font-normal text-gray-400">上次学习: {formatDate(studyMeta.lastStudiedAt)}</span>
+          <span className="text-xs font-normal text-cafe-muted">上次学习: {formatDate(studyMeta.lastStudiedAt)}</span>
         )}
       </button>
       {open && (
-        <div className="rounded-b-lg border border-t-0 border-gray-200 bg-gray-50 p-3">
+        <div className="rounded-b-lg border border-t-0 border-cafe bg-cafe-surface-elevated p-3">
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -143,7 +145,7 @@ export function StudyFoldArea({
               type="button"
               onClick={onDiscuss}
               disabled={discussLoading}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+              className="rounded-md border border-cafe px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated disabled:opacity-50"
             >
               {discussLoading ? '正在创建讨论...' : '在对话中讨论'}
             </button>
@@ -158,16 +160,16 @@ export function StudyFoldArea({
 
           {threads.length > 0 && (
             <div className="mt-3">
-              <h4 className="text-xs font-semibold text-gray-500">关联对话</h4>
+              <h4 className="text-xs font-semibold text-cafe-secondary">关联对话</h4>
               <ul className="mt-1 space-y-1">
                 {threads.map((t) => (
                   <li key={t.threadId} className="flex items-center gap-1">
                     <a
                       href={`/thread/${encodeURIComponent(t.threadId)}`}
-                      className="flex flex-1 items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-opus-dark hover:bg-opus-bg"
+                      className="flex flex-1 items-center justify-between rounded-md border border-cafe bg-cafe-surface px-3 py-1.5 text-xs text-opus-dark hover:bg-opus-bg"
                     >
                       <span className="truncate">{t.threadId}</span>
-                      <span className="ml-2 shrink-0 text-gray-400">{formatDate(t.linkedAt)}</span>
+                      <span className="ml-2 shrink-0 text-cafe-muted">{formatDate(t.linkedAt)}</span>
                     </a>
                     {onUnlinkThread && (
                       <button
@@ -191,15 +193,17 @@ export function StudyFoldArea({
                 ref={linkInputRef}
                 value={linkInput}
                 onChange={(e) => setLinkInput(e.target.value)}
+                onCompositionStart={ime.onCompositionStart}
+                onCompositionEnd={ime.onCompositionEnd}
                 onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
+                  if (ime.isComposing()) return;
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     void handleLinkThread();
                   }
                 }}
                 placeholder="输入 Thread ID 关联..."
-                className="flex-1 rounded-md border border-gray-200 px-2 py-1 text-xs"
+                className="flex-1 rounded-md border border-cafe px-2 py-1 text-xs"
               />
               <button
                 type="button"
@@ -213,28 +217,28 @@ export function StudyFoldArea({
 
           {notes.length > 0 && (
             <div className="mt-3">
-              <h4 className="text-xs font-semibold text-gray-500">学习笔记</h4>
+              <h4 className="text-xs font-semibold text-cafe-secondary">学习笔记</h4>
               <ul className="mt-1 space-y-1">
                 {notes.map((n) => (
                   <li key={n.id}>
                     <button
                       type="button"
                       onClick={() => void toggleNote(n.id)}
-                      className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                      className="flex w-full items-center justify-between rounded-md border border-cafe bg-cafe-surface px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated"
                       data-testid={`note-toggle-${n.id}`}
                     >
                       <span className="flex items-center gap-1.5">
-                        <span className="text-gray-400">{expandedNote === n.id ? '▾' : '▸'}</span>
+                        <span className="text-cafe-muted">{expandedNote === n.id ? '▾' : '▸'}</span>
                         <span className="font-medium">{n.id}</span>
                       </span>
-                      <span className="text-gray-400">
+                      <span className="text-cafe-muted">
                         {n.state} · {formatDate(n.createdAt)}
                       </span>
                     </button>
                     {expandedNote === n.id && (
-                      <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                      <div className="mt-1 rounded-md border border-cafe-subtle bg-cafe-surface-elevated px-3 py-2 text-xs text-cafe-secondary">
                         {loadingNote === n.id ? (
-                          <span className="text-gray-400">加载中...</span>
+                          <span className="text-cafe-muted">加载中...</span>
                         ) : (
                           <pre className="whitespace-pre-wrap">{noteContents[n.id] ?? ''}</pre>
                         )}
@@ -251,15 +255,15 @@ export function StudyFoldArea({
 
           {reports.length > 0 && (
             <div className="mt-3">
-              <h4 className="text-xs font-semibold text-gray-500">研究报告</h4>
+              <h4 className="text-xs font-semibold text-cafe-secondary">研究报告</h4>
               <ul className="mt-1 space-y-1">
                 {reports.map((r) => (
                   <li
                     key={r.id}
-                    className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700"
+                    className="rounded-md border border-cafe bg-cafe-surface px-3 py-1.5 text-xs text-cafe-secondary"
                   >
                     <span className="font-medium">{r.id}</span>
-                    <span className="ml-2 text-gray-400">
+                    <span className="ml-2 text-cafe-muted">
                       {r.state} · {formatDate(r.createdAt)}
                     </span>
                   </li>
@@ -271,7 +275,7 @@ export function StudyFoldArea({
           {/* AC-18: 学习集 */}
           {(studyMeta?.collections?.length ?? 0) > 0 && collections && (
             <div className="mt-3">
-              <h4 className="text-xs font-semibold text-gray-500">所属学习集</h4>
+              <h4 className="text-xs font-semibold text-cafe-secondary">所属学习集</h4>
               <ul className="mt-1 flex flex-wrap gap-1">
                 {studyMeta?.collections?.map((colId) => {
                   const col = collections.find((c) => c.id === colId);
@@ -295,7 +299,7 @@ export function StudyFoldArea({
                   if (e.target.value) void onAddToCollection(e.target.value);
                   e.target.value = '';
                 }}
-                className="rounded-md border border-gray-200 px-2 py-1 text-xs"
+                className="rounded-md border border-cafe px-2 py-1 text-xs"
                 defaultValue=""
               >
                 <option value="" disabled>
@@ -317,8 +321,10 @@ export function StudyFoldArea({
               <input
                 value={newCollectionName}
                 onChange={(e) => setNewCollectionName(e.target.value)}
+                onCompositionStart={ime.onCompositionStart}
+                onCompositionEnd={ime.onCompositionEnd}
                 onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
+                  if (ime.isComposing()) return;
                   if (e.key === 'Enter' && newCollectionName.trim()) {
                     e.preventDefault();
                     void onCreateCollection(newCollectionName.trim());
@@ -326,7 +332,7 @@ export function StudyFoldArea({
                   }
                 }}
                 placeholder="新建学习集..."
-                className="flex-1 rounded-md border border-gray-200 px-2 py-1 text-xs"
+                className="flex-1 rounded-md border border-cafe px-2 py-1 text-xs"
               />
               <button
                 type="button"
@@ -344,7 +350,7 @@ export function StudyFoldArea({
           )}
 
           {!hasContent && !studyMeta?.collections?.length && (
-            <p className="mt-3 text-xs text-gray-400">还没有学习记录，点击「开始学习」开始吧。</p>
+            <p className="mt-3 text-xs text-cafe-muted">还没有学习记录，点击「开始学习」开始吧。</p>
           )}
         </div>
       )}

@@ -9,6 +9,7 @@
  */
 import type { CatId } from '@cat-cafe/shared';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
+import type { ConflictAutoExecutor } from './ConflictAutoExecutor.js';
 import type { ConflictRouter, ConflictSignal } from './ConflictRouter.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 import type { IPrTrackingStore } from './PrTrackingStore.js';
@@ -18,6 +19,8 @@ export interface ConflictCheckTaskSpecOptions {
   readonly checkMergeable: (repoFullName: string, prNumber: number) => Promise<{ mergeState: string; headSha: string }>;
   readonly conflictRouter: ConflictRouter;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
+  /** F140 Phase C: auto-executor for clean rebase. If absent, always wakes cat. */
+  readonly autoExecutor?: ConflictAutoExecutor;
   readonly log: {
     info: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
@@ -76,8 +79,22 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
       timeoutMs: 30_000,
       async execute(workItem: ConflictWorkItem, _subjectKey: string, _ctx: ExecuteContext) {
         const routeResult = await opts.conflictRouter.route(workItem.signal);
+        if (routeResult.kind !== 'notified') return;
 
-        if (routeResult.kind === 'notified' && opts.invokeTrigger) {
+        // F140 Phase C: try auto-resolve before waking cat
+        if (opts.autoExecutor && workItem.signal.mergeState === 'CONFLICTING') {
+          const result = await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber);
+          if (result.kind === 'resolved') {
+            opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);
+            return; // No need to wake cat — conflict handled
+          }
+          // escalated or skipped → fall through to wake cat
+          if (result.kind === 'escalated') {
+            opts.log.info(`[conflict-check] Escalating: ${result.files.length} conflict file(s) in ${result.branch}`);
+          }
+        }
+
+        if (opts.invokeTrigger) {
           const policy: ConnectorTriggerPolicy = { priority: 'urgent', reason: 'github_pr_conflict' };
           opts.invokeTrigger.trigger(
             routeResult.threadId,
@@ -96,5 +113,11 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
     outcome: { whenNoSignal: 'record' },
     enabled: () => true,
     actor: { role: 'repo-watcher', costTier: 'cheap' },
+    display: {
+      label: '冲突检测',
+      category: 'pr',
+      description: '检测 tracked PR 是否有合并冲突',
+      subjectKind: 'pr',
+    },
   };
 }

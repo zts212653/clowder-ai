@@ -12,7 +12,7 @@ const STATUS_ICONS: Record<string, string> = {
   done: '●',
 };
 const STATUS_COLORS: Record<string, string> = {
-  todo: 'text-gray-400',
+  todo: 'text-cafe-muted',
   doing: 'text-blue-500',
   blocked: 'text-red-400',
   done: 'text-green-500',
@@ -25,15 +25,15 @@ function TaskItemRow({ task }: { task: TaskItem }) {
     <div className="group">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-gray-50 rounded transition-colors"
+        className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-cafe-surface-elevated rounded transition-colors"
       >
         <span className={`text-sm ${STATUS_COLORS[task.status]}`}>{STATUS_ICONS[task.status]}</span>
-        <span className="text-xs text-gray-700 truncate flex-1">{task.title}</span>
+        <span className="text-xs text-cafe-secondary truncate flex-1">{task.title}</span>
         {task.ownerCatId && <CatAvatar catId={task.ownerCatId} size={14} />}
       </button>
       {expanded && task.why && (
         <div className="px-3 pb-2 ml-6">
-          <p className="text-[10px] text-gray-400 leading-relaxed">{task.why}</p>
+          <p className="text-[10px] text-cafe-muted leading-relaxed">{task.why}</p>
         </div>
       )}
     </div>
@@ -53,9 +53,9 @@ export function TaskPanel() {
   const activeCount = tasks.filter((t) => t.status !== 'done').length;
 
   return (
-    <div className="border-t border-gray-200 pt-3 mt-3">
+    <div className="border-t border-cafe pt-3 mt-3">
       <div className="flex items-center gap-2 px-3 mb-2">
-        <span className="text-xs font-semibold text-gray-500">🧶 毛线球</span>
+        <span className="text-xs font-semibold text-cafe-secondary">🧶 毛线球</span>
         {activeCount > 0 && (
           <span className="text-[10px] bg-blue-100 text-blue-600 rounded-full px-1.5 py-0.5 font-medium">
             {activeCount}

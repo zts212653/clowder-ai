@@ -157,7 +157,7 @@ F055 合入后team lead安排了一次链式冒烟测试：opus → codex → so
 | Maine Coon (Codex) | F055 spec, PlanBoardPanel 源码 | LGTM，无 P1/P2 | ✅ |
 | 云端 Codex | PR #202 diff | "Didn't find any major issues. Chef's kiss." | ✅ |
 
-## Bug 追踪：多猫 task_progress 对接缺口（2026-06-22）
+## Bug 追踪：多猫 task_progress 对接缺口（2026-03-24）
 
 > **Reporter**: team lead
 > **Investigator**: 金渐层 (@opencode / Claude Opus 4.6)

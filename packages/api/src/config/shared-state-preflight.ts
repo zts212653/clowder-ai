@@ -59,12 +59,15 @@ export interface SharedStatePreflightResult {
 /**
  * Return shared-state files that are in local commits ahead of `ref`.
  * Uses rev-list --count to avoid false positives when local is only behind ref
+ * and merge-base to avoid false positives when local and ref have diverged
  * (git diff --name-only ref..HEAD is a tree diff, not a commit-range diff).
  */
 function diffUnpushedShared(ref: string, cwd: string): string[] {
   const aheadCount = safeExec('git', ['rev-list', '--count', `${ref}..HEAD`], cwd);
   if (!aheadCount || aheadCount === '0') return [];
-  const raw = safeExec('git', ['diff', '--name-only', `${ref}..HEAD`], cwd);
+  const mergeBase = safeExec('git', ['merge-base', 'HEAD', ref], cwd);
+  const diffBase = mergeBase || ref;
+  const raw = safeExec('git', ['diff', '--name-only', `${diffBase}..HEAD`], cwd);
   if (!raw) return [];
   return raw.split('\n').filter((f: string) => f && SHARED_STATE_PATTERN.test(f));
 }

@@ -44,6 +44,8 @@ export interface ConnectorTriggerPolicy {
   readonly priority?: 'urgent' | 'normal';
   /** optional reason for diagnostics */
   readonly reason?: string;
+  /** F140 Phase C: hint which Skill to auto-load (not a hard constraint — cat can override) */
+  readonly suggestedSkill?: string;
 }
 
 /**
@@ -99,7 +101,16 @@ export class ConnectorInvokeTrigger {
     // Urgent connector policy: preempt active invocation in the same thread.
     // Used for GitHub review comments so cats don't get stuck behind long queue chatter.
     if (priority === 'urgent' && invocationTracker.has(threadId, catId)) {
-      this.handleUrgentTrigger(threadId, catId, userId, message, messageId, policy?.reason, sender).catch((err) => {
+      this.handleUrgentTrigger(
+        threadId,
+        catId,
+        userId,
+        message,
+        messageId,
+        policy?.reason,
+        sender,
+        policy?.suggestedSkill,
+      ).catch((err) => {
         this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
       });
       return;
@@ -112,7 +123,16 @@ export class ConnectorInvokeTrigger {
     }
 
     // No active invocation → direct execution (existing flow)
-    this.executeInBackground(threadId, catId, userId, message, messageId, undefined, contentBlocks).catch((err) => {
+    this.executeInBackground(
+      threadId,
+      catId,
+      userId,
+      message,
+      messageId,
+      undefined,
+      contentBlocks,
+      policy?.suggestedSkill,
+    ).catch((err) => {
       // Last-resort guard: prevent unhandledRejection from pre-try errors
       this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -176,6 +196,7 @@ export class ConnectorInvokeTrigger {
     messageId: string,
     reason?: string,
     sender?: { id: string; name?: string },
+    suggestedSkill?: string,
   ): Promise<void> {
     const { invocationTracker, invocationRecordStore, log } = this.opts;
     const idempotencyKey = `connector-${messageId}`;
@@ -213,7 +234,16 @@ export class ConnectorInvokeTrigger {
       if (cancelResult.cancelled) {
         this.opts.queueProcessor?.clearPause(threadId, catId);
       }
-      await this.executeInBackground(threadId, catId, userId, message, messageId, createResult.invocationId);
+      await this.executeInBackground(
+        threadId,
+        catId,
+        userId,
+        message,
+        messageId,
+        createResult.invocationId,
+        undefined,
+        suggestedSkill,
+      );
       return;
     }
 
@@ -237,7 +267,16 @@ export class ConnectorInvokeTrigger {
       }
     }
 
-    await this.executeInBackground(threadId, catId, userId, message, messageId, createResult.invocationId);
+    await this.executeInBackground(
+      threadId,
+      catId,
+      userId,
+      message,
+      messageId,
+      createResult.invocationId,
+      undefined,
+      suggestedSkill,
+    );
   }
 
   private async executeInBackground(
@@ -248,6 +287,7 @@ export class ConnectorInvokeTrigger {
     messageId: string,
     existingInvocationId?: string,
     contentBlocks?: readonly MessageContent[],
+    suggestedSkill?: string,
   ): Promise<void> {
     const { router, socketManager, invocationRecordStore, invocationTracker, invocationQueue, log } = this.opts;
     const targetCats: CatId[] = [catId];
@@ -295,7 +335,8 @@ export class ConnectorInvokeTrigger {
       // ③ Set status running + broadcast intent
       await invocationRecordStore.update(createResult.invocationId, { status: 'running' });
 
-      socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', { threadId, mode: 'execute', targetCats });
+      // #768: Defer intent_mode broadcast until CLI produces first event.
+      let intentModeBroadcast = false;
 
       // ④ Run routeExecution and broadcast each agent message
       const cursorBoundaries = new Map<string, string>();
@@ -324,7 +365,9 @@ export class ConnectorInvokeTrigger {
           });
       }
 
-      const intent = { intent: 'execute' as const, explicit: false, promptTags: [] as string[] };
+      // F140 Phase C: suggestedSkill flows via promptTags → SystemPromptBuilder (hint, not directive)
+      const promptTags: string[] = suggestedSkill ? [`skill:${suggestedSkill}`] : [];
+      const intent = { intent: 'execute' as const, explicit: false, promptTags };
 
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {
         ...(contentBlocks ? { contentBlocks } : {}),
@@ -336,6 +379,16 @@ export class ConnectorInvokeTrigger {
         persistenceContext,
         parentInvocationId: createResult.invocationId,
       })) {
+        // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
+        if (!intentModeBroadcast) {
+          socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
+            threadId,
+            mode: 'execute',
+            targetCats,
+            invocationId: createResult.invocationId,
+          });
+          intentModeBroadcast = true;
+        }
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
         if (msg.type === 'done' && msg.catId) {

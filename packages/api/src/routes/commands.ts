@@ -3,6 +3,7 @@
  * POST /api/commands/extract-tasks - Extract tasks from conversation
  */
 
+import type { CommandSurface } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { extractTasks, toCreateTaskInputs } from '../domains/cats/services/orchestration/TaskExtractor.js';
@@ -10,6 +11,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { AgentService } from '../domains/cats/services/types.js';
+import type { CommandRegistry } from '../infrastructure/commands/CommandRegistry.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -21,6 +23,8 @@ export interface CommandsRoutesOptions {
   opusService: AgentService;
   /** Optional thread ownership guard (enabled in production wiring). */
   threadStore?: IThreadStore;
+  /** F142 Phase B: unified command registry for listing */
+  registry?: CommandRegistry;
 }
 
 const extractTasksSchema = z.object({
@@ -31,7 +35,22 @@ const extractTasksSchema = z.object({
   messageCount: z.number().int().min(1).max(200).optional(),
 });
 
+const VALID_SURFACES = new Set<string>(['web', 'connector', 'both']);
+
 export const commandsRoutes: FastifyPluginAsync<CommandsRoutesOptions> = async (app, opts) => {
+  // GET /api/commands — F142 Phase B: list commands filtered by surface (AC-B8)
+  if (opts.registry) {
+    const registry = opts.registry;
+    app.get('/api/commands', async (request) => {
+      const { surface } = request.query as { surface?: string };
+      if (surface && !VALID_SURFACES.has(surface)) {
+        return { commands: [], error: 'Invalid surface (web|connector|both)' };
+      }
+      const commands = surface ? registry.listBySurface(surface as CommandSurface) : registry.getAll();
+      return { commands };
+    });
+  }
+
   // POST /api/commands/extract-tasks
   app.post('/api/commands/extract-tasks', async (request, reply) => {
     const parseResult = extractTasksSchema.safeParse(request.body);

@@ -62,14 +62,14 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">学习时间线</h3>
+        <h3 className="text-sm font-semibold text-cafe">学习时间线</h3>
         <div className="flex gap-1">
           {[7, 14, 30].map((d) => (
             <button
               key={d}
               type="button"
               onClick={() => setSelectedDays(d)}
-              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-white' : 'border border-gray-200 text-gray-500 hover:bg-gray-100'}`}
+              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-white' : 'border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated'}`}
             >
               {d}天
             </button>
@@ -77,19 +77,19 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
         </div>
       </div>
 
-      {loading && <p className="text-xs text-gray-400">加载中...</p>}
+      {loading && <p className="text-xs text-cafe-muted">加载中...</p>}
       {error && <p className="text-xs text-red-500">{error}</p>}
 
       {!loading && entries.length === 0 && (
-        <p className="text-xs text-gray-400">最近 {selectedDays} 天没有学习活动。</p>
+        <p className="text-xs text-cafe-muted">最近 {selectedDays} 天没有学习活动。</p>
       )}
 
       {Array.from(dateGroups.entries()).map(([dateKey, group]) => (
         <div key={dateKey}>
-          <div className="mb-2 text-xs font-semibold text-gray-500">{formatDate(group[0].lastStudiedAt)}</div>
+          <div className="mb-2 text-xs font-semibold text-cafe-secondary">{formatDate(group[0].lastStudiedAt)}</div>
           <div className="space-y-2 border-l-2 border-opus-light pl-3">
             {group.map((entry) => (
-              <div key={entry.articleId} className="rounded-lg border border-gray-200 bg-white p-2.5">
+              <div key={entry.articleId} className="rounded-lg border border-cafe bg-cafe-surface p-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <a
                     href={`/signals?article=${encodeURIComponent(entry.articleId)}`}
@@ -97,13 +97,16 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                   >
                     {entry.articleTitle}
                   </a>
-                  <span className="shrink-0 text-[10px] text-gray-400">{formatTime(entry.lastStudiedAt)}</span>
+                  <span className="shrink-0 text-[10px] text-cafe-muted">{formatTime(entry.lastStudiedAt)}</span>
                 </div>
-                <span className="text-[10px] text-gray-400">{entry.source}</span>
+                <span className="text-[10px] text-cafe-muted">{entry.source}</span>
                 {entry.artifacts.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {entry.artifacts.map((a) => (
-                      <span key={a.id} className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
+                      <span
+                        key={a.id}
+                        className="rounded-full bg-cafe-surface-elevated px-1.5 py-0.5 text-[10px] text-cafe-secondary"
+                      >
                         {ARTIFACT_ICONS[a.kind] ?? '📄'} {a.kind} · {a.state}
                       </span>
                     ))}

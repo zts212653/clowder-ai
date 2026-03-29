@@ -4,121 +4,19 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
-/* ── Types ───────────────────────────────────── */
-
-interface RunLedgerRow {
-  task_id: string;
-  subject_key: string;
-  outcome: string;
-  signal_summary: string | null;
-  duration_ms: number;
-  started_at: string;
-  assigned_cat_id: string | null;
-}
-
-interface RunStats {
-  total: number;
-  delivered: number;
-  failed: number;
-  skipped: number;
-}
-
-interface TriggerSpec {
-  type: 'interval' | 'cron';
-  ms?: number;
-  expression?: string;
-}
-
-interface ScheduleTask {
-  id: string;
-  profile: string;
-  trigger: TriggerSpec;
-  enabled: boolean;
-  actor?: { role: string; costTier: string };
-  context?: { session: string; materialization: string };
-  lastRun: RunLedgerRow | null;
-  runStats: RunStats;
-}
-
-/* ── Helpers ──────────────────────────────────── */
-
-type TaskCategory = 'PR' | 'Repo' | 'System' | 'Custom';
-
-const CATEGORY_STYLES: Record<TaskCategory, string> = {
-  PR: 'bg-blue-100 text-blue-700',
-  Repo: 'bg-emerald-100 text-emerald-700',
-  System: 'bg-amber-100 text-amber-700',
-  Custom: 'bg-purple-100 text-purple-700',
-};
-
-const CATEGORY_DOT: Record<TaskCategory, string> = {
-  PR: 'bg-[#E8913A]',
-  Repo: 'bg-emerald-500',
-  System: 'bg-amber-500',
-  Custom: 'bg-purple-500',
-};
-
-function categorize(taskId: string): TaskCategory {
-  if (taskId.includes('review') || taskId.includes('conflict')) return 'PR';
-  if (taskId.includes('cicd') || taskId.includes('repo') || taskId.includes('issue')) return 'Repo';
-  if (taskId.includes('summary') || taskId.includes('compact') || taskId.includes('health')) return 'System';
-  return 'Custom';
-}
-
-function formatTrigger(trigger: TriggerSpec): string {
-  if (trigger.type === 'cron') return `cron: ${trigger.expression}`;
-  const ms = trigger.ms ?? 0;
-  if (ms >= 3600000) return `${Math.round(ms / 3600000)}h`;
-  if (ms >= 60000) return `${Math.round(ms / 60000)}m`;
-  return `${Math.round(ms / 1000)}s`;
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60000) return 'just now';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return `${Math.floor(diff / 86400000)}d ago`;
-}
-
-function outcomeIcon(outcome: string): string {
-  if (outcome === 'RUN_DELIVERED') return '\u2713';
-  if (outcome === 'RUN_FAILED') return '\u2717';
-  return '\u2013';
-}
-
-function outcomeColor(outcome: string): string {
-  if (outcome === 'RUN_DELIVERED') return 'text-emerald-600';
-  if (outcome === 'RUN_FAILED') return 'text-red-500';
-  return 'text-gray-400';
-}
-
-function outcomeLabel(outcome: string): string {
-  if (outcome === 'RUN_DELIVERED') return 'delivered';
-  if (outcome === 'RUN_FAILED') return 'failed';
-  if (outcome.startsWith('SKIP_')) return 'idle';
-  return outcome.toLowerCase();
-}
-
-function extractThreadId(subjectKey: string): string | null {
-  if (subjectKey.startsWith('thread-')) return subjectKey.slice(7);
-  if (subjectKey.startsWith('thread:')) return subjectKey.slice(7);
-  return null;
-}
-
-function humanizeId(id: string): string {
-  return id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function humanizeSubject(subjectKey: string): string {
-  if (subjectKey.startsWith('thread-') || subjectKey.startsWith('thread:')) {
-    const id = subjectKey.slice(7);
-    return id ? `Thread ${id.slice(0, 8)}` : 'Thread';
-  }
-  if (subjectKey.startsWith('pr-')) return subjectKey.slice(3);
-  if (subjectKey.startsWith('repo:')) return subjectKey.slice(5);
-  return subjectKey;
-}
+import type { GlobalControlState, RunLedgerRow, ScheduleTask } from './schedule-helpers';
+import {
+  CATEGORY_LABELS,
+  CATEGORY_STYLES,
+  extractThreadId,
+  fallbackCategory,
+  formatTrigger,
+  humanizeId,
+  outcomeColor,
+  outcomeIcon,
+  outcomeLabel,
+  timeAgo,
+} from './schedule-helpers';
 
 /* ── Component ───────────────────────────────── */
 
@@ -132,7 +30,9 @@ export function SchedulePanel() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [scope, setScope] = useState<ScopeFilter>('all');
-  const [nlInput, setNlInput] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [runHistory, setRunHistory] = useState<RunLedgerRow[]>([]);
+  const [globalControl, setGlobalControl] = useState<GlobalControlState | null>(null);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
 
   const fetchTasks = useCallback(async () => {
@@ -149,11 +49,42 @@ export function SchedulePanel() {
     }
   }, []);
 
+  const fetchControl = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/schedule/control');
+      if (res.ok) {
+        const json = await res.json();
+        setGlobalControl(json.global ?? null);
+      }
+    } catch {
+      // fail-open — governance not configured
+    }
+  }, []);
+
   useEffect(() => {
     fetchTasks();
-    const timer = setInterval(fetchTasks, 30000);
+    fetchControl();
+    const timer = setInterval(() => {
+      fetchTasks();
+      fetchControl();
+    }, 30000);
     return () => clearInterval(timer);
-  }, [fetchTasks]);
+  }, [fetchTasks, fetchControl]);
+
+  const handleGlobalToggle = useCallback(async () => {
+    if (!globalControl) return;
+    const next = !globalControl.enabled;
+    try {
+      await apiFetch('/api/schedule/control', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next, reason: next ? null : 'Paused from panel', updatedBy: 'user' }),
+      });
+      fetchControl();
+    } catch {
+      /* fail-open */
+    }
+  }, [globalControl, fetchControl]);
 
   // AC-C3b-2: scope filtering — Current Thread shows only thread-associated tasks matching currentThreadId
   // AC-C3b-3: non-thread tasks (pr-, repo-) only visible in All view (threadId 可空 per AC)
@@ -167,24 +98,70 @@ export function SchedulePanel() {
     });
   }, [tasks, scope, currentThreadId]);
 
-  const handleNlSubmit = useCallback(async () => {
-    if (!nlInput.trim()) return;
-    try {
-      await apiFetch('/api/schedule/nl-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: nlInput.trim() }),
-      });
-      setNlInput('');
-      fetchTasks();
-    } catch {
-      // fail-open
-    }
-  }, [nlInput, fetchTasks]);
+  const handleToggleExpand = useCallback(
+    async (taskId: string) => {
+      if (expandedId === taskId) {
+        setExpandedId(null);
+        setRunHistory([]);
+        return;
+      }
+      setExpandedId(taskId);
+      try {
+        const res = await apiFetch(`/api/schedule/tasks/${encodeURIComponent(taskId)}/runs?limit=5`);
+        if (res.ok) {
+          const json = await res.json();
+          setRunHistory(json.runs ?? []);
+        }
+      } catch {
+        setRunHistory([]);
+      }
+    },
+    [expandedId],
+  );
 
-  const activeCount = tasks.filter((t) => t.enabled).length;
+  /** AC-H4: toggle pause/resume for any task — routes to correct API by source */
+  const handleToggleTask = useCallback(
+    async (task: ScheduleTask) => {
+      const isActive = task.effectiveEnabled ?? task.enabled;
+      try {
+        if (task.source === 'dynamic' && task.dynamicTaskId) {
+          await apiFetch(`/api/schedule/tasks/${encodeURIComponent(task.dynamicTaskId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: !isActive }),
+          });
+        } else {
+          await apiFetch(`/api/schedule/control/tasks/${encodeURIComponent(task.id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: !isActive, updatedBy: 'user' }),
+          });
+        }
+        fetchTasks();
+        fetchControl();
+      } catch {
+        /* fail-open */
+      }
+    },
+    [fetchTasks, fetchControl],
+  );
+
+  const handleDeleteDynamic = useCallback(
+    async (taskId: string) => {
+      try {
+        const res = await apiFetch(`/api/schedule/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+        if (res.ok) fetchTasks();
+      } catch {
+        /* fail-open */
+      }
+    },
+    [fetchTasks],
+  );
+
+  const activeCount = tasks.filter((t) => t.effectiveEnabled ?? t.enabled).length;
   const pausedCount = tasks.length - activeCount;
-  const totalFailed = tasks.reduce((sum, t) => sum + t.runStats.failed, 0);
+  // Health: check if ANY task's most recent run failed (not cumulative total)
+  const hasAttention = tasks.some((t) => t.lastRun?.outcome === 'RUN_FAILED');
 
   if (loading) {
     return <div className="flex-1 flex items-center justify-center text-sm text-[#9A866F]">Loading schedule...</div>;
@@ -221,6 +198,36 @@ export function SchedulePanel() {
         </span>
       </div>
 
+      {/* AC-D1: Global governance toggle */}
+      {globalControl && (
+        <div
+          className={`flex items-center gap-2 px-4 py-1.5 border-b border-[#E8DFD4] ${
+            globalControl.enabled ? 'bg-[#FDFAF6]' : 'bg-red-50'
+          }`}
+        >
+          <button
+            type="button"
+            onClick={handleGlobalToggle}
+            className={`relative w-7 h-4 rounded-full transition-colors ${
+              globalControl.enabled ? 'bg-emerald-400' : 'bg-red-300'
+            }`}
+            title={globalControl.enabled ? 'Scheduler active — click to pause' : 'Scheduler paused — click to resume'}
+          >
+            <span
+              className={`absolute top-0.5 w-3 h-3 rounded-full bg-cafe-surface shadow transition-transform ${
+                globalControl.enabled ? 'left-3.5' : 'left-0.5'
+              }`}
+            />
+          </button>
+          <span className={`text-[10px] font-medium ${globalControl.enabled ? 'text-emerald-700' : 'text-red-600'}`}>
+            {globalControl.enabled ? 'Scheduler active' : 'Scheduler paused'}
+          </span>
+          {!globalControl.enabled && globalControl.reason && (
+            <span className="text-[10px] text-red-400 truncate max-w-[160px]">{globalControl.reason}</span>
+          )}
+        </div>
+      )}
+
       {/* Current Thread context banner (V2 design) */}
       {scope === 'current-thread' && currentThreadId && (
         <div className="flex items-center gap-1.5 px-4 py-1.5 bg-[#F5EDE3]/60 border-b border-[#E8DFD4]">
@@ -236,46 +243,124 @@ export function SchedulePanel() {
         ) : (
           <div className="divide-y divide-[#E8DFD4]">
             {filteredTasks.map((task) => {
-              const category = categorize(task.id);
+              const category = task.display?.category ?? fallbackCategory(task.id);
+              const label = task.display?.label ?? humanizeId(task.id);
+              const preview = task.subjectPreview ?? task.display?.description ?? null;
+              // Status dot: green=healthy, red=last run failed, gray=never run
+              const statusDot = !task.lastRun
+                ? 'bg-gray-300'
+                : task.lastRun.outcome === 'RUN_FAILED'
+                  ? 'bg-red-400'
+                  : 'bg-emerald-400';
+              const isExpanded = expandedId === task.id;
               return (
-                <div key={task.id} className="px-4 py-3 hover:bg-[#F5EDE3]/50 transition-colors">
-                  <div className="flex items-center gap-2">
-                    {/* Color dot (V2 design) */}
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${CATEGORY_DOT[category]}`} />
-                    {/* Type tag */}
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${CATEGORY_STYLES[category]}`}
-                    >
-                      {category}
-                    </span>
-                    {/* Task name */}
-                    <span className="text-xs font-medium text-[#5C4B3A] truncate flex-1">{humanizeId(task.id)}</span>
-                    {/* Trigger badge */}
-                    <span className="text-[10px] text-[#9A866F] font-mono">{formatTrigger(task.trigger)}</span>
-                  </div>
-
-                  {/* Status row */}
-                  <div className="flex items-center gap-2 mt-1 ml-[52px]">
-                    {task.lastRun ? (
-                      <>
-                        <span className={`text-xs font-medium ${outcomeColor(task.lastRun.outcome)}`}>
-                          {outcomeIcon(task.lastRun.outcome)} {outcomeLabel(task.lastRun.outcome)}
+                <div key={task.id}>
+                  <div
+                    className="px-4 py-3 hover:bg-[#F5EDE3]/50 transition-colors cursor-pointer"
+                    onClick={() => handleToggleExpand(task.id)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleToggleExpand(task.id)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${statusDot}`}
+                        title={task.lastRun?.outcome ?? 'never run'}
+                      />
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${CATEGORY_STYLES[category]}`}
+                      >
+                        {CATEGORY_LABELS[category]}
+                      </span>
+                      <span className="text-xs font-medium text-[#5C4B3A] truncate flex-1">{label}</span>
+                      {task.source === 'dynamic' && (
+                        <span className="px-1 py-0.5 rounded text-[8px] font-medium bg-violet-50 text-violet-500">
+                          user
                         </span>
-                        <span className="text-[10px] text-[#9A866F]">{timeAgo(task.lastRun.started_at)}</span>
-                        {task.lastRun.subject_key !== task.id && (
-                          <span className="text-[10px] text-[#B8A594] truncate max-w-[140px]">
-                            {humanizeSubject(task.lastRun.subject_key)}
+                      )}
+                      <span className="text-[10px] text-[#9A866F] font-mono">{formatTrigger(task.trigger)}</span>
+                      <span className="text-[10px] text-[#9A866F]">{isExpanded ? '\u25B4' : '\u25BE'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 ml-[52px]">
+                      {task.lastRun ? (
+                        <>
+                          <span className={`text-xs font-medium ${outcomeColor(task.lastRun.outcome)}`}>
+                            {outcomeIcon(task.lastRun.outcome)} {outcomeLabel(task.lastRun.outcome)}
                           </span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-[10px] text-[#9A866F] italic">never run</span>
-                    )}
-                    {task.runStats.delivered > 0 && (
-                      <span className="ml-auto text-[10px] text-emerald-600">{task.runStats.delivered} delivered</span>
-                    )}
-                    {!task.enabled && <span className="ml-auto text-[9px] text-red-400 font-medium">PAUSED</span>}
+                          <span className="text-[10px] text-[#9A866F]">{timeAgo(task.lastRun.started_at)}</span>
+                          {task.lastRun.outcome === 'RUN_FAILED' && task.lastRun.error_summary && (
+                            <span
+                              className="text-[10px] text-red-400 truncate max-w-[160px]"
+                              title={task.lastRun.error_summary}
+                            >
+                              {task.lastRun.error_summary}
+                            </span>
+                          )}
+                          {preview && task.lastRun.outcome !== 'RUN_FAILED' && (
+                            <span className="text-[10px] text-[#B8A594] truncate max-w-[140px]">{preview}</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-[10px] text-[#9A866F] italic">never run</span>
+                      )}
+                      {task.runStats.delivered > 0 && (
+                        <span className="ml-auto text-[10px] text-emerald-600">
+                          {task.runStats.delivered} delivered
+                        </span>
+                      )}
+                      {!(task.effectiveEnabled ?? task.enabled) && (
+                        <span className="ml-auto text-[9px] text-red-400 font-medium">PAUSED</span>
+                      )}
+                    </div>
                   </div>
+                  {/* AC-F4: expandable detail panel with run history */}
+                  {isExpanded && (
+                    <div className="px-4 pb-3 ml-[52px] space-y-2">
+                      {/* AC-H4: Controls for all tasks — pause/resume universal, delete for dynamic only */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleTask(task);
+                          }}
+                          className="text-[10px] text-[#5C4B3A] hover:text-[#D4A574] transition-colors"
+                        >
+                          {(task.effectiveEnabled ?? task.enabled) ? '\u23F8 Pause' : '\u25B6 Resume'}
+                        </button>
+                        {task.source === 'dynamic' && task.dynamicTaskId && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteDynamic(task.dynamicTaskId!);
+                            }}
+                            className="text-[10px] text-[#9A866F] hover:text-red-500 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                      {/* Run history */}
+                      <div className="text-[10px] text-[#9A866F] font-medium">Recent runs:</div>
+                      {runHistory.length === 0 ? (
+                        <div className="text-[10px] text-[#9A866F] italic">No run history</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {runHistory.map((r, i) => (
+                            <div key={i} className="flex items-center gap-2 text-[10px]">
+                              <span className={outcomeColor(r.outcome)}>{outcomeIcon(r.outcome)}</span>
+                              <span className="text-[#9A866F]">{timeAgo(r.started_at)}</span>
+                              <span className="text-[#9A866F]">{r.duration_ms}ms</span>
+                              {r.error_summary && (
+                                <span className="text-red-400 truncate max-w-[200px]">{r.error_summary}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -283,37 +368,22 @@ export function SchedulePanel() {
         )}
       </div>
 
-      {/* Footer stats (V2 design) */}
+      {/* Footer: health summary (AC-F1) */}
       <div className="px-4 py-1.5 border-t border-[#E8DFD4] text-[10px] text-[#9A866F] flex items-center">
         <span>
           {tasks.length} tasks · {activeCount} active{pausedCount > 0 ? ` · ${pausedCount} paused` : ''}
         </span>
-        <span className={`ml-auto font-medium ${totalFailed > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-          {totalFailed > 0 ? `${totalFailed} failed` : 'All healthy'}
+        <span className={`ml-auto font-medium ${hasAttention ? 'text-red-500' : 'text-emerald-600'}`}>
+          {hasAttention ? 'Attention needed' : 'All healthy'}
         </span>
       </div>
 
-      {/* NL config CTA (AC-C4) */}
-      <div className="px-4 py-3 bg-[#F5EDE3] border-t border-[#E8DFD4]">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="用自然语言添加任务..."
-            className="flex-1 px-3 py-2 rounded-lg bg-white/80 text-sm text-[#5C4B3A] placeholder-[#9A866F] border border-[#E8DFD4] focus:border-[#D4A574] focus:outline-none transition-colors"
-            value={nlInput}
-            onChange={(e) => setNlInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleNlSubmit();
-            }}
-          />
-          <button
-            type="button"
-            onClick={handleNlSubmit}
-            className="px-3 py-2 rounded-lg bg-[#D4A574] text-white text-sm font-medium hover:bg-[#C49564] transition-colors"
-          >
-            添加
-          </button>
-        </div>
+      {/* Conversational CTA (AC-G5: replaces NL input — W1 vision) */}
+      <div className="px-4 py-2.5 bg-[#F5EDE3] border-t border-[#E8DFD4]">
+        <p className="text-[11px] text-[#9A866F] text-center">
+          Want to add a scheduled task? Tell any cat in the chat — e.g.
+          <span className="text-[#5C4B3A] font-medium"> &quot;every morning at 9, check Anthropic news&quot;</span>
+        </p>
       </div>
     </div>
   );

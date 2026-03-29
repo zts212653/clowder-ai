@@ -7,7 +7,7 @@ import { useTts } from '@/hooks/useTts';
 import { hexToRgba, tintedLight } from '@/lib/color-utils';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
-import { type ChatMessage as ChatMessageType, useChatStore } from '@/stores/chatStore';
+import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { CatAvatar } from './CatAvatar';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
@@ -57,7 +57,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const router = useRouter();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const threads = useChatStore((s) => s.threads);
-  const uiThinkingExpandedByDefault = useChatStore((s) => s.uiThinkingExpandedByDefault);
+  const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
   const isUser = message.type === 'user' && !message.catId;
   const isSystem = message.type === 'system';
   const isSummary = message.type === 'summary';
@@ -141,7 +141,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
     }
 
     const toneClass = isTool
-      ? 'text-gray-400 bg-gray-50/50 font-mono text-xs py-1'
+      ? 'text-cafe-muted bg-cafe-surface-elevated/50 font-mono text-xs py-1'
       : isFollowup
         ? 'text-purple-700 bg-purple-50 border border-purple-200'
         : isError
@@ -171,7 +171,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           <div className="flex justify-end items-center gap-2 mb-1">
             {isWhisper && (
               <span
-                className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-gray-100 text-gray-500' : 'bg-amber-100 text-amber-600'}`}
+                className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-amber-100 text-amber-600'}`}
               >
                 {isRevealed ? '已揭秘' : `悄悄话 → ${message.whisperTo?.join(', ') ?? ''}`}
               </span>
@@ -179,7 +179,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             {message.replyTo && message.replyPreview && (
               <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
             )}
-            <span className="text-xs text-gray-400">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
+            <span className="text-xs text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
             <span className="text-xs font-semibold" style={{ color: coCreatorPrimary }}>
               {coCreator.name}
             </span>
@@ -252,10 +252,10 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               <span className="text-xs font-semibold" style={{ opacity: 0.8 }}>
                 {catStyle.label}
               </span>
-              <span className="text-xs text-gray-400">{formatTime(message.timestamp)}</span>
+              <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
               {isWhisper && (
                 <span
-                  className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-gray-100 text-gray-500' : 'bg-amber-100 text-amber-600'}`}
+                  className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-amber-100 text-amber-600'}`}
                 >
                   {isRevealed
                     ? '已揭秘'
@@ -316,7 +316,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
         )}
         <div
           className={`border px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden ${
-            catStyle ? `${catStyle.radius} ${catStyle.font ?? ''}` : 'bg-white border-gray-200 rounded-2xl'
+            catStyle ? `${catStyle.radius} ${catStyle.font ?? ''}` : 'bg-cafe-surface border-cafe rounded-2xl'
           }`}
           style={
             catStyle
@@ -332,14 +332,14 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           ) : !isStreamOrigin && hasTextContent ? (
             <MarkdownContent content={message.content} className={catStyle?.font} />
           ) : message.isStreaming ? (
-            <span className="text-xs text-gray-500">Thinking...</span>
+            <span className="text-xs text-cafe-secondary">Thinking...</span>
           ) : null}
           {message.thinking && (
             <ThinkingContent
               content={message.thinking}
               className={catStyle?.font}
               label="Thinking"
-              defaultExpanded={uiThinkingExpandedByDefault}
+              defaultExpanded={resolveBubbleExpanded(currentThread?.bubbleThinking, globalBubbleDefaults.thinking)}
               expandInExport={false}
               breedColor={catData?.color.primary}
             />
@@ -349,7 +349,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
               events={cliEvents}
               status={cliStatus}
               thinkingMode={currentThread?.thinkingMode}
-              defaultExpanded={uiThinkingExpandedByDefault}
+              defaultExpanded={resolveBubbleExpanded(currentThread?.bubbleCli, globalBubbleDefaults.cliOutput)}
               breedColor={catData?.color.primary}
             />
           )}

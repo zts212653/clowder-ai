@@ -62,7 +62,7 @@ export function AuditEventsTab({ threadId }: AuditEventsTabProps) {
   }, [fetchEvents]);
 
   if (loading) {
-    return <div className="text-xs text-gray-400 py-2">加载中...</div>;
+    return <div className="text-xs text-cafe-muted py-2">加载中...</div>;
   }
 
   if (error) {
@@ -70,28 +70,28 @@ export function AuditEventsTab({ threadId }: AuditEventsTabProps) {
   }
 
   if (events.length === 0) {
-    return <div className="text-xs text-gray-400 py-2">最近 7 天无审计事件</div>;
+    return <div className="text-xs text-cafe-muted py-2">最近 7 天无审计事件</div>;
   }
 
   return (
     <div className="space-y-1 max-h-64 overflow-y-auto">
       {events.map((evt) => {
         const isExpanded = expandedId === evt.id;
-        const colorClass = TYPE_COLORS[evt.type] ?? 'bg-gray-100 text-gray-600';
+        const colorClass = TYPE_COLORS[evt.type] ?? 'bg-cafe-surface-elevated text-cafe-secondary';
         return (
           <button
             type="button"
             key={evt.id}
             data-testid="audit-event-row"
-            className="w-full text-left rounded border border-gray-100 px-2 py-1.5 cursor-pointer hover:bg-gray-50 transition-colors"
+            className="w-full text-left rounded border border-cafe-subtle px-2 py-1.5 cursor-pointer hover:bg-cafe-surface-elevated transition-colors"
             onClick={() => setExpandedId(isExpanded ? null : evt.id)}
           >
             <div className="flex items-center gap-1.5 text-[11px]">
               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${colorClass}`}>{evt.type}</span>
-              <span className="text-gray-400 ml-auto">{timeAgo(evt.timestamp)}</span>
+              <span className="text-cafe-muted ml-auto">{timeAgo(evt.timestamp)}</span>
             </div>
             {isExpanded && (
-              <pre className="mt-1.5 text-[10px] text-gray-600 bg-gray-50 rounded p-1.5 overflow-x-auto whitespace-pre-wrap">
+              <pre className="mt-1.5 text-[10px] text-cafe-secondary bg-cafe-surface-elevated rounded p-1.5 overflow-x-auto whitespace-pre-wrap">
                 {JSON.stringify(evt.data, null, 2)}
               </pre>
             )}

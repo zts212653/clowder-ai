@@ -183,6 +183,8 @@ export interface AgentServiceOptions {
     softWarningMs?: number;
     stallWarningMs?: number;
     boundedExtensionFactor?: number;
+    /** #774: Auto-kill on idle-silent suspected_stall instead of waiting for full timeout */
+    stallAutoKill?: boolean;
   };
   /** F127: Extra --config key=value pairs to pass to the CLI. */
   cliConfigArgs?: readonly string[];

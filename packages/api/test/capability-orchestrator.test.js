@@ -13,12 +13,16 @@ import {
   deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
   generateCliConfigs,
-  getPencilBinarySuffix,
   migrateLegacyCatCafeCapability,
+  migrateResolverBackedCapabilities,
   orchestrate,
+  PENCIL_BINARY_SUFFIX,
   parsePencilVersion,
   readCapabilitiesConfig,
+  readResolvedMcpState,
+  resolveMachineSpecificServers,
   resolvePencilBinary,
+  resolvePencilCommand,
   resolveServersForCat,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
@@ -413,42 +417,108 @@ describe('comparePencilDirs', () => {
 });
 
 describe('resolvePencilBinary', () => {
-  it('getPencilBinarySuffix must not start with / (deterministic regression guard)', () => {
-    const suffix = getPencilBinarySuffix();
+  it('PENCIL_BINARY_SUFFIX must not start with / (deterministic regression guard)', () => {
     assert.ok(
-      !suffix.startsWith('/'),
-      `getPencilBinarySuffix() is '${suffix}' — leading '/' causes path.resolve() to discard all prefix segments`,
+      !PENCIL_BINARY_SUFFIX.startsWith('/'),
+      `PENCIL_BINARY_SUFFIX is '${PENCIL_BINARY_SUFFIX}' — leading '/' causes path.resolve() to discard all prefix segments`,
     );
   });
 
-  it('getPencilBinarySuffix returns platform-appropriate binary name', () => {
-    const suffix = getPencilBinarySuffix();
-    assert.ok(suffix.startsWith('out/mcp-server-'), `unexpected suffix: ${suffix}`);
-    assert.ok(
-      suffix.includes('darwin') || suffix.includes('linux') || suffix.includes('windows'),
-      `suffix should contain platform: ${suffix}`,
-    );
-  });
-
-  it('returns a full path under a known extensions dir when Pencil is installed', async () => {
+  it('returns a full path under ~/.antigravity/extensions when Pencil is installed', async () => {
     const result = await resolvePencilBinary();
     if (result === null) {
-      // No Pencil installation — skip gracefully (CI / environments without editor)
+      // No Pencil installation — skip gracefully (CI / environments without Antigravity)
       return;
     }
     assert.ok(
       !result.startsWith('/out/'),
-      `resolvePencilBinary() returned '${result}' — looks like binary suffix has a leading '/' that breaks path.resolve()`,
+      `resolvePencilBinary() returned '${result}' — looks like PENCIL_BINARY_SUFFIX has a leading '/' that breaks path.resolve()`,
     );
-    // #272: accept any known editor extensions dir, not just .antigravity
     assert.ok(
-      result.includes('/extensions/highagency.pencildev-'),
-      `resolvePencilBinary() should return a path under an editor extensions dir, got '${result}'`,
+      result.includes('.antigravity/extensions'),
+      `resolvePencilBinary() should return a path under ~/.antigravity/extensions, got '${result}'`,
     );
     assert.ok(
       result.includes('/out/mcp-server-'),
       `resolvePencilBinary() should include the binary suffix, got '${result}'`,
     );
+  });
+
+  it('prefers the newest accessible binary across known editor extension dirs', async () => {
+    const antigravityDir = join(await makeTmpDir('pencil-ag'), 'extensions');
+    const cursorDir = join(await makeTmpDir('pencil-cursor'), 'extensions');
+    const vscodeInsidersDir = join(await makeTmpDir('pencil-vsi'), 'extensions');
+
+    await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', 'out'), { recursive: true });
+    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX), '');
+
+    await mkdir(join(cursorDir, 'highagency.pencildev-0.7.1-universal', 'out'), { recursive: true });
+    await writeFile(join(cursorDir, 'highagency.pencildev-0.7.1-universal', PENCIL_BINARY_SUFFIX), '');
+
+    // Newer version exists, but the binary is missing. resolvePencilBinary() should
+    // skip it and fall back to the newest accessible install instead of returning
+    // a broken path.
+    await mkdir(join(vscodeInsidersDir, 'highagency.pencildev-1.0.0-universal', 'out'), { recursive: true });
+
+    const result = await resolvePencilBinary({
+      antigravityDir,
+      cursorDir,
+      vscodeInsidersDir,
+    });
+
+    assert.equal(
+      result,
+      join(cursorDir, 'highagency.pencildev-0.7.1-universal', PENCIL_BINARY_SUFFIX),
+      'should pick newest accessible binary across Antigravity/Cursor/VSCode Insiders',
+    );
+
+    await rm(antigravityDir.replace(/\/extensions$/, ''), { recursive: true, force: true });
+    await rm(cursorDir.replace(/\/extensions$/, ''), { recursive: true, force: true });
+    await rm(vscodeInsidersDir.replace(/\/extensions$/, ''), { recursive: true, force: true });
+  });
+});
+
+describe('resolvePencilCommand', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('pencil-resolve');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('prefers explicit env override over discovered installations', async () => {
+    const antigravityDir = join(dir, 'ag');
+    await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal'), { recursive: true });
+    const explicitBin = join(dir, 'custom-pencil-bin');
+    await writeFile(explicitBin, '');
+
+    const resolved = await resolvePencilCommand({
+      env: { PENCIL_MCP_BIN: explicitBin, PENCIL_MCP_APP: 'vscode' },
+      antigravityDir,
+      vscodeDir: join(dir, 'vscode'),
+    });
+
+    assert.deepEqual(resolved, {
+      command: explicitBin,
+      args: ['--app', 'vscode'],
+    });
+  });
+
+  it('falls back to VS Code when Antigravity is unavailable', async () => {
+    const vscodeDir = join(dir, '.vscode', 'extensions');
+    await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.41-universal', 'out'), { recursive: true });
+    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.41-universal', PENCIL_BINARY_SUFFIX), '');
+
+    const resolved = await resolvePencilCommand({
+      antigravityDir: join(dir, 'missing-ag'),
+      vscodeDir,
+    });
+
+    assert.ok(resolved);
+    assert.ok(resolved.command.includes('.vscode/extensions'));
+    assert.deepEqual(resolved.args, ['--app', 'vscode']);
   });
 });
 
@@ -518,6 +588,33 @@ describe('bootstrapCapabilities', () => {
     const persisted = await readCapabilitiesConfig(dir);
     assert.ok(persisted);
     assert.equal(persisted.capabilities.length, 4);
+  });
+
+  it('normalizes pencil into a resolver-backed capability on bootstrap', async () => {
+    const claudeFile = join(dir, '.mcp.json');
+    await writeFile(
+      claudeFile,
+      JSON.stringify({
+        mcpServers: {
+          pencil: {
+            command: '/home/user/mcp-server-darwin-arm64',
+            args: ['--app', 'antigravity'],
+          },
+        },
+      }),
+    );
+
+    const config = await bootstrapCapabilities(dir, {
+      claudeConfig: claudeFile,
+      codexConfig: join(dir, 'nonexistent.toml'),
+      geminiConfig: join(dir, 'nonexistent.json'),
+    });
+
+    const pencil = config.capabilities.find((c) => c.id === 'pencil');
+    assert.ok(pencil);
+    assert.equal(pencil.mcpServer?.resolver, 'pencil');
+    assert.equal(pencil.mcpServer?.command, '');
+    assert.deepEqual(pencil.mcpServer?.args, []);
   });
 
   it('skips duplicate cat-cafe from external discovery', async () => {
@@ -618,6 +715,31 @@ describe('migrateLegacyCatCafeCapability', () => {
   });
 });
 
+describe('migrateResolverBackedCapabilities', () => {
+  it('rewrites pencil paths into a resolver-backed declarative entry', () => {
+    const config = makeConfig([
+      {
+        id: 'pencil',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: {
+          command: '/home/user/mcp-server-darwin-arm64',
+          args: ['--app', 'antigravity'],
+        },
+      },
+    ]);
+
+    const migrated = migrateResolverBackedCapabilities(config);
+    assert.equal(migrated.migrated, true);
+    assert.deepEqual(migrated.config.capabilities[0].mcpServer, {
+      command: '',
+      args: [],
+      resolver: 'pencil',
+    });
+  });
+});
+
 // ────────── Resolve per-cat ──────────
 
 describe('resolveServersForCat', () => {
@@ -658,6 +780,22 @@ describe('resolveServersForCat', () => {
     // opus has no override → uses global (true)
     const opusServers = resolveServersForCat(config, 'opus');
     assert.equal(opusServers[0].enabled, true);
+  });
+
+  it('treats resolver-backed stdio MCPs as transport-usable before local resolution', () => {
+    const config = makeConfig([
+      {
+        id: 'pencil',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: '', args: [], resolver: 'pencil' },
+      },
+    ]);
+
+    const servers = resolveServersForCat(config, 'opus');
+    assert.equal(servers[0].enabled, true);
+    assert.equal(servers[0].resolver, 'pencil');
   });
 
   it('skips skill entries', () => {
@@ -838,6 +976,141 @@ describe('generateCliConfigs', () => {
     assert.ok(data.mcpServers['cat-cafe-collab'], 'valid managed entry should remain');
   });
 
+  it('resolves pencil from env override and records resolved state', async () => {
+    const hasAnyCats = catRegistry.getAllIds().length > 0;
+    if (!hasAnyCats) return;
+
+    const paths = {
+      anthropic: join(dir, '.mcp.json'),
+      openai: join(dir, '.codex', 'config.toml'),
+      google: join(dir, '.gemini', 'settings.json'),
+    };
+
+    const config = makeConfig([
+      {
+        id: 'pencil',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: '', args: [], resolver: 'pencil' },
+      },
+    ]);
+
+    const originalEnv = process.env.PENCIL_MCP_BIN;
+    const originalApp = process.env.PENCIL_MCP_APP;
+    const explicitBin = join(dir, 'custom-pencil');
+    await writeFile(explicitBin, '');
+    process.env.PENCIL_MCP_BIN = explicitBin;
+    process.env.PENCIL_MCP_APP = 'vscode';
+    try {
+      await generateCliConfigs(config, paths);
+    } finally {
+      if (originalEnv === undefined) delete process.env.PENCIL_MCP_BIN;
+      else process.env.PENCIL_MCP_BIN = originalEnv;
+      if (originalApp === undefined) delete process.env.PENCIL_MCP_APP;
+      else process.env.PENCIL_MCP_APP = originalApp;
+    }
+
+    const codexRaw = await readFile(paths.openai, 'utf-8');
+    assert.ok(codexRaw.includes(explicitBin));
+    assert.ok(codexRaw.includes('vscode'));
+
+    const resolvedState = await readResolvedMcpState(dir);
+    assert.deepEqual(resolvedState.pencil, {
+      resolver: 'pencil',
+      status: 'resolved',
+      command: explicitBin,
+      args: ['--app', 'vscode'],
+    });
+  });
+
+  it('does not write unresolved pencil entries into CLI configs', async () => {
+    const hasAnyCats = catRegistry.getAllIds().length > 0;
+    if (!hasAnyCats) return;
+
+    const paths = {
+      anthropic: join(dir, '.mcp.json'),
+      openai: join(dir, '.codex', 'config.toml'),
+      google: join(dir, '.gemini', 'settings.json'),
+    };
+
+    const config = makeConfig([
+      {
+        id: 'pencil',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: '', args: [], resolver: 'pencil' },
+      },
+    ]);
+
+    const originalEnv = process.env.PENCIL_MCP_BIN;
+    const originalApp = process.env.PENCIL_MCP_APP;
+    process.env.PENCIL_MCP_BIN = join(dir, 'missing-pencil');
+    delete process.env.PENCIL_MCP_APP;
+    try {
+      await generateCliConfigs(config, paths);
+    } finally {
+      if (originalEnv !== undefined) process.env.PENCIL_MCP_BIN = originalEnv;
+      if (originalApp !== undefined) process.env.PENCIL_MCP_APP = originalApp;
+    }
+
+    const claudeData = JSON.parse(await readFile(paths.anthropic, 'utf-8'));
+    assert.equal(claudeData.mcpServers?.pencil, undefined);
+
+    const codexRaw = await readFile(paths.openai, 'utf-8');
+    assert.ok(!codexRaw.includes('[mcp_servers.pencil]'));
+
+    const geminiData = JSON.parse(await readFile(paths.google, 'utf-8'));
+    assert.equal(geminiData.mcpServers?.pencil, undefined);
+
+    const resolvedState = await readResolvedMcpState(dir);
+    assert.deepEqual(resolvedState.pencil, {
+      resolver: 'pencil',
+      status: 'unresolved',
+    });
+  });
+
+  it('resolves pencil once and reuses the result across providers', async () => {
+    /** @type {import('@cat-cafe/shared').McpServerDescriptor[]} */
+    const anthro = [{ name: 'pencil', command: '', args: [], enabled: true, source: 'external', resolver: 'pencil' }];
+    /** @type {import('@cat-cafe/shared').McpServerDescriptor[]} */
+    const openai = [{ name: 'pencil', command: '', args: [], enabled: true, source: 'external', resolver: 'pencil' }];
+    /** @type {import('@cat-cafe/shared').McpServerDescriptor[]} */
+    const google = [{ name: 'pencil', command: '', args: [], enabled: true, source: 'external', resolver: 'pencil' }];
+
+    let calls = 0;
+    await resolveMachineSpecificServers(
+      {
+        anthropic: anthro,
+        openai,
+        google,
+      },
+      {
+        projectRoot: dir,
+        resolvePencilCommandFn: async () => {
+          calls += 1;
+          return { command: '/tmp/pencil-bin', args: ['--app', 'vscode'] };
+        },
+      },
+    );
+
+    assert.equal(calls, 1);
+    for (const providerServers of [anthro, openai, google]) {
+      assert.equal(providerServers[0].command, '/tmp/pencil-bin');
+      assert.deepEqual(providerServers[0].args, ['--app', 'vscode']);
+      assert.equal(providerServers[0].enabled, true);
+    }
+
+    const resolvedState = await readResolvedMcpState(dir);
+    assert.deepEqual(resolvedState.pencil, {
+      resolver: 'pencil',
+      status: 'resolved',
+      command: '/tmp/pencil-bin',
+      args: ['--app', 'vscode'],
+    });
+  });
+
   it('serializes streamableHttp to Claude config and omits it from Codex/Gemini', async () => {
     const hasAnyCats = catRegistry.getAllIds().length > 0;
     if (!hasAnyCats) return;
@@ -963,5 +1236,43 @@ describe('orchestrate', () => {
     // Should use pre-seeded config, not bootstrap fresh
     assert.equal(config.capabilities.length, 1);
     assert.equal(config.capabilities[0].id, 'custom');
+  });
+
+  it('migrates existing pencil paths to resolver-backed capabilities on subsequent runs', async () => {
+    await writeCapabilitiesConfig(
+      dir,
+      makeConfig([
+        {
+          id: 'pencil',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            command: '/home/user/mcp-server-darwin-arm64',
+            args: ['--app', 'antigravity'],
+          },
+        },
+      ]),
+    );
+
+    const config = await orchestrate(
+      dir,
+      {
+        claudeConfig: join(dir, '.mcp.json'),
+        codexConfig: join(dir, '.codex', 'config.toml'),
+        geminiConfig: join(dir, '.gemini', 'settings.json'),
+      },
+      {
+        anthropic: join(dir, '.mcp.json'),
+        openai: join(dir, '.codex', 'config.toml'),
+        google: join(dir, '.gemini', 'settings.json'),
+      },
+    );
+
+    const pencil = config.capabilities.find((c) => c.id === 'pencil');
+    assert.ok(pencil);
+    assert.equal(pencil.mcpServer?.resolver, 'pencil');
+    assert.equal(pencil.mcpServer?.command, '');
+    assert.deepEqual(pencil.mcpServer?.args, []);
   });
 });

@@ -44,6 +44,10 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     queue: [],
     queuePaused: false,
     queueFull: false,
+    workspaceWorktreeId: null,
+    workspaceOpenTabs: [],
+    workspaceOpenFilePath: null,
+    workspaceOpenFileLine: null,
   };
 }
 

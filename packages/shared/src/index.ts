@@ -7,9 +7,11 @@
  * Import from '@cat-cafe/shared/utils' instead.
  */
 
+// Export command parser + core commands (F142 Phase B)
+export { parseCommand } from './command-parser.js';
+export { CORE_COMMANDS } from './core-commands.js';
 // Export registry (CatRegistry, catIdSchema, assertKnownCatId)
 export * from './registry/index.js';
-
 // Export all schemas
 export * from './schemas/index.js';
 // Export shared text helpers

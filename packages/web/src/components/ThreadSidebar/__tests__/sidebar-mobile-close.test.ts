@@ -27,6 +27,7 @@ const mockStore: Record<string, unknown> = {
   getThreadState: () => ({ catStatuses: {}, unreadCount: 0 }),
   updateThreadPin: vi.fn(),
   updateThreadFavorite: vi.fn(),
+  fetchGlobalBubbleDefaults: vi.fn(),
 };
 vi.mock('@/stores/chatStore', () => {
   const hook = Object.assign(

@@ -1,5 +1,7 @@
 'use client';
 
+import { useIMEGuard } from '@/hooks/useIMEGuard';
+
 interface BrowserToolbarProps {
   urlInput: string;
   onUrlChange: (value: string) => void;
@@ -29,8 +31,9 @@ export function BrowserToolbar({
   onConsoleToggle,
   consoleCount,
 }: BrowserToolbarProps) {
+  const ime = useIMEGuard();
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[#FFDDD2] bg-white/60">
+    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[#FFDDD2] bg-cafe-surface/60">
       <button
         type="button"
         onClick={onBack}
@@ -61,11 +64,13 @@ export function BrowserToolbar({
           type="text"
           value={urlInput}
           onChange={(e) => onUrlChange(e.target.value)}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') onNavigate();
+            if (e.key === 'Enter' && !ime.isComposing()) onNavigate();
           }}
           placeholder="localhost:3000"
-          className="w-full px-2 py-1 text-xs rounded border border-[#FFDDD2] bg-white focus:outline-none focus:border-[#E29578] placeholder:text-[#5a4a42]/30"
+          className="w-full px-2 py-1 text-xs rounded border border-[#FFDDD2] bg-cafe-surface focus:outline-none focus:border-[#E29578] placeholder:text-[#5a4a42]/30"
         />
       </div>
 

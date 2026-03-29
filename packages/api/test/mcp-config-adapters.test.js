@@ -394,7 +394,7 @@ describe('writeGeminiMcpConfig', () => {
     });
   });
 
-  it('#272: writes project-level pencil entry for multi-editor support', async () => {
+  it('keeps project-level pencil entry when a resolved command is available', async () => {
     const file = join(dir, '.gemini', 'settings.json');
     await mkdir(join(dir, '.gemini'), { recursive: true });
     await writeFile(
@@ -412,41 +412,11 @@ describe('writeGeminiMcpConfig', () => {
     ]);
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.ok(data.mcpServers.pencil, 'pencil should be written to project Gemini config');
-    assert.equal(data.mcpServers.pencil.command, '/new/pencil', 'pencil command should be updated');
+    assert.deepEqual(data.mcpServers.pencil, {
+      command: '/new/pencil',
+      args: ['--app', 'antigravity'],
+    });
     assert.ok(data.mcpServers['cat-cafe'], 'cat-cafe server should still be written');
-  });
-
-  it('#272: preserves pencil entry when auto-discovery fails (no silent deletion)', async () => {
-    const file = join(dir, '.gemini', 'settings.json');
-    await mkdir(join(dir, '.gemini'), { recursive: true });
-    // Seed a pencil entry (may be stale or may be a valid manual config)
-    await writeFile(
-      file,
-      JSON.stringify({
-        mcpServers: {
-          pencil: { command: '/custom/pencil', args: ['--app', 'antigravity'] },
-          'cat-cafe': { command: 'node', args: ['index.js'] },
-        },
-      }),
-    );
-
-    // Auto-discovery failed, but pencil stays enabled — leave as-is
-    await writeGeminiMcpConfig(file, [
-      {
-        name: 'pencil',
-        command: '/custom/pencil',
-        args: ['--app', 'antigravity'],
-        enabled: true,
-        source: 'external',
-      },
-      { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
-    ]);
-
-    const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.ok(data.mcpServers.pencil, 'pencil entry must be preserved when auto-discovery fails');
-    assert.equal(data.mcpServers.pencil.command, '/custom/pencil', 'pencil command must not be altered');
-    assert.ok(data.mcpServers['cat-cafe'], 'cat-cafe server should be preserved');
   });
 });
 

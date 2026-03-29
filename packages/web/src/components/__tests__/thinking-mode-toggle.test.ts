@@ -47,6 +47,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     root = createRoot(container);
     // Stable baseline for each test
     useChatStore.getState().setUiThinkingExpandedByDefault(false);
+    useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'collapsed', cliOutput: 'collapsed' });
   });
 
   afterEach(() => {
@@ -119,9 +120,9 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
 
-    // Expand globally
+    // Expand globally via bubble defaults
     act(() => {
-      useChatStore.getState().setUiThinkingExpandedByDefault(true);
+      useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'expanded', cliOutput: 'collapsed' });
     });
 
     expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
@@ -129,7 +130,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     // Collapse globally again
     act(() => {
-      useChatStore.getState().setUiThinkingExpandedByDefault(false);
+      useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'collapsed', cliOutput: 'collapsed' });
     });
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);

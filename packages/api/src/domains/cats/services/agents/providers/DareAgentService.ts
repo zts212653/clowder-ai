@@ -19,11 +19,14 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { transformDareEvent } from './dare-event-transform.js';
+
+const log = createModuleLogger('dare-agent');
 
 interface DareAgentServiceOptions {
   catId?: CatId;
@@ -157,7 +160,7 @@ export class DareAgentService implements AgentService {
           yield {
             type: 'error',
             catId: this.catId,
-            error: `DARE CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s)`,
+            error: `DARE CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
             metadata,
             timestamp: Date.now(),
           };
@@ -165,6 +168,16 @@ export class DareAgentService implements AgentService {
         }
         // F118 Phase C: Forward liveness warnings to frontend with catId
         if (isLivenessWarning(event)) {
+          const warningEvent = event as { level?: string; silenceDurationMs?: number };
+          log.warn(
+            {
+              catId: this.catId,
+              invocationId: options?.invocationId,
+              level: warningEvent.level,
+              silenceMs: warningEvent.silenceDurationMs,
+            },
+            '[DareAgent] liveness warning — CLI may be stuck',
+          );
           yield {
             type: 'system_info' as const,
             catId: this.catId,

@@ -4,11 +4,12 @@
  * - CLI output (stream content + tools): rendered via CliOutputBlock
  * - Default is COLLAPSED (reduce fatigue)
  * - `Thread.thinkingMode` is cross-cat visibility semantics, NOT UI expansion state
+ * - Bubble display: global defaults (Config Hub) + thread-level overrides (three-state)
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useChatStore } from '@/stores/chatStore';
+import { resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -49,6 +50,7 @@ beforeEach(() => {
   root = createRoot(container);
   // Stable default for each test (independent of localStorage)
   useChatStore.getState().setUiThinkingExpandedByDefault(false);
+  useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'collapsed', cliOutput: 'collapsed' });
 });
 
 afterEach(() => {
@@ -104,13 +106,27 @@ describe('ThinkingContent default collapse', () => {
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
 
-    // Flip global preference → should expand thinking (ThinkingContent uses border-l-2)
+    // Flip global bubble default → should expand thinking (ThinkingContent uses border-l-2)
     act(() => {
-      useChatStore.getState().setUiThinkingExpandedByDefault(true);
+      useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'expanded', cliOutput: 'collapsed' });
     });
 
     // Only 🧠 Thinking uses the border-l-2 style (CliOutputBlock uses terminal substrate)
     const markdownDivs = container.querySelectorAll('.cli-output-md');
     expect(markdownDivs.length).toBe(1); // only 🧠 Thinking
+  });
+});
+
+describe('resolveBubbleExpanded', () => {
+  it('thread override takes precedence over global default', () => {
+    expect(resolveBubbleExpanded('expanded', 'collapsed')).toBe(true);
+    expect(resolveBubbleExpanded('collapsed', 'expanded')).toBe(false);
+  });
+
+  it('global default is used when thread override is "global" or undefined', () => {
+    expect(resolveBubbleExpanded('global', 'expanded')).toBe(true);
+    expect(resolveBubbleExpanded('global', 'collapsed')).toBe(false);
+    expect(resolveBubbleExpanded(undefined, 'expanded')).toBe(true);
+    expect(resolveBubbleExpanded(undefined, 'collapsed')).toBe(false);
   });
 });

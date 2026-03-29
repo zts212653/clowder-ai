@@ -9,7 +9,7 @@ function StatusBadge({ status, variant }: { status: string; variant: 'staged' | 
   const colors = {
     staged: 'bg-green-100 text-green-700',
     unstaged: 'bg-amber-100 text-amber-700',
-    untracked: 'bg-gray-100 text-gray-500',
+    untracked: 'bg-cafe-surface-elevated text-cafe-secondary',
   };
   return (
     <span className={`inline-block px-1 py-0.5 rounded text-[9px] font-mono font-bold ${colors[variant]}`}>

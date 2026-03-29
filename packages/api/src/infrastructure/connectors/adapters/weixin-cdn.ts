@@ -38,6 +38,43 @@ function aesEcbPaddedSize(plaintextSize: number): number {
   return Math.ceil((plaintextSize + 1) / 16) * 16;
 }
 
+// ── AES Key Decode ──
+
+/**
+ * Decode aesKey string from iLink protocol into a 16-byte Buffer.
+ * Handles: hex (32 chars), standard base64, base64url (- and _), and missing padding.
+ */
+export function decodeAesKey(aesKey: string, log?: FastifyBaseLogger): Buffer {
+  // 1. Hex: exactly 32 hex chars → 16 bytes
+  if (/^[0-9a-f]{32}$/i.test(aesKey)) {
+    return Buffer.from(aesKey, 'hex');
+  }
+
+  // 2. Normalize base64url → standard base64 (replace - with +, _ with /)
+  let normalized = aesKey.replace(/-/g, '+').replace(/_/g, '/');
+  // 3. Restore padding if missing
+  const pad = normalized.length % 4;
+  if (pad === 2) normalized += '==';
+  else if (pad === 3) normalized += '=';
+
+  const key = Buffer.from(normalized, 'base64');
+  if (key.length === 16) return key;
+
+  // 4. Official iLink compat: base64(hex-string) — 32 ASCII hex chars → 16 bytes
+  if (key.length === 32) {
+    const hexStr = key.toString('ascii');
+    if (/^[0-9a-f]{32}$/i.test(hexStr)) {
+      return Buffer.from(hexStr, 'hex');
+    }
+  }
+
+  log?.warn(
+    { aesKeyLen: aesKey.length, decodedLen: key.length, prefix: aesKey.slice(0, 8) },
+    '[weixin-cdn] Invalid AES key length after decode',
+  );
+  throw new Error(`Invalid AES key: decoded ${key.length} bytes from ${aesKey.length}-char string (expected 16)`);
+}
+
 // ── CDN Download Pipeline ──
 
 /**
@@ -71,9 +108,7 @@ export async function downloadMediaFromCdn(params: {
   }
 
   const ciphertext = Buffer.from(await res.arrayBuffer());
-  // iLink protocol uses base64 for aes_key; our upload pipeline uses hex internally.
-  // Detect: 32 hex chars → hex, otherwise → base64.
-  const key = /^[0-9a-f]{32}$/i.test(aesKey) ? Buffer.from(aesKey, 'hex') : Buffer.from(aesKey, 'base64');
+  const key = decodeAesKey(aesKey, log);
   const plaintext = decryptAesEcb(ciphertext, key);
 
   log.info({ ciphertextLen: ciphertext.length, plaintextLen: plaintext.length }, '[weixin-cdn] Media decrypted');

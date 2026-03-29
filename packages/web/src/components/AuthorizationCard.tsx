@@ -24,11 +24,11 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
       <div className="flex items-start gap-2">
         <span className="text-amber-500 mt-0.5 text-lg">🔐</span>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-gray-800">
+          <div className="text-sm font-medium text-cafe">
             {catLabel} 请求权限: <code className="text-xs bg-amber-100 px-1 py-0.5 rounded">{request.action}</code>
           </div>
-          <p className="text-xs text-gray-600 mt-1">{request.reason}</p>
-          {request.context && <p className="text-xs text-gray-500 mt-1 italic">{request.context}</p>}
+          <p className="text-xs text-cafe-secondary mt-1">{request.reason}</p>
+          {request.context && <p className="text-xs text-cafe-secondary mt-1 italic">{request.context}</p>}
         </div>
       </div>
 
@@ -43,7 +43,7 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
             </button>
             <button
               onClick={() => setExpanded(true)}
-              className="px-3 py-1 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+              className="px-3 py-1 text-xs bg-gray-200 text-cafe-secondary rounded-md hover:bg-gray-300 transition-colors"
             >
               更多选项...
             </button>
@@ -88,7 +88,7 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
             </button>
             <button
               onClick={() => setExpanded(false)}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+              className="px-3 py-1 text-xs text-cafe-secondary hover:text-cafe-secondary transition-colors"
             >
               收起
             </button>

@@ -2,7 +2,9 @@
  * F140: Shared GitHub feedback filter — unified dedup across F140 API polling and email watcher.
  *
  * Rule A: self-authored feedback (comments + reviews) → skip everywhere.
- * Rule B: authoritative review bot feedback → skip in F140 (email channel is authoritative source).
+ * Rule B: authoritative review bot feedback → skip in F140 for reviews + inline comments
+ *         (email channel is authoritative source). Conversation comments (issue comments)
+ *         are exempt — the email watcher cannot parse them, so F140 is the only channel.
  * Rule C: single predicate factory shared by both channels.
  *
  * @see docs/features/F140-github-pr-automation.md — Risk: "Review 双重消费"
@@ -18,8 +20,15 @@ export interface GitHubFeedbackFilterOptions {
 export interface GitHubFeedbackFilter {
   /** Rule A only: is this author self-authored? Email watcher uses this (it IS the authoritative source, so Rule B doesn't apply). */
   isSelfAuthored: (author: string) => boolean;
-  /** Rules A+B: should F140 API polling skip this comment? */
-  shouldSkipComment: (comment: { author: string }) => boolean;
+  /**
+   * Rules A+B: should F140 API polling skip this comment?
+   *
+   * Rule B (authoritative bot) only applies to `inline` comments — those are tied to
+   * review submissions that the email watcher handles. `conversation` comments (issue
+   * comments posted to `/issues/N/comments`) are NOT handled by the email watcher's
+   * review parser, so F140 is the only delivery channel for them.
+   */
+  shouldSkipComment: (comment: { author: string; commentType?: 'inline' | 'conversation' }) => boolean;
   /** Rules A+B: should F140 API polling skip this review decision? */
   shouldSkipReview: (review: { author: string }) => boolean;
 }
@@ -41,7 +50,15 @@ export function createGitHubFeedbackFilter(opts: GitHubFeedbackFilterOptions): G
 
   return {
     isSelfAuthored,
-    shouldSkipComment: (c) => shouldSkip(c.author),
+    shouldSkipComment: (c) => {
+      // Rule A: self-authored → always skip
+      if (isSelfAuthored(c.author)) return true;
+      // Rule B: authoritative bot → skip only for inline comments (tied to review
+      // submissions the email watcher handles). Conversation comments (issue comments)
+      // are NOT handled by the email watcher, so F140 must deliver them.
+      if (c.commentType === 'conversation') return false;
+      return opts.authoritativeReviewLogins.includes(c.author);
+    },
     shouldSkipReview: (r) => shouldSkip(r.author),
   };
 }

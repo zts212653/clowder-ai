@@ -131,7 +131,7 @@ export function AdvancedRuntimeSection({
       </div>
 
       {cat ? (
-        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-white/80 p-4">
+        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-cafe-surface/80 p-4">
           {loadingStrategy ? <p className="text-sm text-[#7F7168]">Session 策略加载中...</p> : null}
           {strategyError ? (
             <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{strategyError}</p>
@@ -179,7 +179,7 @@ export function AdvancedRuntimeSection({
       ) : null}
 
       {showCodexSettings ? (
-        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-white/80 p-4">
+        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-cafe-surface/80 p-4">
           {loadingCodexSettings ? <p className="text-sm text-[#7F7168]">Codex 运行参数加载中...</p> : null}
           {codexSettingsError ? (
             <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{codexSettingsError}</p>

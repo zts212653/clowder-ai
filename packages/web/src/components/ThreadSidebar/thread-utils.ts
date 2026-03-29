@@ -42,7 +42,7 @@ export function getProjectPaths(threads: Thread[]): string[] {
 
 /** Thread group for sidebar rendering */
 export interface ThreadGroup {
-  type: 'pinned' | 'recent' | 'project' | 'archived-container' | 'favorites';
+  type: 'pinned' | 'recent' | 'project' | 'archived-container' | 'favorites' | 'system';
   label: string;
   threads: Thread[];
   projectPath?: string;
@@ -130,14 +130,23 @@ export function sortAndGroupThreadsWithWorkspace(
     groups.push({ type: 'pinned', label: '置顶', threads: pinned });
   }
 
-  // 2. Recent threads (cross-project, excluding pinned/default)
-  const recent = getRecentThreads(threads, config.recentLimit, now);
+  // F095 Phase G: System threads (IM Hub connectors) — dedicated section
+  const systemThreads = threads
+    .filter((t) => !!t.connectorHubState && t.id !== 'default' && !t.pinned)
+    .sort((a, b) => sortByUnreadThenActive(a, b, unreadIds));
+  if (systemThreads.length > 0) {
+    groups.push({ type: 'system', label: '系统', threads: systemThreads });
+  }
+  const systemIds = new Set(systemThreads.map((t) => t.id));
+
+  // 2. Recent threads (cross-project, excluding pinned/default/system)
+  const recent = getRecentThreads(threads, config.recentLimit, now).filter((t) => !systemIds.has(t.id));
   if (recent.length > 0) {
     groups.push({ type: 'recent', label: '最近对话', threads: recent });
   }
 
-  // 3. Project groups split into active/archived
-  const regular = threads.filter((t) => !t.pinned && !t.favorited && t.id !== 'default');
+  // 3. Project groups split into active/archived (excluding system threads)
+  const regular = threads.filter((t) => !t.pinned && !t.favorited && t.id !== 'default' && !systemIds.has(t.id));
   const projectGroupEntries = groupByProject(regular, unreadIds);
   const allProjectGroups: ThreadGroup[] = projectGroupEntries.map(([projectPath, projectThreads]) => ({
     type: 'project' as const,

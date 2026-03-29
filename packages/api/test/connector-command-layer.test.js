@@ -736,6 +736,35 @@ describe('ConnectorCommandLayer', () => {
     assert.ok(result.response.includes('没有绑定'));
   });
 
+  // --- F142: registry-executor consistency ---
+
+  describe('registry-executor consistency (connector scope)', () => {
+    it('every connector command dispatched in handle() is reachable', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore(),
+        threadStore: stubThreadStore(),
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const connectorCommands = [
+        '/where',
+        '/new',
+        '/threads',
+        '/use',
+        '/thread',
+        '/unbind',
+        '/allow-group',
+        '/deny-group',
+        '/commands',
+        '/cats',
+        '/status',
+      ];
+      for (const cmd of connectorCommands) {
+        const result = await layer.handle('test', 'chat1', 'user1', cmd);
+        assert.notEqual(result.kind, 'not-command', `${cmd} should be handled`);
+      }
+    });
+  });
+
   it('/unbind removes active binding and returns thread info', async () => {
     let removedKey = null;
     const bindingStore = {
@@ -755,5 +784,457 @@ describe('ConnectorCommandLayer', () => {
     assert.ok(result.response.includes('已解绑'));
     assert.ok(result.response.includes('My Thread'));
     assert.equal(removedKey, 'feishu:chat1');
+  });
+
+  // --- F142: /commands ---
+
+  describe('/commands (F142)', () => {
+    it('returns list of available connector commands', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore(),
+        threadStore: stubThreadStore(),
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/commands');
+      assert.equal(result.kind, 'commands');
+      assert.ok(result.response);
+      assert.ok(result.response.includes('/commands'));
+      assert.ok(result.response.includes('/cats'));
+      assert.ok(result.response.includes('/where'));
+      assert.ok(result.response.includes('/status'));
+    });
+
+    it('/commands is case-insensitive', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore(),
+        threadStore: stubThreadStore(),
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/Commands');
+      assert.equal(result.kind, 'commands');
+    });
+  });
+
+  // --- F142: /cats ---
+
+  describe('/cats (F142)', () => {
+    it('returns formatted cat list for bound thread', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore({
+          connectorId: 'feishu',
+          externalChatId: 'chat1',
+          threadId: 't-bound',
+          userId: 'user1',
+        }),
+        threadStore: stubThreadStore({ id: 't-bound', title: '测试' }),
+        frontendBaseUrl: 'https://cafe.example.com',
+        participantStore: {
+          getParticipantsWithActivity: async () => [{ catId: 'opus', lastMessageAt: 1000, messageCount: 5 }],
+        },
+        agentRegistry: { has: (id) => id === 'opus' },
+        catRoster: { opus: { displayName: '布偶猫', available: true } },
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/cats');
+      assert.equal(result.kind, 'cats');
+      assert.ok(result.response);
+      assert.ok(result.response.includes('参与猫'));
+      assert.equal(result.contextThreadId, 't-bound');
+    });
+
+    it('with no binding returns guidance', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore(),
+        threadStore: stubThreadStore(),
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/cats');
+      assert.equal(result.kind, 'cats');
+      assert.ok(result.response.includes('没有绑定'));
+    });
+
+    it('shows routable-not-joined and not-routable cats', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore({
+          connectorId: 'feishu',
+          externalChatId: 'chat1',
+          threadId: 't-bound',
+          userId: 'user1',
+        }),
+        threadStore: stubThreadStore({ id: 't-bound', title: '测试' }),
+        frontendBaseUrl: 'https://cafe.example.com',
+        participantStore: { getParticipantsWithActivity: async () => [] },
+        agentRegistry: { has: (id) => id === 'gpt52' },
+        catRoster: {
+          gpt52: { displayName: 'GPT-5.4', available: true },
+          gemini: { displayName: '暹罗猫', available: false },
+        },
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/cats');
+      assert.ok(result.response.includes('可调度'));
+      assert.ok(result.response.includes('不可调度'));
+    });
+  });
+
+  // --- F142: /status ---
+
+  describe('/status (F142)', () => {
+    it('returns thread overview for bound thread', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore({
+          connectorId: 'feishu',
+          externalChatId: 'chat1',
+          threadId: 't-bound',
+          userId: 'user1',
+        }),
+        threadStore: stubThreadStore({ id: 't-bound', title: 'F142 开发', createdAt: Date.now() - 86400000 }),
+        frontendBaseUrl: 'https://cafe.example.com',
+        participantStore: {
+          getParticipantsWithActivity: async () => [
+            { catId: 'opus', lastMessageAt: Date.now(), messageCount: 5 },
+            { catId: 'codex', lastMessageAt: Date.now() - 3600000, messageCount: 3 },
+          ],
+        },
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
+      assert.equal(result.kind, 'status');
+      assert.ok(result.response.includes('F142 开发'));
+      assert.ok(result.response.includes('2')); // participant count
+      assert.equal(result.contextThreadId, 't-bound');
+    });
+
+    it('with no binding returns guidance', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore(),
+        threadStore: stubThreadStore(),
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
+      assert.equal(result.kind, 'status');
+      assert.ok(result.response.includes('没有绑定'));
+    });
+
+    it('handles missing thread gracefully', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore({
+          connectorId: 'feishu',
+          externalChatId: 'chat1',
+          threadId: 't-gone',
+          userId: 'user1',
+        }),
+        threadStore: stubThreadStore(), // empty — thread doesn't exist
+        frontendBaseUrl: 'https://cafe.example.com',
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
+      assert.equal(result.kind, 'status');
+      assert.ok(result.response.includes('不存在'));
+    });
+  });
+
+  // --- F142: baseline regression for permission commands ---
+
+  it('/allow-group rejects non-admin sender', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      permissionStore: {
+        isAdmin: async () => false,
+        allowGroup: async () => {},
+        denyGroup: async () => false,
+        listAllowedGroups: async () => [],
+        isGroupAllowed: async () => false,
+      },
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/allow-group', 'sender1');
+    assert.equal(result.kind, 'allow-group');
+    assert.ok(result.response.includes('管理员'));
+  });
+
+  it('/allow-group allows admin sender to whitelist group', async () => {
+    const allowed = [];
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      permissionStore: {
+        isAdmin: async () => true,
+        allowGroup: async (_cId, chatId) => {
+          allowed.push(chatId);
+        },
+        denyGroup: async () => false,
+        listAllowedGroups: async () => allowed,
+        isGroupAllowed: async () => true,
+      },
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/allow-group target-chat', 'admin1');
+    assert.equal(result.kind, 'allow-group');
+    assert.ok(result.response.includes('白名单'));
+    assert.deepEqual(allowed, ['target-chat']);
+  });
+
+  it('/deny-group rejects non-admin sender', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      permissionStore: {
+        isAdmin: async () => false,
+        allowGroup: async () => {},
+        denyGroup: async () => false,
+        listAllowedGroups: async () => [],
+        isGroupAllowed: async () => false,
+      },
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/deny-group', 'sender1');
+    assert.equal(result.kind, 'deny-group');
+    assert.ok(result.response.includes('管理员'));
+  });
+
+  it('/deny-group allows admin to remove group from whitelist', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      permissionStore: {
+        isAdmin: async () => true,
+        allowGroup: async () => {},
+        denyGroup: async () => true,
+        listAllowedGroups: async () => [],
+        isGroupAllowed: async () => false,
+      },
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/deny-group target-chat', 'admin1');
+    assert.equal(result.kind, 'deny-group');
+    assert.ok(result.response.includes('已从白名单移除'));
+  });
+
+  // --- F142 P2: wiring contract — deps must be injected for non-degenerate output ---
+
+  describe('wiring contract: /cats and /status require injected deps (F142 P2)', () => {
+    it('/cats without participantStore/agentRegistry/catRoster returns empty categorization', async () => {
+      // Simulates the pre-fix bootstrap: deps not wired → degenerate output
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore({
+          connectorId: 'feishu',
+          externalChatId: 'chat1',
+          threadId: 't-bound',
+          userId: 'user1',
+        }),
+        threadStore: stubThreadStore({ id: 't-bound', title: 'Test' }),
+        frontendBaseUrl: 'https://cafe.example.com',
+        // NO participantStore, agentRegistry, catRoster — mimics missing wiring
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/cats');
+      assert.equal(result.kind, 'cats');
+      // Without deps, no participant/cat categorization data
+      assert.ok(!result.response.includes('参与猫'), 'should not show participants without deps');
+    });
+
+    it('/cats WITH all deps returns categorized output', async () => {
+      // Simulates correct bootstrap: deps wired → rich output
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore({
+          connectorId: 'feishu',
+          externalChatId: 'chat1',
+          threadId: 't-bound',
+          userId: 'user1',
+        }),
+        threadStore: stubThreadStore({ id: 't-bound', title: 'Test' }),
+        frontendBaseUrl: 'https://cafe.example.com',
+        participantStore: {
+          getParticipantsWithActivity: async () => [{ catId: 'opus', lastMessageAt: Date.now(), messageCount: 3 }],
+        },
+        agentRegistry: { has: (id) => id === 'opus' },
+        catRoster: { opus: { displayName: '布偶猫', available: true } },
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/cats');
+      assert.equal(result.kind, 'cats');
+      assert.ok(result.response.includes('参与猫'), 'must show participants when deps are wired');
+      assert.ok(result.response.includes('布偶猫'), 'must resolve display name from catRoster');
+    });
+
+    it('/status without participantStore shows 0 participants', async () => {
+      const layer = new ConnectorCommandLayer({
+        bindingStore: stubStore({
+          connectorId: 'feishu',
+          externalChatId: 'chat1',
+          threadId: 't-bound',
+          userId: 'user1',
+        }),
+        threadStore: stubThreadStore({ id: 't-bound', title: 'Status Test', createdAt: Date.now() }),
+        frontendBaseUrl: 'https://cafe.example.com',
+        // NO participantStore
+      });
+      const result = await layer.handle('feishu', 'chat1', 'user1', '/status');
+      assert.equal(result.kind, 'status');
+      assert.ok(result.response.includes('0'), 'should show 0 participants without participantStore');
+    });
+  });
+});
+
+// --- F142 Phase B: registry-powered integration tests ---
+
+describe('ConnectorCommandLayer + CommandRegistry (F142-B)', () => {
+  let ConnectorCommandLayer;
+  let CommandRegistry;
+
+  before(async () => {
+    const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
+    ConnectorCommandLayer = mod.ConnectorCommandLayer;
+    const regMod = await import('../dist/infrastructure/commands/CommandRegistry.js');
+    CommandRegistry = regMod.CommandRegistry;
+  });
+
+  function buildRegistry(extraSkill) {
+    const core = [
+      {
+        name: '/where',
+        usage: '/where',
+        description: '查看绑定',
+        category: 'connector',
+        surface: 'connector',
+        source: 'core',
+      },
+      {
+        name: '/new',
+        usage: '/new [标题]',
+        description: '创建 thread',
+        category: 'connector',
+        surface: 'connector',
+        source: 'core',
+      },
+      {
+        name: '/commands',
+        usage: '/commands',
+        description: '列出命令',
+        category: 'connector',
+        surface: 'connector',
+        source: 'core',
+      },
+    ];
+    const registry = new CommandRegistry(core);
+    if (extraSkill) {
+      registry.registerSkillCommands(extraSkill.id, extraSkill.commands, { warn: () => {} });
+    }
+    return registry;
+  }
+
+  it('/commands with registry shows registered skill commands', async () => {
+    const registry = buildRegistry({
+      id: 'debugging',
+      commands: [
+        {
+          name: '/debug',
+          usage: '/debug [query]',
+          description: 'Debug helper',
+          category: 'general',
+          surface: 'connector',
+          source: 'skill',
+        },
+      ],
+    });
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      commandRegistry: registry,
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/commands');
+    assert.equal(result.kind, 'commands');
+    assert.ok(result.response.includes('/debug'), '/commands output must include skill command');
+    assert.ok(result.response.includes('Debug helper'), '/commands output must include skill description');
+  });
+
+  it('core command conflict: skill /where rejected', async () => {
+    const core = [
+      {
+        name: '/where',
+        usage: '/where',
+        description: '查看绑定',
+        category: 'connector',
+        surface: 'connector',
+        source: 'core',
+      },
+    ];
+    const registry = new CommandRegistry(core);
+    const warnings = [];
+    registry.registerSkillCommands(
+      'evil-skill',
+      [
+        {
+          name: '/where',
+          usage: '/where',
+          description: 'Hijack',
+          category: 'general',
+          surface: 'connector',
+          source: 'skill',
+        },
+      ],
+      { warn: (msg) => warnings.push(msg) },
+    );
+    assert.equal(warnings.length, 1);
+    assert.ok(warnings[0].includes('conflicts with core command'));
+    // Original core command should still work
+    const entry = registry.get('/where');
+    assert.equal(entry.source, 'core');
+  });
+
+  it('audit log fires for recognized commands (AC-B7)', async () => {
+    const registry = buildRegistry();
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      commandRegistry: registry,
+    });
+    const logs = [];
+    const origLog = console.log;
+    console.log = (msg) => {
+      if (typeof msg === 'string' && msg.includes('"slash_command"')) logs.push(msg);
+    };
+    try {
+      await layer.handle('feishu', 'chat1', 'user1', '/commands');
+      assert.equal(logs.length, 1, 'should emit exactly one audit log');
+      const entry = JSON.parse(logs[0]);
+      assert.equal(entry.event, 'slash_command');
+      assert.equal(entry.command, '/commands');
+      assert.equal(entry.surface, 'connector');
+      assert.equal(entry.source, 'core');
+      assert.equal(entry.success, true);
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  it('unknown /slash still returns not-command (skill passthrough AC-B4)', async () => {
+    const registry = buildRegistry();
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+      commandRegistry: registry,
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/unknown-skill-cmd hello');
+    assert.equal(result.kind, 'not-command', 'unrecognized slash commands should pass through to cat');
+  });
+
+  it('/thread CORE_COMMANDS usage matches handler error hint (P2 regression)', async () => {
+    // Lock: CORE_COMMANDS says "/thread <thread_id> <message>" — handler must agree
+    const { CORE_COMMANDS } = await import('@cat-cafe/shared');
+    const threadDef = CORE_COMMANDS.find((c) => c.name === '/thread');
+    assert.ok(threadDef, '/thread must exist in CORE_COMMANDS');
+    assert.equal(threadDef.usage, '/thread <thread_id> <message>');
+
+    // Handler's own usage hint must match
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle('feishu', 'chat1', 'user1', '/thread');
+    assert.ok(
+      result.response.includes('/thread <thread_id> <message>'),
+      `handler error hint must match CORE_COMMANDS usage, got: ${result.response}`,
+    );
   });
 });

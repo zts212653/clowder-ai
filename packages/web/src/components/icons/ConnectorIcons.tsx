@@ -51,6 +51,26 @@ export function UsersIcon({ className = 'w-5 h-5' }: IconProps) {
   );
 }
 
+/** Scheduler clock — monoline SVG, 24x24, currentColor */
+export function SchedulerIcon({ className = 'w-5 h-5' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15 15" />
+      <path d="M5 3L2 6" />
+      <path d="M19 3l3 3" />
+    </svg>
+  );
+}
+
 /** Connector icon image — renders a designed PNG icon for IM platforms */
 export function ConnectorImage({ src, alt, className = 'w-5 h-5' }: { src: string; alt: string; className?: string }) {
   return <img src={src} alt={alt} className={`${className} rounded object-cover`} />;

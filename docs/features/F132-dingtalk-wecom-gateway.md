@@ -224,22 +224,22 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 - [x] AC-A2.6: 复用 IM Hub 群聊抽象（bootstrap routing + ConnectorRouter + OutboundDeliveryHook）
 - [x] AC-A2.7: 公共层零改动
 
-### Phase B（WeCom Bot Adapter）
-- [ ] AC-B1: 企微 Bot WebSocket 连接 + 心跳 + 重连
-- [ ] AC-B2: Bot DM 消息入站解析正确（text + image + voice）
-- [ ] AC-B3: 猫猫回复通过 `replyStream` 流式发送（真流式）
-- [ ] AC-B4: 模板卡片发送 + 更新
-- [ ] AC-B5: 图片/语音双向收发（SDK 内置）
-- [ ] AC-B6: 复用 ConnectorRouter/CommandLayer/BindingStore，公共层零改动
+### Phase B（WeCom Bot Adapter）✅ PR #804 merged
+- [x] AC-B1: 企微 Bot WebSocket 连接 + 心跳 + 重连
+- [x] AC-B2: Bot DM 消息入站解析正确（text + image + voice）
+- [x] AC-B3: 猫猫回复通过 `replyStream` 流式发送（真流式）
+- [x] AC-B4: 模板卡片发送 + 更新
+- [x] AC-B5: 图片/语音双向收发（SDK 内置）
+- [x] AC-B6: 复用 ConnectorRouter/CommandLayer/BindingStore，公共层零改动
 
-### Phase C（WeCom Agent Adapter）
-- [ ] AC-C1: 回调 URL 验证（echostr challenge + AES 解密）通过
-- [ ] AC-C2: SHA1 签名校验 + AES-256-CBC 消息解密正确
-- [ ] AC-C3: XML → JSON 转换正确（`fast-xml-parser`）
-- [ ] AC-C4: 猫猫回复通过 `message/send` API 发送（text + markdown + 图文卡片）
-- [ ] AC-C5: 图片/语音通过临时素材 API 收发
-- [ ] AC-C6: final-only 模式（无 streaming），长回复分块发送
-- [ ] AC-C7: 公共层零改动
+### Phase C（WeCom Agent Adapter）✅ PR #808 merged
+- [x] AC-C1: 回调 URL 验证（echostr challenge + AES 解密）通过
+- [x] AC-C2: SHA1 签名校验 + AES-256-CBC 消息解密正确
+- [x] AC-C3: XML → JSON 转换正确（`fast-xml-parser`）
+- [x] AC-C4: 猫猫回复通过 `message/send` API 发送（text + markdown + 图文卡片）
+- [x] AC-C5: 图片/语音通过临时素材 API 收发
+- [x] AC-C6: final-only 模式（无 streaming），长回复分块发送
+- [x] AC-C7: 公共层零改动
 
 ### Phase D（Bootstrap + 富文本映射 + 文档）
 - [ ] AC-D1: connector-gateway-bootstrap 动态注册三个 adapter（有 env var 才启用）
@@ -293,6 +293,26 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 | KD-4 | **企微拆两个 connector**：`wecom-bot`（WebSocket + 流式）+ `wecom-agent`（HTTP callback + AES/XML） | GPT Pro 调研确认：身份、协议、流式能力完全不同，硬揉一个 adapter 会把 Principal Link 和 Session Binding 搅成毛线球。OpenClaw 生态的 `YanHaidao/wecom` 已验证 dual-mode 架构 | 2026-03-22 |
 | KD-5 | 钉钉用 AI Card 做流式，不用 plain message edit | 钉钉 plain message 不支持编辑，但 AI Card 支持 create → streaming update → finish 状态机。`soimy/openclaw-channel-dingtalk` 已验证此路径 | 2026-03-22 |
 | KD-6 | 钉钉群聊须对齐飞书 F134 IM Hub 抽象 | team experience"群聊你也得对接上飞书有的功能或者他们的抽象你要接入，IM Hub 里群聊怎么映射你们也要这么干" | 2026-03-23 |
+| KD-7 | **新 IM 接入 11 步清单**（统一架构指南） | 基于飞书/钉钉/Telegram/微信四个已接入平台的模式提炼，新平台改 11 个位置、公共层零改动。详见下方「新 IM 接入清单」 | 2026-03-27 |
+
+## 新 IM 接入清单（KD-7 — Adapter-Only Extension）
+
+接入一个新 IM 平台需要改动以下 11 个位置，公共层（ConnectorRouter / OutboundDeliveryHook / StreamingOutboundHook / CommandLayer / BindingStore）**零改动**。
+
+| # | Layer | 文件 | 改什么 |
+|---|-------|------|--------|
+| 1 | Shared | `packages/shared/src/types/connector.ts` | 新增 `ConnectorDefinition`（id, displayName, icon PNG, color, tailwindTheme） |
+| 2 | API | `packages/api/src/.../adapters/XxxAdapter.ts` | **新建** adapter。实现 `IOutboundAdapter`（基础）或 `IStreamableOutboundAdapter`（流式）。含 `parseEvent()` / `sendReply()` / `sendFormattedReply()` / `sendMedia()` + 流式 `sendPlaceholder()` / `editMessage()` |
+| 3 | API | `packages/api/src/.../connector-gateway-bootstrap.ts` | env guard → 实例化 → 注册到 adapters Map → `connectorRouter.route()` 8 参数调用 → media download fn → webhook handler / long-poll / stream |
+| 4 | API | `packages/api/src/.../media/ConnectorMediaService.ts` | 新增 `setXxxDownloadFn()` — 平台专属媒体下载 |
+| 5 | API | `packages/api/src/config/connector-secrets-allowlist.ts` | 加入新平台 env var 名（否则 `/api/config/secrets` 拒绝写入） |
+| 6 | API | `packages/api/src/routes/connector-hub.ts` | 新增 `PlatformDef`（fields / docsUrl / steps 向导） |
+| 7 | Web | `packages/web/src/components/HubConfigIcons.tsx` | 新增 `PLATFORM_VISUALS`（iconBg / iconColor / brand PNG） |
+| 8 | Web | `packages/web/src/components/HubListModal.tsx` | 新增 `CONNECTOR_LABELS` 条目 |
+| 9 | Config | `.env.example` | 新增注释块 |
+| 11 | Test | adapter 单测 + `connector-bubble-theme.test.ts` | parseEvent / sendReply / sendMedia / 气泡主题 |
+
+> 此清单来源于 2026-03-27 team lead要求"列出来我们现在要接入一个新 IM 要做什么"。
 
 ## Review Gate
 

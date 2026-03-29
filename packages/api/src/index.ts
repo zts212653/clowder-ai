@@ -4,18 +4,24 @@
  */
 
 import { join } from 'node:path';
-import { type CatConfig, type CatId, catRegistry } from '@cat-cafe/shared';
+import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
+import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
 import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
-import { bootstrapDefaultCatCatalog, getConfigSessionStrategy, toAllCatConfigs } from './config/cat-config-loader.js';
+import {
+  bootstrapDefaultCatCatalog,
+  getAllCatIdsFromConfig,
+  getConfigSessionStrategy,
+  isCatAvailable,
+  toAllCatConfigs,
+} from './config/cat-config-loader.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
-import { resolveAnthropicRuntimeProfile, resolveRuntimeProviderProfileForClient } from './config/provider-profiles.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
@@ -63,6 +69,8 @@ import { createSummaryStore } from './domains/cats/services/stores/factories/Sum
 import { createTaskStore } from './domains/cats/services/stores/factories/TaskStoreFactory.js';
 import { createThreadStore } from './domains/cats/services/stores/factories/ThreadStoreFactory.js';
 import { createWorkflowSopStore } from './domains/cats/services/stores/factories/WorkflowSopStoreFactory.js';
+import { RedisInvocationRecordStore } from './domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
+import { RedisMessageStore } from './domains/cats/services/stores/redis/RedisMessageStore.js';
 import { MlxAudioTtsProvider } from './domains/cats/services/tts/MlxAudioTtsProvider.js';
 import { initStreamingTtsRegistry } from './domains/cats/services/tts/StreamingTtsChunker.js';
 import { TtsRegistry } from './domains/cats/services/tts/TtsRegistry.js';
@@ -76,10 +84,14 @@ import { PreviewGateway } from './domains/preview/preview-gateway.js';
 import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
+import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
+import { parseManifestSlashCommands } from './infrastructure/commands/manifest-commands.js';
 import {
   loadConnectorGatewayConfig,
   startConnectorGateway,
 } from './infrastructure/connectors/connector-gateway-bootstrap.js';
+import { restartConnectorGateway } from './infrastructure/connectors/connector-gateway-lifecycle.js';
+import { createConnectorReloadSubscriber } from './infrastructure/connectors/connector-reload-subscriber.js';
 import {
   CiCdRouter,
   ConflictRouter,
@@ -93,7 +105,9 @@ import {
   startGithubReviewWatcher,
   stopGithubReviewWatcher,
 } from './infrastructure/email/index.js';
+import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
+import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { gameRoutes } from './routes/games.js';
 import {
@@ -147,6 +161,7 @@ import {
   summariesRoutes,
   tasksRoutes,
   threadBranchRoutes,
+  threadCatsRoutes,
   threadsRoutes,
   ttsRoutes,
   uploadsRoutes,
@@ -295,6 +310,28 @@ async function main(): Promise<void> {
   const { ExecutionDigestStore } = await import('./domains/projects/execution-digest-store.js');
   const executionDigestStore = new ExecutionDigestStore();
 
+  if (
+    redis &&
+    messageStore instanceof RedisMessageStore &&
+    invocationRecordStore instanceof RedisInvocationRecordStore
+  ) {
+    const backfillResult = await runSchedulerReplyUserIdBackfill({
+      redis,
+      messageStore,
+      invocationRecordStore,
+      threadStore,
+    });
+    if (!backfillResult.skipped && (backfillResult.repairedMessages > 0 || backfillResult.repairedInvocations > 0)) {
+      app.log.info(
+        {
+          repairedMessages: backfillResult.repairedMessages,
+          repairedInvocations: backfillResult.repairedInvocations,
+        },
+        '[api] F139 scheduler reply userId backfill completed',
+      );
+    }
+  }
+
   const sessionChainStore = createSessionChainStore(redis);
   // F24: Transcript Writer/Reader for session chain
   // E7 fix: resolve relative to monorepo root, not CWD (same fix as docsRoot in PR #524)
@@ -318,16 +355,12 @@ async function main(): Promise<void> {
             catId,
             catConfig as CatConfig & { providerProfileId?: string },
           );
-          const runtime = await resolveRuntimeProviderProfileForClient(
-            projectRoot,
-            catConfig.provider,
-            boundAccountRef,
-          );
+          const runtime = resolveForClient(projectRoot, catConfig.provider, boundAccountRef);
           if (!runtime?.apiKey) return null;
           return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
         }
 
-        const runtime = await resolveAnthropicRuntimeProfile(projectRoot);
+        const runtime = resolveAnthropicRuntimeProfile(projectRoot);
         if (!runtime.apiKey) return null;
         return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
       } catch {
@@ -454,15 +487,44 @@ async function main(): Promise<void> {
   const schedulerDb = memoryServices.store.getDb();
   const runLedger = new RunLedger(schedulerDb);
   const actorResolver = createActorResolver(getRoster);
+  // ── F139 Phase 3B: Governance + Emission stores ──
+  const { GlobalControlStore } = await import('./infrastructure/scheduler/GlobalControlStore.js');
+  const { EmissionStore } = await import('./infrastructure/scheduler/EmissionStore.js');
+  const { PackTemplateStore } = await import('./infrastructure/scheduler/PackTemplateStore.js');
+  const globalControlStore = new GlobalControlStore(schedulerDb);
+  const emissionStore = new EmissionStore(schedulerDb);
+  const packTemplateStore = new PackTemplateStore(schedulerDb);
+
+  // Phase 4: delivery + content fetch for template execution
+  const { createDeliverFn } = await import('./infrastructure/scheduler/delivery.js');
+  const { createFetchContentFn } = await import('./infrastructure/scheduler/content-fetcher.js');
+  const schedulerDeliver = createDeliverFn({ messageStore, socketManager });
+  const schedulerFetchContent = createFetchContentFn();
+
   const taskRunnerV2 = new TaskRunnerV2({
     logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
     ledger: runLedger,
     actorResolver,
+    globalControlStore,
+    emissionStore,
+    deliver: schedulerDeliver,
+    fetchContent: schedulerFetchContent,
   });
 
-  // ── F139 Phase 2: Schedule panel API routes ──
+  // ── F139 Phase 3A: Dynamic task store + template registry ──
+  const { DynamicTaskStore } = await import('./infrastructure/scheduler/DynamicTaskStore.js');
+  const { templateRegistry } = await import('./infrastructure/scheduler/templates/registry.js');
+  const dynamicTaskStore = new DynamicTaskStore(schedulerDb);
+
+  // ── F139 Phase 2+3A+3B: Schedule panel API routes ──
   const { scheduleRoutes } = await import('./routes/schedule.js');
-  await app.register(scheduleRoutes, { taskRunner: taskRunnerV2 });
+  await app.register(scheduleRoutes, {
+    taskRunner: taskRunnerV2,
+    dynamicTaskStore,
+    templateRegistry,
+    globalControlStore,
+    packTemplateStore,
+  });
 
   // ── Phase G: Summary Compaction (registers into unified scheduler) ──
   if (process.env.F102_ABSTRACTIVE === 'on' && memoryServices.indexBuilder) {
@@ -682,6 +744,26 @@ async function main(): Promise<void> {
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
+  // F136 Phase 3A: Cat catalog subscriber — syncs AgentRegistry when cats CRUD emits cat-config events
+  const { createCatCatalogSubscriber } = await import('./config/cat-catalog-subscriber.js');
+  const catCatalogSubscriber = createCatCatalogSubscriber({
+    async onReconcile() {
+      app.log.info('[api] F136: Cat catalog changed, syncing agent registry...');
+      await syncAgentRegistry(catRegistry.getAllConfigs());
+    },
+    log: app.log,
+  });
+
+  // F136 Phase 4c: Account binding subscriber — rebinds provider profiles when accounts change
+  const { createAccountBindingSubscriber } = await import('./config/account-binding-subscriber.js');
+  const accountBindingSubscriber = createAccountBindingSubscriber({
+    async onRebind(changedAccountRefs) {
+      app.log.info(`[api] F136: Accounts changed [${changedAccountRefs.join(', ')}], syncing agent registry...`);
+      await syncAgentRegistry(catRegistry.getAllConfigs());
+    },
+    log: app.log,
+  });
+
   // F089 Phase 2: Shared instances for tmux agent pane execution (opt-in)
   const enableTmuxAgent = process.env.CAT_CAFE_TMUX_AGENT === '1';
   let tmuxGateway: TmuxGateway | undefined;
@@ -845,7 +927,7 @@ async function main(): Promise<void> {
     socketManager,
     threadStore,
   });
-  await app.register(catsRoutes, { onCatalogChanged: syncAgentRegistry });
+  await app.register(catsRoutes);
   await app.register(quotaRoutes);
   // F128: Daily token usage aggregation
   await app.register(usageRoutes, { invocationRecordStore });
@@ -893,6 +975,26 @@ async function main(): Promise<void> {
   const prTrackingStore = redis ? new RedisPrTrackingStore(redis) : new MemoryPrTrackingStore();
   app.log.info(`[api] PrTrackingStore: ${redis ? 'Redis' : 'Memory'}`);
 
+  // Phase D (AC-D1): validate repo exists via `gh repo view` before PR tracking registration.
+  // Generic — works for any GitHub repo the caller has access to, not hardcoded to ours.
+  // Cloud P1: distinguish "repo not found" (return false) from infra failure (throw).
+  const validateRepo = async (repoFullName: string): Promise<boolean> => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    try {
+      await execFileAsync('gh', ['repo', 'view', repoFullName, '--json', 'name'], { timeout: 10_000 });
+      return true;
+    } catch (err: unknown) {
+      // gh ran but repo not found/no access → process exit code is a number
+      if (err instanceof Error && 'code' in err && typeof (err as Record<string, unknown>).code === 'number') {
+        return false;
+      }
+      // Infrastructure failure (gh not found, timeout, auth broken) → propagate
+      throw err;
+    }
+  };
+
   // F126: Create LimbRegistry + Phase B deps for device/hardware capability management
   const { LimbRegistry } = await import('./domains/limb/LimbRegistry.js');
   const { LimbAccessPolicy } = await import('./domains/limb/LimbAccessPolicy.js');
@@ -923,6 +1025,7 @@ async function main(): Promise<void> {
     invocationTracker,
     deliveryCursorStore,
     prTrackingStore,
+    validateRepo,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,
@@ -969,6 +1072,27 @@ async function main(): Promise<void> {
     socketManager,
   });
   await app.register(threadExportRoutes, { threadStore });
+  // F142: shared connector binding store — reused by threadCatsRoutes AND connector gateway
+  const { RedisConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
+  );
+  const { MemoryConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/ConnectorThreadBindingStore.js'
+  );
+  const connectorBindingStore = redisClient
+    ? new RedisConnectorThreadBindingStore(redisClient)
+    : new MemoryConnectorThreadBindingStore();
+  {
+    const allCatConfigs = catRegistry.getAllConfigs();
+    await app.register(threadCatsRoutes, {
+      threadStore,
+      agentRegistry,
+      bindingStore: connectorBindingStore,
+      getCatDisplayName: (catId: string) => allCatConfigs[catId]?.displayName ?? catId,
+      getAllCatIds: () => Object.keys(allCatConfigs),
+      isCatAvailable: (catId: string) => isCatAvailable(catId),
+    });
+  }
   await app.register(tasksRoutes, { taskStore, socketManager });
   await app.register(backlogRoutes, { backlogStore, threadStore, messageStore });
 
@@ -998,6 +1122,7 @@ async function main(): Promise<void> {
   await app.register(projectsRoutes);
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(configRoutes);
+  await app.register(configSecretsRoutes);
   await app.register(featureDocDetailRoutes);
   await app.register(providerProfilesRoutes);
   await app.register(claudeRescueRoutes);
@@ -1090,6 +1215,27 @@ async function main(): Promise<void> {
   const governanceStore = new MemoryGovernanceStore();
   await app.register(memoryPublishRoutes, { governanceStore });
 
+  // F142-B: Build unified command registry at startup (AC-B5)
+  const commandRegistry = new CommandRegistry(CORE_COMMANDS);
+  const skillsDir = join(findMonorepoRoot(process.cwd()), 'cat-cafe-skills');
+  const skillCommandMap = await parseManifestSlashCommands(skillsDir);
+  for (const [skillId, cmds] of skillCommandMap) {
+    commandRegistry.registerSkillCommands(
+      skillId,
+      cmds.map((c) => ({
+        ...c,
+        usage: c.usage ?? c.name,
+        source: 'skill' as const,
+        category: 'connector',
+        skillId,
+      })),
+      app.log,
+    );
+  }
+  app.log.info(
+    `[api] F142-B: CommandRegistry loaded (${commandRegistry.getAll().length} commands, ${skillCommandMap.size} skills)`,
+  );
+
   // Commands route needs opus service for task extraction
   const opusService = new ClaudeAgentService();
   await app.register(commandsRoutes, {
@@ -1098,6 +1244,7 @@ async function main(): Promise<void> {
     socketManager,
     opusService,
     threadStore,
+    registry: commandRegistry,
   });
   await app.register(signalsRoutes);
   await app.register(signalStudyRoutes, { threadStore });
@@ -1165,7 +1312,7 @@ async function main(): Promise<void> {
     defaultUserId: 'default-user',
     reviewContentFetcher: new GhCliReviewContentFetcher(app.log),
   });
-  await app.register(prTrackingRoutes, { prTrackingStore });
+  await app.register(prTrackingRoutes, { prTrackingStore, validateRepo });
 
   // F088: Register connector webhook routes BEFORE listen (Fastify requires it)
   const connectorWebhookHandlers = new Map<string, import('./routes/connector-webhooks.js').ConnectorWebhookHandler>();
@@ -1308,6 +1455,28 @@ async function main(): Promise<void> {
     app.log.warn(`[api] CLI config regeneration failed (best-effort): ${String(err)}`);
   }
 
+  // F136 Phase 4a: Migrate provider-profiles → accounts + conflict scan (HC-3/HC-5/LL-043).
+  // HC-5: conflict is a HARD error — must propagate, not swallow.
+  // LL-043: legacy source present + accounts missing is a HARD error — don't run with empty accounts.
+  // Migration filesystem errors are best-effort.
+  try {
+    const { accountStartupHook } = await import('./config/account-startup.js');
+    const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
+    if (startupResult.migration.migrated) {
+      app.log.info(
+        `[api] F136 account migration: ${startupResult.migration.accountsMigrated} account(s), ${startupResult.migration.credentialsMigrated} credential(s)`,
+      );
+    }
+  } catch (err) {
+    // HC-5 and LL-043 errors are HARD errors — let them crash the server.
+    if (err instanceof Error && (err.message.includes('HC-5') || err.message.includes('LL-043'))) {
+      app.log.error(`[api] ${err.message}`);
+      throw err;
+    }
+    // Other errors (migration filesystem issues) are best-effort.
+    app.log.warn(`[api] F136 account startup hook failed (best-effort): ${String(err)}`);
+  }
+
   // F101 Phase G: Recover auto-play loops for active games after restart.
   if (f101GameStore && socketManager && f101SharedDriver) {
     f101RecoveryPlayer = f101SharedDriver;
@@ -1372,6 +1541,9 @@ async function main(): Promise<void> {
     feedbackFilter,
   });
 
+  // F139 Phase 4b: late-bind invokeTrigger so templates can wake cats
+  taskRunnerV2.setInvokeTrigger(invokeTrigger);
+
   // F139: Register PR-related TaskSpecs into unified scheduler
   {
     const { createCiCdCheckTaskSpec } = await import('./infrastructure/email/CiCdCheckTaskSpec.js');
@@ -1408,12 +1580,17 @@ async function main(): Promise<void> {
       const execFileAsync = promisify(execFile);
       const { stdout } = await execFileAsync(
         'gh',
-        ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeStateStatus'],
+        ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,headRefOid'],
         { timeout: 15_000 },
       );
       const data = JSON.parse(stdout);
-      return data.mergeStateStatus ?? 'UNKNOWN';
+      // Use `mergeable` (CONFLICTING/MERGEABLE/UNKNOWN) — not `mergeStateStatus` (DIRTY/CLEAN/...)
+      // ConflictRouter checks for exact string 'CONFLICTING'
+      return { mergeState: data.mergeable ?? 'UNKNOWN', headSha: data.headRefOid ?? '' };
     };
+
+    const { ConflictAutoExecutor } = await import('./infrastructure/email/ConflictAutoExecutor.js');
+    const autoExecutor = new ConflictAutoExecutor({ log: app.log });
 
     taskRunnerV2.register(
       createConflictCheckTaskSpec({
@@ -1421,6 +1598,7 @@ async function main(): Promise<void> {
         checkMergeable,
         conflictRouter,
         invokeTrigger,
+        autoExecutor,
         log: app.log,
       }),
     );
@@ -1575,52 +1753,88 @@ async function main(): Promise<void> {
     }
   }
 
+  // F139 Phase 3B: Hydrate pack templates from SQLite into TemplateRegistry
+  const packDefs = packTemplateStore.listAll();
+  let packHydrated = 0;
+  for (const def of packDefs) {
+    const builtin = templateRegistry.get(def.builtinTemplateRef);
+    if (builtin) {
+      templateRegistry.register({
+        templateId: def.templateId,
+        label: def.label,
+        category: def.category,
+        description: def.description,
+        subjectKind: def.subjectKind,
+        defaultTrigger: def.defaultTrigger,
+        paramSchema:
+          def.paramSchema as import('./infrastructure/scheduler/templates/types.js').TaskTemplate['paramSchema'],
+        createSpec: builtin.createSpec,
+      });
+      packHydrated++;
+    }
+  }
+  if (packHydrated > 0) app.log.info(`[api] F139: hydrated ${packHydrated} pack template(s)`);
+
+  // F139 Phase 3A: Hydrate dynamic tasks from SQLite before starting
+  const hydrated = taskRunnerV2.hydrateDynamic(dynamicTaskStore, templateRegistry);
+  if (hydrated > 0) app.log.info(`[api] F139: hydrated ${hydrated} dynamic task(s)`);
+
   // F139: Start unified scheduler (all registered specs)
   taskRunnerV2.start();
   app.log.info(`[api] F139: unified scheduler started (${taskRunnerV2.getRegisteredTasks().join(', ')})`);
 
   // F088: Start connector gateway (best-effort, after listen)
+  const gatewayDeps = {
+    messageStore: {
+      async append(input: Parameters<typeof messageStore.append>[0]) {
+        const result = await messageStore.append(input);
+        return { id: result.id };
+      },
+      async getById(id: string) {
+        const msg = messageStore.getById?.(id);
+        if (!msg) return null;
+        const resolved = msg instanceof Promise ? await msg : msg;
+        return resolved ? { source: resolved.source } : null;
+      },
+    },
+    threadStore,
+    invokeTrigger,
+    socketManager,
+    defaultUserId: 'default-user' as const,
+    defaultCatId: 'opus' as CatId,
+    redis: redisClient ?? undefined,
+    log: app.log,
+    agentRegistry,
+    commandRegistry,
+    bindingStore: connectorBindingStore,
+  };
+
+  /** Re-wire all hook consumers after gateway (re)start */
+  function wireGatewayHooks(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
+    invokeTrigger.setOutboundHook(handle.outboundHook);
+    invokeTrigger.setStreamingHook(handle.streamingHook);
+    queueProcessor.setOutboundHook(handle.outboundHook as Parameters<typeof queueProcessor.setOutboundHook>[0]);
+    queueProcessor.setStreamingHook(handle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0]);
+    (callbackOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
+    (messagesOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
+    (messagesOpts as { streamingHook?: typeof handle.streamingHook }).streamingHook = handle.streamingHook;
+    // P1-1 fix: clear stale handlers before re-populating (hot-reload may remove connectors)
+    connectorWebhookHandlers.clear();
+    for (const [id, handler] of handle.webhookHandlers) {
+      connectorWebhookHandlers.set(id, handler);
+    }
+    (connectorHubOpts as { weixinAdapter?: unknown }).weixinAdapter = handle.weixinAdapter;
+    (connectorHubOpts as { startWeixinPolling?: () => void }).startWeixinPolling = handle.startWeixinPolling;
+    (connectorHubOpts as { permissionStore?: unknown }).permissionStore = handle.permissionStore;
+  }
+
   let connectorGatewayHandle: Awaited<ReturnType<typeof startConnectorGateway>> = null;
+  let connectorReloadUnsub: (() => void) | null = null;
   try {
     const gatewayConfig = loadConnectorGatewayConfig();
-    connectorGatewayHandle = await startConnectorGateway(gatewayConfig, {
-      messageStore: {
-        async append(input) {
-          const result = await messageStore.append(input);
-          return { id: result.id };
-        },
-        async getById(id: string) {
-          const msg = messageStore.getById?.(id);
-          if (!msg) return null;
-          const resolved = msg instanceof Promise ? await msg : msg;
-          return resolved ? { source: resolved.source } : null;
-        },
-      },
-      threadStore,
-      invokeTrigger,
-      socketManager,
-      defaultUserId: 'default-user',
-      defaultCatId: 'opus' as CatId,
-      redis: redisClient ?? undefined,
-      log: app.log,
-    });
+    connectorGatewayHandle = await startConnectorGateway(gatewayConfig, gatewayDeps);
     if (connectorGatewayHandle) {
-      invokeTrigger.setOutboundHook(connectorGatewayHandle.outboundHook);
-      invokeTrigger.setStreamingHook(connectorGatewayHandle.streamingHook);
-      queueProcessor.setOutboundHook(
-        connectorGatewayHandle.outboundHook as Parameters<typeof queueProcessor.setOutboundHook>[0],
-      );
-      queueProcessor.setStreamingHook(
-        connectorGatewayHandle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0],
-      );
-      // Wire outbound delivery for proactive cat messages (post_message callback)
-      (callbackOpts as { outboundHook?: typeof connectorGatewayHandle.outboundHook }).outboundHook =
-        connectorGatewayHandle.outboundHook;
-      // F088 ISSUE-15: Wire outbound delivery for web immediate path (messages route)
-      (messagesOpts as { outboundHook?: typeof connectorGatewayHandle.outboundHook }).outboundHook =
-        connectorGatewayHandle.outboundHook;
-      (messagesOpts as { streamingHook?: typeof connectorGatewayHandle.streamingHook }).streamingHook =
-        connectorGatewayHandle.streamingHook;
+      wireGatewayHooks(connectorGatewayHandle);
       queueProcessor.setThreadMetaLookup(async (threadId) => {
         const thread = await threadStore.get(threadId);
         if (!thread) return undefined;
@@ -1630,20 +1844,32 @@ async function main(): Promise<void> {
           deepLinkUrl: `${frontendBaseUrl}/threads/${threadId}`,
         };
       });
-      for (const [id, handler] of connectorGatewayHandle.webhookHandlers) {
-        connectorWebhookHandlers.set(id, handler);
-      }
-      // F137: Wire WeChat adapter to hub routes for QR login
-      (connectorHubOpts as { weixinAdapter?: unknown }).weixinAdapter = connectorGatewayHandle.weixinAdapter;
-      (connectorHubOpts as { startWeixinPolling?: () => void }).startWeixinPolling =
-        connectorGatewayHandle.startWeixinPolling;
-      // F134 Phase D: Wire permission store to hub routes
-      (connectorHubOpts as { permissionStore?: unknown }).permissionStore = connectorGatewayHandle.permissionStore;
+
       app.log.info('[api] Connector gateway started');
     }
   } catch (err) {
     app.log.warn(`[api] Connector gateway startup failed (best-effort): ${String(err)}`);
   }
+
+  // F136 Phase 2: Always subscribe — enables self-healing when initial startup fails (P1-2)
+  const reloadSubscriber = createConnectorReloadSubscriber({
+    log: app.log,
+    debounceMs: 500,
+    async onRestart() {
+      app.log.info('[api] F136: Hot-reloading connector gateway...');
+      const newHandle = await restartConnectorGateway(connectorGatewayHandle, async () => {
+        const freshConfig = loadConnectorGatewayConfig();
+        return startConnectorGateway(freshConfig, gatewayDeps);
+      });
+      if (newHandle) {
+        connectorGatewayHandle = newHandle;
+        wireGatewayHooks(newHandle);
+      }
+      app.log.info('[api] F136: Connector gateway hot-reload complete');
+    },
+  });
+  connectorReloadUnsub = () => reloadSubscriber.unsubscribe();
+  app.log.info('[api] Connector hot-reload subscriber active');
 
   // Graceful shutdown handler: persist Redis before exit
   let shuttingDown = false;
@@ -1690,7 +1916,10 @@ async function main(): Promise<void> {
 
       taskRunnerV2.stop();
 
-      // Stop connector gateway
+      // Stop event bus subscribers
+      catCatalogSubscriber.unsubscribe();
+      accountBindingSubscriber.unsubscribe();
+      connectorReloadUnsub?.();
       try {
         await connectorGatewayHandle?.stop();
       } catch (err) {

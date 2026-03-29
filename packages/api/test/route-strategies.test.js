@@ -1397,6 +1397,16 @@ function createDoneOnlyService(catId) {
   };
 }
 
+/** Mock service that yields a visible system_info notice but no text */
+function createVisibleNoticeOnlyService(catId, content) {
+  return {
+    async *invoke() {
+      yield { type: 'system_info', catId, content, timestamp: Date.now() };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 describe('routeSerial: done-only (no text, no error)', () => {
   it('does not persist empty message when cat yields only done', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
@@ -1415,6 +1425,31 @@ describe('routeSerial: done-only (no text, no error)', () => {
 
     const catAppends = appendCalls.filter((c) => c.catId === 'codex');
     assert.equal(catAppends.length, 0, 'done-only cat should not persist a blank message');
+  });
+
+  it('does not append silent_completion when a visible system notice already exists', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({
+      codex: createVisibleNoticeOnlyService(
+        'codex',
+        '⚠️ Shared-state files committed but not pushed: docs/ROADMAP.md. Please `git push` soon.',
+      ),
+    });
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1', {
+      thinkingMode: 'play',
+    })) {
+      messages.push(msg);
+    }
+
+    const notices = messages.filter((m) => m.type === 'system_info' && m.content?.includes('Shared-state files'));
+    assert.equal(notices.length, 1, 'visible notice should be forwarded exactly once');
+    assert.equal(
+      messages.some((m) => m.type === 'system_info' && m.content?.includes('completed without textual output')),
+      false,
+      'should not add a duplicate silent_completion after a visible notice',
+    );
   });
 
   it('still yields a final done event when cat is silent', async () => {
@@ -1463,6 +1498,29 @@ describe('routeParallel: done-only (no text, no error)', () => {
     assert.equal(doneMsgs[0].isFinal, true, 'silent parallel single-cat run should mark done as final');
     const catAppends = appendCalls.filter((c) => c.catId === 'codex');
     assert.equal(catAppends.length, 0, 'silent parallel cat should not persist blank content');
+  });
+
+  it('does not append silent_completion when a visible system notice already exists', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const deps = createMockDeps({
+      codex: createVisibleNoticeOnlyService(
+        'codex',
+        '⚠️ Shared-state files committed but not pushed: docs/ROADMAP.md. Please `git push` soon.',
+      ),
+    });
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['codex'], 'test', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const notices = messages.filter((m) => m.type === 'system_info' && m.content?.includes('Shared-state files'));
+    assert.equal(notices.length, 1, 'visible notice should be forwarded exactly once');
+    assert.equal(
+      messages.some((m) => m.type === 'system_info' && m.content?.includes('completed without textual output')),
+      false,
+      'should not add a duplicate silent_completion after a visible notice',
+    );
   });
 });
 

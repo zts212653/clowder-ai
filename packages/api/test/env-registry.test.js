@@ -9,7 +9,14 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { buildEnvSummary, ENV_CATEGORIES, ENV_VARS, maskUrlCredentials } from '../dist/config/env-registry.js';
+import {
+  buildEnvSummary,
+  ENV_CATEGORIES,
+  ENV_VARS,
+  hasSensitiveEditableVars,
+  isSensitiveEditableEnvVar,
+  maskUrlCredentials,
+} from '../dist/config/env-registry.js';
 
 // Save and restore env vars around tests
 const savedEnv = {};
@@ -100,6 +107,28 @@ describe('env-registry', () => {
   it('no HINDSIGHT_* vars remain after D-1 cleanup', () => {
     const hindsightVars = ENV_VARS.filter((v) => v.name.startsWith('HINDSIGHT_'));
     assert.equal(hindsightVars.length, 0, 'All HINDSIGHT_* vars should be removed');
+  });
+
+  it('marks OPENAI_API_KEY, GITHUB_MCP_PAT, F102_API_KEY as sensitive + runtimeEditable', () => {
+    for (const name of ['OPENAI_API_KEY', 'GITHUB_MCP_PAT', 'F102_API_KEY']) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(def.sensitive, true, `${name} should be sensitive`);
+      assert.equal(def.runtimeEditable, true, `${name} should be runtimeEditable`);
+      assert.ok(isSensitiveEditableEnvVar(def), `${name} should pass isSensitiveEditableEnvVar`);
+    }
+  });
+
+  it('hasSensitiveEditableVars detects whitelisted sensitive vars', () => {
+    assert.ok(hasSensitiveEditableVars(['OPENAI_API_KEY']));
+    assert.ok(hasSensitiveEditableVars(['FRONTEND_URL', 'F102_API_KEY']));
+    assert.ok(!hasSensitiveEditableVars(['FRONTEND_URL', 'AUDIT_LOG_DIR']));
+  });
+
+  it('marks DEFAULT_OWNER_USER_ID as non-editable (trust anchor)', () => {
+    const def = ENV_VARS.find((v) => v.name === 'DEFAULT_OWNER_USER_ID');
+    assert.ok(def, 'DEFAULT_OWNER_USER_ID should be in registry');
+    assert.equal(def.runtimeEditable, false, 'trust anchor must not be editable from Hub');
   });
 });
 
@@ -357,11 +386,12 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
-  it('rejects sensitive env vars from hub writes', async () => {
+  it('rejects sensitive env writes when DEFAULT_OWNER_USER_ID is not configured', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
     writeFileSync(envFilePath, 'OPENAI_API_KEY=sk-old\n', 'utf8');
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
 
     const app = Fastify({ logger: false });
     try {
@@ -381,9 +411,9 @@ describe('PATCH /api/config/env (route)', () => {
         },
       });
 
-      assert.equal(res.statusCode, 400);
+      assert.equal(res.statusCode, 403);
       const body = JSON.parse(res.payload);
-      assert.match(body.error, /not editable/);
+      assert.match(body.error, /DEFAULT_OWNER_USER_ID/);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'OPENAI_API_KEY=sk-old\n');
     } finally {
       await app.close();

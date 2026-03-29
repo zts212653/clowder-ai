@@ -83,6 +83,97 @@ describe('PR Tracking Routes', () => {
     });
   });
 
+  describe('Phase D: repo existence validation (AC-D1/D2)', () => {
+    it('rejects registration when validateRepo returns false (repo not found)', async () => {
+      const store = new MemoryPrTrackingStore();
+      const app = Fastify();
+      app.register(prTrackingRoutes, {
+        prTrackingStore: store,
+        validateRepo: async () => false,
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/pr-tracking',
+        headers: { ...ALICE, 'content-type': 'application/json' },
+        payload: { ...validBody, repoFullName: 'nonexistent/repo' },
+      });
+      assert.equal(res.statusCode, 422);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error.includes('nonexistent/repo'), 'error should mention the repo');
+
+      // Entry should NOT have been created
+      const entry = await store.get('nonexistent/repo', 42);
+      assert.equal(entry, null, 'store should not contain rejected entry');
+
+      await app.close();
+    });
+
+    it('accepts registration when validateRepo returns true', async () => {
+      const store = new MemoryPrTrackingStore();
+      const app = Fastify();
+      app.register(prTrackingRoutes, {
+        prTrackingStore: store,
+        validateRepo: async () => true,
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/pr-tracking',
+        headers: { ...ALICE, 'content-type': 'application/json' },
+        payload: validBody,
+      });
+      assert.equal(res.statusCode, 201);
+
+      await app.close();
+    });
+
+    it('returns 503 when validateRepo throws (infrastructure failure)', async () => {
+      const store = new MemoryPrTrackingStore();
+      const app = Fastify();
+      app.register(prTrackingRoutes, {
+        prTrackingStore: store,
+        validateRepo: async () => {
+          throw new Error('gh: command not found');
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/pr-tracking',
+        headers: { ...ALICE, 'content-type': 'application/json' },
+        payload: validBody,
+      });
+      assert.equal(res.statusCode, 503);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error.includes('unavailable'), 'error should indicate service unavailable');
+
+      // Entry should NOT have been created
+      const entry = await store.get('owner/repo', 42);
+      assert.equal(entry, null, 'store should not contain entry after infra failure');
+
+      await app.close();
+    });
+
+    it('passes without validateRepo (backward compat)', async () => {
+      const { app } = buildApp();
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/pr-tracking',
+        headers: { ...ALICE, 'content-type': 'application/json' },
+        payload: validBody,
+      });
+      assert.equal(res.statusCode, 201);
+
+      await app.close();
+    });
+  });
+
   describe('P2: strict PR number validation in DELETE', () => {
     it('rejects malformed PR number like "123abc"', async () => {
       const { app, store } = buildApp();

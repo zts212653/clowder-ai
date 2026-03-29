@@ -1,9 +1,11 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-const { resolveProbeTimeoutMs } = await import('../dist/routes/mcp-probe.js');
+const { probeMcpCapability, resolveProbeTimeoutMs } = await import('../dist/routes/mcp-probe.js');
 
 function makeCapability(command, args = []) {
   return {
@@ -39,5 +41,34 @@ describe('resolveProbeTimeoutMs', () => {
   it('uses slow-start timeout for docker mcp gateway run', () => {
     const cap = makeCapability('docker', ['mcp', 'gateway', 'run']);
     assert.equal(resolveProbeTimeoutMs(cap), 7000);
+  });
+});
+
+describe('probeMcpCapability', () => {
+  it('returns unknown when pencil resolver-backed capability cannot resolve a local binary', async () => {
+    const originalBin = process.env.PENCIL_MCP_BIN;
+    const originalApp = process.env.PENCIL_MCP_APP;
+    process.env.PENCIL_MCP_BIN = join(tmpdir(), `missing-pencil-${Date.now()}`);
+    delete process.env.PENCIL_MCP_APP;
+
+    try {
+      const result = await probeMcpCapability(
+        {
+          id: 'pencil',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: { command: '', args: [], resolver: 'pencil' },
+        },
+        { projectRoot: process.cwd() },
+      );
+
+      assert.deepEqual(result, { connectionStatus: 'unknown' });
+    } finally {
+      if (originalBin === undefined) delete process.env.PENCIL_MCP_BIN;
+      else process.env.PENCIL_MCP_BIN = originalBin;
+      if (originalApp === undefined) delete process.env.PENCIL_MCP_APP;
+      else process.env.PENCIL_MCP_APP = originalApp;
+    }
   });
 });

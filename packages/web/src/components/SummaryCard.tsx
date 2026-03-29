@@ -30,9 +30,9 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
 
   return (
     <div className="flex justify-center mb-4">
-      <div className="bg-white border-2 border-gray-200 rounded-lg shadow-md px-5 pt-4 pb-5 max-w-md w-full rotate-[-0.5deg] hover:rotate-0 transition-transform">
+      <div className="bg-cafe-surface border-2 border-cafe rounded-lg shadow-md px-5 pt-4 pb-5 max-w-md w-full rotate-[-0.5deg] hover:rotate-0 transition-transform">
         {/* Topic header */}
-        <div className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-1.5">
+        <div className="text-sm font-bold text-cafe-secondary mb-3 flex items-center gap-1.5">
           <span>📷</span>
           <span>{topic}</span>
         </div>
@@ -40,10 +40,10 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
         {/* Conclusions */}
         {conclusions.length > 0 && (
           <div className="mb-3">
-            <div className="text-xs font-semibold text-gray-500 mb-1">结论</div>
+            <div className="text-xs font-semibold text-cafe-secondary mb-1">结论</div>
             <ul className="space-y-1">
               {conclusions.map((c, i) => (
-                <li key={i} className="text-xs text-gray-700 flex gap-1.5">
+                <li key={i} className="text-xs text-cafe-secondary flex gap-1.5">
                   <span className="text-green-500 flex-shrink-0">✓</span>
                   <span>{c}</span>
                 </li>
@@ -55,10 +55,10 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
         {/* Open questions */}
         {openQuestions.length > 0 && (
           <div className="mb-3">
-            <div className="text-xs font-semibold text-gray-500 mb-1">待讨论</div>
+            <div className="text-xs font-semibold text-cafe-secondary mb-1">待讨论</div>
             <ul className="space-y-1">
               {openQuestions.map((q, i) => (
-                <li key={i} className="text-xs text-gray-500 flex gap-1.5">
+                <li key={i} className="text-xs text-cafe-secondary flex gap-1.5">
                   <span className="text-amber-400 flex-shrink-0">?</span>
                   <span>{q}</span>
                 </li>
@@ -68,7 +68,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
         )}
 
         {/* Footer: creator + time */}
-        <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+        <div className="flex items-center gap-2 pt-2 border-t border-cafe-subtle">
           {createdBy === 'system' ? (
             <span className="text-xs">🤖</span>
           ) : catData ? (
@@ -76,7 +76,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
           ) : (
             <span className="text-xs">👤</span>
           )}
-          <span className="text-[10px] text-gray-400">
+          <span className="text-[10px] text-cafe-muted">
             {creatorLabel} · {formatTime(timestamp)}
           </span>
         </div>

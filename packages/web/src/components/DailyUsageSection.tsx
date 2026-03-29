@@ -87,9 +87,9 @@ export function DailyUsageSection() {
   const grandTotal = report?.grandTotal;
 
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+    <section className="rounded-xl border border-cafe bg-cafe-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">近 7 日猫粮消耗</h3>
+        <h3 className="text-sm font-semibold text-cafe">近 7 日猫粮消耗</h3>
         <button
           type="button"
           onClick={() => fetchUsage(true)}
@@ -102,17 +102,17 @@ export function DailyUsageSection() {
 
       {error && <div className="text-xs text-red-500 bg-red-50 rounded px-2 py-1">{error}</div>}
 
-      {!error && days.length === 0 && !loading && <div className="text-xs text-gray-400 py-2">暂无消耗记录</div>}
+      {!error && days.length === 0 && !loading && <div className="text-xs text-cafe-muted py-2">暂无消耗记录</div>}
 
       {days.map((day) => {
         const cats = Object.entries(day.cats).sort(
           (a, b) => b[1].inputTokens + b[1].outputTokens - (a[1].inputTokens + a[1].outputTokens),
         );
         return (
-          <div key={day.date} className="border-t border-gray-100 pt-2 space-y-1">
+          <div key={day.date} className="border-t border-cafe-subtle pt-2 space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-gray-600">{day.date}</span>
-              <span className="text-gray-400">{day.total.invocations} 次调用</span>
+              <span className="font-semibold text-cafe-secondary">{day.date}</span>
+              <span className="text-cafe-muted">{day.total.invocations} 次调用</span>
             </div>
             {cats.map(([catId, usage]) => (
               <CatUsageRow key={catId} catId={catId} usage={usage} />
@@ -122,10 +122,10 @@ export function DailyUsageSection() {
       })}
 
       {grandTotal && grandTotal.invocations > 0 && (
-        <div className="border-t-2 border-gray-200 pt-2 flex items-center justify-between text-xs text-gray-500">
-          <span className="font-semibold text-gray-700">7 日合计 {grandTotal.invocations} 次</span>
+        <div className="border-t-2 border-cafe pt-2 flex items-center justify-between text-xs text-cafe-secondary">
+          <span className="font-semibold text-cafe-secondary">7 日合计 {grandTotal.invocations} 次</span>
           <span className="flex gap-3">
-            <span className="font-semibold text-gray-700">
+            <span className="font-semibold text-cafe-secondary">
               总 {formatTokens(grandTotal.inputTokens + grandTotal.outputTokens)}
             </span>
             <span>入 {formatTokens(grandTotal.inputTokens)}</span>
@@ -144,10 +144,10 @@ function CatUsageRow({ catId, usage }: { catId: string; usage: CatDailyUsage }) 
   return (
     <div className="flex items-center justify-between gap-2 text-xs">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="font-medium text-gray-700 truncate">{catLabel(catId)}</span>
-        <span className="text-gray-400">{usage.participations}次</span>
+        <span className="font-medium text-cafe-secondary truncate">{catLabel(catId)}</span>
+        <span className="text-cafe-muted">{usage.participations}次</span>
       </div>
-      <div className="flex items-center gap-3 text-gray-500 shrink-0">
+      <div className="flex items-center gap-3 text-cafe-secondary shrink-0">
         <span title="输入 tokens">入 {formatTokens(usage.inputTokens)}</span>
         <span title="输出 tokens">出 {formatTokens(usage.outputTokens)}</span>
       </div>

@@ -177,6 +177,30 @@ export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
   return null;
 }
 
+const USER_FACING_SYSTEM_INFO_TYPES = new Set([
+  'a2a_followup_available',
+  'governance_blocked',
+  'invocation_preempted',
+  'mode_switch_proposal',
+  'session_seal_requested',
+  'silent_completion',
+  'warning',
+]);
+
+/**
+ * Return true when a system_info payload already produces a user-visible notice in the UI.
+ * Route strategies use this to avoid appending a misleading silent_completion after an
+ * actionable blocker/warning has already been surfaced.
+ */
+export function isUserFacingSystemInfoContent(content: string): boolean {
+  try {
+    const parsed = JSON.parse(content) as { type?: unknown };
+    return typeof parsed.type === 'string' && USER_FACING_SYSTEM_INFO_TYPES.has(parsed.type);
+  } catch {
+    return true;
+  }
+}
+
 export function sanitizeInjectedContent(content: string): string {
   const lines = content.split('\n');
   const kept: string[] = [];

@@ -227,12 +227,8 @@ async function dispatchToTarget(
     let governanceErrorCode: string | undefined;
 
     try {
-      socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
-        threadId,
-        mode: intent.intent,
-        targetCats: [targetCatId],
-        invocationId: createResult.invocationId,
-      });
+      // #768: Defer intent_mode broadcast until CLI produces first event.
+      let intentModeBroadcast = false;
 
       for await (const msg of router.routeExecution(
         userId,
@@ -243,6 +239,16 @@ async function dispatchToTarget(
         intent,
         { signal: controller.signal, parentInvocationId: invocationId },
       )) {
+        // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
+        if (!intentModeBroadcast) {
+          socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
+            threadId,
+            mode: intent.intent,
+            targetCats: [targetCatId],
+            invocationId: createResult.invocationId,
+          });
+          intentModeBroadcast = true;
+        }
         if (controller.signal.aborted) break;
 
         // Capture text + tool usage for response aggregation

@@ -33,12 +33,12 @@ export function FileBlock({ block }: { block: RichFileBlock }) {
     <a
       href={safeHref}
       download={safeHref ? block.fileName : undefined}
-      className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+      className="flex items-center gap-3 rounded-lg border border-cafe dark:border-gray-700 px-4 py-3 hover:bg-cafe-surface-elevated dark:hover:bg-gray-800/50 transition-colors"
     >
       <span className="text-2xl flex-shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-cafe-black dark:text-gray-200 truncate">{block.fileName}</div>
-        {block.fileSize != null && <div className="text-xs text-gray-400">{formatFileSize(block.fileSize)}</div>}
+        {block.fileSize != null && <div className="text-xs text-cafe-muted">{formatFileSize(block.fileSize)}</div>}
       </div>
     </a>
   );

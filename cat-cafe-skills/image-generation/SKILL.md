@@ -1,3 +1,8 @@
+---
+name: image-generation
+description: 通过 Chrome MCP 浏览器自动化在 Gemini / ChatGPT 上生成图片并下载
+---
+
 # AI 图片生成 Skill
 
 > 用途：通过 Chrome MCP 浏览器自动化，在 Gemini / ChatGPT 上生成图片并下载

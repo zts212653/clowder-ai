@@ -4,7 +4,7 @@ import type { ConnectorTailwindTheme } from '@cat-cafe/shared';
 import { getConnectorDefinition } from '@cat-cafe/shared';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
-import { ConnectorImage, GitHubIcon, SettingsIcon, UsersIcon } from './icons/ConnectorIcons';
+import { ConnectorImage, GitHubIcon, SchedulerIcon, SettingsIcon, UsersIcon } from './icons/ConnectorIcons';
 import { BallotIcon } from './icons/VoteIcons';
 import { MarkdownContent } from './MarkdownContent';
 import { RichBlocks } from './rich/RichBlocks';
@@ -27,7 +27,7 @@ function renderContentBlocks(blocks: MessageContent[]) {
           key={i}
           src={src}
           alt="attached image"
-          className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity"
+          className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe cursor-pointer hover:opacity-90 transition-opacity"
           onClick={() => isSafeUrl && window.open(src, '_blank', 'noopener')}
         />
       );
@@ -61,6 +61,8 @@ function ConnectorIcon({ connector, fallbackIcon }: { connector: string; fallbac
       return <ConnectorImage src="/images/connectors/weixin.png" alt="WeChat" className="w-5 h-5" />;
     case 'dingtalk':
       return <ConnectorImage src="/images/connectors/dingtalk.png" alt="DingTalk" className="w-5 h-5" />;
+    case 'wecom-bot':
+      return <ConnectorImage src="/images/connectors/wecom-bot.png" alt="WeCom" className="w-5 h-5" />;
     case 'github-review':
     case 'github-ci':
     case 'github-repo-event':
@@ -75,6 +77,8 @@ function ConnectorIcon({ connector, fallbackIcon }: { connector: string; fallbac
       return <BallotIcon className="w-4 h-4" />;
     case 'multi-mention-result':
       return <UsersIcon className="w-4 h-4" />;
+    case 'scheduler':
+      return <SchedulerIcon className="w-4 h-4" />;
     case 'system-command':
       return <SettingsIcon className="w-4 h-4" />;
     default:
@@ -130,8 +134,10 @@ export function ConnectorBubble({ message }: ConnectorBubbleProps) {
           ) : (
             <span className={`text-xs font-semibold ${theme.label}`}>{source.label}</span>
           )}
-          {source.sender && <span className="text-xs text-gray-500">{source.sender.name || source.sender.id} 说</span>}
-          <span className="text-xs text-gray-400">{formatTime(message.timestamp)}</span>
+          {source.sender && (
+            <span className="text-xs text-cafe-secondary">{source.sender.name || source.sender.id} 说</span>
+          )}
+          <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
         </div>
         <div
           className={`${theme.bubble} rounded-2xl rounded-bl-sm px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden`}

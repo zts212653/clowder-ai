@@ -18,7 +18,9 @@ const SPEAKER_COLORS: Record<string, string> = {
 };
 
 function speakerStyle(speaker: string): string {
-  return SPEAKER_COLORS[speaker] ?? SPEAKER_COLORS[speaker.toLowerCase()] ?? 'text-gray-700 bg-gray-100';
+  return (
+    SPEAKER_COLORS[speaker] ?? SPEAKER_COLORS[speaker.toLowerCase()] ?? 'text-cafe-secondary bg-cafe-surface-elevated'
+  );
 }
 
 function formatDuration(seconds: number): string {
@@ -217,7 +219,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between">
-        <h4 className="text-xs font-semibold text-gray-500">播客脚本</h4>
+        <h4 className="text-xs font-semibold text-cafe-secondary">播客脚本</h4>
         <div className="flex gap-1">
           <button
             type="button"
@@ -231,7 +233,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
             type="button"
             disabled={generating}
             onClick={() => void handleGenerate('deep')}
-            className="rounded border border-gray-300 px-2 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+            className="rounded border border-cafe px-2 py-0.5 text-[10px] text-cafe-secondary hover:bg-cafe-surface-elevated disabled:opacity-50"
           >
             深度版
           </button>
@@ -252,7 +254,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
               className={`rounded px-2 py-0.5 text-[10px] ${
                 selectedId === p.id
                   ? 'bg-opus-primary text-white'
-                  : 'border border-gray-200 text-gray-600 hover:bg-gray-50'
+                  : 'border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated'
               }`}
             >
               {p.id.slice(0, 8)}
@@ -262,12 +264,12 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
       )}
 
       {error && <p className="mt-1 text-[10px] text-red-500">{error}</p>}
-      {loading && <p className="mt-1 text-[10px] text-gray-400">加载中...</p>}
+      {loading && <p className="mt-1 text-[10px] text-cafe-muted">加载中...</p>}
 
       {script && (
-        <div className="mt-2 rounded-md border border-gray-200 bg-white">
-          <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5">
-            <span className="text-[10px] text-gray-400">
+        <div className="mt-2 rounded-md border border-cafe bg-cafe-surface">
+          <div className="flex items-center justify-between border-b border-cafe-subtle px-3 py-1.5">
+            <span className="text-[10px] text-cafe-muted">
               {script.mode === 'deep' ? '深度版' : '精华版'} · {script.segments.length} 段
             </span>
             <div className="flex items-center gap-2">
@@ -281,7 +283,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
                   {playingAll ? '⏹ 停止' : '▶ 全部播放'}
                 </button>
               )}
-              <span className="text-[10px] text-gray-400">约 {formatDuration(script.totalDuration)}</span>
+              <span className="text-[10px] text-cafe-muted">约 {formatDuration(script.totalDuration)}</span>
             </div>
           </div>
           <div className="max-h-64 overflow-y-auto">
@@ -289,7 +291,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
               <div
                 key={`${seg.speaker}-${i}`}
                 className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors ${
-                  activeSegment === i ? 'bg-opus-bg' : 'hover:bg-gray-50'
+                  activeSegment === i ? 'bg-opus-bg' : 'hover:bg-cafe-surface-elevated'
                 }`}
               >
                 {seg.audioUrl ? (
@@ -307,7 +309,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
                     <button
                       type="button"
                       onClick={() => seg.audioUrl && void downloadSegmentAudio(seg.audioUrl, seg.speaker, i)}
-                      className="text-[10px] text-gray-400 hover:text-gray-600"
+                      className="text-[10px] text-cafe-muted hover:text-cafe-secondary"
                       title="下载音频"
                     >
                       ⬇
@@ -324,9 +326,9 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
                   >
                     {seg.speaker}
                   </span>
-                  <span className="flex-1 text-xs text-gray-700">{seg.text}</span>
+                  <span className="flex-1 text-xs text-cafe-secondary">{seg.text}</span>
                 </button>
-                <span className="shrink-0 text-[10px] text-gray-300">{formatDuration(seg.durationEstimate)}</span>
+                <span className="shrink-0 text-[10px] text-cafe-muted">{formatDuration(seg.durationEstimate)}</span>
               </div>
             ))}
           </div>
@@ -334,7 +336,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
       )}
 
       {!script && !loading && readyPodcasts.length === 0 && !error && (
-        <p className="mt-1 text-[10px] text-gray-400">还没有播客脚本，点击上方按钮生成。</p>
+        <p className="mt-1 text-[10px] text-cafe-muted">还没有播客脚本，点击上方按钮生成。</p>
       )}
     </div>
   );

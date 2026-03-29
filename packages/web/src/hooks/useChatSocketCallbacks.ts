@@ -32,12 +32,14 @@ export function useChatSocketCallbacks({
 }: ExternalDeps): SocketCallbacks {
   const {
     updateThreadTitle,
+    updateThreadParticipants,
     setLoading,
     setHasActiveInvocation,
     setIntentMode,
     setTargetCats,
     addMessage,
-    removeMessage,
+    removeThreadMessage,
+    requestStreamCatchUp,
   } = useChatStore();
   const { addTask, updateTask } = useTaskStore();
 
@@ -48,7 +50,10 @@ export function useChatSocketCallbacks({
         handleAgentMessage(msg);
         return true;
       },
-      onThreadUpdated: (data) => updateThreadTitle(data.threadId, data.title),
+      onThreadUpdated: (data) => {
+        if (data.title !== undefined) updateThreadTitle(data.threadId, data.title);
+        if (data.participants !== undefined) updateThreadParticipants(data.threadId, data.participants);
+      },
       onIntentMode: (data) => {
         // Socket layer (useSocket) already applies dual-pointer guard + background routing.
         // This callback only fires for the truly active thread.
@@ -86,9 +91,10 @@ export function useChatSocketCallbacks({
       onHeartbeat: (data) => {
         if (data.threadId === threadId) resetTimeout();
       },
-      onMessageDeleted: (data: { messageId: string }) => removeMessage(data.messageId),
-      onMessageRestored: () => {
-        /* re-fetching history if needed */
+      onMessageDeleted: (data: { messageId: string; threadId: string }) =>
+        removeThreadMessage(data.threadId, data.messageId),
+      onMessageRestored: (data: { messageId: string; threadId: string }) => {
+        requestStreamCatchUp(data.threadId);
       },
       onThreadBranched: () => {
         /* branch navigation handled by the action initiator */
@@ -118,7 +124,8 @@ export function useChatSocketCallbacks({
       addTask,
       updateTask,
       addMessage,
-      removeMessage,
+      removeThreadMessage,
+      requestStreamCatchUp,
       resetTimeout,
       clearDoneTimeout,
       handleAuthRequest,

@@ -35,6 +35,16 @@ describe('command-registry', () => {
     expect(names).toContain('/config');
     expect(names).toContain('/signals');
   });
+
+  // F142-B: surface + source fields
+  it('every command has valid surface and source (AC-B8)', () => {
+    const validSurfaces = ['web', 'connector', 'both'];
+    const validSources = ['core', 'skill', 'mcp'];
+    for (const cmd of COMMANDS) {
+      expect(validSurfaces).toContain(cmd.surface);
+      expect(validSources).toContain(cmd.source);
+    }
+  });
 });
 
 describe('shortcut-registry', () => {

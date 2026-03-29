@@ -129,4 +129,40 @@ describe('Skills Route', () => {
 
     await app.close();
   });
+
+  it('exposes required MCP dependency status for routed skills', async () => {
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/skills',
+      headers: AUTH_HEADERS,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const browserAutomation = body.skills.find((skill) => skill.name === 'browser-automation');
+    const pencilDesign = body.skills.find((skill) => skill.name === 'pencil-design');
+
+    assert.ok(browserAutomation, 'browser-automation should be present in skills board');
+    assert.ok(pencilDesign, 'pencil-design should be present in skills board');
+    assert.deepEqual(
+      browserAutomation.requiresMcp?.map((dep) => dep.id),
+      ['playwright', 'claude-in-chrome', 'agent-browser', 'pinchtab'],
+      'browser-automation should declare all browser backend dependencies',
+    );
+    assert.deepEqual(
+      pencilDesign.requiresMcp?.map((dep) => dep.id),
+      ['pencil'],
+      'pencil-design should declare pencil dependency',
+    );
+
+    for (const dep of [...browserAutomation.requiresMcp, ...pencilDesign.requiresMcp]) {
+      assert.match(dep.status, /^(ready|missing|unresolved)$/);
+    }
+
+    await app.close();
+  });
 });
