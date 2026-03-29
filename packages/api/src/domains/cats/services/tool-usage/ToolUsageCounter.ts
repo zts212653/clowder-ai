@@ -109,9 +109,7 @@ export class ToolUsageCounter {
         toolTotals.set(aggKey, { name: e.toolName, category: e.category, count: e.count });
       }
     }
-    const topTools = [...toolTotals.values()]
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 20);
+    const topTools = [...toolTotals.values()].sort((a, b) => b.count - a.count).slice(0, 20);
 
     // Daily breakdown
     const dailyMap = new Map<string, Record<ToolCategory, number>>();
