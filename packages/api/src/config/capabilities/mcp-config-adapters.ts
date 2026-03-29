@@ -33,11 +33,13 @@ function ensureGeminiCatCafeEnv(name: string, env?: Record<string, string>): Rec
   };
 }
 
-function shouldSkipGeminiProjectServer(name: string): boolean {
-  // Gemini CLI already discovers the shared home-level pencil server.
-  // Keeping a project-level pencil entry creates duplicate startup work and
-  // can pin stale Antigravity extension paths.
-  return name === 'pencil';
+function shouldSkipGeminiProjectServer(_name: string): boolean {
+  // #272: Previously skipped pencil because "Gemini CLI discovers it at home level".
+  // But home-level discovery only works for Antigravity — when the user installs
+  // Pencil in VSCode/Cursor, Gemini's own discovery misses it. Since the capability
+  // orchestrator now resolves the correct binary path across editors (PR #277),
+  // let the project-level config carry the resolved path for all editors.
+  return false;
 }
 
 // ────────── Readers ──────────
@@ -184,8 +186,8 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
       ? { ...(existing.mcpServers as Record<string, unknown>) }
       : {};
 
-  // Project-level Gemini config should not shadow the shared home-level pencil MCP.
-  delete existingMcp.pencil;
+  // #272: Previously deleted pencil unconditionally ("should not shadow home-level").
+  // Removed — the capability orchestrator now resolves the correct multi-editor path.
 
   // Update/add managed entries; remove disabled managed; preserve user's own
   for (const s of servers) {
