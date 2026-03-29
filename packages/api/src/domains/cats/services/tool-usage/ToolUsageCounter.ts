@@ -5,7 +5,7 @@
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
-import { TOOL_USAGE_TTL_SECONDS, toolUsageKey, toolUsageScanPattern } from '../stores/redis-keys/tool-usage-keys.js';
+import { TOOL_USAGE_SCAN_ALL, TOOL_USAGE_TTL_SECONDS, toolUsageKey } from '../stores/redis-keys/tool-usage-keys.js';
 import { classifyTool, type ToolCategory } from './classify.js';
 
 const log = createModuleLogger('tool-usage');
@@ -123,31 +123,35 @@ export class ToolUsageCounter {
     return { period: { from, to }, summary: { totalCalls, byCategory }, topTools, daily, byCat };
   }
 
-  /** Scan Redis keys for N days of tool-stats data. */
+  /**
+   * Single-pass SCAN of all tool-stats:* keys + client-side date filtering.
+   * Avoids O(days * total_keys) by scanning the keyspace only once.
+   */
   private async scanDays(days: number): Promise<ToolUsageEntry[]> {
-    const entries: ToolUsageEntry[] = [];
     const now = new Date();
-
+    const validDates = new Set<string>();
     for (let i = 0; i < days; i++) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      const date = toDateString(d.getTime());
-      const pattern = toolUsageScanPattern(date);
+      validDates.add(toDateString(d.getTime()));
+    }
 
-      let cursor = '0';
-      do {
-        const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
-        cursor = nextCursor;
+    const entries: ToolUsageEntry[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', TOOL_USAGE_SCAN_ALL, 'COUNT', 500);
+      cursor = nextCursor;
 
-        if (keys.length > 0) {
-          const values = await this.redis.mget(...keys);
-          for (let k = 0; k < keys.length; k++) {
-            const parsed = parseToolUsageKey(keys[k], values[k]);
-            if (parsed) entries.push(parsed);
+      if (keys.length > 0) {
+        const values = await this.redis.mget(...keys);
+        for (let k = 0; k < keys.length; k++) {
+          const parsed = parseToolUsageKey(keys[k], values[k]);
+          if (parsed && validDates.has(parsed.date)) {
+            entries.push(parsed);
           }
         }
-      } while (cursor !== '0');
-    }
+      }
+    } while (cursor !== '0');
 
     return entries;
   }

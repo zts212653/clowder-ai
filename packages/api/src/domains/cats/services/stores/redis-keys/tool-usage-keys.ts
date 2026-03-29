@@ -11,7 +11,5 @@ export function toolUsageKey(date: string, catId: string, category: string, tool
   return `tool-stats:${date}:${catId}:${category}:${toolName}`;
 }
 
-/** SCAN pattern to match all tool-stats keys for a given date. */
-export function toolUsageScanPattern(date: string): string {
-  return `tool-stats:${date}:*`;
-}
+/** SCAN pattern to match all tool-stats keys (single scan, client-side date filter). */
+export const TOOL_USAGE_SCAN_ALL = 'tool-stats:*';

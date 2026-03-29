@@ -6,6 +6,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
+const AUTH_HEADER = { 'X-Cat-Cafe-User': 'user-1' };
+
 /** Minimal fake Redis (same as counter test). */
 function createFakeRedis() {
   const store = new Map();
@@ -46,11 +48,12 @@ describe('GET /api/usage/tools', () => {
     fakeRedis = createFakeRedis();
     const counter = new ToolUsageCounter(fakeRedis);
 
-    // Seed some data
+    // Seed: native + MCP (both formats) + skill
     counter.recordToolUse('opus', 'Read');
     counter.recordToolUse('opus', 'Read');
     counter.recordToolUse('opus', 'Edit');
     counter.recordToolUse('codex', 'mcp__cat-cafe__post_message');
+    counter.recordToolUse('codex', 'mcp:cat-cafe/search_evidence');
     counter.recordToolUse('opus', 'Skill', { skill: 'tdd' });
     await new Promise((r) => setTimeout(r, 80));
 
@@ -63,46 +66,55 @@ describe('GET /api/usage/tools', () => {
     if (app) await app.close();
   });
 
-  test('returns 200 with correct report structure', async () => {
+  test('returns 401 without auth header', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/usage/tools?days=1' });
+    assert.equal(res.statusCode, 401);
+  });
+
+  test('returns 200 with correct report structure', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/usage/tools?days=1', headers: AUTH_HEADER });
     assert.equal(res.statusCode, 200);
 
     const body = JSON.parse(res.payload);
     assert.ok(body.period);
     assert.ok(body.summary);
-    assert.equal(body.summary.totalCalls, 5);
+    assert.equal(body.summary.totalCalls, 6);
     assert.equal(body.summary.byCategory.native, 3);
-    assert.equal(body.summary.byCategory.mcp, 1);
+    assert.equal(body.summary.byCategory.mcp, 2);
     assert.equal(body.summary.byCategory.skill, 1);
     assert.ok(Array.isArray(body.topTools));
     assert.ok(Array.isArray(body.daily));
     assert.ok(body.byCat.opus);
+    assert.ok(body.byCat.codex);
   });
 
   test('filters by catId', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/usage/tools?days=1&catId=codex' });
+    const res = await app.inject({ method: 'GET', url: '/api/usage/tools?days=1&catId=codex', headers: AUTH_HEADER });
     const body = JSON.parse(res.payload);
-    assert.equal(body.summary.totalCalls, 1);
-    assert.equal(body.summary.byCategory.mcp, 1);
+    assert.equal(body.summary.totalCalls, 2);
+    assert.equal(body.summary.byCategory.mcp, 2);
   });
 
   test('filters by category', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/usage/tools?days=1&category=skill' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/usage/tools?days=1&category=skill',
+      headers: AUTH_HEADER,
+    });
     const body = JSON.parse(res.payload);
     assert.equal(body.summary.totalCalls, 1);
     assert.equal(body.summary.byCategory.skill, 1);
   });
 
   test('rejects invalid category', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/usage/tools?category=invalid' });
+    const res = await app.inject({ method: 'GET', url: '/api/usage/tools?category=invalid', headers: AUTH_HEADER });
     assert.equal(res.statusCode, 400);
   });
 
   test('defaults to 7 days', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/usage/tools' });
+    const res = await app.inject({ method: 'GET', url: '/api/usage/tools', headers: AUTH_HEADER });
     const body = JSON.parse(res.payload);
     assert.ok(body.period);
-    // Should not throw, and period.from should be ~7 days ago
     const fromDate = new Date(body.period.from);
     const toDate = new Date(body.period.to);
     const diffDays = (toDate.getTime() - fromDate.getTime()) / (24 * 60 * 60 * 1000);
