@@ -39,6 +39,17 @@ export interface ToolUsageReport {
 export class ToolUsageCounter {
   constructor(private readonly redis: RedisClient) {}
 
+  /** Resolve ioredis keyPrefix (SCAN doesn't auto-apply it) */
+  private get keyPrefix(): string {
+    return (this.redis as { options?: { keyPrefix?: string } }).options?.keyPrefix ?? '';
+  }
+
+  /** Strip keyPrefix from a raw SCAN key for use with normal commands (which auto-prefix) */
+  private stripPrefix(rawKey: string): string {
+    const p = this.keyPrefix;
+    return p && rawKey.startsWith(p) ? rawKey.slice(p.length) : rawKey;
+  }
+
   /**
    * Record a tool_use event. Fire-and-forget — errors are logged, never thrown.
    */
@@ -136,16 +147,22 @@ export class ToolUsageCounter {
       validDates.add(toDateString(d.getTime()));
     }
 
+    // SCAN doesn't auto-apply ioredis keyPrefix — prepend manually
+    const scanPattern = `${this.keyPrefix}${TOOL_USAGE_SCAN_ALL}`;
+
     const entries: ToolUsageEntry[] = [];
     let cursor = '0';
     do {
-      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', TOOL_USAGE_SCAN_ALL, 'COUNT', 500);
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', scanPattern, 'COUNT', 500);
       cursor = nextCursor;
 
       if (keys.length > 0) {
-        const values = await this.redis.mget(...keys);
+        // MGET auto-applies keyPrefix, so strip it from raw SCAN keys
+        const strippedKeys = keys.map((k) => this.stripPrefix(k));
+        const values = await this.redis.mget(...strippedKeys);
         for (let k = 0; k < keys.length; k++) {
-          const parsed = parseToolUsageKey(keys[k], values[k]);
+          // Parse using stripped key (tool-stats:{date}:{catId}:...)
+          const parsed = parseToolUsageKey(strippedKeys[k], values[k]);
           if (parsed && validDates.has(parsed.date)) {
             entries.push(parsed);
           }

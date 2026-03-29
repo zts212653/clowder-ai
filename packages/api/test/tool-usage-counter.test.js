@@ -151,4 +151,57 @@ describe('ToolUsageCounter', () => {
     assert.equal(report.summary.byCategory.mcp, 1);
     assert.equal(report.summary.byCategory.native, 0);
   });
+
+  test('aggregate works correctly with ioredis keyPrefix', async () => {
+    const { ToolUsageCounter } = await import('../dist/domains/cats/services/tool-usage/ToolUsageCounter.js');
+
+    // Simulate ioredis keyPrefix behavior: write commands auto-prepend,
+    // SCAN returns raw keys (with prefix), MGET auto-prepends.
+    const PREFIX = 'cat-cafe:';
+    const store = new Map();
+    const prefixedRedis = {
+      options: { keyPrefix: PREFIX },
+      _store: store,
+      async incr(key) {
+        const realKey = PREFIX + key;
+        const cur = parseInt(store.get(realKey) ?? '0', 10);
+        const next = cur + 1;
+        store.set(realKey, String(next));
+        return next;
+      },
+      async expire() {},
+      async scan(cursor, _mf, pattern, _cf, _c) {
+        // SCAN sees raw keys; pattern already has prefix from our fix
+        if (cursor !== '0') return ['0', []];
+        const glob = pattern.replace('*', '');
+        const matched = [];
+        for (const k of store.keys()) {
+          if (k.startsWith(glob)) matched.push(k);
+        }
+        return ['0', matched];
+      },
+      async mget(...keys) {
+        // MGET auto-prepends prefix (like ioredis)
+        return keys.map((k) => store.get(PREFIX + k) ?? null);
+      },
+    };
+
+    const counter = new ToolUsageCounter(prefixedRedis);
+
+    counter.recordToolUse('opus', 'Read');
+    counter.recordToolUse('opus', 'mcp__cat-cafe__post');
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Verify keys have prefix in store
+    for (const k of store.keys()) {
+      assert.ok(k.startsWith(PREFIX), `key "${k}" should have prefix "${PREFIX}"`);
+    }
+
+    const report = await counter.aggregate(1);
+
+    assert.equal(report.summary.totalCalls, 2);
+    assert.equal(report.summary.byCategory.native, 1);
+    assert.equal(report.summary.byCategory.mcp, 1);
+    assert.ok(report.topTools.length === 2);
+  });
 });
