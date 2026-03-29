@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 const { connectorHubRoutes } = await import('../dist/routes/connector-hub.js');
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'owner-1' };
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 async function buildApp(overrides = {}) {
   const listCalls = [];
@@ -130,6 +140,110 @@ describe('GET /api/connector/weixin/qrcode-status — adapter not ready', () => 
 
     WA._injectStaticFetch(originalFetch);
     await app.close();
+  });
+});
+
+describe('Feishu QR routes', () => {
+  it('POST /api/connector/feishu/qrcode returns QR image and payload', async () => {
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      feishuRegistrationFetch: async (_url, init) => {
+        const form = new URLSearchParams(String(init?.body ?? ''));
+        const action = form.get('action');
+        if (action === 'init') {
+          return jsonResponse({ supported_auth_methods: ['client_secret'] });
+        }
+        if (action === 'begin') {
+          return jsonResponse({
+            verification_uri_complete: 'https://accounts.feishu.cn/oauth/verify?token=abc',
+            device_code: 'device-abc',
+            interval: 5,
+            expire_in: 600,
+          });
+        }
+        return jsonResponse({ error: 'unexpected_action' }, 400);
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/connector/feishu/qrcode',
+      headers: AUTH_HEADERS,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.qrPayload, 'device-abc');
+    assert.ok(typeof body.qrUrl === 'string' && body.qrUrl.startsWith('data:image/png;base64,'));
+    assert.equal(body.interval, 5);
+    assert.equal(body.expiresIn, 600);
+
+    await app.close();
+  });
+
+  it('GET /api/connector/feishu/qrcode-status persists credentials to env file on confirm', async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-feishu-qr-'));
+    const envFilePath = join(tempRoot, '.env');
+    writeFileSync(envFilePath, '', 'utf8');
+
+    const originalEnv = {
+      FEISHU_APP_ID: process.env.FEISHU_APP_ID,
+      FEISHU_APP_SECRET: process.env.FEISHU_APP_SECRET,
+      FEISHU_CONNECTION_MODE: process.env.FEISHU_CONNECTION_MODE,
+    };
+
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      envFilePath,
+      feishuRegistrationFetch: async (_url, init) => {
+        const form = new URLSearchParams(String(init?.body ?? ''));
+        const action = form.get('action');
+        if (action === 'poll') {
+          return jsonResponse({
+            client_id: 'cli_test_app_id',
+            client_secret: 'test_app_secret_123',
+            user_info: { open_id: 'ou_test', tenant_brand: 'feishu' },
+          });
+        }
+        return jsonResponse({ error: 'unexpected_action' }, 400);
+      },
+    });
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/connector/feishu/qrcode-status?qrPayload=device-xyz',
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(JSON.parse(res.body).status, 'confirmed');
+
+      const envText = readFileSync(envFilePath, 'utf8');
+      assert.match(envText, /FEISHU_APP_ID=cli_test_app_id/);
+      assert.match(envText, /FEISHU_APP_SECRET=test_app_secret_123/);
+      assert.match(envText, /FEISHU_CONNECTION_MODE=websocket/);
+    } finally {
+      if (originalEnv.FEISHU_APP_ID == null) delete process.env.FEISHU_APP_ID;
+      else process.env.FEISHU_APP_ID = originalEnv.FEISHU_APP_ID;
+      if (originalEnv.FEISHU_APP_SECRET == null) delete process.env.FEISHU_APP_SECRET;
+      else process.env.FEISHU_APP_SECRET = originalEnv.FEISHU_APP_SECRET;
+      if (originalEnv.FEISHU_CONNECTION_MODE == null) delete process.env.FEISHU_CONNECTION_MODE;
+      else process.env.FEISHU_CONNECTION_MODE = originalEnv.FEISHU_CONNECTION_MODE;
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 });
 

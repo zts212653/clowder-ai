@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { FeishuQrPanel } from './FeishuQrPanel';
 import {
   ChevronDown,
   ChevronRight,
@@ -84,7 +85,17 @@ export function HubConnectorConfigTab() {
       .map((f) => ({ name: f.envName, value: fieldValues[f.envName] }));
 
     if (updates.length === 0) {
-      setSaveResult({ type: 'error', message: '请填写至少一个非敏感配置项（敏感字段需手动编辑 .env）' });
+      const hasSensitiveConfigured = platform.fields.some(
+        (field) => field.sensitive && Boolean(field.currentValue && field.currentValue.trim()),
+      );
+      if (platform.configured || hasSensitiveConfigured) {
+        setSaveResult({
+          type: 'success',
+          message: '当前无可保存的非敏感变更。若已通过扫码完成绑定，凭证已写入 .env，无需再次保存。',
+        });
+      } else {
+        setSaveResult({ type: 'error', message: '请填写至少一个非敏感配置项（敏感字段需手动编辑 .env）' });
+      }
       return;
     }
 
@@ -131,6 +142,10 @@ export function HubConnectorConfigTab() {
           : undefined;
         const filteredSteps = platform.steps.filter((s) => !s.mode || s.mode === selectedMode);
         const guideSteps = filteredSteps.slice(0, -1);
+        const showFeishuQr = platform.id === 'feishu';
+        const qrStepNum = guideSteps.length + 1;
+        const credentialStepNum = guideSteps.length + (showFeishuQr ? 2 : 1);
+        const verifyStepNum = credentialStepNum + 1;
 
         return (
           <div
@@ -203,9 +218,21 @@ export function HubConnectorConfigTab() {
                   </div>
                 ))}
 
+                {showFeishuQr && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <StepBadge num={qrStepNum} />
+                      <span className="text-[13px] font-medium text-gray-900">扫码创建并绑定飞书机器人（推荐）</span>
+                    </div>
+                    <div className="ml-[26px]">
+                      <FeishuQrPanel configured={platform.configured} onConfirmed={fetchStatus} />
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <StepBadge num={guideSteps.length + 1} />
+                    <StepBadge num={credentialStepNum} />
                     <span className="text-[13px] font-medium text-gray-900">填写应用凭证</span>
                   </div>
                   <div className="ml-[26px] space-y-2.5">
@@ -256,7 +283,7 @@ export function HubConnectorConfigTab() {
 
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <StepBadge num={filteredSteps.length} />
+                    <StepBadge num={verifyStepNum} />
                     <span className="text-[13px] font-medium text-gray-900">测试连接并保存</span>
                   </div>
                   {saveResult && (

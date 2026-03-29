@@ -1,7 +1,10 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { WeixinAdapter } from '../infrastructure/connectors/adapters/WeixinAdapter.js';
 import type { IConnectorPermissionStore } from '../infrastructure/connectors/ConnectorPermissionStore.js';
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface ConnectorHubRoutesOptions {
@@ -16,6 +19,10 @@ export interface ConnectorHubRoutesOptions {
   startWeixinPolling?: () => void;
   /** F134 Phase D: Permission store for group whitelist + admin management */
   permissionStore?: IConnectorPermissionStore | null;
+  /** Optional override for writing connector env updates in tests */
+  envFilePath?: string;
+  /** Optional fetch override for Feishu registration API in tests */
+  feishuRegistrationFetch?: typeof fetch;
 }
 
 function requireTrustedHubIdentity(request: FastifyRequest, reply: FastifyReply): string | null {
@@ -56,6 +63,11 @@ interface PlatformDef {
   /** Steps displayed in the guided wizard — may be mode-filtered */
   steps: PlatformStepDef[];
 }
+
+const FEISHU_ACCOUNTS_BASE_URL = 'https://accounts.feishu.cn';
+const LARK_ACCOUNTS_BASE_URL = 'https://accounts.larksuite.com';
+
+type FeishuRegistrationResponse = Record<string, unknown>;
 
 export const CONNECTOR_PLATFORMS: PlatformDef[] = [
   {
@@ -135,6 +147,86 @@ function maskSensitiveValue(_value: string): string {
   return '••••••••';
 }
 
+function formatEnvFileValue(value: string): string {
+  const escapedControlChars = value.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  if (/^[A-Za-z0-9_./:@-]+$/.test(escapedControlChars)) return escapedControlChars;
+  return `"${escapedControlChars
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/`/g, '\\`')}"`;
+}
+
+function applyEnvUpdatesToFile(contents: string, updates: Map<string, string | null>): string {
+  const lines = contents === '' ? [] : contents.split(/\r?\n/);
+  const seen = new Set<string>();
+  const nextLines: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (!match) {
+      nextLines.push(line);
+      continue;
+    }
+    const name = match[1]!;
+    if (!updates.has(name)) {
+      nextLines.push(line);
+      continue;
+    }
+    seen.add(name);
+    const value = updates.get(name);
+    if (value == null || value === '') continue;
+    nextLines.push(`${name}=${formatEnvFileValue(value)}`);
+  }
+
+  for (const [name, value] of updates) {
+    if (seen.has(name) || value == null || value === '') continue;
+    nextLines.push(`${name}=${formatEnvFileValue(value)}`);
+  }
+
+  const normalized = nextLines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+  return normalized.length > 0 ? `${normalized}\n` : '';
+}
+
+function persistEnvUpdates(envFilePath: string, updates: Map<string, string | null>): void {
+  const current = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf8') : '';
+  const next = applyEnvUpdatesToFile(current, updates);
+  writeFileSync(envFilePath, next, 'utf8');
+  for (const [name, value] of updates) {
+    if (value == null || value === '') delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+
+async function postFeishuRegistration(
+  fetchFn: typeof fetch,
+  baseUrl: string,
+  form: URLSearchParams,
+): Promise<FeishuRegistrationResponse> {
+  const res = await fetchFn(`${baseUrl}/oauth/v1/app/registration`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  const data = (await res.json().catch(() => ({}))) as FeishuRegistrationResponse;
+  if (!res.ok && !('error' in data)) {
+    throw new Error(`registration api ${res.status}`);
+  }
+  return data;
+}
+
+function toPositiveNumber(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return fallback;
+}
+
 export interface PlatformFieldStatus {
   envName: string;
   label: string;
@@ -203,6 +295,8 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
 
 export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> = async (app, opts) => {
   const { threadStore } = opts;
+  const envFilePath = opts.envFilePath ?? resolve(resolveActiveProjectRoot(), '.env');
+  const feishuRegistrationFetch = opts.feishuRegistrationFetch ?? globalThis.fetch;
 
   app.get('/api/connector/hub-threads', async (request, reply) => {
     const userId = requireTrustedHubIdentity(request, reply);
@@ -238,6 +332,127 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
       weixinStatus.configured = adapter != null && adapter.hasBotToken() && adapter.isPolling();
     }
     return { platforms: status };
+  });
+
+  // ── Feishu QR code create/bind routes ──
+
+  app.post('/api/connector/feishu/qrcode', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    try {
+      const initData = await postFeishuRegistration(
+        feishuRegistrationFetch,
+        FEISHU_ACCOUNTS_BASE_URL,
+        new URLSearchParams({ action: 'init' }),
+      );
+      const supportedMethods = Array.isArray(initData.supported_auth_methods) ? initData.supported_auth_methods : [];
+      if (!supportedMethods.includes('client_secret')) {
+        reply.status(502);
+        return { error: 'Feishu registration endpoint does not support client_secret auth method' };
+      }
+
+      const beginData = await postFeishuRegistration(
+        feishuRegistrationFetch,
+        FEISHU_ACCOUNTS_BASE_URL,
+        new URLSearchParams({
+          action: 'begin',
+          archetype: 'PersonalAgent',
+          auth_method: 'client_secret',
+          request_user_info: 'open_id',
+        }),
+      );
+
+      const verificationUri = beginData.verification_uri_complete;
+      const deviceCode = beginData.device_code;
+      if (typeof verificationUri !== 'string' || typeof deviceCode !== 'string') {
+        reply.status(502);
+        return { error: 'Feishu registration response is missing QR payload' };
+      }
+
+      const qrUrl = new URL(verificationUri);
+      qrUrl.searchParams.set('from', 'onboard');
+
+      const QRCode = await import('qrcode');
+      const qrDataUri = await QRCode.toDataURL(qrUrl.toString(), { width: 384, margin: 2 });
+
+      return {
+        qrUrl: qrDataUri,
+        qrPayload: deviceCode,
+        interval: toPositiveNumber(beginData.interval, 5),
+        expiresIn: toPositiveNumber(beginData.expire_in, 600),
+      };
+    } catch (err) {
+      app.log.error({ err }, '[Feishu QR] Failed to fetch QR code');
+      reply.status(502);
+      return { error: 'Failed to fetch QR code from Feishu registration service' };
+    }
+  });
+
+  app.get('/api/connector/feishu/qrcode-status', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    const { qrPayload } = request.query as { qrPayload?: string };
+    if (!qrPayload) {
+      reply.status(400);
+      return { error: 'qrPayload query parameter required' };
+    }
+
+    try {
+      const pollForm = new URLSearchParams({ action: 'poll', device_code: qrPayload });
+      let pollData = await postFeishuRegistration(feishuRegistrationFetch, FEISHU_ACCOUNTS_BASE_URL, pollForm);
+
+      const tenantBrand = ((pollData.user_info as Record<string, unknown> | undefined)?.tenant_brand ?? '') as string;
+      const hasCredentials = typeof pollData.client_id === 'string' && typeof pollData.client_secret === 'string';
+      if (!hasCredentials && tenantBrand === 'lark') {
+        try {
+          pollData = await postFeishuRegistration(feishuRegistrationFetch, LARK_ACCOUNTS_BASE_URL, pollForm);
+        } catch (err) {
+          app.log.warn({ err }, '[Feishu QR] Lark poll fallback failed');
+        }
+      }
+
+      const clientId = pollData.client_id;
+      const clientSecret = pollData.client_secret;
+      if (typeof clientId === 'string' && typeof clientSecret === 'string') {
+        const updates = new Map<string, string | null>([
+          ['FEISHU_APP_ID', clientId],
+          ['FEISHU_APP_SECRET', clientSecret],
+        ]);
+        const currentMode = process.env.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook';
+        const verificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
+        if (currentMode === 'webhook' && (!verificationToken || verificationToken.trim() === '')) {
+          // QR onboarding does not return webhook verification token; default to websocket so setup is immediately valid.
+          updates.set('FEISHU_CONNECTION_MODE', 'websocket');
+        }
+        persistEnvUpdates(envFilePath, updates);
+        app.log.info('[Feishu QR] Bot credentials captured and persisted to env file');
+        return { status: 'confirmed' };
+      }
+
+      const errorCode = pollData.error;
+      if (errorCode === 'authorization_pending' || errorCode === 'slow_down') {
+        return { status: 'waiting' };
+      }
+      if (errorCode === 'access_denied') {
+        return { status: 'denied' };
+      }
+      if (errorCode === 'expired_token') {
+        return { status: 'expired' };
+      }
+      if (typeof errorCode === 'string') {
+        return {
+          status: 'error',
+          error: typeof pollData.error_description === 'string' ? pollData.error_description : errorCode,
+        };
+      }
+      return { status: 'waiting' };
+    } catch (err) {
+      app.log.error({ err }, '[Feishu QR] Failed to poll QR status');
+      reply.status(502);
+      return { error: 'Failed to poll Feishu QR status' };
+    }
   });
 
   // ── F137: WeChat QR code login routes ──
