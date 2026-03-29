@@ -261,6 +261,11 @@ export function useAgentMessages() {
 
   const findCallbackReplacementTarget = useCallback((catId: string, invocationId: string): { id: string } | null => {
     const currentMessages = useChatStore.getState().messages;
+    // #266: Exact invocationId match only — strict scoping prevents a stale
+    // callback from invocation-1 replacing invocation-2's active bubble.
+    // P1 review (codex): the previous activeRefs fallback was dangerous because
+    // it would grab whatever bubble is currently active regardless of invocation,
+    // allowing late retry callbacks to clobber a new conversation's stream.
     for (let i = currentMessages.length - 1; i >= 0; i -= 1) {
       const msg = currentMessages[i];
       if (
@@ -272,6 +277,8 @@ export function useAgentMessages() {
         return { id: msg.id };
       }
     }
+    // No match → caller creates a new callback bubble via addMessage.
+    // For stale callbacks the message already exists in DB (deduped by messageId).
     return null;
   }, []);
 
@@ -431,8 +438,10 @@ export function useAgentMessages() {
 
         if (msg.origin === 'callback') {
           const invocationId = msg.invocationId ?? getCurrentInvocationIdForCat(msg.catId);
+          // #266 P1: Try strict invocationId match first (prevents cross-invocation race),
+          // then fall back to invocationless placeholder (covers lost invocation_created).
           const replacementTarget = invocationId
-            ? findCallbackReplacementTarget(msg.catId, invocationId)
+            ? (findCallbackReplacementTarget(msg.catId, invocationId) ?? findInvocationlessStreamPlaceholder(msg.catId))
             : findInvocationlessStreamPlaceholder(msg.catId);
 
           if (replacementTarget) {
@@ -625,13 +634,18 @@ export function useAgentMessages() {
           // was ever created for this cat, text events were lost (socket transport
           // drop, dual-pointer guard mismatch, etc.). Request a history catch-up
           // so the user sees the response without needing F5.
-          // P2: Only trigger if stream data was actually received (avoids false
-          // catch-up on callback-only flows where addMessage handles delivery).
-          if (!messageId && sawStreamDataRef.current.has(msg.catId)) {
+          // #266 ghost-message: Removed the sawStreamDataRef guard — previously
+          // catch-up only fired when stream data was received but no bubble existed.
+          // For fast/simple replies, stream events AND callback can both be lost
+          // during a micro-disconnect while done(isFinal) arrives after reconnect.
+          // The callback path creates its own bubble via addMessage when no stream
+          // placeholder exists, so double-delivery is benign (replace: true dedupes).
+          if (!messageId) {
             const tid = useChatStore.getState().currentThreadId;
             console.warn('[stream-catchup] done(isFinal) with no active bubble — requesting catch-up', {
               catId: msg.catId,
               threadId: tid,
+              hadStreamData: sawStreamDataRef.current.has(msg.catId),
             });
             if (tid) {
               requestStreamCatchUp(tid);

@@ -218,4 +218,59 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     );
     expect(newAssistantCalls.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('P1 regression: stale callback from inv-1 must NOT replace inv-2 active bubble (#266)', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    // Inv-2 is actively streaming
+    const inv2Bubble = {
+      id: 'msg-inv2',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'New response',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-2' } },
+      timestamp: Date.now(),
+    };
+    storeState.messages.push(inv2Bubble);
+    storeState.catInvocations = { opus: { invocationId: 'inv-2' } };
+
+    // Activate the stream ref by sending a text event for inv-2
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        content: 'New response',
+      });
+    });
+
+    vi.clearAllMocks();
+
+    // Stale callback from inv-1 arrives late (retry / network delay)
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        origin: 'callback',
+        content: 'Old inv-1 response',
+        invocationId: 'inv-1',
+        messageId: 'stored-inv1-msg',
+      });
+    });
+
+    // The stale callback must NOT have patched inv-2's bubble.
+    // It should have created a new standalone callback bubble instead.
+    const newCallbackBubbles = mockAddMessage.mock.calls.filter(
+      ([msg]) => msg.type === 'assistant' && msg.catId === 'opus' && msg.origin === 'callback',
+    );
+    expect(newCallbackBubbles.length).toBe(1);
+    expect(newCallbackBubbles[0][0].content).toBe('Old inv-1 response');
+
+    // Inv-2's bubble must remain untouched (no appendToMessage with stale content)
+    const appendToInv2 = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-inv2');
+    expect(appendToInv2).toHaveLength(0);
+  });
 });
