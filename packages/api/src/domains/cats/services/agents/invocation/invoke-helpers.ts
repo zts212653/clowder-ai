@@ -109,7 +109,8 @@ export function preflightRace<T>(promise: Promise<T>, label: string, signal?: Ab
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`preflight_timeout: ${label}`)), PREFLIGHT_TIMEOUT_MS);
-    timer.unref();
+    // Keep the process alive until the preflight guard actually fires.
+    // Unref'ing this timer lets Node exit early when the raced promise never settles.
   });
 
   const parts: Promise<T | never>[] = [promise, timeoutPromise];
