@@ -28,25 +28,28 @@ describe('QuickCreateForm IME guard', () => {
     container.remove();
   });
 
-  it('blocks Enter default in title input while composing', async () => {
+  it('blocks Enter default in title/summary/tags inputs while composing', async () => {
     const onCreate = vi.fn(async () => {});
 
     await act(async () => {
       root.render(<QuickCreateForm onCreate={onCreate} />);
     });
 
-    const input = container.querySelector('[data-testid="mc-create-title"]') as HTMLInputElement | null;
-    if (!input) throw new Error('Missing title input');
+    const selectors = ['[data-testid="mc-create-title"]', '[data-testid="mc-create-summary"]', '[data-testid="mc-create-tags"]'];
+    for (const selector of selectors) {
+      const input = container.querySelector(selector) as HTMLInputElement | null;
+      if (!input) throw new Error(`Missing input: ${selector}`);
 
-    await act(async () => {
-      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
-    });
+      await act(async () => {
+        input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      });
 
-    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
-    await act(async () => {
-      input.dispatchEvent(enter);
-    });
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      await act(async () => {
+        input.dispatchEvent(enter);
+      });
 
-    expect(enter.defaultPrevented).toBe(true);
+      expect(enter.defaultPrevented).toBe(true);
+    }
   });
 });

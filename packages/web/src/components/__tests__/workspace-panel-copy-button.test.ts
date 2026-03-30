@@ -197,4 +197,23 @@ describe('WorkspacePanel Copy button', () => {
     });
     expect(clipboardWriteText).toHaveBeenCalledWith('');
   });
+
+  it('prevents Enter default in workspace search input while composing', async () => {
+    setupMocks();
+    await renderPanel();
+
+    const searchInput = container.querySelector('input[placeholder="搜索全部..."]') as HTMLInputElement | null;
+    if (!searchInput) throw new Error('Missing workspace search input');
+
+    await act(async () => {
+      searchInput.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    });
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => {
+      searchInput.dispatchEvent(enter);
+    });
+
+    expect(enter.defaultPrevented).toBe(true);
+  });
 });
