@@ -536,6 +536,143 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 201, 'cross-protocol api_key binding should be allowed');
   });
 
+  it('POST /api/cats rejects non-opencode client bound to incompatible protocol account', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const openaiAccount = await createProviderProfile(projectRoot, {
+      displayName: 'MiniMax OpenAI',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.minimaxi.com/v1',
+      apiKey: 'sk-test-minimax',
+      models: ['MiniMax-M2.7'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // client "anthropic" + account protocol "openai" → should be rejected
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-minimax-mismatch',
+        name: '协议不匹配猫',
+        displayName: '协议不匹配猫',
+        avatar: '/avatars/test.png',
+        color: { primary: '#ff0000', secondary: '#ffcccc' },
+        mentionPatterns: ['@mismatch-test'],
+        roleDescription: '测试用',
+        client: 'anthropic',
+        providerProfileId: openaiAccount.id,
+        defaultModel: 'MiniMax-M2.7',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400, 'protocol mismatch should be rejected');
+    const body = JSON.parse(createRes.body);
+    assert.match(body.error, /requires "anthropic" protocol/i);
+  });
+
+  it('POST /api/cats strips trailing slash from model name', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    await createProviderProfile(projectRoot, {
+      displayName: 'Anthropic Key',
+      authType: 'api_key',
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-test-anthropic',
+      models: ['claude-opus-4-6'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-trailing-slash',
+        name: '尾斜杠测试猫',
+        displayName: '尾斜杠测试猫',
+        avatar: '/avatars/test.png',
+        color: { primary: '#00ff00', secondary: '#ccffcc' },
+        mentionPatterns: ['@slash-test'],
+        roleDescription: '测试用',
+        client: 'anthropic',
+        providerProfileId: 'anthropic-key',
+        defaultModel: 'claude-opus-4-6/',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 201, 'should accept model with trailing slash (stripped)');
+    const body = JSON.parse(createRes.body);
+    assert.equal(body.cat.defaultModel, 'claude-opus-4-6', 'trailing slash should be stripped');
+  });
+
+  it('POST /api/cats rejects pure-slash model name', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    await createProviderProfile(projectRoot, {
+      displayName: 'Anthropic Key',
+      authType: 'api_key',
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-test-anthropic',
+      models: ['claude-opus-4-6'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-pure-slash',
+        name: '纯斜杠测试猫',
+        displayName: '纯斜杠测试猫',
+        avatar: '/avatars/test.png',
+        color: { primary: '#ff0000', secondary: '#ffcccc' },
+        mentionPatterns: ['@pure-slash'],
+        roleDescription: '测试用',
+        client: 'anthropic',
+        providerProfileId: 'anthropic-key',
+        defaultModel: '/',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400, 'pure slash model should be rejected');
+  });
+
   it('POST /api/cats opencode+api_key: provider/model is primary, ocProviderName is legacy fallback', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

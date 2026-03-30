@@ -307,7 +307,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let didWriteAudit = false;
   let didComplete = false;
   let didResetRestoreFailures = false;
-  let openCodeRuntimeConfigPath: string | undefined;
+  let openCodeRuntimeConfigDir: string | undefined;
   const hostProjectRoot = findMonorepoRoot(process.cwd());
 
   // === CAT_INVOKED 审计 (fire-and-forget, 缅因猫 review P2-3) ===
@@ -666,7 +666,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const provider = catConfig?.provider;
     const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
     const defaultModel = catConfig?.defaultModel?.trim() || undefined;
-    const projectRoot = workingProjectRoot ?? resolveActiveProjectRoot(process.cwd());
+    // Account resolution, proxy registration, and runtime config always use the
+    // runtime root (process.cwd()), NOT thread.projectPath.  catRegistry loads
+    // from the runtime root at startup — reading a divergent catalog (e.g. the
+    // dev worktree pointed to by thread.projectPath) misses runtime-only accounts.
+    // workingProjectRoot is still used for shared-state preflight + cat cwd.
+    const projectRoot = resolveActiveProjectRoot(process.cwd());
     const boundAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
     const resolveRuntimeAccount = async () => {
       if (!builtinClient) return null;
@@ -838,14 +843,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = effectiveModel;
       const apiType = deriveOpenCodeApiType(resolvedAccount.protocol, effectiveProviderName);
       const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
-      openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(projectRoot, catId as string, invocationId, {
+      openCodeRuntimeConfigDir = writeOpenCodeRuntimeConfig(projectRoot, catId as string, invocationId, {
         providerName: effectiveProviderName,
         models: rawModels,
         defaultModel: effectiveModel,
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
       });
-      callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
+      callbackEnv.OPENCODE_CONFIG_DIR = openCodeRuntimeConfigDir;
       if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
       if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
     }
@@ -1613,9 +1618,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F118: Release session mutex (idempotent — safe if never acquired)
     sessionMutexRelease?.();
 
-    if (openCodeRuntimeConfigPath) {
-      await rm(openCodeRuntimeConfigPath, { force: true }).catch((err) => {
-        log.warn({ invocationId, path: openCodeRuntimeConfigPath, err }, 'Failed to remove OpenCode runtime config');
+    if (openCodeRuntimeConfigDir) {
+      await rm(openCodeRuntimeConfigDir, { recursive: true, force: true }).catch((err) => {
+        log.warn({ invocationId, path: openCodeRuntimeConfigDir, err }, 'Failed to remove OpenCode runtime config dir');
       });
     }
 

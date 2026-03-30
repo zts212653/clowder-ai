@@ -192,7 +192,7 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
     expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
   });
 
-  it('does NOT request catch-up for callback-only flow (P2: no stream data)', () => {
+  it('requests catch-up for callback-only flow when no active bubble (ghost-message)', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -207,7 +207,7 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
       });
     });
 
-    // done(isFinal) arrives — no streaming bubble, but also no stream data was seen
+    // done(isFinal) arrives — no streaming bubble exists
     act(() => {
       captured?.handleAgentMessage({
         type: 'done',
@@ -216,8 +216,28 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
       });
     });
 
-    // P2: should NOT trigger catch-up because no stream chunks were received
-    expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+    // Ghost-message fix: catch-up fires unconditionally when no active bubble,
+    // regardless of whether stream data was seen (sawStreamDataRef guard removed)
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+  });
+
+  it('requests catch-up when done(isFinal) arrives with no events at all', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    // Ghost-message scenario: micro-disconnect lost ALL events (stream + callback)
+    // Only done(isFinal) arrives
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        isFinal: true,
+      });
+    });
+
+    // Must trigger catch-up so user sees the response without F5
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
   });
 
   it('requests catch-up when stream data was seen but bubble is lost', () => {

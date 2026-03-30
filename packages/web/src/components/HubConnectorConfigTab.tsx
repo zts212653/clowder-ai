@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { FeishuQrPanel } from './FeishuQrPanel';
 import {
   ChevronDown,
   ChevronRight,
@@ -189,15 +190,20 @@ export function HubConnectorConfigTab() {
                       <span className="text-[13px] font-medium text-cafe">{step.text}</span>
                     </div>
                     {idx === 0 && (
-                      <a
-                        href={platform.docsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 text-xs text-blue-600 bg-sky-50 rounded-lg px-3 py-2 hover:bg-sky-100 transition-colors ml-[26px]"
-                      >
-                        <ExternalLinkIcon />
-                        <span>{new URL(platform.docsUrl).hostname} → 查看官方文档</span>
-                      </a>
+                      <div className="ml-[26px] space-y-2.5">
+                        <a
+                          href={platform.docsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-blue-600 bg-sky-50 rounded-lg px-3 py-2 hover:bg-sky-100 transition-colors"
+                        >
+                          <ExternalLinkIcon />
+                          <span>{new URL(platform.docsUrl).hostname} → 查看官方文档</span>
+                        </a>
+                        {platform.id === 'feishu' && (
+                          <FeishuQrPanel configured={platform.configured} onConfirmed={() => void fetchStatus()} />
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}

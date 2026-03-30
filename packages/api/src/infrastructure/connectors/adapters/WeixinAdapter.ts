@@ -37,17 +37,38 @@ const QRCODE_TIMEOUT_MS = 5 * 60 * 1000;
 /**
  * Voice item payload mode for WeChat voice delivery.
  * - `minimal` (default): send only `{ media }` — safest fallback ("1s fake" but visible).
- * - `playtime`: send `{ media, playtime }` — hypothesis: duration-only may fix "1s fake"
- *   without triggering the rejection seen with full metadata.
+ * - `playtime`: send `{ media, playtime }` — shows correct duration but won't play.
+ * - `playtime-sec`: send `{ media, playtime }` with playtime in SECONDS (not ms) — hypothesis test.
+ * - `playtime-encode`: send `{ media, encode_type: 6, playtime }` — confirmed broken (encode_type is poison).
  * - `metadata`: send all SILK fields — confirmed broken (voice "completely gone").
  *
  * Runtime-configurable via WEIXIN_VOICE_ITEM_MODE so 铲屎官 can A/B test without code changes.
  */
-type WeixinVoiceItemMode = 'minimal' | 'playtime' | 'metadata';
+type WeixinVoiceItemMode = 'minimal' | 'playtime' | 'playtime-sec' | 'playtime-encode' | 'metadata';
+const UNSAFE_VOICE_MODE_ENV = 'WEIXIN_ENABLE_UNSAFE_VOICE_MODES';
+const UNSAFE_VOICE_MODES = new Set<WeixinVoiceItemMode>(['playtime-encode', 'metadata']);
+const CAPTURE_INBOUND_VOICE_ENV = 'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA';
 
-function getWeixinVoiceItemMode(): WeixinVoiceItemMode {
+function isUnsafeVoiceModeEnabled(): boolean {
+  return process.env[UNSAFE_VOICE_MODE_ENV] === '1';
+}
+
+function isInboundVoiceCaptureEnabled(): boolean {
+  return process.env[CAPTURE_INBOUND_VOICE_ENV] === '1';
+}
+
+function getWeixinVoiceItemMode(log?: FastifyBaseLogger): WeixinVoiceItemMode {
   const mode = process.env.WEIXIN_VOICE_ITEM_MODE?.trim().toLowerCase();
-  if (mode === 'playtime' || mode === 'metadata') return mode;
+  if (mode === 'playtime' || mode === 'playtime-sec' || mode === 'playtime-encode' || mode === 'metadata') {
+    if (UNSAFE_VOICE_MODES.has(mode) && !isUnsafeVoiceModeEnabled()) {
+      log?.warn(
+        { requestedMode: mode, fallbackMode: 'playtime', unsafeModeEnv: UNSAFE_VOICE_MODE_ENV },
+        '[WeixinAdapter] unsafe voice mode disabled — falling back to playtime',
+      );
+      return 'playtime';
+    }
+    return mode;
+  }
   return 'minimal';
 }
 
@@ -340,12 +361,21 @@ export class WeixinAdapter implements IOutboundAdapter {
     }
 
     if (itemType === MessageItemType.VOICE) {
+      const media = firstItem.voice_item?.media;
+      const mediaKey =
+        media?.encrypt_query_param && media?.aes_key
+          ? JSON.stringify({ encryptQueryParam: media.encrypt_query_param, aesKey: media.aes_key })
+          : '';
       return {
         chatId: senderId,
         text: firstItem.voice_item?.text || '[语音]',
         messageId: msgId,
         senderId,
         contextToken,
+        attachments:
+          isInboundVoiceCaptureEnabled() && mediaKey
+            ? [{ type: 'file' as const, mediaUrl: mediaKey, fileName: `weixin-voice-${msgId}.silk` }]
+            : undefined,
       };
     }
 
@@ -748,7 +778,7 @@ export class WeixinAdapter implements IOutboundAdapter {
       if (payload.type === 'image') {
         mediaItem.image_item = { media: mediaRef, mid_size: uploaded.fileSizeCiphertext };
       } else if (payload.type === 'audio' && audioAsVoice) {
-        const voiceMode = getWeixinVoiceItemMode();
+        const voiceMode = getWeixinVoiceItemMode(this.log);
         if (voiceMode === 'metadata') {
           mediaItem.voice_item = {
             media: mediaRef,
@@ -757,13 +787,23 @@ export class WeixinAdapter implements IOutboundAdapter {
             sample_rate: voiceMeta?.sampleRate ?? 24_000,
             playtime: voiceMeta?.durationMs ?? 0,
           };
+        } else if (voiceMode === 'playtime-encode' && voiceMeta?.durationMs && voiceMeta.durationMs > 0) {
+          mediaItem.voice_item = { media: mediaRef, encode_type: 6, playtime: Math.round(voiceMeta.durationMs) };
+        } else if (voiceMode === 'playtime-sec' && voiceMeta?.durationMs && voiceMeta.durationMs > 0) {
+          mediaItem.voice_item = { media: mediaRef, playtime: Math.max(1, Math.round(voiceMeta.durationMs / 1000)) };
         } else if (voiceMode === 'playtime' && voiceMeta?.durationMs && voiceMeta.durationMs > 0) {
           mediaItem.voice_item = { media: mediaRef, playtime: Math.round(voiceMeta.durationMs) };
         } else {
           mediaItem.voice_item = { media: mediaRef };
         }
         this.log.info(
-          { chatId: externalChatId, mode: voiceMode, durationMs: voiceMeta?.durationMs },
+          {
+            chatId: externalChatId,
+            mode: voiceMode,
+            requestedMode: process.env.WEIXIN_VOICE_ITEM_MODE,
+            unsafeVoiceModesEnabled: isUnsafeVoiceModeEnabled(),
+            durationMs: voiceMeta?.durationMs,
+          },
           '[WeixinAdapter] sendMedia: voice_item mode',
         );
       } else {
@@ -869,8 +909,11 @@ export class WeixinAdapter implements IOutboundAdapter {
         return null;
       }
       const result = await encode(parsed.pcm, parsed.sampleRate);
+      // Write raw SILK output — do NOT append 0xFFFF EOS marker.
+      // Evidence: inbound WeChat SILK has no EOS marker and ends exactly at last frame.
+      // The 0xFFFF bytes are read as int16LE frame-size = -1, which crashes WeChat's decoder.
       const silkPath = join(tmpdir(), `cat-cafe-weixin-${Date.now()}.silk`);
-      await writeFile(silkPath, result.data);
+      await writeFile(silkPath, Buffer.from(result.data));
       this.log.info(
         { wavPath, silkPath, duration: result.duration, sampleRate: parsed.sampleRate },
         '[WeixinAdapter] convertWavToSilk: success',

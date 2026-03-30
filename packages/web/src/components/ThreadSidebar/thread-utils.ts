@@ -1,4 +1,4 @@
-import type { Thread } from '@/stores/chat-types';
+import type { Thread, ThreadState } from '@/stores/chat-types';
 import { getRecentThreads, splitIntoActiveAndArchived } from './active-workspace';
 
 export function formatRelativeTime(ts: number, compact = false): string {
@@ -48,6 +48,25 @@ export interface ThreadGroup {
   projectPath?: string;
   /** For archived-container: nested project groups */
   archivedGroups?: ThreadGroup[];
+}
+
+type ThreadActivitySource = Pick<ThreadState, 'lastActivity'> | undefined;
+
+/**
+ * Merge live sidebar activity from per-thread UI state into thread summaries.
+ * Backend `lastActiveAt` only changes when `/api/threads` is re-fetched; while a
+ * background thread is actively streaming, the freshest timestamp lives in
+ * `threadStates[threadId].lastActivity`.
+ */
+export function mergeLiveActivityIntoThreads(
+  threads: Thread[],
+  threadStates: Record<string, ThreadActivitySource>,
+): Thread[] {
+  return threads.map((thread) => {
+    const liveLastActivity = threadStates[thread.id]?.lastActivity ?? 0;
+    if (liveLastActivity <= thread.lastActiveAt) return thread;
+    return { ...thread, lastActiveAt: liveLastActivity };
+  });
 }
 
 /** Sort comparator: unread first, then by lastActiveAt descending. */

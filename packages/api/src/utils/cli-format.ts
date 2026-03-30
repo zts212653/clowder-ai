@@ -12,8 +12,9 @@
  */
 export function formatCliExitError(
   cliName: string,
-  event: { exitCode: number | null; signal: string | null; message: string },
+  event: { exitCode: number | null; signal: string | null; message: string; reasonCode?: string },
 ): string {
   // Use the pre-sanitized message from cli-spawn (no raw stderr exposure)
-  return `${cliName}: ${event.message}`;
+  const base = `${cliName}: ${event.message}`;
+  return event.reasonCode ? `${base} [${event.reasonCode}]` : base;
 }

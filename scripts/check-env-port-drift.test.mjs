@@ -627,7 +627,7 @@ excluded:
       );
       assert.match(
         hotfix,
-        /git -C "\$TARGET_DIR" fetch --quiet --force --prune origin[\s\\]+"\+refs\/tags\/sync\/\*:\$TARGET_SYNC_TAG_REFS\/\*"/,
+        /git -C "\$TARGET_DIR" fetch --quiet --force --prune origin[\s\\]+"\+refs\/tags\/sync\/\*:\$TARGET_SYNC_TAG_REFS\/sync\/\*"/,
         'hotfix lane should force-refresh the mirrored clowder-ai sync tag namespace',
       );
       assert.match(
@@ -775,6 +775,30 @@ describe(
         content,
         /list_source_worktree_realpaths \| grep -qFx "\$RESOLVED_TARGET"/,
         'sync script should compare TARGET_DIR against source worktrees using resolved realpaths',
+      );
+    });
+
+    it('recognizes git worktrees as valid target repos', () => {
+      const content = readSyncScript();
+      assert.match(
+        content,
+        /target_git_repo_exists\(\) \{\s+local repo_dir="\$1"\s+git -C "\$repo_dir" rev-parse --git-dir >/m,
+        'sync script should detect target repos via git rev-parse so linked worktrees are accepted',
+      );
+      assert.match(
+        content,
+        /if ! target_git_repo_exists "\$TARGET_DIR"; then[\s\S]*Target git repo not found/m,
+        'prepare_validation_target should use the git repo helper before rejecting the target',
+      );
+      assert.match(
+        content,
+        /if \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \] && target_git_repo_exists "\$TARGET_DIR"; then/m,
+        'real sync target gates should treat linked worktrees as valid repos',
+      );
+      assert.match(
+        content,
+        /if target_git_repo_exists "\$TARGET_DIR"; then\s+cd "\$TARGET_DIR"\s+git add -A/m,
+        'auto-commit finalization should also run for linked worktree targets',
       );
     });
 

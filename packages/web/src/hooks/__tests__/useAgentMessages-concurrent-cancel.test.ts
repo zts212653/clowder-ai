@@ -238,3 +238,153 @@ describe('F108 P1: concurrent cancel isolation', () => {
     expect(mockSetLoading).toHaveBeenCalledWith(false);
   });
 });
+
+/**
+ * clearDoneTimeout safety net bug:
+ *
+ * clearDoneTimeout() is called unconditionally on the FIRST cat's done/error(isFinal),
+ * killing the 5-minute safety timer. If a subsequent cat's done(isFinal) is lost
+ * (WebSocket issue, server not yielding it), stale invocation slots persist forever,
+ * causing ThreadExecutionBar to show "执行中" until F5.
+ *
+ * Fix: move clearDoneTimeout() inside the `remainingInvocations === 0` block so
+ * the timer stays alive while ANY cat is still running.
+ */
+describe('clearDoneTimeout safety net during concurrent execution', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    captured = undefined;
+
+    // Two cats actively running
+    storeState.activeInvocations = {
+      'inv-opus': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      'inv-codex': { catId: 'codex', mode: 'execute', startedAt: Date.now() },
+    };
+    storeState.catInvocations = {};
+    storeState.messages = [];
+    storeState.currentThreadId = 'thread-1';
+
+    mockRemoveActiveInvocation.mockImplementation((invId: string) => {
+      const inv = storeState.activeInvocations as Record<string, unknown>;
+      delete inv[invId];
+    });
+
+    for (const fn of [
+      mockAddMessage,
+      mockAppendToMessage,
+      mockAppendToolEvent,
+      mockSetStreaming,
+      mockSetLoading,
+      mockSetHasActiveInvocation,
+      mockClearAllActiveInvocations,
+      mockSetIntentMode,
+      mockSetCatStatus,
+      mockClearCatStatuses,
+      mockSetCatInvocation,
+      mockSetMessageUsage,
+      mockRemoveActiveInvocation,
+      mockRequestStreamCatchUp,
+      mockAddMessageToThread,
+      mockClearThreadActiveInvocation,
+      mockResetThreadInvocationState,
+      mockSetThreadMessageStreaming,
+      mockGetThreadState,
+    ]) {
+      fn.mockClear();
+    }
+    mockGetThreadState.mockImplementation(() => ({ messages: [] }));
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+  });
+
+  it('done(isFinal) for first cat preserves safety timeout for remaining cats', () => {
+    act(() => root.render(React.createElement(Harness)));
+
+    // Codex finishes — opus is still running
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'codex',
+        isFinal: true,
+      });
+    });
+
+    // Advance past the 5-minute safety timeout
+    act(() => {
+      vi.advanceTimersByTime(5 * 60 * 1000 + 100);
+    });
+
+    // Safety timeout should have fired — cleaning up stale opus state
+    expect(mockClearAllActiveInvocations).toHaveBeenCalled();
+  });
+
+  it('error(isFinal) for first cat preserves safety timeout for remaining cats', () => {
+    act(() => root.render(React.createElement(Harness)));
+
+    // Codex errors — opus is still running
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'error',
+        catId: 'codex',
+        error: 'something broke',
+        isFinal: true,
+      });
+    });
+
+    // Advance past the 5-minute safety timeout
+    act(() => {
+      vi.advanceTimersByTime(5 * 60 * 1000 + 100);
+    });
+
+    // Safety timeout should have fired — cleaning up stale opus state
+    expect(mockClearAllActiveInvocations).toHaveBeenCalled();
+  });
+
+  it('done(isFinal) for the LAST cat clears safety timeout (no false alarm)', () => {
+    // Only one cat active
+    storeState.activeInvocations = {
+      'inv-codex': { catId: 'codex', mode: 'execute', startedAt: Date.now() },
+    };
+
+    act(() => root.render(React.createElement(Harness)));
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'codex',
+        isFinal: true,
+      });
+    });
+
+    // Clear mock call counts from done handling itself
+    mockClearAllActiveInvocations.mockClear();
+    mockAddMessage.mockClear();
+
+    // Advance past the 5-minute safety timeout
+    act(() => {
+      vi.advanceTimersByTime(5 * 60 * 1000 + 100);
+    });
+
+    // Safety timeout should NOT fire — properly cleared when last cat finished
+    expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
+  });
+});

@@ -60,7 +60,7 @@ your-projects/
 | `pnpm start --memory` | Same, but skip Redis (in-memory store, data lost on restart) |
 | `pnpm start --quick` | Same, but skip rebuild (use existing `dist/`) |
 | `pnpm start --daemon` | Same, but run in background (logs to `cat-cafe-daemon.log`) |
-| `pnpm start:direct` | Bypass worktree — run dev server directly in current checkout |
+| `pnpm start:direct` | Bypass worktree — start from current checkout without auto-update ([details](#running-a-specific-version-without-auto-update)) |
 | `pnpm stop` | Stop background daemon |
 | `pnpm start:status` | Check if daemon is running |
 | `pnpm runtime:init` | Only create the runtime worktree (no start) |
@@ -70,6 +70,55 @@ your-projects/
 First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast-forward sync then start.
 
 > **Custom runtime path:** Set `CAT_CAFE_RUNTIME_DIR` to use a different location: `CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+
+## Running a Specific Version (Without Auto-Update)
+
+By default, `pnpm start` auto-syncs to the latest `origin/main`. If you want to **stay on a specific release** — for stability, reproducibility, or because you're not ready to update — use `pnpm start:direct` instead.
+
+### Option 1: Checkout a Release Tag
+
+Clowder publishes [tagged releases](https://github.com/zts212653/clowder-ai/releases) (`v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.4.0`, etc.). To run a specific version:
+
+```bash
+# 1. Clone (or use your existing clone)
+git clone https://github.com/zts212653/clowder-ai.git
+cd clowder-ai
+
+# 2. Checkout the version you want
+git checkout v0.4.0          # or any tag from the Releases page
+
+# 3. Install + build
+pnpm install
+pnpm build
+
+# 4. Configure
+cp .env.example .env
+# Edit .env — add API keys
+
+# 5. Start directly (bypasses worktree, won't auto-update)
+pnpm start:direct
+
+# No Redis? Use in-memory mode
+pnpm start:direct -- --memory
+```
+
+### Option 2: Stay on Your Current Commit
+
+If you've already cloned and are happy with the current version, just use `pnpm start:direct` instead of `pnpm start`:
+
+```bash
+pnpm start:direct            # Runs from current checkout, no sync
+pnpm start:direct -- --quick # Skip rebuild too
+```
+
+### Why `pnpm start:direct`?
+
+| Command | Auto-syncs to latest? | Creates worktree? | Use case |
+|---------|----------------------|-------------------|----------|
+| `pnpm start` | **Yes** — syncs to `origin/main` | Yes | Always run the latest version |
+| `pnpm start:direct` | **No** — runs from current checkout | No | Pin to a specific version or branch |
+
+> **Updating later:** When you're ready to update, simply `git fetch && git checkout v0.5.0` (or whichever new tag), then `pnpm install && pnpm build && pnpm start:direct`.
 
 ## Background / Daemon Mode
 

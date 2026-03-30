@@ -84,6 +84,9 @@ cp .env.example .env
 # 5. 启动（自动创建运行时 worktree，启动 Redis + API + 前端）
 pnpm start
 
+# 想固定在某个版本？用 start:direct（不会自动更新）：
+#   git checkout <tag> && pnpm start:direct   # 如 v0.4.2
+
 # 6. 可选：后台启动（daemon 模式）
 pnpm start --daemon
 # 查看状态 / 停止
@@ -96,6 +99,8 @@ pnpm stop
 > **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
 **完整安装指南**（API key 配置、CLI 认证、语音、飞书/Telegram、常见问题）：**[SETUP.opensource.zh-CN.md](SETUP.opensource.zh-CN.md)**
+
+> **想固定在某个版本？** 参阅安装指南中的[运行指定版本](SETUP.opensource.zh-CN.md#运行指定版本不自动更新)章节。
 
 > **CVO 训练营已上线！** AI 团队亲自带你走完一个完整的 feature 生命周期 — 从愿景表达到代码上线。
 

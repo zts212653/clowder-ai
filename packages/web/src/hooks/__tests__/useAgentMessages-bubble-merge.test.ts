@@ -25,6 +25,8 @@ const mockSetMessageUsage = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
+const mockReplaceMessageId = vi.fn();
+const mockPatchMessage = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -58,6 +60,8 @@ const storeState = {
   requestStreamCatchUp: mockRequestStreamCatchUp,
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
+  replaceMessageId: mockReplaceMessageId,
+  patchMessage: mockPatchMessage,
 
   addMessageToThread: mockAddMessageToThread,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
@@ -157,6 +161,57 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       ([catId, info]) => catId === 'opus' && info.invocationId === undefined,
     );
     expect(clearCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('callback with invocationId falls back to invocationless placeholder when strict match fails', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    // Setup: an invocationless stream bubble exists (invocation_created was lost)
+    const placeholderMsg = {
+      id: 'msg-placeholder',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'streaming...',
+      isStreaming: true,
+      origin: 'stream',
+      // No invocationId — this is the invocationless placeholder
+      extra: { stream: {} },
+      timestamp: Date.now() - 1000,
+    };
+    storeState.messages.push(placeholderMsg);
+
+    // Simulate text arriving (so activeRefs gets set for this cat)
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        content: 'streaming...',
+      });
+    });
+
+    vi.clearAllMocks();
+
+    // Callback arrives WITH invocationId, but no bubble has that invocationId tagged
+    // (because invocation_created was lost during micro-disconnect)
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        origin: 'callback',
+        content: 'Final callback response',
+        invocationId: 'inv-lost',
+        messageId: 'msg-final',
+      });
+    });
+
+    // With cascade: should fall back to invocationless placeholder and patch it
+    // NOT create a brand new standalone bubble
+    const newBubbleCalls = mockAddMessage.mock.calls.filter(
+      ([msg]) => msg.type === 'assistant' && msg.catId === 'opus',
+    );
+    expect(newBubbleCalls).toHaveLength(0);
   });
 
   it('new invocation text does not append to previous finalized message', () => {

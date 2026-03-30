@@ -57,7 +57,7 @@
     {
       "id": "F010",
       "name": "手机端猫猫",
-      "status": "in-progress | **Owner**: 三猫",
+      "status": "done | **Owner**: 三猫",
       "file": "F010-mobile-cat.md"
     },
     {
@@ -81,7 +81,7 @@
     {
       "id": "F014",
       "name": "SVG 猫猫状态动画",
-      "status": "in-progress | **Owner**: 三猫",
+      "status": "done | **Owner**: 三猫",
       "file": "F014-svg-cat-animation.md"
     },
     {
@@ -213,7 +213,7 @@
     {
       "id": "F036",
       "name": "Logo 一笔画动画（Stroke Drawing Animation）",
-      "status": "in-progress | **Owner**: 三猫",
+      "status": "done | **Owner**: 三猫",
       "file": "F036-logo-stroke-animation.md"
     },
     {
@@ -819,7 +819,7 @@
     {
       "id": "F134",
       "name": "Feishu Group Chat — 飞书群聊多用户支持",
-      "status": "done | **Completed**: 2026-03-26 | **Owner**: Ragdoll | **Priority**: P1 | **PR**: #697, #699, #700, #705, #745",
+      "status": "done | **Completed**: 2026-03-26 | **Follow-up**: done | **Owner**: Ragdoll | **Priority**: P1 | **PR**: #697, #699, #700, #705, #745, #871",
       "file": "F134-feishu-group-chat.md"
     },
     {
@@ -901,5 +901,5 @@
       "file": "F147-i18n-hub-locale-switch.md"
     }
   ],
-  "generated_at": "2026-03-29T15:53:14.531Z"
+  "generated_at": "2026-03-30T21:15:14.395Z"
 }

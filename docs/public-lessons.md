@@ -830,9 +830,9 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-03-28
 - 坑：中文输入法按 Enter 选词时，Chrome 的事件顺序是 `compositionend` → `keydown(Enter, isComposing: false)`。与 Firefox 相反（Firefox 是 `keydown(isComposing: true)` → `compositionend`）。因此 `e.nativeEvent.isComposing` 守卫在 Chrome 上对 Enter 键无效，导致中文输入时按回车选词会直接提交表单。
-- 根因：Web 规范未强制 `compositionend` 与 `keydown` 的顺序，Chrome 和 Firefox 实现不同。项目内 19 个输入组件全部使用了不可靠的 `e.nativeEvent.isComposing` 守卫，包括主聊天输入框。
-- 影响范围：ChatInput（主聊天）、ActionDock（游戏发言）、ThreadItem/SectionGroup（重命名）、HistorySearchModal、SignalArticleDetail、StudyFoldArea、VoiceSettingsPanel、InlineTreeInput、BrakeModal、VoteConfigModal、BindNewSessionSection、SessionChainInputs、DirectoryBrowser、DirectoryPickerModal、InteractiveBlock、BrowserToolbar（URL 输入）、HubPermissionsTab（完全无守卫）。
-- 修复：创建 `useIMEGuard` hook（`packages/web/src/hooks/useIMEGuard.ts`）。核心思路：用 `compositionstart/end` 事件驱动 ref，在 `compositionend` 后通过 `requestAnimationFrame` 延迟一帧清除 composing 状态，使得 Chrome 紧随其后的 `keydown(Enter)` 仍能被拦截。全量替换 19 个组件。
+- 根因：Web 规范未强制 `compositionend` 与 `keydown` 的顺序，Chrome 和 Firefox 实现不同。项目内 24 个输入组件全部使用了不可靠的 `e.nativeEvent.isComposing` 守卫，包括主聊天输入框。
+- 影响范围：ChatInput（主聊天）、ActionDock（游戏发言）、ThreadItem/SectionGroup（重命名）、HistorySearchModal、SignalArticleDetail、StudyFoldArea、VoiceSettingsPanel、InlineTreeInput、BrakeModal、VoteConfigModal、BindNewSessionSection、SessionChainInputs、DirectoryBrowser、DirectoryPickerModal、InteractiveBlock、BrowserToolbar（URL 输入）、HubPermissionsTab（完全无守卫）、WorkspacePanel（搜索）、hub-tag-editor（标签提交）、SessionSearchTab（form submit）、QuickCreateForm（form submit×3）、SignalInboxView（form submit）。
+- 修复：创建 `useIMEGuard` hook（`packages/web/src/hooks/useIMEGuard.ts`）。核心思路：用 `compositionstart/end` 事件驱动 ref，在 `compositionend` 后通过 `requestAnimationFrame` 延迟一帧清除 composing 状态，使得 Chrome 紧随其后的 `keydown(Enter)` 仍能被拦截。全量替换 24 个组件。
 - 检查清单（新增 Enter 输入点必须遵守）：
   1. 禁止裸用 `e.nativeEvent.isComposing` 或 `e.key === 'Enter'` 无守卫
   2. 必须使用 `useIMEGuard` hook 并绑定 `onCompositionStart/End` + `ime.isComposing()` 守卫

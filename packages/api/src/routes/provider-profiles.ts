@@ -81,7 +81,16 @@ const createBodySchema = z
     baseUrl: z.string().optional(),
     apiKey: z.string().optional(),
     modelOverride: z.string().optional(),
-    models: z.array(z.string().trim().min(1)).optional(),
+    models: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .transform((v) => v.replace(/\/+$/, ''))
+          .pipe(z.string().min(1)),
+      )
+      .optional(),
     setActive: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
@@ -105,7 +114,16 @@ const updateBodySchema = z.object({
   baseUrl: z.string().optional(),
   apiKey: z.string().optional(),
   modelOverride: z.string().nullable().optional(),
-  models: z.array(z.string().trim().min(1)).optional(),
+  models: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .transform((v) => v.replace(/\/+$/, ''))
+        .pipe(z.string().min(1)),
+    )
+    .optional(),
 });
 
 const activateBodySchema = z.object({
