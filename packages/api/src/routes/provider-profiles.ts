@@ -61,7 +61,7 @@ function deriveAccountId(displayName: string, existingIds: Set<string>): string 
 
 const MONOREPO_ROOT = findMonorepoRoot();
 
-const protocolEnum = z.enum(['anthropic', 'openai', 'google']);
+const protocolEnum = z.enum(['anthropic', 'openai', 'openai-responses', 'google']);
 const authTypeEnum = z.enum(['oauth', 'api_key']);
 const modeEnum = z.enum(['subscription', 'api_key']);
 
@@ -324,9 +324,11 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
       const baseUrlChanged =
         parsed.data.baseUrl != null &&
         normalizeBaseUrl(parsed.data.baseUrl) !== normalizeBaseUrl(existing.baseUrl ?? '');
+      // Re-infer protocol on baseUrl change, but preserve openai-responses
+      // (it can only be set explicitly — inferProbeProtocol can't distinguish it from openai)
       const effectiveProtocol: AccountProtocol = parsed.data.protocol
         ? (parsed.data.protocol as AccountProtocol)
-        : baseUrlChanged
+        : baseUrlChanged && existing.protocol !== 'openai-responses'
           ? inferProbeProtocol(parsed.data.baseUrl, undefined)
           : existing.protocol;
       const account: AccountConfig = {

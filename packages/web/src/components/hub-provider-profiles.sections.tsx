@@ -14,10 +14,11 @@ export function ProviderProfilesSummaryCard() {
   );
 }
 
-export type ApiProtocol = 'anthropic' | 'openai' | 'google';
+export type ApiProtocol = 'anthropic' | 'openai' | 'openai-responses' | 'google';
 
 const PROTOCOL_OPTIONS: { value: ApiProtocol; label: string }[] = [
-  { value: 'openai', label: 'OpenAI 兼容' },
+  { value: 'openai', label: 'OpenAI 兼容 (Chat)' },
+  { value: 'openai-responses', label: 'OpenAI Responses' },
   { value: 'anthropic', label: 'Anthropic 兼容' },
   { value: 'google', label: 'Google 兼容' },
 ];

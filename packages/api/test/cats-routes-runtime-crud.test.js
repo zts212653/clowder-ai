@@ -778,7 +778,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     // Regression test for: ocProviderName=openrouter + defaultModel=z-ai/glm-4.7
     // The model's first segment "z-ai" is NOT the provider prefix — it is the
     // model's namespace within OpenRouter. stripOwnProviderPrefix must keep it.
-    const { generateOpenCodeRuntimeConfig } = await import(
+    const { deriveOpenCodeApiType, generateOpenCodeRuntimeConfig } = await import(
       '../dist/domains/cats/services/agents/providers/opencode-config-template.js'
     );
 
@@ -842,13 +842,16 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('F189 P1 regression: custom provider without explicit protocol defaults to openai adapter', () => {
+  it('F189 P1 regression: custom provider without explicit protocol defaults to openai adapter', async () => {
     // Regression: effectiveProtocol defaults to 'anthropic' for all opencode providers,
     // but apiType in the F189 block should only honor an EXPLICIT account protocol.
     // Custom providers like maas/deepseek without protocol must get 'openai' adapter.
     // When explicit protocol IS set, it takes full precedence over ocProviderName heuristic.
+    // #291: Uses production deriveOpenCodeApiType instead of inline simulation.
+    const { deriveOpenCodeApiType } = await import(
+      '../dist/domains/cats/services/agents/providers/opencode-config-template.js'
+    );
 
-    // Simulate the fixed logic: explicit protocol first, then ocProviderName fallback
     const scenarios = [
       // No explicit protocol → fall back to ocProviderName
       { protocol: undefined, ocProviderName: 'maas', expected: 'openai' },
@@ -859,6 +862,9 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       { protocol: 'anthropic', ocProviderName: 'anthropic', expected: 'anthropic' },
       { protocol: 'google', ocProviderName: 'custom-gemini', expected: 'google' },
       { protocol: 'openai', ocProviderName: 'openrouter', expected: 'openai' },
+      // openai-responses protocol (#291)
+      { protocol: 'openai-responses', ocProviderName: 'custom', expected: 'openai-responses' },
+      { protocol: 'openai-responses', ocProviderName: undefined, expected: 'openai-responses' },
       // Conflict: explicit protocol MUST override ocProviderName
       { protocol: 'openai', ocProviderName: 'anthropic', expected: 'openai' },
       { protocol: 'openai', ocProviderName: 'google', expected: 'openai' },
@@ -866,18 +872,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     ];
 
     for (const { protocol, ocProviderName, expected } of scenarios) {
-      const explicitProtocol = protocol;
-      const apiType = explicitProtocol
-        ? explicitProtocol === 'anthropic'
-          ? 'anthropic'
-          : explicitProtocol === 'google'
-            ? 'google'
-            : 'openai'
-        : ocProviderName === 'anthropic'
-          ? 'anthropic'
-          : ocProviderName === 'google'
-            ? 'google'
-            : 'openai';
+      const apiType = deriveOpenCodeApiType(protocol, ocProviderName);
       assert.equal(apiType, expected, `protocol=${protocol}, ocProviderName=${ocProviderName} → ${expected}`);
     }
   });
