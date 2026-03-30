@@ -11,7 +11,12 @@ import { readProjectNames, writeProjectNames } from './active-workspace';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { SectionGroup } from './SectionGroup';
 import { ThreadItem } from './ThreadItem';
-import { getProjectPaths, projectDisplayName, sortAndGroupThreadsWithWorkspace } from './thread-utils';
+import {
+  getProjectPaths,
+  mergeLiveActivityIntoThreads,
+  projectDisplayName,
+  sortAndGroupThreadsWithWorkspace,
+} from './thread-utils';
 import { createToggleWithReconcile } from './toggle-with-reconcile';
 import { useCollapseState } from './use-collapse-state';
 import { useProjectPins } from './use-project-pins';
@@ -391,9 +396,10 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
   );
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
   const filteredThreads = useMemo(() => {
-    if (!normalizedQuery) return threads;
-    return threads.filter((thread) => {
+    if (!normalizedQuery) return liveThreads;
+    return liveThreads.filter((thread) => {
       const title = (thread.title ?? '').toLowerCase();
       const fallback = (thread.id === 'default' ? '大厅' : '未命名对话').toLowerCase();
       const project = (thread.projectPath ?? '').toLowerCase();
@@ -405,7 +411,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
         threadId.includes(normalizedQuery)
       );
     });
-  }, [threads, normalizedQuery]);
+  }, [liveThreads, normalizedQuery]);
 
   const unreadIds = useMemo(() => {
     const ids = new Set<string>();
@@ -440,7 +446,7 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
     () => sortAndGroupThreadsWithWorkspace(filteredThreads, unreadIds, pinnedProjects),
     [filteredThreads, unreadIds, pinnedProjects],
   );
-  const existingProjects = useMemo(() => getProjectPaths(threads), [threads]);
+  const existingProjects = useMemo(() => getProjectPaths(liveThreads), [liveThreads]);
   const showDefaultThread = normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery);
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder

@@ -157,20 +157,26 @@ function sanitizePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-');
 }
 
+/**
+ * Writes a per-invocation opencode config directory.
+ * opencode reads config from `OPENCODE_CONFIG_DIR/opencode.json` when the
+ * `OPENCODE_CONFIG_DIR` env var is set, overriding the default user config dir.
+ * Returns the **directory** path (set it as `OPENCODE_CONFIG_DIR`).
+ */
 export function writeOpenCodeRuntimeConfig(
   projectRoot: string,
   catId: string,
   invocationId: string,
   options: OpenCodeRuntimeConfigOptions,
 ): string {
-  const configDir = join(projectRoot, '.cat-cafe');
-  mkdirSync(configDir, { recursive: true });
   const safeCatId = sanitizePathSegment(catId);
   const safeInvocationId = sanitizePathSegment(invocationId);
-  const configPath = join(configDir, `opencode-runtime-${safeCatId}-${safeInvocationId}.json`);
+  const configDir = join(projectRoot, '.cat-cafe', `oc-config-${safeCatId}-${safeInvocationId}`);
+  mkdirSync(configDir, { recursive: true });
+  const configPath = join(configDir, 'opencode.json');
   const tempPath = `${configPath}.tmp-${process.pid}`;
   const config = generateOpenCodeRuntimeConfig(options);
   writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
   renameSync(tempPath, configPath);
-  return configPath;
+  return configDir;
 }

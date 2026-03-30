@@ -8,7 +8,7 @@ created: 2026-03-24
 
 # F134: Feishu Group Chat — 飞书群聊多用户支持
 
-> **Status**: done | **Completed**: 2026-03-26 | **Owner**: Ragdoll | **Priority**: P1 | **PR**: #697, #699, #700, #705, #745
+> **Status**: done | **Completed**: 2026-03-26 | **Follow-up**: done | **Owner**: Ragdoll | **Priority**: P1 | **PR**: #697, #699, #700, #705, #745, #871
 >
 > **Related**: F088（复用公共层 + Phase 7 公共层扩展）| F132（钉钉/企微，同模式独立 Feature）
 >
@@ -395,6 +395,44 @@ FeishuAdapter.parseEvent()
 - Phase A+B: 跨 family review（Maine Coon @codex），公共层改动需额外审查
 - Phase C: 可与 Phase A+B 合并 review
 - Phase D: 独立 review（涉及权限模型）
+
+## Follow-up
+
+### F134 Follow-up: Feishu QR Bind in IM Hub
+
+社区 PR `clowder-ai#287` 提出的能力方向与 F134 一致：在 IM Hub 内提供 Feishu 扫码绑定 / onboarding 流程，降低手填 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 的门槛。
+
+当前结论：
+
+- **方向**：已吸收，作为 F134 follow-up 合入
+- **来源**：`clowder-ai#287`
+- **accepted issue**：`clowder-ai#301`
+- **吸收方式**：**absorbed direction, manual-port execution**
+- **合入结果**：PR #871 (`96e87b13`) 已 merge
+
+之所以不直接 cherry-pick，是因为 cat-cafe 当前主干已经在同一组文件上有更新的 F134/F136 体系：
+
+- IM Hub 已有 `FEISHU_CONNECTION_MODE` 与 mode-aware steps
+- 连接器敏感配置已有统一 `/api/config/secrets` + allowlist + hot-reload
+- 因此 follow-up 应复用现有配置链路，而不是在 `connector-hub` route 中再长第二套 `.env` 持久化逻辑
+
+本次吸收范围（已落地）：
+
+- [x] Feishu QR bind panel 的 UX 形态
+- [x] Feishu QR generate / poll 的后端能力
+- [x] 扫码成功后自动刷新 connector status 的交互
+- [x] save hint 的收敛逻辑与 polling stale response 保护
+
+Follow-up 验收口径：
+
+- [x] **AC-FU1**：IM Hub 的飞书配置卡片内可直接发起扫码绑定，不需要离开当前配置面板
+- [x] **AC-FU2**：`POST /api/connector/feishu/qrcode` 返回可显示的二维码 URL 与后续轮询所需的 payload
+- [x] **AC-FU3**：`GET /api/connector/feishu/qrcode-status` 在确认成功后，通过**我们现有的配置写入/热更新链路**持久化 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`（而不是在 route 中复制一套 `.env` 写入逻辑）
+- [x] **AC-FU4**：当当前模式为 `webhook` 且未配置 `FEISHU_VERIFICATION_TOKEN` 时，扫码成功后自动切到 `websocket`；已有显式模式/verification token 时不擅自覆盖
+- [x] **AC-FU5**：扫码成功后 IM Hub 状态即时刷新，save hint / configured 状态与后端真实配置一致
+- [x] **AC-FU6**：现有手动填写飞书配置、现有 Webhook / WebSocket 模式选择、现有 Weixin QR onboarding 均无回归
+
+---
 
 ## KD-9 技术设计：Message-Level Sender 绑定 + 全链路 @sender
 

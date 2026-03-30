@@ -1102,6 +1102,22 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const { classifyResumeFailure } = await import('../dist/domains/cats/services/agents/invocation/invoke-helpers.js');
 
     assert.equal(classifyResumeFailure('No conversation found with session ID: stale-123'), 'missing_session');
+    assert.equal(
+      classifyResumeFailure('no rollout found for session 019d3eca-9b77-7860-9e3f-1d4bb1815c5e'),
+      'missing_session',
+    );
+    // End-to-end: formatted error from CodexAgentService with [missing_rollout] tag must classify as missing_session
+    // This is the ACTUAL message invoke-single-cat receives after formatCliExitError propagates reasonCode
+    const taggedMsg = 'Codex CLI: CLI 异常退出 (code: 1, signal: none) [missing_rollout]';
+    assert.equal(classifyResumeFailure(taggedMsg), 'missing_session');
+    // Priority: isMissingClaudeSessionError must win over isTransientCliExitCode1 for tagged messages
+    const { isMissingClaudeSessionError, isTransientCliExitCode1 } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-helpers.js'
+    );
+    assert.equal(isMissingClaudeSessionError(taggedMsg), true, 'tagged message must be recognized as missing session');
+    assert.equal(isTransientCliExitCode1(taggedMsg), true, 'tagged message also matches transient pattern');
+    // In invoke-single-cat, isMissingClaudeSessionError is checked FIRST (line 1376) before
+    // isTransientCliExitCode1 (line 1393), so missing_session takes priority → shouldRetryWithoutSession
     assert.equal(classifyResumeFailure('Gemini CLI: CLI 异常退出 (code: 1, signal: none)'), 'cli_exit');
     assert.equal(classifyResumeFailure('Gemini CLI: CLI 异常退出 (code: null, signal: SIGTERM)'), 'cli_exit');
     assert.equal(classifyResumeFailure('authentication failed: login required'), 'auth');
@@ -3145,7 +3161,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENROUTER_API_KEY, 'sk-openrouter-key');
   });
 
-  it('F189: writes invocation-scoped OPENCODE_CONFIG for custom opencode providers and cleans it up', async () => {
+  it('F189: writes invocation-scoped OPENCODE_CONFIG_DIR for custom opencode providers and cleans it up', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f189-opencode-custom-provider-'));
     const apiDir = join(root, 'packages', 'api');
@@ -3178,14 +3194,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
 
     const optionsSeen = [];
-    let seenConfigPath;
+    let seenConfigDir;
     let seenRuntimeConfig;
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
-        assert.ok(seenConfigPath, 'custom provider should receive OPENCODE_CONFIG');
-        seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+        seenConfigDir = options?.callbackEnv?.OPENCODE_CONFIG_DIR;
+        assert.ok(seenConfigDir, 'custom provider should receive OPENCODE_CONFIG_DIR');
+        seenRuntimeConfig = JSON.parse(await readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -3222,7 +3238,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(seenRuntimeConfig?.model, 'maas/glm-5');
     assert.equal(seenRuntimeConfig?.provider?.maas?.npm, '@ai-sdk/openai-compatible');
     assert.deepStrictEqual(seenRuntimeConfig?.provider?.maas?.models, { 'glm-5': { name: 'glm-5' } });
-    await assert.rejects(readFile(seenConfigPath, 'utf-8'));
+    await assert.rejects(readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
   });
 
   it('F189: bare model + ocProviderName assembles composite model for custom provider routing', async () => {
@@ -3258,15 +3274,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       ocProviderName: 'minimax',
     });
 
-    let seenConfigPath;
+    let seenConfigDir;
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
-        assert.ok(seenConfigPath, 'bare model + ocProviderName should receive OPENCODE_CONFIG');
-        seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+        seenConfigDir = options?.callbackEnv?.OPENCODE_CONFIG_DIR;
+        assert.ok(seenConfigDir, 'bare model + ocProviderName should receive OPENCODE_CONFIG_DIR');
+        seenRuntimeConfig = JSON.parse(await readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -3302,10 +3318,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(seenRuntimeConfig?.model, 'minimax/MiniMax-M2.7');
     assert.equal(seenRuntimeConfig?.provider?.minimax?.npm, '@ai-sdk/openai-compatible');
     assert.ok(seenRuntimeConfig?.provider?.minimax?.models?.['MiniMax-M2.7']);
-    await assert.rejects(readFile(seenConfigPath, 'utf-8'));
+    await assert.rejects(readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
   });
 
-  it('F189-fix: builtin ocProviderName with custom baseUrl still generates OPENCODE_CONFIG', async () => {
+  it('F189-fix: builtin ocProviderName with custom baseUrl still generates OPENCODE_CONFIG_DIR', async () => {
     // Regression: ocProviderName="anthropic" + baseUrl="https://api.minimax.io/v1"
     // was skipped by BUILTIN_OPENCODE_PROVIDERS guard, leaving opencode without custom config.
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
@@ -3340,15 +3356,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       ocProviderName: 'anthropic',
     });
 
-    let seenConfigPath;
+    let seenConfigDir;
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
-        assert.ok(seenConfigPath, 'builtin ocProviderName + custom baseUrl must still receive OPENCODE_CONFIG');
-        seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+        seenConfigDir = options?.callbackEnv?.OPENCODE_CONFIG_DIR;
+        assert.ok(seenConfigDir, 'builtin ocProviderName + custom baseUrl must still receive OPENCODE_CONFIG_DIR');
+        seenRuntimeConfig = JSON.parse(await readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -3379,16 +3395,16 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, 'anthropic/MiniMax-M2.7');
-    assert.ok(callbackEnv.OPENCODE_CONFIG, 'OPENCODE_CONFIG must be set for custom endpoint');
+    assert.ok(callbackEnv.OPENCODE_CONFIG_DIR, 'OPENCODE_CONFIG_DIR must be set for custom endpoint');
     assert.equal(callbackEnv.CAT_CAFE_OC_API_KEY, 'sk-minimax-key');
     assert.equal(callbackEnv.CAT_CAFE_OC_BASE_URL, 'https://api.minimax.io/v1');
     assert.equal(seenRuntimeConfig?.model, 'anthropic/MiniMax-M2.7');
     assert.ok(seenRuntimeConfig?.provider?.anthropic);
     assert.ok(seenRuntimeConfig?.provider?.anthropic?.models?.['MiniMax-M2.7']);
-    await assert.rejects(readFile(seenConfigPath, 'utf-8'));
+    await assert.rejects(readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
   });
 
-  it('fix(#280): builtin ocProviderName without baseUrl still generates OPENCODE_CONFIG', async () => {
+  it('fix(#280): builtin ocProviderName without baseUrl still generates OPENCODE_CONFIG_DIR', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'fix280-builtin-oc-provider-'));
     const apiDir = join(root, 'packages', 'api');
@@ -3420,15 +3436,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       ocProviderName: 'anthropic',
     });
 
-    let seenConfigPath;
+    let seenConfigDir;
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
-        assert.ok(seenConfigPath, 'builtin ocProviderName should still receive OPENCODE_CONFIG');
-        seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+        seenConfigDir = options?.callbackEnv?.OPENCODE_CONFIG_DIR;
+        assert.ok(seenConfigDir, 'builtin ocProviderName should still receive OPENCODE_CONFIG_DIR');
+        seenRuntimeConfig = JSON.parse(await readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -3463,7 +3479,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(seenRuntimeConfig?.model, 'anthropic/claude-opus-4-6');
     assert.equal(seenRuntimeConfig?.provider?.anthropic?.npm, '@ai-sdk/anthropic');
     assert.ok(seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6']);
-    await assert.rejects(readFile(seenConfigPath, 'utf-8'));
+    await assert.rejects(readFile(join(seenConfigDir, 'opencode.json'), 'utf-8'));
   });
 
   it('fix(#280): known legacy model without ocProviderName skips runtime config', async () => {
@@ -3504,7 +3520,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        assert.equal(options?.callbackEnv?.OPENCODE_CONFIG, undefined);
+        assert.equal(options?.callbackEnv?.OPENCODE_CONFIG_DIR, undefined);
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -3534,7 +3550,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    assert.equal(callbackEnv.OPENCODE_CONFIG, undefined);
+    assert.equal(callbackEnv.OPENCODE_CONFIG_DIR, undefined);
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, undefined);
   });
 
@@ -3579,9 +3595,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const service = {
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
-        if (configPath) {
-          seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+        const configDir = options?.callbackEnv?.OPENCODE_CONFIG_DIR;
+        if (configDir) {
+          seenRuntimeConfig = JSON.parse(await readFile(join(configDir, 'opencode.json'), 'utf-8'));
         }
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
@@ -3617,7 +3633,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'openrouter/z-ai/glm-4.7',
       'effective model must use ocProviderName as provider prefix, not parsed z-ai',
     );
-    assert.ok(callbackEnv.OPENCODE_CONFIG, 'OPENCODE_CONFIG must be set');
+    assert.ok(callbackEnv.OPENCODE_CONFIG_DIR, 'OPENCODE_CONFIG_DIR must be set');
     assert.equal(seenRuntimeConfig?.model, 'openrouter/z-ai/glm-4.7');
     assert.ok(seenRuntimeConfig?.provider?.openrouter, 'runtime config provider must be openrouter, not z-ai');
   });
@@ -4090,5 +4106,105 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'should reach done (service was invoked)',
     );
     assert.equal(optionsSeen[0]?.workingDirectory, undefined, 'workingDirectory must be undefined for game threads');
+  });
+
+  it('bug-fix: account resolution uses runtime root (process.cwd()), not thread.projectPath', async () => {
+    // Regression: thread.projectPath points to dev worktree which lacks runtime-only accounts.
+    // Account resolution must always use process.cwd() (the runtime root).
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+
+    // runtimeRoot = where the API process runs (has the custom account)
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'account-runtime-root-'));
+    const runtimeApiDir = join(runtimeRoot, 'packages', 'api');
+    await mkdir(runtimeApiDir, { recursive: true });
+    await writeFile(join(runtimeRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    // devRoot = where thread.projectPath points (missing the custom account)
+    const devRoot = await mkdtemp(join(tmpdir(), 'account-dev-root-'));
+    const devApiDir = join(devRoot, 'packages', 'api');
+    await mkdir(devApiDir, { recursive: true });
+    await writeFile(join(devRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    // Write a minimal catalog in devRoot WITHOUT the custom account
+    const devCatCafe = join(devRoot, '.cat-cafe');
+    await mkdir(devCatCafe, { recursive: true });
+    await writeFile(join(devCatCafe, 'cat-catalog.json'), JSON.stringify({ accounts: {} }), 'utf-8');
+
+    // Create the custom account only in runtimeRoot
+    const customProfile = await createProviderProfile(runtimeRoot, {
+      provider: 'openai',
+      name: 'custom-runtime-only',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://custom.example.com/v1',
+      apiKey: 'sk-custom-key',
+      models: ['custom-model'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig);
+    const boundCatId = 'opencode-divergent-path-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      provider: 'opencode',
+      providerProfileId: customProfile.id,
+      defaultModel: 'custom-model',
+      ocProviderName: 'custom',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    // threadStore returns devRoot as projectPath — simulates Hub-created thread
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: async () => ({ projectPath: devRoot, createdBy: 'user1' }),
+        updateParticipantActivity: async () => {},
+      },
+    };
+
+    const previousCwd = process.cwd();
+    try {
+      // process.cwd() = runtimeRoot (where the custom account exists)
+      process.chdir(runtimeApiDir);
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test divergent projectPath account resolution',
+          userId: 'user-divergent',
+          threadId: 'thread-divergent',
+          isLastCat: true,
+        }),
+      );
+      // Must reach done — account resolution should succeed via process.cwd().
+      // If it used thread.projectPath (devRoot), it would throw "bound account not found".
+      assert.ok(
+        msgs.some((m) => m.type === 'done'),
+        'invocation must succeed despite divergent thread.projectPath',
+      );
+      assert.ok(
+        !msgs.some((m) => m.type === 'error' && m.error?.includes('bound account')),
+        'must NOT fail with "bound account not found"',
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(devRoot, { recursive: true, force: true });
+    }
   });
 });

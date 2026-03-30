@@ -209,6 +209,27 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig): RuntimePr
 
 // ── Validation helpers (moved from provider-binding-compat.ts, F136 Phase 4d) ──
 
+/**
+ * Map a cat client/provider to the protocol it requires.
+ * Returns null for clients that accept any protocol (opencode).
+ */
+function expectedProtocolForProvider(provider: CatProvider): AccountProtocol | null {
+  switch (provider) {
+    case 'anthropic':
+      return 'anthropic';
+    case 'openai':
+      return 'openai';
+    case 'google':
+      return 'google';
+    case 'dare':
+      return 'openai';
+    case 'opencode':
+      return null; // opencode supports any protocol
+    default:
+      return null;
+  }
+}
+
 export function validateRuntimeProviderBinding(
   provider: CatProvider,
   profile: RuntimeProviderProfile,
@@ -220,6 +241,18 @@ export function validateRuntimeProviderBinding(
   const expectedClient = resolveBuiltinClientForProvider(provider);
   if (expectedClient && profile.kind === 'builtin' && profile.client && profile.client !== expectedClient) {
     return `bound provider profile "${profile.id}" is incompatible with client "${provider}"`;
+  }
+  // API key accounts must have a protocol compatible with the cat's client.
+  // e.g. client "anthropic" requires protocol "anthropic"; binding a MiniMax
+  // account with protocol "openai" would silently use the wrong API format.
+  if (profile.kind === 'api_key' && profile.protocol) {
+    const expected = expectedProtocolForProvider(provider);
+    if (expected && profile.protocol !== expected) {
+      return (
+        `client "${provider}" requires "${expected}" protocol, ` +
+        `but bound account "${profile.id}" uses "${profile.protocol}" protocol`
+      );
+    }
   }
   return null;
 }

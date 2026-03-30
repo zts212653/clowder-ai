@@ -193,6 +193,9 @@ function reconcileInvocationStateOnReconnect(activeThreadId: string | null): voi
               store.setStreaming(msg.id, false);
             }
           }
+          // Reconnect catch-up (#276): server finished during disconnect,
+          // done(isFinal) was lost → fetch missed messages so user doesn't need F5
+          store.requestStreamCatchUp(threadId);
           console.log('[ws] Reconnect reconciliation: cleared stale active-thread invocation state', { threadId });
         } else if (!isActiveThread) {
           const ts = store.getThreadState(threadId);
@@ -410,10 +413,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
         if (isActiveThread) {
           callbacksRef.current.onIntentMode?.(data);
-          // F108: Register invocation slot in active thread store
+          // F108: Register invocation slot for ALL targetCats (not just the first)
           if (data.invocationId) {
-            const primaryCat = data.targetCats?.[0] ?? 'unknown';
-            useChatStore.getState().addActiveInvocation(data.invocationId, primaryCat, data.mode);
+            const cats = data.targetCats ?? [];
+            for (let i = 0; i < cats.length; i++) {
+              const invId = i === 0 ? data.invocationId : `${data.invocationId}-${cats[i]}`;
+              useChatStore.getState().addActiveInvocation(invId, cats[i]!, data.mode);
+            }
           }
           return;
         }
@@ -422,10 +428,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         if (data.threadId) {
           const store = useChatStore.getState();
           store.setThreadLoading(data.threadId, true);
-          // F108: slot-aware — register specific invocation if ID available
+          // F108: slot-aware — register ALL targetCats (not just the first)
           if (data.invocationId) {
-            const primaryCat = data.targetCats?.[0] ?? 'unknown';
-            store.addThreadActiveInvocation(data.threadId, data.invocationId, primaryCat, data.mode);
+            const cats = data.targetCats ?? [];
+            for (let i = 0; i < cats.length; i++) {
+              const invId = i === 0 ? data.invocationId : `${data.invocationId}-${cats[i]}`;
+              store.addThreadActiveInvocation(data.threadId, invId, cats[i]!, data.mode);
+            }
           } else {
             store.setThreadHasActiveInvocation(data.threadId, true);
           }

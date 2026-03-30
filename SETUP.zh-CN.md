@@ -60,7 +60,7 @@ your-projects/
 | `pnpm start --memory` | 同上，但跳过 Redis（纯内存，重启数据丢失） |
 | `pnpm start --quick` | 同上，但跳过重编译（用已有 `dist/`） |
 | `pnpm start --daemon` | 同上，但后台运行（日志输出到 `cat-cafe-daemon.log`） |
-| `pnpm start:direct` | 跳过 worktree — 直接在当前目录启动 dev server |
+| `pnpm start:direct` | 跳过 worktree — 从当前 checkout 启动，不自动更新（[详情](#运行指定版本不自动更新)） |
 | `pnpm stop` | 停止后台 daemon |
 | `pnpm start:status` | 查看 daemon 是否在运行 |
 | `pnpm runtime:init` | 只创建运行时 worktree（不启动） |
@@ -70,6 +70,55 @@ your-projects/
 首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。
 
 > **自定义运行时路径：** 设置 `CAT_CAFE_RUNTIME_DIR` 使用不同位置：`CAT_CAFE_RUNTIME_DIR=../my-clowder-runtime pnpm start`
+
+## 运行指定版本（不自动更新）
+
+默认情况下，`pnpm start` 会自动同步到最新的 `origin/main`。如果你想**停留在某个特定版本** — 为了稳定性、可复现性，或者暂时不想更新 — 请使用 `pnpm start:direct`。
+
+### 方式一：Checkout 到某个 Release Tag
+
+Clowder 在 [Releases 页面](https://github.com/zts212653/clowder-ai/releases)发布带标签的版本（`v0.1.0`、`v0.2.0`、`v0.3.0`、`v0.4.0` 等）。运行指定版本：
+
+```bash
+# 1. 克隆（或用你已有的 clone）
+git clone https://github.com/zts212653/clowder-ai.git
+cd clowder-ai
+
+# 2. 切换到你想要的版本
+git checkout v0.4.0          # 或者 Releases 页面上的任意 tag
+
+# 3. 安装 + 构建
+pnpm install
+pnpm build
+
+# 4. 配置
+cp .env.example .env
+# 编辑 .env — 添加 API key
+
+# 5. 直接启动（跳过 worktree，不会自动更新）
+pnpm start:direct
+
+# 不需要 Redis？用内存模式
+pnpm start:direct -- --memory
+```
+
+### 方式二：停留在当前 commit
+
+如果你已经 clone 好了并且对当前版本满意，只需用 `pnpm start:direct` 代替 `pnpm start`：
+
+```bash
+pnpm start:direct            # 从当前 checkout 启动，不同步
+pnpm start:direct -- --quick # 也跳过重编译
+```
+
+### 为什么用 `pnpm start:direct`？
+
+| 命令 | 自动同步到最新？ | 创建 worktree？ | 适用场景 |
+|------|----------------|----------------|---------|
+| `pnpm start` | **是** — 同步到 `origin/main` | 是 | 始终运行最新版本 |
+| `pnpm start:direct` | **否** — 从当前 checkout 运行 | 否 | 固定在特定版本或分支 |
+
+> **后续更新：** 准备好更新时，执行 `git fetch && git checkout v0.5.0`（或者新版本 tag），然后 `pnpm install && pnpm build && pnpm start:direct` 即可。
 
 ## 后台 / Daemon 模式
 

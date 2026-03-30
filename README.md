@@ -89,6 +89,9 @@ cp .env.example .env
 # 5. Start (auto-creates runtime worktree, starts Redis + API + Frontend)
 pnpm start
 
+# Pin to a specific release? Use start:direct instead (won't auto-update):
+#   git checkout <tag> && pnpm start:direct   # e.g. v0.4.2
+
 # 6. Optional: run in background (daemon mode)
 pnpm start --daemon
 # Check status / stop
@@ -101,6 +104,8 @@ Open `http://localhost:3003` and start talking to your team.
 > **One-line alternative (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
 
 **Full setup guide** (API keys, CLI auth, voice, Feishu/Telegram, troubleshooting): **[SETUP.opensource.md](SETUP.opensource.md)**
+
+> **Want to stay on a specific version?** See [Running a Specific Version](SETUP.opensource.md#running-a-specific-version-without-auto-update) in the setup guide.
 
 > **CVO Bootcamp is live!** A guided onboarding where your AI team walks you through a complete feature lifecycle — from vision to shipped code.
 

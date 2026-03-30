@@ -212,10 +212,10 @@ export class OpenCodeAgentService implements AgentService {
   private buildEnv(callbackEnv?: Record<string, string>): Record<string, string | null> {
     const env: Record<string, string | null> = { ...callbackEnv };
 
-    // F189: When OPENCODE_CONFIG is set (custom provider via runtime config file),
+    // F189: When OPENCODE_CONFIG_DIR is set (custom provider via runtime config dir),
     // credentials are injected via {env:CAT_CAFE_OC_*} substitution in the config.
     // Clear anthropic env vars to prevent opencode from using the builtin anthropic provider.
-    if (callbackEnv?.OPENCODE_CONFIG) {
+    if (callbackEnv?.OPENCODE_CONFIG_DIR) {
       env[ANTHROPIC_API_KEY_ENV] = null;
       env[ANTHROPIC_BASE_URL_ENV] = null;
       env[OPENCODE_API_KEY_ENV] = null;

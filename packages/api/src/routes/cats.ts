@@ -71,9 +71,16 @@ const baseCatSchema = z.object({
   sessionChain: z.boolean().optional(),
 });
 
+/** Strip trailing slashes from model names — prevents "MiniMax-M2.7/" artifacts. */
+const modelSchema = z
+  .string()
+  .min(1)
+  .transform((v) => v.replace(/\/+$/, ''))
+  .pipe(z.string().min(1));
+
 const createNormalCatSchema = baseCatSchema.extend({
   client: clientSchema.exclude(['antigravity']),
-  defaultModel: z.string().min(1),
+  defaultModel: modelSchema,
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
@@ -82,7 +89,7 @@ const createNormalCatSchema = baseCatSchema.extend({
 
 const createAntigravityCatSchema = baseCatSchema.extend({
   client: z.literal('antigravity'),
-  defaultModel: z.string().min(1),
+  defaultModel: modelSchema,
   commandArgs: z.array(z.string().min(1)).min(1).optional(),
 });
 
@@ -106,7 +113,7 @@ const updateCatSchema = z.object({
   sessionChain: z.boolean().optional(),
   available: z.boolean().optional(),
   client: clientSchema.optional(),
-  defaultModel: z.string().min(1).optional(),
+  defaultModel: modelSchema.optional(),
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(),

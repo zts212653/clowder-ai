@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 
@@ -38,6 +41,134 @@ async function buildApp(overrides = {}) {
   await app.ready();
   return { app, listCalls };
 }
+
+describe('F134 follow-up — Feishu QR bind routes', () => {
+  it('POST /api/connector/feishu/qrcode returns QR payload from bind client', async () => {
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      feishuQrBindClient: {
+        async create() {
+          return {
+            qrUrl: 'data:image/png;base64,abc',
+            qrPayload: 'device-123',
+            intervalMs: 5000,
+            expireMs: 600000,
+          };
+        },
+        async poll() {
+          throw new Error('not used');
+        },
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({ method: 'POST', url: '/api/connector/feishu/qrcode', headers: AUTH_HEADERS });
+    const body = JSON.parse(res.body);
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.qrPayload, 'device-123');
+    assert.equal(body.qrUrl, 'data:image/png;base64,abc');
+    assert.equal(body.intervalMs, 5000);
+    assert.equal(body.expireMs, 600000);
+    await app.close();
+  });
+
+  it('GET /api/connector/feishu/qrcode-status persists credentials and auto-switches to websocket when webhook lacks verification token', async () => {
+    const tmpDir = mkdtempSync(join(os.tmpdir(), 'feishu-qr-bind-'));
+    const envFilePath = join(tmpDir, '.env');
+    writeFileSync(envFilePath, 'FEISHU_CONNECTION_MODE=webhook\n');
+    delete process.env.FEISHU_APP_ID;
+    delete process.env.FEISHU_APP_SECRET;
+    delete process.env.FEISHU_VERIFICATION_TOKEN;
+    process.env.FEISHU_CONNECTION_MODE = 'webhook';
+
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      envFilePath,
+      feishuQrBindClient: {
+        async create() {
+          throw new Error('not used');
+        },
+        async poll() {
+          return { status: 'confirmed', appId: 'cli_feishu', appSecret: 'sec_feishu' };
+        },
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/connector/feishu/qrcode-status?qrPayload=device-123',
+      headers: AUTH_HEADERS,
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.status, 'confirmed');
+    assert.equal(process.env.FEISHU_APP_ID, 'cli_feishu');
+    assert.equal(process.env.FEISHU_APP_SECRET, 'sec_feishu');
+    assert.equal(process.env.FEISHU_CONNECTION_MODE, 'websocket');
+
+    const envText = readFileSync(envFilePath, 'utf8');
+    assert.match(envText, /FEISHU_APP_ID=cli_feishu/);
+    assert.match(envText, /FEISHU_APP_SECRET=sec_feishu/);
+    assert.match(envText, /FEISHU_CONNECTION_MODE=websocket/);
+
+    await app.close();
+  });
+
+  it('GET /api/connector/feishu/qrcode-status preserves explicit webhook mode when verification token exists', async () => {
+    const tmpDir = mkdtempSync(join(os.tmpdir(), 'feishu-qr-bind-'));
+    const envFilePath = join(tmpDir, '.env');
+    writeFileSync(envFilePath, 'FEISHU_CONNECTION_MODE=webhook\nFEISHU_VERIFICATION_TOKEN=vt_123\n');
+    delete process.env.FEISHU_APP_ID;
+    delete process.env.FEISHU_APP_SECRET;
+    process.env.FEISHU_CONNECTION_MODE = 'webhook';
+    process.env.FEISHU_VERIFICATION_TOKEN = 'vt_123';
+
+    const app = Fastify();
+    await app.register(connectorHubRoutes, {
+      threadStore: {
+        async list() {
+          return [];
+        },
+      },
+      envFilePath,
+      feishuQrBindClient: {
+        async create() {
+          throw new Error('not used');
+        },
+        async poll() {
+          return { status: 'confirmed', appId: 'cli_feishu_2', appSecret: 'sec_feishu_2' };
+        },
+      },
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/connector/feishu/qrcode-status?qrPayload=device-456',
+      headers: AUTH_HEADERS,
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.status, 'confirmed');
+    assert.equal(process.env.FEISHU_CONNECTION_MODE, 'webhook');
+    assert.doesNotMatch(readFileSync(envFilePath, 'utf8'), /FEISHU_CONNECTION_MODE=websocket/);
+
+    await app.close();
+  });
+});
 
 describe('GET /api/connector/weixin/qrcode-status — adapter not ready', () => {
   it('P1: returns 503 when QR confirms but weixinAdapter is not available (cloud review a312a53f)', async () => {

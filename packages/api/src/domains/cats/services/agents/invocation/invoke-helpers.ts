@@ -41,7 +41,7 @@ export type ResumeFailureKind = 'missing_session' | 'cli_exit' | 'auth' | 'inval
 export function classifyResumeFailure(message: string | undefined): ResumeFailureKind | null {
   if (!message) return null;
 
-  if (/No conversation found with session ID/i.test(message)) {
+  if (/(No conversation found with session ID|no rollout found|missing_rollout)/i.test(message)) {
     return 'missing_session';
   }
   if (/CLI 异常退出 \(code:\s*(?:\d+|null)(?:,\s*signal:\s*[^)]+)?\)/i.test(message)) {

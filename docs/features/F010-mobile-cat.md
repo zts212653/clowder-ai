@@ -8,7 +8,7 @@ created: 2026-02-26
 
 # F010: 手机端猫猫
 
-> **Status**: in-progress | **Owner**: 三猫
+> **Status**: done | **Owner**: 三猫
 > **Created**: 2026-02-26
 
 ## Why

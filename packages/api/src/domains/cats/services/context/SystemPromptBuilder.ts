@@ -482,7 +482,11 @@ export function buildInvocationContext(context: InvocationContext): string {
   if (context.mode === 'serial' && context.chainIndex != null && context.chainTotal != null) {
     lines.push(`当前模式：你是第 ${context.chainIndex}/${context.chainTotal} 只被召唤的猫，请注意前面猫的回复。`, '');
   } else if (context.mode === 'parallel') {
-    lines.push('当前模式：独立思考。你和队友各自独立回答同一问题，给出你自己的观点。', '');
+    lines.push(
+      '当前模式：独立思考。你和队友各自独立回答同一问题，给出你自己的观点。',
+      `重要：你是 ${config.displayName}（@${context.catId}），不要复制或模仿其他猫的自我介绍。`,
+      '',
+    );
   } else {
     lines.push('当前模式：独立回答。', '');
   }

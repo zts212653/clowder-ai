@@ -5,15 +5,13 @@
  * Allowlist-gated, loopback-guarded, audit-logged (keys only, never values).
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
+import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
 import { isConnectorSecret } from '../config/connector-secrets-allowlist.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
-import { applyEnvUpdatesToFile } from './config.js';
 
 const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
@@ -79,36 +77,10 @@ export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecr
       updates.set(update.name, update.value);
     }
 
-    // Snapshot old values for no-op detection
-    const oldValues = new Map<string, string | undefined>();
-    for (const name of updates.keys()) {
-      oldValues.set(name, process.env[name]);
-    }
-
-    // Write .env file
-    const current = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf8') : '';
-    const next = applyEnvUpdatesToFile(current, updates);
-    writeFileSync(envFilePath, next, 'utf8');
-
-    // Update process.env
-    for (const [name, value] of updates) {
-      if (value == null || value === '') delete process.env[name];
-      else process.env[name] = value;
-    }
-
-    // Emit event only if at least one key actually changed
-    const changedKeys = [...updates.entries()]
-      .filter(([name, value]) => (value ?? '') !== (oldValues.get(name) ?? ''))
-      .map(([name]) => name);
-    if (changedKeys.length > 0) {
-      configEventBus.emitChange({
-        source: 'secrets',
-        scope: 'key',
-        changedKeys,
-        changeSetId: createChangeSetId(),
-        timestamp: Date.now(),
-      });
-    }
+    await applyConnectorSecretUpdates(
+      [...updates.entries()].map(([name, value]) => ({ name, value })),
+      { envFilePath },
+    );
 
     // Audit log — keys only, never values
     try {

@@ -436,6 +436,44 @@ test('spawnCli yields __cliError for exit code 1 even with valid output (no soft
   assert.equal(results[1].exitCode, 1);
 });
 
+test('spawnCli marks no rollout found stderr as missing_rollout reasonCode', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'codex', args: ['exec'] }, { spawnFn }));
+
+  proc.stderr.write('Error: no rollout found for session 019d3eca\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+
+  assert.equal(results.length, 1);
+  assert.equal(isCliError(results[0]), true);
+  assert.equal(results[0].reasonCode, 'missing_rollout');
+});
+
+test('formatCliExitError propagates reasonCode into message string', async () => {
+  const { formatCliExitError } = await import('../dist/utils/cli-format.js');
+
+  // Without reasonCode — unchanged behavior
+  assert.equal(
+    formatCliExitError('Codex CLI', { exitCode: 1, signal: null, message: 'CLI 异常退出 (code: 1, signal: none)' }),
+    'Codex CLI: CLI 异常退出 (code: 1, signal: none)',
+  );
+
+  // With reasonCode — appended as tag
+  assert.equal(
+    formatCliExitError('Codex CLI', {
+      exitCode: 1,
+      signal: null,
+      message: 'CLI 异常退出 (code: 1, signal: none)',
+      reasonCode: 'missing_rollout',
+    }),
+    'Codex CLI: CLI 异常退出 (code: 1, signal: none) [missing_rollout]',
+  );
+});
+
 test('spawnCli yields __cliError when killed by external signal (stderr sanitized)', async () => {
   const proc = createMockProcess({ exitOnKill: false });
   const spawnFn = createMockSpawnFn(proc);

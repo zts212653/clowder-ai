@@ -15,11 +15,14 @@ const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 
-type CliErrorReasonCode = 'invalid_thinking_signature';
+type CliErrorReasonCode = 'invalid_thinking_signature' | 'missing_rollout';
 
 function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined {
   if (/Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i.test(stderr)) {
     return 'invalid_thinking_signature';
+  }
+  if (/no rollout found/i.test(stderr)) {
+    return 'missing_rollout';
   }
   return undefined;
 }

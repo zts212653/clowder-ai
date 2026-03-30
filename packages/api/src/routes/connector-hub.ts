@@ -1,7 +1,9 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { WeixinAdapter } from '../infrastructure/connectors/adapters/WeixinAdapter.js';
 import type { IConnectorPermissionStore } from '../infrastructure/connectors/ConnectorPermissionStore.js';
+import { DefaultFeishuQrBindClient, type FeishuQrBindClient } from '../infrastructure/connectors/FeishuQrBindClient.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface ConnectorHubRoutesOptions {
@@ -16,6 +18,8 @@ export interface ConnectorHubRoutesOptions {
   startWeixinPolling?: () => void;
   /** F134 Phase D: Permission store for group whitelist + admin management */
   permissionStore?: IConnectorPermissionStore | null;
+  envFilePath?: string;
+  feishuQrBindClient?: FeishuQrBindClient;
 }
 
 function requireTrustedHubIdentity(request: FastifyRequest, reply: FastifyReply): string | null {
@@ -237,6 +241,7 @@ export function buildConnectorStatus(env: Record<string, string | undefined> = p
 
 export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> = async (app, opts) => {
   const { threadStore } = opts;
+  const feishuQrBindClient = opts.feishuQrBindClient ?? new DefaultFeishuQrBindClient();
 
   app.get('/api/connector/hub-threads', async (request, reply) => {
     const userId = requireTrustedHubIdentity(request, reply);
@@ -272,6 +277,54 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
       weixinStatus.configured = adapter != null && adapter.hasBotToken() && adapter.isPolling();
     }
     return { platforms: status };
+  });
+
+  app.post('/api/connector/feishu/qrcode', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    try {
+      const result = await feishuQrBindClient.create();
+      return result;
+    } catch (err) {
+      app.log.error({ err }, '[Feishu QR] Failed to fetch QR code');
+      reply.status(502);
+      return { error: 'Failed to fetch QR code from Feishu registration service' };
+    }
+  });
+
+  app.get('/api/connector/feishu/qrcode-status', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    const { qrPayload } = request.query as { qrPayload?: string };
+    if (!qrPayload) {
+      reply.status(400);
+      return { error: 'qrPayload query parameter required' };
+    }
+
+    try {
+      const status = await feishuQrBindClient.poll(qrPayload);
+      if (status.status !== 'confirmed') {
+        return status;
+      }
+
+      const updates = [
+        { name: 'FEISHU_APP_ID', value: status.appId ?? null },
+        { name: 'FEISHU_APP_SECRET', value: status.appSecret ?? null },
+      ];
+      const currentMode = process.env.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook';
+      const verificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
+      if (currentMode === 'webhook' && (!verificationToken || verificationToken.trim() === '')) {
+        updates.push({ name: 'FEISHU_CONNECTION_MODE', value: 'websocket' });
+      }
+      await applyConnectorSecretUpdates(updates, { envFilePath: opts.envFilePath });
+      return { status: 'confirmed' };
+    } catch (err) {
+      app.log.error({ err }, '[Feishu QR] Failed to poll QR status');
+      reply.status(502);
+      return { error: 'Failed to poll Feishu QR status' };
+    }
   });
 
   // ── F137: WeChat QR code login routes ──
