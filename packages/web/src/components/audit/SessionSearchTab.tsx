@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 
 interface SearchHit {
@@ -26,6 +27,7 @@ const KIND_BADGE: Record<string, { bg: string; text: string }> = {
 };
 
 export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabProps) {
+  const ime = useIMEGuard();
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<'both' | 'digests' | 'transcripts'>('both');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -64,6 +66,11 @@ export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabPr
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && ime.isComposing()) e.preventDefault();
+          }}
           placeholder="搜索 session 内容..."
           className="flex-1 text-xs border border-cafe rounded px-2 py-1 focus:outline-none focus:border-blue-300"
         />

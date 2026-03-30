@@ -243,4 +243,32 @@ describe('SignalInboxView', () => {
     });
     expect(container.textContent).toContain('共 1 篇');
   });
+
+  it('prevents Enter default while composing in search input', async () => {
+    await act(async () => {
+      root.render(React.createElement(SignalInboxView));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const queryInput = container.querySelector(
+      'input[placeholder="搜索标题、来源、标签..."]',
+    ) as HTMLInputElement | null;
+    if (!queryInput) throw new Error('Missing query input');
+
+    await act(async () => {
+      queryInput.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    });
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => {
+      queryInput.dispatchEvent(enter);
+    });
+
+    expect(enter.defaultPrevented).toBe(true);
+  });
 });

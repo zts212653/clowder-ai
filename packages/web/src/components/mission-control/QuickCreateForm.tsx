@@ -2,6 +2,7 @@
 
 import type { BacklogPriority } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 
 interface QuickCreateFormProps {
   disabled?: boolean;
@@ -9,6 +10,7 @@ interface QuickCreateFormProps {
 }
 
 export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
+  const ime = useIMEGuard();
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [priority, setPriority] = useState<BacklogPriority>('p2');
@@ -47,6 +49,11 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
           id="mc-create-title"
           value={title}
           onChange={(event) => setTitle(event.target.value)}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
+          }}
           placeholder="任务标题"
           className="w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-title"
@@ -58,6 +65,11 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
           id="mc-create-summary"
           value={summary}
           onChange={(event) => setSummary(event.target.value)}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
+          }}
           placeholder="一句话描述任务价值"
           className="w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-summary"
@@ -84,6 +96,11 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
           id="mc-create-tags"
           value={tagsRaw}
           onChange={(event) => setTagsRaw(event.target.value)}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
+          }}
           placeholder="tags: redis,ui"
           className="w-full rounded-lg border border-[#E6D7C3] px-2 py-1.5 text-xs text-[#2C241B] outline-none focus:border-[#B8946A]"
           data-testid="mc-create-tags"

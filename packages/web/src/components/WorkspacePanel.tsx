@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFileManagement } from '@/hooks/useFileManagement';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
@@ -189,6 +190,7 @@ export function WorkspacePanel() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'content' | 'filename' | 'all'>('all');
   const [didSearch, setDidSearch] = useState(false);
+  const searchIme = useIMEGuard();
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   /** Progressive reveal: store target path, expand ancestors as tree loads deeper. */
   const [pendingRevealPath, setPendingRevealPath] = useState<string | null>(null);
@@ -616,6 +618,11 @@ export function WorkspacePanel() {
               setSearchQuery(e.target.value);
               setDidSearch(false);
               if (!e.target.value.trim()) setSearchResults([]);
+            }}
+            onCompositionStart={searchIme.onCompositionStart}
+            onCompositionEnd={searchIme.onCompositionEnd}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchIme.isComposing()) e.preventDefault();
             }}
             placeholder={
               searchMode === 'content'

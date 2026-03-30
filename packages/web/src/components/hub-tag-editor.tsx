@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 
 function normalizeTag(value: string): string {
   return value.trim();
@@ -82,6 +83,7 @@ export function TagEditor({
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
+  const ime = useIMEGuard();
 
   const commit = () => {
     const nextTag = normalize(draft);
@@ -124,7 +126,10 @@ export function TagEditor({
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(event) => {
+              if (ime.isComposing()) return;
               if (event.key === 'Enter') {
                 event.preventDefault();
                 commit();
