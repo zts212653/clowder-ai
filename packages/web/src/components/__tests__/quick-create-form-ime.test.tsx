@@ -35,7 +35,11 @@ describe('QuickCreateForm IME guard', () => {
       root.render(<QuickCreateForm onCreate={onCreate} />);
     });
 
-    const selectors = ['[data-testid="mc-create-title"]', '[data-testid="mc-create-summary"]', '[data-testid="mc-create-tags"]'];
+    const selectors = [
+      '[data-testid="mc-create-title"]',
+      '[data-testid="mc-create-summary"]',
+      '[data-testid="mc-create-tags"]',
+    ];
     for (const selector of selectors) {
       const input = container.querySelector(selector) as HTMLInputElement | null;
       if (!input) throw new Error(`Missing input: ${selector}`);

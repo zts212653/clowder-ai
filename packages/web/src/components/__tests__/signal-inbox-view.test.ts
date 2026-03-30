@@ -255,7 +255,9 @@ describe('SignalInboxView', () => {
       await Promise.resolve();
     });
 
-    const queryInput = container.querySelector('input[placeholder="搜索标题、来源、标签..."]') as HTMLInputElement | null;
+    const queryInput = container.querySelector(
+      'input[placeholder="搜索标题、来源、标签..."]',
+    ) as HTMLInputElement | null;
     if (!queryInput) throw new Error('Missing query input');
 
     await act(async () => {
