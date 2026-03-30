@@ -2,6 +2,7 @@
 
 import type { SignalArticle, SignalArticleStatus, SignalTier } from '@cat-cafe/shared';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import {
   createCollection,
   deleteSignalArticle,
@@ -43,6 +44,7 @@ function toSignalTier(value: string | undefined): SignalTier | undefined {
 }
 
 export function SignalInboxView() {
+  const ime = useIMEGuard();
   const [items, setItems] = useState<readonly SignalArticle[]>([]);
   const [showServerSearchResults, setShowServerSearchResults] = useState(false);
   const [stats, setStats] = useState<SignalArticleStats | null>(null);
@@ -269,6 +271,11 @@ export function SignalInboxView() {
             <input
               value={filters.query}
               onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
+              onCompositionStart={ime.onCompositionStart}
+              onCompositionEnd={ime.onCompositionEnd}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && ime.isComposing()) event.preventDefault();
+              }}
               placeholder="搜索标题、来源、标签..."
               className="rounded-lg border border-cafe px-3 py-2 text-sm md:col-span-2"
             />
