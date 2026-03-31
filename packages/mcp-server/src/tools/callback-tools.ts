@@ -75,11 +75,6 @@ export async function callbackGet(path: string, params?: Record<string, string>)
 
 export const postMessageInputSchema = {
   content: z.string().min(1).describe('The message content to post'),
-  threadId: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional target thread ID for cross-thread posting. Omit to post in current thread.'),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
   clientMessageId: z
     .string()
@@ -715,7 +710,8 @@ export const callbackTools = [
   {
     name: 'cat_cafe_post_message',
     description:
-      'Post a proactive async message to the Clowder AI chat mid-task (e.g. progress updates, sharing results). ' +
+      'Post a proactive async message to YOUR CURRENT thread mid-task (e.g. progress updates, sharing results). ' +
+      'Always posts to the thread your invocation belongs to. To post to a DIFFERENT thread, use cat_cafe_cross_post_message instead. ' +
       'To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires. ' +
       'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to inline @mention in your response text. ' +
       'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
