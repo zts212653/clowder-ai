@@ -12,7 +12,8 @@
  * E: git not available → { ok: true } (fail-open)
  * F: non-shared-state files ignored
  * G: no upstream + no origin + no merge-base → { ok: true } (fail-open)
- * H: non-main branch → { ok: true } (skip, enforced at merge-gate)
+ * H: non-main branch, unpushed → { ok: true } (skip unpushed, enforced at merge-gate)
+ * I: non-main branch, uncommitted → { ok: false } (uncommitted still detected)
  */
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
@@ -159,21 +160,37 @@ describe('checkSharedStatePreflight (integration)', () => {
     assert.deepEqual(result, { ok: true }, 'should fail-open when git is unavailable');
   });
 
-  it('skips checks on non-main branches (worktree / feature branch)', () => {
+  it('skips unpushed check on non-main branches (worktree / feature branch)', () => {
     const repo = createTempRepo('feature-skip');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
-    // Create a feature branch with unpushed shared-state — should be skipped
+    // Create a feature branch with committed shared-state — unpushed should be skipped
     execSync('git checkout -b feat/test-branch', { cwd: repo, stdio: 'ignore' });
     writeFileSync(join(repo, 'cat-template.json'), '{}');
     execSync('git add cat-template.json && git commit -m "add config"', { cwd: repo, stdio: 'ignore' });
 
     const result = checkSharedStatePreflight(repo);
-    assert.deepEqual(result, { ok: true }, 'feature branch should skip preflight (enforced at merge-gate)');
+    assert.deepEqual(result, { ok: true }, 'feature branch should skip unpushed check');
   });
 
-  it('skips checks on brand-new branches without remote', () => {
+  it('still detects uncommitted shared-state on non-main branches', () => {
+    const repo = createTempRepo('feature-uncommitted');
+    const bare = addBareRemote(repo);
+    tempDirs.push(repo, bare);
+
+    // Create a feature branch with staged (uncommitted) shared-state — should warn
+    execSync('git checkout -b feat/dirty-worktree', { cwd: repo, stdio: 'ignore' });
+    writeFileSync(join(repo, 'cat-config.json'), '{}');
+    execSync('git add cat-config.json', { cwd: repo, stdio: 'ignore' });
+
+    const result = checkSharedStatePreflight(repo);
+    assert.equal(result.ok, false, 'uncommitted shared-state on feature branch should still be detected');
+    assert.deepEqual(result.uncommittedFiles, ['cat-config.json']);
+    assert.equal(result.unpushedFiles, undefined, 'unpushed should not be checked on feature branch');
+  });
+
+  it('skips unpushed check on brand-new branches without remote', () => {
     const repo = createTempRepo('brand-new-skip');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -184,7 +201,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     execSync('git add docs/ROADMAP.md && git commit -m "add backlog on new branch"', { cwd: repo, stdio: 'ignore' });
 
     const result = checkSharedStatePreflight(repo);
-    assert.deepEqual(result, { ok: true }, 'brand-new feature branch should skip preflight');
+    assert.deepEqual(result, { ok: true }, 'brand-new feature branch should skip unpushed check');
   });
 
   it('returns ok:true when local is only behind upstream (no local unpushed commits)', () => {
