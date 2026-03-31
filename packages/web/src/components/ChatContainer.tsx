@@ -9,6 +9,7 @@ import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { godAction, submitAction } from '@/hooks/useGameApi';
 import { reconnectGame } from '@/hooks/useGameReconnect';
+import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
 import { useSendMessage } from '@/hooks/useSendMessage';
@@ -39,6 +40,7 @@ import { MessageActions } from './MessageActions';
 import { MessageNavigator } from './MessageNavigator';
 import { MobileStatusSheet } from './MobileStatusSheet';
 import { ParallelStatusBar } from './ParallelStatusBar';
+import { ProjectSetupCard } from './ProjectSetupCard';
 import { QueuePanel } from './QueuePanel';
 import { RightStatusPanel } from './RightStatusPanel';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
@@ -300,6 +302,25 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [threadId, storeThreads, setCurrentProject]);
 
+  // F113-E: Fetch governance status for the current project (drives ProjectSetupCard)
+  const currentProjectPath = useChatStore((s) => s.currentProjectPath);
+  const { status: govStatus, refetch: govRefetch } = useGovernanceStatus(currentProjectPath);
+  const [setupDone, setSetupDone] = useState(false);
+  // Show card when: needs setup (idle) OR just completed setup (done) — only in empty threads
+  const showSetupCard = !!(
+    (govStatus?.needsBootstrap || govStatus?.needsConfirmation || setupDone) &&
+    messages.length === 0
+  );
+  // Reset setupDone + refetch governance on thread switch (same project may have stale status)
+  const prevThreadSetup = useRef(threadId);
+  useEffect(() => {
+    if (prevThreadSetup.current !== threadId) {
+      prevThreadSetup.current = threadId;
+      setSetupDone(false);
+      govRefetch();
+    }
+  }, [threadId, govRefetch]);
+
   const socketCallbacks = useChatSocketCallbacks({
     threadId,
     userId: getUserId(),
@@ -524,6 +545,21 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                 <PawIcon className="w-12 h-12 text-cocreator-light mx-auto mb-4" />
                 <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
                 <p className="text-sm text-cafe-muted">输入 @布偶 召唤布偶猫开始聊天</p>
+                {showSetupCard && govStatus && (
+                  <div className="mt-6 text-left">
+                    <ProjectSetupCard
+                      key={threadId}
+                      projectPath={currentProjectPath}
+                      isEmptyDir={govStatus.isEmptyDir}
+                      isGitRepo={govStatus.isGitRepo}
+                      gitAvailable={govStatus.gitAvailable}
+                      onComplete={() => {
+                        setSetupDone(true);
+                        govRefetch();
+                      }}
+                    />
+                  </div>
+                )}
                 {(() => {
                   const isCurrentBootcamp = storeThreads.find((t) => t.id === threadId)?.bootcampState;
                   if (isCurrentBootcamp) return null; // already in bootcamp thread

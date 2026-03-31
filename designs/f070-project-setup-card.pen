@@ -1,0 +1,635 @@
+{
+  "version": "2.9",
+  "children": [
+    {
+      "type": "text",
+      "id": "tVKGg",
+      "x": 0,
+      "y": 0,
+      "fill": "#1A1A1A",
+      "content": "F070 ProjectSetupCard — 项目初始化引导卡片",
+      "fontFamily": "Inter",
+      "fontSize": 24,
+      "fontWeight": "700"
+    },
+    {
+      "type": "frame",
+      "id": "PVZEc",
+      "x": 0,
+      "y": 60,
+      "name": "State: Idle (选择初始化方式)",
+      "width": 560,
+      "fill": "#F5F3FF4D",
+      "cornerRadius": 8,
+      "stroke": {
+        "align": "inside",
+        "thickness": 1,
+        "fill": "#7C3AED33"
+      },
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 20,
+      "children": [
+        {
+          "type": "frame",
+          "id": "Q6hFD",
+          "name": "Header",
+          "width": "fill_container",
+          "gap": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "6MWhh",
+              "name": "Cat Idle (setup-cat-idle.png)",
+              "width": 80,
+              "height": 80,
+              "fill": "#E8E0F0",
+              "cornerRadius": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "Jfgl0",
+                  "width": 40,
+                  "height": 40,
+                  "iconFontName": "cat",
+                  "iconFontFamily": "lucide",
+                  "fill": "#7C3AED"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "gxENy",
+              "name": "Header Text",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Sour7",
+                  "fill": "#1A1A1A",
+                  "content": "发现了一片新大陆！",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "1LOZK",
+                  "fill": "#6B7280",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "项目 my-project 是空目录，需要初始化后猫猫才能工作。",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "v4Hm3",
+          "fill": "#6B7280",
+          "content": "请选择你的开荒方式：",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "500"
+        },
+        {
+          "type": "frame",
+          "id": "cJbnp",
+          "name": "Option 1: Clone Git Repo",
+          "width": "fill_container",
+          "cornerRadius": 12,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#7C3AED4D"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "4kmhk",
+              "name": "Opt1 Header",
+              "width": "fill_container",
+              "gap": 12,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "TRVcy",
+                  "fill": "#1A1A1A",
+                  "content": "🐱",
+                  "fontFamily": "Inter",
+                  "fontSize": 18,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "zXBH9",
+                  "fill": "#1A1A1A",
+                  "content": "克隆 Git 仓库",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "Xu2yg",
+                  "name": "Badge",
+                  "fill": "#7C3AED1A",
+                  "cornerRadius": 10,
+                  "padding": [
+                    2,
+                    8
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "BUpaE",
+                      "fill": "#7C3AED",
+                      "content": "推荐",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "gbmHY",
+              "fill": "#6B7280",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "将现有的代码宝藏搬到新营地，包含完整历史记录。",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "2vgas",
+              "name": "Input Row",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "5rBe5",
+                  "name": "URL Input",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 8,
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "#E5E7EB"
+                  },
+                  "padding": [
+                    8,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "U7s3G",
+                      "fill": "#9CA3AF",
+                      "content": "https:// 或 git@...",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pL4Qu",
+                  "name": "Clone Btn",
+                  "fill": "#7C3AED",
+                  "cornerRadius": 8,
+                  "padding": [
+                    8,
+                    16
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "oL6CP",
+                      "fill": "#FFFFFF",
+                      "content": "🐾 立即拉取",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "69k5a",
+          "name": "Option 2: Git Init",
+          "width": "fill_container",
+          "cornerRadius": 12,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#7C3AED4D"
+          },
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "lHdh6",
+              "fill": "#1A1A1A",
+              "content": "🐾",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "fQIJE",
+              "name": "Init Text",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "zQSwj",
+                  "fill": "#1A1A1A",
+                  "content": "初始化全新项目",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "ZehMD",
+                  "fill": "#6B7280",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "从零开始，为你铺设标准的协作规则和猫砂盆。",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "az48x",
+              "name": "Init Btn",
+              "fill": "#7C3AED",
+              "cornerRadius": 8,
+              "padding": [
+                8,
+                16
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "5beyR",
+                  "fill": "#FFFFFF",
+                  "content": "🐾 初始化",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "kRahT",
+          "name": "Option 3: Skip Git",
+          "width": "fill_container",
+          "cornerRadius": 12,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#7C3AED4D"
+          },
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "7e4Eh",
+              "fill": "#1A1A1A",
+              "content": "😺",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "BjWLY",
+              "name": "Skip Text",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "0It3v",
+                  "fill": "#1A1A1A",
+                  "content": "跳过 Git，仅初始化协作",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "jzFXg",
+                  "fill": "#6B7280",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "无版本控制，时光回溯和代码审查功能将不可用。",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "xVA51",
+              "name": "Skip Btn",
+              "fill": "#7C3AED",
+              "cornerRadius": 8,
+              "padding": [
+                8,
+                16
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "aiksn",
+                  "fill": "#FFFFFF",
+                  "content": "🐾 跳过",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "lzmvU",
+          "fill": "#9CA3AF",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "初始化将写入协作规则（CLAUDE.md 等）、Skills 链接和方法论模板。已有文件不会被覆盖。",
+          "fontFamily": "Inter",
+          "fontSize": 10,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "qsMUb",
+      "x": 620,
+      "y": 60,
+      "name": "State: Processing (初始化中)",
+      "width": 560,
+      "fill": "#FFFBEB",
+      "cornerRadius": 8,
+      "stroke": {
+        "align": "inside",
+        "thickness": 1,
+        "fill": "#FDE68A"
+      },
+      "gap": 16,
+      "padding": 16,
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "AHGhL",
+          "name": "Cat Working (setup-cat-working.png)",
+          "width": 80,
+          "height": 80,
+          "fill": "#FEF3C7",
+          "cornerRadius": 8,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon_font",
+              "id": "Yyan8",
+              "width": 36,
+              "height": 36,
+              "iconFontName": "hard-hat",
+              "iconFontFamily": "lucide",
+              "fill": "#D97706"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "WtKsi",
+          "name": "Processing Text",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 6,
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "xQ4H4",
+              "fill": "#92400E",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "项目 my-project 正在初始化",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "500"
+            },
+            {
+              "type": "text",
+              "id": "07NRl",
+              "fill": "#D97706",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "正在写入协作规则（CLAUDE.md 等）、Skills 链接和方法论模板...",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "O0mhz",
+              "fill": "#B45309",
+              "content": "正在初始化治理...",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "500"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "DiiRU",
+      "x": 620,
+      "y": 260,
+      "name": "State: Done (初始化完成)",
+      "width": 560,
+      "fill": "#F0FDF4",
+      "cornerRadius": 8,
+      "stroke": {
+        "align": "inside",
+        "thickness": 1,
+        "fill": "#BBF7D0"
+      },
+      "gap": 16,
+      "padding": 16,
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "oBrh9",
+          "name": "Cat Done (setup-cat-done.png)",
+          "width": 80,
+          "height": 80,
+          "fill": "#DCFCE7",
+          "cornerRadius": 8,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon_font",
+              "id": "A2b5g",
+              "width": 36,
+              "height": 36,
+              "iconFontName": "party-popper",
+              "iconFontFamily": "lucide",
+              "fill": "#16A34A"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "XHb08",
+          "name": "Done Text",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 6,
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "7T16B",
+              "fill": "#166534",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "项目 my-project 初始化完成",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "500"
+            },
+            {
+              "type": "text",
+              "id": "xnpWi",
+              "fill": "#16A34A",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "协作规则（CLAUDE.md 等）、Skills 链接和方法论模板已就绪。",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "fB7Oy",
+              "fill": "#15803D",
+              "content": "治理初始化完成，猫猫已就绪",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "500"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "EHIQI",
+      "x": 620,
+      "y": 460,
+      "name": "State: Error (错误提示)",
+      "width": 560,
+      "fill": "#FEF2F2",
+      "cornerRadius": 8,
+      "stroke": {
+        "align": "inside",
+        "thickness": 1,
+        "fill": "#FECACA"
+      },
+      "layout": "vertical",
+      "gap": 8,
+      "padding": 12,
+      "children": [
+        {
+          "type": "text",
+          "id": "M5D6k",
+          "fill": "#DC2626",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "认证失败，请检查仓库权限",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "ABL2v",
+          "fill": "#EF4444",
+          "content": "重试",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "note",
+      "id": "PxHVr",
+      "x": 0,
+      "y": 620,
+      "width": 500,
+      "height": 140,
+      "content": "State Machine:\nidle → processing (用户点击任意按钮)\nprocessing → done (API 成功 + 1.2s 最小展示)\nprocessing → error (API 失败)\nerror → idle (点击重试)\n\nkey={threadId} 确保切换线程时组件重建\ngovRefetch() 确保治理状态刷新"
+    }
+  ]
+}

@@ -130,6 +130,7 @@ import {
   exportRoutes,
   externalProjectRoutes,
   featureDocDetailRoutes,
+  governanceStatusRoute,
   intentCardRoutes,
   invocationsRoutes,
   leaderboardEventsRoutes,
@@ -138,7 +139,9 @@ import {
   memoryRoutes,
   messageActionsRoutes,
   messagesRoutes,
+  mkdirRoute,
   packsRoutes,
+  projectSetupRoute,
   projectsRoutes,
   providerProfilesRoutes,
   pushRoutes,
@@ -1120,6 +1123,9 @@ async function main(): Promise<void> {
   }
   await app.register(summariesRoutes, { summaryStore, socketManager });
   await app.register(projectsRoutes);
+  await app.register(mkdirRoute);
+  await app.register(governanceStatusRoute);
+  await app.register(projectSetupRoute);
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(configRoutes);
   await app.register(configSecretsRoutes);
