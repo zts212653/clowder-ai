@@ -6,16 +6,21 @@
  *
  * Shared state files (must match .githooks/pre-commit + shared-rules.md §14):
  *   - docs/ROADMAP.md
- *   - docs/ROADMAP.md
  *   - cat-template.json
  *   - cat-config.json
+ *
+ * On non-main branches (worktrees / feature branches), both checks are skipped
+ * because shared-state discipline is enforced at merge-gate / CI, not here.
+ * This avoids false positives when a worktree inherits commits from main.
  */
 import { execFileSync } from 'node:child_process';
 import { createModuleLogger } from '../infrastructure/logger.js';
 
 const log = createModuleLogger('shared-state-preflight');
 
-const SHARED_STATE_PATTERN = /^(docs\/ROADMAP\.md|docs\/ROADMAP\.md|cat-template\.json|cat-config\.json)$/;
+const SHARED_STATE_PATTERN = /^(docs\/ROADMAP\.md|cat-template\.json|cat-config\.json)$/;
+
+const MAIN_BRANCHES = new Set(['main', 'master']);
 
 interface GitExecResult {
   ok: boolean;
@@ -78,6 +83,15 @@ export function checkSharedStatePreflight(projectRoot: string): SharedStatePrefl
     const isGitRepo = repoProbe.ok && repoProbe.stdout === 'true';
     if (!isGitRepo) {
       log.info({ projectRoot, exitCode: repoProbe.exitCode }, 'skip git checks (non-git project root)');
+      return { ok: true };
+    }
+
+    // On feature branches / worktrees, shared-state discipline is enforced at
+    // merge-gate (L3), not during interactive invocation. Checking here causes
+    // false positives because the branch inherits shared-state diffs from main.
+    const currentBranch = safeExec('git', ['branch', '--show-current'], projectRoot);
+    if (currentBranch && !MAIN_BRANCHES.has(currentBranch)) {
+      log.debug({ projectRoot, branch: currentBranch }, 'skip shared-state preflight (non-main branch)');
       return { ok: true };
     }
 
