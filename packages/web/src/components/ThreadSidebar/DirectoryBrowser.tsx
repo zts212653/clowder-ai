@@ -3,7 +3,7 @@
  * Replaces macOS-only osascript folder picker with a web-based solution.
  * Calls GET /api/projects/browse to list directories.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 
@@ -84,6 +84,10 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
   const [info, setInfo] = useState<string | null>(null);
   const [pathInput, setPathInput] = useState('');
   const ime = useIMEGuard();
+  const [creatingDir, setCreatingDir] = useState(false);
+  const [newDirName, setNewDirName] = useState('');
+  const [mkdirError, setMkdirError] = useState<string | null>(null);
+  const newDirInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDirectory = useCallback(async (path?: string, fallbackOnForbidden = false) => {
     setIsLoading(true);
@@ -126,11 +130,41 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
     if (trimmed) fetchDirectory(trimmed);
   }, [pathInput, fetchDirectory]);
 
+  const handleStartCreateDir = useCallback(() => {
+    setCreatingDir(true);
+    setNewDirName('');
+    setMkdirError(null);
+    setTimeout(() => newDirInputRef.current?.focus(), 0);
+  }, []);
+
+  const handleCreateDir = useCallback(async () => {
+    if (!newDirName.trim() || !browseResult) return;
+    setMkdirError(null);
+    try {
+      const res = await apiFetch('/api/projects/mkdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentPath: browseResult.current, name: newDirName.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setMkdirError(data.error || '创建失败');
+        return;
+      }
+      const data = await res.json();
+      setCreatingDir(false);
+      setNewDirName('');
+      fetchDirectory(data.createdPath);
+    } catch {
+      setMkdirError('无法连接到服务器');
+    }
+  }, [newDirName, browseResult, fetchDirectory]);
+
   const segments = browseResult ? pathToSegments(browseResult.current, browseResult.homePath) : [];
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden">
-      {/* ── Breadcrumb ── */}
+      {/* ── Breadcrumb + New Folder ── */}
       <div className="flex items-center gap-1 px-5 h-10 bg-cafe-white border-b border-[#f0e6de] flex-shrink-0 overflow-x-auto">
         {segments.map((seg, i) => (
           <span key={seg.path || `_${i}`} className="flex items-center gap-1 flex-shrink-0">
@@ -163,10 +197,65 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
             )}
           </span>
         ))}
+        {/* [+] New folder button */}
+        <button
+          type="button"
+          onClick={handleStartCreateDir}
+          className="ml-auto flex-shrink-0 px-2 py-1 flex items-center gap-1 rounded-md border border-cocreator-primary/30 bg-cocreator-bg/50 text-cocreator-primary hover:bg-cocreator-bg hover:border-cocreator-primary/50 transition-colors text-[11px] font-medium"
+          title="新建文件夹"
+        >
+          <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
+          </svg>
+          新建
+        </button>
       </div>
 
       {/* ── Directory listing ── */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5 min-h-0">
+        {/* Inline new folder input */}
+        {creatingDir && (
+          <div className="px-3 py-2 rounded-lg ring-2 ring-cocreator-primary bg-cocreator-bg/50 mb-1">
+            <div className="flex items-center gap-2">
+              <FolderIcon className="text-cocreator-primary" />
+              <input
+                ref={newDirInputRef}
+                type="text"
+                value={newDirName}
+                onChange={(e) => setNewDirName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateDir();
+                  if (e.key === 'Escape') {
+                    setCreatingDir(false);
+                    setMkdirError(null);
+                  }
+                }}
+                placeholder="文件夹名称..."
+                className="flex-1 text-sm px-2 py-1 rounded border border-cocreator-primary/30 bg-white focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
+              />
+              <button
+                type="button"
+                onClick={handleCreateDir}
+                disabled={!newDirName.trim()}
+                className="text-xs px-2.5 py-1 rounded bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40 transition-colors"
+              >
+                创建
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingDir(false);
+                  setMkdirError(null);
+                }}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                取消
+              </button>
+            </div>
+            {mkdirError && <p className="text-[10px] text-red-500 mt-1 ml-6">{mkdirError}</p>}
+          </div>
+        )}
+
         {isLoading && (
           <div className="flex items-center justify-center py-8">
             <span className="text-xs text-cafe-muted animate-pulse">Loading...</span>
