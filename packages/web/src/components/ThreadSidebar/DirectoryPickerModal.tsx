@@ -225,6 +225,26 @@ export function DirectoryPickerModal({
             </button>
           )}
 
+          {/* Browsed path not in existing list — show as highlighted entry (pinned to top) */}
+          {selectedPath &&
+            selectedPath !== 'lobby' &&
+            selectedPath !== cwdPath &&
+            !existingProjects.includes(selectedPath) && (
+              <button
+                type="button"
+                onClick={() => handleSelectPath(selectedPath)}
+                className="w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cocreator-bg rounded-lg transition-colors flex items-center gap-2 ring-2 ring-cocreator-primary bg-cocreator-bg"
+                title={selectedPath}
+              >
+                <FolderIcon />
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium block truncate">{projectDisplayName(selectedPath)}</span>
+                  <span className="text-[10px] text-cafe-muted block truncate">{selectedPath}</span>
+                </div>
+                <span className="text-[10px] text-cocreator-primary flex-shrink-0">已选</span>
+              </button>
+            )}
+
           {existingProjects.map((path) => (
             <button
               type="button"

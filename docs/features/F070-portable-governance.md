@@ -278,6 +278,7 @@ managed block 扩充协作方法论段落：
 | Preflight gate blocks new projects without guidance | clowder-ai#123 | `PreflightResult` extended with `needsBootstrap`/`needsConfirmation`/`bootstrapCommand`; invoke-single-cat emits actionable instructions | #532 |
 | setup.sh missing skills sync step | clowder-ai#21 | Added Step 5/6 to setup.sh: links cat-cafe-skills/* to ~/.{claude,codex,gemini}/skills (ADR-009 pattern) | #532 |
 | Governance blocked shows raw text, no actionable UX | clowder-ai#154 | Structured `governance_blocked` event + `GovernanceBlockedCard` with one-click bootstrap+retry button. All 4 routeExecution consumer paths capture `errorCode`. Inspired by community PR clowder-ai#154. | #602 |
+| New project opens without setup guidance | clowder-ai#321 | `ProjectSetupCard`: thread-open-time clone/init/skip setup flow with anime cat illustrations, `useGovernanceStatus` hook, 3 API endpoints (mkdir/status/setup). Design: `designs/f070-project-setup-card.pen` | clowder-ai#299 |
 
 ## Key Decisions
 
