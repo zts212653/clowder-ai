@@ -1,12 +1,12 @@
 ---
-feature_ids: [F142]
+feature_ids: [F150]
 related_features: [F051, F075]
 topics: [observability, analytics, api]
 doc_kind: spec
 created: 2026-03-28
 ---
 
-# F142: Tool / Skill / MCP Usage Statistics API
+# F150: Tool / Skill / MCP Usage Statistics API
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P2
 

@@ -164,7 +164,7 @@ export interface AgentRouterOptions {
   >;
   /** F129: Pack store for loading active packs at invocation time */
   packStore?: import('../../../../packs/PackStore.js').PackStore;
-  /** F142: Tool usage counter */
+  /** F150: Tool usage counter */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
 }
 
@@ -205,7 +205,7 @@ export class AgentRouter {
       >)
     | undefined;
   private packStore?: import('../../../../packs/PackStore.js').PackStore;
-  /** F142 */
+  /** F150 */
   private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   private speechMentionRe: RegExp;
 

@@ -817,7 +817,7 @@ async function main(): Promise<void> {
   const packStoreDir = join(findMonorepoRoot(process.cwd()), '.cat-cafe', 'packs');
   const packStore = new PackStore(packStoreDir);
 
-  // F142: Tool usage counter (fire-and-forget INCR on tool_use events)
+  // F150: Tool usage counter (fire-and-forget INCR on tool_use events)
   const toolUsageCounter = redis
     ? new (await import('./domains/cats/services/tool-usage/ToolUsageCounter.js')).ToolUsageCounter(redis)
     : undefined;
@@ -948,7 +948,7 @@ async function main(): Promise<void> {
   await app.register(quotaRoutes);
   // F128: Daily token usage aggregation
   await app.register(usageRoutes, { invocationRecordStore });
-  // F142: Tool/Skill/MCP usage statistics
+  // F150: Tool/Skill/MCP usage statistics
   if (toolUsageCounter) {
     await app.register(toolUsageRoutes, { toolUsageCounter });
   }

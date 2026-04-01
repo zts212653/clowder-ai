@@ -461,7 +461,7 @@ export async function* routeSerial(
           collectedToolEvents.push(toolEvt);
         }
 
-        // F142: Fire-and-forget tool usage counter
+        // F150: Fire-and-forget tool usage counter
         if (msg.type === 'tool_use' && deps.toolUsageCounter && msg.catId) {
           deps.toolUsageCounter.recordToolUse(
             msg.catId as string,

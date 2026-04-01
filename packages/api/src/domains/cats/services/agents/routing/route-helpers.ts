@@ -32,7 +32,7 @@ export interface RouteStrategyDeps {
   socketManager?: RouteBroadcaster;
   /** F129: Pack store for loading active packs at invocation time */
   packStore?: import('../../../../packs/PackStore.js').PackStore;
-  /** F142: Tool usage counter (fire-and-forget INCR on tool_use events) */
+  /** F150: Tool usage counter (fire-and-forget INCR on tool_use events) */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
 }
 

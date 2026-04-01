@@ -1,5 +1,5 @@
 /**
- * Tool Classification — F142
+ * Tool Classification — F150
  * Classifies tool_use events into native / mcp / skill categories.
  *
  * Handles multiple MCP naming conventions across providers:
