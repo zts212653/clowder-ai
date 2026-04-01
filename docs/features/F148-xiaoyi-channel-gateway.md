@@ -1,0 +1,179 @@
+---
+feature_ids: [F148]
+related_features: [F088, F132, F137, F143, F146]
+topics: [connector, channel, xiaoyi, huawei, openclaw, a2a, websocket]
+doc_kind: spec
+status: spec
+created: 2026-04-01
+---
+
+# F148: XiaoYi Channel Gateway — 小艺渠道 OpenClaw 模式接入
+
+> **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+>
+> 将 Cat Cafe 作为华为小艺智能体的 OpenClaw 后端，
+> 用户在华为手机上通过小艺 APP 即可与猫猫对话。
+
+## Why
+
+Cat Cafe 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、WeCom、WeChat 五个渠道。
+华为小艺是 HarmonyOS 设备的原生 AI 助手，覆盖手机/平板/手表/车机。
+接入小艺渠道意味着 Cat Cafe 的猫猫可以在**所有华为设备上**被用户直接使用。
+
+小艺开放平台提供两种第三方智能体接入模式：
+- **多Agents模式**（原 A2A 模式）：必须绑定华为 LLM（DeepSeek/盘古）作为编排中间层
+- **OpenClaw模式**：通过 WebSocket 直连华为 HAG 服务器，无 LLM 中间层
+
+选择 OpenClaw 模式的理由：
+1. 直连，无 LLM 中间层 → 低延迟、完全可控
+2. 协议已知（`@ynhcj/xiaoyi` npm 包已公开源码）
+3. Cat Cafe 自身充当 OpenClaw server，用户无需部署 OpenClaw 实例
+
+**trade-off**：OpenClaw 模式不支持快捷指令、端侧插件、账号绑定、卡片等平台侧高级功能。
+MVP 阶段这些不是刚需；后续可通过同时支持多Agents模式补齐（见 P1 规划）。
+
+## What
+
+### 架构
+
+```
+用户 → 小艺 APP → 华为 HAG Server ←──WebSocket──→ XiaoYiAdapter (Cat Cafe)
+                  (wss://hag.cloud.huawei.com        │
+                   /openclaw/v1/ws/link)              ├→ Connector Gateway
+                                                      │   ├→ Principal Link
+                                                      │   ├→ Session Binding
+                                                      │   └→ Command Layer
+                                                      └→ Agent Router → Cat Agents
+```
+
+连接方向：**Cat Cafe 主动连接华为 HAG**（类似 DingTalk Stream 模式）。
+
+### 协议栈
+
+| 层 | 技术 |
+|----|------|
+| 传输 | WebSocket (wss) |
+| 认证 | HMAC-SHA256: `signature = HMAC-SHA256(SK, "ak={AK}&timestamp={TS}")` |
+| 消息 | A2A JSON-RPC 2.0 |
+| 流式 | SSE-over-WebSocket (artifact-update events) |
+| 保活 | heartbeat 30s ping + 断线指数退避重连 |
+| HA | 双服务器 (主域名 + 备 IP)，session affinity |
+
+### 消息格式
+
+入站（小艺→我们）：
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "message/stream",
+  "id": "msg-id",
+  "params": {
+    "id": "task-id",
+    "sessionId": "user-session",
+    "message": {
+      "role": "user",
+      "parts": [{ "kind": "text", "text": "你好" }]
+    }
+  }
+}
+```
+
+出站（我们→小艺）：
+```json
+{
+  "taskId": "task-id",
+  "kind": "artifact-update",
+  "append": true,
+  "lastChunk": false,
+  "final": false,
+  "artifact": {
+    "artifactId": "art-1",
+    "parts": [{ "kind": "text", "text": "你好！" }]
+  }
+}
+```
+
+### Phase A: P0 MVP
+
+**目标**：跑通小艺↔Cat Cafe 文本对话链路。
+
+1. **XiaoYiAdapter** — 新增 connector adapter
+   - 实现 `IStreamableOutboundAdapter`
+   - WebSocket 连接管理（connect / auth / heartbeat / reconnect）
+   - 双服务器 HA + session affinity
+   - 多账号支持 (`Map<accountId, Connection>`)
+
+2. **协议层**
+   - `clawd_bot_init` 注册
+   - `message/stream` 入站解析 → 标准 InboundMessage
+   - `agent_response` artifact-update 出站格式化
+   - `tasks/cancel` / `clearContext` 处理
+   - 流式输出（首 token 即推）
+
+3. **Gateway 集成**
+   - Principal Link: `xiaoyi:{agentId}:{sessionId}` → internalUserId
+   - Session Binding: `sessionId` → threadId
+   - Command Layer: `/new` `/threads` `/use` `/where` `/link`
+   - Bootstrap 注册
+
+4. **Onboarding 体验**
+   - 交互式 `/xiaoyi link` 引导命令
+   - 填入 ak/sk/agentId 后自动验证连接
+   - 运行时热加载（无需重启）
+
+### Phase B: P1 增强（后续）
+
+| 能力 | 说明 |
+|------|------|
+| 图片/文件收发 | `kind: "file"` parts 解析 + 发送 |
+| 多Agents模式支持 | 同时支持 OpenClaw 和多Agents两种接入方式 |
+| 快捷指令映射 | 多Agents模式下配置 /threads /new 等为底部按钮 |
+| 端侧指令 | 通过 command parts 操控手机 APP（备忘录、导航等） |
+| 华为账号绑定 | authorize/deauthorize + 手机号身份匹配（需企业开发者） |
+| 卡片 | 平台侧自定义卡片开发 |
+| 推理过程展示 | `kind: "reasoningText"` 透传 |
+| Push 通知 | 异步长耗时任务完成回调 |
+
+## Acceptance Criteria
+
+### Phase A (P0 MVP)
+
+- [ ] AC-A1: XiaoYiAdapter 通过 WebSocket 连接华为 HAG 并完成 HMAC-SHA256 认证
+- [ ] AC-A2: 双服务器 HA — 主服务器断连后自动切换备服务器，session 保持
+- [ ] AC-A3: 心跳保活 30s + 断线指数退避重连（max 10 次）
+- [ ] AC-A4: 多账号支持 — 同一 Cat Cafe 实例可连接多个小艺智能体
+- [ ] AC-A5: 用户在小艺 APP 发送文本，猫猫收到并回复，小艺端展示回复
+- [ ] AC-A6: 流式输出 — 首 token 即推，小艺端逐字展示
+- [ ] AC-A7: Principal Link 正确建立 — 同一用户多次对话映射到同一 Cat Cafe 用户
+- [ ] AC-A8: Session Binding — `/new` 创建新 thread，`/threads` 列出历史，`/use` 切换
+- [ ] AC-A9: `/xiaoyi link` 引导命令 — 交互式填入凭证 + 自动验证
+- [ ] AC-A10: 热加载 — 添加/移除小艺账号无需重启 Cat Cafe
+
+## Dependencies
+
+- **Evolved from**: F088 (Multi-Platform Chat Gateway)，复用三层 connector 架构
+- **Related**: F132 (DingTalk/WeCom)，DingTalk Stream 模式是最接近的参考实现
+- **Related**: F143 (Hostable Agent Runtime)，统一 adapter 接口
+- **External**: 华为小艺开放平台 OpenClaw 模式、HAG WebSocket 端点
+
+## Risk
+
+| Risk | Mitigation |
+|------|------------|
+| 华为 HAG WebSocket 协议变更 | `@ynhcj/xiaoyi` 79 版本活跃迭代，可跟踪其更新 |
+| OpenClaw 模式平台功能受限 | MVP 不依赖高级功能；P1 阶段补充多Agents模式 |
+| 个人开发者无法获取手机号 | P0 用 sessionId 做 Principal Link，不依赖账号绑定 |
+| 双服务器 session affinity 复杂性 | 参考 `@ynhcj/xiaoyi` 已验证的 session binding 设计 |
+
+## Key Decisions
+
+| # | Decision | Rationale | Date |
+|---|----------|-----------|------|
+| 1 | 选择 OpenClaw 模式而非多Agents模式 | 无 LLM 中间层，直连低延迟 | 2026-04-01 |
+| 2 | Cat Cafe 内置适配而非部署 OpenClaw 实例 | 减少用户运维负担，一跳直连 | 2026-04-01 |
+| 3 | P0 用 sessionId 做身份标识 | 个人开发者无法获取手机号，sessionId 足够 MVP | 2026-04-01 |
+| 4 | P0 即支持多账号 | 架构冲击小，设计正确从头对 | 2026-04-01 |
+
+## Review Gate
+
+- Phase A: 缅因猫 review + 铲屎官真机验证
