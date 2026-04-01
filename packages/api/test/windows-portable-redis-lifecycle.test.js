@@ -232,6 +232,24 @@ test('Windows installer generates .env before building so NEXT_PUBLIC_API_URL is
   assert.match(installScript, /SetEnvironmentVariable\(\$key, \$val, "Process"\)/);
 });
 
+test('Windows installer runs preflight before Node and pnpm bootstrap', () => {
+  const preflightIndex = installScript.indexOf('$preflightScript = Join-Path $ProjectRoot "scripts\\preflight.ps1"');
+  const nodeStepIndex = installScript.indexOf('Write-Step "Step 2/9 - Node.js and pnpm"');
+  const wingetIndex = installScript.indexOf('winget install OpenJS.NodeJS.LTS');
+  const npmIndex = installScript.indexOf('& $npmCommand install -g pnpm');
+  const corepackIndex = installScript.indexOf('& $corepackCommand install -g pnpm@latest');
+
+  assert.notEqual(preflightIndex, -1, 'install.ps1 must contain the preflight block');
+  assert.notEqual(nodeStepIndex, -1, 'install.ps1 must still contain the Node/pnpm step');
+  assert.notEqual(wingetIndex, -1, 'install.ps1 must still contain winget bootstrap');
+  assert.notEqual(npmIndex, -1, 'install.ps1 must still contain npm pnpm bootstrap');
+  assert.notEqual(corepackIndex, -1, 'install.ps1 must still contain corepack pnpm bootstrap');
+  assert.ok(preflightIndex < nodeStepIndex, 'preflight must run before Node/pnpm step begins');
+  assert.ok(preflightIndex < wingetIndex, 'preflight must run before winget Node bootstrap');
+  assert.ok(preflightIndex < npmIndex, 'preflight must run before npm pnpm bootstrap');
+  assert.ok(preflightIndex < corepackIndex, 'preflight must run before corepack pnpm bootstrap');
+});
+
 test('Windows installer strips surrounding quotes when loading .env into the build session', () => {
   assert.match(installScript, /\$val = \$Matches\[2\]\.Trim\(\)\.Trim\('"'\)\.Trim\("'"\)/);
   assert.match(installScript, /SetEnvironmentVariable\(\$key, \$val, "Process"\)/);

@@ -5,8 +5,8 @@
 .DESCRIPTION
   Installs prerequisites and sets up the current checked-out clowder-ai repo.
   Clone or download the repo first, then run this helper from inside it.
-  Steps: env detect -> Node/pnpm install -> Redis -> .env generate -> deps & build
-         -> skills mount -> AI CLI tools -> auth config -> verify & optionally start
+  Steps: env detect -> preflight network check -> Node/pnpm install -> Redis -> .env generate
+         -> deps & build -> skills mount -> AI CLI tools -> auth config -> verify & optionally start
 
 .EXAMPLE
   # From repo root:
@@ -17,6 +17,7 @@ param(
     [switch]$Start,
     [switch]$SkipBuild,
     [switch]$SkipCli,
+    [switch]$SkipPreflight,
     [switch]$Debug
 )
 
@@ -130,6 +131,26 @@ $authState = New-InstallerAuthState -ProjectRoot $ProjectRoot
 if ($env:CAT_CAFE_NPM_REGISTRY) {
     $env:NPM_CONFIG_REGISTRY = $env:CAT_CAFE_NPM_REGISTRY.Trim()
     Write-Ok "npm registry override: $($env:NPM_CONFIG_REGISTRY)"
+}
+
+# Preflight network check - fail early before installer-managed downloads.
+$preflightScript = Join-Path $ProjectRoot "scripts\preflight.ps1"
+if (-not $SkipPreflight -and (Test-Path $preflightScript)) {
+    $pfArgs = @("-Timeout", "3")
+    if ($env:CAT_CAFE_NPM_REGISTRY) { $pfArgs += @("-Registry", $env:CAT_CAFE_NPM_REGISTRY) }
+    $pfResult = & powershell -ExecutionPolicy Bypass -File $preflightScript @pfArgs 2>&1
+    $pfResult | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Preflight detected unreachable endpoints (see above)."
+        Write-Warn "Install may fail. Fix the issues above or use -SkipPreflight to bypass."
+        if ([Environment]::UserInteractive -and -not $env:CI) {
+            $continue = Read-Host "  Continue anyway? [y/N]"
+            if ($continue -notmatch '^[Yy]') { Write-Err "Aborted by user"; exit 1 }
+        } else {
+            Write-Err "Non-interactive mode - aborting. Use -SkipPreflight to force."
+            exit 1
+        }
+    }
 }
 
 Write-Step "Step 2/9 - Node.js and pnpm"

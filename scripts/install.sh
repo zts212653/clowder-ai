@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Clowder AI — Linux Repo-Local Install Helper (F113)
-# Usage: bash scripts/install.sh [--start] [--memory] [--registry=URL]
+# Usage: bash scripts/install.sh [--start] [--memory] [--registry=URL] [--skip-preflight]
 # Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
 
 set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-AUTO_START=false; MEMORY_MODE=false; NPM_REGISTRY=""; SOURCE_ONLY=false
+AUTO_START=false; MEMORY_MODE=false; NPM_REGISTRY=""; SOURCE_ONLY=false; SKIP_PREFLIGHT=false
 PROJECT_DIR=""; PROJECT_HAS_GIT_METADATA=false
 for arg in "$@"; do
     case $arg in
         --start) AUTO_START=true ;; --memory) MEMORY_MODE=true ;;
         --registry=*) NPM_REGISTRY="${arg#*=}" ;;
+        --skip-preflight) SKIP_PREFLIGHT=true ;;
         --source-only) SOURCE_ONLY=true ;;
     esac
 done
@@ -22,6 +23,8 @@ use_registry() {
     # npm/pnpm respect these env vars for all operations in this session.
     export npm_config_registry="$reg" NPM_CONFIG_REGISTRY="$reg" PNPM_CONFIG_REGISTRY="$reg"
 }
+# Cross-platform CAT_CAFE_NPM_REGISTRY fallback (parity with install.ps1)
+[[ -z "$NPM_REGISTRY" && -n "${CAT_CAFE_NPM_REGISTRY:-}" ]] && NPM_REGISTRY="$CAT_CAFE_NPM_REGISTRY"
 [[ -n "$NPM_REGISTRY" ]] && use_registry "$NPM_REGISTRY"
 npm_global_install() {
     if [[ -n "$NPM_REGISTRY" ]]; then
@@ -534,6 +537,24 @@ fi
 resolve_project_dir
 ok "Source tree: $PROJECT_DIR"
 
+# Preflight network check — fail early before installer-managed downloads.
+if [[ "$SKIP_PREFLIGHT" != true && -f "$PROJECT_DIR/scripts/preflight.sh" ]]; then
+    preflight_args=()
+    [[ -n "$NPM_REGISTRY" ]] && preflight_args+=("--registry=$NPM_REGISTRY")
+    preflight_args+=("--timeout=3")
+    if ! bash "$PROJECT_DIR/scripts/preflight.sh" "${preflight_args[@]}"; then
+        warn "Preflight detected unreachable endpoints (see above)."
+        warn "Install may fail. Fix the issues above or use --skip-preflight to bypass."
+        if [[ "$HAS_TTY" == true ]]; then
+            tty_read "  Continue anyway? [y/N] " _pf_continue
+            [[ "$_pf_continue" =~ ^[Yy] ]] || { fail "Aborted by user"; exit 1; }
+        else
+            fail "Non-interactive mode — aborting. Use --skip-preflight to force."
+            exit 1
+        fi
+    fi
+fi
+
 # ── [2/9] Install system dependencies ──────────────────────
 step "[2/9] Checking system dependencies / 检测系统依赖..."
 NEED_PKGS=()
@@ -652,6 +673,7 @@ fi
 step "[5/9] Preparing current repo / 准备当前仓库..."
 cd "$PROJECT_DIR"
 ok "Using project: $PROJECT_DIR"
+
 pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
 ok "Packages installed"
 build_step "shared" pnpm --dir packages/shared run build
