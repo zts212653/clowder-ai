@@ -69,7 +69,7 @@ export function buildMcpCallbackInstructions(opts: McpCallbackOptions): string {
 ### HTTP 回调（异步）
 凭证: \`$CAT_CAFE_INVOCATION_ID\` + \`$CAT_CAFE_CALLBACK_TOKEN\`
 可用工具: post-message / register-pr-tracking / thread-context / list-threads / feat-index / list-tasks / pending-mentions / update-task / create-rich-block / search-evidence / reflect / retain-memory / request-permission
-跨 thread 发消息: post-message + \`threadId\`
+跨 thread: cross-post-message + \`threadId\`
 检索消息: thread-context + \`catId\`/\`keyword\`
 检索 feature: feat-index + \`featId\`/\`query\`
 完整用法: GET \`$CAT_CAFE_API_URL/api/callbacks/instructions\`

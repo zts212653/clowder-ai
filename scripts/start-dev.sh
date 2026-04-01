@@ -3,8 +3,8 @@
 # Cat Cafe 启动脚本（底层实现）
 # 用户入口:
 #   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
-#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=opensource + 非 watch API + 优先当前 .env 端口）
-#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=opensource)
+#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=production + 非 watch API + 优先当前 .env 端口）
+#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=dev)
 #
 # 直接调用脚本:
 #   ./scripts/start-dev.sh            — 开发模式 (next dev + Redis 持久化)
@@ -16,13 +16,15 @@
 #   ./scripts/start-dev.sh --stop     — 停止后台 daemon
 #   ./scripts/start-dev.sh --status   — 查看 daemon 状态
 #   ./scripts/start-dev.sh --profile=dev          — 家里开发默认值 (proxy ON, sidecar ON)
-#   ./scripts/start-dev.sh --profile=opensource   — 开源仓默认值 (proxy OFF, sidecar OFF)
+#   ./scripts/start-dev.sh --profile=production   — 日常生产 (proxy OFF, sidecar OFF, TTL=永久)
+#   ./scripts/start-dev.sh --profile=opensource   — 开源演示 (proxy OFF, sidecar OFF, TTL=1天)
 #   ./scripts/start-dev.sh -- --npm-registry=URL --pip-index-url=URL --hf-endpoint=URL
 #                                               — 显式指定安装/模型下载镜像（仅手动 override）
 #
 # Profile 说明:
 #   dev        — proxy ON, ASR/TTS/LLM ON, TTL=永久, redis-dev
-#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=86400s, redis-opensource
+#   production — proxy OFF, ASR/TTS/LLM OFF, TTL=永久, redis-opensource (日常生产)
+#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=86400s, redis-opensource (开源演示)
 #   (无)       — 保持原有行为（各项 ENABLED 默认 0）
 #
 # .env 中的显式值覆盖 profile 默认值。启动摘要标注每个值的来源。
@@ -207,6 +209,17 @@ apply_profile_defaults() {
             _PROF_SUMMARY_TTL_SECONDS=0
             _PROF_REDIS_PROFILE=dev
             ;;
+        production)
+            _PROF_ANTHROPIC_PROXY_ENABLED=0
+            _PROF_ASR_ENABLED=0
+            _PROF_TTS_ENABLED=0
+            _PROF_LLM_POSTPROCESS_ENABLED=0
+            _PROF_MESSAGE_TTL_SECONDS=0
+            _PROF_THREAD_TTL_SECONDS=0
+            _PROF_TASK_TTL_SECONDS=0
+            _PROF_SUMMARY_TTL_SECONDS=0
+            _PROF_REDIS_PROFILE=opensource
+            ;;
         opensource)
             _PROF_ANTHROPIC_PROXY_ENABLED=0
             _PROF_ASR_ENABLED=0
@@ -222,7 +235,7 @@ apply_profile_defaults() {
             # No profile — all _PROF_ vars stay unset, existing behavior preserved
             ;;
         *)
-            echo -e "${RED}ERROR: Unknown profile '$profile'. Valid: dev, opensource${NC}"
+            echo -e "${RED}ERROR: Unknown profile '$profile'. Valid: dev, production, opensource${NC}"
             exit 1
             ;;
     esac

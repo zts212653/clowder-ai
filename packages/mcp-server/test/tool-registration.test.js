@@ -167,6 +167,33 @@ describe('MCP Server Tool Registration', () => {
     assert.ok(checkTool, 'check_permission_status tool should exist');
   });
 
+  test('post_message schema must NOT expose threadId (#316 regression guard)', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const postTool = server._registeredTools.cat_cafe_post_message;
+    assert.ok(postTool, 'post_message tool should exist');
+    const shapeKeys = Object.keys(postTool.inputSchema.shape);
+    assert.ok(
+      !shapeKeys.includes('threadId'),
+      'post_message must NOT expose threadId — use cross_post_message for cross-thread posting (#316)',
+    );
+  });
+
+  test('cross_post_message schema must REQUIRE threadId', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const crossTool = server._registeredTools.cat_cafe_cross_post_message;
+    assert.ok(crossTool, 'cross_post_message tool should exist');
+    const shapeKeys = Object.keys(crossTool.inputSchema.shape);
+    assert.ok(shapeKeys.includes('threadId'), 'cross_post_message must have threadId in schema');
+    assert.ok(
+      crossTool.inputSchema._def.shape().threadId.isOptional() === false,
+      'cross_post_message threadId must be required (not optional)',
+    );
+  });
+
   test('deprecated file tools are not registered', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();

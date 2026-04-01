@@ -104,7 +104,7 @@ export function ThreadItem({
     <div
       data-thread-id={id}
       className={`group relative ${indented ? 'pl-7 pr-3' : 'px-3'} py-2.5 border-b border-gray-50 transition-colors cursor-pointer ${
-        isActive ? 'bg-cocreator-bg' : 'hover:bg-cafe-surface-elevated'
+        isActive ? 'bg-cocreator-light' : 'hover:bg-cafe-surface-elevated'
       }`}
       onClick={() => onSelect(id)}
       title={tooltip}
