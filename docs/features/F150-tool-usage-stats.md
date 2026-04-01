@@ -39,7 +39,7 @@ created: 2026-03-28
 
 ### Phase B: Hub UI（由其他猫完成 UX 设计后实施）
 
-复用 Usage 页面加 tab，展示趋势图 + 排行榜。本 Phase 不在 F142 scope 内，待 Phase A 完成后由前端猫接手。
+复用 Usage 页面加 tab，展示趋势图 + 排行榜。本 Phase 不在 F150 scope 内，待 Phase A 完成后由前端猫接手。
 
 ## Acceptance Criteria
 
