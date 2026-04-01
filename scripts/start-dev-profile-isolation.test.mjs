@@ -79,6 +79,28 @@ describe('start-dev strict profile isolation', () => {
     }
   });
 
+  it('production profile has TTL=0 and shares redis-opensource instance', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        env: {
+          CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
+        },
+        extraArgs: ['--', '--profile=production'],
+      });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /PROFILE=production/);
+      assert.match(result.stdout, /ASR=0/);
+      assert.match(result.stdout, /PROXY=0/);
+      assert.match(result.stdout, /TTL=0/);
+      assert.match(result.stdout, /REDIS_PROFILE=opensource/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
   it('still allows .env overrides after strict sanitize', () => {
     const sandboxDir = createSandbox('ASR_ENABLED=1\nMESSAGE_TTL_SECONDS=123\nREDIS_PROFILE=custom\n');
     try {
