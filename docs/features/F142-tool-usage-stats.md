@@ -26,7 +26,7 @@ created: 2026-03-28
 | 类别 | 判定规则 | 示例 |
 |------|---------|------|
 | **skill** | `toolName === 'Skill'`，具体名从 `toolInput.skill` 提取 | `Skill` → `{skill: "tdd"}` |
-| **mcp** | `toolName.startsWith('mcp__')` | `mcp__cat-cafe__cat_cafe_post_message` |
+| **mcp** | `toolName.startsWith('mcp__')` 或 `toolName.startsWith('mcp:')` (Codex 格式) | `mcp__cat-cafe__cat_cafe_post_message`, `mcp:codex-tool` |
 | **native** | 其余 | `Read`, `Write`, `Edit`, `Bash` |
 
 **埋点**：在 `route-helpers.ts` 加分类函数 `classifyTool()`，在 `route-serial.ts` / `route-parallel.ts` 的 `tool_use` 事件处理点加 fire-and-forget Redis INCR。
