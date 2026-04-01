@@ -142,7 +142,7 @@ function MiniThreadRow({
     <button
       onClick={onClick}
       className={`relative w-full flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors ${
-        isInPane ? 'bg-cocreator-bg/60' : 'hover:bg-cafe-surface-elevated'
+        isInPane ? 'bg-cocreator-light' : 'hover:bg-cafe-surface-elevated'
       } ${onClick ? 'cursor-pointer' : 'cursor-default'}`}
       title={title}
     >

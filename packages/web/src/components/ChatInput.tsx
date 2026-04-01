@@ -26,6 +26,8 @@ import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
 export const threadDrafts = new Map<string, string>();
+export const threadImageDrafts = new Map<string, File[]>();
+const MAX_IMAGE_DRAFT_THREADS = 5;
 
 interface ChatInputProps {
   /** Thread ID for draft persistence — drafts are saved per-thread */
@@ -78,7 +80,7 @@ export function ChatInput({
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
-  const [images, setImages] = useState<File[]>([]);
+  const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
   const [isPreparingImages, setIsPreparingImages] = useState(false);
   const [whisperMode, setWhisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
@@ -488,7 +490,7 @@ export function ChatInput({
     });
   }, []);
 
-  // Sync input text to module-level draft map (covers all sources: typing, voice, mentions)
+  // Sync input text + images to module-level draft maps (covers all sources: typing, voice, mentions)
   // useLayoutEffect runs synchronously before browser paint and before unmount,
   // ensuring the draft is written to the Map before the component is destroyed
   // on thread switch (key={threadId}). useEffect would lose the final keystroke.
@@ -496,7 +498,18 @@ export function ChatInput({
     if (!threadId) return;
     if (input) threadDrafts.set(threadId, input);
     else threadDrafts.delete(threadId);
-  }, [input, threadId]);
+    if (images.length > 0) {
+      threadImageDrafts.delete(threadId); // move to end (Map insertion order)
+      threadImageDrafts.set(threadId, images);
+      // LRU eviction: keep only the most recent N threads with image drafts
+      while (threadImageDrafts.size > MAX_IMAGE_DRAFT_THREADS) {
+        const oldest = threadImageDrafts.keys().next().value;
+        if (oldest !== undefined) threadImageDrafts.delete(oldest);
+      }
+    } else {
+      threadImageDrafts.delete(threadId);
+    }
+  }, [input, images, threadId]);
 
   // F080: recalculate ghost suggestion whenever input changes (covers all setInput paths)
   useEffect(() => {

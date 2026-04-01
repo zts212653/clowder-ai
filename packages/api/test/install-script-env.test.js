@@ -2,6 +2,7 @@ import test from 'node:test';
 
 import {
   assert,
+  installScript,
   join,
   mkdirSync,
   mkdtempSync,
@@ -165,6 +166,22 @@ printf '|status:%s' "$?"
 `);
 
   assert.equal(output, 'registry-install|status:0');
+});
+
+test('install script runs preflight before installer-managed network fetches', () => {
+  const content = readFileSync(installScript, 'utf8');
+  const preflightIndex = content.indexOf('# Preflight network check — fail early before installer-managed downloads.');
+  const systemDepsIndex = content.indexOf('# ── [2/9] Install system dependencies');
+  const nodeSourceIndex = content.indexOf('curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key');
+  const corepackIndex = content.indexOf('corepack prepare pnpm@latest --activate');
+
+  assert.notEqual(preflightIndex, -1, 'install.sh must contain the preflight block');
+  assert.notEqual(systemDepsIndex, -1, 'install.sh must still contain the system dependency step');
+  assert.notEqual(nodeSourceIndex, -1, 'install.sh must still contain NodeSource bootstrap');
+  assert.notEqual(corepackIndex, -1, 'install.sh must still contain corepack bootstrap');
+  assert.ok(preflightIndex < systemDepsIndex, 'preflight must run before system dependency/network bootstrap');
+  assert.ok(preflightIndex < nodeSourceIndex, 'preflight must run before NodeSource download');
+  assert.ok(preflightIndex < corepackIndex, 'preflight must run before corepack pnpm bootstrap');
 });
 
 test('docker reruns add API_SERVER_HOST when missing from existing .env', () => {
