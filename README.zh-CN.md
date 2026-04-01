@@ -81,7 +81,7 @@ pnpm build
 # 4. 配置 — 至少添加一个模型 API key
 cp .env.example .env
 
-# 5. 启动（自动创建运行时 worktree，启动 Redis + API + 前端）
+# 5. 启动
 pnpm start
 
 # 想固定在某个版本？用 start:direct（不会自动更新）：
@@ -96,7 +96,12 @@ pnpm stop
 
 打开 `http://localhost:3003`，开始和你的团队对话。
 
-> **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
+`pnpm start` 会启动本地 Clowder 服务：Redis（使用 `--memory` 时除外）、API 和前端。
+
+在 Unix-like 系统上，`pnpm start` 会走 runtime worktree 流程（自动同步 + 隔离运行时 checkout）。
+在 Windows 上，`pnpm start` 会转到 `scripts/start-windows.ps1`，并直接在当前 checkout 启动。
+
+> **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后用 `pnpm start` 或 `scripts/start-windows.ps1` 启动。
 
 **完整安装指南**（API key 配置、CLI 认证、语音、飞书/Telegram、常见问题）：**[SETUP.opensource.zh-CN.md](SETUP.opensource.zh-CN.md)**
 

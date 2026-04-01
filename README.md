@@ -87,7 +87,7 @@ pnpm build
 # 4. Configure — add at least one model API key
 cp .env.example .env
 
-# 5. Start (auto-creates runtime worktree, starts Redis + API + Frontend)
+# 5. Start
 pnpm start
 
 # Pin to a specific release? Use start:direct instead (won't auto-update):
@@ -102,7 +102,12 @@ pnpm stop
 
 Open `http://localhost:3003` and start talking to your team.
 
-> **One-line alternative (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
+`pnpm start` launches the local Clowder services: Redis (unless using `--memory`), API, and Frontend.
+
+On Unix-like systems, `pnpm start` uses the runtime worktree flow (auto-sync + isolated runtime checkout).
+On Windows, `pnpm start` dispatches to `scripts/start-windows.ps1` and starts from the current checkout.
+
+> **One-line alternative (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1`, then either `pnpm start` or `scripts/start-windows.ps1`.
 
 **Full setup guide** (API keys, CLI auth, voice, Feishu/Telegram, troubleshooting): **[SETUP.opensource.md](SETUP.opensource.md)**
 

@@ -36,15 +36,24 @@ pnpm start
 #   pnpm start:direct
 ```
 
-`pnpm start` uses the **runtime worktree** architecture: it creates an isolated `../cat-cafe-runtime` worktree (on first run), syncs it to `origin/main`, builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). This keeps your development checkout clean.
+On Unix-like systems, `pnpm start` uses the **runtime worktree** architecture: it creates an isolated `../cat-cafe-runtime` worktree (on first run), syncs it to `origin/main`, builds, starts Redis, and launches Frontend (port 3003) + API (port 3004). This keeps your development checkout clean.
 
-> **Tip:** If `pnpm start` fails because `../cat-cafe-runtime` already exists, use `pnpm start:direct` instead — it runs directly in your current checkout without creating a worktree. You can also set a custom path: `CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`.
+On Windows, `pnpm start` dispatches to `scripts/start-windows.ps1` and starts from the current checkout instead of creating/syncing a runtime worktree.
+
+> **Tip (Unix-like):** If `pnpm start` fails because `../cat-cafe-runtime` already exists, use `pnpm start:direct` instead — it runs directly in your current checkout without creating a worktree. You can also set a custom path: `CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`.
 
 Open `http://localhost:3003` and start talking to your team.
 
-> **Alternative — One-line installer (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
+> **Alternative — One-line installer (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. On **Windows**, use `scripts/install.ps1` then either `pnpm start` or `scripts/start-windows.ps1`.
 
-## How `pnpm start` Works (Runtime Worktree)
+## How `pnpm start` Works
+
+Platform behavior differs:
+
+- Unix-like systems: `pnpm start` uses the runtime worktree flow.
+- Windows: `pnpm start` forwards to `scripts/start-windows.ps1` and starts from the current checkout.
+
+### Unix-like: Runtime Worktree
 
 Clowder uses a **runtime worktree** to keep your dev checkout clean:
 
@@ -73,7 +82,7 @@ First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast
 
 ## Running a Specific Version (Without Auto-Update)
 
-By default, `pnpm start` auto-syncs to the latest `origin/main`. If you want to **stay on a specific release** — for stability, reproducibility, or because you're not ready to update — use `pnpm start:direct` instead.
+On Unix-like systems, `pnpm start` auto-syncs to the latest `origin/main`. If you want to **stay on a specific release** — for stability, reproducibility, or because you're not ready to update — use `pnpm start:direct` instead.
 
 ### Option 1: Checkout a Release Tag
 
@@ -120,7 +129,7 @@ pnpm start:direct -- --quick # Skip rebuild too
 
 > **Updating later:** When you're ready to update, simply `git fetch && git checkout v0.5.0` (or whichever new tag), then `pnpm install && pnpm build && pnpm start:direct`.
 
-## Background / Daemon Mode
+## Background / Daemon Mode (Unix-like)
 
 By default `pnpm start` runs in the foreground — if you close the terminal or SSH disconnects, the services stop. Use `--daemon` to run in the background:
 

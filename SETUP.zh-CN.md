@@ -36,15 +36,24 @@ pnpm start
 #   pnpm start:direct
 ```
 
-`pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
+在 Unix-like 系统上，`pnpm start` 使用**运行时 worktree** 架构：首次运行时自动创建隔离的 `../cat-cafe-runtime` worktree，同步到 `origin/main`，构建，启动 Redis，然后启动前端（端口 3003）+ API（端口 3004）。这样你的开发目录保持干净。
 
-> **提示：** 如果 `pnpm start` 因为 `../cat-cafe-runtime` 已存在而失败，改用 `pnpm start:direct` — 直接在当前目录启动，不创建 worktree。也可以自定义路径：`CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`。
+在 Windows 上，`pnpm start` 会转到 `scripts/start-windows.ps1`，直接在当前 checkout 启动，而不会创建或同步 runtime worktree。
+
+> **提示（Unix-like）：** 如果 `pnpm start` 因为 `../cat-cafe-runtime` 已存在而失败，改用 `pnpm start:direct` — 直接在当前目录启动，不创建 worktree。也可以自定义路径：`CAT_CAFE_RUNTIME_DIR=../my-runtime pnpm start`。
 
 打开 `http://localhost:3003`，开始和你的团队对话。
 
-> **替代方案 — 一键安装（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
+> **替代方案 — 一键安装（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。**Windows** 用户请使用 `scripts/install.ps1`，然后用 `pnpm start` 或 `scripts/start-windows.ps1` 启动。
 
-## `pnpm start` 的工作原理（运行时 Worktree）
+## `pnpm start` 的工作原理
+
+不同平台的行为不同：
+
+- Unix-like 系统：`pnpm start` 走 runtime worktree 流程。
+- Windows：`pnpm start` 转发到 `scripts/start-windows.ps1`，直接在当前 checkout 启动。
+
+### Unix-like：运行时 Worktree
 
 Clowder 使用**运行时 worktree** 保持开发目录干净：
 
@@ -73,7 +82,7 @@ your-projects/
 
 ## 运行指定版本（不自动更新）
 
-默认情况下，`pnpm start` 会自动同步到最新的 `origin/main`。如果你想**停留在某个特定版本** — 为了稳定性、可复现性，或者暂时不想更新 — 请使用 `pnpm start:direct`。
+在 Unix-like 系统上，`pnpm start` 会自动同步到最新的 `origin/main`。如果你想**停留在某个特定版本** — 为了稳定性、可复现性，或者暂时不想更新 — 请使用 `pnpm start:direct`。
 
 ### 方式一：Checkout 到某个 Release Tag
 
@@ -120,7 +129,7 @@ pnpm start:direct -- --quick # 也跳过重编译
 
 > **后续更新：** 准备好更新时，执行 `git fetch && git checkout v0.5.0`（或者新版本 tag），然后 `pnpm install && pnpm build && pnpm start:direct` 即可。
 
-## 后台 / Daemon 模式
+## 后台 / Daemon 模式（Unix-like）
 
 默认情况下 `pnpm start` 在前台运行 — 关闭终端或 SSH 断开后服务会停止。使用 `--daemon` 可以在后台运行：
 
