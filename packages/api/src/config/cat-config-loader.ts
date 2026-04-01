@@ -656,6 +656,31 @@ export function getDefaultCatId(): CatId {
 
 // ── Variant CLI effort accessor ──────────────────────────────────────
 
+/**
+ * Provider-aware effort validation.
+ * Each CLI has its own valid effort values:
+ *   claude (anthropic): low|medium|high|max
+ *   codex (openai):     low|medium|high|xhigh
+ *   gemini (google):    low|medium|high|max
+ *   opencode (dare):    low|medium|high|max
+ */
+const VALID_EFFORT_BY_PROVIDER: Record<string, readonly CliEffortLevel[]> = {
+  anthropic: ['low', 'medium', 'high', 'max'] as const,
+  openai: ['low', 'medium', 'high', 'xhigh'] as const,
+  google: ['low', 'medium', 'high', 'max'] as const,
+  dare: ['low', 'medium', 'high', 'max'] as const,
+  opencode: ['low', 'medium', 'high', 'max'] as const,
+  // antigravity, a2a: no effort concept
+} as const;
+
+const DEFAULT_EFFORT_BY_PROVIDER: Record<string, CliEffortLevel> = {
+  anthropic: 'max',
+  openai: 'xhigh',
+  google: 'max',
+  dare: 'max',
+  opencode: 'max',
+};
+
 /** catId → variant index (lazy, rebuilt on config change) */
 let _catIdToVariant: Map<string, CatVariant> | null = null;
 let _catIdToVariantSource: CatCafeConfig | null = null;
@@ -676,10 +701,13 @@ export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 
 /**
  * Get CLI effort level for a cat from cat-config.json.
+ * Provider-aware normalization: validates effort values against provider CLI spec,
+ * auto-maps invalid values to provider-correct defaults.
+ *
  * Default when not configured:
  *   claude (anthropic): 'max'
  *   codex (openai):     'xhigh'
- *   others:             'high'
+ *   others:             'max'
  */
 export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLevel {
   const cfg = config ?? getCachedConfig();
@@ -691,12 +719,29 @@ export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLe
   }
 
   const variant = _catIdToVariant.get(catId);
-  if (variant?.cli.effort) return variant.cli.effort;
+  if (!variant) return 'max';
 
-  // Provider-aware defaults
-  if (variant?.provider === 'openai') return 'xhigh';
-  if (variant?.provider === 'anthropic') return 'max';
-  return 'high';
+  const provider = variant.provider;
+  const configuredEffort = variant.cli.effort;
+
+  if (configuredEffort) {
+    // Validate effort against provider's valid values
+    const validValues = VALID_EFFORT_BY_PROVIDER[provider];
+    if (validValues && validValues.includes(configuredEffort)) {
+      return configuredEffort;
+    }
+
+    // Effort value is invalid for this provider — map to default and warn
+    const defaultValue = DEFAULT_EFFORT_BY_PROVIDER[provider] ?? 'max';
+    log.warn(
+      `Invalid effort "${configuredEffort}" for provider "${provider}" (cat: ${catId}). ` +
+        `Valid values: ${validValues?.join('|') ?? 'unknown'}. Mapped to "${defaultValue}".`,
+    );
+    return defaultValue;
+  }
+
+  // Provider-aware defaults when not configured
+  return DEFAULT_EFFORT_BY_PROVIDER[provider] ?? 'max';
 }
 
 /** Reset cached config (for testing) */

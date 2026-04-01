@@ -6,10 +6,13 @@
  * and bootstrap reporting.
  */
 
+import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, readlink, symlink, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { BootstrapAction, BootstrapReport } from '@cat-cafe/shared';
 import { pathsEqual } from '../../utils/project-path.js';
+import { bootstrapCatCatalog } from '../cat-catalog-store.js';
+import { migrateProviderProfilesToAccounts } from '../migrate-provider-profiles.js';
 import type { Provider } from './governance-pack.js';
 import {
   computePackChecksum,
@@ -89,7 +92,13 @@ export class GovernanceBootstrapService {
       actions.push(action);
     }
 
-    // 4. Save bootstrap report
+    // 4. Runtime catalog + account migration for external project invocation.
+    // Without this, bound accountRef (e.g. my-glm) can resolve in Cat Cafe root
+    // but fail in external project threads that only have governance files.
+    const runtimeCatalogActions = this.bootstrapRuntimeCatalogAndAccounts(targetProject, opts.dryRun);
+    actions.push(...runtimeCatalogActions);
+
+    // 5. Save bootstrap report
     const report: BootstrapReport = {
       projectPath: targetProject,
       timestamp: Date.now(),
@@ -109,6 +118,57 @@ export class GovernanceBootstrapService {
     }
 
     return report;
+  }
+
+  private bootstrapRuntimeCatalogAndAccounts(targetProject: string, dryRun: boolean): BootstrapAction[] {
+    const templatePath = resolve(this.catCafeRoot, 'cat-template.json');
+    const catalogRelPath = '.cat-cafe/cat-catalog.json';
+    const migrationRelPath = '.cat-cafe/accounts-migration';
+    const catalogPath = resolve(targetProject, catalogRelPath);
+
+    if (!existsSync(templatePath)) {
+      return [
+        {
+          file: catalogRelPath,
+          action: 'skipped',
+          reason: 'cat-template.json missing in cat-cafe root',
+        },
+      ];
+    }
+
+    const catalogExists = existsSync(catalogPath);
+    const catalogAction: BootstrapAction = {
+      file: catalogRelPath,
+      action: catalogExists ? 'skipped' : 'created',
+      reason: catalogExists ? 'runtime catalog already exists' : 'runtime catalog bootstrapped from cat-template.json',
+    };
+
+    if (dryRun) {
+      return [
+        catalogAction,
+        {
+          file: migrationRelPath,
+          action: 'skipped',
+          reason: 'dry-run: account migration not executed',
+        },
+      ];
+    }
+
+    bootstrapCatCatalog(targetProject, templatePath);
+    const migration = migrateProviderProfilesToAccounts(targetProject);
+    const migrationAction: BootstrapAction = migration.migrated
+      ? {
+          file: migrationRelPath,
+          action: 'updated',
+          reason: `migrated ${migration.accountsMigrated ?? 0} account(s), ${migration.credentialsMigrated ?? 0} credential(s)`,
+        }
+      : {
+          file: migrationRelPath,
+          action: 'skipped',
+          reason: `migration skipped (${migration.reason ?? 'unknown'})`,
+        };
+
+    return [catalogAction, migrationAction];
   }
 
   private async writeManagedBlock(

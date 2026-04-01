@@ -14,15 +14,44 @@ import {
 describe('GovernanceBootstrapService', () => {
   let catCafeRoot;
   let targetProject;
+  let previousGlobalRoot;
 
   beforeEach(async () => {
     catCafeRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-root-'));
     targetProject = await mkdtemp(join(tmpdir(), 'target-project-'));
+    previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = catCafeRoot;
+
+    await mkdir(join(catCafeRoot, '.cat-cafe'), { recursive: true });
+
     // Create cat-cafe-skills source directory (bootstrap symlinks to it)
     await mkdir(join(catCafeRoot, 'cat-cafe-skills'), { recursive: true });
+
+    // Runtime bootstrap source template (used to create target .cat-cafe/cat-catalog.json)
+    await writeFile(
+      join(catCafeRoot, 'cat-template.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          breeds: [],
+          roster: {},
+          reviewPolicy: {
+            requireDifferentFamily: true,
+            preferActiveInThread: true,
+            preferLead: true,
+            excludeUnavailable: true,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf-8',
+    );
   });
 
   afterEach(async () => {
+    if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
     await rm(catCafeRoot, { recursive: true, force: true });
     await rm(targetProject, { recursive: true, force: true });
   });
@@ -48,6 +77,11 @@ describe('GovernanceBootstrapService', () => {
 
     const sop = await readFile(join(targetProject, 'docs/SOP.md'), 'utf-8');
     assert.ok(sop.includes('worktree'));
+
+    // Should create runtime catalog for account resolution in external project threads
+    const runtimeCatalog = JSON.parse(await readFile(join(targetProject, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    assert.equal(runtimeCatalog.version, 2);
+    assert.ok(runtimeCatalog.reviewPolicy);
   });
 
   it('creates skills symlinks for all 3 providers', async () => {
@@ -167,6 +201,65 @@ describe('GovernanceBootstrapService', () => {
     for (const a of symlinkActions) {
       assert.equal(a.action, 'skipped', `${a.file} should be skipped on second run`);
     }
+  });
+
+  it('migrates legacy provider profiles into target project catalog accounts', async () => {
+    await writeFile(
+      join(catCafeRoot, '.cat-cafe', 'provider-profiles.json'),
+      JSON.stringify(
+        {
+          version: 3,
+          activeProfileId: null,
+          providers: [
+            {
+              id: 'my-glm',
+              displayName: 'My GLM',
+              kind: 'api_key',
+              authType: 'api_key',
+              builtin: false,
+              protocol: 'openai',
+              baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+              models: ['glm-5'],
+              createdAt: '2026-01-01',
+              updatedAt: '2026-01-01',
+            },
+          ],
+          bootstrapBindings: {},
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+
+    await writeFile(
+      join(catCafeRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+      JSON.stringify(
+        {
+          version: 3,
+          profiles: {
+            'my-glm': { apiKey: 'glm-key-xxx' },
+          },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    const report = await svc.bootstrap(targetProject, { dryRun: false });
+
+    const migrationAction = report.actions.find((a) => a.file === '.cat-cafe/accounts-migration');
+    assert.ok(migrationAction);
+    assert.equal(migrationAction.action, 'updated');
+
+    const catalog = JSON.parse(await readFile(join(targetProject, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    assert.equal(catalog.accounts['my-glm'].protocol, 'openai');
+    assert.equal(catalog.accounts['my-glm'].authType, 'api_key');
+
+    const creds = JSON.parse(await readFile(join(catCafeRoot, '.cat-cafe', 'credentials.json'), 'utf-8'));
+    assert.equal(creds['my-glm'].apiKey, 'glm-key-xxx');
   });
 
   it('creates hooks symlink for claude provider', async () => {
