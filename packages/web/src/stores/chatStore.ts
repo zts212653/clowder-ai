@@ -300,10 +300,13 @@ function findAssistantDuplicate(messages: ChatMessage[], incoming: ChatMessage):
     }
   }
 
-  // Phase 2: Bridge/soft rules — check only the MOST RECENT same-cat assistant.
-  // Bridge: callback(has invocationId) → stream(no invocationId) late-bind upgrade
-  // Soft: callback(no invocationId) → stream(no invocationId) upgrade
+  // Phase 2: Soft rule — check only the MOST RECENT same-cat assistant.
+  // Only for callbacks WITHOUT an invocationId → stream(no invocationId) upgrade.
+  // Callbacks WITH invocationId are fully handled by Phase 1 (hard match);
+  // if Phase 1 didn't match, the invocationId is stale/unrelated and soft bridge
+  // must not merge into an invocationless stream from a different invocation.
   if (incoming.origin !== 'callback') return -1;
+  if (incomingInvId) return -1;
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const existing = messages[i]!;

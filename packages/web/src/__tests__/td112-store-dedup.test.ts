@@ -265,7 +265,7 @@ describe('TD112: addMessage store-level dedup', () => {
     expect(msgs[1]!.content).toBe('invocationless stream');
   });
 
-  it('bridge rule: callback with invocationId merges into invocationless stream (codex P1)', () => {
+  it('callback with invocationId does NOT soft-merge into invocationless stream (strict rule)', () => {
     const store = useChatStore.getState();
     const now = Date.now();
 
@@ -279,7 +279,9 @@ describe('TD112: addMessage store-level dedup', () => {
       }),
     );
 
-    // Callback arrives with invocationId (late bind)
+    // Callback arrives with invocationId — Phase 1 (hard) won't match,
+    // Phase 2 (soft bridge) is blocked for callbacks with invocationId.
+    // Hook layer handles legitimate late-bind merges; store must not override.
     store.addMessage(
       makMsg('cb-with-id', {
         catId: 'gpt52',
@@ -291,11 +293,9 @@ describe('TD112: addMessage store-level dedup', () => {
     );
 
     const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]!.content).toBe('final text');
+    expect(msgs).toHaveLength(2);
     expect(msgs[0]!.id).toBe('stream-noid');
-    // Bridge rule backfills invocationId
-    expect(msgs[0]!.extra?.stream?.invocationId).toBe('inv-late');
+    expect(msgs[1]!.id).toBe('cb-with-id');
   });
 
   it('bridge rule: does NOT merge if time gap > 8s', () => {
@@ -324,7 +324,7 @@ describe('TD112: addMessage store-level dedup', () => {
     expect(useChatStore.getState().messages).toHaveLength(2);
   });
 
-  it('bridge rule: scans past intervening callback to find stream (cloud P1 round 4)', () => {
+  it('callbacks with invocationId create standalone bubbles even with intervening stream (strict rule)', () => {
     const store = useChatStore.getState();
     const now = Date.now();
 
@@ -338,7 +338,7 @@ describe('TD112: addMessage store-level dedup', () => {
         timestamp: now,
       }),
     );
-    // 2. Unrelated callback from same cat (different replyTo)
+    // 2. Callback from same cat (has invocationId — blocked from soft bridge)
     store.addMessage(
       makMsg('cb-unrelated', {
         catId: 'gpt52',
@@ -349,7 +349,7 @@ describe('TD112: addMessage store-level dedup', () => {
         timestamp: now + 1000,
       }),
     );
-    // 3. Target callback → should bridge-merge into #1, skipping #2
+    // 3. Another callback with invocationId — also blocked from soft bridge
     store.addMessage(
       makMsg('cb-target', {
         catId: 'gpt52',
@@ -362,13 +362,11 @@ describe('TD112: addMessage store-level dedup', () => {
     );
 
     const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(2);
-    // Bridge merged #3 into #1
+    // All three are separate — no soft bridge for callbacks with invocationId
+    expect(msgs).toHaveLength(3);
     expect(msgs[0]!.id).toBe('stream-noid');
-    expect(msgs[0]!.content).toBe('final for stream');
-    expect(msgs[0]!.extra?.stream?.invocationId).toBe('inv-a');
-    // Unrelated callback untouched
     expect(msgs[1]!.id).toBe('cb-unrelated');
+    expect(msgs[2]!.id).toBe('cb-target');
   });
 
   it('does not affect non-assistant messages', () => {

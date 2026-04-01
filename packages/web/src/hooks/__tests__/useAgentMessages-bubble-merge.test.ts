@@ -163,7 +163,7 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     expect(clearCalls.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('callback with invocationId falls back to invocationless placeholder when strict match fails', () => {
+  it('callback with explicit invocationId creates standalone bubble when strict match fails', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -206,12 +206,14 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       });
     });
 
-    // With cascade: should fall back to invocationless placeholder and patch it
-    // NOT create a brand new standalone bubble
+    // Strict rule: explicit invocationId must NOT fall back to invocationless
+    // placeholder — the placeholder may belong to a newer invocation.
+    // A standalone callback bubble is created instead.
     const newBubbleCalls = mockAddMessage.mock.calls.filter(
       ([msg]) => msg.type === 'assistant' && msg.catId === 'opus',
     );
-    expect(newBubbleCalls).toHaveLength(0);
+    expect(newBubbleCalls).toHaveLength(1);
+    expect(newBubbleCalls[0][0].content).toBe('Final callback response');
   });
 
   it('new invocation text does not append to previous finalized message', () => {
@@ -272,5 +274,163 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       ([msg]) => msg.type === 'assistant' && msg.catId === 'opus',
     );
     expect(newAssistantCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('P1 regression: stale callback from inv-1 must NOT replace inv-2 active bubble (#266)', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    // Inv-2 is actively streaming
+    const inv2Bubble = {
+      id: 'msg-inv2',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'New response',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-2' } },
+      timestamp: Date.now(),
+    };
+    storeState.messages.push(inv2Bubble);
+    storeState.catInvocations = { opus: { invocationId: 'inv-2' } };
+
+    // Activate the stream ref by sending a text event for inv-2
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        content: 'New response',
+      });
+    });
+
+    vi.clearAllMocks();
+
+    // Stale callback from inv-1 arrives late (retry / network delay)
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        origin: 'callback',
+        content: 'Old inv-1 response',
+        invocationId: 'inv-1',
+        messageId: 'stored-inv1-msg',
+      });
+    });
+
+    // The stale callback must NOT have patched inv-2's bubble.
+    // It should have created a new standalone callback bubble instead.
+    const newCallbackBubbles = mockAddMessage.mock.calls.filter(
+      ([msg]) => msg.type === 'assistant' && msg.catId === 'opus' && msg.origin === 'callback',
+    );
+    expect(newCallbackBubbles.length).toBe(1);
+    expect(newCallbackBubbles[0][0].content).toBe('Old inv-1 response');
+
+    // Inv-2's bubble must remain untouched (no appendToMessage with stale content)
+    const appendToInv2 = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-inv2');
+    expect(appendToInv2).toHaveLength(0);
+  });
+
+  it('P1 regression: explicit-invocationId callback must NOT overwrite invocationless bubble when currentKnownInvId is undefined', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    // A newer invocationless bubble exists (invocation_created was missed)
+    const newerBubble = {
+      id: 'msg-newer',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'Newer response',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: {} }, // no invocationId — invocation_created was missed
+      timestamp: Date.now(),
+    };
+    storeState.messages.push(newerBubble);
+    // currentKnownInvId is undefined — no invocation tracked
+    storeState.catInvocations = {};
+
+    // Activate the stream ref
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        content: 'Newer response',
+      });
+    });
+
+    vi.clearAllMocks();
+
+    // Old callback with explicit invocationId arrives
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        origin: 'callback',
+        content: 'Old callback response',
+        invocationId: 'inv-old',
+        messageId: 'stored-old-msg',
+      });
+    });
+
+    // Explicit-invocationId callback must NOT fall back to invocationless placeholder
+    const appendToNewer = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-newer');
+    expect(appendToNewer).toHaveLength(0);
+  });
+
+  it('P1 regression: stale callback standalone bubble must NOT suppress live stream chunks via replacedInvocationsRef', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    // Invocationless streaming bubble (invocation_created was missed)
+    storeState.messages.push({
+      id: 'msg-live',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'Live response',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: {} }, // no invocationId
+      timestamp: Date.now(),
+    });
+    storeState.catInvocations = {}; // unknown current invocation
+
+    // Activate stream ref
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        content: 'Live response',
+      });
+    });
+
+    // Stale callback with explicit invocationId → strict match fails → standalone bubble
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        origin: 'callback',
+        content: 'Old callback',
+        invocationId: 'inv-stale',
+        messageId: 'msg-stale-cb',
+      });
+    });
+
+    vi.clearAllMocks();
+
+    // New stream chunk arrives for the LIVE invocation (no invocationId since missed)
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'opus',
+        content: ' more live text',
+      });
+    });
+
+    // The live stream chunk must NOT be suppressed — it belongs to the current invocation
+    const appendCalls = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-live');
+    expect(appendCalls.length).toBeGreaterThanOrEqual(1);
   });
 });

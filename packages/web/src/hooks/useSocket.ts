@@ -338,6 +338,19 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         reconnectGame(tid).catch(() => {});
       }
 
+      // #266 ghost-message safety net: if the socket reconnected while an
+      // invocation was in progress (isLoading still true because done(isFinal)
+      // was never received), WebSocket events may have been lost during the
+      // disconnect window. Trigger a history catch-up so the user sees the
+      // response without needing F5.
+      const storeState = useChatStore.getState();
+      if (tid && storeState.isLoading && storeState.currentThreadId === tid) {
+        console.warn('[ws] Reconnect catch-up: isLoading=true after reconnect — requesting history catch-up', {
+          threadId: tid,
+        });
+        storeState.requestStreamCatchUp(tid);
+      }
+
       // Reconnect reconciliation: verify invocation state against server truth.
       // Socket disconnect can lose done(isFinal) events, leaving stale "replying" UI.
       // Delay slightly so any buffered events arrive first.
