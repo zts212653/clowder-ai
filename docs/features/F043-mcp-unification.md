@@ -137,11 +137,15 @@ interface FeatEntry {
 
 #### P2: cross_post_message
 
-`post_message` 新增可选 `threadId` 参数：
+独立的 `cat_cafe_cross_post_message` 工具，必须指定目标 `threadId`：
 
 ```typescript
-threadId?: string  // 向指定 thread 发消息，省略 = 当前 thread
+threadId: string   // 必填，目标 thread ID
+content: string    // 消息内容
 ```
+
+> **#316 变更**：`post_message` 不再接受 `threadId` 参数（防止 session 上下文泄漏导致跨 thread 误投）。
+> 跨 thread 投递必须使用 `cross_post_message`。
 
 #### P2: list_tasks
 

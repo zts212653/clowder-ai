@@ -19,8 +19,7 @@ curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/post-message \
   -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg c "消息内容" '{invocationId:$i,callbackToken:$t,content:$c}')"
 ```
 
-可选 body 参数：
-- `threadId`：跨 thread 发消息。省略时默认发到当前 invocation 的 thread。
+post-message 始终发到当前 invocation 的 thread。跨 thread 发消息请用 `cross-post-message`（需传 `threadId`）。
 
 ### Get Thread Context
 ```bash
