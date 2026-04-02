@@ -41,15 +41,19 @@ export interface CliSpawnerDeps {
   spawnFn?: SpawnFn;
 }
 
+/** Env vars to strip from child processes to prevent E2BIG (overly large values). */
+const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
+  'LS_COLORS', // typically 1-2 KB of color mappings
+  'LSCOLORS', // BSD/macOS equivalent
+]);
+
 function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
   if (!overrides) return process.env;
-  // Start with minimal essential environment to avoid E2BIG (ARG_MAX exceeded)
-  const essentialVars = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'SHELL', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP'];
+  // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
-  for (const key of essentialVars) {
-    if (process.env[key]) {
-      merged[key] = process.env[key];
-    }
+  for (const [key, value] of Object.entries(process.env)) {
+    if (ENV_VARS_TO_STRIP.has(key)) continue;
+    merged[key] = value;
   }
   // Apply overrides (with null deletions)
   for (const [key, value] of Object.entries(overrides)) {
