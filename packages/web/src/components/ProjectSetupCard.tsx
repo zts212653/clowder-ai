@@ -173,7 +173,7 @@ export function ProjectSetupCard({
                     placeholder="https:// 或 git@..."
                     className="flex-1 text-xs px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
                     onKeyDown={(e) => {
-                      if (ime.isComposing()) {
+                      if (e.key === 'Enter' && ime.isComposing()) {
                         e.preventDefault();
                         return;
                       }

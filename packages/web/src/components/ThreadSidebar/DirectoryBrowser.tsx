@@ -226,7 +226,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
                 onCompositionStart={ime.onCompositionStart}
                 onCompositionEnd={ime.onCompositionEnd}
                 onKeyDown={(e) => {
-                  if (ime.isComposing()) {
+                  if (e.key === 'Enter' && ime.isComposing()) {
                     e.preventDefault();
                     return;
                   }
