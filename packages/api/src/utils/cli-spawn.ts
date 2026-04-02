@@ -43,7 +43,15 @@ export interface CliSpawnerDeps {
 
 function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
   if (!overrides) return process.env;
-  const merged: NodeJS.ProcessEnv = { ...process.env };
+  // Start with minimal essential environment to avoid E2BIG (ARG_MAX exceeded)
+  const essentialVars = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'SHELL', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP'];
+  const merged: NodeJS.ProcessEnv = {};
+  for (const key of essentialVars) {
+    if (process.env[key]) {
+      merged[key] = process.env[key];
+    }
+  }
+  // Apply overrides (with null deletions)
   for (const [key, value] of Object.entries(overrides)) {
     if (value === null) {
       delete merged[key];

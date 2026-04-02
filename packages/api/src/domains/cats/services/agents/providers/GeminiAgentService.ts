@@ -283,10 +283,27 @@ export class GeminiAgentService implements AgentService {
     let spawnError: Error | null = null;
 
     try {
+      // Build minimal environment to avoid E2BIG (ARG_MAX exceeded)
+      const minimalEnv: Record<string, string | undefined> = {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        USER: process.env.USER,
+        LANG: process.env.LANG,
+        LC_ALL: process.env.LC_ALL,
+      };
+      // Merge callbackEnv last to allow overrides
+      if (options.callbackEnv) {
+        for (const [key, value] of Object.entries(options.callbackEnv)) {
+          if (value !== null) {
+            minimalEnv[key] = value;
+          }
+        }
+      }
+
       const child = this.antigravitySpawnFn('antigravity', ['chat', '--mode', 'agent', prompt], {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, ...options.callbackEnv },
+        env: minimalEnv as Record<string, string>,
       });
       // Capture async spawn errors (ENOENT etc.) that fire on next tick.
       child.on('error', (err: Error) => {
