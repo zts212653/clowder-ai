@@ -6,16 +6,22 @@
  *
  * Shared state files (must match .githooks/pre-commit + shared-rules.md §14):
  *   - docs/ROADMAP.md
- *   - docs/ROADMAP.md
  *   - cat-template.json
  *   - cat-config.json
+ *
+ * On non-main branches (worktrees / feature branches), the **unpushed** check
+ * is skipped because the branch inherits committed diffs from main that aren't
+ * actionable ("push" doesn't apply to a feature branch). The **uncommitted**
+ * check is kept — dirty shared-state files in a worktree are real, not inherited.
  */
 import { execFileSync } from 'node:child_process';
 import { createModuleLogger } from '../infrastructure/logger.js';
 
 const log = createModuleLogger('shared-state-preflight');
 
-const SHARED_STATE_PATTERN = /^(docs\/ROADMAP\.md|docs\/ROADMAP\.md|cat-template\.json|cat-config\.json)$/;
+const SHARED_STATE_PATTERN = /^(docs\/ROADMAP\.md|cat-template\.json|cat-config\.json)$/;
+
+const MAIN_BRANCHES = new Set(['main', 'master']);
 
 interface GitExecResult {
   ok: boolean;
@@ -81,7 +87,7 @@ export function checkSharedStatePreflight(projectRoot: string): SharedStatePrefl
       return { ok: true };
     }
 
-    // Check uncommitted changes to shared state
+    // Check uncommitted changes to shared state (always, including feature branches)
     const uncommittedRaw = safeExec('git', ['diff', '--name-only'], projectRoot);
     const stagedRaw = safeExec('git', ['diff', '--cached', '--name-only'], projectRoot);
 
@@ -89,26 +95,34 @@ export function checkSharedStatePreflight(projectRoot: string): SharedStatePrefl
       (f: string) => f && SHARED_STATE_PATTERN.test(f),
     );
 
-    // Check unpushed commits touching shared state
+    // Check unpushed commits touching shared state.
+    // On feature branches / worktrees, skip: the branch inherits committed diffs
+    // from main that aren't actionable. Enforced at merge-gate (L3) instead.
     let unpushedShared: string[] = [];
-    const upstream = safeExec('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], projectRoot);
-    if (upstream) {
-      unpushedShared = diffUnpushedShared(upstream, projectRoot);
-    } else {
-      // No upstream — try origin/<branch>, then fall back to origin/main merge-base
-      const branch = safeExec('git', ['branch', '--show-current'], projectRoot);
-      if (branch) {
-        const remoteBranch = safeExec('git', ['rev-parse', '--verify', `origin/${branch}`], projectRoot);
-        if (remoteBranch) {
-          unpushedShared = diffUnpushedShared(`origin/${branch}`, projectRoot);
-        } else {
-          // origin/<branch> doesn't exist (new branch) — fall back to merge-base with origin/main
-          const mergeBase = safeExec('git', ['merge-base', 'HEAD', 'origin/main'], projectRoot);
-          if (mergeBase) {
-            unpushedShared = diffUnpushedShared(mergeBase, projectRoot);
+    const currentBranch = safeExec('git', ['branch', '--show-current'], projectRoot);
+    const isMainBranch = !currentBranch || MAIN_BRANCHES.has(currentBranch);
+
+    if (isMainBranch) {
+      const upstream = safeExec('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], projectRoot);
+      if (upstream) {
+        unpushedShared = diffUnpushedShared(upstream, projectRoot);
+      } else {
+        // No upstream — try origin/<branch>, then fall back to origin/main merge-base
+        const branch = currentBranch || safeExec('git', ['branch', '--show-current'], projectRoot);
+        if (branch) {
+          const remoteBranch = safeExec('git', ['rev-parse', '--verify', `origin/${branch}`], projectRoot);
+          if (remoteBranch) {
+            unpushedShared = diffUnpushedShared(`origin/${branch}`, projectRoot);
+          } else {
+            const mergeBase = safeExec('git', ['merge-base', 'HEAD', 'origin/main'], projectRoot);
+            if (mergeBase) {
+              unpushedShared = diffUnpushedShared(mergeBase, projectRoot);
+            }
           }
         }
       }
+    } else {
+      log.debug({ projectRoot, branch: currentBranch }, 'skip unpushed check (non-main branch)');
     }
 
     const hasIssue = uncommittedShared.length > 0 || unpushedShared.length > 0;
