@@ -1,5 +1,5 @@
 ---
-feature_ids: [F148]
+feature_ids: [F151]
 related_features: [F088, F132, F137, F143, F146]
 topics: [connector, channel, xiaoyi, huawei, a2a, websocket]
 doc_kind: spec
@@ -7,7 +7,7 @@ status: spec
 created: 2026-04-01
 ---
 
-# F148: XiaoYi Channel Gateway — 小艺渠道接入
+# F151: XiaoYi Channel Gateway — 小艺渠道接入
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
 >
