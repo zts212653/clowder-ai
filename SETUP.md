@@ -499,8 +499,9 @@ API_SERVER_HOST=0.0.0.0
 # Frontend URL — used for CORS and redirects
 FRONTEND_URL=https://your-domain.com
 
-# API URL — the frontend needs to reach the API
-NEXT_PUBLIC_API_URL=http://your-domain.com:3004
+# API URL — usually not needed behind a reverse proxy (auto-detected).
+# Only set if you need a non-standard endpoint (e.g. separate API domain).
+# NEXT_PUBLIC_API_URL=https://api.your-domain.com
 
 # Redis — if running on a separate host
 REDIS_URL=redis://your-redis-host:6399
@@ -546,6 +547,7 @@ No additional CORS configuration is needed for most LAN / VPN setups.
 - Check the API logs in terminal for auth errors
 
 **Frontend can't connect to API?**
-- Make sure `NEXT_PUBLIC_API_URL=http://localhost:3004` is set
+- For local dev, `NEXT_PUBLIC_API_URL=http://localhost:3004` should be in `.env`
+- Behind a reverse proxy, the frontend auto-detects the API at the same origin — make sure Nginx proxies `/api/` and `/socket.io/` to port 3004
 - API must be running before frontend loads
 

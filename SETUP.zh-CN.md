@@ -499,8 +499,9 @@ API_SERVER_HOST=0.0.0.0
 # 前端 URL — 用于 CORS 和重定向
 FRONTEND_URL=https://your-domain.com
 
-# API URL — 前端需要能访问到 API
-NEXT_PUBLIC_API_URL=http://your-domain.com:3004
+# API URL — 反向代理场景通常不需要设置（自动探测）。
+# 仅在 API 使用独立域名等非标准端点时设置。
+# NEXT_PUBLIC_API_URL=https://api.your-domain.com
 
 # Redis — 如果在其他机器上
 REDIS_URL=redis://your-redis-host:6399
@@ -546,5 +547,6 @@ API 自动接受以下来源的请求：
 - 看终端里 API 日志有没有认证错误
 
 **前端连不上 API？**
-- 确认设了 `NEXT_PUBLIC_API_URL=http://localhost:3004`
+- 本地开发确认 `.env` 里有 `NEXT_PUBLIC_API_URL=http://localhost:3004`
+- 反向代理场景下前端会自动探测同源 API —— 确保 Nginx 把 `/api/` 和 `/socket.io/` 代理到 3004 端口
 - API 必须在前端加载前启动
