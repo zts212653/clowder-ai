@@ -899,7 +899,13 @@
       "name": "i18n — Hub 界面中英文切换",
       "status": "idea | **Owner**: 待定 | **Priority**: 待定",
       "file": "F147-i18n-hub-locale-switch.md"
+    },
+    {
+      "id": "F151",
+      "name": "XiaoYi Channel Gateway — 小艺渠道接入",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F151-xiaoyi-channel-gateway.md"
     }
   ],
-  "generated_at": "2026-03-30T21:15:14.395Z"
+  "generated_at": "2026-04-02T11:01:17.826Z"
 }

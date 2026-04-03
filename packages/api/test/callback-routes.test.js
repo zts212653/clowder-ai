@@ -1980,19 +1980,7 @@ describe('Callback Routes', () => {
   // ---- TD091: POST /api/callbacks/register-pr-tracking ----
 
   test('POST register-pr-tracking succeeds with valid input', async () => {
-    const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
-    const prTrackingStore = new MemoryPrTrackingStore();
-
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      sharedBank: 'cat-cafe-shared',
-      prTrackingStore,
-    });
+    const app = await createApp();
 
     const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-pr');
 
@@ -2012,32 +2000,19 @@ describe('Callback Routes', () => {
     const body = JSON.parse(response.body);
     assert.equal(body.status, 'ok');
     assert.equal(body.threadId, 'thread-pr', 'server must resolve threadId from invocation');
-    assert.equal(body.entry.repoFullName, 'zts212653/cat-cafe');
-    assert.equal(body.entry.prNumber, 99);
-    assert.equal(body.entry.catId, 'opus');
-    assert.equal(body.entry.threadId, 'thread-pr');
-    assert.ok(body.entry.registeredAt > 0);
+    assert.equal(body.task.subjectKey, 'pr:zts212653/cat-cafe#99');
+    assert.equal(body.task.ownerCatId, 'opus');
+    assert.equal(body.task.threadId, 'thread-pr');
+    assert.ok(body.task.createdAt > 0);
 
-    // Verify stored in prTrackingStore
-    const found = prTrackingStore.get('zts212653/cat-cafe', 99);
-    assert.ok(found, 'entry must be stored');
+    // Verify stored in taskStore
+    const found = taskStore.getBySubject('pr:zts212653/cat-cafe#99');
+    assert.ok(found, 'task must be stored');
     assert.equal(found.threadId, 'thread-pr');
   });
 
   test('POST register-pr-tracking rejects invalid credentials', async () => {
-    const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
-    const prTrackingStore = new MemoryPrTrackingStore();
-
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      sharedBank: 'cat-cafe-shared',
-      prTrackingStore,
-    });
+    const app = await createApp();
 
     const response = await app.inject({
       method: 'POST',
@@ -2055,19 +2030,7 @@ describe('Callback Routes', () => {
   });
 
   test('POST register-pr-tracking ignores payload catId, uses invocation identity', async () => {
-    const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
-    const prTrackingStore = new MemoryPrTrackingStore();
-
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      sharedBank: 'cat-cafe-shared',
-      prTrackingStore,
-    });
+    const app = await createApp();
 
     // Invocation is opus, payload sends bogus catId — server must ignore payload
     const { invocationId, callbackToken } = registry.create('user-1', 'opus');
@@ -2086,23 +2049,11 @@ describe('Callback Routes', () => {
 
     assert.equal(response.statusCode, 200, 'payload catId is ignored, so bogus value must not cause 400');
     const body = JSON.parse(response.body);
-    assert.equal(body.entry.catId, 'opus', 'must use invocation catId, not payload');
+    assert.equal(body.task.ownerCatId, 'opus', 'must use invocation catId, not payload');
   });
 
   test('POST register-pr-tracking rejects overwrite from different user (P1-2 ownership)', async () => {
-    const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
-    const prTrackingStore = new MemoryPrTrackingStore();
-
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      sharedBank: 'cat-cafe-shared',
-      prTrackingStore,
-    });
+    const app = await createApp();
 
     // User A registers PR #42
     const userA = registry.create('user-A', 'opus', 'thread-A');
@@ -2135,25 +2086,72 @@ describe('Callback Routes', () => {
     assert.equal(regB.statusCode, 409, 'must reject overwrite from different user');
 
     // Original entry should be unchanged
-    const entry = prTrackingStore.get('zts212653/cat-cafe', 42);
+    const entry = taskStore.getBySubject('pr:zts212653/cat-cafe#42');
     assert.equal(entry.userId, 'user-A', 'original owner must be preserved');
     assert.equal(entry.threadId, 'thread-A');
   });
 
-  test('POST register-pr-tracking allows re-register from same user (update thread)', async () => {
-    const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
-    const prTrackingStore = new MemoryPrTrackingStore();
+  test('POST register-pr-tracking converts atomic store ownership conflicts into 409', async () => {
+    taskStore = {
+      getBySubject() {
+        return null;
+      },
+      async upsertBySubject(input) {
+        if (input.userId === 'user-A') {
+          return {
+            id: 'task-user-a',
+            kind: 'pr_tracking',
+            subjectKey: 'pr:zts212653/cat-cafe#77',
+            threadId: 'thread-A',
+            title: 'PR tracking: zts212653/cat-cafe#77',
+            ownerCatId: 'opus',
+            status: 'todo',
+            why: 'track pr',
+            createdBy: 'opus',
+            createdAt: 1,
+            updatedAt: 1,
+            userId: 'user-A',
+          };
+        }
+        const error = new Error('subject ownership conflict');
+        error.code = 'TASK_SUBJECT_OWNERSHIP_CONFLICT';
+        throw error;
+      },
+    };
 
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      sharedBank: 'cat-cafe-shared',
-      prTrackingStore,
+    const app = await createApp();
+
+    const userA = registry.create('user-A', 'opus', 'thread-A');
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      payload: {
+        invocationId: userA.invocationId,
+        callbackToken: userA.callbackToken,
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 77,
+      },
     });
+    assert.equal(first.statusCode, 200);
+
+    const userB = registry.create('user-B', 'codex', 'thread-B');
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      payload: {
+        invocationId: userB.invocationId,
+        callbackToken: userB.callbackToken,
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 77,
+      },
+    });
+
+    assert.equal(second.statusCode, 409, 'atomic ownership conflict must surface as 409');
+    assert.match(second.body, /already registered by another user/);
+  });
+
+  test('POST register-pr-tracking allows re-register from same user (update thread)', async () => {
+    const app = await createApp();
 
     // User A registers PR #42 from thread-1
     const inv1 = registry.create('user-A', 'opus', 'thread-1');
@@ -2184,13 +2182,20 @@ describe('Callback Routes', () => {
     });
     assert.equal(res.statusCode, 200);
 
-    const entry = prTrackingStore.get('zts212653/cat-cafe', 42);
+    const entry = taskStore.getBySubject('pr:zts212653/cat-cafe#42');
     assert.equal(entry.threadId, 'thread-2', 'same user can update their own registration');
   });
 
   test('POST register-pr-tracking returns 503 when store not configured', async () => {
-    // Default createApp() has no prTrackingStore
-    const app = await createApp();
+    // Create app without taskStore to test the 503 path
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      threadStore,
+    });
     const { invocationId, callbackToken } = registry.create('user-1', 'opus');
 
     const response = await app.inject({
@@ -2211,19 +2216,7 @@ describe('Callback Routes', () => {
   });
 
   test('POST register-pr-tracking uses invocation catId, not payload catId (authority bug)', async () => {
-    const { MemoryPrTrackingStore } = await import('../dist/infrastructure/email/PrTrackingStore.js');
-    const prTrackingStore = new MemoryPrTrackingStore();
-
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      sharedBank: 'cat-cafe-shared',
-      prTrackingStore,
-    });
+    const app = await createApp();
 
     // Invocation is for opencode, but payload says opus
     const { invocationId, callbackToken } = registry.create('user-1', 'opencode', 'thread-opencode');
@@ -2244,10 +2237,10 @@ describe('Callback Routes', () => {
     const body = JSON.parse(response.body);
 
     // Server must use the authoritative catId from invocation record, not the payload
-    assert.equal(body.entry.catId, 'opencode', 'must use invocation catId, not payload catId');
+    assert.equal(body.task.ownerCatId, 'opencode', 'must use invocation catId, not payload catId');
 
-    const stored = prTrackingStore.get('zts212653/cat-cafe', 832);
-    assert.equal(stored.catId, 'opencode', 'stored entry must have authoritative catId');
+    const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#832');
+    assert.equal(stored.ownerCatId, 'opencode', 'stored task must have authoritative catId');
   });
 
   // ---- F052: cross-thread identity isolation ----

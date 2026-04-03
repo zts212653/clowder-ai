@@ -43,8 +43,10 @@ export function computeSubjectPreview(
   // Strict prefix matching: unrecognized keys (e.g. task.id from SKIP_NO_SIGNAL) → null
   switch (subjectKind) {
     case 'pr': {
-      if (!key.startsWith('pr-')) return null;
-      return key.slice(3);
+      // #320: unified subject key uses `pr:owner/repo#N` format
+      if (key.startsWith('pr:')) return key.slice(3);
+      if (key.startsWith('pr-')) return key.slice(3);
+      return null;
     }
     case 'thread': {
       if (key.startsWith('thread-')) return formatThreadPreview(key.slice(7));

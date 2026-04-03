@@ -4,6 +4,29 @@ import { describe, it } from 'node:test';
 
 const noopLog = { info: () => {}, error: () => {}, warn: () => {} };
 
+/** Convert old PrTrackingEntry-style mock to TaskItem shape for #320 unified model */
+function mockTask(pr, overrides = {}) {
+  return {
+    id: `task-${pr.repoFullName}-${pr.prNumber}`,
+    kind: 'pr_tracking',
+    threadId: pr.threadId ?? 't-default',
+    subjectKey: `pr:${pr.repoFullName}#${pr.prNumber}`,
+    title: `PR ${pr.repoFullName}#${pr.prNumber}`,
+    ownerCatId: pr.catId ?? 'opus',
+    status: 'todo',
+    why: '',
+    createdBy: pr.catId ?? 'opus',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    userId: pr.userId ?? 'u-default',
+    ...overrides,
+  };
+}
+
+function mockTaskStore(tasks) {
+  return { listByKind: async () => tasks };
+}
+
 function stubRouter(kind = 'notified') {
   const calls = [];
   return {
@@ -26,21 +49,20 @@ function stubRouter(kind = 'notified') {
   };
 }
 
-const mockEntry = {
+const mockTaskItem = mockTask({
   repoFullName: 'owner/repo',
   prNumber: 42,
   catId: 'opus',
   threadId: 'th-1',
   userId: 'u-1',
-  registeredAt: 1000,
-};
+});
 
 describe('ReviewFeedbackTaskSpec', () => {
   it('has correct id and profile (KD-11)', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [] },
+      taskStore: mockTaskStore([]),
       fetchComments: async () => [],
       fetchReviews: async () => [],
       reviewFeedbackRouter: router,
@@ -54,7 +76,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [] },
+      taskStore: mockTaskStore([]),
       fetchComments: async () => [],
       fetchReviews: async () => [],
       reviewFeedbackRouter: router,
@@ -68,7 +90,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         { id: 1, author: 'alice', body: 'hi', createdAt: '2026-01-01', commentType: 'conversation' },
       ],
@@ -86,7 +108,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [],
       fetchReviews: async () => [{ id: 1, author: 'alice', state: 'APPROVED', body: '', submittedAt: '2026-01-01' }],
       reviewFeedbackRouter: router,
@@ -101,7 +123,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         { id: 1, author: 'alice', body: 'hi', createdAt: '2026-01-01', commentType: 'conversation' },
       ],
@@ -125,7 +147,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         { id: 1, author: 'alice', body: 'hi', createdAt: '2026-01-01', commentType: 'conversation' },
       ],
@@ -150,7 +172,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router, calls } = stubRouter();
     const triggerCalls = [];
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [] },
+      taskStore: mockTaskStore([]),
       fetchComments: async () => [],
       fetchReviews: async () => [],
       reviewFeedbackRouter: router,
@@ -164,14 +186,16 @@ describe('ReviewFeedbackTaskSpec', () => {
 
     let cursorCommitted = false;
     const signal = {
-      entry: mockEntry,
+      task: mockTaskItem,
+      repoFullName: 'owner/repo',
+      prNumber: 42,
       newComments: [{ id: 1, author: 'alice', body: 'hi', createdAt: '2026-01-01', commentType: 'conversation' }],
       newDecisions: [],
       commitCursor: () => {
         cursorCommitted = true;
       },
     };
-    await spec.run.execute(signal, 'pr-owner/repo#42');
+    await spec.run.execute(signal, 'pr:owner/repo#42');
 
     assert.equal(calls.length, 1);
     assert.equal(cursorCommitted, true);
@@ -184,7 +208,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     const triggerCalls = [];
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [] },
+      taskStore: mockTaskStore([]),
       fetchComments: async () => [],
       fetchReviews: async () => [],
       reviewFeedbackRouter: router,
@@ -197,12 +221,14 @@ describe('ReviewFeedbackTaskSpec', () => {
     });
 
     const signal = {
-      entry: mockEntry,
+      task: mockTaskItem,
+      repoFullName: 'owner/repo',
+      prNumber: 42,
       newComments: [],
       newDecisions: [{ id: 1, author: 'bob', state: 'CHANGES_REQUESTED', body: 'fix it', submittedAt: '2026-01-01' }],
       commitCursor: () => {},
     };
-    await spec.run.execute(signal, 'pr-owner/repo#42');
+    await spec.run.execute(signal, 'pr:owner/repo#42');
 
     assert.equal(triggerCalls[0][6].priority, 'urgent');
   });
@@ -211,7 +237,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         {
           id: 1,
@@ -243,7 +269,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         {
           id: 1,
@@ -267,7 +293,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     let fetchCount = 0;
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => {
         fetchCount++;
         return [
@@ -300,7 +326,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     const selfLogin = 'zts212653';
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         {
           id: 1,
@@ -335,7 +361,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter('skipped');
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [] },
+      taskStore: mockTaskStore([]),
       fetchComments: async () => [],
       fetchReviews: async () => [],
       reviewFeedbackRouter: router,
@@ -344,14 +370,16 @@ describe('ReviewFeedbackTaskSpec', () => {
 
     let cursorCommitted = false;
     const signal = {
-      entry: mockEntry,
+      task: mockTaskItem,
+      repoFullName: 'owner/repo',
+      prNumber: 42,
       newComments: [],
       newDecisions: [],
       commitCursor: () => {
         cursorCommitted = true;
       },
     };
-    await spec.run.execute(signal, 'pr-owner/repo#42');
+    await spec.run.execute(signal, 'pr:owner/repo#42');
 
     assert.equal(cursorCommitted, false, 'cursor should not advance when delivery skipped');
   });
@@ -363,7 +391,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     const self = 'zts212653';
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         { id: 1, author: self, body: 'LGTM, looks good to me', createdAt: '2026-01-01', commentType: 'conversation' },
         { id: 2, author: 'alice', body: 'Please fix the typo', createdAt: '2026-01-01', commentType: 'conversation' },
@@ -384,7 +412,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     const self = 'zts212653';
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [],
       fetchReviews: async () => [
         { id: 1, author: self, state: 'COMMENTED', body: 'Looks fine', submittedAt: '2026-01-01' },
@@ -405,7 +433,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     const self = 'zts212653';
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         {
           id: 1,
@@ -431,7 +459,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     const bot = 'chatgpt-codex-connector[bot]';
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         {
           id: 1,
@@ -459,7 +487,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const triggered = [];
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [],
       fetchReviews: async () => [
         { id: 1, author: 'reviewer', state: 'CHANGES_REQUESTED', body: 'Fix the bug', submittedAt: '2026-01-01' },
@@ -474,7 +502,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     });
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
     assert.equal(gateResult.run, true);
-    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#42', {});
     assert.equal(triggered.length, 1);
     const policy = triggered[0][6];
     assert.equal(policy.priority, 'urgent');
@@ -485,7 +513,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const triggered = [];
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [],
       fetchReviews: async () => [
         { id: 1, author: 'reviewer', state: 'APPROVED', body: 'LGTM', submittedAt: '2026-01-01' },
@@ -500,7 +528,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     });
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
     assert.equal(gateResult.run, true);
-    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#42', {});
     assert.equal(triggered.length, 1);
     const policy = triggered[0][6];
     assert.equal(policy.priority, 'normal');
@@ -511,7 +539,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const triggered = [];
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [],
       fetchReviews: async () => [
         { id: 1, author: 'reviewer', state: 'COMMENTED', body: 'Interesting approach', submittedAt: '2026-01-01' },
@@ -526,7 +554,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     });
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
     assert.equal(gateResult.run, true);
-    await spec.run.execute(gateResult.workItems[0].signal, 'pr-a/b#1', {});
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#42', {});
     assert.equal(triggered.length, 1);
     const policy = triggered[0][6];
     assert.equal(policy.priority, 'normal');
@@ -538,7 +566,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     const { router } = stubRouter();
     const authBot = 'chatgpt-codex-connector[bot]';
     const spec = createReviewFeedbackTaskSpec({
-      prTrackingStore: { listAll: async () => [mockEntry] },
+      taskStore: mockTaskStore([mockTaskItem]),
       fetchComments: async () => [
         {
           id: 1,

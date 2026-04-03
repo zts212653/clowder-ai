@@ -1,8 +1,14 @@
+/**
+ * F140/F320: ConflictRouter — route merge conflict signals to the correct thread.
+ *
+ * #320: Reads from unified TaskStore instead of PrTrackingStore.
+ */
 import type { ConnectorSource } from '@cat-cafe/shared';
+import { prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
+import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 import { deliverConnectorMessage } from './deliver-connector-message.js';
-import type { IPrTrackingStore } from './PrTrackingStore.js';
 
 export interface ConflictSignal {
   readonly repoFullName: string;
@@ -17,7 +23,7 @@ export type ConflictRouteResult =
   | { kind: 'skipped'; reason: string };
 
 export interface ConflictRouterOptions {
-  readonly prTrackingStore: IPrTrackingStore;
+  readonly taskStore: ITaskStore;
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly log: FastifyBaseLogger;
 }
@@ -30,23 +36,23 @@ export class ConflictRouter {
   }
 
   async route(signal: ConflictSignal): Promise<ConflictRouteResult> {
-    const { prTrackingStore, log } = this.opts;
-    const tracking = await prTrackingStore.get(signal.repoFullName, signal.prNumber);
-    if (!tracking) {
-      return { kind: 'skipped', reason: `No tracking entry for ${signal.repoFullName}#${signal.prNumber}` };
+    const { taskStore, log } = this.opts;
+    const sk = prSubjectKey(signal.repoFullName, signal.prNumber);
+
+    const task = await taskStore.getBySubject(sk);
+    if (!task) {
+      return { kind: 'skipped', reason: `No tracking task for ${signal.repoFullName}#${signal.prNumber}` };
     }
 
-    // UNKNOWN — GitHub hasn't computed yet, skip
     if (signal.mergeState === 'UNKNOWN') {
       return { kind: 'skipped', reason: 'mergeState UNKNOWN, will retry next poll' };
     }
 
     // KD-9: MERGEABLE → clear fingerprint so re-conflict with same SHA re-notifies
     if (signal.mergeState !== 'CONFLICTING') {
-      if (tracking.lastConflictFingerprint) {
-        await prTrackingStore.patchConflictState(signal.repoFullName, signal.prNumber, {
-          lastConflictFingerprint: '',
-          mergeState: signal.mergeState,
+      if (task.automationState?.conflict?.lastFingerprint) {
+        await taskStore.patchAutomationState(task.id, {
+          conflict: { lastFingerprint: '', mergeState: signal.mergeState },
         });
         log.info(
           `[ConflictRouter] ${signal.repoFullName}#${signal.prNumber}: ${signal.mergeState} — fingerprint cleared`,
@@ -55,21 +61,20 @@ export class ConflictRouter {
       return { kind: 'skipped', reason: `mergeState ${signal.mergeState}, not CONFLICTING` };
     }
 
-    // Dedup: same headSha + CONFLICTING already notified
     const fingerprint = `${signal.headSha}:CONFLICTING`;
-    if (tracking.lastConflictFingerprint === fingerprint) {
+    if (task.automationState?.conflict?.lastFingerprint === fingerprint) {
       return { kind: 'deduped', reason: `Already notified for ${fingerprint}` };
     }
 
-    return this.deliver(signal, tracking, fingerprint);
+    return this.deliver(signal, task, fingerprint);
   }
 
   private async deliver(
     signal: ConflictSignal,
-    tracking: { threadId: string; catId: string; userId: string },
+    task: { id: string; threadId: string; ownerCatId: string | null; userId?: string },
     fingerprint: string,
   ): Promise<ConflictRouteResult> {
-    const { prTrackingStore, log } = this.opts;
+    const { taskStore, log } = this.opts;
     const content = buildConflictMessageContent(signal);
 
     const source: ConnectorSource = {
@@ -80,25 +85,28 @@ export class ConflictRouter {
     };
 
     const result = await deliverConnectorMessage(this.opts.deliveryDeps, {
-      threadId: tracking.threadId,
-      userId: tracking.userId,
-      catId: tracking.catId,
+      threadId: task.threadId,
+      userId: task.userId ?? '',
+      catId: task.ownerCatId ?? '',
       content,
       source,
     });
 
-    await prTrackingStore.patchConflictState(signal.repoFullName, signal.prNumber, {
-      lastConflictFingerprint: fingerprint,
-      lastConflictNotifiedAt: Date.now(),
-      mergeState: signal.mergeState,
+    // #320: Patch automationState.conflict instead of patchConflictState
+    await taskStore.patchAutomationState(task.id, {
+      conflict: {
+        lastFingerprint: fingerprint,
+        lastNotifiedAt: Date.now(),
+        mergeState: signal.mergeState,
+      },
     });
 
-    log.info(`[ConflictRouter] CONFLICTING → ${tracking.catId} in thread ${tracking.threadId} (${fingerprint})`);
+    log.info(`[ConflictRouter] CONFLICTING → ${task.ownerCatId} in thread ${task.threadId} (${fingerprint})`);
 
     return {
       kind: 'notified',
-      threadId: tracking.threadId,
-      catId: tracking.catId,
+      threadId: task.threadId,
+      catId: task.ownerCatId ?? '',
       messageId: result.messageId,
       content,
     };
@@ -107,7 +115,7 @@ export class ConflictRouter {
 
 export function buildConflictMessageContent(signal: ConflictSignal): string {
   const lines: string[] = [
-    '⚠️ **PR 冲突**',
+    '\u26a0\ufe0f **PR 冲突**',
     '',
     `PR #${signal.prNumber} (${signal.repoFullName})`,
     `Commit: \`${signal.headSha.slice(0, 7)}\``,
@@ -115,7 +123,7 @@ export function buildConflictMessageContent(signal: ConflictSignal): string {
     '当前分支与 base 存在冲突，需要 rebase 或手动解决。',
     '',
     '---',
-    '🔧 **自动处理**（KD-13: 全自动 + 事后通知）',
+    '\ud83d\udd27 **自动处理**（KD-13: 全自动 + 事后通知）',
     `- 目标: ${signal.repoFullName}#${signal.prNumber}`,
     '- 操作: 在对应 worktree 执行 `git fetch origin main && git rebase origin/main`',
     '- rebase 成功: push 并通知铲屎官已自动解决',

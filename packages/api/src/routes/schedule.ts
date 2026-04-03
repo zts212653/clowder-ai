@@ -15,6 +15,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { GlobalControlStore } from '../infrastructure/scheduler/GlobalControlStore.js';
 import type { PackTemplateStore } from '../infrastructure/scheduler/PackTemplateStore.js';
@@ -36,6 +37,8 @@ export interface ScheduleRoutesOptions {
   globalControlStore?: GlobalControlStore;
   /** Phase 3B (AC-D3): pack template store */
   packTemplateStore?: PackTemplateStore;
+  /** #320: Unified task store for thread→subjectKey resolution */
+  taskStore?: ITaskStore;
 }
 
 /** Extract threadId from subjectKey — handles both thread-xxx (real tasks) and thread:xxx formats */
@@ -45,16 +48,63 @@ export function extractThreadId(subjectKey: string): string | null {
   return null;
 }
 
+function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void {
+  target.add(subjectKey);
+  if (subjectKey.startsWith('pr:')) target.add(`pr-${subjectKey.slice(3)}`);
+  if (subjectKey.startsWith('pr-')) target.add(`pr:${subjectKey.slice(3)}`);
+}
+
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
-  const { taskRunner, dynamicTaskStore, templateRegistry, globalControlStore, packTemplateStore } = opts;
+  const { taskRunner, dynamicTaskStore, templateRegistry, globalControlStore, packTemplateStore, taskStore } = opts;
 
   // GET /api/schedule/tasks
-  app.get('/api/schedule/tasks', async () => {
+  // #320: Optional ?threadId= filter — resolves thread's task subjectKeys for cross-match
+  app.get('/api/schedule/tasks', async (request) => {
+    const { threadId } = request.query as { threadId?: string };
     const summaries = taskRunner.getTaskSummaries();
-    return { tasks: summaries };
+
+    if (!threadId || !taskStore) {
+      return { tasks: summaries };
+    }
+
+    // Build set of subjectKeys for tasks in this thread
+    const threadTasks = await taskStore.listByThread(threadId);
+    const threadSubjectKeys = new Set<string>();
+    const activeThreadSubjectKinds = new Set<string>();
+    for (const t of threadTasks) {
+      if (t.subjectKey) addSubjectKeyWithAliases(threadSubjectKeys, t.subjectKey);
+      if (t.status === 'done' || !t.subjectKey) continue;
+      if (t.subjectKey.startsWith('pr:') || t.subjectKey.startsWith('pr-')) activeThreadSubjectKinds.add('pr');
+      else if (t.subjectKey.startsWith('thread:') || t.subjectKey.startsWith('thread-')) {
+        activeThreadSubjectKinds.add('thread');
+      }
+    }
+    // Also match thread-prefixed subject keys (dynamic/thread-scoped tasks)
+    threadSubjectKeys.add(`thread-${threadId}`);
+    threadSubjectKeys.add(`thread:${threadId}`);
+
+    // P1-2 fix: don't rely solely on lastRun — query ledger for ANY matching run.
+    // Also include tasks whose subjectKind matches even with zero runs (newly registered).
+    const ledger = taskRunner.getLedger();
+    const filtered = summaries.filter((s) => {
+      // Quick path: if lastRun matches, include immediately
+      if (s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key)) return true;
+      // Slow path: check if ANY run for this task matches thread's subject keys
+      for (const sk of threadSubjectKeys) {
+        const runs = ledger.queryBySubject(s.id, sk, 1);
+        if (runs.length > 0) return true;
+      }
+      // Zero-run path only: newly registered tasks should show up immediately,
+      // but once a task has runs we must not leak it across threads by subject kind.
+      if (!s.lastRun && s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) return true;
+      return false;
+    });
+
+    return { tasks: filtered };
   });
 
   // GET /api/schedule/tasks/:id/runs
+  // #320: threadId filter now resolves task subjectKeys for cross-match
   app.get('/api/schedule/tasks/:id/runs', async (request, reply) => {
     const { id } = request.params as { id: string };
     const { threadId, limit } = request.query as { threadId?: string; limit?: string };
@@ -70,13 +120,19 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     let runs: import('../infrastructure/scheduler/types.js').RunLedgerRow[];
 
     if (threadId) {
-      const hyphenKey = `thread-${threadId}`;
-      const colonKey = `thread:${threadId}`;
-      const hyphenRuns = ledger.queryBySubject(id, hyphenKey, maxRows);
-      const colonRuns = ledger.queryBySubject(id, colonKey, maxRows);
-      runs = [...hyphenRuns, ...colonRuns].sort(
-        (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
-      );
+      // Collect all subject keys for this thread (thread-xxx, thread:xxx, + TaskStore entries)
+      const subjectKeys = new Set([`thread-${threadId}`, `thread:${threadId}`]);
+      if (taskStore) {
+        const threadTasks = await taskStore.listByThread(threadId);
+        for (const t of threadTasks) {
+          if (t.subjectKey) addSubjectKeyWithAliases(subjectKeys, t.subjectKey);
+        }
+      }
+      const allRuns: import('../infrastructure/scheduler/types.js').RunLedgerRow[] = [];
+      for (const sk of subjectKeys) {
+        allRuns.push(...ledger.queryBySubject(id, sk, maxRows));
+      }
+      runs = allRuns.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
       if (runs.length > maxRows) runs = runs.slice(0, maxRows);
     } else {
       runs = ledger.query(id, maxRows);

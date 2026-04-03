@@ -63,15 +63,6 @@ export {
   MemoryProcessedEmailStore,
 } from './ProcessedEmailStore.js';
 export {
-  type CiStateFields,
-  type ConflictStateFields,
-  type IPrTrackingStore,
-  MemoryPrTrackingStore,
-  type PrTrackingEntry,
-  type PrTrackingInput,
-} from './PrTrackingStore.js';
-export { RedisPrTrackingStore } from './RedisPrTrackingStore.js';
-export {
   extractSeverityFindings,
   GhCliReviewContentFetcher,
   getMaxSeverity,

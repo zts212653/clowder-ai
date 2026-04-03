@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
@@ -8,7 +8,6 @@ import type { GlobalControlState, RunLedgerRow, ScheduleTask } from './schedule-
 import {
   CATEGORY_LABELS,
   CATEGORY_STYLES,
-  extractThreadId,
   fallbackCategory,
   formatTrigger,
   humanizeId,
@@ -37,7 +36,10 @@ export function SchedulePanel() {
 
   const fetchTasks = useCallback(async () => {
     try {
-      const res = await apiFetch('/api/schedule/tasks');
+      // #320: When scope is "current-thread", pass threadId to server for unified filtering
+      const params =
+        scope === 'current-thread' && currentThreadId ? `?threadId=${encodeURIComponent(currentThreadId)}` : '';
+      const res = await apiFetch(`/api/schedule/tasks${params}`);
       if (res.ok) {
         const json = await res.json();
         setTasks(json.tasks ?? []);
@@ -47,7 +49,7 @@ export function SchedulePanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scope, currentThreadId]);
 
   const fetchControl = useCallback(async () => {
     try {
@@ -86,17 +88,8 @@ export function SchedulePanel() {
     }
   }, [globalControl, fetchControl]);
 
-  // AC-C3b-2: scope filtering — Current Thread shows only thread-associated tasks matching currentThreadId
-  // AC-C3b-3: non-thread tasks (pr-, repo-) only visible in All view (threadId 可空 per AC)
-  const filteredTasks = useMemo(() => {
-    if (scope === 'all') return tasks;
-    return tasks.filter((t) => {
-      if (!t.lastRun) return true; // no run yet → show everywhere
-      const tid = extractThreadId(t.lastRun.subject_key);
-      // P1-2 fix: non-thread tasks (pr-, repo-) should NOT appear in Current Thread
-      return tid !== null && tid === currentThreadId;
-    });
-  }, [tasks, scope, currentThreadId]);
+  // #320: Server-side filtering via ?threadId= — no client-side extractThreadId needed
+  const filteredTasks = tasks;
 
   const handleToggleExpand = useCallback(
     async (taskId: string) => {
@@ -107,7 +100,9 @@ export function SchedulePanel() {
       }
       setExpandedId(taskId);
       try {
-        const res = await apiFetch(`/api/schedule/tasks/${encodeURIComponent(taskId)}/runs?limit=5`);
+        const params =
+          scope === 'current-thread' && currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : '';
+        const res = await apiFetch(`/api/schedule/tasks/${encodeURIComponent(taskId)}/runs?limit=5${params}`);
         if (res.ok) {
           const json = await res.json();
           setRunHistory(json.runs ?? []);
@@ -116,7 +111,7 @@ export function SchedulePanel() {
         setRunHistory([]);
       }
     },
-    [expandedId],
+    [currentThreadId, expandedId, scope],
   );
 
   /** AC-H4: toggle pause/resume for any task — routes to correct API by source */

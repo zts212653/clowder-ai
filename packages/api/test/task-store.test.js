@@ -115,6 +115,32 @@ describe('TaskStore', () => {
     });
   });
 
+  describe('upsertBySubject', () => {
+    it('re-registering a done pr_tracking task resets it back to todo', () => {
+      const original = store.upsertBySubject(
+        makeInput({
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#42',
+          title: 'PR tracking: owner/repo#42',
+        }),
+      );
+      store.update(original.id, { status: 'done' });
+
+      const reopened = store.upsertBySubject(
+        makeInput({
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#42',
+          threadId: 'thread-2',
+          title: 'PR tracking: owner/repo#42 (reopened)',
+        }),
+      );
+
+      assert.equal(reopened.id, original.id);
+      assert.equal(reopened.threadId, 'thread-2');
+      assert.equal(reopened.status, 'todo');
+    });
+  });
+
   describe('delete', () => {
     it('deletes an existing task', () => {
       const task = store.create(makeInput());
@@ -143,6 +169,56 @@ describe('TaskStore', () => {
       assert.equal(store.size, 5);
       // First done task should be evicted
       assert.equal(store.get(tasks[0].id), null);
+    });
+
+    it('does not evict active pr_tracking tasks during fallback oldest-task eviction', () => {
+      const tracker = store.upsertBySubject(
+        makeInput({
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#99',
+          title: 'Track owner/repo#99',
+        }),
+      );
+      const workTasks = [];
+      for (let i = 0; i < 4; i++) {
+        workTasks.push(store.create(makeInput({ title: `task-${i}` })));
+      }
+
+      store.create(makeInput({ title: 'new-task' }));
+
+      assert.equal(store.size, 5);
+      assert.equal(store.get(tracker.id)?.id, tracker.id);
+      assert.equal(store.getBySubject('pr:owner/repo#99')?.id, tracker.id);
+      assert.equal(store.get(workTasks[0].id), null);
+    });
+
+    it('preserves the task cap when every stored task is an active pr_tracking task', () => {
+      const trackers = [];
+      for (let i = 0; i < 5; i++) {
+        trackers.push(
+          store.upsertBySubject(
+            makeInput({
+              kind: 'pr_tracking',
+              subjectKey: `pr:owner/repo#${i}`,
+              title: `Track owner/repo#${i}`,
+            }),
+          ),
+        );
+      }
+
+      const replacement = store.upsertBySubject(
+        makeInput({
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#999',
+          title: 'Track owner/repo#999',
+        }),
+      );
+
+      assert.equal(store.size, 5);
+      assert.equal(store.get(trackers[0].id), null);
+      assert.equal(store.getBySubject('pr:owner/repo#0'), null);
+      assert.equal(store.get(replacement.id)?.id, replacement.id);
+      assert.equal(store.getBySubject('pr:owner/repo#999')?.id, replacement.id);
     });
 
     it('evicts oldest task if no done tasks available', () => {

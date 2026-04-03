@@ -1,27 +1,31 @@
 /**
- * F140: ReviewFeedbackTaskSpec — detect new PR review feedback (comments + decisions).
+ * F140/F320: ReviewFeedbackTaskSpec — detect new PR review feedback (comments + decisions).
  *
+ * #320: Reads from unified TaskStore (kind=pr_tracking) instead of PrTrackingStore.
  * KD-11: Replaces ReviewCommentsTaskSpec with richer model.
  * KD-10: Cursor commits only after delivery success; trigger is best-effort.
  *
- * Gate: list tracked PRs → fetch comments + reviews → filter by cursor → workItems.
+ * Gate: list pr_tracking tasks → fetch comments + reviews → filter by cursor → workItems.
  * Execute: ReviewFeedbackRouter → ConnectorInvokeTrigger → commitCursor.
  */
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, TaskItem } from '@cat-cafe/shared';
+import { parsePrSubjectKey } from '@cat-cafe/shared';
+import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
-import type { IPrTrackingStore, PrTrackingEntry } from './PrTrackingStore.js';
 import type { PrFeedbackComment, PrReviewDecision, ReviewFeedbackRouter } from './ReviewFeedbackRouter.js';
 
 export interface ReviewFeedbackSignal {
-  entry: PrTrackingEntry;
+  task: TaskItem;
+  repoFullName: string;
+  prNumber: number;
   newComments: PrFeedbackComment[];
   newDecisions: PrReviewDecision[];
   commitCursor: () => void;
 }
 
 export interface ReviewFeedbackTaskSpecOptions {
-  readonly prTrackingStore: IPrTrackingStore;
+  readonly taskStore: ITaskStore;
   readonly fetchComments: (repoFullName: string, prNumber: number) => Promise<PrFeedbackComment[]>;
   readonly fetchReviews: (repoFullName: string, prNumber: number) => Promise<PrReviewDecision[]>;
   readonly reviewFeedbackRouter: ReviewFeedbackRouter;
@@ -32,9 +36,7 @@ export interface ReviewFeedbackTaskSpecOptions {
     warn: (...args: unknown[]) => void;
   };
   readonly pollIntervalMs?: number;
-  /** Predicate to identify comments that should be skipped (self-authored, authoritative bot, etc.). Matched comments are silently skipped and their cursor advanced. */
   readonly isEchoComment?: (comment: PrFeedbackComment) => boolean;
-  /** Predicate to identify review decisions that should be skipped (self-authored, authoritative bot, etc.). Matched reviews are silently skipped and their cursor advanced. */
   readonly isEchoReview?: (review: PrReviewDecision) => boolean;
 }
 
@@ -49,20 +51,24 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
       async gate() {
-        const entries = await opts.prTrackingStore.listAll();
-        if (entries.length === 0) {
+        // #320: Read from unified TaskStore — exclude done tasks (PR merged/closed)
+        const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter((t) => t.status !== 'done');
+        if (tasks.length === 0) {
           return { run: false, reason: 'no tracked PRs' };
         }
 
         const workItems: { signal: ReviewFeedbackSignal; subjectKey: string }[] = [];
 
-        for (const entry of entries) {
+        for (const task of tasks) {
           try {
-            const prKey = `${entry.repoFullName}#${entry.prNumber}`;
+            const parsed = task.subjectKey ? parsePrSubjectKey(task.subjectKey) : null;
+            if (!parsed) continue;
+            const { repoFullName, prNumber } = parsed;
+            const prKey = `${repoFullName}#${prNumber}`;
 
             const [comments, reviews] = await Promise.all([
-              opts.fetchComments(entry.repoFullName, entry.prNumber),
-              opts.fetchReviews(entry.repoFullName, entry.prNumber),
+              opts.fetchComments(repoFullName, prNumber),
+              opts.fetchReviews(repoFullName, prNumber),
             ]);
 
             const commentCursor = commentCursors.get(prKey) ?? 0;
@@ -71,19 +77,15 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const allNewComments = comments.filter((c) => c.id > commentCursor);
             const allNewReviews = reviews.filter((r) => r.id > reviewCursor);
 
-            // Echo filter: skip comments/reviews that match the predicates (self-authored, authoritative bot, etc.).
-            // Cursor still advances past them so they don't reappear next cycle.
             const commentFilter = opts.isEchoComment;
             const reviewFilter = opts.isEchoReview;
             const newComments = commentFilter ? allNewComments.filter((c) => !commentFilter(c)) : allNewComments;
             const newDecisions = reviewFilter ? allNewReviews.filter((r) => !reviewFilter(r)) : allNewReviews;
 
-            // Cursor must cover ALL fetched items (including echoes) to avoid re-processing
             const maxCommentId =
               allNewComments.length > 0 ? Math.max(...allNewComments.map((c) => c.id)) : commentCursor;
             const maxReviewId = allNewReviews.length > 0 ? Math.max(...allNewReviews.map((r) => r.id)) : reviewCursor;
 
-            // Advance cursor past echo-only batches so they don't reappear
             const allSkipped = newComments.length === 0 && newDecisions.length === 0;
             const hadNewItems = allNewComments.length > 0 || allNewReviews.length > 0;
             if (hadNewItems && allSkipped) {
@@ -96,16 +98,18 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
 
             workItems.push({
               signal: {
-                entry,
+                task,
+                repoFullName,
+                prNumber,
                 newComments,
                 newDecisions,
-                // KD-10: cursor advances only in execute, after delivery success
                 commitCursor: () => {
                   commentCursors.set(prKey, maxCommentId);
                   reviewCursors.set(prKey, maxReviewId);
                 },
               },
-              subjectKey: `pr-${entry.repoFullName}#${entry.prNumber}`,
+              // #320 KD-15: unified subject_key format
+              subjectKey: task.subjectKey!,
             });
           } catch {
             // fail-open: skip PRs where fetch fails
@@ -123,28 +127,29 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
       overlap: 'skip',
       timeoutMs: 30_000,
       async execute(signal: ReviewFeedbackSignal, _subjectKey: string, _ctx: ExecuteContext) {
+        const { task } = signal;
         const routeResult = await opts.reviewFeedbackRouter.route(
           {
-            repoFullName: signal.entry.repoFullName,
-            prNumber: signal.entry.prNumber,
+            repoFullName: signal.repoFullName,
+            prNumber: signal.prNumber,
             newComments: signal.newComments,
             newDecisions: signal.newDecisions,
           },
-          { threadId: signal.entry.threadId, catId: signal.entry.catId, userId: signal.entry.userId },
+          {
+            threadId: task.threadId,
+            catId: task.ownerCatId ?? '',
+            userId: task.userId ?? '',
+          },
         );
 
         if (routeResult.kind !== 'notified') return;
 
-        // KD-10: delivery succeeded → commit cursor immediately
         signal.commitCursor();
 
-        // Trigger is best-effort (KD-10)
         if (opts.invokeTrigger) {
           try {
             const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');
             const hasApproved = !hasChangesRequested && signal.newDecisions.some((d) => d.state === 'APPROVED');
-
-            // F140 Phase C: map review decision → suggestedSkill
             const suggestedSkill = hasChangesRequested ? 'receive-review' : hasApproved ? 'merge-gate' : undefined;
 
             const policy: ConnectorTriggerPolicy = {
@@ -155,7 +160,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             opts.invokeTrigger.trigger(
               routeResult.threadId,
               routeResult.catId as CatId,
-              signal.entry.userId,
+              task.userId ?? '',
               routeResult.content,
               routeResult.messageId,
               undefined,
@@ -163,7 +168,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             );
           } catch {
             opts.log.warn(
-              `[review-feedback] trigger failed for ${signal.entry.repoFullName}#${signal.entry.prNumber} (best-effort)`,
+              `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
             );
           }
         }

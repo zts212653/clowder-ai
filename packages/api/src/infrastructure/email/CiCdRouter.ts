@@ -1,8 +1,14 @@
+/**
+ * F133/F320: CiCdRouter — route CI/CD poll results to the correct thread.
+ *
+ * #320: Reads from unified TaskStore instead of PrTrackingStore.
+ */
 import type { ConnectorSource } from '@cat-cafe/shared';
+import { parsePrSubjectKey, prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
+import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 import { deliverConnectorMessage } from './deliver-connector-message.js';
-import type { IPrTrackingStore, PrTrackingEntry } from './PrTrackingStore.js';
 
 export type CiBucket = 'pass' | 'fail' | 'pending';
 
@@ -29,7 +35,7 @@ export type CiRouteResult =
   | { kind: 'skipped'; reason: string };
 
 export interface CiCdRouterOptions {
-  readonly prTrackingStore: IPrTrackingStore;
+  readonly taskStore: ITaskStore;
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly log: FastifyBaseLogger;
 }
@@ -42,38 +48,46 @@ export class CiCdRouter {
   }
 
   async route(poll: CiPollResult): Promise<CiRouteResult> {
-    const { prTrackingStore, log } = this.opts;
+    const { taskStore, log } = this.opts;
+    const sk = prSubjectKey(poll.repoFullName, poll.prNumber);
 
-    const tracking = await prTrackingStore.get(poll.repoFullName, poll.prNumber);
-    if (!tracking) {
-      return { kind: 'skipped', reason: `No tracking entry for ${poll.repoFullName}#${poll.prNumber}` };
+    const task = await taskStore.getBySubject(sk);
+    if (!task) {
+      return { kind: 'skipped', reason: `No tracking task for ${poll.repoFullName}#${poll.prNumber}` };
     }
 
-    if (tracking.ciTrackingEnabled === false) {
+    if (task.automationState?.ci?.enabled === false) {
       return { kind: 'skipped', reason: `CI tracking disabled for ${poll.repoFullName}#${poll.prNumber}` };
     }
 
     if (poll.prState === 'merged' || poll.prState === 'closed') {
-      await prTrackingStore.remove(poll.repoFullName, poll.prNumber);
-      log.info(`[CiCdRouter] PR ${poll.repoFullName}#${poll.prNumber} ${poll.prState} — removed from tracking`);
+      // #320 KD-17: lifecycle close = mark task done (not delete)
+      await taskStore.update(task.id, { status: 'done' });
+      log.info(`[CiCdRouter] PR ${poll.repoFullName}#${poll.prNumber} ${poll.prState} — task marked done`);
       return { kind: 'skipped', reason: `PR ${poll.prState}` };
     }
 
     if (poll.aggregateBucket === 'pending') {
-      await prTrackingStore.patchCiState(poll.repoFullName, poll.prNumber, { headSha: poll.headSha });
+      await taskStore.patchAutomationState(task.id, {
+        ci: { headSha: poll.headSha },
+      });
       return { kind: 'skipped', reason: 'CI still pending' };
     }
 
     const fingerprint = `${poll.headSha}:${poll.aggregateBucket}`;
-    if (tracking.lastCiFingerprint === fingerprint) {
+    if (task.automationState?.ci?.lastFingerprint === fingerprint) {
       return { kind: 'deduped', reason: `Already notified for ${fingerprint}` };
     }
 
-    return this.deliver(poll, tracking, fingerprint);
+    return this.deliver(poll, task, fingerprint);
   }
 
-  private async deliver(poll: CiPollResult, tracking: PrTrackingEntry, fingerprint: string): Promise<CiRouteResult> {
-    const { prTrackingStore, log } = this.opts;
+  private async deliver(
+    poll: CiPollResult,
+    task: { id: string; threadId: string; ownerCatId: string | null; userId?: string },
+    fingerprint: string,
+  ): Promise<CiRouteResult> {
+    const { taskStore, log } = this.opts;
     const content = buildCiMessageContent(poll);
 
     const source: ConnectorSource = {
@@ -84,28 +98,31 @@ export class CiCdRouter {
     };
 
     const result = await deliverConnectorMessage(this.opts.deliveryDeps, {
-      threadId: tracking.threadId,
-      userId: tracking.userId,
-      catId: tracking.catId,
+      threadId: task.threadId,
+      userId: task.userId ?? '',
+      catId: task.ownerCatId ?? '',
       content,
       source,
     });
 
-    await prTrackingStore.patchCiState(poll.repoFullName, poll.prNumber, {
-      headSha: poll.headSha,
-      lastCiFingerprint: fingerprint,
-      lastCiBucket: poll.aggregateBucket,
-      lastCiNotifiedAt: Date.now(),
+    // #320: Patch automationState.ci instead of patchCiState
+    await taskStore.patchAutomationState(task.id, {
+      ci: {
+        headSha: poll.headSha,
+        lastFingerprint: fingerprint,
+        lastBucket: poll.aggregateBucket,
+        lastNotifiedAt: Date.now(),
+      },
     });
 
     log.info(
-      `[CiCdRouter] CI ${poll.aggregateBucket} → ${tracking.catId} in thread ${tracking.threadId} (${fingerprint})`,
+      `[CiCdRouter] CI ${poll.aggregateBucket} → ${task.ownerCatId} in thread ${task.threadId} (${fingerprint})`,
     );
 
     return {
       kind: 'notified',
-      threadId: tracking.threadId,
-      catId: tracking.catId,
+      threadId: task.threadId,
+      catId: task.ownerCatId ?? '',
       messageId: result.messageId,
       bucket: poll.aggregateBucket,
       content,

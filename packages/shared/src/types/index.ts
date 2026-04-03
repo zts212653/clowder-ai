@@ -388,8 +388,13 @@ export type {
 } from './summary.js';
 // Task types (毛线球)
 export type {
+  AutomationState,
+  CiAutomationState,
+  ConflictAutomationState,
   CreateTaskInput,
+  ReviewAutomationState,
   TaskItem,
+  TaskKind,
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';

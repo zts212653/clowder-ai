@@ -22,6 +22,7 @@ const listTasksQuerySchema = callbackAuthSchema.extend({
   threadId: z.string().min(1).optional(),
   catId: z.string().min(1).optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'done']).optional(),
+  kind: z.enum(['work', 'pr_tracking']).optional(),
 });
 
 export function registerCallbackTaskRoutes(
@@ -84,7 +85,7 @@ export function registerCallbackTaskRoutes(
       return { error: 'Invalid request query', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, threadId, catId, status } = parsed.data;
+    const { invocationId, callbackToken, threadId, catId, status, kind } = parsed.data;
     const record = registry.verify(invocationId, callbackToken);
     if (!record) {
       reply.status(401);
@@ -127,6 +128,7 @@ export function registerCallbackTaskRoutes(
     let tasks = perThreadTasks.flat();
     if (catId) tasks = tasks.filter((item) => item.ownerCatId === catId);
     if (status) tasks = tasks.filter((item) => item.status === status);
+    if (kind) tasks = tasks.filter((item) => item.kind === kind);
     tasks.sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt || b.id.localeCompare(a.id));
 
     return { tasks };

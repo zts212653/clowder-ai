@@ -86,15 +86,16 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return task;
   });
 
-  // GET /api/tasks?threadId=xxx
+  // GET /api/tasks?threadId=xxx[&kind=work|pr_tracking]
   app.get('/api/tasks', async (request, reply) => {
-    const { threadId } = request.query as { threadId?: string };
+    const { threadId, kind } = request.query as { threadId?: string; kind?: string };
     if (!threadId) {
       reply.status(400);
       return { error: 'Missing threadId query parameter' };
     }
 
-    const tasks = await taskStore.listByThread(threadId);
+    let tasks = await taskStore.listByThread(threadId);
+    if (kind) tasks = tasks.filter((t) => t.kind === kind);
     return { tasks };
   });
 

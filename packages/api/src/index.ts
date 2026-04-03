@@ -98,8 +98,6 @@ import {
   ConnectorInvokeTrigger,
   GhCliReviewContentFetcher,
   MemoryProcessedEmailStore,
-  MemoryPrTrackingStore,
-  RedisPrTrackingStore,
   ReviewFeedbackRouter,
   ReviewRouter,
   startGithubReviewWatcher,
@@ -175,7 +173,6 @@ import {
   workspaceRoutes,
 } from './routes/index.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
-import { prTrackingRoutes } from './routes/pr-tracking.js';
 import { previewRoutes } from './routes/preview.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
@@ -302,6 +299,15 @@ async function main(): Promise<void> {
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
   const threadStore = createThreadStore(redis);
   const taskStore = createTaskStore(redis);
+  if (redis) {
+    const { RedisPrTrackingStore } = await import('./infrastructure/email/RedisPrTrackingStore.js');
+    const { backfillLegacyPrTracking } = await import('./infrastructure/email/backfill-legacy-pr-tracking.js');
+    await backfillLegacyPrTracking({
+      legacyStore: new RedisPrTrackingStore(redis),
+      taskStore,
+      log: app.log,
+    });
+  }
   const backlogStore = createBacklogStore(redis);
   const workflowSopStore = createWorkflowSopStore(redis);
   const summaryStore = createSummaryStore(redis);
@@ -527,6 +533,7 @@ async function main(): Promise<void> {
     templateRegistry,
     globalControlStore,
     packTemplateStore,
+    taskStore,
   });
 
   // ── Phase G: Summary Compaction (registers into unified scheduler) ──
@@ -974,10 +981,6 @@ async function main(): Promise<void> {
     app.log.info('[api] F101 game routes registered');
   }
 
-  // TD091: Create prTrackingStore early so callbacks can use it for MCP registration
-  const prTrackingStore = redis ? new RedisPrTrackingStore(redis) : new MemoryPrTrackingStore();
-  app.log.info(`[api] PrTrackingStore: ${redis ? 'Redis' : 'Memory'}`);
-
   // Phase D (AC-D1): validate repo exists via `gh repo view` before PR tracking registration.
   // Generic — works for any GitHub repo the caller has access to, not hardcoded to ours.
   // Cloud P1: distinguish "repo not found" (return false) from infra failure (throw).
@@ -1027,7 +1030,6 @@ async function main(): Promise<void> {
     invocationRecordStore,
     invocationTracker,
     deliveryCursorStore,
-    prTrackingStore,
     validateRepo,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
@@ -1309,7 +1311,7 @@ async function main(): Promise<void> {
   // Must register routes BEFORE app.listen()
   const processedEmailStore = new MemoryProcessedEmailStore();
   const reviewRouter = new ReviewRouter({
-    prTrackingStore,
+    taskStore,
     processedEmailStore,
     threadStore,
     messageStore,
@@ -1318,7 +1320,6 @@ async function main(): Promise<void> {
     defaultUserId: 'default-user',
     reviewContentFetcher: new GhCliReviewContentFetcher(app.log),
   });
-  await app.register(prTrackingRoutes, { prTrackingStore, validateRepo });
 
   // F088: Register connector webhook routes BEFORE listen (Fastify requires it)
   const connectorWebhookHandlers = new Map<string, import('./routes/connector-webhooks.js').ConnectorWebhookHandler>();
@@ -1559,14 +1560,14 @@ async function main(): Promise<void> {
     const deliveryDeps = { messageStore, socketManager };
 
     const cicdRouter = new CiCdRouter({
-      prTrackingStore,
+      taskStore,
       deliveryDeps,
       log: app.log,
     });
 
     // F140: ConflictRouter (state-transition dedup + KD-9 fingerprint reset)
     const conflictRouter = new ConflictRouter({
-      prTrackingStore,
+      taskStore,
       deliveryDeps,
       log: app.log,
     });
@@ -1577,7 +1578,7 @@ async function main(): Promise<void> {
       log: app.log,
     });
 
-    taskRunnerV2.register(createCiCdCheckTaskSpec({ prTrackingStore, cicdRouter, invokeTrigger, log: app.log }));
+    taskRunnerV2.register(createCiCdCheckTaskSpec({ taskStore, cicdRouter, invokeTrigger, log: app.log }));
 
     // F140: conflict-check with ConflictRouter + urgent trigger
     const checkMergeable = async (repo: string, pr: number) => {
@@ -1600,7 +1601,7 @@ async function main(): Promise<void> {
 
     taskRunnerV2.register(
       createConflictCheckTaskSpec({
-        prTrackingStore,
+        taskStore,
         checkMergeable,
         conflictRouter,
         invokeTrigger,
@@ -1628,7 +1629,7 @@ async function main(): Promise<void> {
 
     taskRunnerV2.register(
       createReviewFeedbackTaskSpec({
-        prTrackingStore,
+        taskStore,
         fetchComments: async (repo, pr) => {
           const [reviewComments, issueComments] = await Promise.all([
             fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`),

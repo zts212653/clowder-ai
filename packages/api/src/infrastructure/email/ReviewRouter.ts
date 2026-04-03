@@ -14,12 +14,13 @@
  */
 
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import { prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
+import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../../domains/cats/services/stores/ports/ThreadStore.js';
 import type { GithubReviewEvent } from './GithubReviewWatcher.js';
 import type { IProcessedEmailStore } from './ProcessedEmailStore.js';
-import type { IPrTrackingStore } from './PrTrackingStore.js';
 import type { IReviewContentFetcher, ReviewContent } from './ReviewContentFetcher.js';
 
 export type RouteResult =
@@ -35,7 +36,7 @@ export type RouteResult =
   | { kind: 'skipped'; reason: string };
 
 export interface ReviewRouterOptions {
-  readonly prTrackingStore: IPrTrackingStore;
+  readonly taskStore: ITaskStore;
   readonly processedEmailStore: IProcessedEmailStore;
   readonly threadStore: IThreadStore;
   readonly messageStore: IMessageStore;
@@ -101,16 +102,26 @@ export class ReviewRouter {
    * PR dedup claim + rollback handled internally.
    */
   private async deliverAndMark(event: GithubReviewEvent): Promise<RouteResult> {
-    const { prTrackingStore, processedEmailStore, log } = this.opts;
+    const { taskStore, processedEmailStore, log } = this.opts;
 
-    // --- Layer 1: PrTrackingStore lookup ---
-    const tracking = await prTrackingStore.get(event.repository, event.prNumber);
+    // --- Layer 1: TaskStore lookup ---
+    const sk = prSubjectKey(event.repository, event.prNumber);
+    const tracking = await taskStore.getBySubject(sk);
     if (!tracking) {
       log.warn(`[ReviewRouter] Skipping unregistered PR: ${event.repository}#${event.prNumber} (no tracking entry)`);
       await processedEmailStore.markProcessed(event.emailUid);
       return {
         kind: 'skipped',
         reason: `No tracking entry for PR ${event.repository}#${event.prNumber}`,
+      };
+    }
+
+    if (tracking.status === 'done') {
+      log.info(`[ReviewRouter] Skipping done PR tracking task: ${event.repository}#${event.prNumber}`);
+      await processedEmailStore.markProcessed(event.emailUid);
+      return {
+        kind: 'skipped',
+        reason: `Tracking entry for PR ${event.repository}#${event.prNumber} is done`,
       };
     }
 
@@ -128,18 +139,19 @@ export class ReviewRouter {
     }
 
     try {
-      const resolvedUserId = await this.resolveRegistryUserId(tracking.threadId, tracking.userId);
+      const catId = tracking.ownerCatId ?? '';
+      const resolvedUserId = await this.resolveRegistryUserId(tracking.threadId, tracking.userId ?? '');
       log.info(
-        `[ReviewRouter] Registry hit: PR ${event.repository}#${event.prNumber} → cat=${tracking.catId} thread=${tracking.threadId}`,
+        `[ReviewRouter] Registry hit: PR ${event.repository}#${event.prNumber} → cat=${catId} thread=${tracking.threadId}`,
       );
 
-      const posted = await this.postReviewMessage(tracking.threadId, tracking.catId, resolvedUserId, event);
+      const posted = await this.postReviewMessage(tracking.threadId, catId, resolvedUserId, event);
       await processedEmailStore.markProcessed(event.emailUid);
 
       return {
         kind: 'routed',
         threadId: tracking.threadId,
-        catId: tracking.catId,
+        catId,
         userId: resolvedUserId,
         source: 'registry',
         messageId: posted.messageId,

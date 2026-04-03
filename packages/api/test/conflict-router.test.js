@@ -1,7 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { MemoryPrTrackingStore } from '../dist/infrastructure/email/PrTrackingStore.js';
+import { createPrTrackingTaskStore } from './helpers/pr-tracking-test-helper.js';
 
 // Lazy import — ConflictRouter doesn't exist yet, TDD red phase
 const { ConflictRouter, buildConflictMessageContent } = await import('../dist/infrastructure/email/ConflictRouter.js');
@@ -56,21 +56,21 @@ function noopLog() {
 // ─── Tests ─────────────────────────────────────────────────────────
 
 describe('ConflictRouter', () => {
-  /** @type {MemoryPrTrackingStore} */
-  let prTrackingStore;
+  /** @type {ReturnType<typeof createPrTrackingTaskStore>} */
+  let prTracking;
   let messageMock;
   let socketMock;
 
   function createRouter() {
     return new ConflictRouter({
-      prTrackingStore,
+      taskStore: prTracking.taskStore,
       deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
       log: noopLog(),
     });
   }
 
   function seedTracking(overrides = {}) {
-    return prTrackingStore.register({
+    return prTracking.register({
       repoFullName: 'owner/repo',
       prNumber: 42,
       catId: 'opus',
@@ -81,7 +81,7 @@ describe('ConflictRouter', () => {
   }
 
   beforeEach(() => {
-    prTrackingStore = new MemoryPrTrackingStore();
+    prTracking = createPrTrackingTaskStore();
     messageMock = mockMessageStore();
     socketMock = mockSocketManager();
   });
