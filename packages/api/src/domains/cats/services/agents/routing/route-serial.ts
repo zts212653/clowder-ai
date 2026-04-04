@@ -461,6 +461,15 @@ export async function* routeSerial(
           collectedToolEvents.push(toolEvt);
         }
 
+        // F150: Fire-and-forget tool usage counter
+        if (msg.type === 'tool_use' && deps.toolUsageCounter && msg.catId) {
+          deps.toolUsageCounter.recordToolUse(
+            msg.catId as string,
+            msg.toolName ?? 'unknown',
+            msg.toolInput as Record<string, unknown> | undefined,
+          );
+        }
+
         // #80: Draft flush — fire-and-forget periodic persistence for F5 recovery
         if (deps.draftStore && ownInvocationId) {
           const now = Date.now();

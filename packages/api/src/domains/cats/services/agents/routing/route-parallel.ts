@@ -402,6 +402,15 @@ export async function* routeParallel(
       arr.push(toolEvt);
       catToolEvents.set(msg.catId, arr);
     }
+
+    // F150: Fire-and-forget tool usage counter
+    if (msg.type === 'tool_use' && deps.toolUsageCounter && msg.catId) {
+      deps.toolUsageCounter.recordToolUse(
+        msg.catId as string,
+        msg.toolName ?? 'unknown',
+        msg.toolInput as Record<string, unknown> | undefined,
+      );
+    }
     if (msg.metadata && msg.catId && !catMeta.has(msg.catId)) {
       catMeta.set(msg.catId, msg.metadata);
     }

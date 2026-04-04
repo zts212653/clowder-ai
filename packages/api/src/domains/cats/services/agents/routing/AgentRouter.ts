@@ -164,6 +164,8 @@ export interface AgentRouterOptions {
   >;
   /** F129: Pack store for loading active packs at invocation time */
   packStore?: import('../../../../packs/PackStore.js').PackStore;
+  /** F150: Tool usage counter */
+  toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
 }
 
 /**
@@ -203,6 +205,8 @@ export class AgentRouter {
       >)
     | undefined;
   private packStore?: import('../../../../packs/PackStore.js').PackStore;
+  /** F150 */
+  private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
@@ -239,6 +243,7 @@ export class AgentRouter {
     this.agentPaneRegistry = options.agentPaneRegistry;
     this.signalArticleLookup = options.signalArticleLookup;
     this.packStore = options.packStore;
+    this.toolUsageCounter = options.toolUsageCounter;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -663,6 +668,7 @@ export class AgentRouter {
       ...(this.draftStore ? { draftStore: this.draftStore } : {}),
       ...(this.socketManager ? { socketManager: this.socketManager } : {}),
       ...(this.packStore ? { packStore: this.packStore } : {}),
+      ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),
     };
   }
 

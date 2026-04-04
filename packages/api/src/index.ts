@@ -164,6 +164,7 @@ import {
   threadBranchRoutes,
   threadCatsRoutes,
   threadsRoutes,
+  toolUsageRoutes,
   ttsRoutes,
   uploadsRoutes,
   usageRoutes,
@@ -816,6 +817,11 @@ async function main(): Promise<void> {
   const packStoreDir = join(findMonorepoRoot(process.cwd()), '.cat-cafe', 'packs');
   const packStore = new PackStore(packStoreDir);
 
+  // F150: Tool usage counter (fire-and-forget INCR on tool_use events)
+  const toolUsageCounter = redis
+    ? new (await import('./domains/cats/services/tool-usage/ToolUsageCounter.js')).ToolUsageCounter(redis)
+    : undefined;
+
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({
     agentRegistry,
@@ -838,6 +844,7 @@ async function main(): Promise<void> {
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
     signalArticleLookup: createSignalArticleLookup({ transcriptReader }),
     packStore,
+    ...(toolUsageCounter ? { toolUsageCounter } : {}),
   });
 
   const autoSummarizer = new AutoSummarizer({ messageStore, summaryStore });
@@ -941,6 +948,10 @@ async function main(): Promise<void> {
   await app.register(quotaRoutes);
   // F128: Daily token usage aggregation
   await app.register(usageRoutes, { invocationRecordStore });
+  // F150: Tool/Skill/MCP usage statistics
+  if (toolUsageCounter) {
+    await app.register(toolUsageRoutes, { toolUsageCounter });
+  }
   // F075 Phase B+C: Game + Achievement stores
   const { GameStore } = await import('./domains/leaderboard/game-store.js');
   const { AchievementStore } = await import('./domains/leaderboard/achievement-store.js');

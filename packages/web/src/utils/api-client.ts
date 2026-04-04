@@ -26,8 +26,7 @@ export function resolveApiUrl(): string {
   if (envUrl) {
     // Build-time default (localhost) is wrong when accessed remotely — skip and auto-detect.
     const isLocalhostDefault = /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(envUrl);
-    const isRemoteAccess =
-      location != null && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+    const isRemoteAccess = location != null && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
     if (!isLocalhostDefault || !isRemoteAccess) return envUrl;
   }
   if (typeof window === 'undefined') return 'http://localhost:3004';
