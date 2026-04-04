@@ -23,7 +23,7 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
-import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
+import { buildChildEnv, isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
@@ -283,27 +283,14 @@ export class GeminiAgentService implements AgentService {
     let spawnError: Error | null = null;
 
     try {
-      // Build minimal environment to avoid E2BIG (ARG_MAX exceeded)
-      const minimalEnv: Record<string, string | undefined> = {
-        PATH: process.env.PATH,
-        HOME: process.env.HOME,
-        USER: process.env.USER,
-        LANG: process.env.LANG,
-        LC_ALL: process.env.LC_ALL,
-      };
-      // Merge callbackEnv last to allow overrides
-      if (options.callbackEnv) {
-        for (const [key, value] of Object.entries(options.callbackEnv)) {
-          if (value !== null) {
-            minimalEnv[key] = value;
-          }
-        }
-      }
+      // Clone all env, strip bloated vars (LS_COLORS etc.) to avoid E2BIG,
+      // then merge callbackEnv overrides. Preserves API keys etc. from parent env.
+      const childEnv = buildChildEnv(options.callbackEnv);
 
       const child = this.antigravitySpawnFn('antigravity', ['chat', '--mode', 'agent', prompt], {
         detached: true,
         stdio: 'ignore',
-        env: minimalEnv as Record<string, string>,
+        env: childEnv as Record<string, string>,
       });
       // Capture async spawn errors (ENOENT etc.) that fire on next tick.
       child.on('error', (err: Error) => {

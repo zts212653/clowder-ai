@@ -47,7 +47,7 @@ const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   'LSCOLORS', // BSD/macOS equivalent
 ]);
 
-function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
+export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
   if (!overrides) return process.env;
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
