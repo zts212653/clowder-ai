@@ -12,6 +12,7 @@
 [![pnpm](https://img.shields.io/badge/pnpm-9+-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Linux.do](https://img.shields.io/badge/LINUX_DO-Discussion-blue?logo=discourse)](https://linux.do/)
 
 **English** | [中文](README.zh-CN.md)
 
