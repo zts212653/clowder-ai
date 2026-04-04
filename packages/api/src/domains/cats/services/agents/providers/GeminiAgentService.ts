@@ -23,7 +23,13 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
-import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
+import {
+  buildChildEnv,
+  isCliError,
+  isCliTimeout,
+  isLivenessWarning,
+  spawnCli,
+} from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
@@ -283,10 +289,14 @@ export class GeminiAgentService implements AgentService {
     let spawnError: Error | null = null;
 
     try {
+      // Clone all env, strip bloated vars (LS_COLORS etc.) to avoid E2BIG,
+      // then merge callbackEnv overrides. Preserves API keys etc. from parent env.
+      const childEnv = buildChildEnv(options.callbackEnv);
+
       const child = this.antigravitySpawnFn('antigravity', ['chat', '--mode', 'agent', prompt], {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, ...options.callbackEnv },
+        env: childEnv as Record<string, string>,
       });
       // Capture async spawn errors (ENOENT etc.) that fire on next tick.
       child.on('error', (err: Error) => {

@@ -477,6 +477,46 @@ describe('GeminiAgentService (antigravity adapter)', () => {
     assert.equal(spawnOpts.env.CAT_CAFE_CALLBACK_TOKEN, 'tok-2');
   });
 
+  test('preserves inherited env vars (not whitelist) — regression for v2 strip approach', async () => {
+    const prevKey = process.env.GEMINI_API_KEY;
+    const prevCustom = process.env.MY_CUSTOM_VAR;
+    process.env.GEMINI_API_KEY = 'aiza-inherited-key';
+    process.env.MY_CUSTOM_VAR = 'custom-value';
+
+    const antigravitySpawnFn = mock.fn(() => ({
+      on: mock.fn(),
+      unref: mock.fn(),
+      pid: 99999,
+    }));
+
+    const service = new GeminiAgentService({
+      adapter: 'antigravity',
+      antigravitySpawnFn,
+    });
+
+    const callbackEnv = {
+      CAT_CAFE_API_URL: 'http://localhost:3004',
+      CAT_CAFE_INVOCATION_ID: 'inv-inherit',
+      CAT_CAFE_CALLBACK_TOKEN: 'tok-inherit',
+    };
+
+    try {
+      await collect(service.invoke('test', { callbackEnv }));
+
+      const spawnOpts = antigravitySpawnFn.mock.calls[0].arguments[2];
+      // Inherited API key must be present (v1 whitelist dropped these)
+      assert.equal(spawnOpts.env.GEMINI_API_KEY, 'aiza-inherited-key');
+      assert.equal(spawnOpts.env.MY_CUSTOM_VAR, 'custom-value');
+      // callbackEnv still merged
+      assert.equal(spawnOpts.env.CAT_CAFE_INVOCATION_ID, 'inv-inherit');
+    } finally {
+      if (prevKey !== undefined) process.env.GEMINI_API_KEY = prevKey;
+      else delete process.env.GEMINI_API_KEY;
+      if (prevCustom !== undefined) process.env.MY_CUSTOM_VAR = prevCustom;
+      else delete process.env.MY_CUSTOM_VAR;
+    }
+  });
+
   test('errors when callbackEnv is missing', async () => {
     const antigravitySpawnFn = mock.fn();
 
