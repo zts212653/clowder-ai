@@ -1,5 +1,5 @@
 /**
- * Tool Classification Tests — F150
+ * Tool Classification Tests — F150 (#339)
  * classifyTool() correctly buckets tool_use events into native / mcp / skill.
  * Uses real provider output formats, not hand-written idealized strings.
  */

@@ -818,9 +818,60 @@ async function main(): Promise<void> {
   const packStore = new PackStore(packStoreDir);
 
   // F150: Tool usage counter (fire-and-forget INCR on tool_use events)
-  const toolUsageCounter = redis
-    ? new (await import('./domains/cats/services/tool-usage/ToolUsageCounter.js')).ToolUsageCounter(redis)
+  const toolUsageArchiver = redis
+    ? new (await import('./domains/cats/services/tool-usage/ToolUsageArchiver.js')).ToolUsageArchiver(
+        join(findMonorepoRoot(process.cwd()), '.cat-cafe', 'tool-usage-archive.jsonl'),
+      )
     : undefined;
+  const toolUsageCounter = redis
+    ? new (await import('./domains/cats/services/tool-usage/ToolUsageCounter.js')).ToolUsageCounter(
+        redis,
+        toolUsageArchiver,
+      )
+    : undefined;
+
+  // F150: Daily archive sweep — persist expiring Redis counters to JSONL
+  if (toolUsageCounter && toolUsageArchiver) {
+    const sweepLog = (await import('./infrastructure/logger.js')).createModuleLogger('tool-usage-sweep');
+    let sweepInFlight = false;
+    const runSweep = async () => {
+      if (sweepInFlight) return;
+      sweepInFlight = true;
+      try {
+        const archivedDates = await toolUsageArchiver.getArchivedDates();
+        // Catch-up: archive ALL unarchived dates older than 7 days (not just 85-89).
+        // Covers downtime gaps — any date still in Redis but not yet archived gets saved.
+        const now = new Date();
+        const targetDates = new Set<string>();
+        for (let offset = 7; offset <= 89; offset++) {
+          const d = new Date(now);
+          d.setDate(d.getDate() - offset);
+          const dateStr = d.toISOString().slice(0, 10);
+          if (!archivedDates.has(dateStr)) targetDates.add(dateStr);
+        }
+        if (targetDates.size === 0) return;
+        // Single SCAN for all dates, then filter client-side
+        const allEntries = await toolUsageCounter.fetchAllEntries();
+        let archived = 0;
+        for (const date of targetDates) {
+          const entries = allEntries.filter((e) => e.date === date);
+          if (entries.length > 0) {
+            archived += await toolUsageArchiver.archiveEntries(entries);
+          }
+        }
+        if (archived > 0) sweepLog.info({ archived }, 'Tool usage archive sweep completed');
+      } catch (err) {
+        sweepLog.warn({ err }, 'Tool usage archive sweep failed');
+      } finally {
+        sweepInFlight = false;
+      }
+    };
+    // First sweep 30s after startup, then daily
+    const startupTimer = setTimeout(runSweep, 30_000);
+    startupTimer.unref();
+    const dailyTimer = setInterval(runSweep, 24 * 60 * 60 * 1000);
+    dailyTimer.unref();
+  }
 
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({

@@ -1,5 +1,5 @@
 /**
- * Tool Usage Counter — F150
+ * Tool Usage Counter — F150 (#339)
  * Fire-and-forget Redis INCR for tool_use events + aggregation reader.
  */
 
@@ -37,7 +37,10 @@ export interface ToolUsageReport {
 }
 
 export class ToolUsageCounter {
-  constructor(private readonly redis: RedisClient) {}
+  constructor(
+    private readonly redis: RedisClient,
+    private readonly archiver?: { loadArchive(excludeDates?: Set<string>): Promise<ToolUsageEntry[]> },
+  ) {}
 
   /** Resolve ioredis keyPrefix (SCAN doesn't auto-apply it) */
   private get keyPrefix(): string {
@@ -73,15 +76,35 @@ export class ToolUsageCounter {
 
   /**
    * Read aggregated tool usage for a date range.
+   * Pass days=0 for all-time (Redis + archive).
    */
   async aggregate(days: number, filters?: { catId?: string; category?: ToolCategory }): Promise<ToolUsageReport> {
-    const entries = await this.scanDays(days);
+    const allTime = days <= 0;
+    // Redis always scanned (up to 90 days of hot data)
+    const redisEntries = allTime ? await this.scanAll() : await this.scanDays(days);
+
+    // For all-time, merge Redis (authoritative) + archive at entry-level granularity.
+    // Same-day keys can expire at different times, so date-level dedup would lose data.
+    let entries: ToolUsageEntry[];
+    if (allTime && this.archiver) {
+      const redisKeys = new Set(redisEntries.map((e) => `${e.date}:${e.catId}:${e.category}:${e.toolName}`));
+      const archived = await this.archiver.loadArchive();
+      const deduped = archived.filter((e) => !redisKeys.has(`${e.date}:${e.catId}:${e.category}:${e.toolName}`));
+      entries = [...deduped, ...redisEntries];
+    } else {
+      entries = redisEntries;
+    }
 
     const now = new Date();
     const to = toDateString(now.getTime());
-    const fromDate = new Date(now);
-    fromDate.setDate(fromDate.getDate() - days + 1);
-    const from = toDateString(fromDate.getTime());
+    let from: string;
+    if (allTime && entries.length > 0) {
+      from = entries.reduce((min, e) => (e.date < min ? e.date : min), entries[0].date);
+    } else {
+      const fromDate = new Date(now);
+      fromDate.setDate(fromDate.getDate() - (allTime ? 90 : days) + 1);
+      from = toDateString(fromDate.getTime());
+    }
 
     // Apply filters
     const filtered = entries.filter((e) => {
@@ -169,6 +192,34 @@ export class ToolUsageCounter {
     } while (cursor !== '0');
 
     return entries;
+  }
+
+  /** Scan all Redis keys without date filtering (for all-time queries). */
+  private async scanAll(): Promise<ToolUsageEntry[]> {
+    const scanPattern = `${this.keyPrefix}${TOOL_USAGE_SCAN_ALL}`;
+    const entries: ToolUsageEntry[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', scanPattern, 'COUNT', 500);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const strippedKeys = keys.map((k) => this.stripPrefix(k));
+        const values = await this.redis.mget(...strippedKeys);
+        for (let k = 0; k < keys.length; k++) {
+          const parsed = parseToolUsageKey(strippedKeys[k], values[k]);
+          if (parsed) entries.push(parsed);
+        }
+      }
+    } while (cursor !== '0');
+    return entries;
+  }
+
+  /**
+   * Fetch all current Redis entries (for bulk archive operations).
+   * Caller filters by date to avoid per-date full SCANs.
+   */
+  async fetchAllEntries(): Promise<ToolUsageEntry[]> {
+    return this.scanAll();
   }
 }
 

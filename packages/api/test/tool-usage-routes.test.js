@@ -1,5 +1,5 @@
 /**
- * Tool Usage Routes Tests — F150
+ * Tool Usage Routes Tests — F150 (#339)
  * GET /api/usage/tools returns aggregated tool/skill/MCP usage.
  */
 
