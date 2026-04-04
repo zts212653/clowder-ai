@@ -6,8 +6,8 @@
 
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
 /** Create isolated temp dir for each test. */
@@ -99,12 +99,16 @@ describe('ToolUsageArchiver', () => {
     const { ToolUsageArchiver } = await import('../dist/domains/cats/services/tool-usage/ToolUsageArchiver.js');
     const archiver = new ToolUsageArchiver(archivePath);
 
-    writeFileSync(archivePath, [
-      '{"date":"2026-03-20","catId":"opus","category":"native","toolName":"Read","count":10}',
-      'NOT JSON',
-      '{"date":"2026-03-21","catId":"codex","category":"mcp","toolName":"post","count":3}',
-      '',
-    ].join('\n'), 'utf-8');
+    writeFileSync(
+      archivePath,
+      [
+        '{"date":"2026-03-20","catId":"opus","category":"native","toolName":"Read","count":10}',
+        'NOT JSON',
+        '{"date":"2026-03-21","catId":"codex","category":"mcp","toolName":"post","count":3}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
 
     const loaded = await archiver.loadArchive();
     assert.equal(loaded.length, 2);
