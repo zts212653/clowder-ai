@@ -48,13 +48,13 @@ const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
 ]);
 
 export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
-  if (!overrides) return process.env;
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (ENV_VARS_TO_STRIP.has(key)) continue;
     merged[key] = value;
   }
+  if (!overrides) return merged;
   // Apply overrides (with null deletions)
   for (const [key, value] of Object.entries(overrides)) {
     if (value === null) {
