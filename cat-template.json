@@ -844,7 +844,7 @@
         {
           "id": "kimi-default",
           "provider": "kimi",
-          "defaultModel": "kimi-k2.5",
+          "defaultModel": "kimi-code/kimi-for-coding",
           "mcpSupport": true,
           "cli": {
             "command": "kimi",

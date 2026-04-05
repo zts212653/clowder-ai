@@ -159,7 +159,7 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
     },
     mentionPatterns: ['@kimi', '@moonshot', '@月之暗面'],
     provider: 'kimi',
-    defaultModel: 'kimi-k2.5',
+    defaultModel: 'kimi-code/kimi-for-coding',
     mcpSupport: true,
     breedId: 'kimi',
     roleDescription: '中文推理与长文本助手，擅长中文表达、总结与资料整理',

@@ -30,6 +30,7 @@ import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata }
 
 const log = createModuleLogger('kimi-agent');
 const DEFAULT_KIMI_BASE_URL = 'https://api.moonshot.ai/v1';
+const DEFAULT_KIMI_MODEL_ALIAS = 'kimi-code/kimi-for-coding';
 
 interface KimiAgentServiceOptions {
   catId?: CatId;
@@ -76,6 +77,30 @@ function extractTextContent(content: unknown): string | null {
 
 function resolveKimiShareDir(callbackEnv?: Record<string, string>): string {
   return callbackEnv?.KIMI_SHARE_DIR || process.env.KIMI_SHARE_DIR || resolve(homedir(), '.kimi');
+}
+
+function resolveKimiConfigPath(callbackEnv?: Record<string, string>): string {
+  const explicit = callbackEnv?.KIMI_CONFIG_FILE || process.env.KIMI_CONFIG_FILE;
+  if (explicit) return resolve(explicit);
+  return join(resolveKimiShareDir(callbackEnv), 'config.toml');
+}
+
+function resolveKimiModelAlias(model: string, callbackEnv?: Record<string, string>): string {
+  if (callbackEnv?.CAT_CAFE_KIMI_API_KEY) return model;
+  if (model.includes('/')) return model;
+
+  const configPath = resolveKimiConfigPath(callbackEnv);
+  if (existsSync(configPath)) {
+    try {
+      const raw = readFileSync(configPath, 'utf-8');
+      const match = raw.match(/^\s*default_model\s*=\s*["']([^"']+)["']/m);
+      if (match?.[1]) return match[1].trim();
+    } catch {
+      // Fall through to baked-in alias.
+    }
+  }
+
+  return DEFAULT_KIMI_MODEL_ALIAS;
 }
 
 function readKimiSessionId(workingDirectory: string, callbackEnv?: Record<string, string>): string | undefined {
@@ -136,7 +161,8 @@ export class KimiAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
-    const effectiveModel = options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? this.model;
+    const requestedModel = options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? this.model;
+    const effectiveModel = resolveKimiModelAlias(requestedModel, options?.callbackEnv);
     const metadata: MessageMetadata = { provider: 'kimi', model: effectiveModel };
     const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
     const workingDirectory = options?.workingDirectory ?? process.cwd();

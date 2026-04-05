@@ -288,7 +288,7 @@ export class CodexAgentService implements AgentService {
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
     // 注意：旧 session resume 时沿用创建时的沙箱参数，不会带 --add-dir。
     // 这是预期行为——新建会话即可获得 .git 写入权限。
-    const promptArgs = ['--', effectivePrompt];
+    const promptArgs = this.cliCommand === 'omx' ? [effectivePrompt] : ['--', effectivePrompt];
 
     const args: string[] = options?.sessionId
       ? [

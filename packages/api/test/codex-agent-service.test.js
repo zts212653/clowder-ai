@@ -144,6 +144,7 @@ test('supports omx as a Codex-family CLI command', async () => {
   assert.match(command, /(^|\/)omx$/);
   assert.equal(args[0], 'exec');
   assert.ok(args.includes('--json'));
+  assert.ok(!args.includes('--'), 'omx should receive prompt without codex-style arg separator');
 });
 
 test('injects cat-cafe MCP config when workingDirectory contains mcp-server', async () => {

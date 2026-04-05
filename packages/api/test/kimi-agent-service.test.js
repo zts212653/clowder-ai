@@ -148,3 +148,32 @@ test('uses --session for resume and emits session_init immediately', async () =>
   assert.ok(sessionFlagIndex >= 0);
   assert.equal(args[sessionFlagIndex + 1], 'resume-kimi-456');
 });
+
+test('maps bare oauth kimi model names to configured model alias', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-config-share-'));
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+
+  try {
+    writeFileSync(
+      join(shareDir, 'config.toml'),
+      'default_model = "kimi-code/kimi-for-coding"\n',
+      'utf8',
+    );
+    const promise = collect(
+      service.invoke('Hello', {
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const modelFlagIndex = args.indexOf('--model');
+    assert.ok(modelFlagIndex >= 0);
+    assert.equal(args[modelFlagIndex + 1], 'kimi-code/kimi-for-coding');
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
