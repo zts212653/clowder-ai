@@ -115,13 +115,11 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
     assert.equal(msgs[2].type, 'tool_use');
     assert.equal(msgs[2].toolName, 'Shell');
     assert.deepEqual(msgs[2].toolInput, { command: 'ls' });
-    assert.equal(msgs[3].type, 'system_info');
-    assert.match(msgs[3].content, /provider_capability/);
-    assert.equal(msgs[4].type, 'text');
-    assert.equal(msgs[4].content, '已经完成。');
-    assert.equal(msgs[5].type, 'session_init');
-    assert.equal(msgs[5].sessionId, 'kimi-session-123');
-    assert.equal(msgs[6].type, 'done');
+    assert.equal(msgs[3].type, 'text');
+    assert.equal(msgs[3].content, '已经完成。');
+    assert.equal(msgs[4].type, 'session_init');
+    assert.equal(msgs[4].sessionId, 'kimi-session-123');
+    assert.equal(msgs[5].type, 'done');
 
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.ok(args.includes('--print'));
@@ -145,10 +143,10 @@ test('uses --session for resume and emits session_init immediately', async () =>
 
   assert.equal(msgs[0].type, 'session_init');
   assert.equal(msgs[0].sessionId, 'resume-kimi-456');
-  assert.equal(msgs[1].type, 'system_info');
-  assert.match(msgs[1].content, /provider_capability/);
-  assert.equal(msgs[2].type, 'text');
-  assert.equal(msgs[2].content, 'Resumed Kimi.');
+  assert.equal(msgs[1].type, 'text');
+  assert.equal(msgs[1].content, 'Resumed Kimi.');
+  assert.equal(msgs[2].type, 'system_info');
+  assert.match(msgs[2].content, /provider_capability/);
 
   const args = spawnFn.mock.calls[0].arguments[1];
   const sessionFlagIndex = args.indexOf('--session');
@@ -428,6 +426,32 @@ test('enables thinking mode, parses think blocks, and grants image directories t
     rmSync(shareDir, { recursive: true, force: true });
     rmSync(uploadDir, { recursive: true, force: true });
   }
+});
+
+test('does not emit thinking unavailable if a later assistant event includes thinking', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    { role: 'assistant', content: '先准备一下。' },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'think', think: '这里才给出真正的思考内容。' },
+        { type: 'text', text: '最终回答。' },
+      ],
+    },
+  ]);
+
+  const msgs = await promise;
+  const capabilityUnavailable = msgs.find(
+    (msg) => msg.type === 'system_info' && /provider_capability/.test(msg.content) && /thinking/.test(msg.content),
+  );
+  const thinkingEvent = msgs.find((msg) => msg.type === 'system_info' && /"type":"thinking"/.test(msg.content));
+  assert.equal(capabilityUnavailable, undefined);
+  assert.ok(thinkingEvent, 'should emit a thinking event once think content appears later in the stream');
 });
 
 test('extracts session id from non-json resume hint lines in print mode', async () => {

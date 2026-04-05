@@ -341,7 +341,7 @@ export class KimiAgentService implements AgentService {
       }
 
       let emittedSessionInit = Boolean(options?.sessionId);
-      let emittedThinkingUnavailable = false;
+      let sawThinking = false;
       let emittedImageCapability = false;
       const cliOpts = {
         command: kimiCommand,
@@ -462,27 +462,11 @@ export class KimiAgentService implements AgentService {
 
         const thinking = extractThinkingContent(msg);
         if (thinking) {
+          sawThinking = true;
           yield {
             type: 'system_info',
             catId: this.catId,
             content: JSON.stringify({ type: 'thinking', catId: this.catId, text: thinking }),
-            metadata,
-            timestamp: Date.now(),
-          };
-        } else if (!emittedThinkingUnavailable) {
-          emittedThinkingUnavailable = true;
-          yield {
-            type: 'system_info',
-            catId: this.catId,
-            content: JSON.stringify({
-              type: 'provider_capability',
-              capability: 'thinking',
-              status: 'unavailable',
-              provider: 'kimi',
-              reason: supportsThinking
-                ? 'kimi-cli 本次流式输出未提供可解析的 think/reasoning 内容'
-                : '当前 Kimi 模型能力未声明 thinking，已按普通回答处理',
-            }),
             metadata,
             timestamp: Date.now(),
           };
@@ -551,6 +535,24 @@ export class KimiAgentService implements AgentService {
             timestamp: Date.now(),
           };
         }
+      }
+
+      if (!sawThinking) {
+        yield {
+          type: 'system_info',
+          catId: this.catId,
+          content: JSON.stringify({
+            type: 'provider_capability',
+            capability: 'thinking',
+            status: 'unavailable',
+            provider: 'kimi',
+            reason: supportsThinking
+              ? 'kimi-cli 本次流式输出未提供可解析的 think/reasoning 内容'
+              : '当前 Kimi 模型能力未声明 thinking，已按普通回答处理',
+          }),
+          metadata,
+          timestamp: Date.now(),
+        };
       }
 
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
