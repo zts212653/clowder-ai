@@ -83,6 +83,34 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(result, ['opus']);
   });
 
+  it('routes line-start @mention after markdown numbered-list prefix', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '1. @codex 帮忙看下这个实现';
+    const result = parseA2AMentions(text, 'kimi');
+    assert.deepEqual(result, ['codex']);
+  });
+
+  it('routes line-start @mention after markdown bullet prefix', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '- @codex please review this patch';
+    const result = parseA2AMentions(text, 'opus');
+    assert.deepEqual(result, ['codex']);
+  });
+
+  it('routes line-start @mention after markdown quote prefix', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '> @gemini 看下这个视觉方案';
+    const result = parseA2AMentions(text, 'codex');
+    assert.deepEqual(result, ['gemini']);
+  });
+
+  it('matches markdown-style .md suffix handles emitted by Kimi', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '@KIMI.md 这个给你继续';
+    const result = parseA2AMentions(text, 'opus');
+    assert.deepEqual(result, ['kimi']);
+  });
+
   it('analyzeA2AMentions returns empty suppressed (no suppression system)', async () => {
     const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const result = analyzeA2AMentions('@布偶猫', 'codex');

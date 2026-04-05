@@ -26,6 +26,7 @@ const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】�
 // If the next char looks like part of a handle token, treat it as NOT a boundary.
 // This avoids prefix-matching `@opus-45` as `@opus`, while still allowing `@opus请看`.
 const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
+const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
 
 interface MentionPatternEntry {
   readonly catId: CatId;
@@ -98,7 +99,7 @@ export function analyzeA2AMentions(
     if (found.length >= MAX_A2A_MENTION_TARGETS) break; // 5. Safety limit
 
     const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
-    const normalized = rawLine.slice(leadingWs).toLowerCase();
+    const normalized = rawLine.slice(leadingWs).toLowerCase().replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
     if (!normalized.startsWith('@')) {
       continue;
     }
