@@ -16,7 +16,7 @@
  *   读取当前 working directory 的 last_session_id 并补发 session_init。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fs, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
@@ -66,7 +66,10 @@ interface KimiPrintMessage {
 interface KimiModelConfigInfo {
   readonly defaultThinking: boolean;
   readonly capabilities: readonly string[];
+  readonly maxContextSize?: number;
 }
+
+const KIMI_CONTEXT_TAIL_BYTES = 64 * 1024;
 
 function parseToolArguments(raw: unknown): Record<string, unknown> {
   if (typeof raw !== 'string' || raw.trim().length === 0) return {};
@@ -174,7 +177,11 @@ function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string
     modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? ['thinking', 'image_in', 'video_in'] : [];
   const configPath = resolveKimiConfigPath(callbackEnv);
   if (!existsSync(configPath)) {
-    return { defaultThinking: fallbackCapabilities.includes('thinking'), capabilities: [...fallbackCapabilities] };
+    return {
+      defaultThinking: fallbackCapabilities.includes('thinking'),
+      capabilities: [...fallbackCapabilities],
+      ...(modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? { maxContextSize: 262_144 } : {}),
+    };
   }
 
   try {
@@ -183,10 +190,12 @@ function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string
     const sectionHeader = `[models."${modelAlias}"]`;
     const sectionStart = raw.indexOf(sectionHeader);
     let capabilities: string[] = [...fallbackCapabilities];
+    let maxContextSize: number | undefined = modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? 262_144 : undefined;
     if (sectionStart >= 0) {
       const nextSection = raw.indexOf('\n[', sectionStart + sectionHeader.length);
       const section = raw.slice(sectionStart, nextSection >= 0 ? nextSection : undefined);
       const capsMatch = section.match(/^\s*capabilities\s*=\s*\[([^\]]*)\]/m);
+      const maxContextMatch = section.match(/^\s*max_context_size\s*=\s*(\d+)\s*$/m);
       if (capsMatch?.[1]) {
         capabilities = Array.from(
           new Set(
@@ -197,6 +206,10 @@ function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string
           ),
         );
       }
+      if (maxContextMatch?.[1]) {
+        const parsed = Number.parseInt(maxContextMatch[1], 10);
+        if (Number.isFinite(parsed) && parsed > 0) maxContextSize = parsed;
+      }
     }
     return {
       defaultThinking:
@@ -204,9 +217,14 @@ function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string
         capabilities.includes('thinking') ||
         fallbackCapabilities.includes('thinking'),
       capabilities,
+      ...(maxContextSize ? { maxContextSize } : {}),
     };
   } catch {
-    return { defaultThinking: fallbackCapabilities.includes('thinking'), capabilities: [...fallbackCapabilities] };
+    return {
+      defaultThinking: fallbackCapabilities.includes('thinking'),
+      capabilities: [...fallbackCapabilities],
+      ...(modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? { maxContextSize: 262_144 } : {}),
+    };
   }
 }
 
@@ -249,6 +267,73 @@ function buildProjectMcpArgs(workingDirectory?: string): string[] {
   if (!workingDirectory) return [];
   const mcpConfigPath = join(workingDirectory, '.kimi', 'mcp.json');
   return existsSync(mcpConfigPath) ? ['--mcp-config-file', mcpConfigPath] : [];
+}
+
+async function readTailUtf8(filePath: string, maxBytes: number): Promise<string> {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const stat = await handle.stat();
+    const readBytes = Math.min(stat.size, maxBytes);
+    if (readBytes <= 0) return '';
+    const buffer = Buffer.alloc(readBytes);
+    await handle.read(buffer, 0, readBytes, stat.size - readBytes);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+async function findKimiSessionContextFile(shareDir: string, sessionId: string): Promise<string | null> {
+  const sessionsRoot = join(shareDir, 'sessions');
+  const stack: string[] = [sessionsRoot];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    if (!dir) break;
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true, encoding: 'utf8' });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === sessionId) {
+          const contextFile = join(abs, 'context.jsonl');
+          try {
+            await fs.access(contextFile);
+            return contextFile;
+          } catch {
+            return null;
+          }
+        }
+        stack.push(abs);
+      }
+    }
+  }
+  return null;
+}
+
+async function readKimiContextUsedTokens(
+  sessionId: string,
+  callbackEnv?: Record<string, string>,
+): Promise<number | undefined> {
+  const contextFile = await findKimiSessionContextFile(resolveKimiShareDir(callbackEnv), sessionId);
+  if (!contextFile) return undefined;
+  const tail = await readTailUtf8(contextFile, KIMI_CONTEXT_TAIL_BYTES);
+  if (!tail) return undefined;
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]?.trim();
+    if (!line) continue;
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      if (parsed.role === '_usage' && typeof parsed.token_count === 'number' && Number.isFinite(parsed.token_count)) {
+        return parsed.token_count;
+      }
+    } catch {}
+  }
+  return undefined;
 }
 
 function buildApiKeyEnv(model: string, callbackEnv?: Record<string, string>): Record<string, string> | null {
@@ -534,6 +619,22 @@ export class KimiAgentService implements AgentService {
             metadata: { ...metadata, sessionId: inferredSessionId },
             timestamp: Date.now(),
           };
+        }
+      }
+
+      if (metadata.sessionId && modelConfig.maxContextSize != null) {
+        try {
+          const contextUsedTokens = await readKimiContextUsedTokens(metadata.sessionId, options?.callbackEnv);
+          if (contextUsedTokens != null) {
+            metadata.usage = {
+              ...(metadata.usage ?? {}),
+              contextUsedTokens,
+              contextWindowSize: modelConfig.maxContextSize,
+              lastTurnInputTokens: contextUsedTokens,
+            };
+          }
+        } catch {
+          // best-effort snapshot enrichment only
         }
       }
 

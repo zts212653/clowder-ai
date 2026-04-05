@@ -496,3 +496,49 @@ test('captures usage and session id from kimi stream events when available', asy
   assert.equal(text?.metadata?.usage?.outputTokens, 34);
   assert.equal(text?.metadata?.usage?.totalTokens, 46);
 });
+
+test('enriches done metadata with local Kimi context snapshot for session-chain health', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-context-share-'));
+  const sessionId = 'kimi-context-session';
+  const sessionDir = join(shareDir, 'sessions', 'project-hash', sessionId);
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(
+    join(shareDir, 'config.toml'),
+    [
+      'default_model = "kimi-code/kimi-for-coding"',
+      '',
+      '[models."kimi-code/kimi-for-coding"]',
+      'max_context_size = 262144',
+      'capabilities = ["thinking", "image_in"]',
+    ].join('\n'),
+    'utf8',
+  );
+  writeFileSync(
+    join(sessionDir, 'context.jsonl'),
+    ['{"role":"user","content":"hi"}', '{"role":"_usage","token_count":6335}'].join('\n'),
+    'utf8',
+  );
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  try {
+    const promise = collect(
+      service.invoke('Hello', {
+        sessionId,
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    const msgs = await promise;
+    const done = msgs.find((msg) => msg.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(done.metadata.usage.contextUsedTokens, 6335);
+    assert.equal(done.metadata.usage.contextWindowSize, 262144);
+    assert.equal(done.metadata.usage.lastTurnInputTokens, 6335);
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
