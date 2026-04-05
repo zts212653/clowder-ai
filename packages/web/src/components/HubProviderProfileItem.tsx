@@ -103,7 +103,9 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
           {profile.authType === 'api_key' ? (
             <>
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-[#8A776B]">{isKimiConfigProfile(profile) ? 'CLI 配置协议' : 'API 协议'}</p>
+                <p className="text-xs font-semibold text-[#8A776B]">
+                  {isKimiConfigProfile(profile) ? 'CLI 配置协议' : 'API 协议'}
+                </p>
                 <select
                   value={editProtocol}
                   onChange={(e) => setEditProtocol(e.target.value)}
@@ -119,7 +121,11 @@ export function HubProviderProfileItem({ profile, busy, onSave, onDelete }: HubP
               <input
                 value={editBaseUrl}
                 onChange={(e) => setEditBaseUrl(e.target.value)}
-                placeholder={isKimiConfigProfile(profile) ? 'CLI 服务地址，如 https://api.moonshot.ai/v1' : 'API 服务地址，如 https://api.example.com/v1'}
+                placeholder={
+                  isKimiConfigProfile(profile)
+                    ? 'CLI 服务地址，如 https://api.moonshot.ai/v1'
+                    : 'API 服务地址，如 https://api.example.com/v1'
+                }
                 className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
               />
               <div className="relative">

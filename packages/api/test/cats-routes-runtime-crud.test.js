@@ -381,7 +381,6 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       });
       assert.equal(kimiRes.statusCode, 201);
 
-
       const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
       const breeds = catalog.breeds;
       const kimiVariant = breeds.find((breed) => breed.catId === 'runtime-kimi')?.variants?.[0];
@@ -389,7 +388,6 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       assert.equal(kimiVariant.provider, 'kimi');
       assert.deepEqual(kimiVariant.cli, { command: 'kimi', outputFormat: 'stream-json' });
       assert.equal(kimiVariant.accountRef, 'kimi');
-
     } finally {
       await app.close();
     }

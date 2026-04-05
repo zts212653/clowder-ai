@@ -196,7 +196,6 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile, null);
   });
 
-
   it('resolveForClient returns the account when only one matches protocol', async () => {
     const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-9`);
     await writeCatalog({

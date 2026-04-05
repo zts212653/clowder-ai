@@ -16,9 +16,9 @@ vi.mock('@/components/useConfirm', () => ({
 import { HubCatEditor } from '@/components/HubCatEditor';
 import {
   buildCatPayload,
+  builtinAccountIdForClient,
   CLIENT_OPTIONS,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
-  builtinAccountIdForClient,
   filterProfiles,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
@@ -942,7 +942,9 @@ describe('HubCatEditor', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }));
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
     });
     await flushEffects();
 
@@ -951,7 +953,9 @@ describe('HubCatEditor', () => {
 
     expect(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').value).toBe('kimi-k2.5');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存修改');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存修改',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

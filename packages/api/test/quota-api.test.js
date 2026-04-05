@@ -91,17 +91,19 @@ describe('GET /api/quota/probes', () => {
     delete process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
     const app = await buildApp();
     try {
+      const quotaModule = await import('../dist/routes/quota.js');
+      quotaModule.setKimiCliProbeOverrideForTests?.(async () => []);
       const res = await app.inject({ method: 'GET', url: '/api/quota/probes' });
       assert.equal(res.statusCode, 200);
       const body = res.json();
       assert.equal(Array.isArray(body.probes), true);
       const official = body.probes.find((probe) => probe.id === 'official-browser');
-      const kimi = body.probes.find((probe) => probe.id === 'kimi-official-web');
+      const kimi = body.probes.find((probe) => probe.id === 'kimi-cli');
       assert.equal(official?.enabled, false);
       assert.equal(official?.status, 'disabled');
       assert.ok(kimi, 'should expose kimi probe');
       assert.deepEqual(kimi?.targets, ['kimi']);
-      assert.deepEqual(official?.targets, ['codex', 'claude', 'kimi']);
+      assert.deepEqual(official?.targets, ['codex', 'claude']);
       assert.equal(official?.actions?.[0]?.path, '/api/quota/refresh/official');
       assert.equal(official?.actions?.[0]?.requiresInteractive, false);
       assert.match(official?.reason ?? '', /disabled by default/i);
@@ -112,13 +114,14 @@ describe('GET /api/quota/probes', () => {
     }
   });
 
-
   it('exposes a manual refresh action for Kimi official quota', async () => {
     const app = await buildApp();
     try {
+      const quotaModule = await import('../dist/routes/quota.js');
+      quotaModule.setKimiCliProbeOverrideForTests?.(async () => []);
       const res = await app.inject({ method: 'GET', url: '/api/quota/probes' });
       const body = res.json();
-      const kimi = body.probes.find((probe) => probe.id === 'kimi-official-web');
+      const kimi = body.probes.find((probe) => probe.id === 'kimi-cli');
       assert.equal(kimi?.actions?.[0]?.path, '/api/quota/refresh/kimi');
       assert.equal(kimi?.actions?.[0]?.requiresInteractive, false);
     } finally {
@@ -141,6 +144,23 @@ describe('GET /api/quota/probes', () => {
     } finally {
       if (oldEnabled != null) process.env.QUOTA_OFFICIAL_REFRESH_ENABLED = oldEnabled;
       else delete process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
+      await app.close();
+    }
+  });
+
+  it('marks kimi-cli status=error when Kimi is refreshable but no quota data has been loaded yet', async () => {
+    const app = await buildApp();
+    try {
+      const quotaModule = await import('../dist/routes/quota.js');
+      quotaModule.setKimiCliProbeOverrideForTests?.(async () => []);
+      const res = await app.inject({ method: 'GET', url: '/api/quota/probes' });
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      const kimi = body.probes.find((probe) => probe.id === 'kimi-cli');
+      assert.equal(kimi?.enabled, true);
+      assert.equal(kimi?.status, 'error');
+      assert.match(kimi?.reason ?? '', /暂无 Kimi CLI 额度数据|Kimi/i);
+    } finally {
       await app.close();
     }
   });
@@ -192,7 +212,7 @@ describe('GET /api/quota/summary', () => {
       assert.equal(body.platforms.codex.label, '缅因猫 (Codex + GPT-5.2)');
       assert.equal(typeof body.platforms.codex.displayPercent, 'number');
       assert.equal(typeof body.probes.official.status, 'string');
-      assert.equal(typeof body.probes.kimiOfficial.status, 'string');
+      assert.equal(typeof body.probes.kimi.status, 'string');
       assert.equal(typeof body.actions.refreshOfficialPath, 'string');
     } finally {
       if (oldEnabled != null) process.env.QUOTA_OFFICIAL_REFRESH_ENABLED = oldEnabled;
@@ -201,37 +221,40 @@ describe('GET /api/quota/summary', () => {
     }
   });
 
-
-  it('includes Kimi utilization in summary risk calculations', async () => {
-    const oldEnabled = process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
-    const oldToken = process.env.KIMI_AUTH_TOKEN;
-    const previousFetch = globalThis.fetch;
-    process.env.QUOTA_OFFICIAL_REFRESH_ENABLED = '1';
-    process.env.KIMI_AUTH_TOKEN = 'header.payload.signature';
-    globalThis.fetch = async (url) => {
-      if (String(url).includes('kimi.gateway.billing')) {
-        return new Response(JSON.stringify(MOCK_KIMI_USAGE_RESPONSE), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      return new Response('{}', { status: 404 });
-    };
+  it('surfaces the same non-ok Kimi probe status through /api/quota/summary', async () => {
     const app = await buildApp();
     try {
+      const quotaModule = await import('../dist/routes/quota.js');
+      quotaModule.setKimiCliProbeOverrideForTests?.(async () => []);
+      const res = await app.inject({ method: 'GET', url: '/api/quota/summary' });
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.equal(body.probes.kimi.enabled, true);
+      assert.equal(body.probes.kimi.status, 'error');
+      assert.match(body.probes.kimi.reason ?? '', /暂无 Kimi CLI 额度数据|Kimi/i);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('includes Kimi utilization in summary risk calculations', async () => {
+    const app = await buildApp();
+    try {
+      const quotaModule = await import('../dist/routes/quota.js');
+      quotaModule.setKimiCliProbeOverrideForTests?.(async () => [
+        { label: '每周使用限额', usedPercent: 97, percentKind: 'used', poolId: 'kimi-weekly' },
+      ]);
       await app.inject({ method: 'POST', url: '/api/quota/refresh/kimi' });
       const res = await app.inject({ method: 'GET', url: '/api/quota/summary' });
       const body = res.json();
       assert.equal(body.platforms.kimi.status, 'error');
       assert.equal(body.risk.level, 'high');
-      assert.equal(body.risk.reasons.some((reason) => /97%/.test(String(reason))), true);
+      assert.equal(
+        body.risk.reasons.some((reason) => /97%/.test(String(reason))),
+        true,
+      );
       assert.equal(body.actions.refreshKimiPath, '/api/quota/refresh/kimi');
     } finally {
-      if (oldEnabled != null) process.env.QUOTA_OFFICIAL_REFRESH_ENABLED = oldEnabled;
-      else delete process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
-      if (oldToken != null) process.env.KIMI_AUTH_TOKEN = oldToken;
-      else delete process.env.KIMI_AUTH_TOKEN;
-      globalThis.fetch = previousFetch;
       await app.close();
     }
   });
@@ -552,14 +575,34 @@ describe('PATCH /api/quota/antigravity', () => {
   });
 });
 
-
 describe('POST /api/quota/refresh/kimi', () => {
-  it('refreshes Kimi official usage on demand', async () => {
-    const oldEnabled = process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
+  it('refreshes Kimi quota through the CLI by default', async () => {
+    const app = await buildApp();
+    try {
+      const quotaModule = await import('../dist/routes/quota.js');
+      quotaModule.setKimiCliProbeOverrideForTests?.(async () => [
+        { label: '每周使用限额', usedPercent: 97, percentKind: 'remaining', poolId: 'kimi-weekly' },
+        { label: '5小时使用限额', usedPercent: 76, percentKind: 'remaining', poolId: 'kimi-rate-limit' },
+      ]);
+      const res = await app.inject({ method: 'POST', url: '/api/quota/refresh/kimi' });
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.equal(body.kimi.status, 'ok');
+      assert.equal(body.source, 'cli');
+      assert.equal(body.fallbackUsed, false);
+      assert.equal(body.kimi.usageItems[0].label, '每周使用限额');
+      assert.equal(body.kimi.usageItems[0].usedPercent, 97);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('falls back to the Kimi API only when env-gated fallback is enabled', async () => {
     const oldToken = process.env.KIMI_AUTH_TOKEN;
+    const oldFallback = process.env.KIMI_QUOTA_API_FALLBACK_ENABLED;
     const previousFetch = globalThis.fetch;
-    process.env.QUOTA_OFFICIAL_REFRESH_ENABLED = '1';
     process.env.KIMI_AUTH_TOKEN = 'header.payload.signature';
+    process.env.KIMI_QUOTA_API_FALLBACK_ENABLED = '1';
     globalThis.fetch = async (url) => {
       if (String(url).includes('kimi.gateway.billing')) {
         return new Response(JSON.stringify(MOCK_KIMI_USAGE_RESPONSE), {
@@ -571,17 +614,22 @@ describe('POST /api/quota/refresh/kimi', () => {
     };
     const app = await buildApp();
     try {
+      const quotaModule = await import('../dist/routes/quota.js');
+      quotaModule.setKimiCliProbeOverrideForTests?.(async () => {
+        throw new Error('mock kimi cli failure');
+      });
       const res = await app.inject({ method: 'POST', url: '/api/quota/refresh/kimi' });
       assert.equal(res.statusCode, 200);
       const body = res.json();
+      assert.equal(body.source, 'api');
+      assert.equal(body.fallbackUsed, true);
       assert.equal(body.kimi.status, 'ok');
-      assert.equal(body.kimi.usageItems[0].label, '每周使用限额');
-      assert.equal(body.kimi.usageItems[0].usedPercent, 97);
+      assert.match(body.kimi.note ?? '', /降级到 Kimi API/);
     } finally {
-      if (oldEnabled != null) process.env.QUOTA_OFFICIAL_REFRESH_ENABLED = oldEnabled;
-      else delete process.env.QUOTA_OFFICIAL_REFRESH_ENABLED;
       if (oldToken != null) process.env.KIMI_AUTH_TOKEN = oldToken;
       else delete process.env.KIMI_AUTH_TOKEN;
+      if (oldFallback != null) process.env.KIMI_QUOTA_API_FALLBACK_ENABLED = oldFallback;
+      else delete process.env.KIMI_QUOTA_API_FALLBACK_ENABLED;
       globalThis.fetch = previousFetch;
       await app.close();
     }
@@ -779,7 +827,24 @@ describe('Codex Wham API parser (v3)', () => {
   });
 });
 
-describe('Kimi official usage parser', () => {
+describe('Kimi usage parsers', () => {
+  it('parses weekly and 5-hour quotas from Kimi CLI /usage output', async () => {
+    const { parseKimiCliUsageOutput } = await import('../dist/routes/quota.js');
+    const items = parseKimiCliUsageOutput(`
+╭─────────────────────────────── API Usage ───────────────────────────────╮
+│  Weekly limit  ━━━━━━━━━━━━━━━━━━━━  100% left  (resets in 6d 23h 22m)  │
+│  5h limit      ━━━━━━━━━━━━━━━━━━━━  75% left   (resets in 4h 22m)      │
+╰─────────────────────────────────────────────────────────────────────────╯
+`);
+    assert.deepEqual(
+      items.map((item) => [item.label, item.usedPercent, item.percentKind, item.poolId]),
+      [
+        ['每周使用限额', 100, 'remaining', 'kimi-weekly'],
+        ['5小时使用限额', 75, 'remaining', 'kimi-rate-limit'],
+      ],
+    );
+  });
+
   it('parses weekly and 5-hour windows from Kimi billing response', async () => {
     const { parseKimiOfficialUsageResponse } = await import('../dist/routes/quota.js');
     const items = parseKimiOfficialUsageResponse(MOCK_KIMI_USAGE_RESPONSE);

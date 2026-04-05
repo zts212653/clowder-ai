@@ -130,7 +130,6 @@ test('uses exec resume when sessionId is provided', async () => {
   assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
 });
 
-
 test('injects cat-cafe MCP config when workingDirectory contains mcp-server', async () => {
   const tmpRoot = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-mcp-test-'));
   const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');

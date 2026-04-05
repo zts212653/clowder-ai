@@ -163,11 +163,7 @@ test('maps bare oauth kimi model names to configured model alias', async () => {
   const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
 
   try {
-    writeFileSync(
-      join(shareDir, 'config.toml'),
-      'default_model = "kimi-code/kimi-for-coding"\n',
-      'utf8',
-    );
+    writeFileSync(join(shareDir, 'config.toml'), 'default_model = "kimi-code/kimi-for-coding"\n', 'utf8');
     const promise = collect(
       service.invoke('Hello', {
         callbackEnv: { KIMI_SHARE_DIR: shareDir },
@@ -436,7 +432,10 @@ test('enables thinking mode, parses think blocks, and grants image directories t
 
 test('extracts session id from non-json resume hint lines in print mode', async () => {
   async function* spawnCliOverride() {
-    yield { line: 'To resume this session: kimi -r ab5188ae-f3e8-4f72-baec-48a53c665e9a', error: 'Failed to parse JSON line' };
+    yield {
+      line: 'To resume this session: kimi -r ab5188ae-f3e8-4f72-baec-48a53c665e9a',
+      error: 'Failed to parse JSON line',
+    };
     yield { role: 'assistant', content: 'done' };
   }
 

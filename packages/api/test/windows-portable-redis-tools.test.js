@@ -220,7 +220,11 @@ test('Windows installer masks provider API key prompts instead of echoing secret
   assert.match(helpersScript, /ZeroFreeBSTR/);
 
   const apiPromptMatches = helpersScript.match(/\$apiKey = Read-InstallerSecret " {4}API Key"/g) ?? [];
-  assert.equal(apiPromptMatches.length, 4, 'expected Claude, Codex, Gemini, and Kimi API key prompts to use masked input');
+  assert.equal(
+    apiPromptMatches.length,
+    4,
+    'expected Claude, Codex, Gemini, and Kimi API key prompts to use masked input',
+  );
   assert.doesNotMatch(helpersScript, /\$apiKey = Read-Host " {4}API Key"/);
 });
 

@@ -7,8 +7,8 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { aggregateStandup } from '../domains/cats/services/standup-aggregator.js';
+import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface StandupRoutesOptions {

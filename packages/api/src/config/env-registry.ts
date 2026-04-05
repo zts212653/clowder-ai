@@ -939,12 +939,30 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'KIMI_CONFIG_FILE',
+    defaultValue: '~/.kimi/config.toml',
+    description: '官方 kimi-cli 配置文件路径（覆盖默认 ~/.kimi/config.toml）',
+    category: 'kimi',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'KIMI_AUTH_TOKEN',
     defaultValue: '(未设置)',
     description: 'Kimi 官方额度抓取用的 kimi-auth token（来自 kimi.com）',
     category: 'quota',
     sensitive: true,
     hubVisible: false,
+  },
+  {
+    name: 'KIMI_QUOTA_API_FALLBACK_ENABLED',
+    defaultValue: '0（默认关闭）',
+    description: '设为 1 允许 Kimi 额度在 CLI /usage 失败时降级到 API（仍需 KIMI_AUTH_TOKEN）',
+    category: 'quota',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
   },
 
   // --- tts ---

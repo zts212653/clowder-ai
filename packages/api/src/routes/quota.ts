@@ -5,7 +5,8 @@
  * 1. Claude: Anthropic OAuth API（/api/oauth/usage）+ ccusage CLI fallback
  * 2. Codex: OpenAI Wham API（/backend-api/wham/usage）+ PATCH 推送 fallback
  * 3. Gemini: Google internal API + PATCH 推送 fallback
- * 4. Antigravity: 本地 Language Server RPC + PATCH 推送 fallback
+ * 4. Kimi: CLI `/usage` 默认探测 + env-gated API fallback
+ * 5. Antigravity: 本地 Language Server RPC + PATCH 推送 fallback
  *
  * 硬约束：看板值 = 官方 API 值，不二次换算。获取失败显示"获取失败"。
  */
@@ -16,7 +17,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
+import * as pty from 'node-pty';
 import { z } from 'zod';
+import { resolveCliCommand } from '../utils/cli-resolve.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -109,7 +112,7 @@ export interface QuotaProbeAction {
 }
 
 export interface QuotaProbeDescriptor {
-  id: 'claude-cli' | 'official-browser' | 'kimi-official-web' | 'antigravity-placeholder';
+  id: 'claude-cli' | 'official-browser' | 'kimi-cli' | 'antigravity-placeholder';
   sourceKind: 'cli' | 'browser' | 'placeholder';
   refreshMode: 'manual' | 'scheduled';
   enabled: boolean;
@@ -148,7 +151,7 @@ export interface QuotaSummaryResponse {
   probes: {
     official: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
     claudeCli: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
-    kimiOfficial: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
+    kimi: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
   };
   actions: {
     refreshOfficialPath: '/api/quota/refresh/official';
@@ -190,7 +193,7 @@ function createInitialKimiCache(): KimiQuota {
     usageItems: [],
     lastChecked: null,
     status: 'unavailable',
-    note: '暂无 Kimi 官方额度数据，请先手动获取。',
+    note: '暂无 Kimi CLI 额度数据，请先手动刷新。',
   };
 }
 
@@ -207,6 +210,7 @@ let codexCache: CodexQuota = createInitialCodexCache();
 let geminiCache: GeminiQuota = createInitialGeminiCache();
 let kimiCache: KimiQuota = createInitialKimiCache();
 let antigravityCache: AntigravityQuota = createInitialAntigravityCache();
+let kimiCliProbeOverrideForTests: ((env?: NodeJS.ProcessEnv) => Promise<CodexUsageItem[]>) | null = null;
 
 export function resetQuotaCachesForTests(): void {
   claudeCache = createInitialClaudeCache();
@@ -214,11 +218,22 @@ export function resetQuotaCachesForTests(): void {
   geminiCache = createInitialGeminiCache();
   kimiCache = createInitialKimiCache();
   antigravityCache = createInitialAntigravityCache();
+  kimiCliProbeOverrideForTests = null;
+}
+
+export function setKimiCliProbeOverrideForTests(
+  override: ((env?: NodeJS.ProcessEnv) => Promise<CodexUsageItem[]>) | null,
+): void {
+  kimiCliProbeOverrideForTests = override;
 }
 
 const OFFICIAL_REFRESH_ENABLED_ENV = 'QUOTA_OFFICIAL_REFRESH_ENABLED';
 const CLAUDE_CREDENTIALS_PATH_ENV = 'CLAUDE_CREDENTIALS_PATH';
 const CODEX_CREDENTIALS_PATH_ENV = 'CODEX_CREDENTIALS_PATH';
+const KIMI_AUTH_TOKEN_ENV = 'KIMI_AUTH_TOKEN';
+const KIMI_QUOTA_API_FALLBACK_ENABLED_ENV = 'KIMI_QUOTA_API_FALLBACK_ENABLED';
+const KIMI_CLI_PROBE_TIMEOUT_MS = 15_000;
+const KIMI_CLI_IDLE_SETTLE_MS = 350;
 
 function isTruthyFlag(raw: string | undefined): boolean {
   if (!raw) return false;
@@ -233,6 +248,21 @@ function hasOfficialProbeFailure(): boolean {
   });
 }
 
+function isKimiQuotaApiFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isTruthyFlag(env[KIMI_QUOTA_API_FALLBACK_ENABLED_ENV]);
+}
+
+function isKimiCliProbeAvailable(): boolean {
+  return kimiCliProbeOverrideForTests != null || Boolean(resolveCliCommand('kimi'));
+}
+
+function getKimiProbeStatus(env: NodeJS.ProcessEnv = process.env): QuotaProbeRuntimeStatus {
+  const fallbackConfigured = isKimiQuotaApiFallbackEnabled(env) && Boolean(resolveKimiAuthToken(env));
+  if (!isKimiCliProbeAvailable() && !fallbackConfigured) return 'disabled';
+  if (kimiCache.error) return 'error';
+  return kimiCache.status === 'ok' ? 'ok' : 'error';
+}
+
 export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env): QuotaProbeDescriptor[] {
   const officialRefreshEnabled = isTruthyFlag(env[OFFICIAL_REFRESH_ENABLED_ENV]);
   const officialStatus: QuotaProbeRuntimeStatus = !officialRefreshEnabled
@@ -241,6 +271,7 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
       ? 'error'
       : 'ok';
   const claudeStatus: QuotaProbeRuntimeStatus = /ccusage failed/i.test(claudeCache.error ?? '') ? 'error' : 'ok';
+  const kimiStatus = getKimiProbeStatus(env);
 
   return [
     {
@@ -269,7 +300,7 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
       refreshMode: 'manual',
       enabled: officialRefreshEnabled,
       status: officialStatus,
-      targets: ['codex', 'claude', 'kimi'],
+      targets: ['codex', 'claude'],
       actions: [
         {
           kind: 'refresh',
@@ -283,14 +314,14 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
           ? 'Disabled by default for risk control. Set QUOTA_OFFICIAL_REFRESH_ENABLED=1 to enable.'
           : officialStatus === 'error'
             ? (codexCache.error ?? claudeCache.error ?? 'official OAuth probe error')
-            : 'Enabled. Uses Claude/Codex OAuth APIs plus Kimi official billing API (ClaudeBar-compatible).',
+            : 'Enabled. Uses Claude/Codex OAuth APIs.',
     },
     {
-      id: 'kimi-official-web',
-      sourceKind: 'browser',
+      id: 'kimi-cli',
+      sourceKind: 'cli',
       refreshMode: 'manual',
-      enabled: officialRefreshEnabled,
-      status: !officialRefreshEnabled ? 'disabled' : kimiCache.error ? 'error' : kimiCache.status === 'ok' ? 'ok' : 'ok',
+      enabled: kimiStatus !== 'disabled',
+      status: kimiStatus,
       targets: ['kimi'],
       actions: [
         {
@@ -301,11 +332,13 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
         },
       ],
       reason:
-        !officialRefreshEnabled
-          ? 'Disabled by default for risk control. Set QUOTA_OFFICIAL_REFRESH_ENABLED=1 to enable.'
-          : kimiCache.error ??
+        kimiStatus === 'disabled'
+          ? `Kimi CLI not found. Install kimi to use /usage by default, or set ${KIMI_QUOTA_API_FALLBACK_ENABLED_ENV}=1 with ${KIMI_AUTH_TOKEN_ENV} to allow API fallback.`
+          : (kimiCache.error ??
             kimiCache.note ??
-            'Enabled. Uses Kimi official billing API (ClaudeBar-compatible).',
+            (isKimiQuotaApiFallbackEnabled(env)
+              ? `Enabled. Uses Kimi CLI /usage by default; API fallback is allowed when ${KIMI_AUTH_TOKEN_ENV} is available.`
+              : 'Enabled. Uses Kimi CLI /usage by default.')),
     },
     {
       id: 'antigravity-placeholder',
@@ -320,7 +353,42 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
   ];
 }
 
-const KIMI_AUTH_TOKEN_ENV = 'KIMI_AUTH_TOKEN';
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+}
+
+export function parseKimiCliUsageOutput(text: string): CodexUsageItem[] {
+  const cleaned = stripAnsi(text);
+  const items: CodexUsageItem[] = [];
+  for (const line of cleaned.split(/\r?\n/)) {
+    const lower = line.toLowerCase();
+    const percentMatch = line.match(/(\d+)%\s+left/i);
+    if (!percentMatch) continue;
+    const remaining = normalizePercent(Number.parseInt(percentMatch[1] ?? '', 10));
+    const resetMatch = line.match(/\(resets\s+in\s+(.+?)\)/i);
+    if (lower.includes('weekly')) {
+      items.push({
+        label: '每周使用限额',
+        usedPercent: remaining,
+        percentKind: 'remaining',
+        poolId: 'kimi-weekly',
+        ...(resetMatch?.[1] ? { resetsText: `Resets in ${resetMatch[1].trim()}` } : {}),
+      });
+      continue;
+    }
+    if (lower.includes('5h') || lower.includes('5 hour') || lower.includes('5-hour')) {
+      items.push({
+        label: '5小时使用限额',
+        usedPercent: remaining,
+        percentKind: 'remaining',
+        poolId: 'kimi-rate-limit',
+        ...(resetMatch?.[1] ? { resetsText: `Resets in ${resetMatch[1].trim()}` } : {}),
+      });
+    }
+  }
+  return items;
+}
+
 const KIMI_BILLING_URL = 'https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages';
 
 interface KimiUsageResponse {
@@ -351,6 +419,90 @@ function resolveKimiAuthToken(env: NodeJS.ProcessEnv = process.env): string | nu
   const raw = env[KIMI_AUTH_TOKEN_ENV]?.trim();
   if (raw) return raw;
   return null;
+}
+
+async function probeKimiQuotaViaCli(env: NodeJS.ProcessEnv = process.env): Promise<CodexUsageItem[]> {
+  if (kimiCliProbeOverrideForTests) return kimiCliProbeOverrideForTests(env);
+
+  const kimiCommand = resolveCliCommand('kimi');
+  if (!kimiCommand) throw new Error('Kimi CLI not found in PATH');
+
+  return await new Promise<CodexUsageItem[]>((resolve, reject) => {
+    let settled = false;
+    let sentUsage = false;
+    let output = '';
+
+    const proc = pty.spawn(kimiCommand, [], {
+      name: 'xterm-color',
+      cols: 120,
+      rows: 40,
+      cwd: process.cwd(),
+      env: { ...process.env, ...env },
+    });
+
+    const finish = (value: CodexUsageItem[] | null, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(startTimer);
+      clearTimeout(idleTimer);
+      clearTimeout(timeoutTimer);
+      try {
+        proc.kill();
+      } catch {
+        // best effort
+      }
+      if (error) reject(error);
+      else resolve(value ?? []);
+    };
+
+    const tryParse = (): boolean => {
+      const items = parseKimiCliUsageOutput(output);
+      if (items.length > 0) {
+        finish(items);
+        return true;
+      }
+      return false;
+    };
+
+    const sendUsage = () => {
+      if (settled || sentUsage) return;
+      sentUsage = true;
+      try {
+        proc.write('/usage\r');
+      } catch (error) {
+        finish(null, error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    const startTimer = setTimeout(sendUsage, 500);
+    let idleTimer = setTimeout(() => {
+      if (!tryParse()) {
+        finish(null, new Error('Kimi CLI /usage output did not contain quota data'));
+      }
+    }, KIMI_CLI_IDLE_SETTLE_MS);
+    const timeoutTimer = setTimeout(() => {
+      finish(null, new Error(`Kimi CLI quota probe timed out after ${Math.round(KIMI_CLI_PROBE_TIMEOUT_MS / 1000)}s`));
+    }, KIMI_CLI_PROBE_TIMEOUT_MS);
+
+    proc.onData((chunk) => {
+      output += chunk;
+      if (!sentUsage && /💫|weekly limit|5h limit|api usage/i.test(output)) {
+        sendUsage();
+      }
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (!tryParse()) {
+          finish(null, new Error('Kimi CLI /usage output did not contain quota data'));
+        }
+      }, KIMI_CLI_IDLE_SETTLE_MS);
+    });
+
+    proc.onExit(() => {
+      if (!tryParse()) {
+        finish(null, new Error('Kimi CLI exited before quota data was parsed'));
+      }
+    });
+  });
 }
 
 function decodeKimiTokenContext(token: string): { deviceId?: string; sessionId?: string; trafficId?: string } | null {
@@ -584,7 +736,6 @@ function buildAntigravitySummaryPlatform(): QuotaSummaryPlatform {
 }
 
 function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
-  const officialRefreshEnabled = isTruthyFlag(process.env[OFFICIAL_REFRESH_ENABLED_ENV]);
   if (kimiCache.error) {
     return {
       id: 'kimi',
@@ -607,9 +758,9 @@ function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
       status: 'pending',
       note:
         kimiCache.note ??
-        (officialRefreshEnabled
-          ? `暂无 Kimi 官方额度数据，请配置 ${KIMI_AUTH_TOKEN_ENV} 后刷新。`
-          : `官方额度抓取默认关闭，请先设 ${OFFICIAL_REFRESH_ENABLED_ENV}=1。`),
+        (isKimiQuotaApiFallbackEnabled(process.env)
+          ? `暂无 Kimi CLI 额度数据；若 CLI 失败可按配置降级到 API。`
+          : '暂无 Kimi CLI 额度数据，请点击刷新。'),
       lastChecked: kimiCache.lastChecked,
     };
   }
@@ -648,9 +799,12 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
   const kimi = buildKimiSummaryPlatform();
   const antigravity = buildAntigravitySummaryPlatform();
 
-  const utilizationValues = [codex.utilizationPercent, claude.utilizationPercent, kimi.utilizationPercent, antigravity.utilizationPercent].filter(
-    (value): value is number => typeof value === 'number' && Number.isFinite(value),
-  );
+  const utilizationValues = [
+    codex.utilizationPercent,
+    claude.utilizationPercent,
+    kimi.utilizationPercent,
+    antigravity.utilizationPercent,
+  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   const maxUtilization = utilizationValues.length > 0 ? Math.max(...utilizationValues) : null;
 
   const reasons: string[] = [];
@@ -673,6 +827,11 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
 
   if (claude.status === 'error') {
     reasons.push(`布偶猫额度异常：${claude.note}`);
+    level = 'high';
+  }
+
+  if (kimi.status === 'error') {
+    reasons.push(`金吉拉额度异常：${kimi.note}`);
     level = 'high';
   }
 
@@ -708,16 +867,14 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
         status: claudeCliProbe?.status ?? 'ok',
         reason: claudeCliProbe?.reason ?? 'claude-cli probe unavailable',
       },
-      kimiOfficial: {
-        enabled: probes.some((probe) => probe.id === 'kimi-official-web' && probe.enabled),
-        status:
-          probes.find((probe) => probe.id === 'kimi-official-web')?.status ??
-          (kimiCache.error ? 'error' : kimiCache.status === 'ok' ? 'ok' : 'disabled'),
+      kimi: {
+        enabled: probes.some((probe) => probe.id === 'kimi-cli' && probe.enabled),
+        status: probes.find((probe) => probe.id === 'kimi-cli')?.status ?? getKimiProbeStatus(env),
         reason:
-          probes.find((probe) => probe.id === 'kimi-official-web')?.reason ??
+          probes.find((probe) => probe.id === 'kimi-cli')?.reason ??
           kimiCache.error ??
           kimiCache.note ??
-          'Kimi official probe unavailable',
+          'Kimi CLI probe unavailable',
       },
     },
     actions: {
@@ -1138,6 +1295,71 @@ export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions)
   return result;
 }
 
+export async function refreshKimiQuota(options?: {
+  env?: NodeJS.ProcessEnv;
+  fetchLike?: typeof globalThis.fetch;
+}): Promise<{ source: 'cli' | 'api'; items: number; fallbackUsed: boolean; error?: string }> {
+  const env = options?.env ?? process.env;
+  const checkedAt = new Date().toISOString();
+  try {
+    const items = await probeKimiQuotaViaCli(env);
+    kimiCache = {
+      platform: 'kimi',
+      usageItems: items,
+      lastChecked: checkedAt,
+      status: 'ok',
+      note: '来自 Kimi CLI /usage。',
+    };
+    return { source: 'cli', items: items.length, fallbackUsed: false };
+  } catch (cliError) {
+    const cliMessage = cliError instanceof Error ? cliError.message : String(cliError);
+    const fallbackEnabled = isKimiQuotaApiFallbackEnabled(env);
+    const kimiAuthToken = resolveKimiAuthToken(env);
+    if (fallbackEnabled && kimiAuthToken) {
+      const apiResult = await refreshOfficialQuotaViaOAuth({
+        claudeCredentials: null,
+        codexCredentials: null,
+        kimiAuthToken,
+        fetchLike: options?.fetchLike,
+      });
+      if ((apiResult.kimi?.items ?? 0) > 0 && !apiResult.kimi?.error) {
+        kimiCache = {
+          ...kimiCache,
+          error: undefined,
+          lastChecked: checkedAt,
+          note: 'Kimi CLI /usage 失败，已按配置降级到 Kimi API。',
+        };
+        return { source: 'api', items: apiResult.kimi?.items ?? 0, fallbackUsed: true };
+      }
+      const apiMessage = apiResult.kimi?.error ?? `Kimi API fallback failed after CLI error: ${cliMessage}`;
+      const message = `Kimi CLI /usage failed: ${cliMessage}; API fallback failed: ${apiMessage}`;
+      kimiCache = {
+        platform: 'kimi',
+        usageItems: [],
+        error: message,
+        lastChecked: checkedAt,
+        status: 'unavailable',
+        note: message,
+      };
+      return { source: 'api', items: 0, fallbackUsed: true, error: message };
+    }
+
+    const fallbackHint = fallbackEnabled
+      ? `API fallback is enabled but ${KIMI_AUTH_TOKEN_ENV} is missing.`
+      : `API fallback is disabled. Set ${KIMI_QUOTA_API_FALLBACK_ENABLED_ENV}=1 and ${KIMI_AUTH_TOKEN_ENV} to allow fallback.`;
+    const message = `Kimi CLI /usage failed: ${cliMessage}. ${fallbackHint}`;
+    kimiCache = {
+      platform: 'kimi',
+      usageItems: [],
+      error: message,
+      lastChecked: checkedAt,
+      status: 'unavailable',
+      note: message,
+    };
+    return { source: 'cli', items: 0, fallbackUsed: false, error: message };
+  }
+}
+
 // --- Route ---
 
 export async function quotaRoutes(app: FastifyInstance): Promise<void> {
@@ -1166,40 +1388,13 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
     return buildQuotaSummary();
   });
 
-  // POST: refresh Kimi quota from official billing API
+  // POST: refresh Kimi quota (CLI by default, API fallback only when explicitly enabled)
   app.post('/api/quota/refresh/kimi', async (_request, reply) => {
-    if (!isTruthyFlag(process.env[OFFICIAL_REFRESH_ENABLED_ENV])) {
-      const message = `Official quota refresh is temporarily disabled. Set ${OFFICIAL_REFRESH_ENABLED_ENV}=1 to enable it.`;
-      kimiCache = {
-        ...kimiCache,
-        error: message,
-        status: 'unavailable',
-        note: message,
-        lastChecked: new Date().toISOString(),
-      };
-      return reply.status(503).send({ error: message });
+    const result = await refreshKimiQuota();
+    if (result.error) {
+      return reply.status(502).send({ error: result.error });
     }
-    const kimiAuthToken = resolveKimiAuthToken(process.env);
-    if (!kimiAuthToken) {
-      const message = `No Kimi official auth token found. Set ${KIMI_AUTH_TOKEN_ENV}.`;
-      kimiCache = {
-        ...kimiCache,
-        error: message,
-        status: 'unavailable',
-        note: message,
-        lastChecked: new Date().toISOString(),
-      };
-      return reply.status(400).send({ error: message });
-    }
-    const result = await refreshOfficialQuotaViaOAuth({
-      claudeCredentials: null,
-      codexCredentials: null,
-      kimiAuthToken,
-    });
-    if ((result.kimi?.items ?? 0) === 0 && result.kimi?.error) {
-      return reply.status(502).send({ error: result.kimi.error });
-    }
-    return { kimi: kimiCache };
+    return { kimi: kimiCache, source: result.source, fallbackUsed: result.fallbackUsed };
   });
 
   // POST: refresh Claude quota via ccusage CLI
@@ -1245,28 +1440,23 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
     // Load credentials from files
     const claudeCredentials = loadClaudeCredentials(process.env[CLAUDE_CREDENTIALS_PATH_ENV]);
     const codexCredentials = loadCodexCredentials(process.env[CODEX_CREDENTIALS_PATH_ENV]);
-    const kimiAuthToken = resolveKimiAuthToken(process.env);
-
-    if (!claudeCredentials && !codexCredentials && !kimiAuthToken) {
-      const message =
-        `No official quota credentials found. Claude: ~/.claude/.credentials.json, Codex: set ${CODEX_CREDENTIALS_PATH_ENV}, Kimi: set ${KIMI_AUTH_TOKEN_ENV}.`;
+    if (!claudeCredentials && !codexCredentials) {
+      const message = `No official quota credentials found. Claude: ~/.claude/.credentials.json, Codex: set ${CODEX_CREDENTIALS_PATH_ENV}.`;
       const checkedAt = new Date().toISOString();
       codexCache = { ...codexCache, error: message, lastChecked: checkedAt };
       claudeCache = { ...claudeCache, error: message, lastChecked: checkedAt };
-      kimiCache = { ...kimiCache, error: message, status: 'unavailable', note: message, lastChecked: checkedAt };
       return reply.status(400).send({ error: message });
     }
 
-    const result = await refreshOfficialQuotaViaOAuth({ claudeCredentials, codexCredentials, kimiAuthToken });
-    const errors = [result.claude?.error, result.codex?.error, result.kimi?.error].filter(Boolean);
-    if (errors.length > 0 && (result.claude?.items ?? 0) === 0 && (result.codex?.items ?? 0) === 0 && (result.kimi?.items ?? 0) === 0) {
+    const result = await refreshOfficialQuotaViaOAuth({ claudeCredentials, codexCredentials });
+    const errors = [result.claude?.error, result.codex?.error].filter(Boolean);
+    if (errors.length > 0 && (result.claude?.items ?? 0) === 0 && (result.codex?.items ?? 0) === 0) {
       return reply.status(502).send({ error: errors.join('; ') });
     }
     return {
       ok: true,
       claudeItems: result.claude?.items ?? 0,
       codexItems: result.codex?.items ?? 0,
-      kimiItems: result.kimi?.items ?? 0,
       ...(errors.length > 0 ? { warnings: errors } : {}),
       ...(result.skipped && result.skipped.length > 0 ? { skipped: result.skipped } : {}),
     };

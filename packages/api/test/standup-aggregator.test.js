@@ -128,16 +128,30 @@ describe('aggregateStandup', () => {
     const records = [];
     for (let i = 0; i < 7; i++) {
       records.push(
-        makeRecord(`inv-${i}`, anchor + i * 1000, ['opus'], 'succeeded', {
-          opus: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
-        }, `thread-${i}`),
+        makeRecord(
+          `inv-${i}`,
+          anchor + i * 1000,
+          ['opus'],
+          'succeeded',
+          {
+            opus: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
+          },
+          `thread-${i}`,
+        ),
       );
     }
     // Add duplicate thread
     records.push(
-      makeRecord('inv-dup', anchor + 8000, ['opus'], 'succeeded', {
-        opus: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
-      }, 'thread-0'),
+      makeRecord(
+        'inv-dup',
+        anchor + 8000,
+        ['opus'],
+        'succeeded',
+        {
+          opus: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
+        },
+        'thread-0',
+      ),
     );
 
     const result = aggregateStandup(records);
@@ -150,9 +164,7 @@ describe('aggregateStandup', () => {
   test('records without usageByCat still count invocations', async () => {
     const { aggregateStandup } = await import('../dist/domains/cats/services/standup-aggregator.js');
     const anchor = todayNoon();
-    const records = [
-      makeRecord('inv-1', anchor, ['opus'], 'running', undefined),
-    ];
+    const records = [makeRecord('inv-1', anchor, ['opus'], 'running', undefined)];
 
     const result = aggregateStandup(records);
     assert.equal(result.cats.opus.invocations, 1);

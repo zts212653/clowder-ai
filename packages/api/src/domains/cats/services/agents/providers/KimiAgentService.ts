@@ -27,9 +27,9 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
+import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractImagePaths } from './image-paths.js';
-import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 
 const log = createModuleLogger('kimi-agent');
 const DEFAULT_KIMI_BASE_URL = 'https://api.moonshot.ai/v1';
@@ -170,7 +170,8 @@ function resolveKimiConfigPath(callbackEnv?: Record<string, string>): string {
 }
 
 function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string, string>): KimiModelConfigInfo {
-  const fallbackCapabilities: string[] = modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? ['thinking', 'image_in', 'video_in'] : [];
+  const fallbackCapabilities: string[] =
+    modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? ['thinking', 'image_in', 'video_in'] : [];
   const configPath = resolveKimiConfigPath(callbackEnv);
   if (!existsSync(configPath)) {
     return { defaultThinking: fallbackCapabilities.includes('thinking'), capabilities: [...fallbackCapabilities] };
@@ -199,7 +200,9 @@ function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string
     }
     return {
       defaultThinking:
-        defaultThinkingMatch?.[1] === 'true' || capabilities.includes('thinking') || fallbackCapabilities.includes('thinking'),
+        defaultThinkingMatch?.[1] === 'true' ||
+        capabilities.includes('thinking') ||
+        fallbackCapabilities.includes('thinking'),
       capabilities,
     };
   } catch {
@@ -272,7 +275,8 @@ export class KimiAgentService implements AgentService {
     this.catId = options?.catId ?? createCatId('kimi');
     this.spawnFn = options?.spawnFn;
     this.model = options?.model ?? getCatModel(this.catId as string);
-    this.mcpServerPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH ?? resolveDefaultClaudeMcpServerPath();
+    this.mcpServerPath =
+      options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH ?? resolveDefaultClaudeMcpServerPath();
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -287,9 +291,11 @@ export class KimiAgentService implements AgentService {
     const tempMcpConfig = this.writeMcpConfigFile(workingDirectory, options?.callbackEnv);
     const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
     const supportsThinking =
-      modelConfig.capabilities.includes('thinking') || apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('thinking') === true;
+      modelConfig.capabilities.includes('thinking') ||
+      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('thinking') === true;
     const supportsImageInput =
-      modelConfig.capabilities.includes('image_in') || apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
+      modelConfig.capabilities.includes('image_in') ||
+      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
 
     const args = ['--print', '--output-format', 'stream-json'];
     if (options?.sessionId) {
@@ -341,7 +347,7 @@ export class KimiAgentService implements AgentService {
         command: kimiCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
-        ...((options?.callbackEnv || apiKeyEnv)
+        ...(options?.callbackEnv || apiKeyEnv
           ? { env: { ...(options?.callbackEnv ?? {}), ...(apiKeyEnv ?? {}) } }
           : {}),
         ...(options?.signal ? { signal: options.signal } : {}),

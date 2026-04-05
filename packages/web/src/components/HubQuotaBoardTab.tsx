@@ -168,7 +168,7 @@ export function HubQuotaBoardTab() {
       }
       if (!kimiRes.ok) {
         const body = (await kimiRes.json().catch(() => ({}))) as { error?: string };
-        errors.push(body.error ?? '刷新 Kimi 本地会话状态失败');
+        errors.push(body.error ?? '刷新 Kimi 额度失败');
       }
       if (errors.length > 0) {
         setRefreshError(errors.join('；'));

@@ -10,15 +10,7 @@ import { createCatId } from './ids.js';
 /**
  * AI provider behind a cat
  */
-export type CatProvider =
-  | 'anthropic'
-  | 'openai'
-  | 'google'
-  | 'kimi'
-  | 'dare'
-  | 'antigravity'
-  | 'opencode'
-  | 'a2a';
+export type CatProvider = 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'antigravity' | 'opencode' | 'a2a';
 
 /**
  * Cat status in the system

@@ -249,7 +249,6 @@ describe('HubProviderProfileItem', () => {
     expect(container.textContent).toContain('OpenCode (client-auth)');
   });
 
-
   it('labels Kimi config profiles as CLI config instead of raw api_key', async () => {
     const profile: ProfileItem = {
       id: 'kimi-config',
@@ -269,7 +268,9 @@ describe('HubProviderProfileItem', () => {
     };
 
     await act(async () => {
-      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />);
+      root.render(
+        <HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />,
+      );
     });
 
     expect(container.textContent).toContain('CLI 配置');
