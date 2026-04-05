@@ -61,11 +61,35 @@ vi.mock('@/components/workspace/SchedulePanel', () => ({
   SchedulePanel: () => React.createElement('div', { 'data-testid': 'schedule-panel' }),
 }));
 vi.mock('@/components/workspace/BrowserPanel', () => ({
-  BrowserPanel: ({ previewOnly }: { previewOnly?: boolean }) =>
-    React.createElement('div', {
-      'data-testid': 'browser-panel',
-      'data-preview-only': previewOnly ? '1' : '0',
-    }),
+  BrowserPanel: ({
+    initialPort,
+    initialPath,
+    onNavigate,
+    previewOnly,
+  }: {
+    initialPort?: number;
+    initialPath?: string;
+    onNavigate?: (port: number, path: string) => void;
+    previewOnly?: boolean;
+  }) =>
+    React.createElement(
+      'div',
+      {
+        'data-testid': 'browser-panel',
+        'data-preview-only': previewOnly ? '1' : '0',
+        'data-initial-port': initialPort == null ? '' : String(initialPort),
+        'data-initial-path': initialPath ?? '',
+      },
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          'data-testid': 'browser-panel-mock-navigate',
+          onClick: () => onNavigate?.(4173, '/deep-link'),
+        },
+        'mock navigate',
+      ),
+    ),
 }));
 
 function setupMocks(options?: { file?: Record<string, unknown> | null }) {
@@ -224,6 +248,36 @@ describe('WorkspacePanel preview-only mode', () => {
     expect(container.textContent).toContain('Workspace');
     expect(container.querySelector('[data-testid="knowledge-feed"]')).not.toBeNull();
     expect(container.querySelector('button')?.textContent ?? '').not.toContain('退出专注');
+  });
+
+  it('keeps latest browser location when entering preview-only mode', async () => {
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const browserTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('🌐'));
+    await act(async () => {
+      browserTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const mockNavigate = container.querySelector('[data-testid="browser-panel-mock-navigate"]');
+    expect(mockNavigate).toBeTruthy();
+    await act(async () => {
+      mockNavigate?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const enterPreviewOnly = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('专注预览'),
+    );
+    await act(async () => {
+      enterPreviewOnly?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const browserPanel = container.querySelector('[data-testid="browser-panel"]');
+    expect(browserPanel?.getAttribute('data-preview-only')).toBe('1');
+    expect(browserPanel?.getAttribute('data-initial-port')).toBe('4173');
+    expect(browserPanel?.getAttribute('data-initial-path')).toBe('/deep-link');
   });
 
   it('can enter file focus mode from files view and exit back to workspace chrome', async () => {

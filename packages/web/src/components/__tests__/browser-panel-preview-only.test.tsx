@@ -13,7 +13,34 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 vi.mock('@/components/workspace/BrowserToolbar', () => ({
-  BrowserToolbar: () => React.createElement('div', { 'data-testid': 'browser-toolbar' }),
+  BrowserToolbar: ({
+    urlInput,
+    onUrlChange,
+    onNavigate,
+  }: {
+    urlInput: string;
+    onUrlChange: (value: string) => void;
+    onNavigate: () => void;
+  }) =>
+    React.createElement(
+      'div',
+      { 'data-testid': 'browser-toolbar' },
+      React.createElement('input', {
+        'data-testid': 'browser-toolbar-input',
+        value: urlInput,
+        onChange: (e: Event) => onUrlChange((e.target as HTMLInputElement).value),
+      }),
+      React.createElement('button', { type: 'button', 'data-testid': 'browser-toolbar-go', onClick: onNavigate }, 'Go'),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          'data-testid': 'browser-toolbar-set-url',
+          onClick: () => onUrlChange('localhost:4173/deep'),
+        },
+        'Set URL',
+      ),
+    ),
 }));
 
 vi.mock('@/components/workspace/BrowserTabBar', () => ({
@@ -118,5 +145,38 @@ describe('BrowserPanel previewOnly chrome', () => {
     expect(container.textContent).not.toContain('Screenshot saved');
     expect(container.textContent).not.toContain('localhost:5173 via gateway:4100');
     expect(container.querySelector('iframe[title="Preview"]')).not.toBeNull();
+  });
+
+  it('syncs latest target to parent via onNavigate callback', async () => {
+    const { BrowserPanel } = await import('@/components/workspace/BrowserPanel');
+    const onNavigate = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(BrowserPanel, {
+          initialPort: 5173,
+          initialPath: '/',
+          onNavigate,
+        }),
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const setUrl = container.querySelector('[data-testid="browser-toolbar-set-url"]');
+    const go = container.querySelector('[data-testid="browser-toolbar-go"]');
+    await act(async () => {
+      setUrl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      go?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onNavigate.mock.calls).toContainEqual([4173, '/deep']);
   });
 });

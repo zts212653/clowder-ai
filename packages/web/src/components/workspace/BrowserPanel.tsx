@@ -21,6 +21,8 @@ interface BrowserPanelProps {
   initialPort?: number;
   /** Initial path for deep-linking (e.g. "/dashboard" from auto-open) */
   initialPath?: string;
+  /** Notify parent when active preview target changes. */
+  onNavigate?: (port: number, path: string) => void;
   /** Hide browser chrome so the iframe can occupy the full workspace viewer area. */
   previewOnly?: boolean;
 }
@@ -35,7 +37,7 @@ interface PreviewStatus {
  * The iframe loads through the Preview Gateway (独立 origin) to strip X-Frame-Options
  * and isolate cookies/storage from Hub.
  */
-export function BrowserPanel({ initialPort, initialPath, previewOnly = false }: BrowserPanelProps) {
+export function BrowserPanel({ initialPort, initialPath, onNavigate, previewOnly = false }: BrowserPanelProps) {
   const [gatewayPort, setGatewayPort] = useState<number>(0);
   const [targetPort, setTargetPort] = useState(initialPort ?? 0);
   const [urlInput, setUrlInput] = useState(
@@ -123,6 +125,10 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly = false }: 
   })();
 
   const [warning, setWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    onNavigate?.(targetPort, targetPath);
+  }, [onNavigate, targetPath, targetPort]);
 
   const handleNavigate = useCallback(() => {
     setError(null);

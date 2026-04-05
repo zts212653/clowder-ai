@@ -179,6 +179,10 @@ export function WorkspacePanel() {
   const [previewPort, setPreviewPort] = useState<number | undefined>();
   const [previewPath, setPreviewPath] = useState<string>('/');
   const [focusedPane, setFocusedPane] = useState<FocusedPane>(null);
+  const handleBrowserNavigate = useCallback((port: number, path: string) => {
+    setPreviewPort(port > 0 ? port : undefined);
+    setPreviewPath(path || '/');
+  }, []);
 
   // F120: Consume pending auto-open from always-mounted listener (ChatContainer)
   useEffect(() => {
@@ -552,7 +556,12 @@ export function WorkspacePanel() {
       className="hidden lg:flex flex-1 min-w-0 border-l border-cocreator-light bg-cafe-white/95 flex-col overflow-hidden animate-slide-in-right"
     >
       {focusedPane === 'browser' && workspaceMode === 'dev' && viewMode === 'browser' ? (
-        <WorkspacePreviewOnly initialPort={previewPort} initialPath={previewPath} onExit={() => setFocusedPane(null)} />
+        <WorkspacePreviewOnly
+          initialPort={previewPort}
+          initialPath={previewPath}
+          onNavigate={handleBrowserNavigate}
+          onExit={() => setFocusedPane(null)}
+        />
       ) : focusedPane === 'file' && workspaceMode === 'dev' && viewMode === 'files' && file ? (
         <WorkspaceFocusShell onExit={() => setFocusedPane(null)}>
           <WorkspaceFileViewer
@@ -825,7 +834,11 @@ export function WorkspacePanel() {
               {viewMode === 'browser' ? (
                 renderPaneWithFocusAction(
                   'browser',
-                  <BrowserPanel initialPort={previewPort} initialPath={previewPath} />,
+                  <BrowserPanel
+                    initialPort={previewPort}
+                    initialPath={previewPath}
+                    onNavigate={handleBrowserNavigate}
+                  />,
                   '专注预览',
                 )
               ) : viewMode === 'terminal' ? (
