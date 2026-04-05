@@ -40,6 +40,18 @@ describe('Thread API', () => {
     assert.deepEqual(body.participants, []);
   });
 
+  it('POST /api/threads defaults projectPath to the same repo root used by capabilities when omitted', async () => {
+    const { findMonorepoRoot } = await import('../dist/utils/monorepo-root.js');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: { userId: 'alice', title: 'My Chat' },
+    });
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.equal(body.projectPath, findMonorepoRoot(process.cwd()));
+  });
+
   it('POST /api/threads with pinned=true creates a pinned thread', async () => {
     const res = await app.inject({
       method: 'POST',

@@ -27,6 +27,7 @@ import type {
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
@@ -190,6 +191,7 @@ const updateThreadSchema = z
 
 export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (app, opts) => {
   const { threadStore, messageStore, taskProgressStore } = opts;
+  const defaultProjectPath = findMonorepoRoot(process.cwd());
 
   // POST /api/threads - 创建对话
   app.post('/api/threads', async (request, reply) => {
@@ -216,7 +218,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       }
       thread = await threadStore.create(userId, title, validated);
     } else {
-      thread = await threadStore.create(userId, title, projectPath);
+      thread = await threadStore.create(userId, title, defaultProjectPath);
     }
 
     // F32-b Phase 2: Set preferred cats if provided at creation time
