@@ -1,5 +1,5 @@
 /**
- * Redis key patterns for tool usage counters — F150.
+ * Redis key patterns for tool usage counters — F150 (#339).
  * Key: tool-stats:{YYYY-MM-DD}:{catId}:{category}:{toolName}
  * TTL: 90 days.
  */

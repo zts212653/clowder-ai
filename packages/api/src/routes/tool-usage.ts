@@ -1,5 +1,5 @@
 /**
- * Tool Usage Routes — F150
+ * Tool Usage Routes — F150 (#339)
  * GET /api/usage/tools — 按天×猫聚合 tool/skill/MCP 调用次数。
  */
 
@@ -43,7 +43,9 @@ export const toolUsageRoutes: FastifyPluginAsync<ToolUsageRoutesOptions> = async
     const counter = opts.toolUsageCounter;
 
     const daysParam = request.query.days;
-    const days = daysParam ? Math.min(Math.max(1, parseInt(daysParam, 10) || 7), 90) : 7;
+    // days=0 means "all-time" (Redis + archive); otherwise clamp to 1–90
+    const rawDays = daysParam ? parseInt(daysParam, 10) : 7;
+    const days = rawDays === 0 ? 0 : Math.min(Math.max(1, rawDays || 7), 90);
     const catId = request.query.catId || undefined;
     const categoryParam = request.query.category || 'all';
     const forceRefresh = request.query.refresh === '1';

@@ -22,6 +22,10 @@ const ROOT = resolve(import.meta.dirname, '..');
 const ALLOWLIST = new Map([
   ['HOME', 'OS-provided home directory'],
   ['SHELL', 'OS-provided shell path'],
+  ['PATH', 'OS-provided executable search path'],
+  ['USER', 'OS-provided username'],
+  ['LANG', 'OS-provided locale'],
+  ['LC_ALL', 'OS-provided locale override'],
   ['APPDATA', 'Windows OS variable (cli-spawn-win.ts)'],
   ['SYSTEMROOT', 'Windows OS variable (project-path.ts)'],
   ['NODE_ENV', 'Node.js standard'],

@@ -1,5 +1,5 @@
 /**
- * ToolUsageCounter Tests — F150
+ * ToolUsageCounter Tests — F150 (#339)
  * Tests recordToolUse (INCR) + aggregate (SCAN → report).
  * Uses a fake Redis to avoid real I/O.
  */

@@ -41,9 +41,21 @@ export interface CliSpawnerDeps {
   spawnFn?: SpawnFn;
 }
 
-function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
-  if (!overrides) return process.env;
-  const merged: NodeJS.ProcessEnv = { ...process.env };
+/** Env vars to strip from child processes to prevent E2BIG (overly large values). */
+const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
+  'LS_COLORS', // typically 1-2 KB of color mappings
+  'LSCOLORS', // BSD/macOS equivalent
+]);
+
+export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
+  // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
+  const merged: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (ENV_VARS_TO_STRIP.has(key)) continue;
+    merged[key] = value;
+  }
+  if (!overrides) return merged;
+  // Apply overrides (with null deletions)
   for (const [key, value] of Object.entries(overrides)) {
     if (value === null) {
       delete merged[key];
