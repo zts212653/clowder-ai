@@ -945,7 +945,6 @@ command -v claude &>/dev/null && ok "Claude Code already installed" || MISSING_A
 command -v codex &>/dev/null && ok "Codex CLI already installed"  || MISSING_AGENTS+=("codex")
 command -v gemini &>/dev/null && ok "Gemini CLI already installed" || MISSING_AGENTS+=("gemini")
 command -v kimi &>/dev/null && ok "Kimi CLI already installed"   || MISSING_AGENTS+=("kimi")
-command -v omx &>/dev/null && ok "OMX CLI already installed"     || MISSING_AGENTS+=("omx")
 
 if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
     INSTALL_AGENTS=("${MISSING_AGENTS[@]}")  # default: install all missing
@@ -971,7 +970,6 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
             codex)  install_codex_cli ;;
             gemini) install_npm_cli "Gemini CLI" "gemini" "@google/gemini-cli" ;;
             kimi)   install_kimi_cli ;;
-            omx)    install_npm_cli "OMX CLI" "omx" "oh-my-codex" ;;
         esac
     done
 fi
@@ -989,10 +987,6 @@ configure_agent_auth() {
             --client "$cmd" \
             --mode oauth
         ok "$name: OAuth mode (Gemini CLI only supports Google official API)"
-        return 0
-    fi
-    if [[ "$cmd" == "omx" ]]; then
-        ok "$name: reuses Codex auth/config (run 'omx' after Codex is configured)"
         return 0
     fi
 
@@ -1047,9 +1041,8 @@ if [[ "$HAS_TTY" == true ]]; then
     info "  Configure each agent / 逐个配置每只猫的认证方式："
     configure_agent_auth "Claude (布偶猫)" "claude"; configure_agent_auth "Codex (缅因猫)" "codex"
     configure_agent_auth "Gemini (暹罗猫)" "gemini"; configure_agent_auth "Kimi (月之暗面)" "kimi"
-    configure_agent_auth "OMX (oh-my-codex)" "omx"
 else
-    info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini / kimi / omx"
+    info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini / kimi"
 fi
 
 # ── [8/9] Generate .env with all collected config ─────────

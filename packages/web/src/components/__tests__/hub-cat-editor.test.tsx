@@ -813,21 +813,17 @@ describe('HubCatEditor', () => {
     expect(payload.defaultModel).toBe('gpt-5.3-codex-spark');
   });
 
-  it('exposes Kimi and OMX in client options with expected protocol/account behavior', () => {
+  it('exposes Kimi in client options with expected protocol/account behavior', () => {
     expect(CLIENT_OPTIONS.some((option) => option.value === 'kimi' && option.label === 'Kimi')).toBe(true);
-    expect(CLIENT_OPTIONS.some((option) => option.value === 'omx' && option.label === 'OMX')).toBe(true);
 
     expect(protocolForClient('kimi')).toBe('kimi');
-    expect(protocolForClient('omx')).toBe('openai');
 
     expect(defaultMcpSupportForClient('kimi')).toBe(true);
-    expect(defaultMcpSupportForClient('omx')).toBe(true);
 
     expect(builtinAccountIdForClient('kimi')).toBe('kimi');
-    expect(builtinAccountIdForClient('omx')).toBeNull();
   });
 
-  it('lets Kimi reuse builtin and API-key profiles while OMX stays unbound', () => {
+  it('lets Kimi reuse builtin and API-key profiles', () => {
     const profiles: ProfileItem[] = [
       {
         id: 'kimi',
@@ -878,7 +874,6 @@ describe('HubCatEditor', () => {
     ];
 
     expect(filterProfiles('kimi', profiles).map((profile) => profile.id)).toEqual(['kimi', 'moonshot-sponsor']);
-    expect(filterProfiles('omx', profiles)).toEqual([]);
   });
 
   it('switches a Kimi cat to the selected API profile model when builtin-only model would be invalid', async () => {

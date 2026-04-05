@@ -65,14 +65,11 @@ describe('AudioBlock voice message detection', () => {
     expect(html).not.toContain(' truncate');
   });
 
-  it('supports kimi and omx voice color tokens', () => {
+  it('supports kimi voice color tokens', () => {
     const block = { id: 'v2', kind: 'audio' as const, v: 1 as const, url: '/api/tts/audio/abc.wav', text: '测试' };
     const kimiHtml = render(block, 'kimi');
-    const omxHtml = render(block, 'omx');
 
     expect(kimiHtml).toContain('--color-kimi-bg');
     expect(kimiHtml).toContain('--color-kimi-primary');
-    expect(omxHtml).toContain('--color-omx-bg');
-    expect(omxHtml).toContain('--color-omx-primary');
   });
 });

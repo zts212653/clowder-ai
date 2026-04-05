@@ -123,16 +123,6 @@
       "lead": true,
       "available": true,
       "evaluation": "中文长文理解与总结强，适合中文表达、资料整理与结构化输出"
-    },
-    "omx": {
-      "family": "orchestrator",
-      "roles": [
-        "multi-agent",
-        "coding"
-      ],
-      "lead": true,
-      "available": true,
-      "evaluation": "Codex 编排助手，适合多 agent 调度、长任务推进与执行加速"
     }
   },
   "reviewPolicy": {
@@ -873,54 +863,6 @@
             "long-context",
             "chinese-writing",
             "summarization"
-          ],
-          "contextBudget": {
-            "maxPromptTokens": 240000,
-            "maxContextTokens": 216000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 10000
-          }
-        }
-      ]
-    },
-    {
-      "id": "orchestrator",
-      "catId": "omx",
-      "name": "曼岛猫",
-      "displayName": "曼岛猫",
-      "avatar": "/avatars/omx.png",
-      "color": {
-        "primary": "#0F766E",
-        "secondary": "#CCFBF1"
-      },
-      "mentionPatterns": [
-        "@omx",
-        "@oh-my-codex",
-        "@曼岛猫"
-      ],
-      "roleDescription": "Codex 编排助手，擅长工作流组织、多 agent 调度与执行加速",
-      "teamStrengths": "任务编排、多 agent 协作、长任务推进",
-      "caution": "当前执行层仍复用 Codex-family 语义，行为差异需跟随 omx CLI 变化复核",
-      "defaultVariantId": "omx-default",
-      "variants": [
-        {
-          "id": "omx-default",
-          "provider": "omx",
-          "defaultModel": "gpt-5.4",
-          "mcpSupport": true,
-          "cli": {
-            "command": "omx",
-            "outputFormat": "json",
-            "defaultArgs": [
-              "exec",
-              "--json"
-            ]
-          },
-          "personality": "务实高效，偏执行编排风格，适合长任务和并行推进",
-          "strengths": [
-            "orchestration",
-            "workflow",
-            "multi-agent"
           ],
           "contextBudget": {
             "maxPromptTokens": 240000,

@@ -36,7 +36,6 @@ vi.mock('@/hooks/useCatData', () => ({
       { id: 'opus', displayName: '布偶猫', color: { primary: '#7C3AED', secondary: '#EDE9FE' } },
       { id: 'codex', displayName: '缅因猫', color: { primary: '#059669', secondary: '#D1FAE5' } },
       { id: 'kimi', displayName: '金吉拉', color: { primary: '#7C3AED', secondary: '#EDE9FE' } },
-      { id: 'omx', displayName: '曼岛猫', color: { primary: '#0F766E', secondary: '#CCFBF1' } },
     ],
     isLoading: false,
     getCatById: (id: string) => {
@@ -44,7 +43,6 @@ vi.mock('@/hooks/useCatData', () => ({
         opus: { id: 'opus', displayName: '布偶猫' },
         codex: { id: 'codex', displayName: '缅因猫' },
         kimi: { id: 'kimi', displayName: '金吉拉' },
-        omx: { id: 'omx', displayName: '曼岛猫' },
       };
       return map[id];
     },
@@ -231,16 +229,14 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('sealing');
   });
 
-  it('renders kimi and omx family badge colors for active sessions', async () => {
+  it('renders kimi family badge colors for active sessions', async () => {
     mockSessionsResponse([
       { id: 'kimi_s1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
-      { id: 'omx_s1', catId: 'omx', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
     const html = container.innerHTML;
     expect(html).toContain('border-kimi-primary/40');
-    expect(html).toContain('border-omx-primary/40');
   });
 
   it('shows post-compact safety alert when sessionSealed is true', async () => {

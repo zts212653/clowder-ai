@@ -142,7 +142,6 @@ function normalizeClient(rawClient) {
   if (trimmed === 'openai' || trimmed === 'codex') return 'openai';
   if (trimmed === 'google' || trimmed === 'gemini') return 'google';
   if (trimmed === 'kimi' || trimmed === 'moonshot') return 'kimi';
-  if (trimmed === 'omx') return 'openai';
   if (trimmed === 'dare') return 'dare';
   if (trimmed === 'opencode') return 'opencode';
   return null;

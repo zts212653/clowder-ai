@@ -87,7 +87,6 @@ describe('Callback Bootcamp Env Check', () => {
     assert.ok('codexCli' in body);
     assert.ok('geminiCli' in body);
     assert.ok('kimiCli' in body);
-    assert.ok('omxCli' in body);
     assert.ok('mcp' in body);
     assert.ok('tts' in body);
     assert.ok('asr' in body);

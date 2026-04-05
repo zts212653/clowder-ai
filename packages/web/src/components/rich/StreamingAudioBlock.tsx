@@ -9,7 +9,6 @@ const CAT_VOICE_COLORS: Record<string, { bg: string; bar: string }> = {
   codex: { bg: 'bg-[var(--color-codex-bg)]', bar: 'bg-[var(--color-codex-primary)]' },
   gemini: { bg: 'bg-[var(--color-gemini-bg)]', bar: 'bg-[var(--color-gemini-primary)]' },
   kimi: { bg: 'bg-[var(--color-kimi-bg)]', bar: 'bg-[var(--color-kimi-primary)]' },
-  omx: { bg: 'bg-[var(--color-omx-bg)]', bar: 'bg-[var(--color-omx-primary)]' },
 };
 const DEFAULT_VOICE_COLORS = { bg: 'bg-cafe-surface-elevated dark:bg-gray-800', bar: 'bg-gray-400' };
 

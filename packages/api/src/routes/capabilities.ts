@@ -214,7 +214,6 @@ function getCliConfigPaths(projectRoot: string) {
     openai: join(projectRoot, '.codex', 'config.toml'),
     google: join(projectRoot, '.gemini', 'settings.json'),
     kimi: join(projectRoot, '.kimi', 'mcp.json'),
-    omx: join(projectRoot, '.codex', 'config.toml'),
   };
 }
 

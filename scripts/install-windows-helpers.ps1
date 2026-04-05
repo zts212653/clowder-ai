@@ -543,11 +543,10 @@ function Configure-InstallerAuth {
     $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
     $hasGemini = $null -ne (Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6)
     $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
-    $hasOmx = $null -ne (Resolve-ToolCommandWithRetry -Name "omx" -Attempts 6)
     $isInteractive = [Environment]::UserInteractive -and -not $env:CI
 
     if (-not $isInteractive) {
-        Write-Warn "Non-interactive mode - skipping auth prompts. Run claude / codex / gemini / kimi / omx manually after install."
+        Write-Warn "Non-interactive mode - skipping auth prompts. Run claude / codex / gemini / kimi manually after install."
         return
     }
 
@@ -691,11 +690,6 @@ function Configure-InstallerAuth {
         }
     }
 
-    if ($hasOmx) {
-        Write-Host ""
-        Write-Host "  OMX (omx):"
-        Write-Ok "OMX reuses Codex auth/config. Configure Codex first, then run omx."
-    }
 }
 
 function Apply-InstallerAuthEnv {

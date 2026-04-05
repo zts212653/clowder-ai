@@ -52,7 +52,6 @@ export class LlmAIProvider implements AIProvider {
         case 'anthropic':
           return await this.callAnthropic(prompt, controller.signal);
         case 'openai':
-        case 'omx':
           return await this.callOpenAI(prompt, controller.signal);
         case 'google':
           return await this.callGoogle(prompt, controller.signal);

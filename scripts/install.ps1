@@ -345,8 +345,7 @@ $cliTools = @(
     @{ Name = "Claude"; Label = "Claude"; Cmd = "claude"; Pkg = "@anthropic-ai/claude-code" },
     @{ Name = "Codex"; Label = "Codex"; Cmd = "codex"; Pkg = "@openai/codex" },
     @{ Name = "Gemini"; Label = "Gemini"; Cmd = "gemini"; Pkg = "@google/gemini-cli" },
-    @{ Name = "Kimi"; Label = "Kimi"; Cmd = "kimi"; Pkg = "kimi-cli"; InstallKind = "python" },
-    @{ Name = "OMX"; Label = "OMX"; Cmd = "omx"; Pkg = "oh-my-codex" }
+    @{ Name = "Kimi"; Label = "Kimi"; Cmd = "kimi"; Pkg = "kimi-cli"; InstallKind = "python" }
 )
 
 if (-not $SkipCli) {
@@ -403,7 +402,6 @@ $hasClaude = $null -ne (Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6)
 $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
 $hasGemini = $null -ne (Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6)
 $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
-$hasOmx = $null -ne (Resolve-ToolCommandWithRetry -Name "omx" -Attempts 6)
 
 Write-Step "Step 9/9 - Verify and launch"
 
@@ -431,7 +429,6 @@ Write-Host "  Claude:  $(if ($hasClaude) { 'ready' } else { 'not installed' })"
 Write-Host "  Codex:   $(if ($hasCodex) { 'ready' } else { 'not installed' })"
 Write-Host "  Gemini:  $(if ($hasGemini) { 'ready' } else { 'not installed' })"
 Write-Host "  Kimi:    $(if ($hasKimi) { 'ready' } else { 'not installed' })"
-Write-Host "  OMX:     $(if ($hasOmx) { 'ready' } else { 'not installed' })"
 Write-Host ""
 Write-Host "  Start the app:" -ForegroundColor Cyan
 $startCmd = ".\scripts\start-windows.ps1"

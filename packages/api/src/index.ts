@@ -798,9 +798,6 @@ async function main(): Promise<void> {
         case 'kimi':
           service = new KimiAgentService({ catId });
           break;
-        case 'omx':
-          service = new CodexAgentService({ catId, cliCommand: 'omx' });
-          break;
         case 'dare':
           service = new DareAgentService({ catId });
           break;
@@ -1628,7 +1625,6 @@ async function main(): Promise<void> {
         openai: join(root, '.codex', 'config.toml'),
         google: join(root, '.gemini', 'settings.json'),
         kimi: join(root, '.kimi', 'mcp.json'),
-        omx: join(root, '.codex', 'config.toml'),
       });
       app.log.info('[api] CLI configs regenerated at startup');
     }

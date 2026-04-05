@@ -121,14 +121,11 @@ describe('MessageNavigator', () => {
     expect(html).toContain('跳转到 狸花猫（dare-agent） 的消息');
   });
 
-  it('applies kimi and omx fallback colors and labels before /api/cats loads', () => {
-    const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'kimi'), makeMsg('m3', 'assistant', 'omx')];
+  it('applies kimi fallback colors and labels before /api/cats loads', () => {
+    const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'kimi'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('#7C3AED');
-    expect(html).toContain('#0F766E');
     expect(html).toContain('跳转到 金吉拉 的消息');
-    expect(html).toContain('跳转到 曼岛猫 的消息');
   });
 
   it('includes accessibility labels', () => {

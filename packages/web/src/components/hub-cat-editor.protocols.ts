@@ -10,8 +10,6 @@ export function protocolForClient(client: ClientValue): 'anthropic' | 'openai' |
       return 'google';
     case 'kimi':
       return 'kimi';
-    case 'omx':
-      return 'openai';
     case 'dare':
       return 'openai';
     case 'opencode':
@@ -27,7 +25,6 @@ export function defaultMcpSupportForClient(client: ClientValue): boolean {
     client === 'openai' ||
     client === 'google' ||
     client === 'kimi' ||
-    client === 'omx' ||
     client === 'opencode'
   );
 }

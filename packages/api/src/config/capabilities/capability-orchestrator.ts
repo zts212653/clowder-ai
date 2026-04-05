@@ -107,7 +107,6 @@ const PROVIDER_WRITERS = {
   openai: writeCodexMcpConfig,
   google: writeGeminiMcpConfig,
   kimi: writeKimiMcpConfig,
-  omx: writeCodexMcpConfig,
 } as const;
 
 /** Check if a descriptor has a usable transport (stdio command, local resolver, or streamableHttp URL). */
@@ -594,7 +593,6 @@ export interface CliConfigPaths {
   openai: string; // e.g. <projectRoot>/.codex/config.toml
   google: string; // e.g. <projectRoot>/.gemini/settings.json
   kimi: string; // e.g. <projectRoot>/.kimi/mcp.json
-  omx: string; // e.g. <projectRoot>/.codex/config.toml
 }
 
 /** Providers that support streamableHttp transport (URL-based MCP). */
@@ -653,7 +651,7 @@ function collectServersPerProvider(config: CapabilitiesConfig): Record<string, M
   for (const catId of catRegistry.getAllIds()) {
     const entry = catRegistry.tryGet(catId as string);
     if (!entry) continue;
-    const provider = entry.config.provider === 'omx' ? 'openai' : entry.config.provider;
+    const provider = entry.config.provider;
 
     if (!providerServers[provider]) {
       providerServers[provider] = new Map();

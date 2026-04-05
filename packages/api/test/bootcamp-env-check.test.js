@@ -40,7 +40,6 @@ describe('F087: Bootcamp env-check route', () => {
     assert.ok('codexCli' in body, 'missing codexCli');
     assert.ok('geminiCli' in body, 'missing geminiCli');
     assert.ok('kimiCli' in body, 'missing kimiCli');
-    assert.ok('omxCli' in body, 'missing omxCli');
     assert.ok('mcp' in body, 'missing mcp');
     // Advanced features
     assert.ok('tts' in body, 'missing tts');
@@ -52,7 +51,6 @@ describe('F087: Bootcamp env-check route', () => {
     assert.strictEqual(typeof body.pnpm.ok, 'boolean');
     assert.strictEqual(typeof body.git.ok, 'boolean');
     assert.strictEqual(typeof body.kimiCli.ok, 'boolean');
-    assert.strictEqual(typeof body.omxCli.ok, 'boolean');
 
     // node/pnpm/git should be ok in dev environment
     assert.ok(body.node.ok, 'node should be available');
