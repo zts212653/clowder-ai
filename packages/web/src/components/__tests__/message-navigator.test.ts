@@ -125,7 +125,7 @@ describe('MessageNavigator', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'kimi'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('跳转到 金吉拉 的消息');
+    expect(html).toContain('跳转到 梵花猫 的消息');
   });
 
   it('includes accessibility labels', () => {

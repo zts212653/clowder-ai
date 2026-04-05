@@ -35,14 +35,14 @@ vi.mock('@/hooks/useCatData', () => ({
     cats: [
       { id: 'opus', displayName: '布偶猫', color: { primary: '#7C3AED', secondary: '#EDE9FE' } },
       { id: 'codex', displayName: '缅因猫', color: { primary: '#059669', secondary: '#D1FAE5' } },
-      { id: 'kimi', displayName: '金吉拉', color: { primary: '#7C3AED', secondary: '#EDE9FE' } },
+      { id: 'kimi', displayName: '梵花猫', color: { primary: '#4B5563', secondary: '#E5E7EB' } },
     ],
     isLoading: false,
     getCatById: (id: string) => {
       const map: Record<string, unknown> = {
         opus: { id: 'opus', displayName: '布偶猫' },
         codex: { id: 'codex', displayName: '缅因猫' },
-        kimi: { id: 'kimi', displayName: '金吉拉' },
+        kimi: { id: 'kimi', displayName: '梵花猫' },
       };
       return map[id];
     },

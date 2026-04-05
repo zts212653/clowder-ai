@@ -347,7 +347,7 @@ test('wraps system prompt separately and adds local image path hints', async () 
   try {
     const promise = collect(
       service.invoke('帮我分析图片', {
-        systemPrompt: '你是金吉拉，回答要简洁。',
+        systemPrompt: '你是梵花猫，回答要简洁。',
         contentBlocks: [{ type: 'image', url: '/uploads/example.png' }],
         uploadDir,
       }),
@@ -360,7 +360,7 @@ test('wraps system prompt separately and adds local image path hints', async () 
     assert.ok(promptFlagIndex >= 0);
     const effectivePrompt = args[promptFlagIndex + 1];
     assert.match(effectivePrompt, /<system_instructions>/);
-    assert.match(effectivePrompt, /你是金吉拉/);
+    assert.match(effectivePrompt, /你是梵花猫/);
     assert.match(effectivePrompt, /example\.png/);
   } finally {
     rmSync(uploadDir, { recursive: true, force: true });

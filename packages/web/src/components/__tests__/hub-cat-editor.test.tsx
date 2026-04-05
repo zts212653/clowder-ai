@@ -879,13 +879,13 @@ describe('HubCatEditor', () => {
   it('switches a Kimi cat to the selected API profile model when builtin-only model would be invalid', async () => {
     const existingCat = {
       id: 'kimi',
-      name: '金吉拉',
-      displayName: '金吉拉',
+      name: '梵花猫',
+      displayName: '梵花猫',
       provider: 'kimi',
       providerProfileId: 'kimi',
       accountRef: 'kimi',
       defaultModel: 'kimi-code/kimi-for-coding',
-      color: { primary: '#7C3AED', secondary: '#EDE9FE' },
+      color: { primary: '#4B5563', secondary: '#E5E7EB' },
       mentionPatterns: ['@kimi'],
       avatar: '/avatars/kimi.png',
       roleDescription: '中文助手',

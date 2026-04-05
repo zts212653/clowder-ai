@@ -739,7 +739,7 @@ function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
   if (kimiCache.error) {
     return {
       id: 'kimi',
-      label: '金吉拉 (Kimi)',
+      label: '梵花猫 (Kimi)',
       displayPercent: null,
       displayKind: null,
       utilizationPercent: null,
@@ -751,7 +751,7 @@ function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
   if (kimiCache.status === 'unavailable') {
     return {
       id: 'kimi',
-      label: '金吉拉 (Kimi)',
+      label: '梵花猫 (Kimi)',
       displayPercent: null,
       displayKind: null,
       utilizationPercent: null,
@@ -768,7 +768,7 @@ function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
   if (!primary) {
     return {
       id: 'kimi',
-      label: '金吉拉 (Kimi)',
+      label: '梵花猫 (Kimi)',
       displayPercent: null,
       displayKind: null,
       utilizationPercent: null,
@@ -780,7 +780,7 @@ function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
   const utilization = toUtilizationPercent(primary);
   return {
     id: 'kimi',
-    label: '金吉拉 (Kimi)',
+    label: '梵花猫 (Kimi)',
     displayPercent: normalizePercent(primary.usedPercent),
     displayKind: primary.percentKind ?? 'used',
     utilizationPercent: utilization,
@@ -831,7 +831,7 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
   }
 
   if (kimi.status === 'error') {
-    reasons.push(`金吉拉额度异常：${kimi.note}`);
+    reasons.push(`梵花猫额度异常：${kimi.note}`);
     level = 'high';
   }
 
