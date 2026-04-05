@@ -81,6 +81,8 @@ const CAT_SESSION_COLORS: Record<string, { border: string; badgeBg: string; badg
   opus: { border: 'border-opus-primary/40', badgeBg: 'bg-opus-light', badgeText: 'text-opus-dark' },
   codex: { border: 'border-codex-primary/40', badgeBg: 'bg-codex-light', badgeText: 'text-codex-dark' },
   gemini: { border: 'border-gemini-primary/40', badgeBg: 'bg-gemini-light', badgeText: 'text-gemini-dark' },
+  kimi: { border: 'border-kimi-primary/40', badgeBg: 'bg-kimi-light', badgeText: 'text-kimi-dark' },
+  omx: { border: 'border-omx-primary/40', badgeBg: 'bg-omx-light', badgeText: 'text-omx-dark' },
   dare: { border: 'border-dare-primary/40', badgeBg: 'bg-dare-light', badgeText: 'text-dare-dark' },
   // Maine-coon variants: green family, different shades
   gpt52: { border: 'border-[#66BB6A66]', badgeBg: 'bg-[#C8E6C9]', badgeText: 'text-[#2E7D32]' },

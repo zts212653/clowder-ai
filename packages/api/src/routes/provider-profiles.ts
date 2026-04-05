@@ -25,7 +25,7 @@ function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolea
   const isBuiltin = account.authType === 'oauth';
   // Non-standard builtins (dare, opencode) use standard protocols (openai, anthropic)
   // but have their own distinct client identity for the Hub UI.
-  const NON_STANDARD_BUILTIN_CLIENTS = new Set(['dare', 'opencode']);
+  const NON_STANDARD_BUILTIN_CLIENTS = new Set(['dare', 'opencode', 'kimi']);
   const builtinClient = NON_STANDARD_BUILTIN_CLIENTS.has(id) ? id : account.protocol;
   return {
     id,
@@ -61,7 +61,7 @@ function deriveAccountId(displayName: string, existingIds: Set<string>): string 
 
 const MONOREPO_ROOT = findMonorepoRoot();
 
-const protocolEnum = z.enum(['anthropic', 'openai', 'openai-responses', 'google']);
+const protocolEnum = z.enum(['anthropic', 'openai', 'openai-responses', 'google', 'kimi']);
 const authTypeEnum = z.enum(['oauth', 'api_key']);
 const modeEnum = z.enum(['subscription', 'api_key']);
 
@@ -172,13 +172,16 @@ function inferProbeProtocol(
   selector: string | undefined,
   models: readonly string[] | undefined = [],
   ...nameHints: Array<string | undefined>
-): 'anthropic' | 'openai' | 'google' {
+): 'anthropic' | 'openai' | 'google' | 'kimi' {
   const normalizedSelector = selector?.trim().toLowerCase();
   if (normalizedSelector === 'anthropic' || normalizedSelector === 'claude' || normalizedSelector === 'opencode') {
     return 'anthropic';
   }
   if (normalizedSelector === 'google' || normalizedSelector === 'gemini') {
     return 'google';
+  }
+  if (normalizedSelector === 'kimi' || normalizedSelector === 'moonshot') {
+    return 'kimi';
   }
   if (normalizedSelector === 'openai' || normalizedSelector === 'codex' || normalizedSelector === 'dare') {
     return 'openai';
@@ -190,6 +193,9 @@ function inferProbeProtocol(
   }
   if (normalizedModels.some((model) => model.includes('gemini') || model.includes('google'))) {
     return 'google';
+  }
+  if (normalizedModels.some((model) => model.includes('kimi') || model.includes('moonshot'))) {
+    return 'kimi';
   }
   if (normalizedModels.some((model) => model.includes('gpt') || model.includes('o1') || model.includes('o3'))) {
     return 'openai';
@@ -209,6 +215,9 @@ function inferProbeProtocol(
   if (normalizedHints.includes('gemini') || normalizedHints.includes('google')) {
     return 'google';
   }
+  if (normalizedHints.includes('kimi') || normalizedHints.includes('moonshot')) {
+    return 'kimi';
+  }
   if (normalizedHints.includes('codex') || normalizedHints.includes('openai') || normalizedHints.includes('dare')) {
     return 'openai';
   }
@@ -221,6 +230,9 @@ function inferProbeProtocol(
     normalizedBaseUrl.includes('gemini')
   ) {
     return 'google';
+  }
+  if (normalizedBaseUrl.includes('moonshot') || normalizedBaseUrl.includes('kimi')) {
+    return 'kimi';
   }
   return 'openai';
 }

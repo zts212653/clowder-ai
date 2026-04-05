@@ -542,10 +542,12 @@ function Configure-InstallerAuth {
     $hasClaude = $null -ne (Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6)
     $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
     $hasGemini = $null -ne (Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6)
+    $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
+    $hasOmx = $null -ne (Resolve-ToolCommandWithRetry -Name "omx" -Attempts 6)
     $isInteractive = [Environment]::UserInteractive -and -not $env:CI
 
     if (-not $isInteractive) {
-        Write-Warn "Non-interactive mode - skipping auth prompts. Run claude / codex / gemini manually after install."
+        Write-Warn "Non-interactive mode - skipping auth prompts. Run claude / codex / gemini / kimi / omx manually after install."
         return
     }
 
@@ -651,6 +653,48 @@ function Configure-InstallerAuth {
         } else {
             Write-Warn "Gemini auth setup skipped"
         }
+    }
+
+    if ($hasKimi) {
+        Write-Host ""
+        Write-Host "  Kimi (kimi):"
+        $kimiOptions = @(
+            @{ Label = "&OAuth (recommended)"; Help = "Use official Kimi CLI login"; Value = "oauth" },
+            @{ Label = "&API Key"; Help = "Create installer-managed Kimi API key binding"; Value = "api_key" },
+            @{ Label = "&Skip"; Help = "Skip Kimi auth setup for now"; Value = "skip" }
+        )
+        $choice = Select-InstallerChoice -Title "Kimi auth" -Prompt "Choose how to configure Kimi" -Options $kimiOptions
+        if ($choice -eq "api_key") {
+            $apiKey = Read-InstallerSecret "    API Key"
+            $baseUrl = Read-Host "    Base URL (Enter = default)"
+            $model = Read-Host "    Model (Enter = default)"
+            if ($apiKey) {
+                $args = @("client-auth", "set", "--project-dir", $ProjectRoot, "--client", "kimi", "--mode", "api_key")
+                if ($baseUrl) { $args += @("--base-url", $baseUrl) }
+                if ($model) { $args += @("--model", $model) }
+                $env:_INSTALLER_API_KEY = $apiKey
+                try {
+                    Invoke-InstallerAuthHelper $State $args
+                } finally {
+                    Remove-Item Env:\_INSTALLER_API_KEY -ErrorAction SilentlyContinue
+                }
+                Write-Ok "Kimi API key profile written to .cat-cafe/"
+            } else {
+                Invoke-InstallerAuthHelper $State @("client-auth", "set", "--project-dir", $ProjectRoot, "--client", "kimi", "--mode", "oauth")
+                Write-Warn "Kimi API key empty - keeping OAuth"
+            }
+        } elseif ($choice -eq "oauth") {
+            Invoke-InstallerAuthHelper $State @("client-auth", "set", "--project-dir", $ProjectRoot, "--client", "kimi", "--mode", "oauth")
+            Write-Ok "Kimi: OAuth mode"
+        } else {
+            Write-Warn "Kimi auth setup skipped"
+        }
+    }
+
+    if ($hasOmx) {
+        Write-Host ""
+        Write-Host "  OMX (omx):"
+        Write-Ok "OMX reuses Codex auth/config. Configure Codex first, then run omx."
     }
 }
 

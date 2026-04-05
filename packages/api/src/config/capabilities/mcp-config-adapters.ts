@@ -6,6 +6,7 @@
  * Claude:  .mcp.json        — { mcpServers: { name: { command, args, env } } }
  * Codex:   .codex/config.toml — [mcp_servers.<name>] command/args/env/enabled
  * Gemini:  .gemini/settings.json — { mcpServers: { name: { command, args, env, cwd } } }
+ * Kimi:    .kimi/mcp.json       — { mcpServers: { name: { url|command, args, env, headers } } }
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -73,6 +74,22 @@ export async function readCodexMcpConfig(filePath: string): Promise<McpServerDes
 
 /** Read Gemini .gemini/settings.json → McpServerDescriptor[] */
 export async function readGeminiMcpConfig(filePath: string): Promise<McpServerDescriptor[]> {
+  const raw = await safeReadFile(filePath);
+  if (!raw) return [];
+
+  const data = safeJsonParse(raw);
+  if (!data) return [];
+
+  const servers = data.mcpServers;
+  if (!servers || typeof servers !== 'object') return [];
+
+  return Object.entries(servers as Record<string, Record<string, unknown>>).map(([name, cfg]) =>
+    toDescriptor(name, cfg, true),
+  );
+}
+
+/** Read Kimi .kimi/mcp.json → McpServerDescriptor[] */
+export async function readKimiMcpConfig(filePath: string): Promise<McpServerDescriptor[]> {
   const raw = await safeReadFile(filePath);
   if (!raw) return [];
 
@@ -273,9 +290,54 @@ export async function cleanStaleClaudeProjectOverrides(
   return cleaned;
 }
 
+/** Write McpServerDescriptor[] → Kimi .kimi/mcp.json (merge: preserves user's non-managed servers) */
+export async function writeKimiMcpConfig(filePath: string, servers: McpServerDescriptor[]): Promise<void> {
+  const raw = await safeReadFile(filePath);
+  let existing: Record<string, unknown> = {};
+  if (raw) {
+    const parsed = safeJsonParse(raw);
+    if (parsed) existing = parsed;
+  }
+
+  const existingMcp: Record<string, unknown> =
+    existing.mcpServers && typeof existing.mcpServers === 'object'
+      ? { ...(existing.mcpServers as Record<string, unknown>) }
+      : {};
+
+  for (const s of servers) {
+    if (!s.enabled) {
+      delete existingMcp[s.name];
+      continue;
+    }
+    if (s.transport === 'streamableHttp') {
+      if (!s.url?.trim()) {
+        delete existingMcp[s.name];
+        continue;
+      }
+      const entry: Record<string, unknown> = { url: s.url };
+      if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
+      existingMcp[s.name] = entry;
+      continue;
+    }
+    if (!s.command || s.command.trim().length === 0) {
+      delete existingMcp[s.name];
+      continue;
+    }
+    const entry: Record<string, unknown> = { command: s.command, args: s.args };
+    if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
+    if (s.workingDir) entry.cwd = s.workingDir;
+    existingMcp[s.name] = entry;
+  }
+
+  existing.mcpServers = existingMcp;
+  await ensureDir(filePath);
+  await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
+}
+
 // ────────── Helpers ──────────
 
-async function safeReadFile(filePath: string): Promise<string | null> {
+async function safeReadFile(filePath?: string): Promise<string | null> {
+  if (!filePath) return null;
   try {
     return await readFile(filePath, 'utf-8');
   } catch {
@@ -308,7 +370,8 @@ function toStringRecord(val: unknown): Record<string, string> | undefined {
 }
 
 function toDescriptor(name: string, cfg: Record<string, unknown>, enabled: boolean): McpServerDescriptor {
-  const isHttp = cfg.type === 'streamableHttp' || cfg.type === 'http';
+  const isHttp =
+    cfg.type === 'streamableHttp' || cfg.type === 'http' || (typeof cfg.url === 'string' && cfg.url.length > 0);
   const desc: McpServerDescriptor = {
     name,
     command: typeof cfg.command === 'string' ? cfg.command : '',

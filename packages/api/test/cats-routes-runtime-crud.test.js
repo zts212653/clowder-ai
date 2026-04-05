@@ -348,6 +348,78 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(JSON.parse(createRes.body).error, /effort/i);
   });
 
+  it('POST /api/cats accepts kimi and omx clients with first-class default CLI commands', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const kimiRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-kimi',
+          name: 'Kimi 猫',
+          displayName: 'Kimi 猫',
+          avatar: '/avatars/kimi.png',
+          color: { primary: '#7c3aed', secondary: '#ede9fe' },
+          mentionPatterns: ['@runtime-kimi'],
+          roleDescription: '中文代码助手',
+          client: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+        }),
+      });
+      assert.equal(kimiRes.statusCode, 201);
+
+      const omxRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-omx',
+          name: 'OMX 猫',
+          displayName: 'OMX 猫',
+          avatar: '/avatars/omx.png',
+          color: { primary: '#0f766e', secondary: '#ccfbf1' },
+          mentionPatterns: ['@runtime-omx'],
+          roleDescription: 'Codex 编排助手',
+          client: 'omx',
+          accountRef: 'omx',
+          defaultModel: 'gpt-5.4',
+        }),
+      });
+      assert.equal(omxRes.statusCode, 201);
+
+      const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+      const breeds = catalog.breeds;
+      const kimiVariant = breeds.find((breed) => breed.catId === 'runtime-kimi')?.variants?.[0];
+      const omxVariant = breeds.find((breed) => breed.catId === 'runtime-omx')?.variants?.[0];
+
+      assert.equal(kimiVariant.provider, 'kimi');
+      assert.deepEqual(kimiVariant.cli, { command: 'kimi', outputFormat: 'stream-json' });
+      assert.equal(kimiVariant.accountRef, 'kimi');
+
+      assert.equal(omxVariant.provider, 'omx');
+      assert.deepEqual(omxVariant.cli, { command: 'omx', outputFormat: 'json' });
+      assert.equal(omxVariant.accountRef, 'omx');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST /api/cats falls back to the readable active project root when CAT_TEMPLATE_PATH is stale', async () => {
     const projectRoot = createMonorepoProjectRoot();
     const staleRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-stale-'));

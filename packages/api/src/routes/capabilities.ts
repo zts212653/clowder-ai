@@ -204,6 +204,7 @@ function getDiscoveryPaths(projectRoot: string) {
     claudeConfig: join(projectRoot, '.mcp.json'),
     codexConfig: join(projectRoot, '.codex', 'config.toml'),
     geminiConfig: join(projectRoot, '.gemini', 'settings.json'),
+    kimiConfig: join(projectRoot, '.kimi', 'mcp.json'),
   };
 }
 
@@ -212,6 +213,8 @@ function getCliConfigPaths(projectRoot: string) {
     anthropic: join(projectRoot, '.mcp.json'),
     openai: join(projectRoot, '.codex', 'config.toml'),
     google: join(projectRoot, '.gemini', 'settings.json'),
+    kimi: join(projectRoot, '.kimi', 'mcp.json'),
+    omx: join(projectRoot, '.codex', 'config.toml'),
   };
 }
 
@@ -564,6 +567,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       claudeConfig: join(home, '.claude', 'mcp.json'),
       codexConfig: join(home, '.codex', 'config.toml'),
       geminiConfig: join(home, '.gemini', 'settings.json'),
+      kimiConfig: join(home, '.kimi', 'mcp.json'),
     };
     const [projectLevelServers, userLevelServers] = await Promise.all([
       discoverExternalMcpServers(projectLevelPaths),

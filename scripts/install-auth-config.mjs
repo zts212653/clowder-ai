@@ -12,11 +12,12 @@ const BUILTIN_ACCOUNT_SPECS = [
   },
   { id: 'codex', displayName: 'Codex', client: 'openai', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'] },
   { id: 'gemini', displayName: 'Gemini', client: 'google', models: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'] },
+  { id: 'kimi', displayName: 'Kimi', client: 'kimi', models: ['kimi-k2.5', 'kimi-k1.5'] },
   { id: 'dare', displayName: 'Dare', client: 'dare', models: ['z-ai/glm-4.7'] },
   { id: 'opencode', displayName: 'OpenCode', client: 'opencode', models: ['claude-opus-4-6', 'claude-sonnet-4-5'] },
 ];
 
-const DEFAULT_OAUTH_CLIENTS = new Set(['anthropic', 'openai', 'google']);
+const DEFAULT_OAUTH_CLIENTS = new Set(['anthropic', 'openai', 'google', 'kimi']);
 const LEGACY_BUILTIN_ID_MAP = {
   'claude-oauth': 'anthropic',
   'codex-oauth': 'openai',
@@ -140,6 +141,8 @@ function normalizeClient(rawClient) {
   if (trimmed === 'anthropic' || trimmed === 'claude') return 'anthropic';
   if (trimmed === 'openai' || trimmed === 'codex') return 'openai';
   if (trimmed === 'google' || trimmed === 'gemini') return 'google';
+  if (trimmed === 'kimi' || trimmed === 'moonshot') return 'kimi';
+  if (trimmed === 'omx') return 'openai';
   if (trimmed === 'dare') return 'dare';
   if (trimmed === 'opencode') return 'opencode';
   return null;

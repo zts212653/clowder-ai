@@ -130,6 +130,22 @@ test('uses exec resume when sessionId is provided', async () => {
   assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
 });
 
+test('supports omx as a Codex-family CLI command', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex', cliCommand: 'omx' });
+
+  const promise = collect(service.invoke('hello from omx'));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-omx' }]);
+  await promise;
+
+  const command = spawnFn.mock.calls[0].arguments[0];
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.match(command, /(^|\/)omx$/);
+  assert.equal(args[0], 'exec');
+  assert.ok(args.includes('--json'));
+});
+
 test('injects cat-cafe MCP config when workingDirectory contains mcp-server', async () => {
   const tmpRoot = mkdtempSync(join(import.meta.dirname ?? '.', '.tmp-mcp-test-'));
   const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');

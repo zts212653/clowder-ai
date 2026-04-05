@@ -24,6 +24,7 @@ const BUILTIN_CLIENT_LABELS: Record<BuiltinAccountClient, string> = {
   anthropic: 'Claude',
   openai: 'Codex',
   google: 'Gemini',
+  kimi: 'Kimi',
   dare: 'Dare',
   opencode: 'OpenCode',
 };
@@ -32,6 +33,7 @@ const BUILTIN_ACCOUNT_IDS: Record<BuiltinAccountClient, string> = {
   anthropic: 'claude',
   openai: 'codex',
   google: 'gemini',
+  kimi: 'kimi',
   dare: 'dare',
   opencode: 'opencode',
 };
@@ -44,6 +46,8 @@ function builtinDisplayName(client: BuiltinAccountClient): string {
       return 'Codex (OAuth)';
     case 'google':
       return 'Gemini (OAuth)';
+    case 'kimi':
+      return 'Kimi (OAuth)';
     case 'dare':
       return 'Dare (client-auth)';
     case 'opencode':
@@ -67,6 +71,8 @@ function fallbackAccountRef(cat: CatData): string | null {
       return 'codex';
     case 'google':
       return 'gemini';
+    case 'kimi':
+      return 'kimi';
     case 'dare':
       return 'dare';
     case 'opencode':

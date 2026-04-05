@@ -52,9 +52,12 @@ export class LlmAIProvider implements AIProvider {
         case 'anthropic':
           return await this.callAnthropic(prompt, controller.signal);
         case 'openai':
+        case 'omx':
           return await this.callOpenAI(prompt, controller.signal);
         case 'google':
           return await this.callGoogle(prompt, controller.signal);
+        case 'kimi':
+          return await this.callKimi(prompt, controller.signal);
         default:
           // Unsupported providers (dare, antigravity, etc.) — fall through to Anthropic
           return await this.callAnthropic(prompt, controller.signal);
@@ -154,6 +157,33 @@ export class LlmAIProvider implements AIProvider {
 
     const data = (await resp.json()) as { candidates: Array<{ content: { parts: Array<{ text: string }> } }> };
     return { text: data.candidates[0]?.content.parts[0]?.text ?? '' };
+  }
+
+  private async callKimi(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
+    const apiKey = this.resolveApiKey('kimi', 'MOONSHOT_API_KEY', 'OPENAI_API_KEY');
+    if (!apiKey) throw new Error('No Kimi API key in credentials or MOONSHOT_API_KEY env');
+
+    const resp = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 256,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal,
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Kimi API error ${resp.status}: ${body.slice(0, 200)}`);
+    }
+
+    const data = (await resp.json()) as { choices: Array<{ message: { content: string } }> };
+    return { text: data.choices[0]?.message.content ?? '' };
   }
 
   /** Parse LLM text response into structured action. Tolerates markdown wrapping. */

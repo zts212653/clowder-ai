@@ -16,13 +16,16 @@ vi.mock('@/components/useConfirm', () => ({
 import { HubCatEditor } from '@/components/HubCatEditor';
 import {
   buildCatPayload,
+  CLIENT_OPTIONS,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
+  builtinAccountIdForClient,
   filterProfiles,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
+import { defaultMcpSupportForClient, protocolForClient } from '@/components/hub-cat-editor.protocols';
 import type { ProfileItem } from '@/components/hub-provider-profiles.types';
 
 const mockApiFetch = vi.mocked(apiFetch);
@@ -808,6 +811,59 @@ describe('HubCatEditor', () => {
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
     expect(payload.defaultModel).toBe('gpt-5.3-codex-spark');
+  });
+
+  it('exposes Kimi and OMX in client options with expected protocol/account behavior', () => {
+    expect(CLIENT_OPTIONS.some((option) => option.value === 'kimi' && option.label === 'Kimi')).toBe(true);
+    expect(CLIENT_OPTIONS.some((option) => option.value === 'omx' && option.label === 'OMX')).toBe(true);
+
+    expect(protocolForClient('kimi')).toBe('kimi');
+    expect(protocolForClient('omx')).toBe('openai');
+
+    expect(defaultMcpSupportForClient('kimi')).toBe(true);
+    expect(defaultMcpSupportForClient('omx')).toBe(true);
+
+    expect(builtinAccountIdForClient('kimi')).toBe('kimi');
+    expect(builtinAccountIdForClient('omx')).toBeNull();
+  });
+
+  it('filters Kimi profiles as builtin-only and excludes OMX from builtin bindings', () => {
+    const profiles: ProfileItem[] = [
+      {
+        id: 'kimi',
+        provider: 'kimi',
+        displayName: 'Kimi (OAuth)',
+        name: 'Kimi (OAuth)',
+        authType: 'oauth',
+        protocol: 'kimi',
+        kind: 'builtin',
+        builtin: true,
+        mode: 'subscription',
+        client: 'kimi',
+        models: ['kimi-k2.5'],
+        hasApiKey: false,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+      {
+        id: 'moonshot-sponsor',
+        provider: 'moonshot-sponsor',
+        displayName: 'Moonshot Sponsor',
+        name: 'Moonshot Sponsor',
+        authType: 'api_key',
+        protocol: 'kimi',
+        kind: 'api_key',
+        builtin: false,
+        mode: 'api_key',
+        models: ['kimi-k2.5'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+    ];
+
+    expect(filterProfiles('kimi', profiles).map((profile) => profile.id)).toEqual(['kimi']);
+    expect(filterProfiles('omx', profiles)).toEqual([]);
   });
 
   it('keeps unbound cats unbound when opening the editor', async () => {

@@ -873,7 +873,7 @@ ok "Build complete"
 # Skills: per-skill user-level symlinks (ADR-009)
 SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
 if [[ -d "$SKILLS_SOURCE" ]]; then
-    for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills"; do
+    for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills" "$HOME/.kimi/skills"; do
         mkdir -p "$tdir"
         for sd in "$SKILLS_SOURCE"/*/; do
             [[ -d "$sd" ]] || continue; sn=$(basename "$sd"); [[ "$sn" == "refs" ]] && continue; ln -sfn "$sd" "$tdir/$sn"
@@ -905,6 +905,21 @@ install_brew_cask() {
     hash -r 2>/dev/null || true
     command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: brew install --cask $cask"; exit 1; }; ok "$name installed"
 }
+install_kimi_cli() {
+    info "  Installing Kimi CLI..."
+    if command -v uv &>/dev/null; then
+        uv tool install --python 3.13 kimi-cli >/dev/null 2>&1 || uv tool upgrade kimi-cli >/dev/null 2>&1 || true
+    elif command -v pipx &>/dev/null; then
+        pipx install kimi-cli >/dev/null 2>&1 || pipx upgrade kimi-cli >/dev/null 2>&1 || true
+    elif command -v python3 &>/dev/null; then
+        python3 -m pip install --user --upgrade kimi-cli >/dev/null 2>&1 || true
+    else
+        fail "Kimi install failed. Need uv, pipx, or python3 to install kimi-cli"
+        exit 1
+    fi
+    export PATH="$HOME/.local/bin:$PATH"; hash -r 2>/dev/null || true
+    command -v kimi &>/dev/null || { fail "Kimi install failed. Try: uv tool install --python 3.13 kimi-cli"; exit 1; }; ok "Kimi CLI installed"
+}
 install_claude_cli() {
     info "  Installing Claude Code..."
     if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
@@ -929,6 +944,8 @@ MISSING_AGENTS=()
 command -v claude &>/dev/null && ok "Claude Code already installed" || MISSING_AGENTS+=("claude")
 command -v codex &>/dev/null && ok "Codex CLI already installed"  || MISSING_AGENTS+=("codex")
 command -v gemini &>/dev/null && ok "Gemini CLI already installed" || MISSING_AGENTS+=("gemini")
+command -v kimi &>/dev/null && ok "Kimi CLI already installed"   || MISSING_AGENTS+=("kimi")
+command -v omx &>/dev/null && ok "OMX CLI already installed"     || MISSING_AGENTS+=("omx")
 
 if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
     INSTALL_AGENTS=("${MISSING_AGENTS[@]}")  # default: install all missing
@@ -953,6 +970,8 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
             claude) install_claude_cli ;;
             codex)  install_codex_cli ;;
             gemini) install_npm_cli "Gemini CLI" "gemini" "@google/gemini-cli" ;;
+            kimi)   install_kimi_cli ;;
+            omx)    install_npm_cli "OMX CLI" "omx" "oh-my-codex" ;;
         esac
     done
 fi
@@ -970,6 +989,10 @@ configure_agent_auth() {
             --client "$cmd" \
             --mode oauth
         ok "$name: OAuth mode (Gemini CLI only supports Google official API)"
+        return 0
+    fi
+    if [[ "$cmd" == "omx" ]]; then
+        ok "$name: reuses Codex auth/config (run 'omx' after Codex is configured)"
         return 0
     fi
 
@@ -1023,9 +1046,10 @@ configure_agent_auth() {
 if [[ "$HAS_TTY" == true ]]; then
     info "  Configure each agent / 逐个配置每只猫的认证方式："
     configure_agent_auth "Claude (布偶猫)" "claude"; configure_agent_auth "Codex (缅因猫)" "codex"
-    configure_agent_auth "Gemini (暹罗猫)" "gemini"
+    configure_agent_auth "Gemini (暹罗猫)" "gemini"; configure_agent_auth "Kimi (月之暗面)" "kimi"
+    configure_agent_auth "OMX (oh-my-codex)" "omx"
 else
-    info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini"
+    info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini / kimi / omx"
 fi
 
 # ── [8/9] Generate .env with all collected config ─────────

@@ -101,7 +101,8 @@ function readOldSecrets(): Record<string, { apiKey?: string }> {
 }
 
 function toAccountProtocol(protocol: string | undefined): AccountProtocol {
-  if (protocol === 'anthropic' || protocol === 'openai' || protocol === 'google') return protocol;
+  if (protocol === 'anthropic' || protocol === 'openai' || protocol === 'google' || protocol === 'kimi')
+    return protocol;
   return 'openai'; // safe default for custom API-key accounts
 }
 

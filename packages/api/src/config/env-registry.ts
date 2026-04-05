@@ -24,6 +24,7 @@ export type EnvCategory =
   | 'codex'
   | 'dare'
   | 'gemini'
+  | 'kimi'
   | 'tts'
   | 'stt'
   | 'frontend'
@@ -64,6 +65,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   codex: '缅因猫 (Codex)',
   dare: '狸花猫 (Dare)',
   gemini: '暹罗猫 (Gemini)',
+  kimi: 'Kimi',
   tts: '语音合成 (TTS)',
   stt: '语音识别 (STT)',
   frontend: '前端',
@@ -917,6 +919,24 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '暹罗猫适配器 (gemini-cli/antigravity)',
     category: 'gemini',
     sensitive: false,
+  },
+
+  // --- kimi ---
+  {
+    name: 'MOONSHOT_API_KEY',
+    defaultValue: '(未设置)',
+    description: 'Kimi / Moonshot API Key（官方 kimi-cli API Key 模式用）',
+    category: 'kimi',
+    sensitive: true,
+    hubVisible: false,
+  },
+  {
+    name: 'KIMI_SHARE_DIR',
+    defaultValue: '~/.kimi',
+    description: '官方 kimi-cli 共享目录（session / mcp / logs）',
+    category: 'kimi',
+    sensitive: false,
+    hubVisible: false,
   },
 
   // --- tts ---

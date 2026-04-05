@@ -67,6 +67,10 @@ function providerToBootstrapClient(provider: unknown): BuiltinAccountClient | nu
       return 'openai';
     case 'google':
       return 'google';
+    case 'kimi':
+      return 'kimi';
+    case 'omx':
+      return 'openai';
     case 'dare':
       return 'dare';
     case 'opencode':

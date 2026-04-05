@@ -1,5 +1,5 @@
 export function buildProbeHeaders(
-  protocol: 'anthropic' | 'openai' | 'openai-responses' | 'google',
+  protocol: 'anthropic' | 'openai' | 'openai-responses' | 'google' | 'kimi',
   apiKey: string,
 ): Record<string, string> {
   switch (protocol) {
@@ -7,6 +7,7 @@ export function buildProbeHeaders(
       return { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
     case 'google':
       return { 'x-goog-api-key': apiKey };
+    case 'kimi':
     case 'openai':
     case 'openai-responses':
     default:

@@ -10,7 +10,16 @@ import { createCatId } from './ids.js';
 /**
  * AI provider behind a cat
  */
-export type CatProvider = 'anthropic' | 'openai' | 'google' | 'dare' | 'antigravity' | 'opencode' | 'a2a';
+export type CatProvider =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'kimi'
+  | 'omx'
+  | 'dare'
+  | 'antigravity'
+  | 'opencode'
+  | 'a2a';
 
 /**
  * Cat status in the system
@@ -138,6 +147,40 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
     breedId: 'siamese',
     roleDescription: '视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达',
     personality: '活泼有创意，善于用视觉语言表达想法，喜欢尝试新事物',
+  },
+  kimi: {
+    id: createCatId('kimi'),
+    name: 'Kimi',
+    displayName: 'Kimi',
+    avatar: '/avatars/kimi.png',
+    color: {
+      primary: '#7C3AED',
+      secondary: '#EDE9FE',
+    },
+    mentionPatterns: ['@kimi', '@moonshot', '@月之暗面'],
+    provider: 'kimi',
+    defaultModel: 'kimi-k2.5',
+    mcpSupport: true,
+    breedId: 'kimi',
+    roleDescription: '中文推理与长文本助手，擅长中文表达、总结与资料整理',
+    personality: '稳健细致，擅长长文阅读和中文语境下的结构化表达',
+  },
+  omx: {
+    id: createCatId('omx'),
+    name: 'OMX',
+    displayName: 'OMX',
+    avatar: '/avatars/omx.png',
+    color: {
+      primary: '#0F766E',
+      secondary: '#CCFBF1',
+    },
+    mentionPatterns: ['@omx', '@oh-my-codex'],
+    provider: 'omx',
+    defaultModel: 'gpt-5.4',
+    mcpSupport: true,
+    breedId: 'omx',
+    roleDescription: 'Codex 编排助手，擅长工作流组织、多 agent 调度与执行加速',
+    personality: '务实高效，偏执行编排风格，适合长任务和并行推进',
   },
 } as const;
 

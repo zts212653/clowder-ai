@@ -46,6 +46,7 @@ test('client-auth set creates a generic api key account and bootstrap binding fo
       anthropic: { enabled: true, mode: 'api_key', accountRef: 'installer-anthropic' },
       openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
       google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
+      kimi: { enabled: true, mode: 'oauth', accountRef: 'kimi' },
       dare: { enabled: false, mode: 'skip' },
       opencode: { enabled: false, mode: 'skip' },
     });
@@ -117,6 +118,23 @@ test('client-auth set oauth restores builtin bindings for dare and opencode', ()
       enabled: true,
       mode: 'oauth',
       accountRef: 'opencode',
+    });
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set oauth creates builtin kimi binding', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-kimi-oauth-'));
+
+  try {
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'kimi', '--mode', 'oauth']);
+
+    const { profiles } = readInstallerState(projectRoot);
+    assert.deepEqual(profiles.bootstrapBindings.kimi, {
+      enabled: true,
+      mode: 'oauth',
+      accountRef: 'kimi',
     });
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });

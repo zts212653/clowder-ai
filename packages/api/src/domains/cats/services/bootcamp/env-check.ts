@@ -20,6 +20,10 @@ export interface EnvCheckResult {
   pnpm: EnvCheckItem;
   git: EnvCheckItem;
   claudeCli: EnvCheckItem;
+  codexCli: EnvCheckItem;
+  geminiCli: EnvCheckItem;
+  kimiCli: EnvCheckItem;
+  omxCli: EnvCheckItem;
   mcp: EnvCheckItem;
   tts: { ok: boolean; recommended: string };
   asr: { ok: boolean };
@@ -51,11 +55,15 @@ async function checkPort(port: number): Promise<boolean> {
 }
 
 export async function runEnvironmentCheck(): Promise<EnvCheckResult> {
-  const [node, pnpm, git, claudeCli] = await Promise.all([
+  const [node, pnpm, git, claudeCli, codexCli, geminiCli, kimiCli, omxCli] = await Promise.all([
     checkCommand('node --version'),
     checkCommand('pnpm --version'),
     checkCommand('git --version'),
     checkCommand('claude --version'),
+    checkCommand('codex --version'),
+    checkCommand('gemini --version'),
+    checkCommand('kimi --version'),
+    checkCommand('omx version'),
   ]);
 
   const mcpPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
@@ -70,6 +78,10 @@ export async function runEnvironmentCheck(): Promise<EnvCheckResult> {
     pnpm,
     git,
     claudeCli,
+    codexCli,
+    geminiCli,
+    kimiCli,
+    omxCli,
     mcp,
     tts: {
       ok: ttsPort,
