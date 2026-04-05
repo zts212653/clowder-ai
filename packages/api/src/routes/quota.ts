@@ -73,6 +73,15 @@ export interface GeminiQuota {
   lastChecked: string | null;
 }
 
+export interface KimiQuota {
+  platform: 'kimi';
+  usageItems: CodexUsageItem[];
+  error?: string;
+  lastChecked: string | null;
+  status?: 'ok' | 'unavailable';
+  note?: string;
+}
+
 export interface AntigravityQuota {
   platform: 'antigravity';
   usageItems: CodexUsageItem[];
@@ -84,11 +93,12 @@ export interface QuotaResponse {
   claude: ClaudeQuota;
   codex: CodexQuota;
   gemini: GeminiQuota;
+  kimi: KimiQuota;
   antigravity: AntigravityQuota;
   fetchedAt: string;
 }
 
-export type QuotaProbeTargetPlatform = 'claude' | 'codex' | 'antigravity';
+export type QuotaProbeTargetPlatform = 'claude' | 'codex' | 'kimi' | 'antigravity';
 export type QuotaProbeRuntimeStatus = 'ok' | 'error' | 'disabled';
 
 export interface QuotaProbeAction {
@@ -99,7 +109,7 @@ export interface QuotaProbeAction {
 }
 
 export interface QuotaProbeDescriptor {
-  id: 'claude-cli' | 'official-browser' | 'antigravity-placeholder';
+  id: 'claude-cli' | 'official-browser' | 'kimi-official-web' | 'antigravity-placeholder';
   sourceKind: 'cli' | 'browser' | 'placeholder';
   refreshMode: 'manual' | 'scheduled';
   enabled: boolean;
@@ -132,15 +142,18 @@ export interface QuotaSummaryResponse {
   platforms: {
     codex: QuotaSummaryPlatform;
     claude: QuotaSummaryPlatform;
+    kimi: QuotaSummaryPlatform;
     antigravity: QuotaSummaryPlatform;
   };
   probes: {
     official: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
     claudeCli: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
+    kimiOfficial: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
   };
   actions: {
     refreshOfficialPath: '/api/quota/refresh/official';
     refreshClaudePath: '/api/quota/refresh/claude';
+    refreshKimiPath: '/api/quota/refresh/kimi';
   };
 }
 
@@ -171,6 +184,16 @@ function createInitialGeminiCache(): GeminiQuota {
   };
 }
 
+function createInitialKimiCache(): KimiQuota {
+  return {
+    platform: 'kimi',
+    usageItems: [],
+    lastChecked: null,
+    status: 'unavailable',
+    note: '暂无 Kimi 官方额度数据，请先手动获取。',
+  };
+}
+
 function createInitialAntigravityCache(): AntigravityQuota {
   return {
     platform: 'antigravity',
@@ -182,12 +205,14 @@ function createInitialAntigravityCache(): AntigravityQuota {
 let claudeCache: ClaudeQuota = createInitialClaudeCache();
 let codexCache: CodexQuota = createInitialCodexCache();
 let geminiCache: GeminiQuota = createInitialGeminiCache();
+let kimiCache: KimiQuota = createInitialKimiCache();
 let antigravityCache: AntigravityQuota = createInitialAntigravityCache();
 
 export function resetQuotaCachesForTests(): void {
   claudeCache = createInitialClaudeCache();
   codexCache = createInitialCodexCache();
   geminiCache = createInitialGeminiCache();
+  kimiCache = createInitialKimiCache();
   antigravityCache = createInitialAntigravityCache();
 }
 
@@ -244,7 +269,7 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
       refreshMode: 'manual',
       enabled: officialRefreshEnabled,
       status: officialStatus,
-      targets: ['codex', 'claude'],
+      targets: ['codex', 'claude', 'kimi'],
       actions: [
         {
           kind: 'refresh',
@@ -258,7 +283,29 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
           ? 'Disabled by default for risk control. Set QUOTA_OFFICIAL_REFRESH_ENABLED=1 to enable.'
           : officialStatus === 'error'
             ? (codexCache.error ?? claudeCache.error ?? 'official OAuth probe error')
-            : 'Enabled. Uses Anthropic/OpenAI OAuth APIs (ClaudeBar-compatible).',
+            : 'Enabled. Uses Claude/Codex OAuth APIs plus Kimi official billing API (ClaudeBar-compatible).',
+    },
+    {
+      id: 'kimi-official-web',
+      sourceKind: 'browser',
+      refreshMode: 'manual',
+      enabled: officialRefreshEnabled,
+      status: !officialRefreshEnabled ? 'disabled' : kimiCache.error ? 'error' : kimiCache.status === 'ok' ? 'ok' : 'ok',
+      targets: ['kimi'],
+      actions: [
+        {
+          kind: 'refresh',
+          method: 'POST',
+          path: '/api/quota/refresh/kimi',
+          requiresInteractive: false,
+        },
+      ],
+      reason:
+        !officialRefreshEnabled
+          ? 'Disabled by default for risk control. Set QUOTA_OFFICIAL_REFRESH_ENABLED=1 to enable.'
+          : kimiCache.error ??
+            kimiCache.note ??
+            'Enabled. Uses Kimi official billing API (ClaudeBar-compatible).',
     },
     {
       id: 'antigravity-placeholder',
@@ -271,6 +318,109 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
       reason: 'Antigravity official probe not implemented yet.',
     },
   ];
+}
+
+const KIMI_AUTH_TOKEN_ENV = 'KIMI_AUTH_TOKEN';
+const KIMI_BILLING_URL = 'https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages';
+
+interface KimiUsageResponse {
+  usages: Array<{
+    scope: string;
+    detail: {
+      limit: string;
+      used?: string | null;
+      remaining?: string | null;
+      resetTime?: string | null;
+    };
+    limits?: Array<{
+      window?: {
+        duration?: number | null;
+        timeUnit?: string | null;
+      } | null;
+      detail: {
+        limit: string;
+        used?: string | null;
+        remaining?: string | null;
+        resetTime?: string | null;
+      };
+    }> | null;
+  }>;
+}
+
+function resolveKimiAuthToken(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env[KIMI_AUTH_TOKEN_ENV]?.trim();
+  if (raw) return raw;
+  return null;
+}
+
+function decodeKimiTokenContext(token: string): { deviceId?: string; sessionId?: string; trafficId?: string } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    let payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (payload.length % 4 !== 0) payload += '=';
+    const decoded = JSON.parse(Buffer.from(payload, 'base64').toString('utf8')) as Record<string, unknown>;
+    return {
+      deviceId: typeof decoded.device_id === 'string' ? decoded.device_id : undefined,
+      sessionId: typeof decoded.ssid === 'string' ? decoded.ssid : undefined,
+      trafficId: typeof decoded.sub === 'string' ? decoded.sub : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseKimiUsageValue(detail: { limit: string; used?: string | null; remaining?: string | null }): {
+  limit: number;
+  used: number;
+  remaining: number | null;
+} | null {
+  const limit = Number.parseInt(detail.limit, 10);
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  const remaining = detail.remaining != null ? Number.parseInt(detail.remaining, 10) : null;
+  const used =
+    detail.used != null
+      ? Number.parseInt(detail.used, 10)
+      : Number.isFinite(remaining as number)
+        ? Math.max(0, limit - (remaining as number))
+        : 0;
+  return {
+    limit,
+    used: Number.isFinite(used) ? used : 0,
+    remaining: Number.isFinite(remaining as number) ? (remaining as number) : null,
+  };
+}
+
+export function parseKimiOfficialUsageResponse(json: KimiUsageResponse): CodexUsageItem[] {
+  const codingUsage = Array.isArray(json.usages) ? json.usages.find((item) => item.scope === 'FEATURE_CODING') : null;
+  if (!codingUsage) return [];
+  const items: CodexUsageItem[] = [];
+  const weekly = parseKimiUsageValue(codingUsage.detail);
+  if (weekly) {
+    items.push({
+      label: '每周使用限额',
+      usedPercent: normalizePercent(Math.round((weekly.used / weekly.limit) * 10000) / 100),
+      percentKind: 'used',
+      poolId: 'kimi-weekly',
+      ...(codingUsage.detail.resetTime ? { resetsAt: codingUsage.detail.resetTime } : {}),
+      resetsText: `${weekly.used}/${weekly.limit} requests`,
+    });
+  }
+  const rateLimit = Array.isArray(codingUsage.limits)
+    ? codingUsage.limits.find((item) => item?.window?.duration === 5 && /hour/i.test(item?.window?.timeUnit ?? ''))
+    : null;
+  const rate = rateLimit ? parseKimiUsageValue(rateLimit.detail) : null;
+  if (rate) {
+    items.push({
+      label: '5小时使用限额',
+      usedPercent: normalizePercent(Math.round((rate.used / rate.limit) * 10000) / 100),
+      percentKind: 'used',
+      poolId: 'kimi-rate-limit',
+      ...(rateLimit?.detail.resetTime ? { resetsAt: rateLimit.detail.resetTime } : {}),
+      resetsText: `${rate.used}/${rate.limit} requests / 5h`,
+    });
+  }
+  return items;
 }
 
 function normalizePercent(value: number): number {
@@ -433,15 +583,72 @@ function buildAntigravitySummaryPlatform(): QuotaSummaryPlatform {
   };
 }
 
+function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
+  const officialRefreshEnabled = isTruthyFlag(process.env[OFFICIAL_REFRESH_ENABLED_ENV]);
+  if (kimiCache.error) {
+    return {
+      id: 'kimi',
+      label: '金吉拉 (Kimi)',
+      displayPercent: null,
+      displayKind: null,
+      utilizationPercent: null,
+      status: 'error',
+      note: kimiCache.error,
+      lastChecked: kimiCache.lastChecked,
+    };
+  }
+  if (kimiCache.status === 'unavailable') {
+    return {
+      id: 'kimi',
+      label: '金吉拉 (Kimi)',
+      displayPercent: null,
+      displayKind: null,
+      utilizationPercent: null,
+      status: 'pending',
+      note:
+        kimiCache.note ??
+        (officialRefreshEnabled
+          ? `暂无 Kimi 官方额度数据，请配置 ${KIMI_AUTH_TOKEN_ENV} 后刷新。`
+          : `官方额度抓取默认关闭，请先设 ${OFFICIAL_REFRESH_ENABLED_ENV}=1。`),
+      lastChecked: kimiCache.lastChecked,
+    };
+  }
+  const primary = pickPrimaryUsageItem(kimiCache.usageItems);
+  if (!primary) {
+    return {
+      id: 'kimi',
+      label: '金吉拉 (Kimi)',
+      displayPercent: null,
+      displayKind: null,
+      utilizationPercent: null,
+      status: 'pending',
+      note: '暂无 Kimi 额度数据。',
+      lastChecked: kimiCache.lastChecked,
+    };
+  }
+  const utilization = toUtilizationPercent(primary);
+  return {
+    id: 'kimi',
+    label: '金吉拉 (Kimi)',
+    displayPercent: normalizePercent(primary.usedPercent),
+    displayKind: primary.percentKind ?? 'used',
+    utilizationPercent: utilization,
+    status: statusFromUtilization(utilization),
+    note: primary.resetsText ?? primary.resetsAt ?? primary.label,
+    lastChecked: kimiCache.lastChecked,
+  };
+}
+
 export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSummaryResponse {
   const probes = listQuotaProbeDescriptors(env);
   const officialProbe = probes.find((probe) => probe.id === 'official-browser');
   const claudeCliProbe = probes.find((probe) => probe.id === 'claude-cli');
   const codex = buildCodexSummaryPlatform();
   const claude = buildClaudeSummaryPlatform();
+  const kimi = buildKimiSummaryPlatform();
   const antigravity = buildAntigravitySummaryPlatform();
 
-  const utilizationValues = [codex.utilizationPercent, claude.utilizationPercent].filter(
+  const utilizationValues = [codex.utilizationPercent, claude.utilizationPercent, kimi.utilizationPercent, antigravity.utilizationPercent].filter(
     (value): value is number => typeof value === 'number' && Number.isFinite(value),
   );
   const maxUtilization = utilizationValues.length > 0 ? Math.max(...utilizationValues) : null;
@@ -487,6 +694,7 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
     platforms: {
       codex,
       claude,
+      kimi,
       antigravity,
     },
     probes: {
@@ -500,10 +708,22 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
         status: claudeCliProbe?.status ?? 'ok',
         reason: claudeCliProbe?.reason ?? 'claude-cli probe unavailable',
       },
+      kimiOfficial: {
+        enabled: probes.some((probe) => probe.id === 'kimi-official-web' && probe.enabled),
+        status:
+          probes.find((probe) => probe.id === 'kimi-official-web')?.status ??
+          (kimiCache.error ? 'error' : kimiCache.status === 'ok' ? 'ok' : 'disabled'),
+        reason:
+          probes.find((probe) => probe.id === 'kimi-official-web')?.reason ??
+          kimiCache.error ??
+          kimiCache.note ??
+          'Kimi official probe unavailable',
+      },
     },
     actions: {
       refreshOfficialPath: '/api/quota/refresh/official',
       refreshClaudePath: '/api/quota/refresh/claude',
+      refreshKimiPath: '/api/quota/refresh/kimi',
     },
   };
 }
@@ -666,6 +886,7 @@ interface CodexOAuthCredentials extends OAuthCredentials {
 interface RefreshOAuthOptions {
   claudeCredentials: OAuthCredentials | null;
   codexCredentials: CodexOAuthCredentials | null;
+  kimiAuthToken?: string | null;
   fetchLike?: typeof globalThis.fetch;
 }
 
@@ -677,6 +898,7 @@ interface RefreshOAuthProviderResult {
 interface RefreshOAuthResult {
   claude?: RefreshOAuthProviderResult;
   codex?: RefreshOAuthProviderResult;
+  kimi?: RefreshOAuthProviderResult;
   skipped?: string[];
 }
 
@@ -846,6 +1068,71 @@ export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions)
     skipped.push('codex');
   }
 
+  if (options.kimiAuthToken) {
+    tasks.push(
+      (async () => {
+        const token = options.kimiAuthToken!;
+        const tokenContext = decodeKimiTokenContext(token);
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          Cookie: `kimi-auth=${token}`,
+          Origin: 'https://www.kimi.com',
+          Referer: 'https://www.kimi.com/code/console',
+          Accept: '*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+          'connect-protocol-version': '1',
+          'x-language': 'en-US',
+          'x-msh-platform': 'web',
+        };
+        if (tokenContext?.deviceId) headers['x-msh-device-id'] = tokenContext.deviceId;
+        if (tokenContext?.sessionId) headers['x-msh-session-id'] = tokenContext.sessionId;
+        if (tokenContext?.trafficId) headers['x-traffic-id'] = tokenContext.trafficId;
+        try {
+          const response = await fetchFn(KIMI_BILLING_URL, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ scope: ['FEATURE_CODING'] }),
+          });
+          if (response.status === 401 || response.status === 403) {
+            throw new Error(`Kimi auth failed: HTTP ${response.status}`);
+          }
+          if (!response.ok) {
+            throw new Error(`Kimi billing API failed: HTTP ${response.status}`);
+          }
+          const json = (await response.json()) as KimiUsageResponse;
+          const items = parseKimiOfficialUsageResponse(json);
+          if (items.length === 0) {
+            throw new Error('Kimi billing API returned no FEATURE_CODING usage windows');
+          }
+          kimiCache = {
+            platform: 'kimi',
+            usageItems: items,
+            lastChecked: new Date().toISOString(),
+            status: 'ok',
+            note: '来自 Kimi 官方额度接口（每周 + 5 小时窗口）。',
+          };
+          result.kimi = { items: items.length };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          kimiCache = {
+            platform: 'kimi',
+            usageItems: [],
+            error: message,
+            lastChecked: new Date().toISOString(),
+            status: 'unavailable',
+            note: message,
+          };
+          result.kimi = { items: 0, error: message };
+        }
+      })(),
+    );
+  } else {
+    skipped.push('kimi');
+  }
+
   await Promise.all(tasks);
   if (skipped.length > 0) result.skipped = skipped;
   return result;
@@ -867,6 +1154,7 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
       claude: claudeCache,
       codex: codexCache,
       gemini: geminiCache,
+      kimi: kimiCache,
       antigravity: antigravityCache,
       fetchedAt: new Date().toISOString(),
     };
@@ -876,6 +1164,42 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
   // GET: compact summary for menu bar / widget clients
   app.get('/api/quota/summary', async () => {
     return buildQuotaSummary();
+  });
+
+  // POST: refresh Kimi quota from official billing API
+  app.post('/api/quota/refresh/kimi', async (_request, reply) => {
+    if (!isTruthyFlag(process.env[OFFICIAL_REFRESH_ENABLED_ENV])) {
+      const message = `Official quota refresh is temporarily disabled. Set ${OFFICIAL_REFRESH_ENABLED_ENV}=1 to enable it.`;
+      kimiCache = {
+        ...kimiCache,
+        error: message,
+        status: 'unavailable',
+        note: message,
+        lastChecked: new Date().toISOString(),
+      };
+      return reply.status(503).send({ error: message });
+    }
+    const kimiAuthToken = resolveKimiAuthToken(process.env);
+    if (!kimiAuthToken) {
+      const message = `No Kimi official auth token found. Set ${KIMI_AUTH_TOKEN_ENV}.`;
+      kimiCache = {
+        ...kimiCache,
+        error: message,
+        status: 'unavailable',
+        note: message,
+        lastChecked: new Date().toISOString(),
+      };
+      return reply.status(400).send({ error: message });
+    }
+    const result = await refreshOfficialQuotaViaOAuth({
+      claudeCredentials: null,
+      codexCredentials: null,
+      kimiAuthToken,
+    });
+    if ((result.kimi?.items ?? 0) === 0 && result.kimi?.error) {
+      return reply.status(502).send({ error: result.kimi.error });
+    }
+    return { kimi: kimiCache };
   });
 
   // POST: refresh Claude quota via ccusage CLI
@@ -921,25 +1245,28 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
     // Load credentials from files
     const claudeCredentials = loadClaudeCredentials(process.env[CLAUDE_CREDENTIALS_PATH_ENV]);
     const codexCredentials = loadCodexCredentials(process.env[CODEX_CREDENTIALS_PATH_ENV]);
+    const kimiAuthToken = resolveKimiAuthToken(process.env);
 
-    if (!claudeCredentials && !codexCredentials) {
+    if (!claudeCredentials && !codexCredentials && !kimiAuthToken) {
       const message =
-        'No OAuth credentials found. Claude: ~/.claude/.credentials.json, Codex: set CODEX_CREDENTIALS_PATH.';
+        `No official quota credentials found. Claude: ~/.claude/.credentials.json, Codex: set ${CODEX_CREDENTIALS_PATH_ENV}, Kimi: set ${KIMI_AUTH_TOKEN_ENV}.`;
       const checkedAt = new Date().toISOString();
       codexCache = { ...codexCache, error: message, lastChecked: checkedAt };
       claudeCache = { ...claudeCache, error: message, lastChecked: checkedAt };
+      kimiCache = { ...kimiCache, error: message, status: 'unavailable', note: message, lastChecked: checkedAt };
       return reply.status(400).send({ error: message });
     }
 
-    const result = await refreshOfficialQuotaViaOAuth({ claudeCredentials, codexCredentials });
-    const errors = [result.claude?.error, result.codex?.error].filter(Boolean);
-    if (errors.length > 0 && (result.claude?.items ?? 0) === 0 && (result.codex?.items ?? 0) === 0) {
+    const result = await refreshOfficialQuotaViaOAuth({ claudeCredentials, codexCredentials, kimiAuthToken });
+    const errors = [result.claude?.error, result.codex?.error, result.kimi?.error].filter(Boolean);
+    if (errors.length > 0 && (result.claude?.items ?? 0) === 0 && (result.codex?.items ?? 0) === 0 && (result.kimi?.items ?? 0) === 0) {
       return reply.status(502).send({ error: errors.join('; ') });
     }
     return {
       ok: true,
       claudeItems: result.claude?.items ?? 0,
       codexItems: result.codex?.items ?? 0,
+      kimiItems: result.kimi?.items ?? 0,
       ...(errors.length > 0 ? { warnings: errors } : {}),
       ...(result.skipped && result.skipped.length > 0 ? { skipped: result.skipped } : {}),
     };

@@ -505,6 +505,28 @@ describe('writeKimiMcpConfig', () => {
       env: { DEBUG: '1' },
     });
   });
+
+  it('injects cat-cafe callback env placeholders for kimi cat-cafe servers', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeKimiMcpConfig(file, [
+      {
+        name: 'cat-cafe',
+        command: 'node',
+        args: ['index.js'],
+        enabled: true,
+        source: 'cat-cafe',
+      },
+    ]);
+
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    assert.deepEqual(raw.mcpServers['cat-cafe'].env, {
+      CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
+      CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
+      CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
+      CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
+      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
+    });
+  });
 });
 
 // ────────── P1-2 Regression: Preserve user's non-managed MCP servers ──────────

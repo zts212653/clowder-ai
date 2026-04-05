@@ -223,6 +223,44 @@ interface SkillMeta {
   triggers?: string[];
 }
 
+interface SkillScanPlan {
+  key: string;
+  provider: 'anthropic' | 'openai' | 'google' | 'kimi';
+  path: string;
+  exclude?: string[];
+}
+
+export async function scanProviderSkillDirs(plans: SkillScanPlan[]): Promise<{
+  providerSkills: Record<string, string[]>;
+  scanResults: Record<string, string[] | null>;
+  scansOk: boolean;
+}> {
+  const providerSkills: Record<string, string[]> = {};
+  const scanResults: Record<string, string[] | null> = {};
+
+  for (const plan of plans) {
+    if (!providerSkills[plan.provider]) providerSkills[plan.provider] = [];
+  }
+
+  const results = await Promise.all(
+    plans.map(async (plan) => {
+      const names = await listSkillSubdirs(plan.path, plan.exclude);
+      return { plan, names };
+    }),
+  );
+
+  let scansOk = true;
+  for (const { plan, names } of results) {
+    scanResults[plan.key] = names;
+    if (names === null) {
+      scansOk = false;
+      continue;
+    }
+    providerSkills[plan.provider] = [...new Set([...(providerSkills[plan.provider] ?? []), ...names])];
+  }
+
+  return { providerSkills, scanResults, scansOk };
+}
 /**
  * Extract description + triggers from a SKILL.md frontmatter.
  * Triggers are embedded in descriptions:
@@ -472,19 +510,29 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // placeholders for Gemini MCP) are applied to existing environments
     // without requiring a full re-bootstrap.  writeXxxMcpConfig functions
     // are idempotent merge-writers, so repeated calls are safe and cheap.
-    await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+    try {
+      await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== 'EPERM' && code !== 'EACCES') throw error;
+    }
 
     // 2. Discover skills (filesystem scan — separate from MCP)
     // null = scan failed (readdir/read error); [] = directory exists but empty.
     // Use listSkillSubdirs() for provider dirs so stale/broken symlinks do not
     // resurrect deleted skills in the board.
     const projectSkillsDir = join(projectRoot, '.claude', 'skills');
-    const [claudeProjectSkills, claudeUserSkills, codexSkills, geminiSkills] = await Promise.all([
-      listSkillSubdirs(projectSkillsDir),
-      listSkillSubdirs(join(home, '.claude', 'skills')),
-      listSkillSubdirs(join(home, '.codex', 'skills'), ['.system']),
-      listSkillSubdirs(join(home, '.gemini', 'skills')),
-    ]);
+    const skillScanPlans: SkillScanPlan[] = [
+      { key: 'claude-project', provider: 'anthropic', path: projectSkillsDir },
+      { key: 'claude-user', provider: 'anthropic', path: join(home, '.claude', 'skills') },
+      { key: 'codex-user', provider: 'openai', path: join(home, '.codex', 'skills'), exclude: ['.system'] },
+      { key: 'gemini-user', provider: 'google', path: join(home, '.gemini', 'skills') },
+      { key: 'kimi-project', provider: 'kimi', path: join(projectRoot, '.kimi', 'skills') },
+      { key: 'kimi-user', provider: 'kimi', path: join(home, '.kimi', 'skills') },
+    ];
+    const { providerSkills, scanResults, scansOk: allScansOk } = await scanProviderSkillDirs(skillScanPlans);
+    const claudeProjectSkills = scanResults['claude-project'];
+    const projectKimiSkills = scanResults['kimi-project'];
 
     // F041 bug fix: Also scan cat-cafe-skills/ for project-level skill detection.
     // User-level skills (e.g. ~/.claude/skills/feat-completion) are symlinks to
@@ -494,18 +542,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const catCafeOwnSkills = await listSkillSubdirs(catCafeSkillsDir);
     const hasProjectCatCafeSkillsDir = existsSync(catCafeSkillsDir);
 
-    const allScansOk =
-      claudeProjectSkills !== null && claudeUserSkills !== null && codexSkills !== null && geminiSkills !== null;
-
-    // F041 re-open: Track project-level skills for source classification
-    // Includes both .claude/skills/ AND cat-cafe-skills/ entries
-    const projectSkillNames = new Set([...(claudeProjectSkills ?? []), ...(catCafeOwnSkills ?? [])]);
-
-    const providerSkills: Record<string, string[]> = {
-      anthropic: [...new Set([...(claudeProjectSkills ?? []), ...(claudeUserSkills ?? [])])],
-      openai: codexSkills ?? [],
-      google: geminiSkills ?? [],
-    };
+    const projectSkillNames = new Set([
+      ...(claudeProjectSkills ?? []),
+      ...(projectKimiSkills ?? []),
+      ...(catCafeOwnSkills ?? []),
+    ]);
 
     // 3. Sync discovered skills into capabilities.json
     const allSkillNames = new Set<string>();
@@ -546,7 +587,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         !shouldBeCatCafe &&
         cap.source === 'cat-cafe' &&
         catCafeOwnSkills !== null &&
-        claudeProjectSkills !== null
+        claudeProjectSkills !== null &&
+        projectKimiSkills !== null
       ) {
         cap.source = 'external';
         configDirty = true;
@@ -609,6 +651,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       skillDirCandidates.push({ name, dir: join(home, '.claude', 'skills', name) });
       skillDirCandidates.push({ name, dir: join(home, '.codex', 'skills', name) });
       skillDirCandidates.push({ name, dir: join(home, '.gemini', 'skills', name) });
+      skillDirCandidates.push({ name, dir: join(home, '.kimi', 'skills', name) });
     }
 
     const metaResults = await Promise.all(
@@ -729,16 +772,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       claude: join(home, '.claude', 'skills'),
       codex: join(home, '.codex', 'skills'),
       gemini: join(home, '.gemini', 'skills'),
+      kimi: join(home, '.kimi', 'skills'),
     };
     await Promise.all(
       catCafeSkillItems.map(async (item) => {
         const expectedTarget = join(mountSkillsSrc, item.id);
-        const [claude, codex, gemini] = await Promise.all([
+        const [claude, codex, gemini, kimi] = await Promise.all([
           isCorrectSymlink(join(providerDirs.claude, item.id), expectedTarget, item.id, mainSkillsSrc),
           isCorrectSymlink(join(providerDirs.codex, item.id), expectedTarget, item.id, mainSkillsSrc),
           isCorrectSymlink(join(providerDirs.gemini, item.id), expectedTarget, item.id, mainSkillsSrc),
+          isCorrectSymlink(join(providerDirs.kimi, item.id), expectedTarget, item.id, mainSkillsSrc),
         ]);
-        item.mounts = { claude, codex, gemini };
+        item.mounts = { claude, codex, gemini, kimi };
       }),
     );
 

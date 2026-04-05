@@ -41,13 +41,13 @@ const BUILTIN_ACCOUNT_IDS: Record<BuiltinAccountClient, string> = {
 function builtinDisplayName(client: BuiltinAccountClient): string {
   switch (client) {
     case 'anthropic':
-      return 'Claude (OAuth)';
+      return 'Claude（CLI 内置）';
     case 'openai':
-      return 'Codex (OAuth)';
+      return 'Codex（CLI 内置）';
     case 'google':
-      return 'Gemini (OAuth)';
+      return 'Gemini（CLI 内置）';
     case 'kimi':
-      return 'Kimi (OAuth)';
+      return 'Kimi（CLI 内置）';
     case 'dare':
       return 'Dare (client-auth)';
     case 'opencode':
@@ -101,6 +101,8 @@ function builtinQuotaItems(accountId: string, quota: QuotaResponse | null): Code
       return quota?.codex.usageItems ?? [];
     case 'gemini':
       return quota?.gemini?.usageItems ?? [];
+    case 'kimi':
+      return quota?.kimi?.usageItems ?? [];
     default:
       return [];
   }
@@ -113,6 +115,8 @@ function builtinEmptyText(accountId: string): string {
       return '暂无数据，点击刷新获取';
     case 'gemini':
       return '暂无数据（需 ClaudeBar 推送）';
+    case 'kimi':
+      return '暂无官方额度数据，需开启官方抓取并配置 KIMI_AUTH_TOKEN';
     case 'dare':
       return 'Dare 不单独上报官方额度，实际额度取决于绑定账号';
     case 'opencode':
@@ -174,7 +178,7 @@ export function buildAccountQuotaGroups(
     {
       id: 'builtin',
       title: '内置账号额度（按账号配置）',
-      description: '固定内置账号包括 Claude / Codex / Gemini / Dare / OpenCode，每个账号下方反向显示绑定成员。',
+      description: '固定内置账号包括 Claude / Codex / Gemini / Kimi / Dare / OpenCode，每个账号下方反向显示绑定成员。',
       pools: builtinPools,
     },
     {

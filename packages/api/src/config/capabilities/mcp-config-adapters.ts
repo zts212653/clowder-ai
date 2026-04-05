@@ -21,6 +21,13 @@ const GEMINI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
   CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
   CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
 };
+const KIMI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
+  CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
+  CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
+  CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
+  CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
+  CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
+};
 
 function isCatCafeServer(name: string): boolean {
   return name === 'cat-cafe' || name.startsWith('cat-cafe-');
@@ -30,6 +37,14 @@ function ensureGeminiCatCafeEnv(name: string, env?: Record<string, string>): Rec
   if (!isCatCafeServer(name)) return env;
   return {
     ...GEMINI_CAT_CAFE_ENV_PLACEHOLDERS,
+    ...(env ?? {}),
+  };
+}
+
+function ensureKimiCatCafeEnv(name: string, env?: Record<string, string>): Record<string, string> | undefined {
+  if (!isCatCafeServer(name)) return env;
+  return {
+    ...KIMI_CAT_CAFE_ENV_PLACEHOLDERS,
     ...(env ?? {}),
   };
 }
@@ -324,9 +339,19 @@ export async function writeKimiMcpConfig(filePath: string, servers: McpServerDes
       continue;
     }
     const entry: Record<string, unknown> = { command: s.command, args: s.args };
-    if (s.env && Object.keys(s.env).length > 0) entry.env = s.env;
+    const env = ensureKimiCatCafeEnv(s.name, s.env);
+    if (env && Object.keys(env).length > 0) entry.env = env;
     if (s.workingDir) entry.cwd = s.workingDir;
     existingMcp[s.name] = entry;
+  }
+
+  for (const [name, value] of Object.entries(existingMcp)) {
+    if (!isCatCafeServer(name)) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const cfg = value as Record<string, unknown>;
+    const currentEnv = toStringRecord(cfg.env);
+    cfg.env = ensureKimiCatCafeEnv(name, currentEnv);
+    existingMcp[name] = cfg;
   }
 
   existing.mcpServers = existingMcp;

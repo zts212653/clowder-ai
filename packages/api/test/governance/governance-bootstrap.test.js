@@ -35,8 +35,8 @@ describe('GovernanceBootstrapService', () => {
     assert.equal(report.packVersion, GOVERNANCE_PACK_VERSION);
     assert.ok(report.actions.length > 0);
 
-    // Should create CLAUDE.md, AGENTS.md, GEMINI.md
-    for (const f of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']) {
+    // Should create CLAUDE.md, AGENTS.md, GEMINI.md, KIMI.md
+    for (const f of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'KIMI.md']) {
       const content = await readFile(join(targetProject, f), 'utf-8');
       assert.ok(content.includes(MANAGED_BLOCK_START), `${f} should have managed block start`);
       assert.ok(content.includes(MANAGED_BLOCK_END), `${f} should have managed block end`);
@@ -50,12 +50,12 @@ describe('GovernanceBootstrapService', () => {
     assert.ok(sop.includes('worktree'));
   });
 
-  it('creates skills symlinks for all 3 providers', async () => {
+  it('creates skills symlinks for all 4 providers', async () => {
     const svc = new GovernanceBootstrapService(catCafeRoot);
     await svc.bootstrap(targetProject, { dryRun: false });
 
     const sourcePath = resolve(catCafeRoot, 'cat-cafe-skills');
-    for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills']) {
+    for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills']) {
       const linkPath = join(targetProject, dir);
       const stat = await lstat(linkPath);
       assert.ok(stat.isSymbolicLink(), `${dir} should be a symlink`);
@@ -179,6 +179,17 @@ describe('GovernanceBootstrapService', () => {
     const hooksPath = join(targetProject, '.claude', 'hooks');
     const stat = await lstat(hooksPath);
     assert.ok(stat.isSymbolicLink(), '.claude/hooks should be a symlink');
+  });
+
+  it('creates hooks symlink for kimi provider when source exists', async () => {
+    await mkdir(join(catCafeRoot, '.kimi', 'hooks'), { recursive: true });
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    const hooksPath = join(targetProject, '.kimi', 'hooks');
+    const stat = await lstat(hooksPath);
+    assert.ok(stat.isSymbolicLink(), '.kimi/hooks should be a symlink');
   });
 
   it('skips hooks symlink when source hooks dir does not exist', async () => {

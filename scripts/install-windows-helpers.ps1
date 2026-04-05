@@ -5,7 +5,7 @@ function Mount-InstallerSkills {
     param([string]$ProjectRoot)
 
     $skillsSource = Join-Path $ProjectRoot "cat-cafe-skills"
-    $cliDirs = @("$env:USERPROFILE\.claude", "$env:USERPROFILE\.codex", "$env:USERPROFILE\.gemini")
+    $cliDirs = @("$env:USERPROFILE\.claude", "$env:USERPROFILE\.codex", "$env:USERPROFILE\.gemini", "$env:USERPROFILE\.kimi")
     if (-not (Test-Path $skillsSource)) {
         Write-Warn "cat-cafe-skills/ not found - skills mount skipped"
         return

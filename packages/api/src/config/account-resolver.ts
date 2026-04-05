@@ -41,8 +41,6 @@ export function resolveBuiltinClientForProvider(provider: CatProvider): BuiltinA
     case 'dare':
     case 'opencode':
       return provider;
-    case 'omx':
-      return 'openai';
     default:
       return null;
   }
@@ -97,7 +95,6 @@ const BUILTIN_ACCOUNT_MAP: Record<string, { client: BuiltinAccountClient; protoc
   builtin_google: { client: 'google', protocol: 'google' },
   kimi: { client: 'kimi', protocol: 'kimi' },
   builtin_kimi: { client: 'kimi', protocol: 'kimi' },
-  omx: { client: 'openai', protocol: 'openai' },
   dare: { client: 'dare', protocol: 'openai' },
   builtin_dare: { client: 'dare', protocol: 'openai' },
   opencode: { client: 'opencode', protocol: 'anthropic' },
@@ -139,6 +136,7 @@ export function resolveForClient(
   preferredAccountRef?: string,
 ): RuntimeProviderProfile | null {
   const accounts = readCatalogAccounts(projectRoot);
+  const protocol = normalizeProtocol(client);
 
   // Try preferred first
   if (preferredAccountRef) {
@@ -147,7 +145,6 @@ export function resolveForClient(
   }
 
   // Find accounts matching the protocol — return only if unambiguous (exactly one match)
-  const protocol = normalizeProtocol(client);
   const matches: Array<[string, AccountConfig]> = [];
   for (const [ref, account] of Object.entries(accounts)) {
     if (account.protocol === protocol) {
@@ -158,11 +155,9 @@ export function resolveForClient(
     return accountToRuntimeProfile(matches[0][0], matches[0][1]);
   }
 
-  // Synthetic builtin fallback: only when no real accounts match the protocol
-  // (e.g. fresh install before migration, or test env with no catalog)
-  if (preferredAccountRef && matches.length === 0) {
+  if (matches.length === 0 && preferredAccountRef) {
     const builtin = BUILTIN_ACCOUNT_MAP[preferredAccountRef];
-    if (builtin) {
+    if (builtin && builtin.protocol === protocol) {
       return {
         id: preferredAccountRef,
         authType: 'oauth',
@@ -226,8 +221,6 @@ function expectedProtocolForProvider(provider: CatProvider): AccountProtocol | n
       return 'google';
     case 'kimi':
       return 'kimi';
-    case 'omx':
-      return 'openai';
     case 'dare':
       return 'openai';
     case 'opencode':

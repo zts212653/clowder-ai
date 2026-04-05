@@ -127,8 +127,8 @@ describe('MessageNavigator', () => {
 
     expect(html).toContain('#7C3AED');
     expect(html).toContain('#0F766E');
-    expect(html).toContain('跳转到 Kimi 的消息');
-    expect(html).toContain('跳转到 OMX 的消息');
+    expect(html).toContain('跳转到 金吉拉 的消息');
+    expect(html).toContain('跳转到 曼岛猫 的消息');
   });
 
   it('includes accessibility labels', () => {

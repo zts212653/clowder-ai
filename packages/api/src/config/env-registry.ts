@@ -938,6 +938,14 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     hubVisible: false,
   },
+  {
+    name: 'KIMI_AUTH_TOKEN',
+    defaultValue: '(未设置)',
+    description: 'Kimi 官方额度抓取用的 kimi-auth token（来自 kimi.com）',
+    category: 'quota',
+    sensitive: true,
+    hubVisible: false,
+  },
 
   // --- tts ---
   {
@@ -1197,7 +1205,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'QUOTA_OFFICIAL_REFRESH_ENABLED',
     defaultValue: '0（默认关闭）',
-    description: '设为 1 允许官方额度抓取（需要 Chrome OAuth cookie）',
+    description: '设为 1 允许官方额度抓取（Claude/Codex OAuth + Kimi auth token）',
     category: 'quota',
     sensitive: false,
   },

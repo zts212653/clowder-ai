@@ -475,12 +475,13 @@ function ToggleSwitch({
   );
 }
 
-/** Mount status badges for a cat-cafe skill (claude/codex/gemini) */
+/** Mount status badges for cat-cafe skills (provider list is explicit for stable ordering). */
 function MountStatusBadges({ mounts }: { mounts: Record<string, boolean> }) {
   const providers = [
     { key: 'claude', label: 'Claude' },
     { key: 'codex', label: 'Codex' },
     { key: 'gemini', label: 'Gemini' },
+    { key: 'kimi', label: 'Kimi' },
   ];
   return (
     <div>

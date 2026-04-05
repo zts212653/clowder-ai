@@ -102,7 +102,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile, null);
   });
 
-  it('resolveByAccountRef exposes synthetic builtin profiles for kimi and omx', async () => {
+  it('resolveByAccountRef exposes synthetic builtin profile for kimi', async () => {
     const { resolveByAccountRef, resolveBuiltinClientForProvider } = await import(
       `../dist/config/account-resolver.js?t=${Date.now()}-2b`
     );
@@ -116,16 +116,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(kimi.client, 'kimi');
     assert.equal(kimi.protocol, 'kimi');
 
-    const omx = resolveByAccountRef(projectRoot, 'omx');
-    assert.ok(omx);
-    assert.equal(omx.id, 'omx');
-    assert.equal(omx.authType, 'oauth');
-    assert.equal(omx.kind, 'builtin');
-    assert.equal(omx.client, 'openai');
-    assert.equal(omx.protocol, 'openai');
-
     assert.equal(resolveBuiltinClientForProvider('kimi'), 'kimi');
-    assert.equal(resolveBuiltinClientForProvider('omx'), 'openai');
   });
 
   it('resolveByAccountRef injects apiKey from credentials', async () => {
@@ -193,6 +184,19 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile, null);
   });
 
+  it('resolveForClient does not fall back to builtin when multiple concrete matches exist', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-8b`);
+    await writeCatalog({
+      'kimi-primary': { authType: 'api_key', protocol: 'kimi', displayName: 'Kimi Primary' },
+      'kimi-secondary': { authType: 'api_key', protocol: 'kimi', displayName: 'Kimi Secondary' },
+    });
+    await writeCredentials({});
+
+    const profile = resolveForClient(projectRoot, 'kimi', 'kimi');
+    assert.equal(profile, null);
+  });
+
+
   it('resolveForClient returns the account when only one matches protocol', async () => {
     const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-9`);
     await writeCatalog({
@@ -204,6 +208,21 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     const profile = resolveForClient(projectRoot, 'anthropic');
     assert.ok(profile);
     assert.equal(profile.id, 'my-ant');
+  });
+
+  it('resolveForClient prefers protocol match over stale builtin ref when exactly one concrete account exists', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-9b`);
+    await writeCatalog({
+      'moonshot-api': { authType: 'api_key', protocol: 'kimi', baseUrl: 'https://api.moonshot.ai/v1' },
+    });
+    await writeCredentials({ 'moonshot-api': { apiKey: 'sk-kimi' } });
+
+    const profile = resolveForClient(projectRoot, 'kimi', 'kimi');
+    assert.ok(profile);
+    assert.equal(profile.id, 'moonshot-api');
+    assert.equal(profile.kind, 'api_key');
+    assert.equal(profile.protocol, 'kimi');
+    assert.equal(profile.apiKey, 'sk-kimi');
   });
 
   it('resolveForClient returns baseUrl from custom account (game domain P2-1 pattern)', async () => {

@@ -6,10 +6,10 @@ const FALLBACK_BUILTIN_PROFILE_SPECS: Array<{
   displayName: string;
   models: string[];
 }> = [
-  { client: 'anthropic', id: 'claude', displayName: 'Claude (OAuth)', models: [] },
-  { client: 'openai', id: 'codex', displayName: 'Codex (OAuth)', models: [] },
-  { client: 'google', id: 'gemini', displayName: 'Gemini (OAuth)', models: [] },
-  { client: 'kimi', id: 'kimi', displayName: 'Kimi (OAuth)', models: [] },
+  { client: 'anthropic', id: 'claude', displayName: 'Claude（CLI 内置）', models: [] },
+  { client: 'openai', id: 'codex', displayName: 'Codex（CLI 内置）', models: [] },
+  { client: 'google', id: 'gemini', displayName: 'Gemini（CLI 内置）', models: [] },
+  { client: 'kimi', id: 'kimi', displayName: 'Kimi（CLI 内置）', models: [] },
   { client: 'dare', id: 'dare', displayName: 'Dare (client-auth)', models: [] },
   { client: 'opencode', id: 'opencode', displayName: 'OpenCode (client-auth)', models: [] },
 ];

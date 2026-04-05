@@ -381,7 +381,7 @@ echo ""
 
 SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
 if [[ -d "$SKILLS_SOURCE" ]]; then
-    for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills"; do
+    for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills" "$HOME/.kimi/skills"; do
         mkdir -p "$tdir"
         for sd in "$SKILLS_SOURCE"/*/; do
             [[ -d "$sd" ]] || continue
@@ -390,7 +390,7 @@ if [[ -d "$SKILLS_SOURCE" ]]; then
             ln -sfn "$sd" "$tdir/$sn"
         done
     done
-    echo -e "  ${GREEN}✓${NC} Skills linked to ~/.claude/skills, ~/.codex/skills, ~/.gemini/skills"
+    echo -e "  ${GREEN}✓${NC} Skills linked to ~/.claude/skills, ~/.codex/skills, ~/.gemini/skills, ~/.kimi/skills"
 else
     echo -e "  ${YELLOW}⚠${NC} cat-cafe-skills/ not found — skills will not be available"
     echo "     You can link them later by re-running this script after cloning cat-cafe-skills."

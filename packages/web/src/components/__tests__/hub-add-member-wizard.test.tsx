@@ -182,6 +182,35 @@ describe('HubAddMemberWizard', () => {
                 createdAt: '2026-03-18T00:00:00.000Z',
                 updatedAt: '2026-03-18T00:00:00.000Z',
               },
+              {
+                id: 'kimi',
+                provider: 'kimi',
+                displayName: 'Kimi (OAuth)',
+                name: 'Kimi (OAuth)',
+                authType: 'oauth',
+                protocol: 'kimi',
+                builtin: true,
+                mode: 'subscription',
+                client: 'kimi',
+                models: ['kimi-code/kimi-for-coding'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'moonshot-sponsor',
+                provider: 'moonshot-sponsor',
+                displayName: 'Moonshot Sponsor',
+                name: 'Moonshot Sponsor',
+                authType: 'api_key',
+                protocol: 'kimi',
+                builtin: false,
+                mode: 'api_key',
+                models: ['kimi-code/kimi-for-coding'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
             ],
           }),
         );
@@ -256,6 +285,35 @@ describe('HubAddMemberWizard', () => {
     await flushEffects();
 
     expect(onComplete).toHaveBeenCalled();
+  });
+
+  it('shows Kimi builtin and API-key profiles in the wizard', async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(HubAddMemberWizard, {
+          open: true,
+          onClose: vi.fn(),
+          onComplete: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    await click(queryButton(container, 'Kimi'));
+    expect(container.textContent).toContain('Kimi (OAuth)');
+    expect(container.textContent).toContain('Moonshot Sponsor');
+  });
+
+  it('shows Kimi builtin and API profiles when selecting the Kimi client', async () => {
+    await act(async () => {
+      root.render(React.createElement(HubAddMemberWizard, { open: true, onClose: vi.fn(), onComplete: vi.fn() }));
+    });
+    await flushEffects();
+
+    await click(queryButton(container, 'Kimi'));
+    expect(container.textContent).toContain('Kimi (OAuth)');
+    expect(container.textContent).toContain('Moonshot Sponsor');
+    expect(container.textContent).not.toContain('Codex Sponsor');
   });
 
   it('walks the Antigravity flow with default CLI args and lands in the editor', async () => {

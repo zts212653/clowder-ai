@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -91,6 +91,7 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
     emitKimiEvents(proc, [
       {
         role: 'assistant',
+        thinking: '先思考一下目录结构。',
         content: '先看一下目录。',
         tool_calls: [
           {
@@ -107,16 +108,20 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
     ]);
 
     const msgs = await promise;
-    assert.equal(msgs[0].type, 'text');
-    assert.equal(msgs[0].content, '先看一下目录。');
-    assert.equal(msgs[1].type, 'tool_use');
-    assert.equal(msgs[1].toolName, 'Shell');
-    assert.deepEqual(msgs[1].toolInput, { command: 'ls' });
-    assert.equal(msgs[2].type, 'text');
-    assert.equal(msgs[2].content, '已经完成。');
-    assert.equal(msgs[3].type, 'session_init');
-    assert.equal(msgs[3].sessionId, 'kimi-session-123');
-    assert.equal(msgs[4].type, 'done');
+    assert.equal(msgs[0].type, 'system_info');
+    assert.match(msgs[0].content, /thinking/);
+    assert.equal(msgs[1].type, 'text');
+    assert.equal(msgs[1].content, '先看一下目录。');
+    assert.equal(msgs[2].type, 'tool_use');
+    assert.equal(msgs[2].toolName, 'Shell');
+    assert.deepEqual(msgs[2].toolInput, { command: 'ls' });
+    assert.equal(msgs[3].type, 'system_info');
+    assert.match(msgs[3].content, /provider_capability/);
+    assert.equal(msgs[4].type, 'text');
+    assert.equal(msgs[4].content, '已经完成。');
+    assert.equal(msgs[5].type, 'session_init');
+    assert.equal(msgs[5].sessionId, 'kimi-session-123');
+    assert.equal(msgs[6].type, 'done');
 
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.ok(args.includes('--print'));
@@ -140,8 +145,10 @@ test('uses --session for resume and emits session_init immediately', async () =>
 
   assert.equal(msgs[0].type, 'session_init');
   assert.equal(msgs[0].sessionId, 'resume-kimi-456');
-  assert.equal(msgs[1].type, 'text');
-  assert.equal(msgs[1].content, 'Resumed Kimi.');
+  assert.equal(msgs[1].type, 'system_info');
+  assert.match(msgs[1].content, /provider_capability/);
+  assert.equal(msgs[2].type, 'text');
+  assert.equal(msgs[2].content, 'Resumed Kimi.');
 
   const args = spawnFn.mock.calls[0].arguments[1];
   const sessionFlagIndex = args.indexOf('--session');
@@ -176,4 +183,293 @@ test('maps bare oauth kimi model names to configured model alias', async () => {
   } finally {
     rmSync(shareDir, { recursive: true, force: true });
   }
+});
+
+test('api-key mode injects kimi env overrides instead of embedding secrets in argv', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(
+    service.invoke('Hello', {
+      callbackEnv: {
+        CAT_CAFE_KIMI_API_KEY: 'sk-kimi-secret',
+        CAT_CAFE_KIMI_BASE_URL: 'https://api.moonshot.ai/v1',
+        KIMI_SHARE_DIR: mkdtempSync(join(tmpdir(), 'kimi-share-api-key-')),
+      },
+    }),
+  );
+  emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const joined = args.join(' ');
+  const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
+  assert.ok(!args.includes('--config-file'));
+  assert.ok(!args.includes('--model'));
+  assert.ok(!joined.includes('sk-kimi-secret'));
+  assert.equal(env.KIMI_API_KEY, 'sk-kimi-secret');
+  assert.equal(env.KIMI_BASE_URL, 'https://api.moonshot.ai/v1');
+  assert.equal(env.KIMI_MODEL_NAME, 'kimi-code/kimi-for-coding');
+});
+
+test('api-key mode maps selected model into official kimi env overrides', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-config-shape-'));
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+
+  try {
+    const promise = collect(
+      service.invoke('Hello', {
+        callbackEnv: {
+          CAT_CAFE_KIMI_API_KEY: 'sk-kimi-secret',
+          CAT_CAFE_KIMI_BASE_URL: 'https://api.moonshot.ai/v1',
+          KIMI_SHARE_DIR: shareDir,
+        },
+      }),
+    );
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
+    assert.ok(!args.includes('--model'));
+    assert.equal(env.KIMI_MODEL_NAME, 'kimi-k2.5');
+    assert.equal(env.KIMI_MODEL_MAX_CONTEXT_SIZE, '262144');
+
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    await promise;
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+test('injects cat-cafe MCP config file when callback env is present', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-mcp-'));
+  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-mcp-'));
+  const mcpServerDir = mkdtempSync(join(tmpdir(), 'kimi-mcp-server-'));
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({
+    spawnFn,
+    model: 'kimi-code/kimi-for-coding',
+    mcpServerPath: join(mcpServerDir, 'index.js'),
+  });
+
+  try {
+    mkdirSync(join(projectDir, '.kimi'), { recursive: true });
+    writeFileSync(
+      join(projectDir, '.kimi', 'mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+        },
+      }),
+      'utf8',
+    );
+    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
+
+    const promise = collect(
+      service.invoke('Hello', {
+        workingDirectory: projectDir,
+        callbackEnv: {
+          KIMI_SHARE_DIR: shareDir,
+          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+          CAT_CAFE_INVOCATION_ID: 'invoke-123',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-123',
+        },
+      }),
+    );
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const mcpFlagIndex = args.indexOf('--mcp-config-file');
+    assert.ok(mcpFlagIndex >= 0);
+    const mcpPath = args[mcpFlagIndex + 1];
+    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
+    assert.ok(mcpConfig.mcpServers['cat-cafe']);
+    assert.ok(mcpConfig.mcpServers.filesystem);
+    assert.equal(mcpConfig.mcpServers['cat-cafe'].command, 'node');
+    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
+    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_INVOCATION_ID, 'invoke-123');
+    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_CALLBACK_TOKEN, 'token-123');
+
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    await promise;
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(mcpServerDir, { recursive: true, force: true });
+  }
+});
+
+test('creates Kimi share dir before writing temp MCP config on fresh setups', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kimi-fresh-root-'));
+  const shareDir = join(root, 'does-not-exist-yet');
+  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-fresh-project-'));
+  const mcpServerDir = mkdtempSync(join(tmpdir(), 'kimi-fresh-mcp-'));
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({
+    spawnFn,
+    model: 'kimi-code/kimi-for-coding',
+    mcpServerPath: join(mcpServerDir, 'index.js'),
+  });
+
+  try {
+    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
+    const promise = collect(
+      service.invoke('Hello', {
+        workingDirectory: projectDir,
+        callbackEnv: {
+          KIMI_SHARE_DIR: shareDir,
+          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+          CAT_CAFE_INVOCATION_ID: 'invoke-fresh',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-fresh',
+        },
+      }),
+    );
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const mcpFlagIndex = args.indexOf('--mcp-config-file');
+    assert.ok(mcpFlagIndex >= 0);
+    const mcpPath = args[mcpFlagIndex + 1];
+    assert.ok(readFileSync(mcpPath, 'utf8').includes('cat-cafe'));
+
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    const msgs = await promise;
+    assert.equal(msgs.at(-1)?.type, 'done');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(mcpServerDir, { recursive: true, force: true });
+  }
+});
+
+test('wraps system prompt separately and adds local image path hints', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+  const uploadDir = mkdtempSync(join(tmpdir(), 'kimi-upload-'));
+  const imagePath = join(uploadDir, 'example.png');
+  writeFileSync(imagePath, 'fake-image', 'utf8');
+
+  try {
+    const promise = collect(
+      service.invoke('帮我分析图片', {
+        systemPrompt: '你是金吉拉，回答要简洁。',
+        contentBlocks: [{ type: 'image', url: '/uploads/example.png' }],
+        uploadDir,
+      }),
+    );
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const promptFlagIndex = args.indexOf('--prompt');
+    assert.ok(promptFlagIndex >= 0);
+    const effectivePrompt = args[promptFlagIndex + 1];
+    assert.match(effectivePrompt, /<system_instructions>/);
+    assert.match(effectivePrompt, /你是金吉拉/);
+    assert.match(effectivePrompt, /example\.png/);
+  } finally {
+    rmSync(uploadDir, { recursive: true, force: true });
+  }
+});
+
+test('enables thinking mode, parses think blocks, and grants image directories to kimi-cli', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-config-cap-'));
+  const uploadDir = mkdtempSync(join(tmpdir(), 'kimi-image-cap-'));
+  const imagePath = join(uploadDir, 'diagram.png');
+  writeFileSync(imagePath, 'fake-image', 'utf8');
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  try {
+    writeFileSync(
+      join(shareDir, 'config.toml'),
+      [
+        'default_model = "kimi-code/kimi-for-coding"',
+        'default_thinking = true',
+        '',
+        '[models."kimi-code/kimi-for-coding"]',
+        'capabilities = ["thinking", "image_in"]',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const promise = collect(
+      service.invoke('看看这张图', {
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+        contentBlocks: [{ type: 'image', url: '/uploads/diagram.png' }],
+        uploadDir,
+      }),
+    );
+
+    emitKimiEvents(proc, [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'think', think: '先理解图片里有什么。' },
+          { type: 'text', text: '我已经看到图片路径提示。' },
+        ],
+      },
+    ]);
+
+    const msgs = await promise;
+    assert.equal(msgs[0].type, 'system_info');
+    assert.match(msgs[0].content, /thinking/);
+    assert.match(msgs[0].content, /先理解图片/);
+    assert.equal(msgs[1].type, 'system_info');
+    assert.match(msgs[1].content, /image_input/);
+    assert.match(msgs[1].content, /available/);
+    assert.equal(msgs[2].type, 'text');
+    assert.match(msgs[2].content, /图片路径提示/);
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--thinking'));
+    const addDirIndex = args.indexOf('--add-dir');
+    assert.ok(addDirIndex >= 0);
+    assert.equal(args[addDirIndex + 1], uploadDir);
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+    rmSync(uploadDir, { recursive: true, force: true });
+  }
+});
+
+test('extracts session id from non-json resume hint lines in print mode', async () => {
+  async function* spawnCliOverride() {
+    yield { line: 'To resume this session: kimi -r ab5188ae-f3e8-4f72-baec-48a53c665e9a', error: 'Failed to parse JSON line' };
+    yield { role: 'assistant', content: 'done' };
+  }
+
+  const service = new KimiAgentService({ model: 'kimi-code/kimi-for-coding' });
+  const msgs = await collect(service.invoke('Hello', { spawnCliOverride }));
+  const session = msgs.find((msg) => msg.type === 'session_init');
+  assert.equal(session?.sessionId, 'ab5188ae-f3e8-4f72-baec-48a53c665e9a');
+});
+
+test('captures usage and session id from kimi stream events when available', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      session_id: 'kimi-live-session',
+      usage: {
+        input_tokens: 12,
+        output_tokens: 34,
+        total_tokens: 46,
+      },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const session = msgs.find((msg) => msg.type === 'session_init');
+  const text = msgs.find((msg) => msg.type === 'text');
+  assert.equal(session?.sessionId, 'kimi-live-session');
+  assert.equal(text?.metadata?.sessionId, 'kimi-live-session');
+  assert.equal(text?.metadata?.usage?.inputTokens, 12);
+  assert.equal(text?.metadata?.usage?.outputTokens, 34);
+  assert.equal(text?.metadata?.usage?.totalTokens, 46);
 });

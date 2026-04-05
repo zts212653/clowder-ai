@@ -215,6 +215,21 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   }, [form.client, form.defaultModel, modelOptions]);
 
   useEffect(() => {
+    if (form.client !== 'kimi') return;
+    if (selectedProfile?.authType !== 'api_key') return;
+    if (modelOptions.length === 0) return;
+    const currentModel = form.defaultModel.trim();
+    if (currentModel && modelOptions.includes(currentModel)) return;
+    setForm((prev) => {
+      if (prev.client !== 'kimi') return prev;
+      if (prev.accountRef !== form.accountRef) return prev;
+      const nextModel = modelOptions[0] ?? '';
+      if (!nextModel || prev.defaultModel.trim() === nextModel) return prev;
+      return { ...prev, defaultModel: nextModel };
+    });
+  }, [form.accountRef, form.client, form.defaultModel, modelOptions, selectedProfile?.authType]);
+
+  useEffect(() => {
     if (form.client !== 'antigravity') return;
     if (form.commandArgs.trim().length > 0) return;
     setForm((prev) => {

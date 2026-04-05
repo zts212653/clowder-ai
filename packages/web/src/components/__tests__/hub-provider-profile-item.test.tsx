@@ -249,6 +249,40 @@ describe('HubProviderProfileItem', () => {
     expect(container.textContent).toContain('OpenCode (client-auth)');
   });
 
+
+  it('labels Kimi config profiles as CLI config instead of raw api_key', async () => {
+    const profile: ProfileItem = {
+      id: 'kimi-config',
+      provider: 'kimi-config',
+      displayName: 'Kimi Config',
+      name: 'Kimi Config',
+      authType: 'api_key',
+      protocol: 'kimi',
+      kind: 'api_key',
+      builtin: false,
+      mode: 'api_key',
+      baseUrl: 'https://api.moonshot.ai/v1',
+      models: ['moonshot-v1-8k'],
+      hasApiKey: true,
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:00.000Z',
+    };
+
+    await act(async () => {
+      root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={vi.fn(async () => {})} onDelete={() => {}} />);
+    });
+
+    expect(container.textContent).toContain('CLI 配置');
+    expect(container.textContent).toContain('Kimi / Moonshot 兼容');
+    expect(container.textContent).not.toContain('api_key');
+
+    await act(async () => {
+      queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('CLI 配置协议');
+  });
+
   it('uses password input for API key edits and requires delete confirmation', async () => {
     const profile: ProfileItem = {
       id: 'codex-sponsor',

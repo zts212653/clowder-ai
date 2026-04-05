@@ -824,8 +824,8 @@
     {
       "id": "moonshot",
       "catId": "kimi",
-      "name": "Kimi",
-      "displayName": "Kimi",
+      "name": "金吉拉",
+      "displayName": "金吉拉",
       "avatar": "/avatars/kimi.png",
       "color": {
         "primary": "#7C3AED",
@@ -834,7 +834,8 @@
       "mentionPatterns": [
         "@kimi",
         "@moonshot",
-        "@月之暗面"
+        "@月之暗面",
+        "@金吉拉"
       ],
       "roleDescription": "中文长文本助手，擅长中文语境理解、资料整理与结构化表达",
       "teamStrengths": "中文长文、总结归纳、资料整理",
@@ -873,8 +874,8 @@
     {
       "id": "orchestrator",
       "catId": "omx",
-      "name": "OMX",
-      "displayName": "OMX",
+      "name": "曼岛猫",
+      "displayName": "曼岛猫",
       "avatar": "/avatars/omx.png",
       "color": {
         "primary": "#0F766E",
@@ -882,7 +883,8 @@
       },
       "mentionPatterns": [
         "@omx",
-        "@oh-my-codex"
+        "@oh-my-codex",
+        "@曼岛猫"
       ],
       "roleDescription": "Codex 编排助手，擅长工作流组织、多 agent 调度与执行加速",
       "teamStrengths": "任务编排、多 agent 协作、长任务推进",

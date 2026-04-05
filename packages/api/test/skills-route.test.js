@@ -78,6 +78,7 @@ describe('Skills Route', () => {
       assert.equal(typeof skill.mounts.claude, 'boolean');
       assert.equal(typeof skill.mounts.codex, 'boolean');
       assert.equal(typeof skill.mounts.gemini, 'boolean');
+      assert.equal(typeof skill.mounts.kimi, 'boolean');
     }
 
     await app.close();

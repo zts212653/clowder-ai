@@ -23,6 +23,7 @@ function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
   if (accountRef.includes('claude')) return 'Claude';
   if (accountRef.includes('codex')) return 'Codex';
   if (accountRef.includes('gemini')) return 'Gemini';
+  if (accountRef.includes('kimi') || accountRef.includes('moonshot')) return 'Kimi';
   if (accountRef.includes('opencode')) return 'OpenCode';
   if (accountRef.includes('dare')) return 'Dare';
   if (cat.provider === 'antigravity') return 'Antigravity';
@@ -37,12 +38,13 @@ function accountSummary(cat: CatData) {
     accountRef === 'claude' ||
     accountRef === 'codex' ||
     accountRef === 'gemini' ||
+    accountRef === 'kimi' ||
     accountRef === 'dare' ||
     accountRef === 'opencode'
   ) {
-    return '内置 OAuth 账号';
+    return 'CLI（内置）账号';
   }
-  return `API Key · ${accountRef}`;
+  return `CLI（配置） · ${accountRef}`;
 }
 
 function getMetaSummary(cat: CatData, configCat?: CatConfig) {
@@ -134,7 +136,7 @@ export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoC
 export function HubOverviewToolbar({ onAddMember }: { onAddMember?: () => void }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <p className="text-[13px] text-[#8F8075]">全部 · 订阅 · API Key · 未启用</p>
+      <p className="text-[13px] text-[#8F8075]">全部 · CLI（内置） · CLI（配置） · 未启用</p>
       <button
         type="button"
         onClick={onAddMember}

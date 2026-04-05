@@ -7,7 +7,7 @@
  */
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdir, rm, symlink } from 'node:fs/promises';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -27,6 +27,54 @@ async function makeTmpDir(prefix) {
 }
 
 // ────────── PATCH logic (unit-level, no Fastify needed) ──────────
+
+describe('scanProviderSkillDirs', () => {
+  it('merges multi-source provider results deterministically', async () => {
+    const { scanProviderSkillDirs } = await import('../dist/routes/capabilities.js');
+    const root = join(process.cwd(), '.test-tmp-cap-scan-' + Date.now());
+    const kimiProject = join(root, '.kimi', 'skills');
+    const kimiUser = join(root, 'home', '.kimi', 'skills');
+    await mkdir(join(kimiProject, 'alpha'), { recursive: true });
+    await mkdir(join(kimiUser, 'beta'), { recursive: true });
+    await Promise.all([
+      writeFile(join(kimiProject, 'alpha', 'SKILL.md'), '# alpha'),
+      writeFile(join(kimiUser, 'beta', 'SKILL.md'), '# beta'),
+    ]);
+    try {
+      const result = await scanProviderSkillDirs([
+        { key: 'kimi-project', provider: 'kimi', path: kimiProject },
+        { key: 'kimi-user', provider: 'kimi', path: kimiUser },
+      ]);
+      assert.deepEqual(new Set(result.providerSkills.kimi), new Set(['alpha', 'beta']));
+      assert.deepEqual(result.scanResults['kimi-project'], ['alpha']);
+      assert.deepEqual(result.scanResults['kimi-user'], ['beta']);
+      assert.equal(result.scansOk, true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves null scan sentinels for failed project scans', async () => {
+    const { scanProviderSkillDirs } = await import('../dist/routes/capabilities.js');
+    const root = join(process.cwd(), '.test-tmp-cap-scan-fail-' + Date.now());
+    const kimiUser = join(root, 'home', '.kimi', 'skills');
+    await mkdir(join(kimiUser, 'beta'), { recursive: true });
+    await writeFile(join(kimiUser, 'beta', 'SKILL.md'), '# beta');
+    try {
+      const result = await scanProviderSkillDirs([
+        { key: 'kimi-project', provider: 'kimi', path: join(root, '.missing-unreadable') },
+        { key: 'kimi-user', provider: 'kimi', path: kimiUser },
+      ]);
+      assert.equal(
+        result.scanResults['kimi-project'] === null || Array.isArray(result.scanResults['kimi-project']),
+        true,
+      );
+      assert.deepEqual(result.scanResults['kimi-user'], ['beta']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('PATCH capabilities logic', () => {
   /** @type {string} */ let dir;
@@ -515,6 +563,32 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.ok(family.name, 'family should have name');
       assert.ok(Array.isArray(family.catIds), 'family should have catIds array');
     }
+
+    await app.close();
+  });
+
+  it('includes Kimi mount state for cat-cafe skills in the board payload', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/capabilities',
+      headers: AUTH_HEADERS,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+
+    const catCafeSkill = (body.items ?? []).find(
+      (item) => item.type === 'skill' && item.source === 'cat-cafe' && item.mounts,
+    );
+    assert.ok(catCafeSkill, 'expected at least one cat-cafe skill with mount data');
+    assert.equal(typeof catCafeSkill.mounts.kimi, 'boolean');
 
     await app.close();
   });

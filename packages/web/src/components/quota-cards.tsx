@@ -53,6 +53,15 @@ export interface GeminiQuota {
   lastChecked: string | null;
 }
 
+export interface KimiQuota {
+  platform: 'kimi';
+  usageItems: CodexUsageItem[];
+  error?: string;
+  lastChecked: string | null;
+  status?: 'ok' | 'unavailable';
+  note?: string;
+}
+
 export interface AntigravityQuota {
   platform: 'antigravity';
   usageItems: CodexUsageItem[];
@@ -64,6 +73,7 @@ export interface QuotaResponse {
   claude: ClaudeQuota;
   codex: CodexQuota;
   gemini: GeminiQuota;
+  kimi: KimiQuota;
   antigravity: AntigravityQuota;
   fetchedAt: string;
 }
