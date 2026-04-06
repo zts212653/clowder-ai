@@ -71,6 +71,10 @@ export interface ConnectorGatewayConfig {
   coCreatorUserId?: string | undefined;
   whisperUrl?: string | undefined;
   connectorMediaDir?: string | undefined;
+  /** F151: XiaoYi OpenClaw 模式 */
+  xiaoyiAk?: string | undefined;
+  xiaoyiSk?: string | undefined;
+  xiaoyiAgentId?: string | undefined;
 }
 
 export interface ConnectorGatewayDeps {
@@ -204,6 +208,9 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID,
     whisperUrl: process.env.WHISPER_URL,
     connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR,
+    xiaoyiAk: process.env.XIAOYI_AK,
+    xiaoyiSk: process.env.XIAOYI_SK,
+    xiaoyiAgentId: process.env.XIAOYI_AGENT_ID,
   };
 }
 
@@ -228,8 +235,9 @@ export async function startConnectorGateway(
       config.wecomEncodingAesKey,
   );
   const hasWeixin = Boolean(config.weixinBotToken);
+  const hasXiaoyi = Boolean(config.xiaoyiAk && config.xiaoyiSk && config.xiaoyiAgentId);
 
-  if (!hasTelegram && !hasFeishu && !hasDingTalk && !hasWeComBot && !hasWeComAgent && !hasWeixin) {
+  if (!hasTelegram && !hasFeishu && !hasDingTalk && !hasWeComBot && !hasWeComAgent && !hasWeixin && !hasXiaoyi) {
     log.info('[ConnectorGateway] No pre-configured connectors — gateway created for WeChat QR login support');
   }
 
@@ -642,6 +650,25 @@ export async function startConnectorGateway(
     stopFns.push(async () => dingtalk.stopStream());
 
     log.info('[ConnectorGateway] DingTalk adapter started (Stream mode)');
+  }
+
+  // ── XiaoYi (OpenClaw WebSocket mode) — F151 ──
+  if (hasXiaoyi) {
+    const { XiaoyiAdapter } = await import('./adapters/XiaoyiAdapter.js');
+    const xiaoyi = new XiaoyiAdapter(log, {
+      agentId: config.xiaoyiAgentId!,
+      ak: config.xiaoyiAk!,
+      sk: config.xiaoyiSk!,
+    });
+    adapters.set('xiaoyi', xiaoyi);
+
+    await xiaoyi.startStream(async (msg) => {
+      await connectorRouter.route('xiaoyi', msg.chatId, msg.text, msg.messageId, undefined, { id: msg.senderId });
+    });
+
+    stopFns.push(async () => xiaoyi.stopStream());
+
+    log.info('[ConnectorGateway] XiaoYi adapter started (OpenClaw WebSocket mode)');
   }
 
   // ── WeCom Bot (WebSocket mode via @wecom/aibot-node-sdk) ──

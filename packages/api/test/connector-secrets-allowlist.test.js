@@ -26,6 +26,9 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
       'WECOM_AGENT_SECRET',
       'WECOM_TOKEN',
       'WECOM_ENCODING_AES_KEY',
+      'XIAOYI_AK',
+      'XIAOYI_SK',
+      'XIAOYI_AGENT_ID',
     ];
     for (const name of expected) {
       assert.ok(isConnectorSecret(name), `${name} should be in allowlist`);
@@ -41,7 +44,7 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
     assert.equal(isConnectorSecret('TELEGRAM_BOT_TOKEN_EXTRA'), false);
   });
 
-  it('allowlist has exactly 17 entries', () => {
-    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 17);
+  it('allowlist has exactly 20 entries', () => {
+    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 20);
   });
 });

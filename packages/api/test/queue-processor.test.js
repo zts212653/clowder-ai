@@ -975,11 +975,11 @@ describe('QueueProcessor', () => {
     });
 
     it('delivery failure: cleanupPlaceholders NOT called when delivery partially fails', async () => {
-      let deliverCallCount = 0;
+      // F151: mid-loop delivery retries failed turns in the final phase,
+      // so use catId-based failure to ensure opus consistently fails.
       const outboundHook = {
-        deliver: mock.fn(async () => {
-          deliverCallCount++;
-          if (deliverCallCount === 1) throw new Error('delivery failed');
+        deliver: mock.fn(async (_threadId, _content, catId) => {
+          if (catId === 'opus') throw new Error('delivery failed');
         }),
       };
       const streamingHook = {
@@ -1009,9 +1009,10 @@ describe('QueueProcessor', () => {
       hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
 
       await hookProcessor.processNext('t1', 'u1');
-      await waitFor(() => outboundHook.deliver.mock.calls.length >= 2);
+      // F151: mid-loop delivers both, opus fails and retries in final phase = 3 calls total
+      await waitFor(() => outboundHook.deliver.mock.calls.length >= 3);
 
-      assert.equal(outboundHook.deliver.mock.calls.length, 2, 'deliver should be attempted for both turns');
+      assert.equal(outboundHook.deliver.mock.calls.length, 3, 'mid-loop (2) + final-phase retry (1)');
 
       // One rejection → Promise.allSettled sees mixed results → cleanupPlaceholders skipped
       await new Promise((r) => setTimeout(r, 50));
@@ -1087,6 +1088,83 @@ describe('QueueProcessor', () => {
 
       assert.equal(deliverCalls.length, 1, 'late-bound hook should be called');
       assert.equal(deliverCalls[0].content, 'Late-bound delivery');
+    });
+
+    it('P2-1 regression: failed invocation still triggers notifyDeliveryBatchDone', async () => {
+      const batchDoneCalls = [];
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+        notifyDeliveryBatchDone: mock.fn(async (threadId, chainDone) => {
+          batchDoneCalls.push({ threadId, chainDone });
+        }),
+      };
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            throw new Error('invocation crashed');
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue);
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => batchDoneCalls.length >= 1);
+
+      assert.equal(batchDoneCalls.length, 1, 'notifyDeliveryBatchDone must fire on failure');
+      assert.equal(batchDoneCalls[0].threadId, 't1');
+      assert.equal(batchDoneCalls[0].chainDone, true, 'single invocation failure → chainDone=true');
+    });
+
+    it('P3-P2: reject callback (executeEntry throws in finally) still triggers notifyDeliveryBatchDone', async () => {
+      const batchDoneCalls = [];
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+        notifyDeliveryBatchDone: mock.fn(async (threadId, chainDone) => {
+          batchDoneCalls.push({ threadId, chainDone });
+        }),
+      };
+
+      // Make invocationTracker.complete throw in finally block → executeEntry rejects
+      const hookDeps = stubDeps({
+        invocationTracker: {
+          start: mock.fn(() => new AbortController()),
+          complete: mock.fn(() => {
+            throw new Error('tracker.complete crashed');
+          }),
+          has: mock.fn(() => false),
+        },
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue);
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => batchDoneCalls.length >= 1);
+
+      assert.equal(batchDoneCalls.length, 1, 'reject callback must also fire notifyDeliveryBatchDone');
+      assert.equal(batchDoneCalls[0].threadId, 't1');
     });
   });
 });

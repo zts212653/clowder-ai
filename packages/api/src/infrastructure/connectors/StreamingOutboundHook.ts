@@ -135,4 +135,18 @@ export class StreamingOutboundHook {
       }
     }
   }
+
+  /** F151: Notify adapters that an invocation's delivery batch is complete. */
+  async notifyDeliveryBatchDone(threadId: string, chainDone: boolean): Promise<void> {
+    const bindings = await this.opts.bindingStore.getByThread(threadId);
+    for (const binding of bindings) {
+      const adapter = this.opts.adapters.get(binding.connectorId);
+      if (!adapter?.onDeliveryBatchDone) continue;
+      try {
+        await adapter.onDeliveryBatchDone(binding.externalChatId, chainDone);
+      } catch (err) {
+        this.opts.log.warn({ err, connectorId: binding.connectorId }, '[StreamingOutbound] onDeliveryBatchDone failed');
+      }
+    }
+  }
 }

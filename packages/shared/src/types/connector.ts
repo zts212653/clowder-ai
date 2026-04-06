@@ -206,6 +206,19 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     },
   },
   {
+    id: 'xiaoyi',
+    displayName: '小艺 APP',
+    icon: '/images/connectors/xiaoyi.png',
+    color: { primary: '#CF0A2C', secondary: '#FFF0F0' },
+    description: '华为小艺 OpenClaw 模式',
+    tailwindTheme: {
+      avatar: 'bg-red-100 ring-2 ring-red-200',
+      label: 'text-red-700',
+      labelLink: 'text-red-700 hover:text-red-900',
+      bubble: 'border border-red-200 bg-red-50',
+    },
+  },
+  {
     id: 'wecom-bot',
     displayName: '企业微信',
     icon: '/images/connectors/wecom-bot.png',

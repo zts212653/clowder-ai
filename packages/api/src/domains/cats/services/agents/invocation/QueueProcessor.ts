@@ -67,6 +67,8 @@ export interface StreamingOutboundHookLike {
   onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
   onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
+  /** F151: Signal adapters that delivery batch is complete for a thread. */
+  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
 }
 
 /** Thread metadata for outbound delivery (deep link, title, etc.) */
@@ -180,6 +182,27 @@ export class QueueProcessor {
 
   hasActiveOrQueuedAgentForCat(threadId: string, catId: string): boolean {
     return this.deps.queue.hasActiveOrQueuedAgentForCat(threadId, catId);
+  }
+
+  /** F151: Check if thread has any queued or processing entries (used by delivery-batch-done signal). */
+  isThreadBusy(threadId: string): boolean {
+    if (this.deps.queue.hasQueuedForThread(threadId)) return true;
+    const prefix = `${threadId}:`;
+    for (const key of this.processingSlots) {
+      if (key.startsWith(prefix)) return true;
+    }
+    return false;
+  }
+
+  /** F151: Signal streaming adapters that delivery is done for this thread invocation.
+   *  Fires on both success AND failure — failed invocations must close the task
+   *  immediately instead of waiting for TASK_TIMEOUT_MS (P2-1 review fix). */
+  private signalDeliveryBatchDone(threadId: string, _status: string): void {
+    if (!this.deps.streamingHook?.notifyDeliveryBatchDone) return;
+    const threadStillBusy = this.deps.invocationTracker.has(threadId) || this.isThreadBusy(threadId);
+    this.deps.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
+      this.deps.log.warn({ err, threadId }, '[QueueProcessor] notifyDeliveryBatchDone failed');
+    });
   }
 
   /** Returns pause reason when paused; otherwise undefined. */
@@ -311,10 +334,12 @@ export class QueueProcessor {
         (status) => {
           this.processingSlots.delete(sk);
           this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
+          this.signalDeliveryBatchDone(threadId, status);
         },
         () => {
           this.processingSlots.delete(sk);
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
+          this.signalDeliveryBatchDone(threadId, 'failed');
         },
       );
       // Continue scanning — start all entries with free cat slots (parallel dispatch)
@@ -359,10 +384,12 @@ export class QueueProcessor {
       (status) => {
         this.processingSlots.delete(entrySk);
         this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
+        this.signalDeliveryBatchDone(threadId, status);
       },
       () => {
         this.processingSlots.delete(entrySk);
         this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
+        this.signalDeliveryBatchDone(threadId, 'failed');
       },
     );
 
@@ -400,10 +427,12 @@ export class QueueProcessor {
       (status) => {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
+        this.signalDeliveryBatchDone(threadId, status);
       },
       () => {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
+        this.signalDeliveryBatchDone(threadId, 'failed');
       },
     );
 
@@ -553,6 +582,25 @@ export class QueueProcessor {
         });
       }
 
+      // F151: Mid-loop delivery to preserve ordering (same fix as ConnectorInvokeTrigger)
+      const deliveredTurnIndices = new Set<number>();
+      const DELIVER_TIMEOUT_MS = 10_000;
+      let threadMeta: ThreadMetaLike | undefined;
+      let threadMetaPromise: Promise<ThreadMetaLike | undefined> | undefined;
+      if (this.deps.outboundHook && this.deps.threadMetaLookup) {
+        const rawResult = this.deps.threadMetaLookup(threadId);
+        if (rawResult) {
+          const LOOKUP_TIMEOUT_MS = 2000;
+          threadMetaPromise = Promise.race([
+            Promise.resolve(rawResult).catch((err: unknown) => {
+              log.warn({ err, threadId }, '[QueueProcessor] threadMetaLookup late rejection');
+              return undefined;
+            }),
+            new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS)),
+          ]);
+        }
+      }
+
       for await (const msg of router.routeExecution(
         userId,
         content,
@@ -596,6 +644,42 @@ export class QueueProcessor {
             persistenceContext.richBlocks = undefined;
           }
           currentTurnCatId = undefined;
+          // F151: Deliver completed cat's turns immediately (same fix as ConnectorInvokeTrigger)
+          if (this.deps.outboundHook) {
+            if (threadMetaPromise) {
+              threadMeta = await threadMetaPromise;
+              threadMetaPromise = undefined;
+            }
+            for (let i = 0; i < outboundTurns.length; i++) {
+              if (deliveredTurnIndices.has(i)) continue;
+              const turn = outboundTurns[i];
+              if (turn.catId !== msg.catId) continue;
+              const turnContent = turn.textParts.join('');
+              if (!turnContent && !turn.richBlocks?.length) continue;
+              try {
+                await Promise.race([
+                  this.deps.outboundHook.deliver(
+                    threadId,
+                    turnContent,
+                    turn.catId,
+                    turn.richBlocks,
+                    threadMeta,
+                    undefined,
+                    messageId ?? undefined,
+                  ),
+                  new Promise<void>((_, reject) =>
+                    setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+                  ),
+                ]);
+                deliveredTurnIndices.add(i);
+              } catch (err) {
+                log.error(
+                  { err, threadId, catId: turn.catId },
+                  '[QueueProcessor] Mid-loop delivery failed, will retry in final phase',
+                );
+              }
+            }
+          }
         }
         if (msg.type === 'text' && typeof (msg as Record<string, unknown>).content === 'string') {
           const textContent = (msg as Record<string, unknown>).content as string;
@@ -634,7 +718,7 @@ export class QueueProcessor {
 
       finalStatus = 'succeeded';
 
-      // 10. Outbound delivery: send per-turn content to bound external chats (Feishu/Telegram)
+      // 10. Outbound delivery: send remaining per-turn content to bound external chats
       await this.deliverOutbound(
         threadId,
         primaryCat,
@@ -645,6 +729,8 @@ export class QueueProcessor {
         streamStartPromise,
         log,
         messageId ?? undefined,
+        deliveredTurnIndices,
+        threadMeta,
       );
 
       return 'succeeded';
@@ -716,6 +802,8 @@ export class QueueProcessor {
     streamStartPromise: Promise<void> | undefined,
     log: LoggerLike,
     triggerMessageId?: string,
+    deliveredTurnIndices?: Set<number>,
+    preResolvedMeta?: ThreadMetaLike | undefined,
   ): Promise<void> {
     const finalContent = collectedTextParts.join('');
 
@@ -735,25 +823,33 @@ export class QueueProcessor {
 
     const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
     if (this.deps.outboundHook && hasContent) {
-      let threadMeta: ThreadMetaLike | undefined;
-      try {
-        const LOOKUP_TIMEOUT_MS = 2000;
-        const rawResult = this.deps.threadMetaLookup?.(threadId);
-        if (rawResult) {
-          const lookupPromise = Promise.resolve(rawResult).catch((err: unknown) => {
-            log.warn({ err, threadId }, '[QueueProcessor] threadMetaLookup late rejection');
-            return undefined;
-          });
-          const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS));
-          threadMeta = await Promise.race([lookupPromise, timeout]);
+      // F151: Use pre-resolved threadMeta from mid-loop delivery, or do fresh lookup
+      let threadMeta: ThreadMetaLike | undefined = preResolvedMeta;
+      if (threadMeta === undefined && !(deliveredTurnIndices && deliveredTurnIndices.size > 0)) {
+        try {
+          const LOOKUP_TIMEOUT_MS = 2000;
+          const rawResult = this.deps.threadMetaLookup?.(threadId);
+          if (rawResult) {
+            const lookupPromise = Promise.resolve(rawResult).catch((err: unknown) => {
+              log.warn({ err, threadId }, '[QueueProcessor] threadMetaLookup late rejection');
+              return undefined;
+            });
+            const timeout = new Promise<undefined>((resolve) =>
+              setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS),
+            );
+            threadMeta = await Promise.race([lookupPromise, timeout]);
+          }
+        } catch (lookupErr) {
+          log.warn({ err: lookupErr, threadId }, '[QueueProcessor] threadMetaLookup failed');
         }
-      } catch (lookupErr) {
-        log.warn({ err: lookupErr, threadId }, '[QueueProcessor] threadMetaLookup failed');
       }
 
       const DELIVER_TIMEOUT_MS = 10_000;
+      // F151: skip turns already delivered mid-loop
       const nonEmptyTurns = outboundTurns.filter(
-        (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
+        (t, i) =>
+          !(deliveredTurnIndices && deliveredTurnIndices.has(i)) &&
+          (t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0)),
       );
 
       let deliveryFailed = false;
@@ -810,7 +906,8 @@ export class QueueProcessor {
           deliveryFailed = true;
           log.error({ err, threadId }, '[QueueProcessor] Outbound delivery error');
         }
-      } else {
+      } else if (!(deliveredTurnIndices && deliveredTurnIndices.size > 0)) {
+        // Fallback: no per-turn delivery happened — deliver remaining content as one
         const richBlocks = persistenceContext.richBlocks;
         if (richBlocks) {
           const deliverPromise = this.deps.outboundHook.deliver(

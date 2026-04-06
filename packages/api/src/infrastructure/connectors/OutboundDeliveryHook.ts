@@ -28,6 +28,8 @@ export interface IOutboundAdapter {
     externalChatId: string,
     payload: { type: 'image' | 'file' | 'audio'; [key: string]: unknown },
   ): Promise<void>;
+  /** F151: Delivery batch complete. `chainDone=true` = no more output for this task; send close frame. */
+  onDeliveryBatchDone?(externalChatId: string, chainDone: boolean): Promise<void>;
 }
 
 /** Adapter that supports edit-in-place streaming (placeholder → progressive edits). */
@@ -75,6 +77,18 @@ export class OutboundDeliveryHook {
   }
 
   async deliver(
+    threadId: string,
+    content: string,
+    catId?: CatId,
+    richBlocks?: RichBlock[],
+    threadMeta?: ThreadMeta,
+    origin?: MessageOrigin,
+    triggerMessageId?: string,
+  ): Promise<void> {
+    return this.executeDelivery(threadId, content, catId, richBlocks, threadMeta, origin, triggerMessageId);
+  }
+
+  private async executeDelivery(
     threadId: string,
     content: string,
     catId?: CatId,

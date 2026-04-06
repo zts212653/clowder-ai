@@ -155,6 +155,22 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     ],
   },
   {
+    id: 'xiaoyi',
+    name: '小艺',
+    nameEn: 'XiaoYi (Huawei)',
+    fields: [
+      { envName: 'XIAOYI_AK', label: 'Access Key', sensitive: false },
+      { envName: 'XIAOYI_SK', label: 'Secret Key', sensitive: true },
+      { envName: 'XIAOYI_AGENT_ID', label: 'Agent ID', sensitive: false },
+    ],
+    docsUrl: 'https://developer.huawei.com/consumer/cn/service/josp/agc/index.html',
+    steps: [
+      { text: '在小艺开放平台创建 OpenClaw 模式智能体，获取 AK/SK 和 Agent ID' },
+      { text: '填写以下配置并保存，重启 API 服务后自动通过 WebSocket 连接华为 HAG' },
+      { text: '在小艺 APP 中发送消息验证对话链路是否正常' },
+    ],
+  },
+  {
     id: 'weixin',
     name: '微信',
     nameEn: 'WeChat Personal',

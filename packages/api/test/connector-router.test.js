@@ -305,11 +305,16 @@ describe('ConnectorRouter', () => {
       };
     }
 
+    let batchDoneCalls;
     function mockAdapter() {
       adapterSendCalls = [];
+      batchDoneCalls = [];
       return {
         async sendReply(externalChatId, content) {
           adapterSendCalls.push({ externalChatId, content });
+        },
+        async onDeliveryBatchDone(externalChatId, chainDone) {
+          batchDoneCalls.push({ externalChatId, chainDone });
         },
       };
     }
@@ -344,6 +349,10 @@ describe('ConnectorRouter', () => {
       assert.equal(adapterSendCalls.length, 1);
       assert.equal(adapterSendCalls[0].externalChatId, 'chat-123');
       assert.equal(adapterSendCalls[0].content, 'You are here');
+      // F151: close frame must be sent after command response
+      assert.equal(batchDoneCalls.length, 1);
+      assert.equal(batchDoneCalls[0].externalChatId, 'chat-123');
+      assert.equal(batchDoneCalls[0].chainDone, true);
       // invokeTrigger should NOT have been called
       assert.equal(cmdTrigger.calls.length, 0);
       // Message should NOT be stored

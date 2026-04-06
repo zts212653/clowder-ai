@@ -23,6 +23,9 @@ export const CONNECTOR_SECRETS_ALLOWLIST: ReadonlySet<string> = new Set([
   'WECOM_AGENT_SECRET',
   'WECOM_TOKEN',
   'WECOM_ENCODING_AES_KEY',
+  'XIAOYI_AK',
+  'XIAOYI_SK',
+  'XIAOYI_AGENT_ID',
 ]);
 
 export function isConnectorSecret(name: string): boolean {

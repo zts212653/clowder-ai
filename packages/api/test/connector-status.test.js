@@ -5,7 +5,12 @@ import { buildConnectorStatus } from '../dist/routes/connector-hub.js';
 describe('buildConnectorStatus', () => {
   it('returns all platforms as not configured when env is empty', () => {
     const result = buildConnectorStatus({});
-    assert.equal(result.length, 6);
+    assert.equal(result.length, 7);
+
+    const xiaoyi = result.find((p) => p.id === 'xiaoyi');
+    assert.ok(xiaoyi);
+    assert.equal(xiaoyi.configured, false);
+    assert.equal(xiaoyi.fields.length, 3);
 
     const feishu = result.find((p) => p.id === 'feishu');
     assert.ok(feishu);

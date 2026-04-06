@@ -698,6 +698,27 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: true,
   },
   {
+    name: 'XIAOYI_AK',
+    defaultValue: '(未设置 → 不启用)',
+    description: '华为小艺 OpenClaw Access Key',
+    category: 'connector',
+    sensitive: false,
+  },
+  {
+    name: 'XIAOYI_SK',
+    defaultValue: '(未设置)',
+    description: '华为小艺 OpenClaw Secret Key',
+    category: 'connector',
+    sensitive: true,
+  },
+  {
+    name: 'XIAOYI_AGENT_ID',
+    defaultValue: '(未设置)',
+    description: '华为小艺 Agent ID',
+    category: 'connector',
+    sensitive: false,
+  },
+  {
     name: 'FEISHU_BOT_OPEN_ID',
     defaultValue: '(未设置)',
     description: '飞书机器人 Open ID（接收消息的 bot 身份标识）',

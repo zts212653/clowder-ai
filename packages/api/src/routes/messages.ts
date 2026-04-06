@@ -63,6 +63,8 @@ interface StreamingHookLike {
   onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
   onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
+  /** F151: Signal adapters that an invocation's delivery batch is complete. */
+  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
 }
 
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
@@ -1437,6 +1439,16 @@ export async function deliverOutboundFromWeb(
           logger.warn({ err, threadId }, '[messages] Late-success placeholder cleanup failed');
         });
       }
+    });
+  }
+
+  // F151: Signal adapters that this invocation's delivery batch is complete.
+  // chainDone = no more active or queued invocations for this thread.
+  if (opts.streamingHook?.notifyDeliveryBatchDone) {
+    const threadStillBusy =
+      (opts.invocationTracker?.has(threadId) ?? false) || (opts.queueProcessor?.isThreadBusy(threadId) ?? false);
+    await opts.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
+      logger.warn({ err, threadId }, '[messages] notifyDeliveryBatchDone failed');
     });
   }
 }
