@@ -2,6 +2,7 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useCallback, useEffect, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 
 type ViewMode = 'chat' | 'handoff' | 'raw';
@@ -32,6 +33,7 @@ interface RawEvent {
 
 export interface SessionEventsViewerProps {
   sessionId: string;
+  catId?: string;
   onClose: () => void;
 }
 
@@ -46,11 +48,27 @@ function fmtDuration(ms: number): string {
 
 const ROLE_STYLES: Record<string, string> = {
   user: 'bg-blue-50 text-blue-800',
-  assistant: 'bg-purple-50 text-purple-800',
   system: 'bg-cafe-surface-elevated text-cafe-secondary',
 };
 
-export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerProps) {
+const ASSISTANT_STYLE_BY_CAT: Record<string, string> = {
+  opus: 'bg-opus-light text-opus-dark',
+  codex: 'bg-codex-light text-codex-dark',
+  gemini: 'bg-gemini-light text-gemini-dark',
+  kimi: 'bg-kimi-light text-kimi-dark',
+  dare: 'bg-dare-light text-dare-dark',
+  gpt52: 'bg-[#C8E6C9] text-[#2E7D32]',
+  'opus-45': 'bg-[#E1D5F0] text-[#5E35B1]',
+  sonnet: 'bg-[#EDE7F6] text-[#6A1B9A]',
+};
+
+function assistantRoleStyle(catId?: string): string {
+  if (!catId) return 'bg-cafe-surface-elevated text-cafe-secondary';
+  return ASSISTANT_STYLE_BY_CAT[catId] ?? 'bg-cafe-surface-elevated text-cafe-secondary';
+}
+
+export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEventsViewerProps) {
+  const { getCatById } = useCatData();
   const [view, setView] = useState<ViewMode>('chat');
   const [data, setData] = useState<ChatMessage[] | HandoffSummary[] | RawEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,6 +126,9 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
     fetchEvents(view, prev);
   };
 
+  const assistantStyle = assistantRoleStyle(catId);
+  const assistantLabel = catId ? (getCatById(catId)?.displayName ?? catId) : 'assistant';
+
   return (
     <div className="rounded-lg border border-cafe bg-cafe-surface">
       {/* Header */}
@@ -148,9 +169,13 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
             {(data as ChatMessage[]).map((msg, i) => (
               <div
                 key={`${msg.role}-${msg.timestamp}-${i}`}
-                className={`rounded px-2 py-1.5 text-[11px] ${ROLE_STYLES[msg.role] ?? 'bg-cafe-surface-elevated text-cafe-secondary'}`}
+                className={`rounded px-2 py-1.5 text-[11px] ${
+                  msg.role === 'assistant'
+                    ? assistantStyle
+                    : (ROLE_STYLES[msg.role] ?? 'bg-cafe-surface-elevated text-cafe-secondary')
+                }`}
               >
-                <span className="font-medium">{msg.role}</span>
+                <span className="font-medium">{msg.role === 'assistant' ? assistantLabel : msg.role}</span>
                 <p className="mt-0.5 whitespace-pre-wrap break-words">{msg.content}</p>
               </div>
             ))}

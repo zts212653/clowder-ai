@@ -25,6 +25,16 @@ vi.mock('../SessionChainInputs', () => ({
   BindSessionInput: () => null,
   SessionIdTag: ({ id }: { id: string }) => React.createElement('span', null, id),
 }));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    getCatById: (id: string) => {
+      const cats: Record<string, { id: string; displayName: string }> = {
+        opus: { id: 'opus', displayName: '布偶猫' },
+      };
+      return cats[id];
+    },
+  }),
+}));
 
 const sealedSession = {
   id: 'sess-abc',
@@ -97,6 +107,6 @@ describe('SessionChainPanel onViewSession', () => {
       viewBtn?.click();
     });
 
-    expect(props.onViewSession).toHaveBeenCalledWith('sess-abc');
+    expect(props.onViewSession).toHaveBeenCalledWith('sess-abc', 'opus');
   });
 });

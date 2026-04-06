@@ -38,7 +38,7 @@ interface SessionSummary {
 export interface SessionChainPanelProps {
   threadId: string;
   catInvocations: Record<string, CatInvocationInfo>;
-  onViewSession?: (sessionId: string) => void;
+  onViewSession?: (sessionId: string, catId?: string) => void;
 }
 
 function timeAgo(ts: number): string {
