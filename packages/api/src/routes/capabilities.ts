@@ -651,6 +651,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       skillDirCandidates.push({ name, dir: join(home, '.codex', 'skills', name) });
       skillDirCandidates.push({ name, dir: join(home, '.gemini', 'skills', name) });
       skillDirCandidates.push({ name, dir: join(home, '.kimi', 'skills', name) });
+      skillDirCandidates.push({ name, dir: join(projectRoot, '.kimi', 'skills', name) });
     }
 
     const metaResults = await Promise.all(

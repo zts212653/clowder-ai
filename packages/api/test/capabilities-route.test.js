@@ -894,4 +894,62 @@ describe('GET /api/capabilities (Fastify)', () => {
     await rm(projectDir, { recursive: true, force: true });
     await app.close();
   });
+
+  it('extracts skill metadata from project-level .kimi/skills SKILL.md', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-kimi-project-meta-${Date.now()}`);
+    const kimiSkillsDir = join(projectDir, '.kimi', 'skills');
+    await mkdir(join(kimiSkillsDir, 'test-skill'), { recursive: true });
+
+    // Write SKILL.md with frontmatter containing description and triggers
+    await writeFile(
+      join(kimiSkillsDir, 'test-skill', 'SKILL.md'),
+      '---\ndescription: "Test skill for project-level Kimi metadata extraction"\ntriggers: ["test-trigger", "kimi-test"]\n---\n\n# Test Skill\n',
+    );
+
+    // Write capabilities.json with the skill
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'test-skill',
+          type: 'skill',
+          enabled: true,
+          source: 'project',
+        },
+      ],
+    });
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res.statusCode, 200);
+
+      const body = res.json();
+      const skillItem = body.items.find((i) => i.type === 'skill' && i.id === 'test-skill');
+      assert.ok(skillItem, 'Project-level Kimi skill should appear in board');
+      assert.equal(
+        skillItem.description,
+        'Test skill for project-level Kimi metadata extraction',
+        'Should extract description from project .kimi/skills SKILL.md',
+      );
+      assert.deepEqual(
+        skillItem.triggers,
+        ['test-trigger', 'kimi-test'],
+        'Should extract triggers from project .kimi/skills SKILL.md',
+      );
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
 });
