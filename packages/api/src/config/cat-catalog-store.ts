@@ -14,6 +14,24 @@ interface BootstrapBinding {
 }
 type BootstrapBindings = Partial<Record<BuiltinAccountClient, BootstrapBinding>>;
 
+interface LegacySeedIdentityRule {
+  catId: string;
+  legacyName: string;
+  legacyDisplayName: string;
+  legacyColor: { primary: string; secondary: string };
+  legacyMentionPattern: string;
+}
+
+const LEGACY_SEED_IDENTITY_RULES: readonly LegacySeedIdentityRule[] = [
+  {
+    catId: 'kimi',
+    legacyName: '金吉拉',
+    legacyDisplayName: '金吉拉',
+    legacyColor: { primary: '#7C3AED', secondary: '#EDE9FE' },
+    legacyMentionPattern: '@金吉拉',
+  },
+];
+
 const CAT_CAFE_DIR = '.cat-cafe';
 const CAT_CATALOG_FILENAME = 'cat-catalog.json';
 const LEGACY_META_FILENAME = 'provider-profiles.json';
@@ -180,6 +198,17 @@ function collectBreedCatIds(breed: Record<string, unknown>): string[] {
   return [...collected];
 }
 
+function findBreedByCatId(config: CatCafeConfig, catId: string): Record<string, unknown> | null {
+  for (const breed of config.breeds as unknown as Record<string, unknown>[]) {
+    if (typeof breed.catId === 'string' && breed.catId === catId) return breed;
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+    if (variants.some((variant) => typeof variant.catId === 'string' && variant.catId === catId)) {
+      return breed;
+    }
+  }
+  return null;
+}
+
 function fallbackAccountRefForClient(client: BuiltinAccountClient, binding: BootstrapBinding | undefined): string {
   return binding?.accountRef?.trim() || builtinAccountIdForClient(client);
 }
@@ -309,6 +338,72 @@ function migrateExistingCatalogBindings(
   return { catalog: nextCatalog, dirty };
 }
 
+function migrateLegacySeedIdentities(
+  projectRoot: string,
+  catalog: CatCafeConfig,
+): { catalog: CatCafeConfig; dirty: boolean } {
+  let template: CatCafeConfig;
+  try {
+    template = JSON.parse(readFileSync(resolveProjectTemplatePath(projectRoot), 'utf-8')) as CatCafeConfig;
+  } catch {
+    return { catalog, dirty: false };
+  }
+
+  let dirty = false;
+  const nextCatalog = structuredClone(catalog) as CatCafeConfig;
+
+  for (const rule of LEGACY_SEED_IDENTITY_RULES) {
+    const runtimeBreed = findBreedByCatId(nextCatalog, rule.catId);
+    const templateBreed = findBreedByCatId(template, rule.catId);
+    if (!runtimeBreed || !templateBreed) continue;
+
+    if (runtimeBreed.name === rule.legacyName && typeof templateBreed.name === 'string' && templateBreed.name.length > 0) {
+      runtimeBreed.name = templateBreed.name;
+      dirty = true;
+    }
+
+    if (
+      runtimeBreed.displayName === rule.legacyDisplayName &&
+      typeof templateBreed.displayName === 'string' &&
+      templateBreed.displayName.length > 0
+    ) {
+      runtimeBreed.displayName = templateBreed.displayName;
+      dirty = true;
+    }
+
+    const runtimeColor = runtimeBreed.color as { primary?: string; secondary?: string } | undefined;
+    const templateColor = templateBreed.color as { primary?: string; secondary?: string } | undefined;
+    if (
+      runtimeColor?.primary === rule.legacyColor.primary &&
+      runtimeColor?.secondary === rule.legacyColor.secondary &&
+      templateColor?.primary &&
+      templateColor?.secondary
+    ) {
+      runtimeBreed.color = { primary: templateColor.primary, secondary: templateColor.secondary };
+      dirty = true;
+    }
+
+    const runtimePatterns = Array.isArray(runtimeBreed.mentionPatterns)
+      ? (runtimeBreed.mentionPatterns as unknown[]).filter((pattern): pattern is string => typeof pattern === 'string')
+      : [];
+    if (runtimePatterns.some((pattern) => pattern.trim().toLowerCase() === rule.legacyMentionPattern.toLowerCase())) {
+      const templatePatterns = Array.isArray(templateBreed.mentionPatterns)
+        ? (templateBreed.mentionPatterns as unknown[]).filter((pattern): pattern is string => typeof pattern === 'string')
+        : [];
+      const preservedPatterns = runtimePatterns.filter(
+        (pattern) => pattern.trim().toLowerCase() !== rule.legacyMentionPattern.toLowerCase(),
+      );
+      const nextPatterns = Array.from(new Set([...templatePatterns, ...preservedPatterns]));
+      if (JSON.stringify(nextPatterns) !== JSON.stringify(runtimePatterns)) {
+        runtimeBreed.mentionPatterns = nextPatterns;
+        dirty = true;
+      }
+    }
+  }
+
+  return { catalog: nextCatalog, dirty };
+}
+
 function filterBootstrapCatalog(template: CatCafeConfig, projectRoot: string): CatCafeConfig {
   const bootstrapBindings = readBootstrapBindingsLegacy(projectRoot);
   const selectedBreeds: Record<string, unknown>[] = [];
@@ -377,9 +472,10 @@ export function readCatCatalogRaw(projectRoot: string): string | null {
   const raw = readFileSync(catalogPath, 'utf-8');
   try {
     const parsed = JSON.parse(raw) as CatCafeConfig;
-    const migrated = migrateExistingCatalogBindings(projectRoot, parsed);
-    if (migrated.dirty) {
-      const nextRaw = `${JSON.stringify(migrated.catalog, null, 2)}\n`;
+    const bindingMigrated = migrateExistingCatalogBindings(projectRoot, parsed);
+    const identityMigrated = migrateLegacySeedIdentities(projectRoot, bindingMigrated.catalog);
+    if (bindingMigrated.dirty || identityMigrated.dirty) {
+      const nextRaw = `${JSON.stringify(identityMigrated.catalog, null, 2)}\n`;
       writeFileAtomic(catalogPath, nextRaw);
       return nextRaw;
     }

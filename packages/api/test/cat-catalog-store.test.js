@@ -358,6 +358,77 @@ describe('cat-catalog-store', () => {
     assert.equal(hydrated.breeds[0]?.variants[0]?.accountRef, 'claude');
   });
 
+  it('refreshes stale legacy kimi identity fields in existing runtime catalogs', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-kimi-identity-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = {
+      version: 2,
+      breeds: [
+        {
+          id: 'moonshot',
+          catId: 'kimi',
+          name: '梵花猫',
+          displayName: '梵花猫',
+          avatar: '/avatars/kimi.png',
+          color: { primary: '#4B5563', secondary: '#E5E7EB' },
+          mentionPatterns: ['@kimi', '@moonshot', '@月之暗面', '@梵花猫'],
+          roleDescription: '中文长文本助手',
+          defaultVariantId: 'kimi-default',
+          variants: [
+            {
+              id: 'kimi-default',
+              provider: 'kimi',
+              defaultModel: 'kimi-code/kimi-for-coding',
+              mcpSupport: true,
+              cli: { command: 'kimi', outputFormat: 'stream-json' },
+              personality: '模板人格',
+            },
+          ],
+        },
+      ],
+      roster: {
+        kimi: {
+          family: 'moonshot',
+          roles: ['research'],
+          lead: true,
+          available: true,
+          evaluation: 'kimi',
+        },
+      },
+      reviewPolicy: {
+        requireDifferentFamily: true,
+        preferActiveInThread: true,
+        preferLead: true,
+        excludeUnavailable: true,
+      },
+      coCreator: {
+        name: 'Co-worker',
+        aliases: ['共创伙伴'],
+        mentionPatterns: ['@co-worker', '@owner'],
+      },
+    };
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const runtimeCatalog = structuredClone(template);
+    runtimeCatalog.breeds[0].name = '金吉拉';
+    runtimeCatalog.breeds[0].displayName = '金吉拉';
+    runtimeCatalog.breeds[0].color = { primary: '#7C3AED', secondary: '#EDE9FE' };
+    runtimeCatalog.breeds[0].mentionPatterns = ['@kimi', '@moonshot', '@月之暗面', '@金吉拉', '@自定义'];
+    runtimeCatalog.breeds[0].variants[0].personality = '保留的运行时人格';
+    mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+    writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(runtimeCatalog, null, 2));
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const kimiBreed = hydrated.breeds[0];
+
+    assert.equal(kimiBreed.name, '梵花猫');
+    assert.equal(kimiBreed.displayName, '梵花猫');
+    assert.deepEqual(kimiBreed.color, { primary: '#4B5563', secondary: '#E5E7EB' });
+    assert.deepEqual(kimiBreed.mentionPatterns, ['@kimi', '@moonshot', '@月之暗面', '@梵花猫', '@自定义']);
+    assert.equal(kimiBreed.variants[0].personality, '保留的运行时人格');
+  });
+
   it('creates a new runtime member without corrupting v2 top-level fields', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');
