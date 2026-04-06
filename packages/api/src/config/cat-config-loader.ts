@@ -674,25 +674,15 @@ function buildCatIdToVariantIndex(config: CatCafeConfig): Map<string, CatVariant
 /** Effort level union across all CLI providers */
 export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 
-function normalizeCliEffortForProvider(
-  provider: CatVariant['provider'] | undefined,
-  effort: CliEffortLevel | undefined,
-): CliEffortLevel | undefined {
-  if (!effort) return undefined;
-
-  // Runtime member edits can switch providers without resetting the old CLI effort.
-  // Keep invocation resilient against those stale cross-provider values.
-  if (provider === 'openai' && effort === 'max') return 'xhigh';
-  if (provider === 'anthropic' && effort === 'xhigh') return 'max';
-  return effort;
-}
-
 /**
  * Get CLI effort level for a cat from cat-config.json.
  * Default when not configured:
  *   claude (anthropic): 'max'
  *   codex (openai):     'xhigh'
  *   others:             'high'
+ *
+ * Note: Stale effort values from provider switches are cleaned at write time
+ * in cats.ts PATCH handler, so no runtime normalization is needed here.
  */
 export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLevel {
   const cfg = config ?? getCachedConfig();
@@ -704,8 +694,7 @@ export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLe
   }
 
   const variant = _catIdToVariant.get(catId);
-  const normalizedEffort = normalizeCliEffortForProvider(variant?.provider, variant?.cli.effort);
-  if (normalizedEffort) return normalizedEffort;
+  if (variant?.cli.effort) return variant.cli.effort;
 
   // Provider-aware defaults
   if (variant?.provider === 'openai') return 'xhigh';

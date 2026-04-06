@@ -745,17 +745,28 @@ describe('F32-b P4c: personality fallback to default variant', () => {
 });
 
 describe('getCatEffort', () => {
-  it('normalizes stale cross-provider effort values before invocation', () => {
+  // Note: Stale cross-provider effort values are now cleaned at write time
+  // (when switching providers via PATCH /api/cats/:id), so runtime
+  // normalization is no longer needed here.
+  it('returns effort from cli config if set', () => {
     const cfg = validConfig();
-    cfg.breeds[0].variants[0].provider = 'openai';
     cfg.breeds[0].variants[0].cli = {
       command: 'claude',
       outputFormat: 'stream-json',
-      effort: 'max',
+      effort: 'low',
     };
     const config = loadCatConfig(writeTempConfig(cfg));
 
-    assert.equal(getCatEffort('opus', config), 'xhigh');
+    assert.equal(getCatEffort('opus', config), 'low');
+  });
+
+  it('returns provider-aware default when not configured', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].provider = 'openai';
+    cfg.breeds[0].variants[0].cli = undefined;
+    const config = loadCatConfig(writeTempConfig(cfg));
+
+    assert.equal(getCatEffort('opus', config), 'xhigh'); // openai default
   });
 });
 
