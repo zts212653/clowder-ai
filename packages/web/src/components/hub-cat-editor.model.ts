@@ -60,11 +60,11 @@ export interface CodexRuntimeSettings {
   authMode: CodexAuthMode;
 }
 
-export const CLIENT_OPTIONS: Array<{ value: ClientValue; label: string }> = [
-  { value: 'anthropic', label: 'Claude' },
-  { value: 'openai', label: 'Codex' },
-  { value: 'google', label: 'Gemini' },
-  { value: 'kimi', label: 'Kimi' },
+export const CLIENT_OPTIONS: Array<{ value: ClientValue; label: string; subtitle?: string }> = [
+  { value: 'anthropic', label: 'Claude', subtitle: '擅长深度思考与代码审查' },
+  { value: 'openai', label: 'Codex', subtitle: 'OpenAI 官方 Codex CLI' },
+  { value: 'google', label: 'Gemini', subtitle: '多模态长上下文专家' },
+  { value: 'kimi', label: 'Kimi', subtitle: '擅长处理中文长文本、总结归纳和资料整理' },
   { value: 'dare', label: 'Dare' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'antigravity', label: 'Antigravity' },
