@@ -16,9 +16,18 @@
  *   读取当前 working directory 的 last_session_id 并补发 session_init。
  */
 
-import { existsSync, promises as fs, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  promises as fs,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -172,6 +181,15 @@ function resolveKimiConfigPath(callbackEnv?: Record<string, string>): string {
   return join(resolveKimiShareDir(callbackEnv), 'config.toml');
 }
 
+function normalizeKimiWorkDirPath(candidate: string): string {
+  const resolved = resolve(candidate);
+  try {
+    return normalize(realpathSync(resolved));
+  } catch {
+    return normalize(resolved);
+  }
+}
+
 function readKimiModelConfigInfo(modelAlias: string, callbackEnv?: Record<string, string>): KimiModelConfigInfo {
   const fallbackCapabilities: string[] =
     modelAlias === DEFAULT_KIMI_MODEL_ALIAS ? ['thinking', 'image_in', 'video_in'] : [];
@@ -253,8 +271,10 @@ function readKimiSessionId(workingDirectory: string, callbackEnv?: Record<string
   try {
     const raw = JSON.parse(readFileSync(statePath, 'utf-8')) as { work_dirs?: Array<Record<string, unknown>> };
     const workDirs = Array.isArray(raw?.work_dirs) ? raw.work_dirs : [];
-    const target = resolve(workingDirectory);
-    const entry = workDirs.find((item) => typeof item.path === 'string' && resolve(item.path) === target);
+    const target = normalizeKimiWorkDirPath(workingDirectory);
+    const entry = workDirs.find(
+      (item) => typeof item.path === 'string' && normalizeKimiWorkDirPath(item.path) === target,
+    );
     return typeof entry?.last_session_id === 'string' && entry.last_session_id.trim().length > 0
       ? entry.last_session_id
       : undefined;

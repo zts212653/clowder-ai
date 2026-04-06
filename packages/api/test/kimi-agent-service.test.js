@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -128,6 +128,50 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
     assert.ok(args.includes('--prompt'));
   } finally {
     rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+test('infers session_init from kimi.json when workingDirectory is a symlink alias', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-symlink-'));
+  const worktreeRoot = mkdtempSync(join(tmpdir(), 'kimi-worktree-real-'));
+  const worktreeAlias = join(tmpdir(), `kimi-worktree-alias-${Date.now()}`);
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+
+  try {
+    symlinkSync(worktreeRoot, worktreeAlias, process.platform === 'win32' ? 'junction' : 'dir');
+    writeFileSync(
+      join(shareDir, 'kimi.json'),
+      JSON.stringify(
+        {
+          work_dirs: [
+            {
+              path: worktreeRoot,
+              last_session_id: 'kimi-session-symlink',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const promise = collect(
+      service.invoke('Hello', {
+        workingDirectory: worktreeAlias,
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    const msgs = await promise;
+    const sessionInit = msgs.find((msg) => msg.type === 'session_init');
+    assert.equal(sessionInit?.sessionId, 'kimi-session-symlink');
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+    rmSync(worktreeRoot, { recursive: true, force: true });
+    rmSync(worktreeAlias, { recursive: true, force: true });
   }
 });
 
