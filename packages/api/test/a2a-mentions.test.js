@@ -74,6 +74,52 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(result, ['opus', 'codex']);
   });
 
+  it('routes multiple @mentions on the same line when the line is a pure handoff target list', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const text = '到我这里结束了吗？是的 — 我的编译修复已完成，等待 commit + push 和 CI 结果。\n@opus @gpt52';
+      const result = parseA2AMentions(text, 'kimi');
+      assert.deepEqual(result, ['opus', 'gpt52']);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  it('does not treat later inline mentions as actionable once prose starts on the line', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const text = '@opus 请继续推进，如果需要再找 @gpt52';
+      const result = parseA2AMentions(text, 'kimi');
+      assert.deepEqual(result, ['opus']);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   // === Content-before-mention: 上文写内容，最后一行 @ (缅因猫习惯) ===
 
   it('routes when content comes before @mention (content-before-mention pattern)', async () => {
