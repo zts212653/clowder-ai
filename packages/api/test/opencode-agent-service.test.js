@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
-import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import {
+  OpenCodeAgentService,
+  summarizeOpenCodeEnvForDebug,
+} from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 
 ensureFakeCliOnPath('opencode');
@@ -108,6 +111,42 @@ const _ERROR_EVENT = {
 };
 
 describe('OpenCodeAgentService', () => {
+  test('summarizeOpenCodeEnvForDebug reports runtime-config mode and masks secrets', () => {
+    const summary = summarizeOpenCodeEnvForDebug({
+      OPENCODE_CONFIG: '/tmp/.cat-cafe/oc-config-opencode-inv1/opencode.json',
+      CAT_CAFE_OC_API_KEY: 'sk-oc-secret',
+      CAT_CAFE_OC_BASE_URL: 'https://maas.example.com/v1',
+      ANTHROPIC_API_KEY: null,
+      ANTHROPIC_BASE_URL: null,
+      CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+      CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'anthropic/minimax-m2.7',
+    });
+
+    assert.equal(summary.mode, 'runtime-config');
+    assert.equal(summary.opencodeConfig, '/tmp/.cat-cafe/oc-config-opencode-inv1/opencode.json');
+    assert.equal(summary.catCafeOcApiKey, 'sk-oc-***');
+    assert.equal(summary.catCafeOcBaseUrl, 'https://maas.example.com/v1');
+    assert.equal(summary.anthropicApiKey, '(cleared)');
+    assert.equal(summary.anthropicBaseUrl, '(cleared)');
+    assert.equal(summary.profileMode, 'api_key');
+    assert.equal(summary.modelOverride, 'anthropic/minimax-m2.7');
+  });
+
+  test('summarizeOpenCodeEnvForDebug reports direct-env mode without leaking raw keys', () => {
+    const summary = summarizeOpenCodeEnvForDebug({
+      CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+      ANTHROPIC_API_KEY: 'sk-direct-secret',
+      ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic/v1',
+    });
+
+    assert.equal(summary.mode, 'direct-env');
+    assert.equal(summary.opencodeConfig, '(unset)');
+    assert.equal(summary.anthropicApiKey, 'sk-dir***');
+    assert.equal(summary.anthropicBaseUrl, 'https://api.minimaxi.com/anthropic/v1');
+    assert.equal(summary.catCafeOcApiKey, '(unset)');
+    assert.equal(summary.catCafeOcBaseUrl, '(unset)');
+  });
+
   test('yields session_init, text, done from opencode events', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
@@ -418,16 +457,16 @@ describe('OpenCodeAgentService', () => {
     );
   });
 
-  // ── F189: OPENCODE_CONFIG_DIR passthrough clears anthropic env vars ──
+  // ── F189: OPENCODE_CONFIG passthrough clears anthropic env vars ──
 
-  test('OPENCODE_CONFIG_DIR in callbackEnv clears ANTHROPIC env vars', async () => {
+  test('OPENCODE_CONFIG in callbackEnv clears ANTHROPIC env vars', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'maas/glm-5' });
     const promise = collect(
       service.invoke('Test', {
         callbackEnv: {
-          OPENCODE_CONFIG_DIR: '/tmp/.cat-cafe/oc-config-test-inv1',
+          OPENCODE_CONFIG: '/tmp/.cat-cafe/oc-config-test-inv1/opencode.json',
           CAT_CAFE_OC_API_KEY: 'sk-custom-key',
           CAT_CAFE_OC_BASE_URL: 'https://maas.example.com/v1',
           CAT_CAFE_ANTHROPIC_API_KEY: 'sk-should-be-cleared',
@@ -439,8 +478,8 @@ describe('OpenCodeAgentService', () => {
     await promise;
 
     const opts = spawnFn.mock.calls[0].arguments[2];
-    // OPENCODE_CONFIG_DIR and OC credentials must be present
-    assert.strictEqual(opts.env.OPENCODE_CONFIG_DIR, '/tmp/.cat-cafe/oc-config-test-inv1');
+    // OPENCODE_CONFIG and OC credentials must be present
+    assert.strictEqual(opts.env.OPENCODE_CONFIG, '/tmp/.cat-cafe/oc-config-test-inv1/opencode.json');
     assert.strictEqual(opts.env.CAT_CAFE_OC_API_KEY, 'sk-custom-key');
     assert.strictEqual(opts.env.CAT_CAFE_OC_BASE_URL, 'https://maas.example.com/v1');
     // Anthropic env vars must be cleared to prevent builtin provider conflict
@@ -450,7 +489,7 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(opts.env.OPENCODE_BASE_URL, undefined);
   });
 
-  test('without OPENCODE_CONFIG_DIR, anthropic env vars are still set normally', async () => {
+  test('without OPENCODE_CONFIG, anthropic env vars are still set normally', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });

@@ -221,7 +221,15 @@ export function IdentitySection({
 }
 
 /** Well-known OpenCode provider names (always shown as suggestions). */
-const KNOWN_OC_PROVIDERS = ['anthropic', 'openai', 'openrouter', 'google', 'azure', 'deepseek'];
+export const KNOWN_OC_PROVIDERS = [
+  'anthropic',
+  'openai',
+  'openai-responses',
+  'openrouter',
+  'google',
+  'azure',
+  'deepseek',
+];
 
 /** Merge well-known providers with any prefixes extracted from model strings like "openai/gpt-5.4". */
 function buildProviderSuggestions(models: string[]): string[] {
@@ -276,22 +284,20 @@ function ComboField({
   );
 }
 
-// Derive the opencode endpoint suffix from protocol / ocProviderName.
-// Priority mirrors backend deriveOpenCodeApiType: protocol > ocProviderName > default.
-// Note: model prefix (e.g. google/gemini-*) is NOT used — it can be a namespace
-// within a different provider (e.g. OpenRouter) and would produce misleading hints.
-function resolveOpenCodeEndpoint(protocol: string | undefined, ocProviderName: string): string {
-  // Explicit protocol always wins (same as deriveOpenCodeApiType)
-  if (protocol) {
-    if (protocol === 'anthropic') return '/v1/messages';
-    if (protocol === 'google') return '/models/{model}:generateContent';
-    if (protocol === 'openai-responses') return '/v1/responses';
-    return '/v1/chat/completions';
-  }
-  // Fallback: ocProviderName (authoritative provider binding)
-  if (ocProviderName === 'anthropic') return '/v1/messages';
-  if (ocProviderName === 'google') return '/models/{model}:generateContent';
+// Derive the opencode endpoint suffix from ocProviderName (sole authority).
+// Account-level protocol is no longer used — mirrors backend deriveOpenCodeApiType.
+export function resolveOpenCodeEndpoint(ocProviderName: string): string {
+  const normalized = ocProviderName.toLowerCase();
+  if (normalized === 'openai-responses') return '/v1/responses';
+  if (normalized === 'anthropic') return '/v1/messages';
+  if (normalized === 'google') return '/models/{model}:generateContent';
   return '/v1/chat/completions';
+}
+
+interface CallHint {
+  label: string;
+  url: string;
+  warning: string;
 }
 
 // Generate a hint showing what API endpoint the CLI will actually call
@@ -300,15 +306,15 @@ function buildCallHint(
   profile: ProfileItem | undefined,
   model: string,
   ocProviderName: string,
-): string | null {
+): CallHint | null {
   if (!profile || profile.builtin || !profile.baseUrl) return null;
   const base = profile.baseUrl.replace(/\/+$/, '');
   const hasV1Suffix = /\/v1$/i.test(base);
   // Strip trailing /v1 from base to avoid /v1/v1 duplication when pathSuffix already includes /v1
   const baseWithoutV1 = hasV1Suffix ? base.replace(/\/v1$/i, '') : base;
 
-  // For opencode, derive endpoint dynamically (protocol > ocProviderName > default)
-  const ocPath = client === 'opencode' ? resolveOpenCodeEndpoint(profile.protocol, ocProviderName) : undefined;
+  // For opencode, derive endpoint dynamically from ocProviderName (sole authority)
+  const ocPath = client === 'opencode' ? resolveOpenCodeEndpoint(ocProviderName) : undefined;
 
   const cliEndpoints: Record<string, { cli: string; pathSuffix: string }> = {
     anthropic: { cli: 'claude', pathSuffix: '/v1/messages' },
@@ -325,9 +331,10 @@ function buildCallHint(
   const fullUrl = `${effectiveBase}${info.pathSuffix}`;
   let warning = '';
   if (client === 'google') {
-    warning = `\n注意: Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client`;
+    warning =
+      '\n注意: Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client';
   }
-  return `${info.cli} CLI 实际调用: ${fullUrl}${warning}`;
+  return { label: `${info.cli} CLI 实际调用: `, url: fullUrl, warning };
 }
 
 export function AccountSection({
@@ -417,15 +424,21 @@ export function AccountSection({
               }
             />
             {form.client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
-              <ComboField
-                label="Provider 名称"
-                ariaLabel="OC Provider Name"
-                value={form.ocProviderName}
-                onChange={(value) => onChange({ ocProviderName: value })}
-                suggestions={providerSuggestions}
-                required
-                placeholder="如 anthropic、openai、openrouter、maas"
-              />
+              <>
+                <ComboField
+                  label="Provider 名称"
+                  ariaLabel="OC Provider Name"
+                  value={form.ocProviderName}
+                  onChange={(value) => onChange({ ocProviderName: value })}
+                  suggestions={providerSuggestions}
+                  required
+                  placeholder="如 anthropic、openai、openai-responses、openrouter、maas"
+                />
+                <p className="text-[11px] leading-4 text-[#8A776B]">
+                  OpenCode 根据 Provider 名称决定实际的 API 协议类型（如 openai → Chat Completions, anthropic →
+                  Messages, openai-responses → Responses）
+                </p>
+              </>
             ) : null}
             {form.client === 'opencode' &&
             form.defaultModel.trim() &&
@@ -439,7 +452,11 @@ export function AccountSection({
             ) : null}
             {callHint ? (
               <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
-                <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">{callHint}</p>
+                <p className="whitespace-pre-wrap text-[11px] leading-4 text-[#8A776B]">
+                  {callHint.label}
+                  <span className="font-semibold text-[#5C4D43]">{callHint.url}</span>
+                  {callHint.warning}
+                </p>
               </div>
             ) : null}
           </>

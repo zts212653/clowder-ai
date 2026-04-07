@@ -10,6 +10,7 @@ import {
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
+  summarizeOpenCodeRuntimeConfigForDebug,
   writeOpenCodeRuntimeConfig,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 
@@ -177,51 +178,31 @@ describe('parseOpenCodeModel', () => {
 });
 
 describe('deriveOpenCodeApiType', () => {
-  test('explicit protocol takes precedence over ocProviderName', () => {
-    const scenarios = [
-      // Explicit protocol always wins
-      { protocol: 'anthropic', ocProviderName: 'anthropic', expected: 'anthropic' },
-      { protocol: 'google', ocProviderName: 'custom-gemini', expected: 'google' },
-      { protocol: 'openai', ocProviderName: 'openrouter', expected: 'openai' },
-      // Conflict: explicit protocol overrides ocProviderName
-      { protocol: 'openai', ocProviderName: 'anthropic', expected: 'openai' },
-      { protocol: 'openai', ocProviderName: 'google', expected: 'openai' },
-      { protocol: 'google', ocProviderName: 'anthropic', expected: 'google' },
-    ];
-    for (const { protocol, ocProviderName, expected } of scenarios) {
-      assert.equal(
-        deriveOpenCodeApiType(protocol, ocProviderName),
-        expected,
-        `protocol=${protocol}, ocProviderName=${ocProviderName} → ${expected}`,
-      );
-    }
-  });
-
-  test('falls back to ocProviderName when protocol is undefined', () => {
+  test('derives apiType solely from ocProviderName', () => {
     const scenarios = [
       { ocProviderName: 'anthropic', expected: 'anthropic' },
       { ocProviderName: 'google', expected: 'google' },
+      { ocProviderName: 'openai-responses', expected: 'openai-responses' },
       { ocProviderName: 'maas', expected: 'openai' },
       { ocProviderName: 'deepseek', expected: 'openai' },
       { ocProviderName: 'minimax', expected: 'openai' },
+      { ocProviderName: 'openrouter', expected: 'openai' },
       { ocProviderName: undefined, expected: 'openai' },
     ];
     for (const { ocProviderName, expected } of scenarios) {
-      assert.equal(
-        deriveOpenCodeApiType(undefined, ocProviderName),
-        expected,
-        `protocol=undefined, ocProviderName=${ocProviderName} → ${expected}`,
-      );
+      assert.equal(deriveOpenCodeApiType(ocProviderName), expected, `ocProviderName=${ocProviderName} → ${expected}`);
     }
   });
 
-  test('openai-responses protocol is reachable and returns openai-responses', () => {
-    assert.equal(deriveOpenCodeApiType('openai-responses', 'maas'), 'openai-responses');
-    assert.equal(deriveOpenCodeApiType('openai-responses', undefined), 'openai-responses');
+  test('openai-responses is reachable', () => {
+    assert.equal(deriveOpenCodeApiType('openai-responses'), 'openai-responses');
   });
 
-  test('unknown protocol values default to openai', () => {
-    assert.equal(deriveOpenCodeApiType('unknown-proto', 'anthropic'), 'openai');
+  test('case-insensitive ocProviderName matching', () => {
+    assert.equal(deriveOpenCodeApiType('Anthropic'), 'anthropic');
+    assert.equal(deriveOpenCodeApiType('OPENAI-RESPONSES'), 'openai-responses');
+    assert.equal(deriveOpenCodeApiType('OpenAI-Responses'), 'openai-responses');
+    assert.equal(deriveOpenCodeApiType('Google'), 'google');
   });
 });
 
@@ -262,6 +243,33 @@ describe('generateOpenCodeRuntimeConfig', () => {
     }
   });
 
+  test('providerName "openai" is remapped to avoid OpenCode builtin collision', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'openai',
+      models: ['openai/gpt-4o'],
+      defaultModel: 'openai/gpt-4o',
+      apiType: 'openai',
+      hasBaseUrl: true,
+    });
+    // Provider key must NOT be 'openai' — OpenCode treats it as built-in and
+    // forces Responses API, ignoring the npm adapter field.
+    assert.equal(config.provider['openai'], undefined, 'must not use reserved "openai" key');
+    assert.ok(config.provider['openai-compat'], 'must use remapped "openai-compat" key');
+    assert.equal(config.provider['openai-compat'].npm, '@ai-sdk/openai-compatible');
+    assert.equal(config.model, 'openai-compat/gpt-4o', 'model prefix must match remapped provider key');
+  });
+
+  test('non-reserved providerName is kept as-is', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'kimi',
+      models: ['kimi/moonshot-v2'],
+      defaultModel: 'kimi/moonshot-v2',
+      apiType: 'openai',
+    });
+    assert.ok(config.provider['kimi'], 'custom name must be preserved');
+    assert.equal(config.model, 'kimi/moonshot-v2');
+  });
+
   test('unknown apiType falls back to openai-compatible adapter', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'test',
@@ -270,13 +278,35 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
     assert.equal(config.provider.test.npm, '@ai-sdk/openai-compatible');
   });
+
+  test('summarizeOpenCodeRuntimeConfigForDebug reports provider adapter and model keys', () => {
+    const summary = summarizeOpenCodeRuntimeConfigForDebug({
+      providerName: 'anthropic',
+      models: ['anthropic/minimax-m2.7', 'anthropic/minimax-text-01'],
+      defaultModel: 'anthropic/minimax-m2.7',
+      apiType: 'anthropic',
+      hasBaseUrl: true,
+    });
+
+    assert.equal(summary.model, 'anthropic/minimax-m2.7');
+    assert.deepStrictEqual(summary.providerKeys, ['anthropic']);
+    assert.deepStrictEqual(summary.providerSummary, {
+      anthropic: {
+        npm: '@ai-sdk/anthropic',
+        modelKeys: ['minimax-m2.7', 'minimax-text-01'],
+        hasBaseUrl: true,
+        apiKeySource: `env:${OC_API_KEY_ENV}`,
+        baseUrlSource: `env:${OC_BASE_URL_ENV}`,
+      },
+    });
+  });
 });
 
 describe('writeOpenCodeRuntimeConfig', () => {
-  test('writes invocation-scoped runtime config dir under .cat-cafe (OPENCODE_CONFIG_DIR)', () => {
+  test('writes invocation-scoped runtime config file under .cat-cafe (OPENCODE_CONFIG)', () => {
     const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-runtime-config-'));
     try {
-      const configDir = writeOpenCodeRuntimeConfig(tmpRoot, 'opencode-maas', 'inv-123', {
+      const configPath = writeOpenCodeRuntimeConfig(tmpRoot, 'opencode-maas', 'inv-123', {
         providerName: 'maas',
         models: ['maas/glm-5'],
         defaultModel: 'maas/glm-5',
@@ -284,10 +314,9 @@ describe('writeOpenCodeRuntimeConfig', () => {
         hasBaseUrl: true,
       });
 
-      assert.match(configDir, /\.cat-cafe\/oc-config-opencode-maas-inv-123$/);
-      const configFile = join(configDir, 'opencode.json');
-      assert.ok(existsSync(configFile), 'opencode.json must exist inside config dir');
-      const content = JSON.parse(readFileSync(configFile, 'utf-8'));
+      assert.match(configPath, /\.cat-cafe\/oc-config-opencode-maas-inv-123\/opencode\.json$/);
+      assert.ok(existsSync(configPath), 'opencode.json must exist at returned config path');
+      const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       assert.equal(content.model, 'maas/glm-5');
       assert.deepStrictEqual(content.provider.maas.models, { 'glm-5': { name: 'glm-5' } });
     } finally {

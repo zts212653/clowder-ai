@@ -536,7 +536,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 201, 'cross-protocol api_key binding should be allowed');
   });
 
-  it('POST /api/cats rejects non-opencode client bound to incompatible protocol account', async () => {
+  it('POST /api/cats allows cross-protocol binding after protocol retirement (#329)', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -556,7 +556,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const app = Fastify();
     await app.register(catsRoutes);
 
-    // client "anthropic" + account protocol "openai" → should be rejected
+    // Protocol validation removed (#329): protocol is provider-determined,
+    // not an account attribute. Cross-protocol binding is now allowed.
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
@@ -565,12 +566,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        catId: 'runtime-minimax-mismatch',
-        name: '协议不匹配猫',
-        displayName: '协议不匹配猫',
+        catId: 'runtime-minimax-cross-protocol',
+        name: '跨协议绑定猫',
+        displayName: '跨协议绑定猫',
         avatar: '/avatars/test.png',
         color: { primary: '#ff0000', secondary: '#ffcccc' },
-        mentionPatterns: ['@mismatch-test'],
+        mentionPatterns: ['@cross-protocol-test'],
         roleDescription: '测试用',
         client: 'anthropic',
         providerProfileId: openaiAccount.id,
@@ -578,9 +579,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       }),
     });
 
-    assert.equal(createRes.statusCode, 400, 'protocol mismatch should be rejected');
-    const body = JSON.parse(createRes.body);
-    assert.match(body.error, /requires "anthropic" protocol/i);
+    assert.equal(createRes.statusCode, 201, 'cross-protocol binding should be allowed after protocol retirement');
   });
 
   it('POST /api/cats strips trailing slash from model name', async () => {
@@ -979,38 +978,26 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('F189 P1 regression: custom provider without explicit protocol defaults to openai adapter', async () => {
-    // Regression: effectiveProtocol defaults to 'anthropic' for all opencode providers,
-    // but apiType in the F189 block should only honor an EXPLICIT account protocol.
-    // Custom providers like maas/deepseek without protocol must get 'openai' adapter.
-    // When explicit protocol IS set, it takes full precedence over ocProviderName heuristic.
-    // #291: Uses production deriveOpenCodeApiType instead of inline simulation.
+  it('F189 P1 regression: apiType derived solely from ocProviderName (protocol retired)', async () => {
+    // deriveOpenCodeApiType now only uses ocProviderName; account-level protocol
+    // is no longer consulted. This test verifies the new single-source behavior.
     const { deriveOpenCodeApiType } = await import(
       '../dist/domains/cats/services/agents/providers/opencode-config-template.js'
     );
 
     const scenarios = [
-      // No explicit protocol → fall back to ocProviderName
-      { protocol: undefined, ocProviderName: 'maas', expected: 'openai' },
-      { protocol: undefined, ocProviderName: 'deepseek', expected: 'openai' },
-      { protocol: undefined, ocProviderName: 'anthropic', expected: 'anthropic' },
-      { protocol: undefined, ocProviderName: 'google', expected: 'google' },
-      // Explicit protocol → always wins over ocProviderName
-      { protocol: 'anthropic', ocProviderName: 'anthropic', expected: 'anthropic' },
-      { protocol: 'google', ocProviderName: 'custom-gemini', expected: 'google' },
-      { protocol: 'openai', ocProviderName: 'openrouter', expected: 'openai' },
-      // openai-responses protocol (#291)
-      { protocol: 'openai-responses', ocProviderName: 'custom', expected: 'openai-responses' },
-      { protocol: 'openai-responses', ocProviderName: undefined, expected: 'openai-responses' },
-      // Conflict: explicit protocol MUST override ocProviderName
-      { protocol: 'openai', ocProviderName: 'anthropic', expected: 'openai' },
-      { protocol: 'openai', ocProviderName: 'google', expected: 'openai' },
-      { protocol: 'google', ocProviderName: 'anthropic', expected: 'google' },
+      { ocProviderName: 'maas', expected: 'openai' },
+      { ocProviderName: 'deepseek', expected: 'openai' },
+      { ocProviderName: 'anthropic', expected: 'anthropic' },
+      { ocProviderName: 'google', expected: 'google' },
+      { ocProviderName: 'openrouter', expected: 'openai' },
+      { ocProviderName: 'openai-responses', expected: 'openai-responses' },
+      { ocProviderName: undefined, expected: 'openai' },
     ];
 
-    for (const { protocol, ocProviderName, expected } of scenarios) {
-      const apiType = deriveOpenCodeApiType(protocol, ocProviderName);
-      assert.equal(apiType, expected, `protocol=${protocol}, ocProviderName=${ocProviderName} → ${expected}`);
+    for (const { ocProviderName, expected } of scenarios) {
+      const apiType = deriveOpenCodeApiType(ocProviderName);
+      assert.equal(apiType, expected, `ocProviderName=${ocProviderName} → ${expected}`);
     }
   });
 

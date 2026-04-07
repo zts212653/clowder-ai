@@ -87,7 +87,7 @@ describe('HubProviderProfileItem', () => {
     expect(Object.hasOwn(payload, 'modelOverride')).toBe(false);
   });
 
-  it('displays protocol badge and sends protocol change from dropdown', async () => {
+  it('allows protocol correction via collapsible advanced section in edit mode', async () => {
     const profile: ProfileItem = {
       id: 'minimax-api',
       provider: 'minimax-api',
@@ -110,7 +110,7 @@ describe('HubProviderProfileItem', () => {
       root.render(<HubProviderProfileItem profile={profile} busy={false} onSave={onSave} onDelete={() => {}} />);
     });
 
-    // Protocol badge should be visible in read-only view
+    // Protocol badge visible in read-only view
     expect(container.textContent).toContain('OpenAI');
 
     // Enter edit mode
@@ -118,14 +118,23 @@ describe('HubProviderProfileItem', () => {
       queryButton(container, '编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    // Protocol dropdown should exist with current value
+    // Protocol dropdown is hidden by default (collapsed)
+    expect(container.querySelector('select')).toBeNull();
+
+    // Expand advanced section
+    await act(async () => {
+      queryButton(container, '高级设置').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Protocol dropdown is now visible
     const select = container.querySelector('select') as HTMLSelectElement | null;
     expect(select).not.toBeNull();
     expect(select!.value).toBe('openai');
 
     // Change protocol to anthropic
     await act(async () => {
-      select!.value = 'anthropic';
+      const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(select!), 'value');
+      descriptor?.set?.call(select!, 'anthropic');
       select!.dispatchEvent(new Event('change', { bubbles: true }));
     });
 

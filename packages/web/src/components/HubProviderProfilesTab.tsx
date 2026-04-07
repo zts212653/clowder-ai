@@ -3,11 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubProviderProfileItem, type ProfileEditPayload } from './HubProviderProfileItem';
-import {
-  type ApiProtocol,
-  CreateApiKeyProfileSection,
-  ProviderProfilesSummaryCard,
-} from './hub-provider-profiles.sections';
+import { CreateApiKeyProfileSection, ProviderProfilesSummaryCard } from './hub-provider-profiles.sections';
 import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
 import { ensureBuiltinProviderProfiles, resolveAccountActionId } from './hub-provider-profiles.view';
 
@@ -17,7 +13,6 @@ export function HubProviderProfilesTab() {
   const [data, setData] = useState<ProviderProfilesResponse | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [createDisplayName, setCreateDisplayName] = useState('');
-  const [createProtocol, setCreateProtocol] = useState<ApiProtocol>('openai');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
   const [createModels, setCreateModels] = useState<string[]>([]);
@@ -76,7 +71,6 @@ export function HubProviderProfilesTab() {
         method: 'POST',
         body: JSON.stringify({
           displayName: createDisplayName.trim(),
-          protocol: createProtocol,
           authType: 'api_key',
           baseUrl: createBaseUrl.trim(),
           apiKey: createApiKey.trim(),
@@ -84,7 +78,6 @@ export function HubProviderProfilesTab() {
         }),
       });
       setCreateDisplayName('');
-      setCreateProtocol('openai');
       setCreateBaseUrl('');
       setCreateApiKey('');
       setCreateModels([]);
@@ -95,7 +88,7 @@ export function HubProviderProfilesTab() {
     } finally {
       setBusyId(null);
     }
-  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, createProtocol, fetchProfiles]);
+  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, fetchProfiles]);
 
   const deleteProfile = useCallback(
     async (profileId: string) => {
@@ -162,13 +155,11 @@ export function HubProviderProfilesTab() {
 
       <CreateApiKeyProfileSection
         displayName={createDisplayName}
-        protocol={createProtocol}
         baseUrl={createBaseUrl}
         apiKey={createApiKey}
         models={createModels}
         busy={busyId === 'create'}
         onDisplayNameChange={setCreateDisplayName}
-        onProtocolChange={setCreateProtocol}
         onBaseUrlChange={setCreateBaseUrl}
         onApiKeyChange={setCreateApiKey}
         onModelsChange={setCreateModels}

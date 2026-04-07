@@ -314,6 +314,17 @@ export async function* spawnCli(
       await Promise.race([exitPromise, new Promise<void>((r) => setTimeout(r, SEMANTIC_COMPLETION_GRACE_MS).unref())]);
     }
 
+    if (exitCode === 0 && exitSignal === null && stderrBuffer.trim()) {
+      log.debug(
+        {
+          command: options.command,
+          hadNdjsonEvent: firstEventAt !== null,
+          stderr: stderrBuffer.trim().slice(-1000),
+        },
+        'CLI stderr on successful exit',
+      );
+    }
+
     // Yield error on abnormal exit (only if WE didn't kill it AND no semantic completion)
     // Covers both non-zero exitCode AND external signal kills
     // Windows: exit code 3221226505 (0xC0000409 STATUS_STACK_BUFFER_OVERRUN) is a libuv

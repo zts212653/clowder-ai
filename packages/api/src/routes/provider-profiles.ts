@@ -339,16 +339,19 @@ export const providerProfilesRoutes: FastifyPluginAsync<ProviderProfilesRoutesOp
         reply.status(404);
         return { error: `Account "${params.profileId}" not found` };
       }
-      const baseUrlChanged =
-        parsed.data.baseUrl != null &&
-        normalizeBaseUrl(parsed.data.baseUrl) !== normalizeBaseUrl(existing.baseUrl ?? '');
-      // Re-infer protocol on baseUrl change, but preserve openai-responses
-      // (it can only be set explicitly — inferProbeProtocol can't distinguish it from openai)
-      const effectiveProtocol: AccountProtocol = parsed.data.protocol
-        ? (parsed.data.protocol as AccountProtocol)
-        : baseUrlChanged && existing.protocol !== 'openai-responses'
-          ? inferProbeProtocol(parsed.data.baseUrl, undefined)
-          : existing.protocol;
+      // Protocol is no longer user-editable in Hub UI. Preserve the existing account
+      // family unless an API client explicitly overrides it, otherwise normal proxy
+      // baseUrl edits can silently rewrite anthropic/google accounts to openai.
+      const effectiveProtocol: AccountProtocol =
+        (parsed.data.protocol as AccountProtocol | undefined) ??
+        existing.protocol ??
+        inferProbeProtocol(
+          parsed.data.baseUrl ?? existing.baseUrl,
+          undefined,
+          parsed.data.models ?? existing.models,
+          parsed.data.name ?? existing.displayName ?? params.profileId,
+          parsed.data.displayName ?? existing.displayName ?? params.profileId,
+        );
       const account: AccountConfig = {
         authType: (parsed.data.authType as 'oauth' | 'api_key') ?? existing.authType,
         protocol: effectiveProtocol,

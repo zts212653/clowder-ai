@@ -197,21 +197,14 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.baseUrl, 'https://custom-proxy.example.com');
   });
 
-  it('env fallback: resolveByAccountRef reads env API key when credentials absent', async () => {
+  it('env fallback retired (#329): resolveByAccountRef returns undefined apiKey when credentials absent', async () => {
     const { resolveByAccountRef } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-7`);
     await writeCatalog({
       custom: { authType: 'api_key', protocol: 'anthropic' },
     });
-    // No credentials written — env fallback should kick in
-    const prevEnv = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = 'sk-env-fallback';
-    try {
-      const profile = resolveByAccountRef(projectRoot, 'custom');
-      assert.ok(profile);
-      assert.equal(profile.apiKey, 'sk-env-fallback');
-    } finally {
-      if (prevEnv === undefined) delete process.env.ANTHROPIC_API_KEY;
-      else process.env.ANTHROPIC_API_KEY = prevEnv;
-    }
+    // No credentials written — env fallback removed in #329 (protocol退場)
+    const profile = resolveByAccountRef(projectRoot, 'custom');
+    assert.ok(profile);
+    assert.equal(profile.apiKey, undefined, 'env fallback retired: no apiKey without stored credential');
   });
 });

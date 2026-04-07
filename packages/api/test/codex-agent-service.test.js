@@ -336,6 +336,74 @@ test('resume session does NOT include --add-dir (sandbox locked at creation)', a
   assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
 });
 
+test('custom provider: model passed via --config as-is', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'qwen-plus' });
+
+  // Emit events after a tick to ensure generator has started consuming
+  const promise = collect(
+    service.invoke('test custom model', {
+      callbackEnv: {
+        OPENAI_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1/',
+        OPENAI_API_KEY: 'sk-test',
+        CODEX_AUTH_MODE: 'api_key',
+      },
+    }),
+  );
+  setTimeout(() => emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-custom-prefix' }]), 50);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  // custom provider: model passed via --config (not --model) to bypass metadata lookup
+  assert.ok(!args.includes('--model'), 'must NOT use --model flag for custom provider');
+  assert.ok(args.includes('model="qwen-plus"'), 'model must be passed as-is via --config');
+  assert.ok(args.includes('model_provider="custom"'), 'must set model_provider=custom');
+});
+
+test('custom provider: multi-segment model slug preserved as-is', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  // Model like "google/gemini-3-flash-preview" (OpenRouter format) — must NOT be stripped
+  const service = new CodexAgentService({ spawnFn, model: 'google/gemini-3-flash-preview' });
+
+  const promise = collect(
+    service.invoke('test multi-segment', {
+      callbackEnv: {
+        OPENAI_BASE_URL: 'https://openrouter.ai/api/v1/',
+        OPENAI_API_KEY: 'sk-test',
+        CODEX_AUTH_MODE: 'api_key',
+      },
+    }),
+  );
+  setTimeout(() => emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-multi-seg' }]), 50);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const modelArg = args.find((a) => a.startsWith('model='));
+  assert.equal(
+    modelArg,
+    'model="google/gemini-3-flash-preview"',
+    'multi-segment model slug must be preserved verbatim',
+  );
+});
+
+test('no custom provider: model is passed as-is', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+
+  const promise = collect(service.invoke('test no custom'));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-no-custom' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const modelIdx = args.indexOf('--model');
+  assert.ok(modelIdx >= 0, 'must use --model flag for non-custom provider');
+  assert.equal(args[modelIdx + 1], 'gpt-5.3-codex', 'model without custom base URL stays as-is');
+  assert.ok(!args.includes('model_provider="custom"'), 'must not set model_provider when no custom URL');
+});
+
 test('handles multiple agent_message items', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

@@ -414,7 +414,7 @@ describe('provider profiles routes', () => {
     }
   });
 
-  it('PATCH /api/provider-profiles/:id re-infers protocol when baseUrl changes', async () => {
+  it('PATCH /api/provider-profiles/:id preserves existing protocol when baseUrl changes without explicit override', async () => {
     const Fastify = (await import('fastify')).default;
     const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
     const app = Fastify();
@@ -424,73 +424,40 @@ describe('provider profiles routes', () => {
     const projectDir = await makeTmpDir('reinfer-proto');
     setGlobalRoot(projectDir);
     try {
-      // Create profile with generic baseUrl → inferred protocol should be 'openai' (default)
+      // Create an anthropic account behind a vendor-neutral proxy URL.
       const createRes = await app.inject({
         method: 'POST',
         url: '/api/provider-profiles',
         headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
         payload: JSON.stringify({
           projectPath: projectDir,
-          displayName: 'MiniMax',
+          displayName: 'Anthropic Proxy',
           authType: 'api_key',
-          baseUrl: 'https://api.minimaxi.com/v1',
+          protocol: 'anthropic',
+          baseUrl: 'https://proxy.example.com/v1',
           apiKey: 'sk-test',
-          models: ['MiniMax-M2.7'],
+          models: ['claude-sonnet-4-5'],
         }),
       });
       assert.equal(createRes.statusCode, 200);
       const profileId = createRes.json().profile.id;
-      assert.equal(createRes.json().profile.protocol, 'openai', 'initial protocol should be openai (default)');
+      assert.equal(createRes.json().profile.protocol, 'anthropic');
 
-      // PATCH baseUrl to anthropic-compatible endpoint → protocol should re-infer to 'anthropic'
+      // Normal proxy baseUrl maintenance must not silently rewrite the account family.
       const patchRes = await app.inject({
         method: 'PATCH',
         url: `/api/provider-profiles/${profileId}`,
         headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
         payload: JSON.stringify({
           projectPath: projectDir,
-          baseUrl: 'https://api.minimaxi.com/anthropic',
+          baseUrl: 'https://proxy-2.example.com/v1',
         }),
       });
       assert.equal(patchRes.statusCode, 200);
       assert.equal(
         patchRes.json().profile.protocol,
         'anthropic',
-        'protocol should re-infer to anthropic when baseUrl contains anthropic',
-      );
-
-      // PATCH without changing baseUrl → protocol should stay 'anthropic'
-      const patchRes2 = await app.inject({
-        method: 'PATCH',
-        url: `/api/provider-profiles/${profileId}`,
-        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          projectPath: projectDir,
-          displayName: 'MiniMax Renamed',
-        }),
-      });
-      assert.equal(patchRes2.statusCode, 200);
-      assert.equal(
-        patchRes2.json().profile.protocol,
-        'anthropic',
-        'protocol should stay anthropic when baseUrl unchanged',
-      );
-
-      // PATCH with explicit protocol override → should use explicit value
-      const patchRes3 = await app.inject({
-        method: 'PATCH',
-        url: `/api/provider-profiles/${profileId}`,
-        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          projectPath: projectDir,
-          protocol: 'openai',
-        }),
-      });
-      assert.equal(patchRes3.statusCode, 200);
-      assert.equal(
-        patchRes3.json().profile.protocol,
-        'openai',
-        'explicit protocol in PATCH should override re-inference',
+        'hidden protocol must be preserved across baseUrl-only edits',
       );
     } finally {
       restoreGlobalRoot();
@@ -499,7 +466,7 @@ describe('provider profiles routes', () => {
     }
   });
 
-  it('PATCH re-infer is not misled by displayName when baseUrl changes', async () => {
+  it('PATCH keeps current protocol even when the new baseUrl would hint another family', async () => {
     const Fastify = (await import('fastify')).default;
     const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
     const app = Fastify();
@@ -527,7 +494,7 @@ describe('provider profiles routes', () => {
       const profileId = createRes.json().profile.id;
       assert.equal(createRes.json().profile.protocol, 'openai');
 
-      // PATCH baseUrl to anthropic endpoint — re-infer should follow baseUrl, NOT displayName
+      // PATCH baseUrl to an anthropic-looking endpoint — protocol should stay openai.
       const patchRes = await app.inject({
         method: 'PATCH',
         url: `/api/provider-profiles/${profileId}`,
@@ -540,9 +507,54 @@ describe('provider profiles routes', () => {
       assert.equal(patchRes.statusCode, 200);
       assert.equal(
         patchRes.json().profile.protocol,
-        'anthropic',
-        'baseUrl signal must override displayName hint when baseUrl changed',
+        'openai',
+        'hidden protocol must not be silently reclassified by a new baseUrl hint',
       );
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it('PATCH /api/provider-profiles/:id accepts explicit protocol override for API clients', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
+    const app = Fastify();
+    await app.register(providerProfilesRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('patch-explicit-protocol');
+    setGlobalRoot(projectDir);
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/provider-profiles',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          displayName: 'proxy-account',
+          authType: 'api_key',
+          baseUrl: 'https://proxy.example.com',
+          apiKey: 'sk-test',
+          models: ['gpt-5.4'],
+        }),
+      });
+      assert.equal(createRes.statusCode, 200);
+      const profileId = createRes.json().profile.id;
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/provider-profiles/${profileId}`,
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          baseUrl: 'https://api.minimaxi.com/anthropic',
+          protocol: 'anthropic',
+        }),
+      });
+      assert.equal(patchRes.statusCode, 200);
+      assert.equal(patchRes.json().profile.protocol, 'anthropic');
     } finally {
       restoreGlobalRoot();
       await rm(projectDir, { recursive: true, force: true });

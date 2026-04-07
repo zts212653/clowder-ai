@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import {
   resolveAnthropicRuntimeProfile,
@@ -40,6 +40,8 @@ import {
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
+  safeProviderName,
+  summarizeOpenCodeRuntimeConfigForDebug,
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-template.js';
 
@@ -307,7 +309,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let didWriteAudit = false;
   let didComplete = false;
   let didResetRestoreFailures = false;
-  let openCodeRuntimeConfigDir: string | undefined;
+  let openCodeRuntimeConfigPath: string | undefined;
   const hostProjectRoot = findMonorepoRoot(process.cwd());
 
   // === CAT_INVOKED 审计 (fire-and-forget, 缅因猫 review P2-3) ===
@@ -712,25 +714,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // Determine effective protocol: account.protocol > provider-based default
-    const defaultProtocolForProvider: Record<string, string> = {
+    // Fail fast when an api_key account has no credential — otherwise the child
+    // process silently receives no auth and produces cryptic errors.
+    if (resolvedAccount?.authType === 'api_key' && !resolvedAccount.apiKey) {
+      throw new Error(
+        `account "${resolvedAccount.id}" is configured as api_key but has no API key set — ` +
+          'add the key in Hub > account settings',
+      );
+    }
+
+    // Protocol is determined by provider — account.protocol is retired for all
+    // fixed-protocol providers. OpenCode is the sole exception: it can target
+    // multiple backends, so its env injection uses the bound account's protocol.
+    const protocolForProvider: Record<string, string> = {
       anthropic: 'anthropic',
-      opencode: 'anthropic',
       openai: 'openai',
       google: 'google',
       dare: 'openai',
     };
-    const effectiveProtocol =
-      resolvedAccount?.authType === 'api_key' && resolvedAccount.protocol
+    const effectiveProtocol = provider
+      ? provider === 'opencode' && resolvedAccount?.protocol
         ? resolvedAccount.protocol
-        : provider
-          ? (defaultProtocolForProvider[provider] ?? null)
-          : null;
+        : (protocolForProvider[provider] ?? null)
+      : null;
 
-    // Pass protocol hint to CLI via callbackEnv (used by OpenCode/Claude for model prefix)
-    if (effectiveProtocol) {
-      callbackEnv.CAT_CAFE_EFFECTIVE_PROTOCOL = effectiveProtocol;
-    }
+    // effectiveProtocol is used below for env injection branching (anthropic/openai/google)
+    // but is NOT passed to callbackEnv — it should not influence CLI routing decisions.
 
     if (effectiveProtocol === 'anthropic') {
       if (resolvedAccount?.authType === 'api_key') {
@@ -827,6 +836,31 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       effectiveProviderName = ocProviderName;
       effectiveModel = `${ocProviderName}/${trimmedDefaultModel}`;
     }
+
+    if (provider === 'opencode') {
+      log.debug(
+        {
+          catId,
+          invocationId,
+          boundAccountRef: boundAccountRef ?? null,
+          resolvedAccount: resolvedAccount
+            ? {
+                id: resolvedAccount.id,
+                authType: resolvedAccount.authType,
+                baseUrl: resolvedAccount.baseUrl ?? null,
+                modelCount: resolvedAccount.models?.length ?? 0,
+                hasApiKey: Boolean(resolvedAccount.apiKey),
+              }
+            : null,
+          defaultModel: trimmedDefaultModel ?? null,
+          ocProviderName: ocProviderName ?? null,
+          parsedOpenCodeModel,
+          effectiveProviderName: effectiveProviderName ?? null,
+          effectiveModel: effectiveModel ?? null,
+        },
+        'Resolved OpenCode runtime inputs',
+      );
+    }
     // fix(#280): explicit ocProviderName means we must force the F189 path so the
     // effective "provider/model" string is injected into opencode, even for builtin
     // providers. For legacy members without ocProviderName, only synthesize runtime
@@ -840,19 +874,49 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       effectiveProviderName &&
       (hasExplicitOcProvider || !getOpenCodeKnownModels().has(effectiveModel))
     ) {
-      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = effectiveModel;
-      const apiType = deriveOpenCodeApiType(resolvedAccount.protocol, effectiveProviderName);
+      // Remap model prefix when provider name collides with OpenCode builtins
+      // (e.g. 'openai/gpt-4o' → 'openai-compat/gpt-4o') so the CLI -m arg
+      // matches the remapped provider key in opencode.json.
+      const safeProvider = safeProviderName(effectiveProviderName);
+      const safeModel =
+        safeProvider !== effectiveProviderName && effectiveModel.startsWith(`${effectiveProviderName}/`)
+          ? `${safeProvider}/${effectiveModel.slice(effectiveProviderName.length + 1)}`
+          : effectiveModel;
+      callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = safeModel;
+      const apiType = deriveOpenCodeApiType(effectiveProviderName);
       const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
-      openCodeRuntimeConfigDir = writeOpenCodeRuntimeConfig(projectRoot, catId as string, invocationId, {
+      const runtimeConfigOptions = {
         providerName: effectiveProviderName,
         models: rawModels,
         defaultModel: effectiveModel,
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
-      });
-      callbackEnv.OPENCODE_CONFIG_DIR = openCodeRuntimeConfigDir;
+      } as const;
+      openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(
+        projectRoot,
+        catId as string,
+        invocationId,
+        runtimeConfigOptions,
+      );
+      callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
       if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
       if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
+      log.debug(
+        {
+          catId,
+          invocationId,
+          openCodeConfigPath: openCodeRuntimeConfigPath,
+          apiType,
+          callbackEnvSummary: {
+            opencodeConfig: callbackEnv.OPENCODE_CONFIG,
+            ocBaseUrl: callbackEnv[OC_BASE_URL_ENV] ?? null,
+            ocApiKeyPresent: Boolean(callbackEnv[OC_API_KEY_ENV]),
+            modelOverride: callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE ?? null,
+          },
+          runtimeConfigSummary: summarizeOpenCodeRuntimeConfigForDebug(runtimeConfigOptions),
+        },
+        'Prepared OpenCode runtime config',
+      );
     }
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new sessions for cats
@@ -1618,7 +1682,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F118: Release session mutex (idempotent — safe if never acquired)
     sessionMutexRelease?.();
 
-    if (openCodeRuntimeConfigDir) {
+    if (openCodeRuntimeConfigPath) {
+      const openCodeRuntimeConfigDir = dirname(openCodeRuntimeConfigPath);
       await rm(openCodeRuntimeConfigDir, { recursive: true, force: true }).catch((err) => {
         log.warn({ invocationId, path: openCodeRuntimeConfigDir, err }, 'Failed to remove OpenCode runtime config dir');
       });

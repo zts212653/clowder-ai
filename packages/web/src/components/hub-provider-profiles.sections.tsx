@@ -14,37 +14,24 @@ export function ProviderProfilesSummaryCard() {
   );
 }
 
-export type ApiProtocol = 'anthropic' | 'openai' | 'openai-responses' | 'google';
-
-const PROTOCOL_OPTIONS: { value: ApiProtocol; label: string }[] = [
-  { value: 'openai', label: 'OpenAI 兼容 (Chat)' },
-  { value: 'openai-responses', label: 'OpenAI Responses' },
-  { value: 'anthropic', label: 'Anthropic 兼容' },
-  { value: 'google', label: 'Google 兼容' },
-];
-
 export function CreateApiKeyProfileSection({
   displayName,
-  protocol,
   baseUrl,
   apiKey,
   models,
   busy,
   onDisplayNameChange,
-  onProtocolChange,
   onBaseUrlChange,
   onApiKeyChange,
   onModelsChange,
   onCreate,
 }: {
   displayName: string;
-  protocol: ApiProtocol;
   baseUrl: string;
   apiKey: string;
   models: string[];
   busy: boolean;
   onDisplayNameChange: (value: string) => void;
-  onProtocolChange: (value: ApiProtocol) => void;
   onBaseUrlChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
   onModelsChange: (models: string[]) => void;
@@ -77,20 +64,6 @@ export function CreateApiKeyProfileSection({
             placeholder="API 服务地址，如 https://api.example.com/v1"
             className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
           />
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-[#8A776B]">API 协议</p>
-            <select
-              value={protocol}
-              onChange={(e) => onProtocolChange(e.target.value as ApiProtocol)}
-              className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm text-[#2D2118]"
-            >
-              {PROTOCOL_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <input
             type="password"
             autoComplete="off"
