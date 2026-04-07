@@ -16,7 +16,9 @@ function stubDeps(overrides = {}) {
     queue: new InvocationQueue(),
     invocationTracker: {
       start: mock.fn(() => new AbortController()),
+      startAll: mock.fn(() => new AbortController()),
       complete: mock.fn(),
+      completeAll: mock.fn(),
       has: mock.fn(() => false),
     },
     invocationRecordStore: {

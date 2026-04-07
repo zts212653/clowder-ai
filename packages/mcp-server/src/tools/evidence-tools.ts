@@ -26,6 +26,21 @@ export const searchEvidenceInputSchema = {
     .optional()
     .describe('Retrieval mode: lexical (BM25, default), semantic (vector), hybrid (both + rerank)'),
   depth: z.enum(['summary', 'raw']).optional().describe('Result depth: summary (default) or raw detail'),
+  dateFrom: z.string().optional().describe('ISO8601 date filter, inclusive lower bound (e.g. 2026-03-15)'),
+  dateTo: z.string().optional().describe('ISO8601 date filter, inclusive upper bound (e.g. 2026-03-20)'),
+  contextWindow: z
+    .number()
+    .int()
+    .min(1)
+    .max(5)
+    .optional()
+    .describe('Number of surrounding passages to include per match (like grep -C). Only effective with depth=raw'),
+  threadId: z
+    .string()
+    .optional()
+    .describe(
+      'Filter results to a specific thread. Only returns evidence from that thread digest. For reading raw messages, use get_thread_context instead.',
+    ),
 };
 
 export async function handleSearchEvidence(input: {
@@ -34,12 +49,20 @@ export async function handleSearchEvidence(input: {
   scope?: string | undefined;
   mode?: string | undefined;
   depth?: string | undefined;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+  contextWindow?: number | undefined;
+  threadId?: string | undefined;
 }): Promise<ToolResult> {
   const params = new URLSearchParams({ q: input.query });
   if (input.limit != null) params.set('limit', String(input.limit));
   if (input.scope) params.set('scope', input.scope);
   if (input.mode) params.set('mode', input.mode);
   if (input.depth) params.set('depth', input.depth);
+  if (input.dateFrom) params.set('dateFrom', input.dateFrom);
+  if (input.dateTo) params.set('dateTo', input.dateTo);
+  if (input.contextWindow != null) params.set('contextWindow', String(input.contextWindow));
+  if (input.threadId) params.set('threadId', input.threadId);
 
   const url = `${API_URL}/api/evidence/search?${params.toString()}`;
 
@@ -58,6 +81,18 @@ export async function handleSearchEvidence(input: {
         snippet: string;
         confidence: string;
         sourceType: string;
+        passages?: Array<{
+          passageId: string;
+          content: string;
+          speaker?: string;
+          createdAt?: string;
+          context?: Array<{
+            passageId: string;
+            content: string;
+            speaker?: string;
+            createdAt?: string;
+          }>;
+        }>;
       }>;
       degraded: boolean;
       degradeReason?: string;
@@ -83,6 +118,24 @@ export async function handleSearchEvidence(input: {
       lines.push(`  type: ${r.sourceType}`);
       const snippet = r.snippet.length > 200 ? `${r.snippet.slice(0, 200)}...` : r.snippet;
       lines.push(`  > ${snippet.replace(/\n/g, ' ')}`);
+      // AC-I9: show passage-level detail when depth=raw
+      if (r.passages && r.passages.length > 0) {
+        lines.push('  passages:');
+        for (const p of r.passages) {
+          const speaker = p.speaker ?? '?';
+          const ts = p.createdAt ? ` (${p.createdAt})` : '';
+          const text = p.content.length > 150 ? `${p.content.slice(0, 150)}...` : p.content;
+          lines.push(`    [${p.passageId}] ${speaker}${ts}: ${text.replace(/\n/g, ' ')}`);
+          if (p.context && p.context.length > 0) {
+            for (const c of p.context) {
+              const cs = c.speaker ?? '?';
+              const ct = c.createdAt ? ` (${c.createdAt})` : '';
+              const cx = c.content.length > 120 ? `${c.content.slice(0, 120)}...` : c.content;
+              lines.push(`      ~ ${cs}${ct}: ${cx.replace(/\n/g, ' ')}`);
+            }
+          }
+        }
+      }
       lines.push('');
     }
 
@@ -103,7 +156,8 @@ export const evidenceTools = [
       'MODE SELECTION: lexical (default) = BM25 keyword match, best for Feature IDs / exact terms (F042, Redis). ' +
       'hybrid = BM25 + vector NN + RRF fusion, RECOMMENDED for most searches — finds both exact AND semantic matches. ' +
       'semantic = pure vector nearest-neighbor, best for cross-language (English query → Chinese docs) or synonym matching. ' +
-      'TIP: When unsure, use mode=hybrid.',
+      'TIP: When unsure, use mode=hybrid. ' +
+      'BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead.',
     inputSchema: searchEvidenceInputSchema,
     handler: handleSearchEvidence,
   },

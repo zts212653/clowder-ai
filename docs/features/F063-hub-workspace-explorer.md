@@ -471,6 +471,62 @@ team lead反馈（2026-03-08）："调整了右边文件栏的大小，切换走
 |------|------|------|----------|
 | G7-2 | 切换线程后恢复文件树展开状态 + 打开的文件标签 | P2 | 每个线程的 `expandedPaths` + `openTabs` + `openFilePath` 存到 `Map<threadId, WorkspaceState>`，切换线程时 save/restore |
 
+## Phase: Focus Mode（Intake from clowder-ai#362）
+
+> **Status**: ✅ merged | **Source**: clowder-ai#362 → cat-cafe#966 | **Strategy**: manual-port
+> **Date**: 2026-04-05 | **Owner**: Ragdoll (Opus)
+> **Reviewer**: Maine Coon/Maine Coon (codex) + 云端 Codex
+
+### Why
+
+社区贡献者在 clowder-ai#362 实现了 workspace 专注模式——展开任意 pane（浏览器/文件/变更/git/终端）到全 workspace 区域，消除周围干扰。GPT-5.4 评估后建议 intake 回家并修复 UX 问题。
+
+### What
+
+| 组件 | 职责 | 行数 |
+|------|------|------|
+| `FocusModeButton` | per-pane toolbar 行内的专注按钮，空态自动禁用 | 25 |
+| `WorkspaceFocusShell` | 共享壳：Escape 退出 + 暖色调半透明浮标退出按钮 + fade 过渡 | 55 |
+| `WorkspacePreviewOnly` | 浏览器 focus 壳：Shell > BrowserPanel(previewOnly) | 20 |
+| `WorkspaceFileViewer` | 从 WorkspacePanel 提取的文件查看器（tab bar + toolbar + 内容渲染 + 专注按钮） | 320 |
+| `FileContentRenderer` | 从 FileViewer 提取的内容渲染（binary/md/html/jsx/code） | 154 |
+| `BrowserPanel` 改动 | 新增 `previewOnly` + `onNavigate` props | 350 |
+| `WorkspacePanel` 改动 | focusedPane 状态路由 + auto-exit + per-pane FocusModeButton 集成 | 1018 |
+
+### UX 修复（相对上游）
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P1 | 浏览器 focus 后切回丢失预览状态 | `onNavigate` 回调同步 port/path 到父层 |
+| 2 | P1 | focus 按钮位置各 pane 不统一 | 统一放在 tab bar → **R2 移至 per-pane toolbar 行**（见 UX R2） |
+| 3 | P2 | 空态时 focus 按钮可点（误导） | `disabled` 禁用（无预览/无 worktree/无文件） |
+| 4 | P2 | 进出硬切无过渡 | `animate-fade-in` |
+| 5 | P3 | 退出按钮可能被内容遮挡 | sticky header → **R2 暖色调半透明浮标**（见 UX R2） |
+
+### Acceptance Criteria
+
+- [x] AC-F1: 任意 workspace pane 可一键展开到全区域
+- [x] AC-F2: 统一的退出方式（Escape + 可见退出按钮）
+- [x] AC-F3: 浏览器预览状态在 focus 切换间保持
+- [x] AC-F4: 空态（无预览/无文件/无 worktree）时 focus 按钮禁用
+- [x] AC-F5: 上下文切换（viewMode/file/workspaceMode 变化）自动退出 focus
+- [x] AC-F6: 10 个测试覆盖 FocusModeButton + WorkspaceFocusShell + WorkspacePreviewOnly
+
+### UX R2（team lead视觉审查 2026-04-05）
+
+team lead看到实际 UI 后指出两个层级问题：
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 6 | P1 | 专注按钮放在 tab bar 与 view mode 同级，层级错误（它是 pane action 不是 view mode） | 移到 per-pane toolbar 行：文件 toolbar 同行（Copy/Path/Finder/编辑 旁）、浏览器右上角浮层 |
+| 7 | P1 | 退出专注用暗色 sticky header，与 Cat Cafe 暖色设计语言冲突 | 改为暖色调半透明浮标：`bg-cocreator-light/70 rounded-full backdrop-blur-sm shadow-sm` |
+
+### Review 记录
+
+- Maine Coon(codex) R1: 2 P1（onNavigate 空态残留 + 测试 prop 名错误）→ 修复 → R2 放行
+- 云端 Codex: "Didn't find any major issues" → 0 P1/P2
+- **team lead UX R2**: 2 P1（按钮层级 + 退出样式）→ fix/focus-mode-ux 分支修复
+
 ## Known Bugs (Follow-up)
 
 | Bug | 描述 | 根因 | 状态 |

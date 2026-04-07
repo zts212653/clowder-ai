@@ -198,7 +198,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     // Server says still processing
     mockApiFetch.mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ activeInvocations: ['opus'] }),
+      json: () => Promise.resolve({ activeInvocations: [{ catId: 'opus', startedAt: Date.now() }] }),
     });
 
     const callbacks: SocketCallbacks = {

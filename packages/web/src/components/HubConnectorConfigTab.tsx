@@ -201,7 +201,11 @@ export function HubConnectorConfigTab() {
                           <span>{new URL(platform.docsUrl).hostname} → 查看官方文档</span>
                         </a>
                         {platform.id === 'feishu' && (
-                          <FeishuQrPanel configured={platform.configured} onConfirmed={() => void fetchStatus()} />
+                          <FeishuQrPanel
+                            configured={platform.configured}
+                            onConfirmed={() => void fetchStatus()}
+                            onDisconnected={() => void fetchStatus()}
+                          />
                         )}
                       </div>
                     )}

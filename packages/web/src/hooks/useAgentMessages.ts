@@ -112,9 +112,6 @@ export function useAgentMessages() {
   /** Bug C P2: Track whether stream data was received per cat (avoids false catch-up on callback-only flows) */
   const sawStreamDataRef = useRef<Set<string>>(new Set());
 
-  /** Current A2A group ID — set on a2a_handoff, cleared on done(isFinal) */
-  const a2aGroupRef = useRef<string | null>(null);
-
   /** F118 AC-C3: Pending timeout diagnostics keyed by catId to prevent cross-cat mismatch */
   const pendingTimeoutDiagRef = useRef<Map<string, Record<string, unknown>>>(new Map());
 
@@ -375,7 +372,6 @@ export function useAgentMessages() {
         origin: 'stream',
         ...(metadata ? { metadata } : {}),
         ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
-        ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
         timestamp: Date.now(),
         isStreaming: true,
       });
@@ -431,11 +427,6 @@ export function useAgentMessages() {
 
         if (msg.origin === 'callback') {
           const invocationId = msg.invocationId ?? getCurrentInvocationIdForCat(msg.catId);
-          // Strict rule: callbacks with explicit invocationId must match exactly.
-          // If strict match fails, do NOT fall back to invocationless placeholder —
-          // even when currentKnownInvId is undefined (missed invocation_created),
-          // the invocationless bubble may belong to a newer invocation.
-          // Only allow invocationless fallback for callbacks without explicit ID.
           const hasExplicitInvocationId = !!msg.invocationId;
           const replacementTarget = invocationId
             ? (findCallbackReplacementTarget(msg.catId, invocationId) ??
@@ -454,7 +445,6 @@ export function useAgentMessages() {
               ...(msg.metadata ? { metadata: msg.metadata } : {}),
               ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
               ...(msg.mentionsUser ? { mentionsUser: true } : {}),
-              ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
               ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
               ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
             });
@@ -467,9 +457,6 @@ export function useAgentMessages() {
           } else {
             // Use backend messageId when available for rich_block correlation (#83 P2)
             const id = msg.messageId ?? `msg-${Date.now()}-${msg.catId}-cb-${++cbSeq}`;
-            // Preserve explicit invocationId so store-level TD112 dedup (Phase 1)
-            // can distinguish this bubble and Phase 2 soft bridge won't merge it
-            // into an unrelated invocationless stream placeholder.
             const extraForAdd = {
               ...(msg.extra?.crossPost ? { crossPost: msg.extra.crossPost } : {}),
               ...(hasExplicitInvocationId && msg.invocationId ? { stream: { invocationId: msg.invocationId } } : {}),
@@ -483,7 +470,6 @@ export function useAgentMessages() {
               ...(msg.metadata ? { metadata: msg.metadata } : {}),
               ...(Object.keys(extraForAdd).length > 0 ? { extra: extraForAdd } : {}),
               ...(msg.mentionsUser ? { mentionsUser: true } : {}),
-              ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
               ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
               ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
               timestamp: Date.now(),
@@ -492,10 +478,6 @@ export function useAgentMessages() {
             // placeholder existed yet. Mark the invocation as replaced so that
             // late-arriving stream chunks for the same invocation are suppressed
             // instead of spawning a second bubble.
-            // For explicit-invocationId callbacks: only lock when provably same
-            // invocation (currentKnownInvId matches). When stale or ambiguous
-            // (currentKnownInvId undefined), skip — P1 stream freeze is worse
-            // than P2 duplicate bubble.
             const shouldLockReplacement =
               invocationId &&
               (!hasExplicitInvocationId || getCurrentInvocationIdForCat(msg.catId) === msg.invocationId);
@@ -528,7 +510,6 @@ export function useAgentMessages() {
               origin: 'stream',
               ...(msg.metadata ? { metadata: msg.metadata } : {}),
               ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
-              ...(a2aGroupRef.current ? { a2aGroupId: a2aGroupRef.current } : {}),
               ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
               ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
               timestamp: Date.now(),
@@ -618,39 +599,38 @@ export function useAgentMessages() {
         // transition it to 'completed'/'interrupted'. Wiping it would remove the
         // cat from PlanBoardPanel and defeat clearCatStatuses' snapshot preservation.
         setCatInvocation(msg.catId, { invocationId: undefined });
-        if (msg.isFinal) {
-          // F108: Remove specific invocation slot; fall back to cat-scoped lookup.
-          // Steer/force cancel broadcasts done(isFinal) without invocationId — find and
-          // remove only this cat's latest active slot to avoid clearing other cats' slots
-          // during multi-cat concurrent dispatch.
-          if (msg.invocationId) {
-            // F869: Multi-cat slot-aware cleanup. Primary cats use invocationId as slot
-            // key; secondary cats use ${invocationId}-${catId}. Only remove the slot
-            // that belongs to THIS cat to prevent cross-cat interference during concurrent
-            // multi-cat dispatch.
-            const slotState = useChatStore.getState();
-            const primarySlot = slotState.activeInvocations[msg.invocationId];
-            if (primarySlot?.catId === msg.catId) {
-              removeActiveInvocation(msg.invocationId);
-            }
-            removeActiveInvocation(`${msg.invocationId}-${msg.catId}`);
-            // Hydrated synthetic IDs (hydrated-${threadId}-${catId}) won't match the real
-            // invocationId from the server. Only clean up hydrated- prefixed orphans to
-            // avoid accidentally deleting a NEW invocation's slot during same-cat preempt
-            // (where old done arrives after new invocation starts).
-            const stateAfter = useChatStore.getState();
-            const orphan = findLatestActiveInvocationIdForCat(stateAfter.activeInvocations, msg.catId);
-            if (orphan?.startsWith('hydrated-')) {
-              removeActiveInvocation(orphan);
-            }
-          } else {
-            const catSlot = findLatestActiveInvocationIdForCat(useChatStore.getState().activeInvocations, msg.catId);
-            if (catSlot) {
-              removeActiveInvocation(catSlot);
-            } else {
-              setHasActiveInvocation(false);
-            }
+        // Always remove the finishing cat's invocation slot, regardless of isFinal.
+        // isFinal=false means "more cats coming" but THIS cat is done — its slot must go.
+        // Without this, non-final cats (e.g. 缅因猫 in 缅因猫→布偶猫 sequence) leave
+        // orphan slots that keep ThreadExecutionBar showing "执行中" until F5 refresh.
+        if (msg.invocationId) {
+          const slotState = useChatStore.getState();
+          const primarySlot = slotState.activeInvocations[msg.invocationId];
+          if (primarySlot?.catId === msg.catId) {
+            removeActiveInvocation(msg.invocationId);
           }
+          removeActiveInvocation(`${msg.invocationId}-${msg.catId}`);
+          // Hydrated synthetic IDs (hydrated-${threadId}-${catId}) won't match the real
+          // invocationId from the server. Only clean up hydrated- prefixed orphans to
+          // avoid accidentally deleting a NEW invocation's slot during same-cat preempt
+          // (where old done arrives after new invocation starts).
+          const stateAfter = useChatStore.getState();
+          const orphan = findLatestActiveInvocationIdForCat(stateAfter.activeInvocations, msg.catId);
+          if (orphan?.startsWith('hydrated-')) {
+            removeActiveInvocation(orphan);
+          }
+        } else {
+          const catSlot = findLatestActiveInvocationIdForCat(useChatStore.getState().activeInvocations, msg.catId);
+          if (catSlot) {
+            removeActiveInvocation(catSlot);
+          } else if (Object.keys(useChatStore.getState().activeInvocations ?? {}).length === 0) {
+            // Only reset global flag when no active invocations remain.
+            // Without this guard, a non-final cat with no slot would incorrectly
+            // clear hasActiveInvocation while other cats are still running.
+            setHasActiveInvocation(false);
+          }
+        }
+        if (msg.isFinal) {
           // F108 P1 fix: Only clear global state when the LAST active invocation ends.
           // During concurrent multi-cat execution, cancelling one cat must not wipe
           // the execution state (loading/intentMode/catStatuses) of remaining cats.
@@ -665,7 +645,6 @@ export function useAgentMessages() {
           // is designed to persist until a *different* invocationId is observed
           // (F123 PR #465, symptom-fixture-matrix.md:23). Clearing on done(isFinal)
           // would allow reordered stale chunks to recreate ghost bubbles.
-          a2aGroupRef.current = null;
           // Bug C safety net: if done(isFinal) arrived but no streaming bubble
           // was ever created for this cat, events were lost (socket transport
           // drop, micro-disconnect, dual-pointer guard mismatch, etc.).
@@ -686,16 +665,11 @@ export function useAgentMessages() {
           sawStreamDataRef.current.delete(msg.catId);
         }
       } else if (msg.type === 'a2a_handoff') {
-        // Start or continue an A2A group
-        if (!a2aGroupRef.current) {
-          a2aGroupRef.current = `a2a-group-${Date.now()}`;
-        }
         addMessage({
           id: `a2a-${Date.now()}-${msg.catId}`,
           type: 'system',
           variant: 'info',
           content: msg.content ?? '',
-          a2aGroupId: a2aGroupRef.current,
           timestamp: Date.now(),
         });
       } else if (msg.type === 'system_info') {
@@ -760,6 +734,22 @@ export function useAgentMessages() {
             const ref = activeRefs.current.get(msg.catId);
             if (ref) {
               setMessageUsage(ref.id, parsed.usage);
+            }
+            consumed = true;
+          } else if (parsed?.type === 'context_briefing') {
+            // F148 Phase E: Insert briefing card into chat store for immediate display
+            const sm = parsed.storedMessage as
+              | { id: string; content: string; origin: string; timestamp: number; extra?: Record<string, unknown> }
+              | undefined;
+            if (sm?.id) {
+              addMessage({
+                id: sm.id,
+                type: 'system',
+                content: sm.content ?? '',
+                origin: (sm.origin as 'briefing') ?? 'briefing',
+                timestamp: sm.timestamp ?? Date.now(),
+                ...(sm.extra ? { extra: sm.extra } : {}),
+              });
             }
             consumed = true;
           } else if (parsed?.type === 'context_health') {
@@ -1130,13 +1120,13 @@ export function useAgentMessages() {
     [setLoading, clearAllActiveInvocations, setStreaming, setIntentMode, clearCatStatuses, clearDoneTimeout],
   );
 
-  // #266 Round 2: Clear message-identity ref maps used for stream→callback dedup.
-  // Covers activeRefs, replacedInvocationsRef, finalizedStreamRef, sawStreamDataRef.
-  // NOTE: pendingTimeoutDiagRef and a2aGroupRef are NOT cleared here — they have
-  // independent lifecycles (done(isFinal) and timeout guard respectively).
   const resetRefs = useCallback(() => {
     activeRefs.current.clear();
     replacedInvocationsRef.current.clear();
+    // clowder-ai#378: clear ALL ref maps so stale IDs from prior invocation
+    // don't cause findInvocationlessStreamPlaceholder to match old bubbles.
+    // Without this, scheduler callbacks (no invocationId) could patch a
+    // finalized bubble from the previous invocation after thread switch.
     finalizedStreamRef.current.clear();
     sawStreamDataRef.current.clear();
   }, []);

@@ -14,6 +14,10 @@
 
 {为什么做这个改动、约束和目标}
 
+## Issue Closure
+
+- Closes #__  {同仓 issue auto-close；intake PR 必填每个 Intake Intent Issue}
+
 ## Original Requirements（必填）
 
 - Discussion/Interview: *(internal reference removed)*

@@ -182,6 +182,7 @@ describe('WerewolfEngine — Day Phase', () => {
     assert.equal(speeches.length, 2);
     assert.equal(speeches[0].scope, 'public');
     assert.equal(speeches[0].payload.seatId, 'P3');
+    assert.ok(speeches[0].payload.actorId, 'speech event should include actorId');
     assert.equal(speeches[1].payload.text, 'I am a villager.');
   });
 });

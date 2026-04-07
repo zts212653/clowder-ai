@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { PackManifest } from '@cat-cafe/shared';
 import { PackManifestSchema } from '@cat-cafe/shared';
 import { parse } from 'yaml';
+import { checkGrowthBoundary } from './GrowthBoundary.js';
 import type { PackSecurityGuard, SecurityResult } from './PackSecurityGuard.js';
 import type { PackStore } from './PackStore.js';
 
@@ -47,6 +48,12 @@ export class PackLoader {
       throw new PackSecurityError(result);
     }
 
+    // Growth boundary check (KD-11: no private data in packs)
+    const growthResult = await checkGrowthBoundary(sourceDir);
+    if (!growthResult.clean) {
+      throw new GrowthBoundaryError(growthResult.violations);
+    }
+
     // Read manifest for pack name
     const manifest = await readManifest(sourceDir);
 
@@ -81,5 +88,12 @@ export class PackSecurityError extends Error {
   constructor(public readonly result: SecurityResult) {
     super(`Pack security validation failed:\n${result.reasons.map((r) => `  - ${r}`).join('\n')}`);
     this.name = 'PackSecurityError';
+  }
+}
+
+export class GrowthBoundaryError extends Error {
+  constructor(public readonly violations: string[]) {
+    super(`Growth boundary violations found:\n${violations.map((v) => `  - ${v}`).join('\n')}`);
+    this.name = 'GrowthBoundaryError';
   }
 }

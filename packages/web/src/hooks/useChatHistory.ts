@@ -301,7 +301,7 @@ export function useChatHistory(threadId: string) {
             contentBlocks?: unknown[];
             toolEvents?: unknown[];
             metadata?: { provider: string; model: string; sessionId?: string };
-            origin?: 'stream' | 'callback';
+            origin?: 'stream' | 'callback' | 'briefing';
             thinking?: string;
             extra?: {
               rich?: { v: number; blocks: unknown[] };
@@ -417,7 +417,7 @@ export function useChatHistory(threadId: string) {
     if (!controller) return;
 
     try {
-      const res = await apiFetch(`/api/tasks?threadId=${encodeURIComponent(fetchForThread)}`, {
+      const res = await apiFetch(`/api/tasks?threadId=${encodeURIComponent(fetchForThread)}&kind=work`, {
         signal: controller.signal,
       });
       if (!res.ok) return;
@@ -513,7 +513,7 @@ export function useChatHistory(threadId: string) {
         queue: QueueEntry[];
         paused: boolean;
         pauseReason?: 'canceled' | 'failed';
-        activeInvocations?: string[];
+        activeInvocations?: Array<{ catId: string; startedAt: number }>;
       };
       // Always sync server state — clears stale local data when server queue is empty
       setQueue(fetchForThread, data.queue);
@@ -523,8 +523,9 @@ export function useChatHistory(threadId: string) {
       // and always overwrites stale snapshots restored by setCurrentThread().
       const store = useChatStore.getState();
       if (data.activeInvocations && data.activeInvocations.length > 0) {
-        replaceThreadTargetCats(fetchForThread, data.activeInvocations);
-        for (const catId of data.activeInvocations) {
+        const activeCatIds = data.activeInvocations.map((s) => s.catId);
+        replaceThreadTargetCats(fetchForThread, activeCatIds);
+        for (const catId of activeCatIds) {
           updateThreadCatStatus(fetchForThread, catId, 'streaming');
         }
         // F108B P1-2: Clear stale activeInvocations before hydrating from server truth.
@@ -533,13 +534,13 @@ export function useChatHistory(threadId: string) {
         store.clearThreadActiveInvocation(fetchForThread);
         store.setThreadHasActiveInvocation(fetchForThread, true);
         // Hydrate activeInvocations record so ThreadExecutionBar renders.
-        // Server returns catIds only; synthesize placeholder invocationIds for display.
-        for (const catId of data.activeInvocations) {
-          const syntheticId = `hydrated-${fetchForThread}-${catId}`;
+        // Server now returns {catId, startedAt} — use server startedAt to preserve elapsed time.
+        for (const slot of data.activeInvocations) {
+          const syntheticId = `hydrated-${fetchForThread}-${slot.catId}`;
           if (fetchForThread === store.currentThreadId) {
-            store.addActiveInvocation(syntheticId, catId, 'execute');
+            store.addActiveInvocation(syntheticId, slot.catId, 'execute', slot.startedAt);
           } else {
-            store.addThreadActiveInvocation(fetchForThread, syntheticId, catId, 'execute');
+            store.addThreadActiveInvocation(fetchForThread, syntheticId, slot.catId, 'execute', slot.startedAt);
           }
         }
       } else {

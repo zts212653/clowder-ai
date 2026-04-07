@@ -456,7 +456,7 @@ interface ChatState {
   setLoading: (loading: boolean) => void;
   setHasActiveInvocation: (v: boolean) => void;
   /** F108: Register a new active invocation slot */
-  addActiveInvocation: (invocationId: string, catId: string, mode: string) => void;
+  addActiveInvocation: (invocationId: string, catId: string, mode: string, startedAt?: number) => void;
   /** F108: Remove an active invocation slot; derives hasActiveInvocation */
   removeActiveInvocation: (invocationId: string) => void;
   /** F108: Clear all active invocations (timeout/error/stop recovery) */
@@ -517,7 +517,13 @@ interface ChatState {
   setThreadLoading: (threadId: string, loading: boolean) => void;
   setThreadHasActiveInvocation: (threadId: string, active: boolean) => void;
   /** F108: Add an active invocation to a thread (background or active) */
-  addThreadActiveInvocation: (threadId: string, invocationId: string, catId: string, mode: string) => void;
+  addThreadActiveInvocation: (
+    threadId: string,
+    invocationId: string,
+    catId: string,
+    mode: string,
+    startedAt?: number,
+  ) => void;
   /** F108: Remove an active invocation from a thread; derives hasActiveInvocation */
   removeThreadActiveInvocation: (threadId: string, invocationId: string) => void;
   /** F108: Clear all active invocations for a thread (cancel fallback when invocationId unknown) */
@@ -602,8 +608,8 @@ interface ChatState {
   setWorkspaceRevealPath: (path: string | null, originThreadId?: string | null) => void;
 
   // Phase H + F139: Workspace mode (dev tools / knowledge feed / schedule panel)
-  workspaceMode: 'dev' | 'knowledge' | 'schedule';
-  setWorkspaceMode: (mode: 'dev' | 'knowledge' | 'schedule') => void;
+  workspaceMode: 'dev' | 'recall' | 'schedule';
+  setWorkspaceMode: (mode: 'dev' | 'recall' | 'schedule') => void;
 
   // ── F120: Preview auto-open (always-mounted listener) ──
   pendingPreviewAutoOpen: { port: number; path: string } | null;
@@ -1046,9 +1052,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setLoading: (loading) => set({ isLoading: loading }),
   setHasActiveInvocation: (v) => set({ hasActiveInvocation: v }),
   /** F108: Register a new active invocation slot */
-  addActiveInvocation: (invocationId, catId, mode) =>
+  addActiveInvocation: (invocationId, catId, mode, startedAt?) =>
     set((state) => {
-      const activeInvocations = { ...state.activeInvocations, [invocationId]: { catId, mode, startedAt: Date.now() } };
+      const activeInvocations = {
+        ...state.activeInvocations,
+        [invocationId]: { catId, mode, startedAt: startedAt ?? Date.now() },
+      };
       return { activeInvocations, hasActiveInvocation: true };
     }),
   /** F108: Remove an active invocation slot; derives hasActiveInvocation */
@@ -1526,19 +1535,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }),
 
   /** F108: Add an active invocation to a thread (background or active) */
-  addThreadActiveInvocation: (threadId, invocationId, catId, mode) =>
+  addThreadActiveInvocation: (threadId, invocationId, catId, mode, startedAt?) =>
     set((state) => {
+      const ts = startedAt ?? Date.now();
       if (threadId === state.currentThreadId) {
         const activeInvocations = {
           ...state.activeInvocations,
-          [invocationId]: { catId, mode, startedAt: Date.now() },
+          [invocationId]: { catId, mode, startedAt: ts },
         };
         return { activeInvocations, hasActiveInvocation: true };
       }
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
       const activeInvocations = {
         ...existing.activeInvocations,
-        [invocationId]: { catId, mode, startedAt: Date.now() },
+        [invocationId]: { catId, mode, startedAt: ts },
       };
       return {
         threadStates: {

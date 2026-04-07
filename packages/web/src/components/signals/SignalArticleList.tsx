@@ -96,7 +96,10 @@ export function SignalArticleList({
                     <span className="text-xs text-cafe-secondary">{article.source}</span>
                     <span className="text-xs text-cafe-secondary">{formatDate(article.fetchedAt)}</span>
                     {article.note && (
-                      <span title="有备注" className="text-opus-dark">
+                      <span
+                        title={article.note.length > 80 ? `${article.note.slice(0, 80)}...` : article.note}
+                        className="text-opus-dark cursor-help"
+                      >
                         ✎
                       </span>
                     )}

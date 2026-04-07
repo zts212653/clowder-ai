@@ -59,18 +59,18 @@ F021 Signal Hunter 完成了 RSS 抓取 + 打分 + 收件箱的基础版。但te
 - [x] AC-6: Study 模式可触发多猫研究，报告归档到 Study 目录 *(多猫研究按钮 + research=multi 上下文注入)*
 - [x] AC-7: 7 个新 MCP 工具可用（start_study / save_notes / list_studies / generate_podcast / signal_update_article / signal_delete_article / signal_link_thread）
 - [x] AC-8: Signal Hunter 旧 studies 迁移到新结构 *(migration.ts)*
-- [x] AC-9: 有 study 的文章在列表有视觉标记 *(studyCount badge + ✎ note icon)*
+- [x] AC-9: 有 study 的文章在列表有视觉标记 *(studyCount badge + ✎ note icon)* ~~⚠️ REGRESSION~~ **Fixed PR #948: enrichWithStudyMeta 回填 studyCount/lastStudiedAt**
 - [x] AC-10: 记忆对接用 cat-cafe-memory session search（不走 RAG），猫猫讨论前能搜到相关历史 *(ActiveSignalArticle enrichment with relatedDiscussions)*
 - [x] AC-12: "打开原文"保留外链跳转（team lead确认：需要给人展示来源时跳浏览器是正确行为），详情页已内嵌 markdown 渲染供日常阅读
 - [~] AC-13: Signal Inbox 列表视图 UX 设计语言归一化 *(转出为 TECH-DEBT.md TD107)*
 - [x] AC-14: 可删除文章（单篇 + 批量选择删除），软删除（`deletedAt` 时间戳），列表过滤隐藏
 - [x] AC-15: 可给文章添加备注（自由文本，不是标签——team lead的个人笔记/提醒）
-- [x] AC-16: 批量操作（多选 → 删除/标已读/归档/加标签），范围=当前页可见项
-- [x] AC-17: 按来源过滤（只看特定信源，50+ 源需要快速筛选）*(signals-view.ts source 条件 + SignalInboxView 来源下拉 + API source param)*
+- [x] AC-16: 批量操作（多选 → 删除/标已读/归档/加标签），范围=当前页可见项 ~~⚠️ REGRESSION~~ **Fixed PR #948: BatchActionBar add-tags + append semantics**
+- [x] AC-17: 按来源过滤（只看特定信源，50+ 源需要快速筛选）*(signals-view.ts source 条件 + SignalInboxView 来源下拉 + API source param)* ~~⚠️ REGRESSION~~ **Fixed PR #948: fetchSignalSources 从 config 取全集**
 - [x] AC-18: 文章关联——把相关文章绑成"学习集"（如"多 Agent 系列"），Study 折叠区展示同集文章 *(collection CRUD + StudyFoldArea UI + atomic sync)*
-- [x] AC-19: 学习时间线——"上周学了什么"回顾视图，按时间线展示 study 成果 *(StudyTimeline component + SignalInboxView integration)*
+- [x] AC-19: 学习时间线——"上周学了什么"回顾视图，按时间线展示 study 成果 *(StudyTimeline component + SignalInboxView integration)* ~~⚠️ REGRESSION~~ **Fixed PR #948: useSearchParams + Suspense boundary**
 - [x] AC-20: 删除语义——软删除（`deletedAt`），有 study/播客/thread 关联的文章不硬删，避免幽灵引用
-- [x] AC-21: 备注与笔记边界——备注进搜索、不注入讨论上下文、列表显示图标 hover 预览
+- [x] AC-21: 备注与笔记边界——备注进搜索、不注入讨论上下文、列表显示图标 hover 预览 ~~⚠️ REGRESSION~~ **Fixed PR #948: note hover shows content preview**
 - [x] AC-22: Thread 关联 edge cases——已有关联默认"继续最近 thread"；重复贴同篇去重提示；并列挂载 vs 切换主文章；thread 删除后 link 标 stale 不级联删
 - [x] AC-23: 讨论前 evidence pack——文章全文 + note + 最近 linked threads (max 3) + 最近 study note，"先搜后聊" *(通过 enriched ActiveSignalArticle 注入)*
 - [x] AC-24: Artifact job state——播客/研究生成有 `queued/running/ready/failed` 状态，防止重复触发 + 失败可见
@@ -365,3 +365,39 @@ team lead 21:54 报告：Phase 10 只修了列表页提取，19 篇 Anthropic En
 1. 否决理由 → ADR？有 → Decision #8 修正（否决"完全无状态"，保留 artifact job state）
 2. 踩坑教训 → lessons-learned？有 → 文件存在≠任务状态，长任务必须有 job state（待写入）
 3. 操作规则 → 指引文件？没有新全局规则
+
+## Known Issues (2026-04-03 Audit)
+
+> **审计者**: Ragdoll/Ragdoll + Maine Coon/Maine Coon(GPT-5.4)
+> **触发**: team lead报告"收藏文章消失 + 找不到学习过的文章"
+
+### P1 — 功能断裂
+
+| # | Issue | 状态 | 影响的 AC | 发现者 |
+|---|-------|------|-----------|--------|
+| 1 | **收藏/归档 tab 缺失** | ✅ PR #948 | 设计 gap（Screen D） | Ragdoll |
+| 2 | **studyCount 永远为 0** | ✅ PR #948 | AC-9 | Ragdoll |
+| 3 | **lastStudiedAt 未回流** | ✅ PR #948 | AC-9 | Maine Coon确认 |
+| 4 | **时间线 deep-link 断裂** | ✅ PR #948 | AC-19 | Maine Coon |
+| 5 | **搜索结果状态漂移** | ✅ PR #948 | — | Maine Coon |
+| 6 | **软删除文章仍计入统计** | ✅ PR #948 | AC-14/AC-20 | Maine Coon |
+
+### P2 — 体验缺陷
+
+| # | Issue | 状态 | 影响的 AC | 发现者 |
+|---|-------|------|-----------|--------|
+| 7 | **无"已学习"筛选维度** | 🔲 deferred（需设计讨论） | 设计 gap（Screen D） | Ragdoll |
+| 8 | **来源过滤器只取已加载文章** | ✅ PR #948 | AC-17 | Maine Coon |
+| 9 | **批量操作缺"加标签"** | ✅ PR #948 | AC-16 | Maine Coon |
+| 10 | **StudyFoldArea 不自动展开** | ✅ PR #948 | AC-4 | Maine Coon |
+
+### P3 — 打磨项
+
+| # | Issue | 状态 | 影响的 AC | 发现者 |
+|---|-------|------|-----------|--------|
+| 11 | **备注图标缺 hover 预览** | ✅ PR #948 | AC-21 | Maine Coon |
+| 12 | **updateArticle 返回不带 studyCount** | ✅ PR #948 | AC-9 | Ragdoll |
+
+### 测试覆盖
+
+Maine Coon单独跑了相关 4 个 API 测试文件（28/28 通过），web 侧 signal 组件测试也通过。以上问题均未被现有测试覆盖——是"链路缺口"不是"红灯被忽略"。

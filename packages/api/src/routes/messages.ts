@@ -31,7 +31,7 @@ import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
 import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
-import type { AutoSummarizer } from '../domains/cats/services/orchestration/AutoSummarizer.js';
+
 import { getPushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
@@ -40,6 +40,7 @@ import type { IInvocationRecordStore } from '../domains/cats/services/stores/por
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
@@ -90,7 +91,7 @@ export interface MessagesRoutesOptions {
   uploadDir?: string;
   invocationTracker?: InvocationTracker;
   invocationRecordStore?: IInvocationRecordStore;
-  autoSummarizer?: AutoSummarizer;
+
   summaryStore?: ISummaryStore;
   /** #80: Streaming draft store for F5 recovery */
   draftStore?: IDraftStore;
@@ -101,7 +102,7 @@ export interface MessagesRoutesOptions {
   /** F101: Game store for /game command interception */
   gameStore?: IGameStore;
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
-  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopAllLoops'>;
+  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopLoop' | 'stopAllLoops'>;
   /** F088 ISSUE-15: Outbound delivery hook for connector platforms (late-bound after gateway bootstrap) */
   outboundHook?: OutboundDeliveryHookLike;
   /** F088 ISSUE-15: Streaming hook for connector platforms (late-bound after gateway bootstrap) */
@@ -287,9 +288,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       });
 
       // Phase D: Create independent game thread with project categorization
-      const gameTitle = `狼人杀 — ${playerCount}人局`;
+      const ts = new Date()
+        .toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' })
+        .replace(' ', '-')
+        .replaceAll(':', '');
+      const gameTitle = `狼人杀 — ${playerCount}人局 (${ts})`;
       const gameThread = await opts.threadStore.create(userId, gameTitle, `games/${parsedGame.gameType}`);
       const gameThreadId = gameThread.id;
+      await opts.threadStore.updatePin(gameThreadId, true);
 
       // Notify source thread about the new game thread (include initiator for frontend guard)
       opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'game:thread_created', {
@@ -508,7 +514,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (mode !== 'force' && opts.invocationTracker) {
         // F122 AC-A8: Atomic thread-level busy gate + slot registration.
         // If thread became busy since initial has() check at line 306, degrade to queue.
-        const tryResult = opts.invocationTracker.tryStartThread(resolvedThreadId, primaryCat, userId, targetCats);
+        const tryResult = opts.invocationTracker.tryStartThreadAll(resolvedThreadId, targetCats, userId);
         if (tryResult === null) {
           // TOCTOU: thread became busy between has() and here — degrade to queue
           if (opts.invocationQueue) {
@@ -604,25 +610,25 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           idempotencyKey: resolvedIdempotencyKey,
         });
       } catch (createErr) {
-        // Release slot occupied by tryStartThread — prevent "假忙" leak
+        // Release slots occupied by tryStartThreadAll — prevent "假忙" leak
         if (controller) {
-          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
         }
         throw createErr;
       }
 
       if (createResult.outcome === 'duplicate') {
-        // AC-A11: tryStartThread succeeded but create returned duplicate — release slot
+        // AC-A11: tryStartThreadAll succeeded but create returned duplicate — release slots
         if (controller) {
-          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
         }
         reply.status(200);
         return { status: 'duplicate', invocationId: createResult.invocationId };
       }
 
-      // Force path: still uses start() (preemptive — cancel already happened above)
+      // Force path: still uses startAll() (preemptive — cancel already happened above)
       if (!controller) {
-        controller = opts.invocationTracker?.start(resolvedThreadId, primaryCat, userId, targetCats);
+        controller = opts.invocationTracker?.startAll(resolvedThreadId, targetCats, userId);
       }
 
       // Race: thread entered deleting between isDeleting() and start()
@@ -661,8 +667,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           userMessageId: storedUserMessage.id,
         });
       } catch (preExecErr) {
-        // Release slot — we haven't entered background coroutine yet
-        opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+        // Release slots — we haven't entered background coroutine yet
+        opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
         // Mark record as failed if it was created
         try {
           await opts.invocationRecordStore?.update(createResult.invocationId, { status: 'failed' });
@@ -940,20 +946,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 });
             }
 
-            // Fire-and-forget: auto-summarize if threshold met (only on success)
-            if (opts.autoSummarizer) {
-              opts.autoSummarizer
-                .maybeSummarize(resolvedThreadId)
-                .then((summary) => {
-                  if (summary) {
-                    opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'thread_summary', summary);
-                  }
-                })
-                .catch(() => {
-                  /* ignore */
-                });
-            }
-
             // F088 ISSUE-15: Outbound delivery to connector platforms (Feishu/Telegram)
             // P2 fix: fire-and-forget so delivery latency doesn't block invocationTracker.complete()
             deliverOutboundFromWeb(
@@ -1013,7 +1005,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           } // end else (non-abort error)
         } finally {
           clearInterval(heartbeatInterval);
-          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
           // F39: Notify queue processor for auto-dequeue chain
           opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch(() => {
             /* best-effort, don't crash background task */
@@ -1023,15 +1015,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     } else {
       // Fallback: no invocationRecordStore (legacy path, uses route())
       // F122 A.1: Try non-preemptive first. Legacy path has no InvocationQueue so it
-      // cannot degrade to queue — fall back to preemptive start() as temporary compat.
+      // cannot degrade to queue — fall back to preemptive startAll() as temporary compat.
       // TODO(F122 Phase B): Legacy path should be removed or given queue support.
       let controller: AbortController | undefined;
       if (mode !== 'force' && opts.invocationTracker) {
         controller =
-          opts.invocationTracker.tryStartThread(resolvedThreadId, primaryCat, userId, targetCats) ??
-          opts.invocationTracker.start(resolvedThreadId, primaryCat, userId, targetCats);
+          opts.invocationTracker.tryStartThreadAll(resolvedThreadId, targetCats, userId) ??
+          opts.invocationTracker.startAll(resolvedThreadId, targetCats, userId);
       } else {
-        controller = opts.invocationTracker?.start(resolvedThreadId, primaryCat, userId, targetCats);
+        controller = opts.invocationTracker?.startAll(resolvedThreadId, targetCats, userId);
       }
       if (controller?.signal.aborted) {
         reply.status(409);
@@ -1091,7 +1083,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           );
         } finally {
           clearInterval(heartbeatInterval);
-          opts.invocationTracker?.complete(resolvedThreadId, primaryCat, controller);
+          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
         }
       })();
     }
@@ -1148,12 +1140,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     };
     const chatItems: TimelineItem[] = page.map((m) => ({
       id: m.id,
-      type: (m.catId
-        ? 'assistant'
-        : m.source
-          ? 'connector'
-          : m.userId === 'system'
-            ? 'system'
+      type: (isSystemUserMessage(m)
+        ? 'system'
+        : m.catId
+          ? 'assistant'
+          : m.source
+            ? 'connector'
             : 'user') as TimelineItem['type'],
       catId: m.catId,
       content: m.content,
@@ -1257,37 +1249,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
     }
 
-    // P1-B fix: merge summaries into history timeline
-    // First page (no cursor): include summaries >= oldest message (no max cap,
-    //   so summaries created *after* the newest message are still included).
-    // Pagination (before cursor): include summaries >= oldest message AND < beforeTs.
-    if (opts.summaryStore) {
-      const summaries = await opts.summaryStore.listByThread(resolvedThreadId);
-      const minTs = page.length > 0 ? (page[0]?.timestamp ?? null) : null;
-      for (const s of summaries) {
-        if (minTs !== null && s.createdAt < minTs) continue;
-        if (beforeTs != null && s.createdAt >= beforeTs) continue;
-        chatItems.push({
-          id: `summary-${s.id}`,
-          type: 'summary',
-          catId: null,
-          content: s.topic,
-          timestamp: s.createdAt,
-          summary: {
-            id: s.id,
-            topic: s.topic,
-            conclusions: [...s.conclusions],
-            openQuestions: [...s.openQuestions],
-            createdBy: s.createdBy,
-          },
-        });
-      }
-      chatItems.sort((a, b) => {
-        const ta = typeof a.deliveredAt === 'number' ? a.deliveredAt : a.timestamp;
-        const tb = typeof b.deliveredAt === 'number' ? b.deliveredAt : b.timestamp;
-        return ta - tb;
-      });
-    }
+    // Auto-summary disabled (clowder-ai#343): regex-based summaries removed from chat flow.
+    // Scheduled compaction (SummaryCompactionTask) continues for memory infrastructure.
 
     return {
       messages: chatItems,

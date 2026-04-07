@@ -123,4 +123,28 @@ describe('F134 follow-up — FeishuQrPanel', () => {
     expect(onConfirmed).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('Feishu connected');
   });
+
+  it('shows disconnect button when configured, calls API and triggers onDisconnected', async () => {
+    const onDisconnected = vi.fn();
+    mockApiFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await act(async () => {
+      root.render(React.createElement(FeishuQrPanel, { configured: true, onDisconnected }));
+    });
+    await flushEffects();
+
+    const disconnectBtn = queryButton(container, 'Disconnect');
+    expect(disconnectBtn).toBeTruthy();
+
+    await act(async () => {
+      disconnectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/connector/feishu/disconnect',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+  });
 });

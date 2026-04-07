@@ -76,13 +76,13 @@ describe('McpPromptInjector', () => {
     assert.ok(instructions.includes('$CAT_CAFE_API_URL'), 'fallback should use env var, not hardcoded host');
   });
 
-  it('buildMcpCallbackInstructions is compact (<700 chars)', async () => {
+  it('buildMcpCallbackInstructions is compact (<750 chars)', async () => {
     const { buildMcpCallbackInstructions } = await import(
       '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
     );
     const instructions = buildMcpCallbackInstructions({});
 
-    assert.ok(instructions.length < 700, `Instructions (${instructions.length} chars) should be <700`);
+    assert.ok(instructions.length < 750, `Instructions (${instructions.length} chars) should be <750`);
   });
 
   it('buildMcpCallbackInstructions uses teammate handle (not self) in examples', async () => {

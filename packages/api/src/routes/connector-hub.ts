@@ -343,6 +343,21 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     }
   });
 
+  app.post('/api/connector/feishu/disconnect', async (request, reply) => {
+    const userId = requireTrustedHubIdentity(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    await applyConnectorSecretUpdates(
+      [
+        { name: 'FEISHU_APP_ID', value: null },
+        { name: 'FEISHU_APP_SECRET', value: null },
+      ],
+      { envFilePath: opts.envFilePath },
+    );
+    app.log.info({ userId }, '[Feishu] Disconnected by user');
+    return { ok: true };
+  });
+
   // ── F137: WeChat QR code login routes ──
 
   app.post('/api/connector/weixin/qrcode', async (request, reply) => {
@@ -386,8 +401,11 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
           return { error: 'WeChat adapter not ready — please retry shortly' };
         }
         adapter.setBotToken(status.botToken);
+        await applyConnectorSecretUpdates([{ name: 'WEIXIN_BOT_TOKEN', value: status.botToken }], {
+          envFilePath: opts.envFilePath,
+        });
         opts.startWeixinPolling?.();
-        app.log.info('[WeChat QR] Auto-activated — bot_token set server-side, polling started');
+        app.log.info('[WeChat QR] Auto-activated — bot_token persisted to .env, polling started');
         return { status: 'confirmed' };
       }
 
@@ -432,7 +450,10 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     }
 
     await adapter.disconnect();
-    app.log.info({ userId }, '[WeChat] Disconnected by user');
+    await applyConnectorSecretUpdates([{ name: 'WEIXIN_BOT_TOKEN', value: null }], {
+      envFilePath: opts.envFilePath,
+    });
+    app.log.info({ userId }, '[WeChat] Disconnected by user — token cleared from .env');
 
     return { ok: true };
   });

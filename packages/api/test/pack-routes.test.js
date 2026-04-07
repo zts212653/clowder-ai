@@ -166,4 +166,90 @@ describe('Pack Routes', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.removed, false);
   });
+
+  // ─── Export Endpoint (Phase B-α) ──────────────────────────────────
+
+  test('POST /api/packs/export creates pack from body data', async () => {
+    const app = await buildApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/packs/export',
+      payload: {
+        name: 'test-export',
+        catConfig: {
+          roster: {
+            opus: { family: 'ragdoll', roles: ['architect'], available: true },
+          },
+          breeds: [
+            {
+              id: 'ragdoll',
+              catId: 'opus',
+              displayName: 'Ragdoll',
+              defaultVariantId: 'v1',
+              variants: [{ id: 'v1', roleDescription: 'Architect', strengths: ['design'] }],
+            },
+          ],
+        },
+        sharedRulesContent: '## 铁律\n\n### 铁律 1: Test Rule\nDo not break things.',
+        skillsManifestContent:
+          'skills:\n  test-skill:\n    description: Test\n    triggers: ["test"]\n    sop_step: 1\n',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(body.ok);
+    assert.equal(body.manifest.name, 'test-export');
+    assert.equal(body.manifest.packType, 'domain');
+    assert.ok(Array.isArray(body.warnings));
+  });
+
+  test('POST /api/packs/export returns 400 for catConfig missing roster/breeds (R2 P1)', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/packs/export',
+      payload: {
+        catConfig: {},
+        sharedRulesContent: '## 铁律\n### 铁律 1: test\nrule',
+        skillsManifestContent: 'skills:\n  s:\n    sop_step: 1\n',
+      },
+    });
+    assert.ok(res.statusCode >= 400 && res.statusCode < 500, `Expected 4xx, got ${res.statusCode}`);
+  });
+
+  test('POST /api/packs/export handles breeds with missing variants gracefully (R3 P1)', async () => {
+    const app = await buildApp();
+    // breeds[{id:'x'}] without catId/variants: roster lookup returns undefined → breed skipped
+    // Exporter returns empty masks but valid pack → 200 with warnings
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/packs/export',
+      payload: {
+        catConfig: { roster: { x: { available: true } }, breeds: [{ id: 'x' }] },
+        sharedRulesContent: '## 铁律\n### 铁律 1: test\nrule',
+        skillsManifestContent: 'skills:\n  s:\n    sop_step: 1\n',
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(body.ok);
+    // Should warn about empty masks (no breeds matched)
+    assert.ok(body.warnings.some((w) => w.includes('No masks')));
+  });
+
+  test('POST /api/packs/export returns 400 when no data provided and no file paths', async () => {
+    const app = await buildApp();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/packs/export',
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 400);
+    const body = JSON.parse(res.body);
+    assert.ok(body.error);
+  });
 });

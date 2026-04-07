@@ -2,8 +2,8 @@ import type { PortValidationOptions, PortValidationResult } from './types.js';
 
 /** Clowder AI 自身服务端口 — 硬编码保底 */
 export const DEFAULT_EXCLUDED_PORTS = [
-  3001,
-  3002, // Hub frontend + API
+  3003,
+  3004, // Hub frontend + API
   6398,
   6399, // Redis dev + prod
   18888,

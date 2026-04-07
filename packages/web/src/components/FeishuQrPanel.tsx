@@ -9,6 +9,7 @@ type QrState = 'idle' | 'fetching' | 'waiting' | 'confirmed' | 'error' | 'expire
 interface FeishuQrPanelProps {
   configured: boolean;
   onConfirmed?: () => void;
+  onDisconnected?: () => void;
 }
 
 function statusMessage(status: QrState, errorMsg: string | null) {
@@ -18,8 +19,9 @@ function statusMessage(status: QrState, errorMsg: string | null) {
   return null;
 }
 
-export function FeishuQrPanel({ configured, onConfirmed }: FeishuQrPanelProps) {
+export function FeishuQrPanel({ configured, onConfirmed, onDisconnected }: FeishuQrPanelProps) {
   const [qrState, setQrState] = useState<QrState>(configured ? 'confirmed' : 'idle');
+  const [disconnecting, setDisconnecting] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -42,7 +44,6 @@ export function FeishuQrPanel({ configured, onConfirmed }: FeishuQrPanelProps) {
       setErrorMsg(null);
     }
   }, [configured, stopPolling]);
-
   useEffect(() => () => stopPolling(), [stopPolling]);
 
   const schedulePoll = useCallback(
@@ -71,26 +72,15 @@ export function FeishuQrPanel({ configured, onConfirmed }: FeishuQrPanelProps) {
           stopPolling();
           terminalRef.current = true;
 
-          if (data.status === 'confirmed') {
-            setQrState('confirmed');
+          if (data.status === 'confirmed' || data.status === 'expired' || data.status === 'denied') {
+            setQrState(data.status);
             setQrUrl(null);
-            setErrorMsg(null);
-            onConfirmed?.();
+            if (data.status === 'confirmed') {
+              setErrorMsg(null);
+              onConfirmed?.();
+            }
             return;
           }
-
-          if (data.status === 'expired') {
-            setQrState('expired');
-            setQrUrl(null);
-            return;
-          }
-
-          if (data.status === 'denied') {
-            setQrState('denied');
-            setQrUrl(null);
-            return;
-          }
-
           setQrState('error');
           setErrorMsg('Unexpected QR status');
           setQrUrl(null);
@@ -130,6 +120,21 @@ export function FeishuQrPanel({ configured, onConfirmed }: FeishuQrPanelProps) {
     }
   };
 
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      const res = await apiFetch('/api/connector/feishu/disconnect', { method: 'POST' });
+      if (res.ok) {
+        setQrState('idle');
+        onDisconnected?.();
+      }
+    } catch {
+      // button stays enabled for retry
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
   if (qrState === 'confirmed') {
     return (
       <div className="space-y-2" data-testid="feishu-connected">
@@ -138,6 +143,15 @@ export function FeishuQrPanel({ configured, onConfirmed }: FeishuQrPanelProps) {
             <CheckCircleIcon />
           </span>
           <span className="text-sm font-medium text-green-700">Feishu connected</span>
+          <button
+            type="button"
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+            className="ml-auto text-xs font-medium text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+            data-testid="feishu-disconnect"
+          >
+            {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+          </button>
         </div>
         <p className="text-xs leading-relaxed text-cafe-tertiary">
           扫码绑定已完成。后续如需切换凭证，仍可继续通过下方表单手动覆盖。

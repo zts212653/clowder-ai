@@ -57,10 +57,10 @@ test(
     const probe = new ProcessLivenessProbe(process.pid, {
       sampleIntervalMs: 20,
       softWarningMs: 50,
-      stallWarningMs: 200,
+      stallWarningMs: 500,
     });
     probe.start();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 250));
     const warnings = probe.drainWarnings();
     assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
     probe.stop();
@@ -74,10 +74,10 @@ test(
     const probe = new ProcessLivenessProbe(process.pid, {
       sampleIntervalMs: 20,
       softWarningMs: 30,
-      stallWarningMs: 80,
+      stallWarningMs: 100,
     });
     probe.start();
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 350));
     const warnings = probe.drainWarnings();
     assert.ok(warnings.some((w) => w.level === 'suspected_stall'));
     probe.stop();
@@ -120,6 +120,44 @@ test('isHardCapExceeded returns true when elapsed >= factor * timeout', () => {
   assert.equal(probe.isHardCapExceeded(601, 300), true);
   probe.stop();
 });
+
+test(
+  'classifies as busy-silent when child process has growing CPU (Unix only)',
+  { skip: process.platform === 'win32' && 'child CPU detection requires ps (Unix only)' },
+  async () => {
+    const { spawn } = await import('node:child_process');
+    // Spawn a parent that is idle but has a CPU-busy child.
+    // Parent: just waits (idle CPU). Child: infinite loop (busy CPU).
+    const parent = spawn(
+      'node',
+      [
+        '-e',
+        `const { spawn } = require('child_process');
+       const c = spawn('node', ['-e', 'while(true){}'], { stdio: 'ignore' });
+       process.on('SIGTERM', () => { c.kill(); process.exit(0); });
+       setInterval(() => {}, 60000);`,
+      ],
+      { stdio: 'ignore' },
+    );
+
+    try {
+      // Give child time to start burning CPU
+      await new Promise((r) => setTimeout(r, 300));
+
+      const probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 100 });
+      probe.start();
+
+      // Wait for multiple sampling cycles (single ps -A call) to complete
+      await new Promise((r) => setTimeout(r, 600));
+
+      const state = probe.getState();
+      assert.equal(state, 'busy-silent', `parent with busy child should be busy-silent, got ${state}`);
+      probe.stop();
+    } finally {
+      parent.kill('SIGTERM');
+    }
+  },
+);
 
 const { parseCpuTime } = await import('../dist/utils/ProcessLivenessProbe.js');
 

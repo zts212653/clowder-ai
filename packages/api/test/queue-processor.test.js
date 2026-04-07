@@ -10,7 +10,9 @@ function stubDeps(overrides = {}) {
     queue: new InvocationQueue(),
     invocationTracker: {
       start: mock.fn(() => new AbortController()),
+      startAll: mock.fn(() => new AbortController()),
       complete: mock.fn(),
+      completeAll: mock.fn(),
       has: mock.fn(() => false),
     },
     invocationRecordStore: {
@@ -76,7 +78,7 @@ describe('QueueProcessor', () => {
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');
 
     // Should have started execution (invocationTracker.start called)
-    assert.ok(deps.invocationTracker.start.mock.calls.length > 0);
+    assert.ok(deps.invocationTracker.startAll.mock.calls.length > 0);
     // Entry should be marked processing then removed
     // Wait a tick for background execution
     await new Promise((r) => setTimeout(r, 50));
@@ -84,7 +86,7 @@ describe('QueueProcessor', () => {
 
   it('succeeded + empty queue → no action', async () => {
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');
-    assert.equal(deps.invocationTracker.start.mock.calls.length, 0);
+    assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0);
   });
 
   it('canceled → pauses queue, emits queue_paused', async () => {
@@ -93,7 +95,7 @@ describe('QueueProcessor', () => {
     await processor.onInvocationComplete('t1', 'opus', 'canceled');
 
     // Should NOT start new execution
-    assert.equal(deps.invocationTracker.start.mock.calls.length, 0);
+    assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0);
     // Should emit queue_paused
     const emitCalls = deps.socketManager.emitToUser.mock.calls;
     assert.ok(emitCalls.length > 0);
@@ -120,7 +122,7 @@ describe('QueueProcessor', () => {
 
     await processor.onInvocationComplete('t1', 'opus', 'failed');
 
-    assert.equal(deps.invocationTracker.start.mock.calls.length, 0);
+    assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0);
     const emitCalls = deps.socketManager.emitToUser.mock.calls;
     const pausedCall = emitCalls.find((c) => c.arguments[1] === 'queue_paused');
     assert.ok(pausedCall);
@@ -267,8 +269,8 @@ describe('QueueProcessor', () => {
 
     // Both entries should have been processed (tracker.start called twice)
     assert.ok(
-      deps.invocationTracker.start.mock.calls.length >= 2,
-      `expected >=2 tracker.start calls, got ${deps.invocationTracker.start.mock.calls.length}`,
+      deps.invocationTracker.startAll.mock.calls.length >= 2,
+      `expected >=2 tracker.start calls, got ${deps.invocationTracker.startAll.mock.calls.length}`,
     );
   });
 
@@ -425,8 +427,8 @@ describe('QueueProcessor', () => {
 
       // Both entries should have been processed
       assert.ok(
-        deps.invocationTracker.start.mock.calls.length >= 2,
-        `expected >=2 tracker.start calls, got ${deps.invocationTracker.start.mock.calls.length}`,
+        deps.invocationTracker.startAll.mock.calls.length >= 2,
+        `expected >=2 tracker.start calls, got ${deps.invocationTracker.startAll.mock.calls.length}`,
       );
     });
 
@@ -601,7 +603,7 @@ describe('QueueProcessor', () => {
       // Give fire-and-forget a tick
       await new Promise((r) => setTimeout(r, 50));
 
-      assert.ok(deps.invocationTracker.start.mock.calls.length > 0, 'should start execution');
+      assert.ok(deps.invocationTracker.startAll.mock.calls.length > 0, 'should start execution');
     });
 
     it('does not execute autoExecute entry when target cat slot is busy', async () => {
@@ -619,7 +621,7 @@ describe('QueueProcessor', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // Entry stays queued, not executed
-      assert.equal(deps.invocationTracker.start.mock.calls.length, 0, 'should not start when slot busy');
+      assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0, 'should not start when slot busy');
       const queued = deps.queue.list('t1', 'system');
       assert.equal(queued.length, 1, 'entry should remain in queue');
       assert.equal(queued[0].status, 'queued', 'entry should still be queued');
@@ -636,7 +638,7 @@ describe('QueueProcessor', () => {
       await processor.tryAutoExecute('t1');
       await new Promise((r) => setTimeout(r, 50));
 
-      assert.equal(deps.invocationTracker.start.mock.calls.length, 0, 'should not execute user entries');
+      assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0, 'should not execute user entries');
     });
 
     it('skips stale queued autoExecute entries older than threshold', async () => {
@@ -655,7 +657,7 @@ describe('QueueProcessor', () => {
       await processor.tryAutoExecute('t1');
       await new Promise((r) => setTimeout(r, 50));
 
-      assert.equal(deps.invocationTracker.start.mock.calls.length, 0, 'stale autoExecute entry must not start');
+      assert.equal(deps.invocationTracker.startAll.mock.calls.length, 0, 'stale autoExecute entry must not start');
       const stillQueued = deps.queue.list('t1', 'system');
       assert.equal(stillQueued.length, 1);
       assert.equal(stillQueued[0].status, 'queued');
@@ -679,7 +681,10 @@ describe('QueueProcessor', () => {
       await processor.tryAutoExecute('t1');
       await new Promise((r) => setTimeout(r, 50));
 
-      assert.ok(deps.invocationTracker.start.mock.calls.length > 0, 'should execute on free slot despite thread pause');
+      assert.ok(
+        deps.invocationTracker.startAll.mock.calls.length > 0,
+        'should execute on free slot despite thread pause',
+      );
     });
 
     it('skips busy-slot entry and executes next free-slot autoExecute entry (P2 scan)', async () => {
@@ -707,9 +712,10 @@ describe('QueueProcessor', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // First start should be codex (skipped opus because slot is busy)
-      assert.ok(deps.invocationTracker.start.mock.calls.length >= 1, 'should start at least one');
-      const firstStartCall = deps.invocationTracker.start.mock.calls[0];
-      assert.equal(firstStartCall.arguments[1], 'codex', 'should start codex (free slot) first, not opus (busy)');
+      assert.ok(deps.invocationTracker.startAll.mock.calls.length >= 1, 'should start at least one');
+      const firstStartCall = deps.invocationTracker.startAll.mock.calls[0];
+      // startAll receives catIds[] as second arg
+      assert.deepEqual(firstStartCall.arguments[1], ['codex'], 'should start codex (free slot) first, not opus (busy)');
     });
 
     it('starts multiple free-slot entries in a single tryAutoExecute call (parallel dispatch)', async () => {
@@ -740,9 +746,10 @@ describe('QueueProcessor', () => {
       await new Promise((r) => setTimeout(r, 100));
 
       // All 3 should have been started (different cat slots, all free)
-      const startCalls = deps.invocationTracker.start.mock.calls;
+      const startCalls = deps.invocationTracker.startAll.mock.calls;
       assert.equal(startCalls.length, 3, 'should start all 3 entries in one call');
-      const startedCats = startCalls.map((c) => c.arguments[1]);
+      // startAll receives catIds[] as second arg — flatten to get primary cats
+      const startedCats = startCalls.map((c) => c.arguments[1][0]);
       assert.ok(startedCats.includes('opus'), 'opus should be started');
       assert.ok(startedCats.includes('codex'), 'codex should be started');
       assert.ok(startedCats.includes('gemini'), 'gemini should be started');
@@ -766,7 +773,7 @@ describe('QueueProcessor', () => {
 
       // executeEntry must NOT have been called
       assert.equal(
-        deps.invocationTracker.start.mock.calls.length,
+        deps.invocationTracker.startAll.mock.calls.length,
         0,
         'must not call executeEntry (tracker.start not called)',
       );
@@ -792,7 +799,7 @@ describe('QueueProcessor', () => {
       assert.equal(result.started, false, 'must not start when tracker has active invocation');
       // executeEntry must NOT have been called
       assert.equal(
-        deps.invocationTracker.start.mock.calls.length,
+        deps.invocationTracker.startAll.mock.calls.length,
         0,
         'must not call executeEntry (tracker.start not called)',
       );

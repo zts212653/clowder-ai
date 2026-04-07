@@ -9,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   runSourceOnlySnippet,
+  spawnSync,
   tmpdir,
   writeFileSync,
 } from './install-script-test-helpers.js';
@@ -252,6 +253,44 @@ printf 'npm=%s|pnpm=%s' "$npm_config_registry" "$PNPM_CONFIG_REGISTRY"
   }
 });
 
+test('registry fallback chain picks up npm_config_registry when CAT_CAFE_NPM_REGISTRY is unset', () => {
+  // Regression: preflight.sh suggests setting npm_config_registry, but install.sh
+  // previously only read CAT_CAFE_NPM_REGISTRY — the two paths were inconsistent.
+  const result = spawnSync(
+    'bash',
+    ['-lc', `source "${installScript}" --source-only >/dev/null 2>&1; printf '%s' "$NPM_REGISTRY"`],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        npm_config_registry: 'https://fallback-mirror.test/',
+        CAT_CAFE_NPM_REGISTRY: '',
+        NPM_REGISTRY: '',
+      },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'https://fallback-mirror.test/');
+});
+
+test('registry fallback chain prefers CAT_CAFE_NPM_REGISTRY over npm_config_registry', () => {
+  const result = spawnSync(
+    'bash',
+    ['-lc', `source "${installScript}" --source-only >/dev/null 2>&1; printf '%s' "$NPM_REGISTRY"`],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CAT_CAFE_NPM_REGISTRY: 'https://primary.test/',
+        npm_config_registry: 'https://secondary.test/',
+        NPM_REGISTRY: '',
+      },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'https://primary.test/');
+});
+
 test('default_frontend_url uses the internal frontend default port', () => {
   const output = runSourceOnlySnippet(`
 unset FRONTEND_PORT
@@ -271,7 +310,7 @@ printf '%s' "$(default_frontend_url)"
 });
 
 test('append_to_profile adds newline before appending when file lacks trailing newline', () => {
-  const tmpDir = mkdtempSync(join(tmpdir(), 'clowder-install-append-nl-'));
+  const tmpDir = mkdtempSync(join(tmpdir(), 'cat-cafe-install-append-nl-'));
 
   try {
     const profile = join(tmpDir, '.zprofile');
@@ -293,7 +332,7 @@ cat "${profile}"
 });
 
 test('append_to_profile skips extra newline when file already ends with newline', () => {
-  const tmpDir = mkdtempSync(join(tmpdir(), 'clowder-install-append-nl2-'));
+  const tmpDir = mkdtempSync(join(tmpdir(), 'cat-cafe-install-append-nl2-'));
 
   try {
     const profile = join(tmpDir, '.zprofile');

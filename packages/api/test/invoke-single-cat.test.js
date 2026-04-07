@@ -691,6 +691,64 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.cliSessionId, 'new-cli', 'should have updated cliSessionId');
   });
 
+  it('ACP session: ephemeralSession=true skips seal on sessionId change', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const sealCalls = [];
+    const sessionSealer = {
+      requestSeal: async (args) => {
+        sealCalls.push(args);
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+
+    // Pre-create active session (simulates first invocation)
+    sessionChainStore.create({
+      cliSessionId: 'acp-sess-1',
+      threadId: 'thread-acp-seal',
+      catId: 'gemini',
+      userId: 'user1',
+    });
+    const originalId = sessionChainStore.getActive('gemini', 'thread-acp-seal').id;
+
+    // Second invocation: ACP yields a DIFFERENT sessionId with ephemeralSession=true
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'gemini',
+          sessionId: 'acp-sess-2',
+          ephemeralSession: true,
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'gemini', content: 'hello', timestamp: Date.now() };
+        yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore, sessionSealer };
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'gemini',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-acp-seal',
+        isLastCat: true,
+      }),
+    );
+
+    // Session should NOT be sealed — just cliSessionId updated
+    assert.equal(sealCalls.length, 0, 'should not have called requestSeal');
+    const active = sessionChainStore.getActive('gemini', 'thread-acp-seal');
+    assert.ok(active, 'original session should still be active');
+    assert.equal(active.id, originalId, 'should be the SAME session record (not a new one)');
+    assert.equal(active.cliSessionId, 'acp-sess-2', 'cliSessionId should be updated to new ACP session');
+  });
+
   it('F24: yields context_health system_info when done has usage with contextWindowSize', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();

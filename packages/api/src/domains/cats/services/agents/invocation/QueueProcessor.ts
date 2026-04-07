@@ -14,7 +14,9 @@ import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[]): AbortController;
+  startAll(threadId: string, catIds: string[], userId?: string): AbortController;
   complete(threadId: string, catId: string, controller?: AbortController): void;
+  completeAll(threadId: string, catIds: string[], controller?: AbortController): void;
   has(threadId: string, catId?: string): boolean;
 }
 
@@ -471,8 +473,8 @@ export class QueueProcessor {
       }
       invocationId = createResult.invocationId;
 
-      // 2. Start tracking (slot key = primary target cat)
-      controller = invocationTracker.start(threadId, primaryCat, userId, targetCats);
+      // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
+      controller = invocationTracker.startAll(threadId, targetCats, userId);
 
       // 3. Backfill message ID
       if (messageId) {
@@ -761,8 +763,8 @@ export class QueueProcessor {
 
       return 'failed';
     } finally {
-      // Always cleanup tracker + queue
-      invocationTracker.complete(threadId, primaryCat, controller);
+      // Always cleanup tracker + queue (all target cat slots)
+      invocationTracker.completeAll(threadId, targetCats, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
       socketManager.emitToUser(userId, 'queue_updated', {
         threadId,

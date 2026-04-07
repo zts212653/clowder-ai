@@ -2,8 +2,8 @@
 
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import {
@@ -12,6 +12,7 @@ import {
   comparePencilDirs,
   deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
+  ensureCatCafeMainServer,
   generateCliConfigs,
   migrateLegacyCatCafeCapability,
   migrateResolverBackedCapabilities,
@@ -424,19 +425,25 @@ describe('resolvePencilBinary', () => {
     );
   });
 
-  it('returns a full path under ~/.antigravity/extensions when Pencil is installed', async () => {
+  it('returns a full path under a known editor extension root when Pencil is installed', async () => {
     const result = await resolvePencilBinary();
     if (result === null) {
       // No Pencil installation — skip gracefully (CI / environments without Antigravity)
       return;
     }
+    const knownRoots = [
+      join(homedir(), '.antigravity', 'extensions'),
+      join(homedir(), '.vscode', 'extensions'),
+      join(homedir(), '.cursor', 'extensions'),
+      join(homedir(), '.vscode-insiders', 'extensions'),
+    ];
     assert.ok(
       !result.startsWith('/out/'),
       `resolvePencilBinary() returned '${result}' — looks like PENCIL_BINARY_SUFFIX has a leading '/' that breaks path.resolve()`,
     );
     assert.ok(
-      result.includes('.antigravity/extensions'),
-      `resolvePencilBinary() should return a path under ~/.antigravity/extensions, got '${result}'`,
+      knownRoots.some((root) => result === root || result.startsWith(`${root}${sep}`)),
+      `resolvePencilBinary() should return a path under a known editor extension root, got '${result}'`,
     );
     assert.ok(
       result.includes('/out/mcp-server-'),
@@ -564,8 +571,13 @@ describe('bootstrapCapabilities', () => {
     });
 
     assert.equal(config.version, 1);
-    // cat-cafe split(3) + filesystem
-    assert.equal(config.capabilities.length, 4);
+    // cat-cafe main(1) + split(3) + filesystem
+    assert.equal(config.capabilities.length, 5);
+
+    const catCafeMain = config.capabilities.find((c) => c.id === 'cat-cafe');
+    assert.ok(catCafeMain);
+    assert.equal(catCafeMain.source, 'cat-cafe');
+    assert.equal(catCafeMain.enabled, true);
 
     const catCafeCollab = config.capabilities.find((c) => c.id === 'cat-cafe-collab');
     assert.ok(catCafeCollab);
@@ -587,7 +599,7 @@ describe('bootstrapCapabilities', () => {
     // Also persisted to disk
     const persisted = await readCapabilitiesConfig(dir);
     assert.ok(persisted);
-    assert.equal(persisted.capabilities.length, 4);
+    assert.equal(persisted.capabilities.length, 5);
   });
 
   it('normalizes pencil into a resolver-backed capability on bootstrap', async () => {
@@ -634,9 +646,10 @@ describe('bootstrapCapabilities', () => {
       geminiConfig: join(dir, 'x.json'),
     });
 
-    // Only split built-ins should exist (legacy cat-cafe external duplicate skipped)
+    // Builtin cat-cafe main + splits; external duplicate skipped
     const catCafeEntries = config.capabilities.filter((c) => c.id === 'cat-cafe');
-    assert.equal(catCafeEntries.length, 0);
+    assert.equal(catCafeEntries.length, 1);
+    assert.equal(catCafeEntries[0].source, 'cat-cafe');
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-collab'));
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-memory'));
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-signals'));
@@ -656,15 +669,15 @@ describe('bootstrapCapabilities', () => {
       { catCafeRepoRoot: '/host-repo' },
     );
 
-    const splitIds = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'];
-    for (const splitId of splitIds) {
-      const cap = config.capabilities.find((c) => c.id === splitId);
-      assert.ok(cap, `${splitId} should exist after bootstrap`);
+    const allIds = ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'];
+    for (const id of allIds) {
+      const cap = config.capabilities.find((c) => c.id === id);
+      assert.ok(cap, `${id} should exist after bootstrap`);
       assert.equal(cap.type, 'mcp');
       assert.ok(cap.mcpServer);
       assert.ok(
         cap.mcpServer.args[0].includes('/host-repo'),
-        `${splitId} MCP serverPath should be built from catCafeRepoRoot`,
+        `${id} MCP serverPath should be built from catCafeRepoRoot`,
       );
     }
   });
@@ -737,6 +750,175 @@ describe('migrateResolverBackedCapabilities', () => {
       args: [],
       resolver: 'pencil',
     });
+  });
+});
+
+// ────────── ensureCatCafeMainServer (F145 Phase C AC-C3) ──────────
+
+describe('ensureCatCafeMainServer', () => {
+  it('adds cat-cafe main server when splits exist but main is missing', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, true);
+    const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
+    assert.ok(main);
+    assert.equal(main.type, 'mcp');
+    assert.equal(main.source, 'cat-cafe');
+    assert.ok(main.mcpServer?.args[0].includes('index.js'));
+  });
+
+  it('inserts main server before first split server', () => {
+    const config = makeConfig([
+      {
+        id: 'filesystem',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['@mcp/fs'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['signals.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, true);
+    assert.equal(result.config.capabilities[0].id, 'filesystem');
+    assert.equal(result.config.capabilities[1].id, 'cat-cafe');
+    assert.equal(result.config.capabilities[2].id, 'cat-cafe-signals');
+  });
+
+  it('no-op when main server already exists', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['index.js'] },
+      },
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, false);
+  });
+
+  it('no-op when no split servers exist', () => {
+    const config = makeConfig([
+      {
+        id: 'filesystem',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['@mcp/fs'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, false);
+  });
+
+  it('no-op without projectRoot', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['collab.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config);
+    assert.equal(result.migrated, false);
+  });
+
+  it('inherits disabled + overrides + env from split servers (R1 regression)', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: false,
+        source: 'cat-cafe',
+        overrides: [{ catId: 'codex', enabled: true }],
+        mcpServer: {
+          command: 'node',
+          args: ['collab.js'],
+          env: { CAT_CAFE_FOO: 'bar' },
+          workingDir: '/tmp/cat-cafe',
+        },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: false,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, { projectRoot: '/repo' });
+    assert.equal(result.migrated, true);
+    const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
+    assert.ok(main);
+    assert.equal(main.enabled, false, 'must inherit disabled state');
+    assert.deepEqual(main.overrides, [{ catId: 'codex', enabled: true }]);
+    assert.deepEqual(main.mcpServer?.env, { CAT_CAFE_FOO: 'bar' });
+    assert.equal(main.mcpServer?.workingDir, '/tmp/cat-cafe');
+  });
+
+  it('uses catCafeRepoRoot for main server path', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: ['memory.js'] },
+      },
+    ]);
+
+    const result = ensureCatCafeMainServer(config, {
+      catCafeRepoRoot: '/custom-root',
+    });
+    assert.equal(result.migrated, true);
+    const main = result.config.capabilities.find((c) => c.id === 'cat-cafe');
+    assert.ok(main);
+    assert.ok(main.mcpServer?.args[0].includes('/custom-root'));
   });
 });
 

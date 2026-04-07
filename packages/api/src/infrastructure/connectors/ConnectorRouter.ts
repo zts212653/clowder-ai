@@ -109,7 +109,7 @@ export interface ConnectorRouterOptions {
       contentBlocks?: readonly MessageContent[],
       policy?: unknown,
       sender?: { id: string; name?: string },
-    ): void;
+    ): 'dispatched' | 'enqueued' | 'merged' | 'full';
   };
   readonly socketManager?:
     | {
@@ -250,12 +250,6 @@ export class ConnectorRouter {
           } else {
             await adapter.sendReply(externalChatId, cmdResult.response);
           }
-          // F151: Close the A2A task after command response — without this,
-          // adapters like XiaoYi never send the close frame and the app
-          // won't render the response until the user refreshes.
-          if (adapter.onDeliveryBatchDone) {
-            await adapter.onDeliveryBatchDone(externalChatId, true);
-          }
         }
         // ISSUE-8 (8A): Store command exchange in Hub thread, not conversation thread
         const chatLabel = chatType === 'group' ? `飞书群聊 · ${chatName || externalChatId.slice(-8)}` : undefined;
@@ -266,7 +260,10 @@ export class ConnectorRouter {
           '[ConnectorRouter] Command handled → Hub thread',
         );
 
-        // /thread: forward message content to the target thread
+        // /thread: forward message content to the target thread.
+        // When forwarding, do NOT close the A2A task — the delivery
+        // pipeline's notifyDeliveryBatchDone signal will close it after
+        // the forwarded invocation completes (F151 P1-2 fix).
         if (cmdResult.forwardContent && cmdResult.newActiveThreadId) {
           const fwdThreadId = cmdResult.newActiveThreadId;
           const fwdText = cmdResult.forwardContent;
@@ -294,9 +291,33 @@ export class ConnectorRouter {
             source: fwdSource,
             timestamp: fwdTimestamp,
           });
-          invokeTrigger.trigger(fwdThreadId, targetCatId, this.opts.defaultUserId, fwdText, fwdStored.id);
-          log.info({ connectorId, threadId: fwdThreadId }, '[ConnectorRouter] /thread message forwarded');
+          const triggerOutcome = invokeTrigger.trigger(
+            fwdThreadId,
+            targetCatId,
+            this.opts.defaultUserId,
+            fwdText,
+            fwdStored.id,
+          );
+          log.info(
+            { connectorId, threadId: fwdThreadId, triggerOutcome },
+            '[ConnectorRouter] /thread message forwarded',
+          );
+
+          // F151 P1: If the target queue was full, no invocation will run and no
+          // notifyDeliveryBatchDone signal will come — close the task here to
+          // prevent it from staying open until TASK_TIMEOUT_MS.
+          if (triggerOutcome === 'full' && adapter?.onDeliveryBatchDone) {
+            await adapter.onDeliveryBatchDone(externalChatId, true);
+          }
+
           return { kind: 'routed', threadId: fwdThreadId, messageId: fwdStored.id };
+        }
+
+        // F151: Close the A2A task after command response (non-forward path).
+        // Placed after /thread check so forwarded invocations can still
+        // deliver through the open task.
+        if (adapter?.onDeliveryBatchDone) {
+          await adapter.onDeliveryBatchDone(externalChatId, true);
         }
 
         const result: RouteResult = { kind: 'command' };

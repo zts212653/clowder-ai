@@ -299,6 +299,14 @@ function markThreadInvocationComplete(msg: BackgroundAgentMessage, options: Hand
       options.store.removeThreadActiveInvocation(msg.threadId, msg.invocationId);
     }
     options.store.removeThreadActiveInvocation(msg.threadId, `${msg.invocationId}-${msg.catId}`);
+    // Clean up hydrated-* placeholder slots from F5/reconnect.
+    // Matches useAgentMessages.ts active-thread behavior: hydrated- slots are
+    // always synthetic placeholders that should yield to real done events.
+    const stateAfter = options.store.getThreadState(msg.threadId);
+    const orphan = findLatestActiveInvocationIdForCat(stateAfter.activeInvocations, msg.catId);
+    if (orphan?.startsWith('hydrated-')) {
+      options.store.removeThreadActiveInvocation(msg.threadId, orphan);
+    }
   } else {
     const threadState = options.store.getThreadState(msg.threadId);
     const catSlot = findLatestActiveInvocationIdForCat(threadState.activeInvocations, msg.catId);

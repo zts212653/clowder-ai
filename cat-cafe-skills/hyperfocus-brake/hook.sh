@@ -14,6 +14,13 @@ INPUT_PID=$!
 # 引入状态管理函数（用户级状态文件，跨 session 共享）
 source "$SCRIPT_DIR/state.sh"
 
+# 检查铲屎官是否活跃（15 分钟内有 user message）
+# 铲屎官睡着了猫还在干活 → 不应该累计时间
+if ! is_human_active; then
+  wait $INPUT_PID 2>/dev/null || true
+  exit 0
+fi
+
 # 记录这次活动
 ACTIVE_MS=$(record_activity)
 

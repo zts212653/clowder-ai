@@ -83,7 +83,14 @@ function buildCapturingDeps(callLog) {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     },
   };
 }

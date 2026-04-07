@@ -24,6 +24,8 @@ import { getMultiMentionOrchestrator } from '../../routes/callback-multi-mention
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
 
+export type TriggerOutcome = 'dispatched' | 'enqueued' | 'merged' | 'full';
+
 export interface ConnectorInvokeTriggerOptions {
   readonly router: AgentRouter;
   readonly socketManager: SocketManager;
@@ -94,7 +96,7 @@ export class ConnectorInvokeTrigger {
     contentBlocks?: readonly MessageContent[],
     policy?: ConnectorTriggerPolicy,
     sender?: { id: string; name?: string },
-  ): void {
+  ): TriggerOutcome {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
 
@@ -113,13 +115,12 @@ export class ConnectorInvokeTrigger {
       ).catch((err) => {
         this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
       });
-      return;
+      return 'dispatched';
     }
 
     // Normal connector policy: if this cat is already running in this thread, enqueue.
     if (invocationTracker.has(threadId, catId)) {
-      this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
-      return;
+      return this.enqueueWhileActive(threadId, catId, userId, message, messageId, sender);
     }
 
     // No active invocation → direct execution (existing flow)
@@ -136,6 +137,7 @@ export class ConnectorInvokeTrigger {
       // Last-resort guard: prevent unhandledRejection from pre-try errors
       this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
     });
+    return 'dispatched';
   }
 
   private enqueueWhileActive(

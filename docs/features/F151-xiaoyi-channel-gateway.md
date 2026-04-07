@@ -3,13 +3,13 @@ feature_ids: [F151]
 related_features: [F088, F132, F137, F143, F146]
 topics: [connector, channel, xiaoyi, huawei, a2a, websocket]
 doc_kind: spec
-status: spec
+status: done
 created: 2026-04-01
 ---
 
 # F151: XiaoYi Channel Gateway — 小艺渠道接入
 
-> **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1
 >
 > 在小艺开放平台创建 OpenClaw 模式智能体，由 Cat Cafe 通过 WebSocket 对接华为 HAG，
 > 用户在华为手机上通过小艺 APP 即可与猫猫对话。
@@ -281,8 +281,8 @@ onDeliveryBatchDone(chainDone=true):
 | 3 | `externalSenderId` 绑定 `owner:{agentId}` | OpenClaw 无用户级标识，所有对话归属 connector 配置者 | 2026-04-01 |
 | 4 | 使用 `params.sessionId` 而非顶层 `msg.sessionId` | 顶层 sessionId 每次打开 app 刷新；params 内的跨会话稳定（office-claw P1-1 实测验证） | 2026-04-01 |
 | 5 | 不做多小艺 agent 接入 | 单账号单 agent，scope 聚焦 | 2026-04-01 |
-| 6 | adapter 内置 task 生命周期管理 | 流式出站必须带 taskId 回包；现有 `IStreamableOutboundAdapter` 接口不携带此上下文，由 adapter 内部 FIFO 队列 + invocation 级绑定管理（缅因猫 review R4/R5） | 2026-04-01 |
-| 7 | `externalChatId` 带 `agentId:` 前缀 | 隔离命名空间，确保 binding key 全局唯一（缅因猫 review） | 2026-04-01 |
+| 6 | adapter 内置 task 生命周期管理 | 流式出站必须带 taskId 回包；现有 `IStreamableOutboundAdapter` 接口不携带此上下文，由 adapter 内部 FIFO 队列 + invocation 级绑定管理（Maine Coon review R4/R5） | 2026-04-01 |
+| 7 | `externalChatId` 带 `agentId:` 前缀 | 隔离命名空间，确保 binding key 全局唯一（Maine Coon review） | 2026-04-01 |
 | 8 | status-update 不带 message 文字 | HAG 把 status-update 的 message 渲染为持久条目（真机验证 2026-04-03），因此占位文字用 artifact-update。status-update 仅用于状态信号：`working`（保活）、`completed/failed`（close frame，见 D12）。所有 status-update 均不带 message 字段 | 2026-04-03 |
 | 9 | ~~多猫 replyParts 聚合~~ → per-delivery artifact | **D9-v1 已废弃**。原以为"一个 task 只能有一个 artifact"，但华为官方文档明确："一次会话请求(final为True结束)，允许若干流式输出"。每次 `sendReply` / streaming 会话用独立 `artifactId`（adapter 不感知 catId），无需合并。删除 `replyParts` / `claimedTasks` / `activeTask` | 2026-04-05 |
 | 10 | ~~invocation 级 task 绑定 (claimTask)~~ → 删除 | D9 改为 per-delivery artifact 后，不再需要 invocation 级绑定。每次 `sendReply` 调用生成新 artifactId | 2026-04-05 |
@@ -295,4 +295,4 @@ onDeliveryBatchDone(chainDone=true):
 
 ## Review Gate
 
-- Phase A: 缅因猫 review + 铲屎官真机验证
+- Phase A: Maine Coon review + team lead真机验证

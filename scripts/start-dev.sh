@@ -3,8 +3,8 @@
 # Cat Cafe 启动脚本（底层实现）
 # 用户入口:
 #   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
-#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=production + 非 watch API + 优先当前 .env 端口）
-#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=dev)
+#   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=opensource + 非 watch API + 优先当前 .env 端口）
+#   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=opensource)
 #
 # 直接调用脚本:
 #   ./scripts/start-dev.sh            — 开发模式 (next dev + Redis 持久化)
@@ -686,6 +686,119 @@ ensure_redis_dirs() {
     mkdir -p "$REDIS_DATA_DIR" "$REDIS_BACKUP_DIR"
 }
 
+file_size_bytes() {
+    local path="$1"
+    [ -f "$path" ] || {
+        echo "0"
+        return 0
+    }
+
+    if stat -f '%z' "$path" >/dev/null 2>&1; then
+        stat -f '%z' "$path"
+        return 0
+    fi
+
+    if stat -c '%s' "$path" >/dev/null 2>&1; then
+        stat -c '%s' "$path"
+        return 0
+    fi
+
+    wc -c < "$path" | tr -d ' '
+}
+
+file_mtime_epoch() {
+    local path="$1"
+    [ -e "$path" ] || {
+        echo "0"
+        return 0
+    }
+
+    if stat -f '%m' "$path" >/dev/null 2>&1; then
+        stat -f '%m' "$path"
+        return 0
+    fi
+
+    if stat -c '%Y' "$path" >/dev/null 2>&1; then
+        stat -c '%Y' "$path"
+        return 0
+    fi
+
+    echo "0"
+}
+
+maybe_quarantine_stale_aof_dir() {
+    [ "${CAT_CAFE_DISABLE_STALE_AOF_GUARD:-0}" = "1" ] && return 0
+
+    local dump_path="$REDIS_DATA_DIR/$REDIS_DBFILE"
+    local append_dir_name="${REDIS_APPEND_DIR:-appendonlydir}"
+    local append_dir_path="$REDIS_DATA_DIR/$append_dir_name"
+
+    [ -f "$dump_path" ] || return 0
+    [ -d "$append_dir_path" ] || return 0
+
+    local dump_size
+    dump_size=$(file_size_bytes "$dump_path")
+    # 小数据集不做自动隔离，避免误判。
+    [ "${dump_size:-0}" -ge 1048576 ] || return 0
+
+    local total_aof_size=0
+    local latest_aof_mtime=0
+    local aof_file_count=0
+    local aof_incr_count=0
+    local largest_base_size=0
+    local file size mtime
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        size=$(file_size_bytes "$file")
+        mtime=$(file_mtime_epoch "$file")
+        total_aof_size=$((total_aof_size + size))
+        aof_file_count=$((aof_file_count + 1))
+        [ "$mtime" -gt "$latest_aof_mtime" ] && latest_aof_mtime="$mtime"
+        case "$(basename "$file")" in
+            *.incr.aof) aof_incr_count=$((aof_incr_count + 1)) ;;
+            *.base.rdb|*.base.aof)
+                [ "$size" -gt "$largest_base_size" ] && largest_base_size="$size"
+                ;;
+        esac
+    done < <(find "$append_dir_path" -type f -name 'appendonly.aof*' 2>/dev/null || true)
+
+    [ "$aof_file_count" -gt 0 ] || return 0
+
+    local stale_detected=false
+    local ratio_threshold="${CAT_CAFE_STALE_AOF_RATIO_THRESHOLD:-100}"
+    local base_ratio=0
+    if [ "$largest_base_size" -gt 0 ]; then
+        base_ratio=$((dump_size / largest_base_size))
+        # 以 base 为准：dump 至少比 base 大 100 倍，视为明显脱节。
+        [ "$base_ratio" -ge "$ratio_threshold" ] && stale_detected=true
+    elif [ "$total_aof_size" -le 131072 ]; then
+        # 没有 base 文件时仅在 AOF 总体极小才兜底触发。
+        stale_detected=true
+    fi
+
+    [ "$stale_detected" = true ] || return 0
+
+    local dump_mtime
+    dump_mtime=$(file_mtime_epoch "$dump_path")
+    [ "$dump_mtime" -gt 0 ] || return 0
+    [ "$latest_aof_mtime" -gt 0 ] || return 0
+    # dump 比 AOF 至少新 10 分钟，规避同一时段写入噪音。
+    [ $((dump_mtime - latest_aof_mtime)) -ge 600 ] || return 0
+
+    ensure_redis_dirs
+    local stamp quarantine
+    stamp=$(date '+%Y%m%d-%H%M%S')
+    quarantine="$REDIS_BACKUP_DIR/stale-aof-${REDIS_STORAGE_KEY}-${stamp}"
+
+    if mv "$append_dir_path" "$quarantine" 2>/dev/null; then
+        echo -e "${YELLOW}  ⚠ 检测到可疑 stale AOF：已隔离 $append_dir_name → $quarantine${NC}"
+        echo -e "${YELLOW}    条件: dump=${dump_size}B, aof=${total_aof_size}B, base=${largest_base_size}B, ratio=${base_ratio}x, incr=${aof_incr_count}, AOF 旧于 dump${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ 检测到可疑 stale AOF，但隔离失败: $append_dir_path${NC}"
+        echo -e "${YELLOW}    建议手动处理后重试，避免冷启动优先加载旧 AOF${NC}"
+    fi
+}
+
 prune_redis_backups() {
     local keep="${1:-20}"
     local files=()
@@ -846,6 +959,7 @@ setup_storage() {
 
     echo -e "${YELLOW}  ⚠ Redis 未运行，尝试在端口 $REDIS_PORT 启动...${NC}"
     if command -v redis-server &> /dev/null; then
+        maybe_quarantine_stale_aof_dir
         redis-server \
             --port "$REDIS_PORT" \
             --bind 127.0.0.1 \

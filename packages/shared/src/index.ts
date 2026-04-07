@@ -7,6 +7,8 @@
  * Import from '@cat-cafe/shared/utils' instead.
  */
 
+// Export shared CLI effort helpers
+export * from './cli-effort.js';
 // Export command parser + core commands (F142 Phase B)
 export { parseCommand } from './command-parser.js';
 export { CORE_COMMANDS } from './core-commands.js';

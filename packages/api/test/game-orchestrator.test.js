@@ -215,6 +215,85 @@ describe('GameOrchestrator', () => {
       const phaseEvent = socket.broadcasts.find((b) => b.event === 'game:phase_changed');
       assert.ok(phaseEvent, 'should broadcast game:phase_changed');
     });
+
+    it('records night_thought event when night action includes speechText', async () => {
+      const game = await orchestrator.startGame({
+        threadId: 'thread-thought',
+        definition: makeDefinition(),
+        seats: makeSeats(),
+        config: { timeoutMs: 30000, voiceMode: false, humanRole: 'player' },
+      });
+
+      const stored = await store.getGame(game.gameId);
+      stored.currentPhase = 'night_wolf';
+      stored.round = 1;
+      await store.updateGame(game.gameId, stored);
+
+      await orchestrator.handlePlayerAction(game.gameId, 'P1', {
+        seatId: 'P1',
+        actionName: 'kill',
+        targetSeat: 'P2',
+        params: { speechText: 'P2 太可疑了' },
+        submittedAt: Date.now(),
+      });
+
+      const updated = await store.getGame(game.gameId);
+      const thought = updated.eventLog.find((e) => e.type === 'night_thought');
+      assert.ok(thought, 'should record night_thought event');
+      assert.equal(thought.scope, 'faction:wolf', 'wolf thought should be faction-scoped');
+      assert.equal(thought.payload.text, 'P2 太可疑了');
+      assert.equal(thought.payload.seatId, 'P1');
+      assert.ok(thought.payload.actorId, 'should include actorId in payload');
+      assert.equal(thought.revealPolicy, 'phase_end', 'thoughts revealed after phase ends');
+    });
+
+    it('scopes non-wolf night_thought as god-only to prevent identity leak', async () => {
+      const def = makeDefinition();
+      def.roles.push({ name: 'seer', faction: 'village', description: 'Checks one player at night' });
+      def.phases.push({
+        name: 'night_seer',
+        type: 'night_action',
+        actingRole: 'seer',
+        timeoutMs: 30000,
+        autoAdvance: true,
+      });
+      def.actions.push({
+        name: 'check',
+        allowedRole: 'seer',
+        allowedPhase: 'night_seer',
+        targetRequired: true,
+        schema: {},
+      });
+
+      const seats = makeSeats();
+      seats.push({ seatId: 'P3', actorType: 'cat', actorId: 'gemini', role: 'seer', alive: true, properties: {} });
+
+      const game = await orchestrator.startGame({
+        threadId: 'thread-seer-scope',
+        definition: def,
+        seats,
+        config: { timeoutMs: 30000, voiceMode: false, humanRole: 'player' },
+      });
+
+      const stored = await store.getGame(game.gameId);
+      stored.currentPhase = 'night_seer';
+      stored.round = 1;
+      await store.updateGame(game.gameId, stored);
+
+      await orchestrator.handlePlayerAction(game.gameId, 'P3', {
+        seatId: 'P3',
+        actionName: 'check',
+        targetSeat: 'P1',
+        params: { speechText: 'P1 行为反常，查一下' },
+        submittedAt: Date.now(),
+      });
+
+      const updated = await store.getGame(game.gameId);
+      const thought = updated.eventLog.find((e) => e.type === 'night_thought');
+      assert.ok(thought, 'should record night_thought for seer');
+      assert.equal(thought.scope, 'god', 'seer thought must be god-only, not faction:village (identity leak)');
+      assert.equal(thought.payload.text, 'P1 行为反常，查一下');
+    });
   });
 
   describe('tick', () => {

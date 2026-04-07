@@ -1,3 +1,4 @@
+import { CLI_EFFORT_VALUES, type CliEffortValue, getCliEffortOptionsForProvider } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import type { BuiltinAccountClient, ProfileItem } from './hub-provider-profiles.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
@@ -27,6 +28,7 @@ export interface HubCatEditorFormState {
   defaultModel: string;
   commandArgs: string;
   cliConfigArgs: string[];
+  cliEffort: CliEffortValue | '';
   ocProviderName: string;
   sessionChain: SessionChainValue;
   maxPromptTokens: string;
@@ -98,6 +100,14 @@ export const CODEX_AUTH_MODE_OPTIONS: Array<{ value: CodexAuthMode; label: strin
 ];
 
 export const DEFAULT_ANTIGRAVITY_COMMAND_ARGS = '. --remote-debugging-port=9000';
+
+function isCliEffortValue(value: string | undefined): value is CliEffortValue {
+  return value !== undefined && CLI_EFFORT_VALUES.includes(value as CliEffortValue);
+}
+
+export function getCliEffortOptionsForClient(client: ClientValue): readonly CliEffortValue[] | null {
+  return getCliEffortOptionsForProvider(client);
+}
 
 export function splitMentionPatterns(raw: string): string[] {
   return raw
@@ -233,6 +243,7 @@ export const filterProfiles = filterAccounts;
 export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | null): HubCatEditorFormState {
   const createDraft = !cat ? draft : null;
   const catId = cat?.id ?? '';
+  const persistedCliEffort = cat?.cli?.effort;
   const mentionPatterns = cat?.mentionPatterns ?? (catId ? [canonicalMentionPattern(catId)] : []);
   return {
     catId,
@@ -254,6 +265,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
+    cliEffort: isCliEffortValue(persistedCliEffort) ? persistedCliEffort : '',
     ocProviderName: cat?.ocProviderName ?? '',
     sessionChain: String(cat?.sessionChain ?? true) as SessionChainValue,
     maxPromptTokens: cat?.contextBudget ? String(cat.contextBudget.maxPromptTokens) : '',

@@ -202,7 +202,18 @@ export function HubMemberOverviewCard({
         </button>
       </div>
 
-      <p className="mt-2.5 text-[13px] text-[#8A776B]">{getMetaSummary(cat, configCat)}</p>
+      <p className="mt-2.5 text-[13px] text-[#8A776B]">
+        {getMetaSummary(cat, configCat)}
+        {cat.adapterMode ? (
+          <span
+            className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+              cat.adapterMode === 'acp' ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-500'
+            }`}
+          >
+            {cat.adapterMode.toUpperCase()}
+          </span>
+        ) : null}
+      </p>
 
       <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
     </section>

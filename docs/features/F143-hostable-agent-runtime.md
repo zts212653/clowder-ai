@@ -1,6 +1,6 @@
 ---
 feature_ids: [F143]
-related_features: [F050, F002, F126, F127]
+related_features: [F050, F002, F126, F127, F149]
 topics: [architecture, agent-hosting, protocol-abstraction, transport, runtime-contract, a2a]
 doc_kind: spec
 created: 2026-03-27

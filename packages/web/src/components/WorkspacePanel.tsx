@@ -8,13 +8,13 @@ import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { RecallFeed } from './memory/RecallFeed';
 import { useConfirm } from './useConfirm';
 import { BrowserPanel } from './workspace/BrowserPanel';
 import { ChangesPanel } from './workspace/ChangesPanel';
 import { FileIcon } from './workspace/FileIcons';
 import { FocusModeButton } from './workspace/FocusModeButton';
 import { GitPanel } from './workspace/GitPanel';
-import { KnowledgeFeed } from './workspace/KnowledgeFeed';
 import { LinkedRootRemoveButton, LinkedRootsManager } from './workspace/LinkedRootsManager';
 import { ResizeHandle } from './workspace/ResizeHandle';
 import { SchedulePanel } from './workspace/SchedulePanel';
@@ -130,8 +130,6 @@ const MenuIcon = () => (
   </svg>
 );
 
-type FocusedPane = 'browser' | 'changes' | 'file' | 'git' | 'terminal' | null;
-
 /* ── Main panel ──────────────────────────────── */
 export function WorkspacePanel() {
   const confirm = useConfirm();
@@ -178,11 +176,27 @@ export function WorkspacePanel() {
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
   const [previewPort, setPreviewPort] = useState<number | undefined>();
   const [previewPath, setPreviewPath] = useState<string>('/');
-  const [focusedPane, setFocusedPane] = useState<FocusedPane>(null);
+  const [focusedPane, setFocusedPane] = useState<'browser' | 'changes' | 'file' | 'git' | 'terminal' | null>(null);
+
+  // Keep parent state in sync with BrowserPanel navigation (focus mode state preservation)
   const handleBrowserNavigate = useCallback((port: number, path: string) => {
-    setPreviewPort(port > 0 ? port : undefined);
-    setPreviewPath(path || '/');
+    setPreviewPort(port);
+    setPreviewPath(path);
   }, []);
+
+  // Auto-exit focus mode when context changes
+  useEffect(() => {
+    if (!focusedPane) return;
+    if (workspaceMode !== 'dev') {
+      setFocusedPane(null);
+      return;
+    }
+    if (focusedPane === 'file' && (viewMode !== 'files' || !file)) {
+      setFocusedPane(null);
+      return;
+    }
+    if (focusedPane !== 'file' && viewMode !== focusedPane) setFocusedPane(null);
+  }, [file, focusedPane, viewMode, workspaceMode]);
 
   // F120: Consume pending auto-open from always-mounted listener (ChatContainer)
   useEffect(() => {
@@ -194,19 +208,6 @@ export function WorkspacePanel() {
       setViewMode('browser');
     }
   }, [pendingPreviewAutoOpen, consumePreviewAutoOpen]);
-
-  useEffect(() => {
-    if (!focusedPane) return;
-    if (workspaceMode !== 'dev') {
-      setFocusedPane(null);
-      return;
-    }
-    if (focusedPane === 'file') {
-      if (viewMode !== 'files' || !file) setFocusedPane(null);
-      return;
-    }
-    if (viewMode !== focusedPane) setFocusedPane(null);
-  }, [file, focusedPane, viewMode, workspaceMode]);
   const [portDiscoveryToast, setPortDiscoveryToast] = useState<{ port: number; framework?: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'content' | 'filename' | 'all'>('all');
@@ -458,21 +459,10 @@ export function WorkspacePanel() {
   );
 
   const isTokenValid = editToken && editTokenExpiry && editTokenExpiry > Date.now();
-  const canEdit = !!file && !file.binary && !file.truncated;
+  const canEdit = file && !file.binary && !file.truncated;
   const isMarkdown = !!(openFilePath && (openFilePath.endsWith('.md') || openFilePath.endsWith('.mdx')));
   const isHtml = !!(openFilePath && /\.html?$/i.test(openFilePath));
   const isJsx = !!(openFilePath && /\.[jt]sx$/i.test(openFilePath));
-  const renderPaneWithFocusAction = useCallback(
-    (pane: Exclude<FocusedPane, 'file' | null>, content: React.ReactNode, label = '专注模式') => (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex items-center justify-end px-3 py-2 border-b border-cocreator-light/40 bg-cafe-surface/50">
-          <FocusModeButton label={label} onClick={() => setFocusedPane(pane)} />
-        </div>
-        <div className="flex-1 min-h-0">{content}</div>
-      </div>
-    ),
-    [],
-  );
 
   const handleToggleEdit = useCallback(async () => {
     // If already editing with a valid token, toggle off
@@ -555,6 +545,7 @@ export function WorkspacePanel() {
       ref={panelRef}
       className="hidden lg:flex flex-1 min-w-0 border-l border-cocreator-light bg-cafe-white/95 flex-col overflow-hidden animate-slide-in-right"
     >
+      {/* ── Focus mode overlay ── */}
       {focusedPane === 'browser' && workspaceMode === 'dev' && viewMode === 'browser' ? (
         <WorkspacePreviewOnly
           initialPort={previewPort}
@@ -565,33 +556,33 @@ export function WorkspacePanel() {
       ) : focusedPane === 'file' && workspaceMode === 'dev' && viewMode === 'files' && file ? (
         <WorkspaceFocusShell onExit={() => setFocusedPane(null)}>
           <WorkspaceFileViewer
-            canEdit={canEdit}
-            closeTab={closeTab}
-            currentWorktree={currentWorktree}
-            editMode={editMode}
             file={file}
-            htmlPreview={htmlPreview}
+            openFilePath={openFilePath}
+            openTabs={openTabs}
+            canEdit={!!canEdit}
+            editMode={editMode}
+            isMarkdown={isMarkdown}
             isHtml={isHtml}
             isJsx={isJsx}
-            isMarkdown={isMarkdown}
-            jsxPreview={jsxPreview}
             markdownRendered={markdownRendered}
+            htmlPreview={htmlPreview}
+            jsxPreview={jsxPreview}
+            saveError={saveError}
+            scrollToLine={scrollToLine}
+            worktreeId={worktreeId}
+            currentWorktree={currentWorktree}
+            setOpenFile={setOpenFile}
+            closeTab={closeTab}
             onCloseCurrentTab={() => {
               if (openFilePath) closeTab(openFilePath);
               setEditMode(false);
             }}
-            onSave={handleSave}
             onToggleEdit={handleToggleEdit}
+            onToggleMarkdownRendered={() => setMarkdownRendered((p) => !p)}
             onToggleHtmlPreview={() => setHtmlPreview((p) => !p)}
             onToggleJsxPreview={() => setJsxPreview((p) => !p)}
-            onToggleMarkdownRendered={() => setMarkdownRendered((p) => !p)}
-            openFilePath={openFilePath}
-            openTabs={openTabs}
+            onSave={handleSave}
             revealInFinder={revealInFinder}
-            saveError={saveError}
-            scrollToLine={scrollToLine}
-            setOpenFile={(path) => setOpenFile(path)}
-            worktreeId={worktreeId}
           />
         </WorkspaceFocusShell>
       ) : focusedPane === 'changes' && workspaceMode === 'dev' && viewMode === 'changes' ? (
@@ -722,14 +713,27 @@ export function WorkspacePanel() {
             </button>
             <button
               type="button"
-              onClick={() => setWorkspaceMode('knowledge')}
+              onClick={() => setWorkspaceMode('recall')}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
-                workspaceMode === 'knowledge'
+                workspaceMode === 'recall'
                   ? 'bg-cocreator-primary/10 text-cocreator-primary border border-cocreator-primary/30'
                   : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
               }`}
             >
-              <span className="text-xs">✨</span> 知识
+              <svg
+                className="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+                <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+                <path d="M9 17l3 5v-5M15 17l-3 5" />
+              </svg>
+              记忆
             </button>
             <button
               type="button"
@@ -748,8 +752,10 @@ export function WorkspacePanel() {
           </div>
 
           {/* Knowledge / Schedule / Dev mode routing */}
-          {workspaceMode === 'knowledge' ? (
-            <KnowledgeFeed />
+          {workspaceMode === 'recall' ? (
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <RecallFeed />
+            </div>
           ) : workspaceMode === 'schedule' ? (
             <SchedulePanel />
           ) : (
@@ -832,30 +838,47 @@ export function WorkspacePanel() {
               )}
 
               {viewMode === 'browser' ? (
-                renderPaneWithFocusAction(
-                  'browser',
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  <FocusModeButton
+                    disabled={!previewPort}
+                    onClick={() => setFocusedPane('browser')}
+                    className="absolute top-2 right-2 z-10"
+                  />
                   <BrowserPanel
                     initialPort={previewPort}
                     initialPath={previewPath}
                     onNavigate={handleBrowserNavigate}
-                  />,
-                  '专注预览',
-                )
+                  />
+                </div>
               ) : viewMode === 'terminal' ? (
-                renderPaneWithFocusAction(
-                  'terminal',
-                  worktreeId ? (
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  <FocusModeButton
+                    disabled={!worktreeId}
+                    onClick={() => setFocusedPane('terminal')}
+                    className="absolute top-2 right-2 z-10"
+                  />
+                  {worktreeId ? (
                     <TerminalTab worktreeId={worktreeId} />
                   ) : (
                     <div className="flex items-center justify-center h-full text-sm text-cocreator-dark/50">
                       请先选择一个 Worktree
                     </div>
-                  ),
-                )
+                  )}
+                </div>
               ) : viewMode === 'git' ? (
-                renderPaneWithFocusAction('git', <GitPanel />)
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  <FocusModeButton onClick={() => setFocusedPane('git')} className="absolute top-2 right-2 z-10" />
+                  <GitPanel />
+                </div>
               ) : viewMode === 'changes' ? (
-                renderPaneWithFocusAction('changes', <ChangesPanel worktreeId={worktreeId} basisPct={treeBasis} />)
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  <FocusModeButton
+                    disabled={!worktreeId}
+                    onClick={() => setFocusedPane('changes')}
+                    className="absolute top-2 right-2 z-10"
+                  />
+                  <ChangesPanel worktreeId={worktreeId} basisPct={treeBasis} />
+                </div>
               ) : (
                 <>
                   {/* Search loading indicator */}
@@ -959,7 +982,7 @@ export function WorkspacePanel() {
                     callbacks={treeCallbacks}
                   />
 
-                  {/* Vertical resize handle + File viewer */}
+                  {/* Vertical resize handle + File viewer (extracted) */}
                   {(file || openTabs.length > 0) && (
                     <>
                       <ResizeHandle
@@ -967,43 +990,45 @@ export function WorkspacePanel() {
                         onResize={handleVerticalResize}
                         onDoubleClick={resetTreeBasis}
                       />
-                      <WorkspaceFileViewer
-                        canEdit={canEdit}
-                        closeTab={closeTab}
-                        currentWorktree={currentWorktree}
-                        editMode={editMode}
-                        file={file}
-                        htmlPreview={htmlPreview}
-                        isHtml={isHtml}
-                        isJsx={isJsx}
-                        isMarkdown={isMarkdown}
-                        jsxPreview={jsxPreview}
-                        markdownRendered={markdownRendered}
-                        onCloseCurrentTab={() => {
-                          if (openFilePath) closeTab(openFilePath);
-                          setEditMode(false);
-                        }}
-                        onEnterFocus={file ? () => setFocusedPane('file') : undefined}
-                        onSave={handleSave}
-                        onToggleEdit={handleToggleEdit}
-                        onToggleHtmlPreview={() => setHtmlPreview((p) => !p)}
-                        onToggleJsxPreview={() => setJsxPreview((p) => !p)}
-                        onToggleMarkdownRendered={() => setMarkdownRendered((p) => !p)}
-                        openFilePath={openFilePath}
-                        openTabs={openTabs}
-                        revealInFinder={revealInFinder}
-                        saveError={saveError}
-                        scrollToLine={scrollToLine}
-                        setOpenFile={(path) => setOpenFile(path)}
-                        worktreeId={worktreeId}
-                      />
+                      {file && (
+                        <WorkspaceFileViewer
+                          file={file}
+                          openFilePath={openFilePath}
+                          openTabs={openTabs}
+                          canEdit={!!canEdit}
+                          editMode={editMode}
+                          isMarkdown={isMarkdown}
+                          isHtml={isHtml}
+                          isJsx={isJsx}
+                          markdownRendered={markdownRendered}
+                          htmlPreview={htmlPreview}
+                          jsxPreview={jsxPreview}
+                          saveError={saveError}
+                          scrollToLine={scrollToLine}
+                          worktreeId={worktreeId}
+                          currentWorktree={currentWorktree}
+                          setOpenFile={setOpenFile}
+                          closeTab={closeTab}
+                          onCloseCurrentTab={() => {
+                            if (openFilePath) closeTab(openFilePath);
+                            setEditMode(false);
+                          }}
+                          onToggleEdit={handleToggleEdit}
+                          onToggleMarkdownRendered={() => setMarkdownRendered((p) => !p)}
+                          onToggleHtmlPreview={() => setHtmlPreview((p) => !p)}
+                          onToggleJsxPreview={() => setJsxPreview((p) => !p)}
+                          onSave={handleSave}
+                          revealInFinder={revealInFinder}
+                          onFocusMode={() => setFocusedPane('file')}
+                        />
+                      )}
                     </>
                   )}
                 </> /* end viewMode=files */
               )}
             </>
           )}
-        </>
+        </> /* end non-focus-mode */
       )}
     </aside>
   );

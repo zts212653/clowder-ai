@@ -26,13 +26,13 @@ export function handleNavigateEvent(
     setWorkspaceWorktreeId: (id: string | null) => void;
     setWorkspaceRevealPath: (path: string | null) => void;
     setWorkspaceOpenFile: (path: string | null, line: number | null, targetWorktreeId?: string | null) => void;
-    setWorkspaceMode?: (mode: 'dev' | 'knowledge') => void;
+    setWorkspaceMode?: (mode: 'dev' | 'recall') => void;
   },
   recentOpen?: { path: string; worktreeId?: string; ts: number } | null,
 ): boolean {
   // Phase H: Switch workspace to knowledge feed mode
   if (data.action === 'knowledge-feed') {
-    actions.setWorkspaceMode?.('knowledge');
+    actions.setWorkspaceMode?.('recall');
     return true;
   }
 

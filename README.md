@@ -84,7 +84,7 @@ pnpm install
 # 3. Build all packages (required before first start)
 pnpm build
 
-# 4. Configure — add at least one model API key
+# 4. Configure infrastructure (API keys are added in the UI after launch)
 cp .env.example .env
 
 # 5. Start (auto-creates runtime worktree, starts Redis + API + Frontend)
@@ -100,7 +100,7 @@ pnpm start:status
 pnpm stop
 ```
 
-Open `http://localhost:3003` and start talking to your team.
+Open `http://localhost:3003` → go to **Hub → System Settings → Account Configuration** to add your model API keys (Claude, GPT, Gemini, or third-party providers like Kimi, GLM, MiniMax).
 
 > **Bare-metal / one-line install (macOS · Linux · Windows):** `bash scripts/install.sh` handles Homebrew/system deps, Node, pnpm, Redis, AI CLIs, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
 
@@ -220,7 +220,7 @@ Hit the Hub button to open the floating command center. Tabs include:
 | **Skills** | On-demand skills loaded by agents (TDD, debugging, review, etc.) |
 | **Quota Board** | Real-time token usage and cost tracking per agent |
 | **Routing Policy** | How tasks get routed — which agent handles what |
-| **Provider Profiles** | Model configurations, API keys, output format per provider |
+| **Account Configuration** | Add model API keys, configure OAuth, manage provider profiles (Claude, GPT, Gemini, Kimi, GLM, MiniMax, etc.) |
 
 <details><summary>📹 Demo: Hub & Mission Hub walkthrough</summary>
 
@@ -362,7 +362,7 @@ We build in the open. Here's where we are.
 
 | Feature | Status |
 |---------|--------|
-| Multi-User Collaboration (OAuth + ACL) | Spec |
+| Multi-User Collaboration (OAuth + Provider Profiles) | Phase 1 Done |
 | Mission Hub (cross-project command center) | Phase 2 Done |
 | Cold-Start Verifier | Spec |
 
@@ -417,6 +417,7 @@ We're not building tools. We're building homes.
 
 - **[Tutorials](https://github.com/zts212653/cat-cafe-tutorials)** — Step-by-step guides for building with Clowder AI
 - **[SETUP.md](SETUP.md)** — Full installation and configuration guide
+- **[Third-Party AI Provider Guide](docs/guides/provider-configuration.md)** — Configure Kimi, GLM, MiniMax, Qwen, OpenRouter, and other providers
 - **[Tips](docs/TIPS.md)** — Magic words, @mentions, voice companion, and other usage tips
 - **[docs/](docs/)** — Architecture decisions, feature specs, and lessons learned
 

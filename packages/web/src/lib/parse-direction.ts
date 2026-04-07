@@ -10,7 +10,7 @@ export interface DirectionInfo {
 }
 
 interface MessageLike {
-  origin?: 'stream' | 'callback';
+  origin?: 'stream' | 'callback' | 'briefing';
   content: string;
   visibility?: 'public' | 'whisper';
   whisperTo?: string[];

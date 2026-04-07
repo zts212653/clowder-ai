@@ -26,9 +26,8 @@ pnpm install
 # 3. 构建（必需 — 为工作区包生成 dist/）
 pnpm build
 
-# 4. 配置环境
+# 4. 配置基础设施（API key 在启动后通过前端 UI 添加）
 cp .env.example .env
-# 编辑 .env — 添加模型 API key 或配置 CLI 认证（见下方）
 
 # 5. 启动
 pnpm start
@@ -91,9 +90,8 @@ git checkout v0.4.0          # 或者 Releases 页面上的任意 tag
 pnpm install
 pnpm build
 
-# 4. 配置
+# 4. 配置基础设施（API key 在启动后通过 UI 添加）
 cp .env.example .env
-# 编辑 .env — 添加 API key
 
 # 5. 直接启动（跳过 worktree，不会自动更新）
 pnpm start:direct
@@ -180,26 +178,11 @@ sudo journalctl -u clowder-ai -f
 
 ## 配置
 
-### 模型 API Key（推荐）
+### 基础设施（`.env`）
 
-如果直接使用 API key，至少需要一个模型 provider 才能有一个可用的 agent。建议三个都配，这样才能完整体验多 agent 协作。
+`.env` 文件只配置**基础设施** — 端口、Redis 和可选的服务 URL。模型 API key 通过 Web UI 管理（见下方）。
 
-> **用 CLI 认证？** 如果你已经通过 `claude`、`codex` 或 `gemini` CLI 工具登录认证，可以跳过 API key — CLI 订阅会处理认证。API key 只在直接调用 API 时需要。
-
-```bash
-# Claude（布偶猫/宪宪）— 推荐作为主力
-ANTHROPIC_API_KEY=your-anthropic-api-key
-
-# GPT / Codex（缅因猫/砚砚）— 代码审查专家
-OPENAI_API_KEY=your-openai-api-key
-
-# Gemini（暹罗猫/烁烁）— 视觉设计
-GOOGLE_API_KEY=...
-```
-
-### Redis
-
-Redis 是线程、消息、任务和记忆的持久化存储。
+**Redis** — 线程、消息、任务和记忆的持久化存储：
 
 ```bash
 REDIS_URL=redis://localhost:6399
@@ -209,15 +192,47 @@ REDIS_URL=redis://localhost:6399
 
 **没有 Redis？** 用 `pnpm start --memory` 启动纯内存模式（重启后数据丢失 — 试玩够用了）。
 
-### 前端
+**前端：**
 
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:3004
 ```
 
+### 模型接入（UI）
+
+启动后，打开 `http://localhost:3003`，进入 **Hub → 系统配置 → 账号配置** 来配置模型 provider。
+
+账号分两种类型：
+
+| 类型 | 工作方式 | 适用 Provider |
+|------|---------|--------------|
+| **内置（OAuth / CLI 订阅）** | 通过 provider 的 CLI 工具认证（`claude`、`codex`、`gemini`），无需 API key — CLI 订阅自动处理认证 | Claude、GPT/Codex、Gemini |
+| **API Key** | 输入 API key + base URL 直接调用 API。兼容任何 OpenAI 或 Anthropic 协议的端点 | Claude、GPT、Gemini、**Kimi、GLM、MiniMax、Qwen、OpenRouter** 等 |
+
+**步骤：**
+1. 在账号配置页点击 **"添加账号"**
+2. 选择一个 provider 或添加自定义 provider
+3. 内置 provider：选择 OAuth/订阅模式（CLI 已认证则无需 key）
+4. API key provider：输入 API key，可选填自定义 base URL
+5. 点击 **测试** 验证连通性
+
+**添加国产 / 第三方 provider（Kimi、GLM、MiniMax、Qwen、OpenRouter）：**
+
+这些 provider 以 API key 账号形式配置，需要填写自定义 base URL。详细配置说明（base URL、模型名、协议选择、常见坑）请参阅 **[第三方 AI Provider 配置指南](docs/guides/provider-configuration.md)**。
+
+> **兼容模式：** 系统仍会从 `.env` 读取 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GOOGLE_API_KEY` 作为兜底，但这条路径已不推荐。新安装请统一用 UI 配置。
+
+### 成员配置
+
+给团队成员（猫猫）绑定特定的 provider：
+
+1. 进入 **Hub → 成员协作 → 总览**
+2. 每个成员可以绑定账号配置中的一个 provider 账号
+3. 内置 provider 支持 OAuth；第三方 provider 使用 API key 账号
+
 ## 可选功能
 
-只要有模型访问（API key 或 CLI 认证）+ Redis（或 `--memory` 模式），Clowder 就能开箱即用。以下功能全是可选的。
+只要有模型访问 + Redis（或 `--memory` 模式），Clowder 就能开箱即用。以下功能全是可选的。
 
 ### 语音输入 / 输出
 
@@ -543,7 +558,8 @@ API 自动接受以下来源的请求：
 - 确认 Redis 已安装：`redis-server --version`
 
 **没有 agent 响应？**
-- 检查 `.env` 里有有效的 API key，或确认 CLI 认证正常（`claude --version`、`codex --version`）
+- 检查是否已在 **Hub → 系统配置 → 账号配置** 中添加了至少一个 provider 账号
+- 如果用 CLI 认证，确认认证正常（`claude --version`、`codex --version`）
 - 看终端里 API 日志有没有认证错误
 
 **前端连不上 API？**

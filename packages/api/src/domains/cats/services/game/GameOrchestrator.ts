@@ -11,6 +11,7 @@ import type { IGameStore } from '../stores/ports/GameStore.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import { GameEngine } from './GameEngine.js';
 import { GameViewBuilder } from './GameViewBuilder.js';
+import { appendGameSystemMessage } from './gameSystemMessage.js';
 import { WerewolfEngine } from './werewolf/WerewolfEngine.js';
 
 const log = createModuleLogger('game-orchestrator');
@@ -125,12 +126,28 @@ export class GameOrchestrator {
     // H2: Record speech + dual-write to messageStore when speak action has text
     // Accept both speechText (AI path) and content (human frontend path)
     const speechText = (action.params?.speechText ?? action.params?.content) as string | undefined;
+    const seat = runtime.seats.find((s) => s.seatId === seatId);
     if (action.actionName === 'speak' && speechText) {
-      const seat = runtime.seats.find((s) => s.seatId === seatId);
       if (engine instanceof WerewolfEngine) {
         (engine as WerewolfEngine).recordSpeech(seatId, speechText);
       }
       this.writeSpeech(runtime, seat?.actorId ?? seatId, speechText);
+    }
+
+    // Record night action reasoning (wolf → faction:wolf visible to pack; others → god-only to avoid identity leak)
+    if (action.actionName !== 'speak' && action.actionName !== 'vote' && speechText) {
+      const seatRole = seat?.role ?? '';
+      const roleDef = runtime.definition.roles.find((r) => r.name === seatRole);
+      const faction = roleDef?.faction;
+      const scope: import('@cat-cafe/shared').EventScope = faction === 'wolf' ? 'faction:wolf' : 'god';
+      engine.appendEvent({
+        round: runtime.round,
+        phase: runtime.currentPhase,
+        type: 'night_thought',
+        scope,
+        payload: { seatId, actorId: seat?.actorId ?? seatId, text: speechText },
+        revealPolicy: 'phase_end',
+      });
     }
 
     // Emit real-time ballot.updated for day votes (KD-26: live transparency)
@@ -149,6 +166,40 @@ export class GameOrchestrator {
       this.advancePhase(engine);
     }
 
+    await this.store.updateGame(gameId, engine.getRuntime());
+    await this.broadcastGameState(gameId);
+  }
+
+  /** Force-settle current phase: apply fallbacks for missing actions and advance.
+   *  Called by GameNarratorDriver after its own waitForAllActions returns.
+   *  Unlike tick(), this skips the elapsed-time check — narrator already waited.
+   *  @param expectedPhase — if provided, no-op when phase already advanced (race guard) */
+  async forceSettle(gameId: string, expectedPhase?: string): Promise<void> {
+    const runtime = await this.store.getGame(gameId);
+    if (!runtime) return;
+    if (runtime.status !== 'playing') return;
+    if (expectedPhase && runtime.currentPhase !== expectedPhase) {
+      log.info(
+        { gameId, expectedPhase, actualPhase: runtime.currentPhase },
+        'forceSettle skipped: phase already advanced',
+      );
+      return;
+    }
+
+    const engine = this.createEngine(runtime);
+
+    if (!engine.allActionsCollected()) {
+      this.applyFallbacks(engine);
+      engine.appendEvent({
+        round: runtime.round,
+        phase: runtime.currentPhase,
+        type: 'timeout',
+        scope: 'public',
+        payload: { reason: 'narrator_timeout' },
+      });
+    }
+
+    this.advancePhase(engine);
     await this.store.updateGame(gameId, engine.getRuntime());
     await this.broadcastGameState(gameId);
   }
@@ -298,15 +349,12 @@ export class GameOrchestrator {
 
   private writeAnnounce(runtime: GameRuntime, content: string): void {
     if (!this.messageStore) return;
-    const userId = runtime.config.observerUserId ?? 'system';
     Promise.resolve(
-      this.messageStore.append({
-        userId,
-        catId: null,
-        content,
-        mentions: [],
-        timestamp: Date.now(),
+      appendGameSystemMessage({
         threadId: runtime.threadId,
+        content,
+        messageStore: this.messageStore,
+        socketManager: this.socket,
       }),
     ).catch((err) => {
       log.error({ err }, '[GameOrchestrator] Failed to write announce to messageStore');
@@ -369,9 +417,35 @@ export class GameOrchestrator {
         payload: { seatId: seat.seatId, reason: 'timeout' },
       });
 
-      // Generate random fallback target (any alive seat except self and same-faction)
+      // Non-wolf night roles (seer/witch/guard) skip on timeout — random action is game-breaking
+      // (e.g. witch randomly healing/poisoning, seer randomly checking)
+      const isNightPhase = runtime.currentPhase.startsWith('night_');
       const wolfRoles = new Set(runtime.definition.roles.filter((r) => r.faction === 'wolf').map((r) => r.name));
       const isWolf = wolfRoles.has(seat.role);
+
+      if (isNightPhase && !isWolf) {
+        // Skip — record as "no action taken" instead of random fallback
+        const fallbackAction: PendingAction = {
+          seatId: seat.seatId as import('@cat-cafe/shared').SeatId,
+          actionName: 'skip',
+          submittedAt: Date.now(),
+          status: 'fallback',
+          requestedAt: runtime.phaseStartedAt ?? runtime.updatedAt,
+          fallbackSource: 'skip',
+        };
+        runtime.pendingActions[seat.seatId] = fallbackAction;
+
+        engine.appendEvent({
+          round: runtime.round,
+          phase: runtime.currentPhase,
+          type: 'action.fallback',
+          scope: 'god',
+          payload: { seatId: seat.seatId, actionName: 'skip', fallbackSource: 'skip', reason: 'timeout' },
+        });
+        continue;
+      }
+
+      // Wolf / day phases: generate random fallback target
       const validTargets = aliveSeatIds.filter((id) => {
         if (id === seat.seatId) return false;
         if (isWolf) {

@@ -5,6 +5,11 @@
 
 import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
+import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+
+const log = createModuleLogger('context-transport');
+
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import { formatMessage } from '../../context/ContextAssembler.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
@@ -14,6 +19,17 @@ import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
+import type { CoverageMap } from './context-transport.js';
+import {
+  buildCoverageMap,
+  buildTombstone,
+  detectRecentBurst,
+  formatAnchors,
+  formatTombstone,
+  recallEvidence,
+  scrubToolPayloads,
+  selectAnchors,
+} from './context-transport.js';
 
 /** Minimal broadcast interface — avoids coupling routing layer to SocketManager concrete class */
 export interface RouteBroadcaster {
@@ -32,6 +48,8 @@ export interface RouteStrategyDeps {
   socketManager?: RouteBroadcaster;
   /** F129: Pack store for loading active packs at invocation time */
   packStore?: import('../../../../packs/PackStore.js').PackStore;
+  /** F148: Evidence store for context recall (optional, fail-open) */
+  evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150: Tool usage counter (fire-and-forget INCR on tool_use events) */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
 }
@@ -92,6 +110,13 @@ export interface IncrementalContextResult {
   currentMessageFilteredOut: boolean;
   /** GAP-1: User-facing message when incremental batch was truncated by budget cap */
   degradation?: string;
+  /** Phase E: Coverage map for context briefing surface (only present when smart window triggered) */
+  coverageMap?: CoverageMap;
+  /** Phase E: Briefing context data for AC-E4 expanded view */
+  briefingContext?: {
+    threadMemorySummary?: string;
+    anchorSummaries?: string[];
+  };
 }
 
 /**
@@ -167,7 +192,7 @@ export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
   }
   if (msg.type === 'tool_result') {
     const raw = (msg.content ?? '').trimEnd();
-    const detail = raw.length > 0 ? truncateDetail(raw, 220) : '(no output)';
+    const detail = raw.length > 0 ? truncateDetail(raw, 1500) : '(no output)';
     return {
       id: `toolr-${msg.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
       type: 'tool_result',
@@ -210,7 +235,10 @@ export function sanitizeInjectedContent(content: string): string {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const isHistoryHeader = line.startsWith('[对话历史 - 最近 ') || line.startsWith('[对话历史增量 - 未发送过 ');
+    const isHistoryHeader =
+      line.startsWith('[对话历史 - 最近 ') ||
+      line.startsWith('[对话历史增量 - 未发送过 ') ||
+      line.startsWith('[对话历史增量 - 智能窗口');
 
     if (!skippingHistoryEnvelope && isHistoryHeader) {
       // Drop known injected history envelopes only.
@@ -310,6 +338,10 @@ export async function assembleIncrementalContext(
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
   const viewer = (thinkingMode ?? 'play') === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
   const relevant = unseen.filter((m) => {
+    // System-generated messages (persisted error badges) are display-only — never enter prompt
+    if (m.userId === 'system') return false;
+    // F148 Phase E: briefing messages are non-routing — never enter incremental context (AC-E2)
+    if (m.origin === 'briefing') return false;
     // F35: Exclude whispers not intended for this cat (play mode only)
     if (!canViewMessage(m, viewer)) return false;
     // Exclude own messages (only include user messages and other cats' messages)
@@ -330,6 +362,43 @@ export async function assembleIncrementalContext(
       !relevant.some((m) => m.id === currentUserMessageId) &&
       unseen.some((m) => m.id === currentUserMessageId),
   );
+
+  // F148: Smart window — cold mention detection
+  // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
+  const hcConfig = DEFAULT_HIERARCHICAL_CONTEXT;
+  const countTrigger = relevant.length > hcConfig.coldMentionThreshold;
+  // Gap-1: only estimate tokens when count doesn't trigger (the "few but fat" path)
+  const tokenTrigger =
+    !countTrigger &&
+    relevant.reduce((sum, m) => sum + estimateTokens(m.content), 0) > hcConfig.coldMentionTokenThreshold;
+  const isColdMention = countTrigger || tokenTrigger;
+
+  // F148 OQ-3 telemetry: warm/cold path decision
+  log.info({
+    f148: 'path-decision',
+    threadId,
+    catId,
+    messageCount: relevant.length,
+    isColdMention,
+    trigger: countTrigger ? 'count' : tokenTrigger ? 'token' : 'none',
+    thresholds: { count: hcConfig.coldMentionThreshold, token: hcConfig.coldMentionTokenThreshold },
+  });
+
+  if (isColdMention) {
+    return assembleSmartWindowContext(
+      deps,
+      relevant,
+      catId,
+      threadId,
+      currentUserMessageId,
+      currentMessageFilteredOut,
+      hcConfig,
+      cursor,
+      options,
+    );
+  }
+
+  // --- Warm path: existing behavior unchanged ---
 
   // GAP-1: Unconditional budget cap — protects both first-time cats (cursor=undefined)
   // and stale cursor scenarios where large unseen batches accumulate.
@@ -392,11 +461,6 @@ export async function assembleIncrementalContext(
         }
       }
       if (totalTokens - dropTokens > effectiveTokenBudget) {
-        // Even after dropping all but one message, the last message alone may exceed
-        // maxContextTokens (e.g. a single huge message). We still keep it because
-        // returning empty context is worse — the cat gets no context at all. The
-        // degradation notice below will flag this situation so the cat knows the
-        // context was force-trimmed.
         tokenTrimStart = perLineTokens.length - 1;
       }
     }
@@ -432,5 +496,307 @@ export async function assembleIncrementalContext(
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation,
+  };
+}
+
+/**
+ * F148: Smart window path for cold-mention context assembly.
+ * Burst detection → tombstone → evidence recall → tool scrub → compact context.
+ */
+async function assembleSmartWindowContext(
+  deps: RouteStrategyDeps,
+  relevant: StoredMessage[],
+  catId: CatId,
+  threadId: string,
+  currentUserMessageId: string | undefined,
+  currentMessageFilteredOut: boolean,
+  hcConfig: import('../../../../../config/hierarchical-context-config.js').HierarchicalContextConfig,
+  _cursor: string | undefined,
+  options: IncrementalContextOptions | undefined,
+): Promise<IncrementalContextResult> {
+  const budget = getCatContextBudget(catId as string);
+  const truncateLimit = budget.maxContentLengthPerMsg;
+
+  // 1. Burst detection
+  const { burst, omitted } = detectRecentBurst(relevant, hcConfig);
+
+  // F148 OQ-1 telemetry: burst detection stats
+  const actualGapMs =
+    burst.length > 0 && omitted.length > 0 ? burst[0].timestamp - omitted[omitted.length - 1].timestamp : null;
+  log.info({
+    f148: 'burst-stats',
+    threadId,
+    catId,
+    totalMessages: relevant.length,
+    burstCount: burst.length,
+    omittedCount: omitted.length,
+    actualGapMs,
+    configuredGapMs: hcConfig.burstSilenceGapMs,
+  });
+
+  // 2. Thread title for tombstone + evidence (fail-open like recallEvidence)
+  const threadStore = deps.invocationDeps.threadStore;
+  let threadTitle = '';
+  if (threadStore) {
+    try {
+      threadTitle = (await Promise.resolve(threadStore.get(threadId)))?.title ?? '';
+    } catch {
+      // fail-open: threadTitle stays empty, tombstone/evidence degrade gracefully
+    }
+  }
+
+  // 3. Sanitize omitted content once (before tombstone keyword extraction + anchor formatting)
+  const sanitizedOmitted = omitted.map((m) => ({
+    ...m,
+    content: sanitizeInjectedContent(m.content),
+  }));
+
+  // 3.1 Tombstone (uses sanitized content for keyword extraction)
+  const tombstone = buildTombstone(sanitizedOmitted, threadTitle, hcConfig, threadId);
+  const tombstoneText = tombstone ? formatTombstone(tombstone) : '';
+
+  // 3.5 Phase C: Anchor extraction from omitted messages
+  const currentMsgText = currentUserMessageId
+    ? (burst.find((m) => m.id === currentUserMessageId)?.content.slice(0, 200) ?? '')
+    : '';
+  const compositeQueryTerms = [threadTitle, currentMsgText]
+    .concat(
+      burst
+        .filter((m) => m.catId === null && m.userId !== 'system')
+        .slice(-2)
+        .map((m) => m.content.slice(0, 200)),
+    )
+    .join(' ')
+    .toLowerCase()
+    .split(/[^a-zA-Z0-9\u4e00-\u9fff]+/)
+    .filter((w) => w.length >= 3);
+  const anchors = selectAnchors(sanitizedOmitted, compositeQueryTerms, hcConfig.maxAnchors);
+  const anchorLines = formatAnchors(anchors, truncateLimit);
+
+  // 3.7 Phase D: Fetch thread memory (fail-open)
+  let threadMemorySummary = '';
+  let threadMemoryMeta: {
+    available: boolean;
+    sessionsIncorporated: number;
+    decisions?: string[];
+    openQuestions?: string[];
+  } | null = null;
+  if (threadStore) {
+    try {
+      const mem = await Promise.resolve(threadStore.getThreadMemory(threadId));
+      if (mem) {
+        let summary = sanitizeInjectedContent(mem.summary);
+        // Trim to maxThreadMemoryTokens by dropping oldest lines
+        const lines = summary.split('\n');
+        while (lines.length > 1 && estimateTokens(lines.join('\n')) > hcConfig.maxThreadMemoryTokens) {
+          lines.shift();
+        }
+        summary = lines.join('\n');
+        // Hard-cap: if remaining text still exceeds budget, binary-search truncate by tokens
+        if (estimateTokens(summary) > hcConfig.maxThreadMemoryTokens) {
+          let lo = 0;
+          let hi = summary.length;
+          while (lo < hi) {
+            const mid = (lo + hi + 1) >>> 1;
+            if (estimateTokens(summary.slice(0, mid)) <= hcConfig.maxThreadMemoryTokens) lo = mid;
+            else hi = mid - 1;
+          }
+          summary = summary.slice(0, lo) + '…';
+        }
+        threadMemorySummary = summary;
+        threadMemoryMeta = {
+          available: true,
+          sessionsIncorporated: mem.sessionsIncorporated,
+          ...(Array.isArray(mem.decisions) && mem.decisions.length ? { decisions: mem.decisions } : {}),
+          ...(Array.isArray(mem.openQuestions) && mem.openQuestions.length ? { openQuestions: mem.openQuestions } : {}),
+        };
+      }
+    } catch {
+      // fail-open: threadMemory stays empty
+    }
+  }
+
+  // 3.8 Evidence recall (fail-open) — must run before coverage map so hints are populated
+  const currentMsg = currentUserMessageId ? burst.find((m) => m.id === currentUserMessageId) : undefined;
+  const nonSystemRecent = burst.filter((m) => m.catId === null && m.userId !== 'system').slice(-2);
+  const evidenceLines = await recallEvidence(
+    deps.evidenceStore,
+    threadTitle,
+    currentMsg?.content ?? '',
+    nonSystemRecent,
+    hcConfig,
+  );
+
+  // 3.9 Phase D: Build coverage map (AC-D2) — VG-1: only evidence recall titles (not tombstone search hints)
+  const participants = [...new Set(omitted.map((m) => m.catId ?? m.userId).filter(Boolean))] as string[];
+  const retrievalHints = evidenceLines.map((line) => {
+    const match = line.match(/^\[Evidence:\s*(.+?)\]/);
+    return match ? match[1] : line.slice(0, 80);
+  });
+  const coverageMap = buildCoverageMap({
+    omitted: {
+      count: omitted.length,
+      from: omitted[0]?.timestamp ?? 0,
+      to: omitted[omitted.length - 1]?.timestamp ?? 0,
+      participants,
+    },
+    burst: {
+      count: burst.length,
+      from: burst[0]?.timestamp ?? 0,
+      to: burst[burst.length - 1]?.timestamp ?? 0,
+    },
+    anchorIds: anchors.map((a) => a.message.id),
+    threadMemory: threadMemoryMeta,
+    retrievalHints,
+    searchSuggestions: tombstone?.retrievalHints ?? [],
+  });
+  const coverageMapText = `[Context Coverage Map]\n${JSON.stringify(coverageMap)}`;
+  const threadMemoryText = threadMemorySummary
+    ? `[Thread Memory: ${threadMemoryMeta?.sessionsIncorporated ?? 0} sessions]\n${threadMemorySummary}`
+    : '';
+
+  // 5. Tool payload scrub on burst
+  const scrubbedBurst = scrubToolPayloads(burst);
+
+  // 6. Format burst messages
+  const burstLines = scrubbedBurst.map((m) => {
+    const contentWithDigest = digestRichBlocks(m);
+    const cleanContent = sanitizeInjectedContent(contentWithDigest);
+    const normalized: StoredMessage = cleanContent === m.content ? m : { ...m, content: cleanContent };
+    const rendered = formatMessage(normalized, { truncate: truncateLimit });
+    return `[${m.id}] ${rendered}`;
+  });
+
+  // 7. Respect effectiveMaxContextTokens (same as warm path)
+  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
+  const boundaryId = relevant[relevant.length - 1]?.id;
+
+  if (effectiveTokenBudget <= 0) {
+    return {
+      contextText: '',
+      boundaryId,
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut,
+      degradation: `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
+    };
+  }
+
+  // Token trim with graduated degradation:
+  // evidence → coverageMap+threadMemory → anchors → tombstone → burst
+  let finalBurstLines = burstLines;
+  let finalBurstMsgs = scrubbedBurst;
+  const finalEvidenceLines = [...evidenceLines];
+  const finalAnchorLines = [...anchorLines];
+  const anchorScores = anchors.map((a) => a.score);
+  let finalTombstoneText = tombstoneText;
+  let finalCoverageMapText = coverageMapText;
+  let finalThreadMemoryText = threadMemoryText;
+  let tokenDegradation: string | undefined;
+
+  const totalTokens = () =>
+    estimateTokens(
+      [
+        finalCoverageMapText,
+        finalThreadMemoryText,
+        finalTombstoneText,
+        ...finalAnchorLines,
+        ...finalEvidenceLines,
+        ...finalBurstLines,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+
+  if (totalTokens() > effectiveTokenBudget) {
+    // Stage 1: Drop evidence lines from oldest
+    while (finalEvidenceLines.length > 0 && totalTokens() > effectiveTokenBudget) {
+      finalEvidenceLines.shift();
+    }
+
+    // Stage 1.3: Drop coverage map + thread memory together
+    if (totalTokens() > effectiveTokenBudget) {
+      finalCoverageMapText = '';
+      finalThreadMemoryText = '';
+    }
+
+    // Stage 1.5: Drop anchors by lowest score
+    while (finalAnchorLines.length > 0 && totalTokens() > effectiveTokenBudget) {
+      let minIdx = 0;
+      for (let i = 1; i < anchorScores.length; i++) {
+        if (anchorScores[i] < anchorScores[minIdx]) minIdx = i;
+      }
+      finalAnchorLines.splice(minIdx, 1);
+      anchorScores.splice(minIdx, 1);
+    }
+
+    // Stage 2: Drop tombstone
+    if (totalTokens() > effectiveTokenBudget && finalTombstoneText) {
+      finalTombstoneText = '';
+    }
+
+    // Stage 3: Trim burst from oldest
+    let keep = finalBurstLines.length;
+    while (keep > 1 && totalTokens() > effectiveTokenBudget) {
+      finalBurstLines = burstLines.slice(-keep + 1);
+      finalBurstMsgs = scrubbedBurst.slice(-keep + 1);
+      keep--;
+    }
+
+    // Stage 4: Hard cap — if envelope + 1 burst still exceeds budget, return empty
+    if (totalTokens() > effectiveTokenBudget) {
+      return {
+        contextText: '',
+        boundaryId,
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut,
+        degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+      };
+    }
+
+    tokenDegradation = `⚠️ 增量上下文 token 预算截断: evidence ${evidenceLines.length} → ${finalEvidenceLines.length}, anchors ${anchorLines.length} → ${finalAnchorLines.length}, burst ${burstLines.length} → ${finalBurstLines.length}`;
+  }
+
+  // 8. Assemble context packet
+  const sections: string[] = [];
+  if (finalCoverageMapText) sections.push(finalCoverageMapText);
+  if (finalThreadMemoryText) sections.push(finalThreadMemoryText);
+  if (finalTombstoneText) sections.push(finalTombstoneText);
+  if (finalAnchorLines.length > 0) sections.push(...finalAnchorLines);
+  if (finalEvidenceLines.length > 0) {
+    sections.push(`[Related evidence]\n${finalEvidenceLines.join('\n')}\n[/Related evidence]`);
+  }
+  sections.push(...finalBurstLines);
+
+  const includesCurrentUserMessage = Boolean(
+    currentUserMessageId && finalBurstMsgs.some((m) => m.id === currentUserMessageId),
+  );
+
+  const contextText =
+    sections.length > 0
+      ? `[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
+      : '';
+
+  // Final hard cap: envelope overhead may push total over budget
+  if (contextText && estimateTokens(contextText) > effectiveTokenBudget) {
+    return {
+      contextText: '',
+      boundaryId,
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut,
+      degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+    };
+  }
+
+  return {
+    contextText,
+    boundaryId,
+    includesCurrentUserMessage,
+    currentMessageFilteredOut,
+    degradation: tokenDegradation,
+    coverageMap,
+    briefingContext: {
+      ...(threadMemorySummary ? { threadMemorySummary } : {}),
+      ...(finalAnchorLines.length > 0 ? { anchorSummaries: finalAnchorLines } : {}),
+    },
   };
 }

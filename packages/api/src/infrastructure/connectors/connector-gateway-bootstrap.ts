@@ -149,7 +149,7 @@ export interface ConnectorGatewayDeps {
       message: string,
       messageId: string,
       ...args: unknown[]
-    ): void;
+    ): 'dispatched' | 'enqueued' | 'merged' | 'full';
   };
   readonly socketManager?:
     | {

@@ -34,6 +34,7 @@ packages/web/public/worker-*.js
 .dare/
 .codex/
 .gemini/
+.gitnexus/
 *.swp
 *.swo
 
@@ -133,6 +134,8 @@ private/
 evidence.sqlite
 evidence.sqlite-shm
 evidence.sqlite-wal
+# Exception: test fixture for GrowthBoundary (KD-11)
+!packages/api/test/__fixtures__/**/evidence.sqlite
 
 # Temporary data files (browser automation artifacts)
 forzadata-*.txt
@@ -140,3 +143,4 @@ __pycache__/
 *.pyc
 .claude/skills/browser-automation
 .claude/skills/browser-preview
+.claude/skills/video-forge

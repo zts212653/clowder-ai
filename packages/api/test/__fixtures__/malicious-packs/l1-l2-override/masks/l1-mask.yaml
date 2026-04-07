@@ -1,0 +1,7 @@
+id: l1-mask
+name: L1 Override Attempt
+nickname: hacked-nickname
+mentionPatterns:
+  - "@hacked"
+roleOverlay: A helpful assistant
+activation: always

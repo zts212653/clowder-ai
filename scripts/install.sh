@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Clowder AI — Repo-Local Install Helper (F113)
+# Cat Cafe — Cross-Platform One-Click Install Helper (F113)
 # Usage: bash scripts/install.sh [--start] [--memory] [--registry=URL] [--skip-preflight]
 # Supported: macOS (Homebrew), Debian/Ubuntu, CentOS/RHEL/Fedora
 
@@ -23,8 +23,12 @@ use_registry() {
     # npm/pnpm respect these env vars for all operations in this session.
     export npm_config_registry="$reg" NPM_CONFIG_REGISTRY="$reg" PNPM_CONFIG_REGISTRY="$reg"
 }
-# Cross-platform CAT_CAFE_NPM_REGISTRY fallback (parity with install.ps1)
-[[ -z "$NPM_REGISTRY" && -n "${CAT_CAFE_NPM_REGISTRY:-}" ]] && NPM_REGISTRY="$CAT_CAFE_NPM_REGISTRY"
+# Registry env fallback chain: preflight.sh suggests npm_config_registry,
+# so we must honour it here too — not just CAT_CAFE_NPM_REGISTRY.
+for _reg_var in CAT_CAFE_NPM_REGISTRY npm_config_registry NPM_CONFIG_REGISTRY PNPM_CONFIG_REGISTRY; do
+    [[ -z "$NPM_REGISTRY" && -n "${!_reg_var:-}" ]] && NPM_REGISTRY="${!_reg_var}" && break
+done
+unset _reg_var
 [[ -n "$NPM_REGISTRY" ]] && use_registry "$NPM_REGISTRY"
 npm_global_install() {
     if [[ -n "$NPM_REGISTRY" ]]; then
@@ -38,10 +42,9 @@ info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
 step() { echo ""; echo -e "${BOLD}$*${NC}"; }
 USED_FNM=false
-resolve_realpath() { realpath "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || echo "$1"; }
-# P1 review: On Apple Silicon, /usr/local/bin is often not writable without
-# sudo, and we deliberately skip sudo on Darwin. Use ~/.local/bin instead.
-USER_BIN_DIR="/usr/local/bin"
+resolve_realpath() {
+    realpath "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || echo "$1"
+}
 persist_user_bin() {
     local bin="$1" path=""; path="$(command -v "$bin" 2>/dev/null || true)"
     [[ -n "$path" ]] || return 0
@@ -310,11 +313,11 @@ resolve_project_dir_from() {
 resolve_project_dir() {
     local script_source="${BASH_SOURCE[0]:-}"
     [[ -n "$script_source" ]] || {
-        fail "This helper must run from a clowder-ai source tree. Clone or download first, then run: bash scripts/install.sh"
+        fail "This helper must run from a cat-cafe source tree. Clone or download first, then run: bash scripts/install.sh"
         exit 1
     }
     PROJECT_DIR="$(resolve_project_dir_from "$script_source")" || {
-        fail "Could not locate the clowder-ai source tree from $script_source. Clone or download first, then run: bash scripts/install.sh"
+        fail "Could not locate the cat-cafe source tree from $script_source. Clone or download first, then run: bash scripts/install.sh"
         exit 1
     }
     PROJECT_HAS_GIT_METADATA=false
@@ -584,7 +587,7 @@ case "$PLATFORM" in
         fi
         # Persist brew shellenv to login profiles so new terminals find brew, node, etc.
         if [[ "$_brew_recovered" == true ]]; then
-            _shellenv_line="eval \"\$($(command -v brew) shellenv)\"  # Homebrew (added by Clowder AI)"
+            _shellenv_line="eval \"\$($(command -v brew) shellenv)\"  # Homebrew (added by Cat Cafe)"
             for _prof in $(darwin_login_profiles); do
                 append_to_profile "$_shellenv_line" "$_prof"
             done
@@ -615,21 +618,19 @@ if [[ "$DISTRO_FAMILY" != "darwin" && $EUID -ne 0 ]]; then
     command -v sudo &>/dev/null || { fail "Not root and sudo not found / 请以 root 运行或安装 sudo"; exit 1; }
     SUDO="sudo"
 fi
-# P1 review: On Darwin (especially Apple Silicon), /usr/local/bin often
-# requires sudo which we skip. Use ~/.local/bin for user-local binaries.
+# On Darwin, /usr/local/bin often requires sudo which we skip.
+# Use ~/.local/bin for user-local binaries.
 if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
     USER_BIN_DIR="$HOME/.local/bin"
     mkdir -p "$USER_BIN_DIR"
-    # Ensure USER_BIN_DIR is on current session PATH (bare-metal installs may not have it)
     case ":$PATH:" in
         *":$USER_BIN_DIR:"*) ;;
         *) export PATH="$USER_BIN_DIR:$PATH" ;;
     esac
     # Persist ~/.local/bin to login profiles unconditionally so that any later
-    # persist_user_bin symlinks (CLI tools, etc.) survive in new terminals —
-    # even when Node and pnpm are already installed and their blocks are skipped.
+    # persist_user_bin symlinks survive in new terminals.
     for _prof in $(darwin_login_profiles); do
-        append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
+        append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Cat Cafe user binaries' "$_prof"
     done
     unset _prof
 fi
@@ -713,6 +714,7 @@ if command -v pandoc &>/dev/null; then
 else
     info "Installing pandoc (document generation)..."
     case "$DISTRO_FAMILY" in
+        darwin) brew install pandoc && ok "pandoc installed" || warn "pandoc install failed — document generation will fall back to .md" ;;
         debian) $SUDO $PKG_INSTALL pandoc && ok "pandoc installed" || warn "pandoc install failed — document generation will fall back to .md" ;;
         rhel) $SUDO $PKG_INSTALL pandoc && ok "pandoc installed" || warn "pandoc install failed — document generation will fall back to .md" ;;
         *) warn "pandoc not installed — document generation will fall back to .md" ;;
@@ -784,9 +786,7 @@ if node_needs_install; then
     # Persist PATH additions to login profiles (zsh + bash) for new terminals.
     if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
         for _prof in $(darwin_login_profiles); do
-            # ~/.local/bin for persist_user_bin symlinks (fnm, pnpm, etc.)
-            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
-            # fnm shell init (only if fnm was used)
+            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Cat Cafe user binaries' "$_prof"
             if [[ "$USED_FNM" == true ]]; then
                 _fnm_shell="zsh"
                 [[ "$_prof" == *bash* || "$_prof" == *profile ]] && _fnm_shell="bash"
@@ -816,7 +816,7 @@ if ! command -v pnpm &>/dev/null; then
     # if Node was already present and the Node install step was skipped).
     if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
         for _prof in $(darwin_login_profiles); do
-            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
+            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Cat Cafe user binaries' "$_prof"
         done
         unset _prof
     fi
@@ -863,7 +863,6 @@ fi
 step "[5/9] Preparing current repo / 准备当前仓库..."
 cd "$PROJECT_DIR"
 ok "Using project: $PROJECT_DIR"
-
 pnpm_install_with_fallback || { fail "pnpm install failed in $PROJECT_DIR"; exit 1; }
 ok "Packages installed"
 build_step "shared" pnpm --dir packages/shared run build
@@ -884,7 +883,7 @@ else fail "cat-cafe-skills/ not found"; exit 1; fi
 
 # ── [6/9] Install AI agent CLI tools ─────────────────────
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
-info "  Clowder spawns CLI subprocesses — these are required"
+info "  Cat Cafe spawns CLI subprocesses — these are required"
 install_npm_cli() {
     local name="$1" cmd="$2" pkg="$3"
     info "  Installing $name ($pkg)..."
@@ -1048,7 +1047,7 @@ chmod 600 .env 2>/dev/null || true
 
 # ── [9/9] Done ──────────────────────────────────────────────
 step "[9/9] Installation complete! / 安装完成！"
-echo -e "\n  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
+echo -e "\n  ${GREEN}══ Cat Cafe is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
 START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
 # The script runs as a subprocess — PATH changes don't propagate to the parent
 # shell. On macOS, prefix the banner command with `source ~/.zprofile` so the

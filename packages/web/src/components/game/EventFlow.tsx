@@ -113,15 +113,16 @@ export function EventFlow({ events, catDisplayNames, seatToActor }: EventFlowPro
         // Human players have userId as actorId — show "铲屎官" instead of raw userId
         const isHuman = !catDisplayNames?.[rawActorId] && rawActorId !== seatId && rawActorId !== 'system';
         const actorId = isHuman ? 'owner' : rawActorId;
-        const displayName = isHuman ? '铲屎官' : (catDisplayNames?.[rawActorId] ?? rawActorId);
+        const displayName = isHuman ? '铲屎官' : (catDisplayNames?.[rawActorId] ?? rawActorId) || seatId || '???';
         const content = String(event.payload.content ?? event.payload.message ?? event.payload.text ?? '');
         const isLastWords = event.type === 'last_words';
+        const isNightThought = event.type === 'night_thought';
 
         return (
           <div
             key={event.eventId}
             data-testid="chat-bubble"
-            className={`flex gap-2.5 w-full ${isLastWords ? 'border-l-2 border-ww-danger pl-2' : ''}`}
+            className={`flex gap-2.5 w-full ${isLastWords ? 'border-l-2 border-ww-danger pl-2' : ''} ${isNightThought ? 'border-l-2 border-ww-info pl-2 opacity-80' : ''}`}
           >
             {/* Avatar circle */}
             <div className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden bg-ww-card border-2 border-ww-subtle">
@@ -140,7 +141,7 @@ export function EventFlow({ events, catDisplayNames, seatToActor }: EventFlowPro
               <span className="text-ww-cute text-xs font-semibold">
                 {seatId && seatId !== actorId ? `${seatId} ` : ''}
                 {displayName}
-                {isLastWords ? ' · 遗言' : ' · 发言'}
+                {isLastWords ? ' · 遗言' : isNightThought ? ' · 心声' : ' · 发言'}
               </span>
               <span className="text-ww-main text-sm">{content}</span>
             </div>

@@ -30,8 +30,8 @@ interface InvocationTrackerLike {
     requestUserId?: string,
     abortReason?: string,
   ): { cancelled: boolean; catIds: string[] };
-  /** Issue #83: Get all active catIds for a thread (F5 refresh recovery) */
-  getActiveSlots(threadId: string): string[];
+  /** Issue #83: Get all active slots for a thread (F5 refresh recovery) */
+  getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number }>;
 }
 
 export interface QueueRoutesOptions {

@@ -16,6 +16,8 @@ const MALICIOUS_IDENTITY = join(FIXTURES, 'malicious-packs', 'identity-override'
 const MALICIOUS_CAPS = join(FIXTURES, 'malicious-packs', 'capabilities-present');
 const MALICIOUS_UNKNOWN = join(FIXTURES, 'malicious-packs', 'unknown-fields');
 const MALICIOUS_RELAX = join(FIXTURES, 'malicious-packs', 'relaxation');
+const MALICIOUS_L1L2 = join(FIXTURES, 'malicious-packs', 'l1-l2-override');
+const MALICIOUS_GROWTH = join(FIXTURES, 'malicious-packs', 'growth-leak');
 
 // ─── Dynamic imports after build ─────────────────────────────────────
 
@@ -144,6 +146,22 @@ describe('PackSecurityGuard', () => {
     assert.ok(
       result.reasons.some((r) => r.includes('immutable identity field')),
       `Reasons: ${result.reasons.join('; ')}`,
+    );
+  });
+
+  test('rejects L1 routing identity fields in masks (KD-12 OQ-5)', async () => {
+    const { PackSecurityGuard } = await loadModules();
+    const guard = new PackSecurityGuard();
+    const result = await guard.validate(MALICIOUS_L1L2);
+    assert.ok(!result.ok, 'Should reject L1 fields (nickname, mentionPatterns)');
+    assert.ok(
+      result.reasons.some((r) => r.includes('immutable identity field')),
+      `Reasons: ${result.reasons.join('; ')}`,
+    );
+    // Both L1 fields should be flagged
+    assert.ok(
+      result.reasons.some((r) => r.includes('nickname')),
+      `Should flag nickname: ${result.reasons.join('; ')}`,
     );
   });
 
@@ -332,5 +350,17 @@ describe('PackLoader', () => {
 
     await assert.rejects(async () => loader.add('https://github.com/example/pack.git'), /not supported in Phase A/);
     await assert.rejects(async () => loader.add('http://example.com/pack'), /not supported in Phase A/);
+  });
+
+  test('rejects pack with Growth data at install (P1-1 KD-11)', async () => {
+    const { PackStore, PackSecurityGuard, PackLoader } = await loadModules();
+    const storeDir = await createTmpDir();
+    const store = new PackStore(storeDir);
+    const guard = new PackSecurityGuard();
+    const loader = new PackLoader(store, guard);
+
+    await assert.rejects(async () => loader.add(MALICIOUS_GROWTH), /Growth.*boundary|Growth.*violation/i);
+    // Must NOT be installed
+    assert.ok(!(await store.has('growth-leak')));
   });
 });

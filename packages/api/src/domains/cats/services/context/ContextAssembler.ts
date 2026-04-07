@@ -106,7 +106,16 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   const maxTotalTokens = options?.maxTotalTokens ?? options?.maxTotalChars ?? DEFAULT_MAX_TOTAL_TOKENS;
 
   // F117: exclude undelivered messages (queued/canceled) from prompt context
-  const deliveredMessages = messages.filter(isDelivered);
+  // Also exclude system-generated messages (userId='system') — these are display-only
+  // (e.g. persisted error badges) and must not re-enter the prompt as "铲屎官" messages.
+  // Defense: also exclude legacy error messages that were incorrectly persisted with
+  // userId=user by route-parallel.ts (context poisoning bug, fixed in PR #992).
+  // Only filter cat messages (catId !== null) starting with [错误] — user messages are legit.
+  // All 6 known contaminated records start with [错误] (no partial-text-before-error exists
+  // in practice, since stream_idle_stall means zero text was produced before the error).
+  const deliveredMessages = messages.filter(
+    (m) => isDelivered(m) && m.userId !== 'system' && !(m.catId && m.content?.startsWith('[错误]')),
+  );
 
   if (deliveredMessages.length === 0) {
     return { contextText: '', messageCount: 0, estimatedTokens: 0 };

@@ -64,7 +64,7 @@ test_no_trigger_below_threshold() {
   teardown
 }
 
-# Test 2: 达到阈值触发 L1
+# Test 2: 达到阈值触发 L1 — 写 pending_trigger 到 state 文件
 test_trigger_l1_at_threshold() {
   setup
   source "$STATE_SCRIPT"
@@ -73,21 +73,23 @@ test_trigger_l1_at_threshold() {
   # 设置 70 秒的活跃时间（超过 60 秒阈值）
   set_field "active_work_ms" "70000"
   set_field "last_activity_ts" "$(($(date +%s) - 1))000"
+  # 确保心跳新鲜（铲屎官在）
+  touch_user_heartbeat
 
-  local output
-  output=$(mock_input | "$HOOK_SCRIPT" 2>&1)
+  mock_input | "$HOOK_SCRIPT" >/dev/null 2>&1
 
-  # 应该有 systemMessage
-  if ! echo "$output" | jq -e '.systemMessage' >/dev/null 2>&1; then
-    echo "FAIL: should have systemMessage"
-    echo "  got: $output"
+  # hook 应该在 state 文件里设置 pending_trigger
+  local pending
+  pending=$(get_field "pending_trigger")
+
+  if [[ -z "$pending" ]] || [[ "$pending" == "null" ]]; then
+    echo "FAIL: pending_trigger should be set in state file"
     teardown
     return 1
   fi
 
-  # 应该是 L1
   local level
-  level=$(echo "$output" | jq -r '.hookSpecificOutput.hyperfocusTrigger.level')
+  level=$(echo "$pending" | jq -r '.level')
   if [[ "$level" != "1" ]]; then
     echo "FAIL: should be level 1, got $level"
     teardown

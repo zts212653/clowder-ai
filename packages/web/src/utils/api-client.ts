@@ -37,7 +37,7 @@ export function resolveApiUrl(): string {
   // API lives at the same origin, proxied via /api/ and /socket.io/ paths.
   if (!port) return `${protocol}//${hostname}`;
   // Direct access with explicit port: convention frontendPort + 1 = apiPort
-  // (runtime: 3001→3002, open-source: 3003→3004, alpha: 3011→3012).
+  // (runtime: 3001→3002, alpha: 3011→3012).
   return `${protocol}//${hostname}:${port + 1}`;
 }
 export const API_URL = resolveApiUrl();

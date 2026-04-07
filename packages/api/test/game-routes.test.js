@@ -72,6 +72,7 @@ function createStubThreadStore() {
     async update() {},
     async delete() {},
     async updateThinkingMode() {},
+    async updatePin() {},
   };
 }
 

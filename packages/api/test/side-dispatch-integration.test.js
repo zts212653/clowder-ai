@@ -274,7 +274,7 @@ describe('AC-A9: InvocationTracker used as unified SlotTracker', () => {
 
     // Active slots lists both
     const slots = tracker.getActiveSlots('t1');
-    assert.deepEqual(slots.sort(), ['codex', 'opus']);
+    assert.deepEqual(slots.map((s) => s.catId).sort(), ['codex', 'opus']);
 
     // Cancel main → side survives
     tracker.cancel('t1', 'opus', 'u1');

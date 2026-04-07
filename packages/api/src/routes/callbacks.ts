@@ -26,12 +26,14 @@ import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBloc
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
 import { callbackAuthSchema } from './callback-auth-schema.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { registerCallbackGameRoutes } from './callback-game-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
@@ -755,7 +757,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F-Swarm-6: allow reading a different thread's context
     const effectiveThreadId = overrideThreadId ?? record.threadId;
-    const normalizedKeyword = keyword?.toLowerCase();
+    // F148 Phase B (AC-B2): tokenize keyword for relevance scoring
+    const keywordTerms = keyword ? tokenizeKeyword(keyword) : [];
 
     const requestedLimit = limit ?? 20;
     let needsPlayFilter = false;
@@ -773,6 +776,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ? { type: 'cat' as const, catId: createCatId(record.catId) }
       : { type: 'user' as const };
     const matchesExtraFilters = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
+      // F148 Phase E (AC-E2): briefing messages are non-routing, never enter cat context
+      if (item.origin === 'briefing') return false;
       if (filterCatId) {
         if (filterCatId === 'user') {
           if (item.catId !== null) return false;
@@ -780,7 +785,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           return false;
         }
       }
-      if (normalizedKeyword && !item.content.toLowerCase().includes(normalizedKeyword)) {
+      // F148 Phase B (AC-B2): tokenized keyword relevance (replaces substring .includes())
+      if (keywordTerms.length > 0 && scoreKeywordRelevance(item.content, keywordTerms) === 0) {
         return false;
       }
       return true;
@@ -813,8 +819,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         cursorId = oldest.id;
       }
 
-      visible.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
-      filtered = visible.slice(-requestedLimit);
+      // F148 Phase B (AC-B2): sort by keyword relevance when searching, chronological otherwise
+      if (keywordTerms.length > 0) {
+        visible.sort((a, b) => {
+          const sa = scoreKeywordRelevance(a.content, keywordTerms);
+          const sb = scoreKeywordRelevance(b.content, keywordTerms);
+          return sb - sa || b.timestamp - a.timestamp; // higher relevance first, then newest first
+        });
+        filtered = visible.slice(0, requestedLimit); // P1-1 fix: take HEAD (highest relevance)
+      } else {
+        visible.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        filtered = visible.slice(-requestedLimit); // take TAIL (most recent)
+      }
     } else {
       // Play mode: paginate backwards collecting visible messages until we have enough
       // or data is exhausted. No fixed page cap — correctness over latency.
@@ -851,9 +867,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
 
       // visible is accumulated in reverse-chronological page order but each page is ascending.
-      // Re-sort ascending and take newest requestedLimit.
-      visible.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
-      filtered = visible.slice(-requestedLimit);
+      // P2-1 fix: play mode also sorts by keyword relevance when keyword is active
+      if (keywordTerms.length > 0) {
+        visible.sort((a, b) => {
+          const sa = scoreKeywordRelevance(a.content, keywordTerms);
+          const sb = scoreKeywordRelevance(b.content, keywordTerms);
+          return sb - sa || b.timestamp - a.timestamp;
+        });
+        filtered = visible.slice(0, requestedLimit);
+      } else {
+        visible.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        filtered = visible.slice(-requestedLimit);
+      }
     }
 
     // F073 P1: Look up workflow SOP for resume capsule if thread has linked backlog item
@@ -887,6 +912,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         content: item.content,
         ...(item.contentBlocks ? { contentBlocks: item.contentBlocks } : {}),
         timestamp: item.timestamp,
+        // F148 Phase B (AC-B2): include relevance score when keyword search is active
+        ...(keywordTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, keywordTerms) } : {}),
       })),
       ...(workflowSop ? { workflowSop } : {}),
     };
@@ -1307,4 +1334,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   // F088 Phase J2: Document generation callback routes
   registerCallbackDocumentRoutes(app, { registry, socketManager });
+
+  // F101: Game action callback for non-Claude cats (OpenCode/Codex/Gemini)
+  registerCallbackGameRoutes(app, { registry });
 };

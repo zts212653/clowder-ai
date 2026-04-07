@@ -624,8 +624,10 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 2);
-    assert.equal(body.messages[0].content, 'Discuss Redis lock strategy');
-    assert.equal(body.messages[1].content, 'redis retry and timeout');
+    // F148 Phase B: with relevance sort, both match "redis" equally (1.0).
+    // Tiebreaker is newest-first (b.timestamp - a.timestamp).
+    assert.equal(body.messages[0].content, 'redis retry and timeout');
+    assert.equal(body.messages[1].content, 'Discuss Redis lock strategy');
   });
 
   test('GET thread-context combines catId + keyword filters', async () => {
@@ -1926,6 +1928,55 @@ describe('Callback Routes', () => {
     assert.ok(!contents.includes('thinking output'), 'stream must be hidden');
     assert.ok(contents.includes('legacy reply'), 'legacy must be visible');
     assert.ok(contents.includes('callback speech'), 'callback must be visible');
+  });
+
+  test('P2-1: GET thread-context play mode + keyword sorts by relevance', async () => {
+    const thread = threadStore.create('user-1', 'Play keyword test');
+    const tid = thread.id;
+    threadStore.updateThinkingMode(tid, 'play');
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = registry.create('user-1', 'opus', tid);
+
+    // msg1: low relevance ("redis" matches 1/2 terms)
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'redis connection pool',
+      mentions: [],
+      timestamp: 1000,
+      threadId: tid,
+    });
+    // msg2: high relevance ("redis" + "lock" matches 2/2 terms)
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'redis lock contention fix',
+      mentions: [],
+      timestamp: 2000,
+      threadId: tid,
+    });
+    // msg3: no match
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'deploy pipeline ready',
+      mentions: [],
+      timestamp: 3000,
+      threadId: tid,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&keyword=redis+lock`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.messages.length, 2, 'only 2 messages match keyword');
+    // Highest relevance first: "redis lock contention fix" (2/2) before "redis connection pool" (1/2)
+    assert.equal(body.messages[0].content, 'redis lock contention fix', 'highest relevance first');
+    assert.equal(body.messages[1].content, 'redis connection pool', 'lower relevance second');
   });
 
   // ---- TD091: threadId echo in thread-context ----

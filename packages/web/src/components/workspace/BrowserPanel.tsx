@@ -21,10 +21,10 @@ interface BrowserPanelProps {
   initialPort?: number;
   /** Initial path for deep-linking (e.g. "/dashboard" from auto-open) */
   initialPath?: string;
-  /** Notify parent when active preview target changes. */
-  onNavigate?: (port: number, path: string) => void;
-  /** Hide browser chrome so the iframe can occupy the full workspace viewer area. */
+  /** Hide toolbar/tabs/console — used in focus mode */
   previewOnly?: boolean;
+  /** Called when user navigates to a new port/path — keeps parent state in sync */
+  onNavigate?: (port: number, path: string) => void;
 }
 
 interface PreviewStatus {
@@ -37,7 +37,7 @@ interface PreviewStatus {
  * The iframe loads through the Preview Gateway (独立 origin) to strip X-Frame-Options
  * and isolate cookies/storage from Hub.
  */
-export function BrowserPanel({ initialPort, initialPath, onNavigate, previewOnly = false }: BrowserPanelProps) {
+export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate }: BrowserPanelProps) {
   const [gatewayPort, setGatewayPort] = useState<number>(0);
   const [targetPort, setTargetPort] = useState(initialPort ?? 0);
   const [urlInput, setUrlInput] = useState(
@@ -54,12 +54,15 @@ export function BrowserPanel({ initialPort, initialPath, onNavigate, previewOnly
   const { consoleEntries, consoleOpen, setConsoleOpen, isCapturing, screenshotUrl, handleScreenshot, clearConsole } =
     usePreviewBridge(iframeRef, gatewayPort);
 
-  // Helper: update active viewport state
   const activateView = useCallback((port: number, path: string) => {
     setTargetPort(port);
     setTargetPath(path);
     setUrlInput(port ? `localhost:${port}${path !== '/' ? path : ''}` : '');
   }, []);
+
+  useEffect(() => {
+    if (onNavigate) onNavigate(targetPort, targetPath);
+  }, [targetPort, targetPath, onNavigate]);
 
   // Fetch gateway port on mount
   useEffect(() => {
@@ -71,7 +74,6 @@ export function BrowserPanel({ initialPort, initialPath, onNavigate, previewOnly
       .catch(() => setError('Preview gateway not available'));
   }, []);
 
-  // If initialPort/initialPath changes, add or activate a tab
   useEffect(() => {
     if (!initialPort) return;
     const path = initialPath ?? '/';
@@ -107,11 +109,9 @@ export function BrowserPanel({ initialPort, initialPath, onNavigate, previewOnly
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Build gateway URL using URL API to handle paths with query params correctly
   const gatewayUrl = (() => {
     if (!targetPort || !gatewayPort) return '';
     const url = new URL(`http://localhost:${gatewayPort}`);
-    // Parse targetPath which may contain query string (e.g. /dashboard?foo=1)
     const qIdx = targetPath.indexOf('?');
     if (qIdx >= 0) {
       url.pathname = targetPath.slice(0, qIdx);
@@ -125,10 +125,6 @@ export function BrowserPanel({ initialPort, initialPath, onNavigate, previewOnly
   })();
 
   const [warning, setWarning] = useState<string | null>(null);
-
-  useEffect(() => {
-    onNavigate?.(targetPort, targetPath);
-  }, [onNavigate, targetPath, targetPort]);
 
   const handleNavigate = useCallback(() => {
     setError(null);
@@ -291,18 +287,11 @@ export function BrowserPanel({ initialPort, initialPath, onNavigate, previewOnly
         </div>
       )}
 
-      {/* Error banner */}
-      {!previewOnly && error && (
-        <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50/80 border-b border-red-100">{error}</div>
-      )}
-
-      {/* Hub URL warning banner */}
-      {!previewOnly && warning && !error && (
+      {error && <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50/80 border-b border-red-100">{error}</div>}
+      {warning && !error && (
         <div className="px-3 py-1.5 text-xs text-amber-700 bg-amber-50/80 border-b border-amber-100">{warning}</div>
       )}
-
-      {/* Screenshot success toast */}
-      {!previewOnly && screenshotUrl && (
+      {screenshotUrl && (
         <div className="px-3 py-1.5 text-xs text-green-700 bg-green-50/80 border-b border-green-100">
           Screenshot saved:{' '}
           <a href={screenshotUrl} target="_blank" rel="noreferrer" className="underline">

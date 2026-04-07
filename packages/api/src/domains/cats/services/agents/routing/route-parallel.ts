@@ -27,6 +27,7 @@ import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
+import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -234,6 +235,34 @@ export async function* routeParallel(
             timestamp: Date.now(),
           } as AgentMessage);
         }
+
+        // F148 Phase E: Auto-insert context briefing when smart window triggered (AC-E1)
+        if (inc.coverageMap) {
+          const briefingInput = buildBriefingMessage(inc.coverageMap, threadId, inc.briefingContext);
+          try {
+            const stored = await deps.messageStore.append(briefingInput);
+            // P1-3: Include full stored message in payload so frontend can addMessage directly
+            degradationMsgs.push({
+              type: 'system_info' as AgentMessageType,
+              catId,
+              content: JSON.stringify({
+                type: 'context_briefing',
+                messageId: stored.id,
+                storedMessage: {
+                  id: stored.id,
+                  content: stored.content,
+                  origin: stored.origin,
+                  timestamp: stored.timestamp,
+                  extra: stored.extra,
+                },
+              }),
+              timestamp: stored.timestamp,
+            } as AgentMessage);
+          } catch {
+            // fail-open: briefing is non-critical UI enhancement
+          }
+        }
+
         const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);
@@ -314,6 +343,7 @@ export async function* routeParallel(
   const catToolEvents = new Map<string, StoredToolEvent[]>();
   // F060: Collect inline rich blocks per cat from system_info stream
   const catStreamRichBlocks = new Map<string, import('@cat-cafe/shared').RichBlock[]>();
+  const catErrorText = new Map<string, string>();
   const catHadError = new Set<string>();
   // #267: track errors that happened BEFORE abort — only these are real provider failures
   const catHadProviderError = new Set<string>();
@@ -391,8 +421,8 @@ export async function* routeParallel(
       // #267: errors before abort are real provider failures; errors after abort are cleanup
       if (!signal?.aborted) catHadProviderError.add(msg.catId);
       if (msg.error) {
-        const prev = catText.get(msg.catId) ?? '';
-        catText.set(msg.catId, `${prev + (prev ? '\n\n' : '')}[错误] ${msg.error}`);
+        const prev = catErrorText.get(msg.catId) ?? '';
+        catErrorText.set(msg.catId, `${prev}${prev ? '\n' : ''}${msg.error}`);
       }
     }
     // Accumulate tool events per cat
@@ -792,6 +822,27 @@ export async function* routeParallel(
               });
             }
           }
+        }
+      }
+
+      // Persist error as system message so it survives F5 reload but does NOT
+      // re-enter the prompt as a cat message (aligned with route-serial.ts).
+      // Previously errors were mixed into catText and persisted with userId=user,
+      // which polluted the conversation history and caused "context poisoning".
+      const errorText = catErrorText.get(msg.catId);
+      if (errorText) {
+        try {
+          await deps.messageStore.append({
+            userId: 'system',
+            catId: null,
+            content: `Error: ${errorText}`,
+            mentions: [],
+            origin: 'stream',
+            timestamp: Date.now(),
+            threadId,
+          });
+        } catch (err) {
+          log.error({ catId: msg.catId, err }, 'messageStore.append (error system msg) failed');
         }
       }
 

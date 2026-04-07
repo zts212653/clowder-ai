@@ -34,7 +34,14 @@ describe('triggerA2AInvocation (fallback path)', () => {
       start() {
         return abortController;
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -162,7 +169,14 @@ describe('triggerA2AInvocation (fallback path)', () => {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -233,7 +247,14 @@ describe('triggerA2AInvocation (fallback path)', () => {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -323,7 +344,14 @@ describe('triggerA2AInvocation (fallback path)', () => {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -398,7 +426,14 @@ describe('triggerA2AInvocation (fallback path)', () => {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -471,7 +506,14 @@ describe('triggerA2AInvocation (fallback path)', () => {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -547,7 +589,14 @@ describe('triggerA2AInvocation (fallback path)', () => {
         setTimeout(() => abortController.abort(), 5);
         return abortController;
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -764,7 +813,14 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
         startCalled++;
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockInvocationRecordStore = {
@@ -838,7 +894,14 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
         startCalled++;
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockInvocationRecordStore = {
@@ -933,7 +996,14 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     const mockRouter = {
@@ -1007,7 +1077,14 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
       start() {
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete() {},
+      completeAll() {},
     };
 
     let routeCalled = 0;
@@ -1110,7 +1187,14 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
           start() {
             return new AbortController();
           },
+          startAll() {
+            return new AbortController();
+          },
+          tryStartThreadAll() {
+            return new AbortController();
+          },
           complete() {},
+          completeAll() {},
         },
         queueProcessor: mockQueueProcessor,
         invocationQueue: mockInvocationQueue,
@@ -1171,7 +1255,14 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
           start() {
             return new AbortController();
           },
+          startAll() {
+            return new AbortController();
+          },
+          tryStartThreadAll() {
+            return new AbortController();
+          },
           complete() {},
+          completeAll() {},
         },
         queueProcessor: {
           onInvocationComplete() {},
@@ -1230,7 +1321,14 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
           start() {
             return new AbortController();
           },
+          startAll() {
+            return new AbortController();
+          },
+          tryStartThreadAll() {
+            return new AbortController();
+          },
           complete() {},
+          completeAll() {},
         },
         queueProcessor: {
           onInvocationComplete() {},
@@ -1292,7 +1390,14 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
           start() {
             return new AbortController();
           },
+          startAll() {
+            return new AbortController();
+          },
+          tryStartThreadAll() {
+            return new AbortController();
+          },
           complete() {},
+          completeAll() {},
         },
         queueProcessor: {
           onInvocationComplete() {},
@@ -1353,7 +1458,14 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
           start() {
             return new AbortController();
           },
+          startAll() {
+            return new AbortController();
+          },
+          tryStartThreadAll() {
+            return new AbortController();
+          },
           complete() {},
+          completeAll() {},
         },
         queueProcessor: {
           onInvocationComplete() {},

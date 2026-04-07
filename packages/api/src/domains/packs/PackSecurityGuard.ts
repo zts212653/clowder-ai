@@ -55,7 +55,28 @@ const RELAXATION_PATTERNS: RegExp[] = [
  * Note: 'name' is NOT here — it's a valid mask field (mask's own name).
  * 'id' is also valid (mask's own id).
  */
-const IMMUTABLE_FIELDS = new Set(['catId', 'family', 'provider', 'displayName', 'breedId']);
+/**
+ * Identity fields that masks must never set (KD-3 + F093 KD-12 five-layer classification).
+ * L1 (routing identity): catId, family, breedId, name→displayName, nickname, mentionPatterns
+ * L2 (infrastructure): provider, model, defaultModel, contextBudget, cli, mcpSupport
+ * Note: mask's own 'id' and 'name' fields are valid (mask identity, not cat identity).
+ */
+const IMMUTABLE_FIELDS = new Set([
+  // L1: Routing identity — never overridable
+  'catId',
+  'family',
+  'breedId',
+  'displayName',
+  'nickname',
+  'mentionPatterns',
+  // L2: Infrastructure — never overridable, not visible to packs
+  'provider',
+  'model',
+  'defaultModel',
+  'contextBudget',
+  'cli',
+  'mcpSupport',
+]);
 
 export class PackSecurityGuard {
   /**

@@ -55,7 +55,6 @@ export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS
     merged[key] = value;
   }
   if (!overrides) return merged;
-  // Apply overrides (with null deletions)
   for (const [key, value] of Object.entries(overrides)) {
     if (value === null) {
       delete merged[key];

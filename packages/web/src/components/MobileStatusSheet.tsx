@@ -2,7 +2,9 @@
 
 import { useMemo } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useChatStore } from '@/stores/chatStore';
 import { CatTokenUsage } from './CatTokenUsage';
+import { deriveActiveCats } from './parallel-status-helpers';
 import type { RightStatusPanelProps } from './RightStatusPanel';
 import { modeLabel, statusLabel, statusTone, truncateId } from './status-helpers';
 
@@ -26,6 +28,7 @@ export function MobileStatusSheet({
   messageSummary,
 }: MobileStatusSheetProps) {
   const { getCatById } = useCatData();
+  const activeInvocations = useChatStore((s) => s.activeInvocations);
 
   const activeCats = useMemo(() => {
     const snapshotCats = Object.entries(catInvocations)
@@ -35,8 +38,9 @@ export function MobileStatusSheet({
         return taskProgress.snapshotStatus !== 'completed';
       })
       .map(([catId]) => catId);
-    return Array.from(new Set([...targetCats, ...snapshotCats]));
-  }, [targetCats, catInvocations]);
+    const slotCats = deriveActiveCats(targetCats, activeInvocations);
+    return Array.from(new Set([...slotCats, ...snapshotCats]));
+  }, [targetCats, catInvocations, activeInvocations]);
 
   const allParticipants = useMemo(() => {
     return [...new Set([...activeCats, ...Object.keys(catInvocations)])];

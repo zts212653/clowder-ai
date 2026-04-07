@@ -332,7 +332,10 @@ describe('POST /api/callbacks/start-vote', () => {
       },
       invocationTracker: {
         start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
         has: () => false,
         getActiveSlots: () => [],
       },
@@ -395,7 +398,10 @@ describe('POST /api/callbacks/start-vote', () => {
       },
       invocationTracker: {
         start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
         has: () => false,
         getActiveSlots: () => [],
       },

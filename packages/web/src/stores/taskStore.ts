@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export interface TaskItem {
   id: string;
+  kind: 'work' | 'pr_tracking';
   threadId: string;
   title: string;
   ownerCatId: string | null;

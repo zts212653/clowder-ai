@@ -342,10 +342,17 @@ export function CliOutputBlock({
   const prevStatusRef = useRef(status);
   useEffect(() => {
     if (prevStatusRef.current === 'streaming' && status !== 'streaming' && !userInteracted.current) {
-      setExpanded(false);
+      setExpanded(defaultExpanded);
     }
     prevStatusRef.current = status;
-  }, [status]);
+  }, [status, defaultExpanded]);
+
+  // Sync expanded state when defaultExpanded prop changes (e.g. async config load)
+  useEffect(() => {
+    if (!userInteracted.current) {
+      setExpanded(forceExpanded || defaultExpanded);
+    }
+  }, [defaultExpanded, forceExpanded]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: expanded is intentional — dispatch on toggle
   useLayoutEffect(() => {

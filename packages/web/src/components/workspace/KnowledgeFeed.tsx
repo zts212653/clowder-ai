@@ -112,7 +112,7 @@ export function KnowledgeFeed() {
 
   const tabs: Array<{ key: FeedTab; label: string; count?: number }> = [
     { key: 'review', label: '待确认', count: data?.needsReview.length },
-    { key: 'settled', label: '已沉淀', count: data?.settled.length },
+    { key: 'settled', label: '已确认', count: data?.settled.length },
     { key: 'frequent', label: '高频' },
     { key: 'upgrade', label: '升级' },
   ];
@@ -224,7 +224,7 @@ function KnowledgeCard({
         </span>
         {tab === 'settled' && (
           <span className="text-[9px] font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-            <span>&#10003;</span> 已沉淀
+            <span>&#10003;</span> 已确认
           </span>
         )}
       </div>

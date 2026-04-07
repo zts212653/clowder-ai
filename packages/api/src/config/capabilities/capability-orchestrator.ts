@@ -506,6 +506,42 @@ export function migrateResolverBackedCapabilities(config: CapabilitiesConfig): {
   return { migrated: true, config: { ...config, capabilities } };
 }
 
+/**
+ * F145 Phase C: Ensure the cat-cafe main server (index.js, hosts limb tools)
+ * exists alongside split servers. Handles upgrades from pre-AC-C3 installs
+ * where only split servers were bootstrapped.
+ */
+export function ensureCatCafeMainServer(
+  config: CapabilitiesConfig,
+  opts?: { catCafeRepoRoot?: string; projectRoot?: string },
+): { migrated: boolean; config: CapabilitiesConfig } {
+  const projectRoot = opts?.catCafeRepoRoot ?? opts?.projectRoot;
+  if (!projectRoot) return { migrated: false, config };
+
+  const splitSet = new Set<string>(CAT_CAFE_SPLIT_SERVER_IDS);
+  const hasSplit = config.capabilities.some((cap) => splitSet.has(cap.id));
+  if (!hasSplit) return { migrated: false, config };
+
+  const hasMain = config.capabilities.some((cap) => cap.type === 'mcp' && cap.id === 'cat-cafe');
+  if (hasMain) return { migrated: false, config };
+
+  // Inherit enabled/overrides/env/workingDir from the first split server,
+  // so we don't re-enable a server the user explicitly disabled.
+  const firstSplit = config.capabilities.find((cap) => splitSet.has(cap.id));
+  const mainEntry = toCapabilityEntry(buildCatCafeMcpDescriptor(projectRoot));
+  if (firstSplit) {
+    mainEntry.enabled = firstSplit.enabled;
+    if (firstSplit.overrides) mainEntry.overrides = firstSplit.overrides.map((o) => ({ ...o }));
+    if (firstSplit.mcpServer?.env) mainEntry.mcpServer!.env = { ...firstSplit.mcpServer.env };
+    if (firstSplit.mcpServer?.workingDir) mainEntry.mcpServer!.workingDir = firstSplit.mcpServer.workingDir;
+  }
+  const firstSplitIdx = config.capabilities.findIndex((cap) => splitSet.has(cap.id));
+  const capabilities = [...config.capabilities];
+  capabilities.splice(firstSplitIdx, 0, mainEntry);
+
+  return { migrated: true, config: { ...config, capabilities } };
+}
+
 // ────────── Bootstrap: Create initial capabilities.json ──────────
 
 /**
@@ -517,13 +553,15 @@ export async function bootstrapCapabilities(
   discoveryPaths: DiscoveryPaths,
   opts?: { catCafeRepoRoot?: string },
 ): Promise<CapabilitiesConfig> {
-  const catCafeServers = buildCatCafeSplitMcpDescriptors(opts?.catCafeRepoRoot ?? projectRoot);
+  const catCafeRepoRoot = opts?.catCafeRepoRoot ?? projectRoot;
+  const catCafeServers = buildCatCafeSplitMcpDescriptors(catCafeRepoRoot);
   const externals = await discoverExternalMcpServers(discoveryPaths);
 
   const capabilities: CapabilityEntry[] = [];
 
-  // Add Cat Cafe's own MCP (split servers)
-  for (const entry of buildSplitCapabilityEntries(opts?.catCafeRepoRoot ?? projectRoot)) {
+  // Add Cat Cafe's own MCP (main server + split servers)
+  capabilities.push(toCapabilityEntry(buildCatCafeMcpDescriptor(catCafeRepoRoot)));
+  for (const entry of buildSplitCapabilityEntries(catCafeRepoRoot)) {
     capabilities.push(entry);
   }
 
@@ -711,13 +749,12 @@ export async function orchestrate(
   if (!config) {
     config = await bootstrapCapabilities(projectRoot, discoveryPaths, opts);
   } else {
-    const migrated = migrateLegacyCatCafeCapability(
-      config,
-      opts?.catCafeRepoRoot ? { projectRoot, catCafeRepoRoot: opts.catCafeRepoRoot } : { projectRoot },
-    );
+    const rootOpts = opts?.catCafeRepoRoot ? { projectRoot, catCafeRepoRoot: opts.catCafeRepoRoot } : { projectRoot };
+    const migrated = migrateLegacyCatCafeCapability(config, rootOpts);
     const resolverMigrated = migrateResolverBackedCapabilities(migrated.config);
-    config = resolverMigrated.config;
-    if (migrated.migrated || resolverMigrated.migrated) {
+    const mainServerMigrated = ensureCatCafeMainServer(resolverMigrated.config, rootOpts);
+    config = mainServerMigrated.config;
+    if (migrated.migrated || resolverMigrated.migrated || mainServerMigrated.migrated) {
       await writeCapabilitiesConfig(projectRoot, config);
     }
   }

@@ -11,15 +11,19 @@
  */
 
 import type { CatId, SealResult, SessionStatus } from '@cat-cafe/shared';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
+import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { buildThreadMemory } from './buildThreadMemory.js';
+import { extractDecisionSignals } from './extractDecisionSignals.js';
 import { generateHandoffDigest } from './HandoffDigestGenerator.js';
 import { formatEventsChat, formatEventsHandoff } from './TranscriptFormatter.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1, TranscriptWriter } from './TranscriptWriter.js';
 
+const log = createModuleLogger('session-sealer');
 const FINALIZE_TIMEOUT_MS = 30_000;
 
 export type SealReason = 'threshold' | 'manual' | 'error' | (string & {});
@@ -79,6 +83,7 @@ export class SessionSealer implements ISessionSealer {
     private readonly transcriptReader?: TranscriptReader,
     private readonly getMaxPromptTokens?: (catId: CatId) => number,
     private readonly handoffConfig?: HandoffConfig,
+    private readonly summaryStore?: ISummaryStore,
   ) {}
 
   async requestSeal(args: { sessionId: string; reason: SealReason }): Promise<SealResult> {
@@ -107,6 +112,24 @@ export class SessionSealer implements ISessionSealer {
       return { accepted: false, status: updated?.status ?? 'sealed' };
     }
 
+    log.info(
+      { sessionId: args.sessionId, catId: record.catId, threadId: record.threadId, reason: args.reason },
+      'session seal requested',
+    );
+    getEventAuditLog()
+      .append({
+        type: AuditEventTypes.SEAL_REQUESTED,
+        threadId: record.threadId,
+        data: {
+          sessionId: args.sessionId,
+          catId: record.catId,
+          cliSessionId: record.cliSessionId,
+          reason: args.reason,
+          seq: record.seq,
+        },
+      })
+      .catch(() => {});
+
     return {
       accepted: true,
       status: 'sealing',
@@ -123,10 +146,11 @@ export class SessionSealer implements ISessionSealer {
 
     const now = Date.now();
 
+    let finalizeClean = false;
     try {
-      await withTimeout(this.doFinalize(record, now), FINALIZE_TIMEOUT_MS);
+      finalizeClean = await withTimeout(this.doFinalize(record, now), FINALIZE_TIMEOUT_MS);
     } catch (err) {
-      // Finalize timed out or threw — force-seal to prevent stuck sealing state.
+      // finalizeClean stays false — timeout or unexpected throw.
       getEventAuditLog()
         .append({
           type: AuditEventTypes.SEAL_FINALIZE_FAILED,
@@ -148,6 +172,34 @@ export class SessionSealer implements ISessionSealer {
         sealedAt: now,
         updatedAt: now,
       });
+      log.info(
+        {
+          sessionId: args.sessionId,
+          catId: record.catId,
+          threadId: record.threadId,
+          reason: record.sealReason,
+          partial: !finalizeClean,
+        },
+        finalizeClean
+          ? 'session seal finalized'
+          : 'session seal finalized (partial — transcript/digest may be missing)',
+      );
+      if (finalizeClean) {
+        getEventAuditLog()
+          .append({
+            type: AuditEventTypes.SEAL_FINALIZED,
+            threadId: record.threadId,
+            data: {
+              sessionId: args.sessionId,
+              catId: record.catId,
+              cliSessionId: record.cliSessionId,
+              reason: record.sealReason,
+              seq: record.seq,
+              sealedAt: now,
+            },
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       getEventAuditLog()
         .append({
@@ -176,9 +228,20 @@ export class SessionSealer implements ISessionSealer {
       if (s.status === 'sealing' && now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
         await this.store.update(s.id, {
           status: 'sealed',
+          sealReason: 'reconcile_stuck',
           sealedAt: now,
           updatedAt: now,
         });
+        log.info(
+          {
+            sessionId: s.id,
+            catId: s.catId,
+            threadId: s.threadId,
+            reason: 'reconcile_stuck',
+            stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
+          },
+          'session force-sealed by stuck reaper',
+        );
         getEventAuditLog()
           .append({
             type: AuditEventTypes.SEAL_FINALIZE_FAILED,
@@ -209,9 +272,20 @@ export class SessionSealer implements ISessionSealer {
       if (now - (s.updatedAt ?? s.createdAt) > maxAgeMs) {
         await this.store.update(s.id, {
           status: 'sealed',
+          sealReason: 'global_reaper',
           sealedAt: now,
           updatedAt: now,
         });
+        log.info(
+          {
+            sessionId: s.id,
+            catId: s.catId,
+            threadId: s.threadId,
+            reason: 'global_reaper',
+            stuckDurationMs: now - (s.updatedAt ?? s.createdAt),
+          },
+          'session force-sealed by global reaper',
+        );
         getEventAuditLog()
           .append({
             type: AuditEventTypes.SEAL_FINALIZE_FAILED,
@@ -230,10 +304,16 @@ export class SessionSealer implements ISessionSealer {
     return count;
   }
 
+  /**
+   * Returns true if all best-effort steps succeeded, false if any threw.
+   * Callers use this to decide whether to emit SEAL_FINALIZED (clean) or log partial.
+   */
   private async doFinalize(
     record: { id: string; threadId: string; catId: string; cliSessionId: string; seq: number; createdAt: number },
     now: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let clean = true;
+
     // Phase C: Flush transcript + index + extractive digest
     if (this.transcriptWriter) {
       try {
@@ -248,6 +328,7 @@ export class SessionSealer implements ISessionSealer {
           { createdAt: record.createdAt, sealedAt: now },
         );
       } catch {
+        clean = false;
         // best-effort: transcript flush failure doesn't prevent sealing
       }
     }
@@ -261,10 +342,20 @@ export class SessionSealer implements ISessionSealer {
           // KD-5 dynamic cap: min(3000, floor(maxPromptTokens * 0.03)), floor 1200
           const maxPrompt = this.getMaxPromptTokens?.(record.catId as CatId) ?? 180000;
           const maxTokens = Math.max(1200, Math.min(3000, Math.floor(maxPrompt * 0.03)));
-          const updated = buildThreadMemory(existingMemory, digest as unknown as ExtractiveDigestV1, maxTokens);
+
+          // VG-3: Extract decision signals from transcript + summary (best-effort)
+          const signals = await this.extractSignals(record);
+
+          const updated = buildThreadMemory(
+            existingMemory,
+            digest as unknown as ExtractiveDigestV1,
+            maxTokens,
+            signals,
+          );
           await this.threadStore.updateThreadMemory(record.threadId, updated);
         }
       } catch {
+        clean = false;
         // best-effort: thread memory update failure doesn't prevent sealing
       }
     }
@@ -308,8 +399,47 @@ export class SessionSealer implements ISessionSealer {
           }
         }
       } catch {
+        clean = false;
         // best-effort: handoff digest failure doesn't prevent sealing
       }
+    }
+
+    return clean;
+  }
+
+  /**
+   * VG-3: Best-effort extraction of decision signals from transcript events + ThreadSummary.
+   * Returns undefined if extraction fails or no data available.
+   */
+  private async extractSignals(record: {
+    id: string;
+    threadId: string;
+    catId: string;
+  }): Promise<ReturnType<typeof extractDecisionSignals> | undefined> {
+    try {
+      // Build transcript text from events
+      const events = await this.transcriptReader!.readAllEvents(record.id, record.threadId, record.catId);
+      const chatMessages = formatEventsChat(events);
+      const transcriptText = chatMessages.map((m) => m.content).join('\n');
+
+      // Get latest ThreadSummary conclusions (if summaryStore available)
+      let summaryConclusions: string[] = [];
+      let summaryOpenQuestions: string[] = [];
+      if (this.summaryStore) {
+        const summaries = await this.summaryStore.listByThread(record.threadId);
+        if (summaries.length > 0) {
+          const latest = summaries[summaries.length - 1];
+          summaryConclusions = [...latest.conclusions];
+          summaryOpenQuestions = [...latest.openQuestions];
+        }
+      }
+
+      if (!transcriptText && summaryConclusions.length === 0 && summaryOpenQuestions.length === 0) return undefined;
+
+      return extractDecisionSignals({ transcriptText, summaryConclusions, summaryOpenQuestions });
+    } catch {
+      // Fail-open: decision extraction failure doesn't affect sealing
+      return undefined;
     }
   }
 }

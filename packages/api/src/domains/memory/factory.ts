@@ -1,6 +1,10 @@
 // F102: Memory service factory — creates SQLite-backed memory services
 
+import { mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { EmbeddingService } from './EmbeddingService.js';
+import { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
 import { type ExcludeThreadIdsFn, IndexBuilder, type MessageListFn, type ThreadListFn } from './IndexBuilder.js';
 import type {
   EmbedConfig,
@@ -32,6 +36,8 @@ export interface MemoryServices {
   materializationService?: IMaterializationService;
   embeddingService?: IEmbeddingService;
   vectorStore?: VectorStore;
+  /** F-4: Global knowledge index builder (Skills + MEMORY.md) */
+  globalIndexBuilder?: GlobalIndexBuilder;
 }
 
 export interface MemoryConfig {
@@ -52,6 +58,12 @@ export interface MemoryConfig {
   messageListFn?: MessageListFn;
   /** Callback returning thread IDs to exclude from session digest indexing (e.g. game threads) */
   excludeThreadIdsFn?: ExcludeThreadIdsFn;
+  /** F-4: path to global knowledge SQLite (default: ~/.cat-cafe/global_knowledge.sqlite) */
+  globalDbPath?: string;
+  /** F-4: Skills root directory (default: ~/.claude/skills/) */
+  skillsRoot?: string;
+  /** F-4: Claude projects memory root (default: ~/.claude/projects/) */
+  memoryRoot?: string;
 }
 
 export async function createMemoryServices(config: MemoryConfig): Promise<MemoryServices> {
@@ -107,11 +119,32 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   }
 
   const markerQueue = new MarkerQueue(markersDir);
-  const materializationService = new MaterializationService(markerQueue, docsRoot);
+  const materializationService = new MaterializationService(markerQueue, docsRoot, indexBuilder);
   const reflectionService = new ReflectionService(
     async () => '[reflect not configured — use search_evidence to find project knowledge]',
   );
-  const knowledgeResolver = new KnowledgeResolver({ projectStore: store });
+
+  // F-4: Global knowledge store (optional — fail-open if missing/broken)
+  let globalStore: SqliteEvidenceStore | undefined;
+  let globalIndexBuilder: GlobalIndexBuilder | undefined;
+  try {
+    const globalPath =
+      config.globalDbPath ??
+      process.env['GLOBAL_KNOWLEDGE_DB'] ??
+      join(homedir(), '.cat-cafe', 'global_knowledge.sqlite');
+    mkdirSync(dirname(globalPath), { recursive: true });
+    globalStore = new SqliteEvidenceStore(globalPath);
+    await globalStore.initialize();
+    globalIndexBuilder = new GlobalIndexBuilder({
+      skillsRoot: config.skillsRoot ?? join(homedir(), '.claude', 'skills'),
+      memoryRoot: config.memoryRoot ?? join(homedir(), '.claude', 'projects'),
+      globalStore,
+    });
+  } catch {
+    // fail-open: no global knowledge → project-only search
+  }
+
+  const knowledgeResolver = new KnowledgeResolver({ projectStore: store, globalStore });
 
   return {
     evidenceStore: store,
@@ -123,5 +156,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     materializationService,
     embeddingService,
     vectorStore,
+    globalIndexBuilder,
   };
 }

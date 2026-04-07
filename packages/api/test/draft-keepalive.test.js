@@ -259,27 +259,33 @@ describe('Issue #83: Draft keepalive timer', () => {
 });
 
 describe('Issue #83: /queue activeInvocations', () => {
-  it('InvocationTracker.getActiveSlots returns active catIds', async () => {
+  it('InvocationTracker.getActiveSlots returns {catId, startedAt} for active slots', async () => {
     const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
     const tracker = new InvocationTracker();
+    const catIds = (slots) => slots.map((s) => s.catId);
 
     // No active slots initially
     assert.deepEqual(tracker.getActiveSlots('thread-1'), []);
 
     // Start invocation
     tracker.start('thread-1', 'opus', 'user-1');
-    assert.deepEqual(tracker.getActiveSlots('thread-1'), ['opus']);
+    assert.deepEqual(catIds(tracker.getActiveSlots('thread-1')), ['opus']);
 
     // Start another cat
     tracker.start('thread-1', 'sonnet', 'user-1');
     const slots = tracker.getActiveSlots('thread-1');
-    assert.ok(slots.includes('opus'), 'Should include opus');
-    assert.ok(slots.includes('sonnet'), 'Should include sonnet');
+    const ids = catIds(slots);
+    assert.ok(ids.includes('opus'), 'Should include opus');
+    assert.ok(ids.includes('sonnet'), 'Should include sonnet');
     assert.equal(slots.length, 2, 'Should have exactly 2 active slots');
+    // Each slot has startedAt
+    for (const slot of slots) {
+      assert.equal(typeof slot.startedAt, 'number');
+    }
 
     // Complete one
     tracker.complete('thread-1', 'opus');
-    assert.deepEqual(tracker.getActiveSlots('thread-1'), ['sonnet']);
+    assert.deepEqual(catIds(tracker.getActiveSlots('thread-1')), ['sonnet']);
 
     // Complete all
     tracker.complete('thread-1', 'sonnet');

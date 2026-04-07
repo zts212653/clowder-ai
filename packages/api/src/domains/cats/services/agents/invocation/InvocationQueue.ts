@@ -82,9 +82,16 @@ export class InvocationQueue {
     const q = this.getOrCreate(key);
 
     // Check merge with tail — F134: connector messages never merge (different group senders could collide)
+    // Stale defense: never merge into a stale agent entry — its createdAt is too old
+    // for listAutoExecute() to pick up, so merging would silently swallow the new message.
     const tail = q.length > 0 ? q[q.length - 1] : null;
+    const isStaleTail =
+      tail?.source === 'agent' &&
+      tail.status === 'queued' &&
+      Date.now() - tail.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS;
     if (
       tail &&
+      !isStaleTail &&
       tail.status === 'queued' &&
       tail.source === input.source &&
       tail.source !== 'connector' &&
@@ -97,8 +104,13 @@ export class InvocationQueue {
       return { outcome: 'merged', entry: { ...tail }, queuePosition: q.indexOf(tail) + 1 };
     }
 
-    // Capacity check (only queued entries count)
-    const queuedCount = q.filter((e) => e.status === 'queued').length;
+    // Capacity check (only non-stale queued entries count)
+    const now = Date.now();
+    const queuedCount = q.filter(
+      (e) =>
+        e.status === 'queued' &&
+        !(e.source === 'agent' && now - e.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS),
+    ).length;
     if (queuedCount >= MAX_QUEUE_DEPTH) {
       return { outcome: 'full' };
     }
@@ -389,13 +401,19 @@ export class InvocationQueue {
     return result;
   }
 
-  /** F122B: Count queued+processing agent-sourced entries for a thread (depth tracking). */
+  /** F122B: Count queued+processing agent-sourced entries for a thread (depth tracking).
+   *  Stale defense: queued entries older than STALE_QUEUED_THRESHOLD_MS are excluded
+   *  so zombie entries don't eat up the A2A depth quota. */
   countAgentEntriesForThread(threadId: string): number {
+    const now = Date.now();
     let count = 0;
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
-        if (e.source === 'agent') count++;
+        if (e.source !== 'agent') continue;
+        // Exclude stale queued entries (zombie defense) — processing entries always count
+        if (e.status === 'queued' && now - e.createdAt >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) continue;
+        count++;
       }
     }
     return count;
@@ -403,12 +421,37 @@ export class InvocationQueue {
 
   /** F122B: Check if a specific cat already has a queued agent entry for this thread.
    *  Used by callback-a2a-trigger for dedup — only checks 'queued' so that new handoffs
-   *  can still be enqueued while an earlier entry is processing. */
+   *  can still be enqueued while an earlier entry is processing.
+   *
+   *  Stale defense: entries older than STALE_QUEUED_THRESHOLD_MS are ignored.
+   *  Without this, a zombie queued entry (e.g. from a canceled invocation that
+   *  didn't clean up) would permanently block all subsequent @mentions for that
+   *  cat in that thread until server restart. */
   hasQueuedAgentForCat(threadId: string, catId: string): boolean {
+    const now = Date.now();
     for (const [key, q] of this.queues) {
       if (!key.startsWith(`${threadId}:`)) continue;
       for (const e of q) {
-        if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) return true;
+        if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) {
+          const queuedAge = now - e.createdAt;
+          if (queuedAge >= InvocationQueue.STALE_QUEUED_THRESHOLD_MS) {
+            this.log?.warn(
+              {
+                threadId,
+                catId,
+                matchedEntry: {
+                  entryId: e.id,
+                  status: e.status,
+                  queuedAgeMs: queuedAge,
+                  userId: key.split(':')[1] ?? '',
+                },
+              },
+              '[DIAG] hasQueuedAgentForCat: ignoring stale queued entry (zombie defense)',
+            );
+            continue;
+          }
+          return true;
+        }
       }
     }
     return false;

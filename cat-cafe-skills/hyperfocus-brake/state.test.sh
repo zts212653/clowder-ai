@@ -378,7 +378,90 @@ test_bypass_escalation_cooldown() {
   teardown
 }
 
-# Test 15: night_mode 检测
+# Test 15: touch_user_heartbeat 写入心跳
+test_touch_user_heartbeat() {
+  setup
+  source "$STATE_SCRIPT"
+
+  touch_user_heartbeat
+
+  if [[ ! -f "$HEARTBEAT_FILE" ]]; then
+    echo "FAIL: heartbeat file should exist after touch_user_heartbeat"
+    teardown
+    return 1
+  fi
+
+  local beat
+  beat=$(cat "$HEARTBEAT_FILE")
+  local now
+  now=$(date +%s)
+  local diff=$((now - beat))
+
+  if [[ $diff -gt 2 ]]; then
+    echo "FAIL: heartbeat should be within 2s of now, got diff=$diff"
+    teardown
+    return 1
+  fi
+
+  echo "✓ test_touch_user_heartbeat"
+  teardown
+}
+
+# Test 16: is_human_active 返回 true（心跳新鲜）
+test_is_human_active_recent() {
+  setup
+  source "$STATE_SCRIPT"
+
+  touch_user_heartbeat
+
+  if ! is_human_active; then
+    echo "FAIL: should be active right after heartbeat"
+    teardown
+    return 1
+  fi
+
+  echo "✓ test_is_human_active_recent"
+  teardown
+}
+
+# Test 17: is_human_active 返回 false（心跳过期）
+test_is_human_active_stale() {
+  setup
+  source "$STATE_SCRIPT"
+
+  _resolve_heartbeat_file
+  # 写入 20 分钟前的时间戳
+  echo $(($(date +%s) - 1200)) > "$HEARTBEAT_FILE"
+
+  if is_human_active; then
+    echo "FAIL: should NOT be active with 20min old heartbeat"
+    teardown
+    return 1
+  fi
+
+  echo "✓ test_is_human_active_stale"
+  teardown
+}
+
+# Test 18: is_human_active 无心跳文件默认 true（首次运行）
+test_is_human_active_no_file() {
+  setup
+  source "$STATE_SCRIPT"
+
+  _resolve_heartbeat_file
+  rm -f "$HEARTBEAT_FILE"
+
+  if ! is_human_active; then
+    echo "FAIL: should default to active when no heartbeat file exists"
+    teardown
+    return 1
+  fi
+
+  echo "✓ test_is_human_active_no_file"
+  teardown
+}
+
+# Test 19: night_mode 检测
 test_night_mode_detection() {
   setup
   source "$STATE_SCRIPT"
@@ -415,6 +498,10 @@ run_all_tests() {
   test_wrap_up_uses_10min_cooldown || ((failed++))
   test_cross_session_sharing || ((failed++))
   test_bypass_escalation_cooldown || ((failed++))
+  test_touch_user_heartbeat || ((failed++))
+  test_is_human_active_recent || ((failed++))
+  test_is_human_active_stale || ((failed++))
+  test_is_human_active_no_file || ((failed++))
   test_night_mode_detection || ((failed++))
 
   echo ""

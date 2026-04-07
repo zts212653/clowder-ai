@@ -107,7 +107,7 @@ interface TreeNode {
   children?: TreeNode[];
 }
 
-const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git', '.turbo', 'coverage']);
+const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git', '.turbo', 'coverage', '.claude']);
 
 interface WorkspaceSearchResult {
   path: string;
@@ -136,6 +136,9 @@ async function listWorkspaceFiles(root: string): Promise<string[]> {
       '-not',
       '-path',
       '*/dist/*',
+      '-not',
+      '-path',
+      `${root}/.claude/*`,
       '-not',
       '-path',
       '*/secrets/*',
@@ -470,6 +473,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };
       }
+      request.log.error({ err: e }, 'workspace search failed');
       reply.status(500);
       return { error: 'Internal error' };
     }

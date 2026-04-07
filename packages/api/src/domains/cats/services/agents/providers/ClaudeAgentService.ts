@@ -203,7 +203,7 @@ export class ClaudeAgentService implements AgentService {
       '--model',
       cliModel,
       '--effort',
-      getCatEffort(this.catId as string),
+      getCatEffort(this.catId as string, undefined, 'anthropic'),
       '--permission-mode',
       PERMISSION_MODE,
       // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.

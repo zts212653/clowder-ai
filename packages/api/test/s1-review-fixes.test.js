@@ -261,12 +261,23 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
         ctrl.abort();
         return ctrl;
       },
+      tryStartThreadAll: () => {
+        const ctrl = new AbortController();
+        ctrl.abort();
+        return ctrl;
+      },
       start: () => {
         const ctrl = new AbortController();
         ctrl.abort();
         return ctrl;
       },
+      startAll: () => {
+        const ctrl = new AbortController();
+        ctrl.abort();
+        return ctrl;
+      },
       complete: () => {},
+      completeAll: () => {},
     };
 
     const threadStore = {

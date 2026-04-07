@@ -30,6 +30,7 @@ declare -F frontend_launch_command >/dev/null
 declare -F default_redis_storage_key >/dev/null
 declare -F default_redis_data_dir >/dev/null
 declare -F default_redis_backup_dir >/dev/null
+declare -F maybe_quarantine_stale_aof_dir >/dev/null
 printf 'ok'
 `,
   );
@@ -368,6 +369,116 @@ test('redis snapshot archive failure warns and does not abort startup flow', () 
     assert.match(result.stdout, /ok$/);
   } finally {
     chmodSync(backupDir, 0o700);
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('stale AOF guard quarantines tiny old appendonlydir before cold start', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-stale-aof-'));
+  const dataDir = join(tempRoot, 'data');
+  const backupDir = join(tempRoot, 'backup');
+
+  try {
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+mkdir -p "${dataDir}/appendonlydir" "${backupDir}"
+REDIS_STORAGE_KEY=test-6399
+REDIS_DATA_DIR="${dataDir}"
+REDIS_BACKUP_DIR="${backupDir}"
+REDIS_DBFILE=dump.rdb
+dd if=/dev/zero of="${dataDir}/dump.rdb" bs=1024 count=2048 >/dev/null 2>&1
+printf 'file appendonly.aof.1.base.rdb seq 1 type b\\n' > "${dataDir}/appendonlydir/appendonly.aof.manifest"
+touch -t 202401010000 "${dataDir}/appendonlydir/appendonly.aof.manifest"
+touch "${dataDir}/dump.rdb"
+maybe_quarantine_stale_aof_dir >/dev/null
+if [ -d "${dataDir}/appendonlydir" ]; then
+  printf 'dir-present'
+elif compgen -G "${backupDir}/stale-aof-test-6399-*" >/dev/null; then
+  printf 'moved'
+else
+  printf 'missing-backup'
+fi
+`,
+    );
+
+    assert.equal(output, 'moved');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('stale AOF guard keeps appendonlydir when base size is proportional to dump', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-healthy-aof-'));
+  const dataDir = join(tempRoot, 'data');
+  const backupDir = join(tempRoot, 'backup');
+
+  try {
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+mkdir -p "${dataDir}/appendonlydir" "${backupDir}"
+REDIS_STORAGE_KEY=test-6399
+REDIS_DATA_DIR="${dataDir}"
+REDIS_BACKUP_DIR="${backupDir}"
+REDIS_DBFILE=dump.rdb
+dd if=/dev/zero of="${dataDir}/dump.rdb" bs=1024 count=2048 >/dev/null 2>&1
+dd if=/dev/zero of="${dataDir}/appendonlydir/appendonly.aof.1.base.rdb" bs=1024 count=1024 >/dev/null 2>&1
+dd if=/dev/zero of="${dataDir}/appendonlydir/appendonly.aof.1.incr.aof" bs=1024 count=256 >/dev/null 2>&1
+touch -t 202401010000 "${dataDir}/appendonlydir/appendonly.aof.1.incr.aof"
+touch -t 202401010000 "${dataDir}/appendonlydir/appendonly.aof.1.base.rdb"
+touch "${dataDir}/dump.rdb"
+maybe_quarantine_stale_aof_dir >/dev/null
+if [ -d "${dataDir}/appendonlydir" ]; then
+  printf 'kept'
+else
+  printf 'moved'
+fi
+`,
+    );
+
+    assert.equal(output, 'kept');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('stale AOF guard quarantines tiny base even when incr AOF exists', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-stale-aof-incr-'));
+  const dataDir = join(tempRoot, 'data');
+  const backupDir = join(tempRoot, 'backup');
+
+  try {
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
+mkdir -p "${dataDir}/appendonlydir" "${backupDir}"
+REDIS_STORAGE_KEY=test-6399
+REDIS_DATA_DIR="${dataDir}"
+REDIS_BACKUP_DIR="${backupDir}"
+REDIS_DBFILE=dump.rdb
+dd if=/dev/zero of="${dataDir}/dump.rdb" bs=1024 count=2048 >/dev/null 2>&1
+dd if=/dev/zero of="${dataDir}/appendonlydir/appendonly.aof.1.base.rdb" bs=1 count=88 >/dev/null 2>&1
+dd if=/dev/zero of="${dataDir}/appendonlydir/appendonly.aof.1.incr.aof" bs=1024 count=256 >/dev/null 2>&1
+touch -t 202401010000 "${dataDir}/appendonlydir/appendonly.aof.1.base.rdb"
+touch -t 202401010000 "${dataDir}/appendonlydir/appendonly.aof.1.incr.aof"
+touch "${dataDir}/dump.rdb"
+maybe_quarantine_stale_aof_dir >/dev/null
+if [ -d "${dataDir}/appendonlydir" ]; then
+  printf 'dir-present'
+elif compgen -G "${backupDir}/stale-aof-test-6399-*" >/dev/null; then
+  printf 'moved'
+else
+  printf 'missing-backup'
+fi
+`,
+    );
+
+    assert.equal(output, 'moved');
+  } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
 });

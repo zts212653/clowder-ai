@@ -121,7 +121,6 @@ vi.mock('@/components/ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('@/components/RightStatusPanel', () => ({ RightStatusPanel: () => null }));
 vi.mock('@/components/ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
 vi.mock('@/components/ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
-vi.mock('@/components/A2ACollapsible', () => ({ A2ACollapsible: () => null }));
 vi.mock('@/components/ConfirmDialog', () => ({ ConfirmDialog: () => null }));
 vi.mock('@/components/MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('@/components/MessageActions', () => ({

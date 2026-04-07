@@ -44,8 +44,11 @@ function buildDeps(overrides = {}) {
     },
     invocationTracker: {
       start: mock.fn(() => new AbortController()),
+      startAll: mock.fn(() => new AbortController()),
       tryStartThread: mock.fn(() => new AbortController()),
+      tryStartThreadAll: mock.fn(() => new AbortController()),
       complete: mock.fn(),
+      completeAll: mock.fn(),
       // Slot-aware has(): thread-level returns true (opus busy), slot-level varies
       has: mock.fn((threadId, catId) => {
         if (catId === 'opus') return true; // opus is busy
@@ -55,7 +58,7 @@ function buildDeps(overrides = {}) {
       }),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
       isDeleting: mock.fn(() => false),
-      getActiveSlots: mock.fn(() => ['opus']),
+      getActiveSlots: mock.fn(() => [{ catId: 'opus', startedAt: Date.now() }]),
     },
     invocationRecordStore: {
       create: mock.fn(async () => ({

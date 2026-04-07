@@ -67,18 +67,20 @@ L3 不直接写入 L1，内部拆成三个状态面：
 
 在进入实现前，先完成一轮云端咨询调研，避免我们在“看起来相似”的生态接口上误判。
 
-调研聚焦四个问题：
+调研聚焦六个问题：
 
 1. Claude / Codex / OpenClaw / Antigravity 的插件/连接器格式交集有多大
 2. 哪些生态支持“程序化发布/安装 API”，哪些只支持 UI/CLI 手工路径
 3. 能否安全地做统一 adapter（最小公共字段 + 各家扩展字段）
 4. 供应链风险最小化策略（官方认证、签名、审核、安装门禁）
 5. 外部文档 URL 有效性与内容一致性（防止基于失效链接立项）
+6. F129 Pack 与 marketplace 条目模型如何一一映射（Pack 作为 L3 可分发单元）
 
 产物：
 - 跨生态 schema 对照矩阵
 - adapter 可行性结论（直接可做 / 需降级 / 不建议）
 - Phase A-B 的实现边界收敛稿
+- F129 Pack ↔ Marketplace 条目映射契约（字段与 installPlan 对齐）
 
 ### Phase A: 能力中心写路径（One-click Add/Remove MCP）
 
@@ -118,9 +120,14 @@ L3 不直接写入 L1，内部拆成三个状态面：
 统一输出模型：
 - `packageId`
 - `ecosystem` (`codex`/`claude`/`openclaw`/`antigravity`)
-- `kind` (`mcp`/`plugin`/`bundle`/`connector`)
+- `kind` (`mcp`/`plugin`/`bundle`/`connector`/`pack`)
 - `trustLevel` (`official`/`verified`/`community`)
 - `installPlan`（最终映射为 L1 MCP entry 或 L2/L3 扩展）
+
+承接边界（与 F129 对齐）：
+- F146 负责 Marketplace / Registry 的发现、分发与治理（owner）
+- F129 负责 Pack 生产、编译与运行时消费（producer + consumer）
+- F129 Phase C 的 “社区 Registry/Marketplace” 由 F146 承接；F129 通过 F146 Marketplace 被发现与安装
 
 ### Phase C: 安装治理与安全门禁
 
@@ -138,6 +145,23 @@ L3 不直接写入 L1，内部拆成三个状态面：
 3. 禁止 install-time scripts 自动执行（默认 deny）
 4. schema validation 先于执行（manifest/entry 校验不过不安装）
 5. 声明态 vs 实测态 diff gate（声明可用但 probe 失败不得标 ready）
+
+Skill 内容安全（防下毒）：
+
+外来 SKILL.md 是自然语言 prompt，加载后直接成为猫的 system prompt 一部分。这是 MCP 代码层安全工具扫不到的攻击面。
+
+1. **SKILL.md 内容安全扫描**
+   - 安装外来 skill 时，先做 prompt injection 检测（关键词 + 语义审查）
+   - 标记危险模式：要求忽略安全规则、要求发送数据到外部 URL、要求修改系统配置、要求读取 .env/credentials
+   - 检测不通过 → 标记 `quarantined`，不允许激活
+2. **外来 skill 权限隔离**
+   - 外来 skill 不允许访问 capabilities.json 写路径
+   - 外来 skill 不允许触发其他 skill（防链式提权）
+   - 外来 skill 的工具调用不能 auto-allow，必须逐次 permission 确认
+3. **Quarantine 状态机**
+   - `pending_review` → `approved` / `quarantined` / `rejected`
+   - `quarantined` 的 skill 可以查看内容但不能激活
+   - 只有team lead或审核猫显式 approve 才能从 quarantined 变 approved
 
 版本管理：
 
@@ -181,6 +205,7 @@ L3 不直接写入 L1，内部拆成三个状态面：
 - [ ] AC-R3: 给出统一 adapter 最小字段集（必填）+ 各生态扩展字段（可选）
 - [ ] AC-R4: 形成“先做什么、不做什么”的实施收敛结论并回写 F146
 - [ ] AC-R5: 外部文档 URL 逐条验真（可访问 + 内容匹配），形成证据表
+- [ ] AC-R6: 形成 F129 Pack ↔ Marketplace 条目映射契约（kind/metadata/installPlan 对齐）
 
 ### Phase A（能力中心写路径）
 - [ ] AC-A1: Hub 可通过 UI 新增 MCP（无需手改 `capabilities.json`）
@@ -196,6 +221,7 @@ L3 不直接写入 L1，内部拆成三个状态面：
 - [ ] AC-B3: 能把 marketplace 条目映射成可执行 `installPlan`
 - [ ] AC-B4: 支持统一搜索接口返回 Antigravity 结果（至少 discovery + metadata）
 - [ ] AC-B5: Antigravity 结果与现有 `pencil` resolver 策略保持一致性（不互相冲突）
+- [ ] AC-B6: 统一搜索结果支持 `kind=pack`，可发现并安装来自 F129 产出的 Pack
 
 ### Phase C（治理与版本）
 - [ ] AC-C1: 默认策略阻止一键安装 `community` 包（需二次确认）
@@ -204,6 +230,12 @@ L3 不直接写入 L1，内部拆成三个状态面：
 - [ ] AC-C4: 禁止未通过 probe 的 MCP 直接显示 ready
 - [ ] AC-C5: 禁止 install-time scripts（除非显式审批）
 - [ ] AC-C6: 声明态与实测态出现 diff 时强制告警并阻断 ready
+- [ ] AC-C7: 外来 SKILL.md 安装时必须经过内容安全扫描（prompt injection 检测），不通过则标 `quarantined`
+- [ ] AC-C8: 外来 skill 权限隔离（不允许访问写路径、不允许触发其他 skill、工具调用需逐次确认）
+- [ ] AC-C9: quarantined skill 只有team lead或审核猫显式 approve 后才能激活
+- [ ] AC-C10: 外来 skill 安装时记录不可变指纹（source + version + hash/signature），运行前校验一致性，不一致自动降级 `quarantined`
+- [ ] AC-C11: 外来 skill 首次运行默认最小权限（dry-run/只读），涉及写文件、网络外发、高危工具必须二次确认
+- [ ] AC-C12: 一键 `revoke`（全端停用 + 清理挂载 + 禁止再次激活），60s 内传播到 Hub/CLI/connector 侧
 
 ### Phase D（联动体验）
 - [ ] AC-D1: Skills 页可从 `requires_mcp missing` 直接发起补齐
@@ -226,7 +258,11 @@ L3 不直接写入 L1，内部拆成三个状态面：
 | 三家生态概念不一致（plugin/bundle/connector） | 统一中间模型，禁止 UI 直接耦合源字段 |
 | 恶意包/供应链风险 | trustLevel 策略 + 安装审批 + 审计日志 + 默认 deny community auto-install |
 | 自动安装破坏本机环境 | preview/install 两阶段，先 dry-run 显示变更 |
-| 把 L3 当真相源导致状态漂移 | 明确“最终真相源只写 L1 capabilities” |
+| 把 L3 当真相源导致状态漂移 | 明确”最终真相源只写 L1 capabilities” |
+| Skill 下毒（SKILL.md prompt injection） | 内容安全扫描 + quarantine 状态机 + 外来 skill 权限隔离 |
+| 低质量/冒充 skill（名字像官方但无关） | trustLevel 过滤 + community 二次确认 + 来源追踪 |
+| 指纹漂移（安装后上游替换内容） | 运行前指纹校验 + 不一致自动 quarantine（AC-C10） |
+| 撤销传播延迟（已判恶意但仍可运行） | revoke SLA 60s + 全端停用（AC-C12） |
 
 ## Key Decisions
 
@@ -238,6 +274,7 @@ L3 不直接写入 L1，内部拆成三个状态面：
 | KD-4 | 三家生态先统一 discovery，再逐步统一 install | 降低首期复杂度与安全风险 | 2026-03-28 |
 | KD-5 | Antigravity 不是“可选”，首期必须纳入 discovery 与一致性约束 | 我们已有活跃 `pencil` 生态，不能与 F145 resolver 脱节 | 2026-03-28 |
 | KD-6 | Runtime Connect / OpenAI connectors 在本 feature 里降为 P2 | 对我们当前主路径不是首要堵点，避免 Phase A 扩 scope | 2026-03-28 |
+| KD-7 | 承接 F129 的 Marketplace/Registry owner 职责，Pack 纳入 L3 分发统一模型 | 避免双 Feature 重复建设分发层，明确 owner/consumer 边界 | 2026-04-04 |
 
 ## Review Gate
 

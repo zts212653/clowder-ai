@@ -234,18 +234,20 @@ export async function enqueueA2ATargets(
   const { invocationTracker } = deps;
   if (invocationTracker?.has(threadId)) {
     // Guard: shims may not implement getActiveSlots — fall back to empty (allow all)
-    const activeSlots = invocationTracker.getActiveSlots?.(threadId) ?? [];
-    const nonConflicting = targetCats.filter((catId) => !activeSlots.includes(catId));
+    const activeSlotIds = (invocationTracker.getActiveSlots?.(threadId) ?? []).map((s) =>
+      typeof s === 'string' ? s : s.catId,
+    );
+    const nonConflicting = targetCats.filter((catId) => !activeSlotIds.includes(catId));
     if (nonConflicting.length === 0) {
       log.info(
-        { threadId, targetCats, activeSlots },
+        { threadId, targetCats, activeSlotIds },
         '[F27] A2A fallback skipped: all targets already active in thread slots',
       );
       return { enqueued: [], fallback: true };
     }
     if (nonConflicting.length < targetCats.length) {
       log.info(
-        { threadId, targetCats, activeSlots, nonConflicting },
+        { threadId, targetCats, activeSlotIds, nonConflicting },
         '[F27] A2A fallback: filtered already-active targets, proceeding with remaining',
       );
     }
@@ -291,7 +293,9 @@ export async function triggerA2AInvocation(
   // are already covered by active slots (redundancy short-circuit).
   const parentActive = invocationTracker?.has(threadId) ?? false;
   if (parentActive) {
-    const activeCats = invocationTracker?.getActiveSlots?.(threadId) ?? [];
+    const activeCats = (invocationTracker?.getActiveSlots?.(threadId) ?? []).map((s) =>
+      typeof s === 'string' ? s : s.catId,
+    );
     // Redundant A2A short-circuit (砚砚 4ee660b defense-in-depth):
     // if parent already includes all targets, skip entirely.
     if (targetCats.length > 0 && targetCats.every((catId) => activeCats.includes(catId))) {

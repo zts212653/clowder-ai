@@ -73,12 +73,13 @@ function mockThreadStore() {
   };
 }
 
-function mockTrigger() {
+function mockTrigger(outcome = 'dispatched') {
   const calls = [];
   return {
     calls,
     trigger(threadId, catId, userId, message, messageId, policy) {
       calls.push({ threadId, catId, userId, message, messageId, policy });
+      return outcome;
     },
   };
 }
@@ -558,6 +559,40 @@ describe('ConnectorRouter', () => {
       assert.equal(fwdTrigger.calls.length, 1);
       assert.equal(fwdTrigger.calls[0].threadId, 'thread-target-1');
       assert.equal(fwdTrigger.calls[0].message, 'hi there');
+      // F151: forward path must NOT close the A2A task (delivery pipeline will)
+      assert.equal(batchDoneCalls.length, 0, 'forward path should not call onDeliveryBatchDone');
+    });
+
+    it('/thread forward closes task when target queue is full', async () => {
+      const fullTrigger = mockTrigger('full');
+      const fullSocket = mockSocketManager();
+      const fullStore = mockMessageStore();
+      const fullRouter = new ConnectorRouter({
+        bindingStore,
+        dedup: new InboundMessageDedup(),
+        messageStore: fullStore,
+        threadStore,
+        invokeTrigger: fullTrigger,
+        socketManager: fullSocket,
+        defaultUserId: 'owner-1',
+        defaultCatId: 'opus',
+        log: noopLog(),
+        commandLayer: mockCommandLayer({
+          '/thread': {
+            kind: 'thread',
+            response: '📨 已路由到 目标Thread',
+            newActiveThreadId: 'thread-target-1',
+            contextThreadId: 'thread-target-1',
+            forwardContent: 'hi there',
+          },
+        }),
+        adapters: new Map([['feishu', mockAdapter()]]),
+      });
+      const result = await fullRouter.route('feishu', 'chat-full', '/thread thread-target-1 hi there', 'ext-full-1');
+      assert.equal(result.kind, 'routed');
+      // When queue is full, router must close the task since no invocation will run
+      assert.equal(batchDoneCalls.length, 1, 'queue-full forward must close the A2A task');
+      assert.equal(batchDoneCalls[0].chainDone, true);
     });
 
     it('/thread command sends confirmation response to adapter', async () => {

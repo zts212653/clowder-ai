@@ -82,10 +82,20 @@ function makeGameStore(runtime, { stopAfterCalls = 50 } = {}) {
 
 function makeOrchestrator() {
   const calls = [];
+  const tickCalls = [];
+  const forceSettleCalls = [];
   return {
     calls,
+    tickCalls,
+    forceSettleCalls,
     async broadcastGameState(gameId) {
       calls.push(gameId);
+    },
+    async tick(gameId) {
+      tickCalls.push(gameId);
+    },
+    async forceSettle(gameId) {
+      forceSettleCalls.push(gameId);
     },
   };
 }
@@ -116,6 +126,28 @@ function makeActionNotifier() {
   };
 }
 
+function makeMessageStore() {
+  const appended = [];
+  return {
+    appended,
+    async append(message) {
+      const stored = { id: `msg-${appended.length + 1}`, threadId: message.threadId ?? 'default', ...message };
+      appended.push(stored);
+      return stored;
+    },
+  };
+}
+
+function makeSocketManager() {
+  const broadcasts = [];
+  return {
+    broadcasts,
+    broadcastToRoom(room, event, data) {
+      broadcasts.push({ room, event, data });
+    },
+  };
+}
+
 /** Extract narrative text from runtime.eventLog */
 function getNarrativeTexts(runtime) {
   return runtime.eventLog.filter((e) => e.type === 'narrative').map((e) => e.payload.text);
@@ -142,7 +174,7 @@ describe('GameNarratorDriver', () => {
 
   // --- Night phase ---
 
-  it('night phase: posts narrative, wakes wolf cats, waits for actions, posts close narrative', async () => {
+  it('night phase: posts narrative, wakes wolf cats, and waits for phase settlement', async () => {
     const driver = new GameNarratorDriver({ gameStore, orchestrator, wakeCat, actionNotifier });
     driver.startLoop('game-001');
 
@@ -151,15 +183,11 @@ describe('GameNarratorDriver', () => {
     driver.stopLoop('game-001');
     await new Promise((r) => setTimeout(r, 100));
 
-    // Should have posted narrative "狼人请睁眼" and then "狼人请闭眼" to eventLog
+    // Should have posted the public open narrative to eventLog.
     const narratives = getNarrativeTexts(runtime);
     assert.ok(
       narratives.some((n) => n.includes('狼人请睁眼')),
       'should post wolf open narrative',
-    );
-    assert.ok(
-      narratives.some((n) => n.includes('狼人请闭眼')),
-      'should post wolf close narrative',
     );
 
     // Should have woken the two wolf cats (P1=opus, P2=codex)
@@ -223,8 +251,8 @@ describe('GameNarratorDriver', () => {
 
   it('discuss phase: wakes alive seats sequentially in seat order (AC-I6)', async () => {
     const rt = makeRuntime({ currentPhase: 'day_discuss' });
-    // loop-top(1) + dawn narrative getGame(1) + 7 per-seat narrative getGames(7) = 9
-    const gs = makeGameStore(rt, { stopAfterCalls: 9 });
+    // loop-top(1) + dawn narrative(1) + 7 seats × (freshCheck + narrative)(14) = 16
+    const gs = makeGameStore(rt, { stopAfterCalls: 16 });
     const driver = new GameNarratorDriver({ gameStore: gs, orchestrator, wakeCat, actionNotifier });
     driver.startLoop('game-001');
     await new Promise((r) => setTimeout(r, 300));
@@ -252,7 +280,7 @@ describe('GameNarratorDriver', () => {
 
   it('discuss phase: posts per-seat narrative prompts', async () => {
     const rt = makeRuntime({ currentPhase: 'day_discuss' });
-    const gs = makeGameStore(rt, { stopAfterCalls: 9 });
+    const gs = makeGameStore(rt, { stopAfterCalls: 16 });
     const driver = new GameNarratorDriver({ gameStore: gs, orchestrator, wakeCat, actionNotifier });
     driver.startLoop('game-001');
     await new Promise((r) => setTimeout(r, 300));
@@ -400,7 +428,7 @@ describe('GameNarratorDriver', () => {
     for (const gameId of orchestrator.calls) {
       assert.equal(gameId, 'game-001', 'broadcast should target correct gameId');
     }
-    assert.ok(orchestrator.calls.length >= 2, 'should broadcast at least twice (open + close)');
+    assert.ok(orchestrator.calls.length >= 1, 'should broadcast at least once for the phase narrative');
   });
 
   it('postNarrative reads fresh state and increments version (OCC safe)', async () => {
@@ -418,6 +446,194 @@ describe('GameNarratorDriver', () => {
     for (const updated of gs.updates) {
       assert.ok(updated.version > initialVersion, 'each updateGame call should have incremented version');
     }
+  });
+
+  it('postNarrative dual-writes canonical system message and broadcasts game:narrative', async () => {
+    const messageStore = makeMessageStore();
+    const socketManager = makeSocketManager();
+    const driver = new GameNarratorDriver({
+      gameStore,
+      orchestrator,
+      wakeCat,
+      actionNotifier,
+      messageStore,
+      socketManager,
+    });
+
+    driver.startLoop('game-001');
+    await new Promise((r) => setTimeout(r, 200));
+    driver.stopLoop('game-001');
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.ok(messageStore.appended.length > 0, 'should persist narrative into thread history');
+    assert.equal(messageStore.appended[0].userId, 'system');
+    assert.equal(messageStore.appended[0].catId, 'system');
+    assert.ok(
+      socketManager.broadcasts.some((b) => b.event === 'game:narrative'),
+      'should emit game:narrative',
+    );
+  });
+
+  it('night phase calls forceSettle after waitForAllActions (single-clock P1 fix)', async () => {
+    const rt = makeRuntime({
+      definition: {
+        ...makeRuntime().definition,
+        phases: [{ name: 'night_wolf', type: 'night_action', actingRole: 'wolf', timeoutMs: 0, autoAdvance: true }],
+      },
+    });
+    const gs = makeGameStore(rt, { stopAfterCalls: 50 });
+    const timeoutNotifier = {
+      ...makeActionNotifier(),
+      waitForAllActions: async function (gameId, seatIds, timeout) {
+        this.calls.waitForAllActions.push({ gameId, seatIds, timeout });
+      },
+    };
+    const settlingOrchestrator = makeOrchestrator();
+    settlingOrchestrator.forceSettle = async (gameId) => {
+      settlingOrchestrator.forceSettleCalls.push(gameId);
+      rt.currentPhase = 'night_seer';
+    };
+
+    const driver = new GameNarratorDriver({
+      gameStore: gs,
+      orchestrator: settlingOrchestrator,
+      wakeCat,
+      actionNotifier: timeoutNotifier,
+    });
+
+    driver.startLoop('game-001');
+    await new Promise((r) => setTimeout(r, 250));
+    driver.stopLoop('game-001');
+    await new Promise((r) => setTimeout(r, 100));
+
+    const wolfOpenCount = getNarrativeTexts(rt).filter((text) => text.includes('狼人请睁眼')).length;
+    assert.equal(wolfOpenCount, 1, 'should only narrate wolf open once before phase advances');
+    assert.equal(
+      settlingOrchestrator.forceSettleCalls.length,
+      1,
+      'should call forceSettle (not tick) for phase advancement',
+    );
+    assert.equal(settlingOrchestrator.tickCalls.length, 0, 'should NOT use tick for night action settlement');
+    assert.equal(wakeCat.calls.length, 2, 'should not wake wolves twice');
+  });
+
+  it('night phase posts close narrative as system message after forceSettle', async () => {
+    const messageStore = makeMessageStore();
+    const socketManager = makeSocketManager();
+    const rt = makeRuntime();
+    const gs = makeGameStore(rt, { stopAfterCalls: 4 });
+    const settlingOrchestrator = makeOrchestrator();
+    settlingOrchestrator.forceSettle = async (gameId) => {
+      settlingOrchestrator.forceSettleCalls.push(gameId);
+    };
+
+    const driver = new GameNarratorDriver({
+      gameStore: gs,
+      orchestrator: settlingOrchestrator,
+      wakeCat,
+      actionNotifier,
+      messageStore,
+      socketManager,
+    });
+    driver.startLoop('game-001');
+    await new Promise((r) => setTimeout(r, 200));
+    driver.stopLoop('game-001');
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Close narrative "狼人请闭眼" should be in system messages, not in eventLog
+    const closeMessages = messageStore.appended.filter((m) => m.content.includes('请闭眼'));
+    assert.ok(closeMessages.length > 0, 'should send close narrative as system message');
+    assert.equal(closeMessages[0].userId, 'system', 'close narrative userId should be system');
+
+    // Close narrative should NOT be in eventLog
+    const closeInLog = getNarrativeTexts(rt).filter((t) => t.includes('请闭眼'));
+    assert.equal(closeInLog.length, 0, 'close narrative should NOT be in eventLog');
+  });
+
+  it('forceSettle no-ops when action route already advanced the phase (double-advance guard)', async () => {
+    const rt = makeRuntime({
+      definition: {
+        ...makeRuntime().definition,
+        phases: [
+          { name: 'night_wolf', type: 'night_action', actingRole: 'wolf', timeoutMs: 0, autoAdvance: true },
+          { name: 'night_seer', type: 'night_action', actingRole: 'seer', timeoutMs: 45000, autoAdvance: true },
+          { name: 'night_witch', type: 'night_action', actingRole: 'witch', timeoutMs: 45000, autoAdvance: true },
+        ],
+      },
+    });
+    const gs = makeGameStore(rt, { stopAfterCalls: 50 });
+    // Simulate: action route already advanced phase before narrator calls forceSettle
+    const raceNotifier = {
+      ...makeActionNotifier(),
+      waitForAllActions: async function (gameId, seatIds, timeout) {
+        this.calls.waitForAllActions.push({ gameId, seatIds, timeout });
+        // Simulate action route advancing the phase during the wait
+        rt.currentPhase = 'night_seer';
+      },
+    };
+    const phaseLog = [];
+    const settlingOrchestrator = makeOrchestrator();
+    settlingOrchestrator.forceSettle = async (gameId, expectedPhase) => {
+      settlingOrchestrator.forceSettleCalls.push({ gameId, expectedPhase });
+      phaseLog.push({ before: rt.currentPhase, expectedPhase });
+      // Real forceSettle would check expectedPhase — if mismatch, no-op
+      if (expectedPhase && rt.currentPhase !== expectedPhase) return;
+      // If no guard, this would wrongly advance night_seer → night_witch
+      rt.currentPhase = 'night_witch';
+    };
+
+    const driver = new GameNarratorDriver({
+      gameStore: gs,
+      orchestrator: settlingOrchestrator,
+      wakeCat,
+      actionNotifier: raceNotifier,
+    });
+
+    driver.startLoop('game-001');
+    await new Promise((r) => setTimeout(r, 250));
+    driver.stopLoop('game-001');
+    await new Promise((r) => setTimeout(r, 100));
+
+    // The first forceSettle call should carry expectedPhase='night_wolf'
+    assert.ok(settlingOrchestrator.forceSettleCalls.length >= 1, 'forceSettle should be called');
+    assert.equal(
+      settlingOrchestrator.forceSettleCalls[0].expectedPhase,
+      'night_wolf',
+      'narrator should pass the phase it was settling as expectedPhase',
+    );
+    // The first forceSettle should have been a no-op (phase already advanced by action route)
+    // Check phaseLog: the first call saw currentPhase=night_seer but expected night_wolf → mismatch → no advance
+    assert.equal(phaseLog[0].before, 'night_seer', 'first forceSettle saw phase already advanced to night_seer');
+    assert.equal(phaseLog[0].expectedPhase, 'night_wolf', 'first forceSettle expected night_wolf');
+    // The guard prevented the double-advance: night_seer was NOT advanced by the wolf forceSettle
+  });
+
+  it('system-driven resolve phases call orchestrator.tick instead of sleeping forever', async () => {
+    const rt = makeRuntime({
+      currentPhase: 'night_resolve',
+      definition: {
+        ...makeRuntime().definition,
+        phases: [{ name: 'night_resolve', type: 'resolve', timeoutMs: 0, autoAdvance: true }],
+      },
+    });
+    const gs = makeGameStore(rt, { stopAfterCalls: 50 });
+    const tickingOrchestrator = makeOrchestrator();
+    tickingOrchestrator.tick = async (gameId) => {
+      tickingOrchestrator.tickCalls.push(gameId);
+      rt.status = 'ended';
+    };
+
+    const driver = new GameNarratorDriver({
+      gameStore: gs,
+      orchestrator: tickingOrchestrator,
+      wakeCat,
+      actionNotifier,
+    });
+
+    driver.startLoop('game-001');
+    await new Promise((r) => setTimeout(r, 120));
+
+    assert.equal(tickingOrchestrator.tickCalls.length, 1, 'resolve phase should actively tick orchestrator');
   });
 
   // --- Game ended externally ---

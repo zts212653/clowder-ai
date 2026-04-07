@@ -127,6 +127,7 @@ triggers:
 | audio 写长段话 | 合成效果差 | 短句口语化，1-2 句 |
 | 只发 block 不写文字 | 猫猫朋友看不懂上下文 | 先 post_message 再 block |
 | `"type"` 而不是 `"kind"` | block 创建失败 | 字段是 `kind` 不是 `type` |
+| 播客生成超时就重复提交 | 产生多个重复 artifact | `signal_generate_podcast` 是异步落库——MCP 120s 超时 ≠ 任务失败，TTS 合成需 3-5 分钟。超时后用 `signal_list_studies` 检查 artifact 状态，不要重复调用 |
 
 ## 和其他 skill 的区别
 

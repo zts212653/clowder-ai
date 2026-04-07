@@ -8,7 +8,7 @@ created: 2026-02-26
 
 # F036: Logo 一笔画动画（Stroke Drawing Animation）
 
-> **Status**: done | **Owner**: 三猫
+> **Status**: done (partial) | **Owner**: 三猫
 > **Created**: 2026-02-26
 
 ## Why
@@ -19,6 +19,9 @@ created: 2026-02-26
 
 ## Acceptance Criteria
 - [ ] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
+## Closure Note
+Logo 替换+三猫渐变已完成（7 个 feat(F036) commit，`CatCafeLogo.tsx` 在用）。原始愿景 stroke-dashoffset 一笔画动画因工具链限制搁置（AI 画不出可用 SVG，autotrace 路径太杂）。2026-03-30 team lead确认以 partial 关闭，如未来需要 stroke animation 另开新 feature。
+
 ## Key Decisions
 - 历史记录未单列关键决策
 

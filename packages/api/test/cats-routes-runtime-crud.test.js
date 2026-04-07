@@ -264,6 +264,90 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.ok(mentions.includes('runtime-spark'), 'new alias should route immediately');
   });
 
+  it('POST /api/cats persists structured cli.effort for Codex members', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-codex-effort',
+        name: '运行时缅因猫',
+        displayName: '运行时缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-codex-effort'],
+        roleDescription: '审查',
+        client: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        cli: { command: 'codex', outputFormat: 'json', effort: 'xhigh' },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+    const createdBody = JSON.parse(createRes.body);
+    assert.equal(createdBody.cat.cli?.effort, 'xhigh');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listRes.statusCode, 200);
+    const listBody = JSON.parse(listRes.body);
+    const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-codex-effort');
+    assert.ok(runtimeCat, 'runtime-codex-effort should appear in /api/cats');
+    assert.equal(runtimeCat.cli?.effort, 'xhigh');
+
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const persisted = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const variant = persisted.breeds.find((breed) => breed.catId === 'runtime-codex-effort')?.variants?.[0];
+    assert.equal(variant?.cli?.effort, 'xhigh');
+  });
+
+  it('POST /api/cats rejects illegal provider/effort combinations', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-invalid-effort',
+        name: '非法缅因猫',
+        displayName: '非法缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-invalid-effort'],
+        roleDescription: '审查',
+        client: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        cli: { command: 'codex', outputFormat: 'json', effort: 'max' },
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400);
+    assert.match(JSON.parse(createRes.body).error, /effort/i);
+  });
+
   it('POST /api/cats falls back to the readable active project root when CAT_TEMPLATE_PATH is stale', async () => {
     const projectRoot = createMonorepoProjectRoot();
     const staleRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-stale-'));

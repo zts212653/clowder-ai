@@ -16,6 +16,7 @@ import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import {
   bootstrapDefaultCatCatalog,
+  getAcpConfig,
   getAllCatIdsFromConfig,
   getConfigSessionStrategy,
   isCatAvailable,
@@ -51,7 +52,7 @@ import {
   MemoryGovernanceStore,
   OpenCodeAgentService,
 } from './domains/cats/services/index.js';
-import { AutoSummarizer } from './domains/cats/services/orchestration/AutoSummarizer.js';
+
 import { initPushNotificationService } from './domains/cats/services/push/PushNotificationService.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
@@ -385,6 +386,7 @@ async function main(): Promise<void> {
     transcriptReader,
     (catId) => getCatContextBudget(catId).maxPromptTokens,
     handoffConfig,
+    summaryStore,
   );
 
   // F102: Memory services — SQLite-only
@@ -409,15 +411,15 @@ async function main(): Promise<void> {
     // Phase E-2: message passage indexing — provide a callback that reads thread messages
     messageListFn: async (threadId: string, limit?: number) => {
       const messages = await messageStore.getByThread(threadId, limit ?? 2000, 'default-user');
-      return messages.map(
-        (m: { id: string; content: string; catId?: string | null; threadId: string; timestamp: number }) => ({
+      return messages
+        .filter((m: { origin?: string }) => m.origin !== 'briefing') // F148 Phase E (AC-E2): exclude briefing from evidence index
+        .map((m: { id: string; content: string; catId?: string | null; threadId: string; timestamp: number }) => ({
           id: m.id,
           content: m.content,
           catId: m.catId ?? undefined,
           threadId: m.threadId,
           timestamp: m.timestamp,
-        }),
-      );
+        }));
     },
     // Phase E-1: thread summary indexing — provide a callback that lists all threads
     threadListFn: async () => {
@@ -454,6 +456,16 @@ async function main(): Promise<void> {
       );
     } catch (err) {
       app.log.warn(`[api] F102: evidence index rebuild failed (non-fatal): ${err}`);
+    }
+  }
+
+  // F-4: Global knowledge rebuild (Skills + MEMORY.md → global_knowledge.sqlite)
+  if (memoryServices.globalIndexBuilder) {
+    try {
+      const gResult = await memoryServices.globalIndexBuilder.rebuild();
+      app.log.info(`[api] F102: global knowledge rebuilt — ${gResult.docsIndexed} indexed (${gResult.durationMs}ms)`);
+    } catch (err) {
+      app.log.warn(`[api] F102: global knowledge rebuild failed (non-fatal): ${err}`);
     }
   }
 
@@ -614,69 +626,82 @@ async function main(): Promise<void> {
             }
           : undefined,
         // H-3: Submit durable candidates to knowledge emergence pipeline
-        submitCandidate: async (candidate) => {
-          const marker = await memoryServices.markerQueue.submit({
-            content: `[${candidate.kind}] ${candidate.title}: ${candidate.claim}`,
-            source: `thread:${candidate.threadId}`,
-            status: 'captured',
-            // method → lesson: EvidenceKind has no 'method' variant; methods are stored as lessons
-            targetKind: candidate.kind === 'decision' ? 'decision' : 'lesson',
-          });
-          // Auto-approve explicit candidates (铲屎官不需要每条都审)
-          if (candidate.confidence === 'explicit') {
-            await memoryServices.markerQueue.transition(marker.id, 'normalized');
-            await memoryServices.markerQueue.transition(marker.id, 'approved');
-            app.log.info(`[knowledge-emergence] auto-approved: [${candidate.kind}] ${candidate.title}`);
-          } else {
-            app.log.info(`[knowledge-emergence] submitted for review: [${candidate.kind}] ${candidate.title}`);
-          }
-        },
+        // Gated by F102_DURABLE_CANDIDATES flag (spec §F102 env config)
+        submitCandidate:
+          process.env.F102_DURABLE_CANDIDATES !== 'on'
+            ? undefined
+            : async (candidate) => {
+                const marker = await memoryServices.markerQueue.submit({
+                  content: `[${candidate.kind}] ${candidate.title}: ${candidate.claim}`,
+                  source: `thread:${candidate.threadId}`,
+                  status: 'captured',
+                  // method → lesson: EvidenceKind has no 'method' variant; methods are stored as lessons
+                  targetKind: candidate.kind === 'decision' ? 'decision' : 'lesson',
+                });
+                // Auto-approve explicit candidates (铲屎官不需要每条都审)
+                if (candidate.confidence === 'explicit') {
+                  await memoryServices.markerQueue.transition(marker.id, 'normalized');
+                  await memoryServices.markerQueue.transition(marker.id, 'approved');
+                  app.log.info(`[knowledge-emergence] auto-approved: [${candidate.kind}] ${candidate.title}`);
+                } else {
+                  app.log.info(`[knowledge-emergence] submitted for review: [${candidate.kind}] ${candidate.title}`);
+                }
+              },
         logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
       });
 
       taskRunnerV2.register(summarySpec);
-      app.log.info('[api] F139: summary-compact spec registered');
+      const candidatesOn = process.env.F102_DURABLE_CANDIDATES === 'on';
+      const topicSegOn = process.env.F102_TOPIC_SEGMENTS === 'on';
+      app.log.info(
+        `[api] F139: summary-compact spec registered (candidates=${candidatesOn ? 'on' : 'off'}, topicSegments=${topicSegOn ? 'on' : 'off'})`,
+      );
 
       // H-3 backfill: replay lost candidates from summary_segments into MarkerQueue.
-      // Before the mkdirSync fix, submit() silently failed (ENOENT). This one-shot
-      // replay recovers those candidates. Idempotent via content-based dedup: each
-      // candidate is skipped if a marker with identical content already exists.
-      const existingMarkers = await memoryServices.markerQueue.list();
-      const existingContents = new Set(existingMarkers.map((m) => m.content));
-      const rows = db
-        .prepare('SELECT thread_id, candidates FROM summary_segments WHERE candidates IS NOT NULL')
-        .all() as Array<{ thread_id: string; candidates: string }>;
-      let backfilled = 0;
-      for (const row of rows) {
-        try {
-          const candidates = JSON.parse(row.candidates) as Array<{
-            kind: string;
-            title: string;
-            claim: string;
-            confidence?: string;
-          }>;
-          for (const c of candidates) {
-            const content = `[${c.kind}] ${c.title}: ${c.claim}`;
-            if (existingContents.has(content)) continue;
-            const marker = await memoryServices.markerQueue.submit({
-              content,
-              source: `thread:${row.thread_id}`,
-              status: 'captured',
-              targetKind: c.kind === 'decision' ? 'decision' : 'lesson',
-            });
-            if ((c.confidence ?? 'inferred') === 'explicit') {
-              await memoryServices.markerQueue.transition(marker.id, 'normalized');
-              await memoryServices.markerQueue.transition(marker.id, 'approved');
+      // Gated by F102_DURABLE_CANDIDATES (same gate as submitCandidate above).
+      if (!candidatesOn) {
+        app.log.info('[knowledge-backfill] skipped (F102_DURABLE_CANDIDATES=off)');
+      } else {
+        // Before the mkdirSync fix, submit() silently failed (ENOENT). This one-shot
+        // replay recovers those candidates. Idempotent via content-based dedup: each
+        // candidate is skipped if a marker with identical content already exists.
+        const existingMarkers = await memoryServices.markerQueue.list();
+        const existingContents = new Set(existingMarkers.map((m) => m.content));
+        const rows = db
+          .prepare('SELECT thread_id, candidates FROM summary_segments WHERE candidates IS NOT NULL')
+          .all() as Array<{ thread_id: string; candidates: string }>;
+        let backfilled = 0;
+        for (const row of rows) {
+          try {
+            const candidates = JSON.parse(row.candidates) as Array<{
+              kind: string;
+              title: string;
+              claim: string;
+              confidence?: string;
+            }>;
+            for (const c of candidates) {
+              const content = `[${c.kind}] ${c.title}: ${c.claim}`;
+              if (existingContents.has(content)) continue;
+              const marker = await memoryServices.markerQueue.submit({
+                content,
+                source: `thread:${row.thread_id}`,
+                status: 'captured',
+                targetKind: c.kind === 'decision' ? 'decision' : 'lesson',
+              });
+              if ((c.confidence ?? 'inferred') === 'explicit') {
+                await memoryServices.markerQueue.transition(marker.id, 'normalized');
+                await memoryServices.markerQueue.transition(marker.id, 'approved');
+              }
+              existingContents.add(content);
+              backfilled++;
             }
-            existingContents.add(content);
-            backfilled++;
+          } catch (backfillErr) {
+            app.log.error(`[knowledge-backfill] failed for thread ${row.thread_id}: ${backfillErr}`);
           }
-        } catch (backfillErr) {
-          app.log.error(`[knowledge-backfill] failed for thread ${row.thread_id}: ${backfillErr}`);
         }
-      }
-      if (backfilled > 0) {
-        app.log.info(`[knowledge-backfill] replayed ${backfilled} lost candidates into MarkerQueue`);
+        if (backfilled > 0) {
+          app.log.info(`[knowledge-backfill] replayed ${backfilled} lost candidates into MarkerQueue`);
+        }
       }
     } catch (err) {
       app.log.warn(`[api] F102 Phase G: scheduler init failed (non-fatal): ${err}`);
@@ -701,6 +726,11 @@ async function main(): Promise<void> {
     }
   }
 
+  // ── F149 Phase C: ACP process pool registry (variantId → AcpProcessPool) ──
+  // Using Map<string, any> because AcpProcessPool is dynamically imported only when acp config present.
+  // biome-ignore lint: dynamic import bridge
+  const acpPoolRegistry = new Map<string, any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
   const agentRegistry = new AgentRegistry();
@@ -719,9 +749,50 @@ async function main(): Promise<void> {
         case 'openai':
           service = new CodexAgentService({ catId });
           break;
-        case 'google':
-          service = new GeminiAgentService({ catId });
+        case 'google': {
+          const acpConfig = getAcpConfig(id);
+          if (acpConfig) {
+            const { GeminiAcpAdapter } = await import(
+              './domains/cats/services/agents/providers/acp/GeminiAcpAdapter.js'
+            );
+            const { AcpProcessPool } = await import('./domains/cats/services/agents/providers/acp/AcpProcessPool.js');
+            const { AcpClient } = await import('./domains/cats/services/agents/providers/acp/AcpClient.js');
+            const acpProjectRoot = findMonorepoRoot();
+            const poolKey = { projectPath: acpProjectRoot, providerProfile: id };
+            // Shared pool per variant — reused across cats with same variant
+            if (!acpPoolRegistry.has(id)) {
+              const pool = new AcpProcessPool(
+                {
+                  maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
+                  idleTtlMs: acpConfig.pool?.idleTtlMs ?? 5 * 60 * 1000,
+                  healthCheckIntervalMs: 30_000,
+                },
+                acpConfig,
+                () =>
+                  new AcpClient({
+                    command: acpConfig.command,
+                    args: acpConfig.startupArgs,
+                    cwd: acpProjectRoot,
+                  }),
+              );
+              acpPoolRegistry.set(id, pool);
+            }
+            const { resolveAcpMcpServers } = await import(
+              './domains/cats/services/agents/providers/acp/acp-mcp-resolver.js'
+            );
+            const mcpServers = resolveAcpMcpServers(acpProjectRoot, acpConfig.mcpWhitelist ?? []);
+            service = new GeminiAcpAdapter({
+              catId,
+              pool: acpPoolRegistry.get(id)!,
+              poolKey,
+              projectRoot: acpProjectRoot,
+              mcpServers,
+            });
+          } else {
+            service = new GeminiAgentService({ catId });
+          }
           break;
+        }
         case 'dare':
           service = new DareAgentService({ catId });
           break;
@@ -895,10 +966,9 @@ async function main(): Promise<void> {
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
     signalArticleLookup: createSignalArticleLookup({ transcriptReader }),
     packStore,
+    evidenceStore: memoryServices.evidenceStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
   });
-
-  const autoSummarizer = new AutoSummarizer({ messageStore, summaryStore });
 
   // F39: Message queue delivery
   const invocationQueue = new InvocationQueue();
@@ -942,6 +1012,8 @@ async function main(): Promise<void> {
           wakeCat,
           actionNotifier: sharedActionNotifier,
           orchestrator: sharedOrchestrator,
+          messageStore,
+          socketManager,
         },
       });
       app.log.info('[api] F101 game driver: GameNarratorDriver (agent-driven)');
@@ -965,7 +1037,6 @@ async function main(): Promise<void> {
     threadStore,
     invocationTracker,
     invocationRecordStore,
-    autoSummarizer,
     summaryStore,
     draftStore,
     invocationQueue,
@@ -996,6 +1067,19 @@ async function main(): Promise<void> {
     threadStore,
   });
   await app.register(catsRoutes);
+
+  // F149 Phase C: ACP pool diagnostics endpoint (gated by env flag)
+  app.get('/api/diagnostics/acp-pool', async (_req, reply) => {
+    if (process.env.CAT_CAFE_DIAGNOSTICS !== '1') {
+      return reply.code(403).send({ error: 'Diagnostics disabled' });
+    }
+    const pools: Record<string, unknown> = {};
+    for (const [variantId, pool] of acpPoolRegistry) {
+      pools[variantId] = pool.getMetrics();
+    }
+    return { pools, poolCount: acpPoolRegistry.size };
+  });
+
   await app.register(quotaRoutes);
   // F128: Daily token usage aggregation
   await app.register(usageRoutes, { invocationRecordStore });
@@ -1255,10 +1339,11 @@ async function main(): Promise<void> {
   const { voteRoutes } = await import('./routes/votes.js');
   await app.register(voteRoutes, { threadStore, socketManager, messageStore });
 
-  // Evidence search (SQLite) + reindex endpoint (D-11)
+  // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search
   await app.register(evidenceRoutes, {
     evidenceStore: memoryServices.evidenceStore,
     indexBuilder: memoryServices.indexBuilder,
+    knowledgeResolver: memoryServices.knowledgeResolver,
   });
 
   // F129: Pack system routes (reuse shared packStore from above)
@@ -1267,7 +1352,13 @@ async function main(): Promise<void> {
     const { PackLoader } = await import('./domains/packs/PackLoader.js');
     const packGuard = new PackSecurityGuard();
     const packLoader = new PackLoader(packStore, packGuard);
-    await app.register(packsRoutes, { packLoader });
+    const root = findMonorepoRoot(process.cwd());
+    await app.register(packsRoutes, {
+      packLoader,
+      catConfigPath: join(root, 'cat-config.json'),
+      sharedRulesPath: join(root, 'cat-cafe-skills', 'refs', 'shared-rules.md'),
+      skillsManifestPath: join(root, 'cat-cafe-skills', 'manifest.yaml'),
+    });
   }
 
   // Reflect (SQLite-backed reflection)
@@ -1279,6 +1370,7 @@ async function main(): Promise<void> {
   await knowledgeFeedRoutes(app, {
     markerQueue: memoryServices.markerQueue,
     db: memoryServices.store.getDb(),
+    materializationService: memoryServices.materializationService,
   });
 
   // Memory governance (publish workflow)
@@ -1430,6 +1522,14 @@ async function main(): Promise<void> {
       `[api] API namespace lease acquired (${leaseResult.holder?.instanceId ?? 'unknown'}) on redis=${redisUrl ?? 'memory'}`,
     );
   }
+
+  // F149 Phase C: graceful shutdown for ACP process pools
+  app.addHook('onClose', async () => {
+    for (const pool of acpPoolRegistry.values()) {
+      await pool.closeAll();
+    }
+    acpPoolRegistry.clear();
+  });
 
   // F101: register onClose hook BEFORE listen (Fastify forbids addHook after listen).
   // The actual recovery player is assigned post-listen; stopAllLoops is a no-op if null.

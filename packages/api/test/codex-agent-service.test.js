@@ -149,6 +149,7 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
           CAT_CAFE_INVOCATION_ID: 'inv-test-1',
           CAT_CAFE_CALLBACK_TOKEN: 'tok-test-1',
           CAT_CAFE_USER_ID: 'user-test-1\nline2',
+          CAT_CAFE_CAT_ID: 'codex',
           CAT_CAFE_SIGNAL_USER: 'codex',
         },
       }),
@@ -166,6 +167,10 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_USER_ID="user-test-1\\nline2"'));
+    assert.ok(
+      args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_CAT_ID="codex"'),
+      'must inject CAT_CAFE_CAT_ID for game action auth',
+    );
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_SIGNAL_USER="codex"'));
   } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
@@ -192,6 +197,23 @@ test('does not include resume when no sessionId', async () => {
   assert.ok(args.includes('danger-full-access'), 'default sandbox should allow git writes');
   assert.ok(args.includes('approval_policy="on-request"'), 'fresh exec should set default approval policy');
   assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
+});
+
+test('unknown Codex cat falls back to xhigh reasoning effort for new invocations', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, catId: 'runtime-unknown-codex', model: 'gpt-5.4' });
+
+  const promise = collect(service.invoke('hello'));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-fallback' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(args.includes('--config'), 'reasoning effort must be passed via --config');
+  assert.ok(
+    args.includes('model_reasoning_effort="xhigh"'),
+    `expected xhigh fallback for unknown Codex cat, got argv: ${JSON.stringify(args)}`,
+  );
 });
 
 test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {

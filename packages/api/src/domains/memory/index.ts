@@ -5,6 +5,7 @@ export { EmbeddingService } from './EmbeddingService.js';
 export type { MemoryConfig, MemoryServices } from './factory.js';
 // Factory
 export { createMemoryServices } from './factory.js';
+export { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
 export type { MessageListFn, StoredMessageSnapshot } from './IndexBuilder.js';
 export { IndexBuilder } from './IndexBuilder.js';
 // Interfaces + types

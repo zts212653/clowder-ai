@@ -81,6 +81,40 @@ describe('chatStore multi-slot activeInvocations (F108)', () => {
     });
   });
 
+  it('#963: side-dispatch intent_mode must replace parent slot for same cat (no orphans)', () => {
+    const store = useChatStore.getState();
+
+    // Step 1: Parent intent_mode registers all cats
+    store.addActiveInvocation('inv-A', 'opus', 'execute');
+    store.addActiveInvocation('inv-A-gemini', 'gemini', 'execute');
+    store.addActiveInvocation('inv-A-gpt52', 'gpt52', 'execute');
+    expect(Object.keys(useChatStore.getState().activeInvocations)).toHaveLength(3);
+
+    // Step 2: Callback intent_mode for gemini with new invocationId.
+    // Preempt stale slot first (mirrors useSocket.ts registration-time fix).
+    const cur = useChatStore.getState().activeInvocations;
+    for (const [key, info] of Object.entries(cur)) {
+      if (info.catId === 'gemini' && key !== 'inv-B') {
+        useChatStore.getState().removeActiveInvocation(key);
+      }
+    }
+    useChatStore.getState().addActiveInvocation('inv-B', 'gemini', 'execute');
+
+    // Should have 3 slots: inv-A (opus), inv-B (gemini), inv-A-gpt52 (gpt52)
+    const state = useChatStore.getState();
+    expect(Object.keys(state.activeInvocations)).toHaveLength(3);
+    expect(state.activeInvocations['inv-A']).toBeDefined();
+    expect(state.activeInvocations['inv-B']).toBeDefined();
+    expect(state.activeInvocations['inv-A-gpt52']).toBeDefined();
+    expect(state.activeInvocations['inv-A-gemini']).toBeUndefined();
+
+    // Step 3: Gemini finishes — removing inv-B leaves no gemini orphan
+    useChatStore.getState().removeActiveInvocation('inv-B');
+    const after = useChatStore.getState();
+    expect(Object.keys(after.activeInvocations)).toHaveLength(2);
+    expect(Object.values(after.activeInvocations).some((i) => i.catId === 'gemini')).toBe(false);
+  });
+
   it('setThreadHasActiveInvocation works for background threads with slot tracking', () => {
     // Set up a background thread with active invocation
     useChatStore.getState().setCurrentThread('thread-b');

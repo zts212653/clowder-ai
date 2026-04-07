@@ -3,7 +3,7 @@
 <EXTREMELY_IMPORTANT>
 你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（25 个）
+## Skills 列表（27 个）
 
 ### 开发流程链
 ```
@@ -16,6 +16,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 |-------|----------|----------|
 | `feat-lifecycle` | 新功能立项/讨论/完成 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
+| `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
 | `writing-plans` | 写实施计划 | — |
 | `worktree` | 开始写代码（创建隔离环境） | ① |
 | `tdd` | 写测试+实现（红绿重构） | ① |
@@ -38,6 +39,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `browser-preview` | 写前端/跑 dev server/看页面效果 | — |
 | `browser-automation` | 外部网站浏览/登录态流程/浏览器工具路由 | — |
 | `workspace-navigator` | 铲屎官说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
+| `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
 
 ### 参考文件（refs/，按需读取）
 
@@ -52,6 +54,9 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `refs/requirements-checklist-template.md` | 需求点 checklist 模板（B3） |
 | `refs/mcp-callbacks.md` | HTTP callback API 参考 |
 | `refs/rich-blocks.md` | Rich block 创建指南 |
+| `refs/ppt-density-playbook.md` | PPT 密度填充手法（8 种手段） |
+| `refs/ppt-visual-review.md` | PPT 视觉审查 Gate（D1 布局+D2 审美） |
+| `refs/ppt-style-tile.md` | PPT 风格定调（核心页 CSS 变量） |
 
 ## 关键规则
 

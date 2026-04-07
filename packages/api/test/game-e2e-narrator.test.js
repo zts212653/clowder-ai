@@ -87,10 +87,14 @@ describe('E2E: 7-person game lifecycle via GameNarratorDriver [AC-I10]', () => {
       }
     }
 
-    const orchestrator = { async broadcastGameState() {} };
+    const orchestrator = {
+      async broadcastGameState() {},
+      async tick() {},
+      async forceSettle() {},
+    };
 
     const wakeCat = async (params) => {
-      wakes.push(params);
+      wakes.push({ ...params, _phase: currentRuntime.currentPhase });
     };
 
     const actionNotifier = {
@@ -111,7 +115,29 @@ describe('E2E: 7-person game lifecycle via GameNarratorDriver [AC-I10]', () => {
       cleanup: () => {},
     };
 
-    const driver = new GameNarratorDriver({ gameStore, orchestrator, wakeCat, actionNotifier });
+    const systemMessages = [];
+    const messageStore = {
+      async append(msg) {
+        const stored = { id: `msg-${systemMessages.length + 1}`, ...msg };
+        systemMessages.push(stored);
+        return stored;
+      },
+    };
+    const socketBroadcasts = [];
+    const socketManager = {
+      broadcastToRoom(room, event, data) {
+        socketBroadcasts.push({ room, event, data });
+      },
+    };
+
+    const driver = new GameNarratorDriver({
+      gameStore,
+      orchestrator,
+      wakeCat,
+      actionNotifier,
+      messageStore,
+      socketManager,
+    });
     driver.startLoop('game-e2e-001');
     await new Promise((r) => setTimeout(r, 1500));
     driver.stopLoop('game-e2e-001');
@@ -119,29 +145,18 @@ describe('E2E: 7-person game lifecycle via GameNarratorDriver [AC-I10]', () => {
 
     const narrativeTexts = currentRuntime.eventLog.filter((e) => e.type === 'narrative').map((e) => e.payload.text);
 
+    // Open narratives are in eventLog
     assert.ok(
       narrativeTexts.some((t) => t.includes('狼人请睁眼')),
       'wolf open',
-    );
-    assert.ok(
-      narrativeTexts.some((t) => t.includes('狼人请闭眼')),
-      'wolf close',
     );
     assert.ok(
       narrativeTexts.some((t) => t.includes('预言家请睁眼')),
       'seer open',
     );
     assert.ok(
-      narrativeTexts.some((t) => t.includes('预言家请闭眼')),
-      'seer close',
-    );
-    assert.ok(
       narrativeTexts.some((t) => t.includes('女巫请睁眼')),
       'witch open',
-    );
-    assert.ok(
-      narrativeTexts.some((t) => t.includes('女巫请闭眼')),
-      'witch close',
     );
     assert.ok(
       narrativeTexts.some((t) => t.includes('天亮了')),
@@ -150,6 +165,21 @@ describe('E2E: 7-person game lifecycle via GameNarratorDriver [AC-I10]', () => {
     assert.ok(
       narrativeTexts.some((t) => t.includes('投票')),
       'vote',
+    );
+
+    // Close narratives are system messages (not eventLog) — P1 fix
+    const closeTexts = systemMessages.map((m) => m.content);
+    assert.ok(
+      closeTexts.some((t) => t.includes('狼人请闭眼')),
+      'wolf close (system message)',
+    );
+    assert.ok(
+      closeTexts.some((t) => t.includes('预言家请闭眼')),
+      'seer close (system message)',
+    );
+    assert.ok(
+      closeTexts.some((t) => t.includes('女巫请闭眼')),
+      'witch close (system message)',
     );
 
     for (const event of currentRuntime.eventLog.filter((e) => e.type === 'narrative')) {
@@ -171,8 +201,10 @@ describe('E2E: 7-person game lifecycle via GameNarratorDriver [AC-I10]', () => {
       'witch woken',
     );
 
-    const discussWakes = wakes.filter((w) => w.timeoutMs === TIME_BUDGETS.discussPerSpeaker);
-    assert.equal(discussWakes.length, 7, '7 speakers in discuss');
+    const discussWakes = wakes.filter(
+      (w) => w._phase === 'day_discuss' && w.timeoutMs === TIME_BUDGETS.discussPerSpeaker,
+    );
+    assert.equal(discussWakes.length, 7, '7 speakers in discuss with correct timeout');
 
     const voteWakes = wakes.filter((w) => w.timeoutMs === TIME_BUDGETS.votePerVoter);
     assert.equal(voteWakes.length, 7, '7 voters');
@@ -260,9 +292,18 @@ describe('E2E: 7-person game lifecycle via GameNarratorDriver [AC-I10]', () => {
     driver.stopLoop('game-e2e-001');
     await new Promise((r) => setTimeout(r, 100));
 
+    // Composition (板子) is public knowledge — role names in "Nx局" line are OK.
+    // What must NOT leak: which specific seat holds seer/witch.
     for (const wake of wakes) {
-      assert.ok(!wake.briefing.includes('预言家'), 'wolf briefing should not leak seer');
-      assert.ok(!wake.briefing.includes('女巫'), 'wolf briefing should not leak witch');
+      // P3=seer(gemini), P4=witch(gpt52) — wolf should not see these seat-role bindings
+      assert.ok(
+        !wake.briefing.includes('座位3') || !wake.briefing.includes('预言家('),
+        'wolf briefing should not leak seer seat',
+      );
+      assert.ok(
+        !wake.briefing.includes('座位4') || !wake.briefing.includes('女巫('),
+        'wolf briefing should not leak witch seat',
+      );
     }
   });
 });

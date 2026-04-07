@@ -6,6 +6,7 @@
  *
  * Shared state files (must match .githooks/pre-commit + shared-rules.md §14):
  *   - docs/ROADMAP.md
+ *   - docs/ROADMAP.md
  *   - cat-template.json
  *   - cat-config.json
  *
@@ -13,13 +14,14 @@
  * is skipped because the branch inherits committed diffs from main that aren't
  * actionable ("push" doesn't apply to a feature branch). The **uncommitted**
  * check is kept — dirty shared-state files in a worktree are real, not inherited.
+ * (Ported from community fix: clowder-ai#325, closes clowder-ai#324)
  */
 import { execFileSync } from 'node:child_process';
 import { createModuleLogger } from '../infrastructure/logger.js';
 
 const log = createModuleLogger('shared-state-preflight');
 
-const SHARED_STATE_PATTERN = /^(docs\/ROADMAP\.md|cat-template\.json|cat-config\.json)$/;
+const SHARED_STATE_PATTERN = /^(docs\/ROADMAP\.md|docs\/ROADMAP\.md|cat-template\.json|cat-config\.json)$/;
 
 const MAIN_BRANCHES = new Set(['main', 'master']);
 

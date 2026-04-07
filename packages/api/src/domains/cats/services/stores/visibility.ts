@@ -12,9 +12,14 @@ import type { StoredMessage } from './ports/MessageStore.js';
  */
 export const SYSTEM_USER_IDS: ReadonlySet<string> = new Set(['scheduler', 'system']);
 
-/** Returns true if a message was authored by a trusted system-level source (dual check: userId + catId). */
+/**
+ * Returns true if a message was authored by a trusted system-level source.
+ *
+ * Historical writes use `catId: 'system'`; newer display-only badges (for example
+ * persisted ACP errors) use `catId: null`. Both must bypass per-user filtering.
+ */
 export function isSystemUserMessage(msg: Pick<StoredMessage, 'userId' | 'catId'>): boolean {
-  return SYSTEM_USER_IDS.has(msg.userId) && msg.catId === 'system';
+  return SYSTEM_USER_IDS.has(msg.userId) && (msg.catId === 'system' || msg.catId === null);
 }
 
 /** Who is viewing */

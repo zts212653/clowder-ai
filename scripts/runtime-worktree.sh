@@ -322,7 +322,14 @@ sync_runtime_worktree() {
 
   info "syncing runtime worktree with $REMOTE_NAME/main (ff-only)"
   git -C "$RUNTIME_DIR" fetch "$REMOTE_NAME" main
-  git -C "$RUNTIME_DIR" merge --ff-only "$REMOTE_NAME/main"
+  if ! git -C "$RUNTIME_DIR" merge --ff-only "$REMOTE_NAME/main" 2>/dev/null; then
+    echo ""
+    echo "  ff-only merge failed — likely stale untracked files blocking the sync."
+    echo "  Check with:  git -C \"$RUNTIME_DIR\" status"
+    echo "  Quick fix:   git -C \"$RUNTIME_DIR\" clean -fd .claude/skills/"
+    echo ""
+    die "runtime sync failed (see above)"
+  fi
 
   if [ "$RUN_INSTALL" = "true" ]; then
     info "refreshing dependencies in runtime worktree"
@@ -375,7 +382,7 @@ start_runtime_worktree() {
     ensure_runtime_start_prereqs
     info "running in-place (deployment mode): $PROJECT_DIR"
     cd "$PROJECT_DIR"
-    exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=production ${START_ARGS[@]+"${START_ARGS[@]}"}
+    exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
   if ! worktree_exists; then
@@ -403,7 +410,7 @@ start_runtime_worktree() {
   cd "$RUNTIME_DIR"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
-  exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=production ${START_ARGS[@]+"${START_ARGS[@]}"}
+  exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
 
 COMMAND="${1:-status}"

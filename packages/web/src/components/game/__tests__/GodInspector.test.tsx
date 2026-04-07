@@ -101,4 +101,20 @@ describe('GodInspector', () => {
     const html = render({ gameStatus: 'playing' });
     expect(html).toContain('data-testid="god-actions"');
   });
+
+  it('shows stop button when game is playing', () => {
+    const html = render({ gameStatus: 'playing' });
+    expect(html).toContain('data-testid="god-stop"');
+    expect(html).toContain('强制停止游戏');
+  });
+
+  it('shows stop button when game is paused', () => {
+    const html = render({ gameStatus: 'paused' });
+    expect(html).toContain('data-testid="god-stop"');
+  });
+
+  it('hides stop button when game is finished', () => {
+    const html = render({ gameStatus: 'finished' });
+    expect(html).not.toContain('data-testid="god-stop"');
+  });
 });

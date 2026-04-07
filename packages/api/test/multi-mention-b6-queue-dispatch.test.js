@@ -83,7 +83,14 @@ function createMockInvocationTracker() {
     start(threadId, catId, userId, catIds) {
       return new AbortController();
     },
+    startAll() {
+      return new AbortController();
+    },
+    tryStartThreadAll() {
+      return new AbortController();
+    },
     complete() {},
+    completeAll() {},
   };
 }
 
@@ -434,7 +441,10 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
       queue,
       invocationTracker: {
         start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
         has: () => false,
       },
       invocationRecordStore: {
@@ -498,7 +508,10 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
       queue,
       invocationTracker: {
         start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
         has: () => false,
       },
       invocationRecordStore: {
@@ -557,7 +570,10 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
       queue,
       invocationTracker: {
         start: () => abortController,
+        startAll: () => abortController,
+        tryStartThreadAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
         has: () => false,
       },
       invocationRecordStore: {
@@ -618,7 +634,10 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
       queue,
       invocationTracker: {
         start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
         has: () => false,
       },
       invocationRecordStore: {

@@ -154,12 +154,17 @@ describe('SlotTracker: per-thread-per-cat isolation', () => {
     assert.equal(tracker.has('t1'), false, 'no slots remain');
   });
 
-  it('getActiveSlots returns all active catIds for thread', () => {
+  it('getActiveSlots returns {catId, startedAt} for all active slots', () => {
     const tracker = new InvocationTracker();
     tracker.start('t1', 'opus', 'user1', ['opus']);
     tracker.start('t1', 'codex', 'user1', ['codex']);
     const slots = tracker.getActiveSlots('t1');
-    assert.deepEqual(slots.sort(), ['codex', 'opus']);
+    const catIds = slots.map((s) => s.catId).sort();
+    assert.deepEqual(catIds, ['codex', 'opus']);
+    for (const slot of slots) {
+      assert.equal(typeof slot.startedAt, 'number');
+      assert.ok(slot.startedAt > 0, 'startedAt should be positive epoch ms');
+    }
   });
 
   it('getActiveSlots returns empty for unknown thread', () => {
@@ -261,5 +266,174 @@ describe('SlotTracker: per-thread-per-cat isolation', () => {
     const result = tracker.tryStartThread('t1', 'catA', 'user1');
     assert.equal(result, null, 'should return null when thread is deleting');
     guard.release();
+  });
+});
+
+// --- Multi-cat startAll / completeAll / startedAt (Bug fix: concurrent multi-cat display) ---
+
+describe('InvocationTracker: startAll registers all target cats', () => {
+  it('startAll creates slots for all catIds with shared controller', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.has('t1', 'codex'), true);
+    // Both slots share the same controller
+    assert.equal(controller.signal.aborted, false);
+  });
+
+  it('startAll preempts existing slots for same catId', () => {
+    const tracker = new InvocationTracker();
+    const old = tracker.start('t1', 'opus', 'user1', ['opus']);
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(old.signal.aborted, true, 'old opus slot should be preempted');
+    assert.equal(old.signal.reason, 'preempted');
+  });
+
+  it('startAll returns pre-aborted controller when thread is deleting', () => {
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardDelete('t1');
+    assert.equal(guard.acquired, true);
+    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(controller.signal.aborted, true);
+    guard.release();
+  });
+
+  it('completeAll removes all target cat slots', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus', 'codex', 'gemini'], 'user1');
+    tracker.completeAll('t1', ['opus', 'codex', 'gemini'], controller);
+    assert.equal(tracker.has('t1'), false, 'all slots removed');
+  });
+
+  it('completeAll matches all batch slots via batchController', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // complete() with primaryController matches opus (its own controller)
+    tracker.complete('t1', 'opus', controller);
+    assert.equal(tracker.has('t1', 'opus'), false);
+    assert.equal(tracker.has('t1', 'codex'), true);
+    // complete() with primaryController does NOT match codex (different controller)
+    // — this is correct: use completeAll for batch cleanup
+    tracker.complete('t1', 'codex', controller);
+    assert.equal(tracker.has('t1', 'codex'), true, 'individual complete should not match non-primary controller');
+    // completeAll matches via batchController
+    tracker.completeAll('t1', ['codex'], controller);
+    assert.equal(tracker.has('t1'), false);
+  });
+
+  it('completeAll with wrong controller does not remove slots', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const wrongCtrl = new AbortController();
+    tracker.completeAll('t1', ['opus', 'codex'], wrongCtrl);
+    assert.equal(tracker.has('t1', 'opus'), true, 'opus should survive wrong controller');
+    assert.equal(tracker.has('t1', 'codex'), true, 'codex should survive wrong controller');
+  });
+});
+
+describe('InvocationTracker: tryStartThreadAll', () => {
+  it('registers all cats when thread is idle', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.ok(controller, 'should return controller when idle');
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.has('t1', 'codex'), true);
+  });
+
+  it('returns null when thread has active slots', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'gemini', 'user1', ['gemini']);
+    const result = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(result, null);
+    // gemini should still be active, opus/codex not registered
+    assert.equal(tracker.has('t1', 'gemini'), true);
+    assert.equal(tracker.has('t1', 'opus'), false);
+    assert.equal(tracker.has('t1', 'codex'), false);
+  });
+
+  it('returns null when thread is deleting', () => {
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardDelete('t1');
+    const result = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(result, null);
+    guard.release();
+  });
+});
+
+describe('InvocationTracker: per-cat cancel isolation (AC-B9 regression)', () => {
+  it('cancel one cat from startAll batch does NOT abort other cats', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // Cancel opus only
+    const result = tracker.cancel('t1', 'opus');
+    assert.equal(result.cancelled, true);
+    assert.equal(tracker.has('t1', 'opus'), false, 'opus should be removed');
+    assert.equal(tracker.has('t1', 'codex'), true, 'codex must survive opus cancel');
+    // Verify codex controller is NOT aborted
+    const slots = tracker.getActiveSlots('t1');
+    assert.equal(slots.length, 1);
+    assert.equal(slots[0].catId, 'codex');
+  });
+
+  it('cancel non-primary cat does NOT abort primary execution signal', () => {
+    const tracker = new InvocationTracker();
+    const primaryController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // Cancel codex (non-primary)
+    tracker.cancel('t1', 'codex');
+    // Primary controller must NOT be aborted — routeExecution depends on it
+    assert.equal(primaryController.signal.aborted, false, 'primary controller must survive non-primary cancel');
+    assert.equal(tracker.has('t1', 'opus'), true, 'opus must survive codex cancel');
+  });
+
+  it('cancel primary cat aborts only primary controller', () => {
+    const tracker = new InvocationTracker();
+    const primaryController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // Cancel opus (primary)
+    tracker.cancel('t1', 'opus');
+    assert.equal(primaryController.signal.aborted, true, 'primary controller should be aborted');
+    // Codex's own controller should NOT be aborted
+    assert.equal(tracker.has('t1', 'codex'), true, 'codex slot still exists');
+  });
+
+  it('tryStartThreadAll also creates independent controllers', () => {
+    const tracker = new InvocationTracker();
+    const primaryController = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.ok(primaryController);
+    tracker.cancel('t1', 'codex');
+    assert.equal(primaryController.signal.aborted, false, 'primary survives non-primary cancel');
+    assert.equal(tracker.has('t1', 'opus'), true);
+  });
+});
+
+describe('InvocationTracker: startedAt timestamp', () => {
+  it('start() sets startedAt and getActiveSlots returns it', () => {
+    const before = Date.now();
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    const after = Date.now();
+    const slots = tracker.getActiveSlots('t1');
+    assert.equal(slots.length, 1);
+    assert.ok(slots[0].startedAt >= before, `startedAt (${slots[0].startedAt}) >= before (${before})`);
+    assert.ok(slots[0].startedAt <= after, `startedAt (${slots[0].startedAt}) <= after (${after})`);
+  });
+
+  it('startAll() sets same startedAt for all cats', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const slots = tracker.getActiveSlots('t1');
+    assert.equal(slots.length, 2);
+    // All cats should share the same startedAt (same Date.now() call)
+    assert.equal(slots[0].startedAt, slots[1].startedAt, 'startAll should use single timestamp');
+  });
+
+  it('F5 recovery: getActiveSlots preserves original startedAt after time passes', async () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const slotsEarly = tracker.getActiveSlots('t1');
+    // Simulate time passing (F5 happens later)
+    await new Promise((r) => setTimeout(r, 50));
+    const slotsLater = tracker.getActiveSlots('t1');
+    // startedAt should be the ORIGINAL time, not Date.now() at query time
+    assert.equal(slotsLater[0].startedAt, slotsEarly[0].startedAt, 'startedAt must not change over time');
   });
 });

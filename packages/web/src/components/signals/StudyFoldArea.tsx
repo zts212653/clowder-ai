@@ -64,6 +64,11 @@ export function StudyFoldArea({
   const linkInputRef = useRef<HTMLInputElement>(null);
   const ime = useIMEGuard();
 
+  // Auto-expand when article changes OR when studyMeta arrives async with study history
+  useEffect(() => {
+    setOpen(!!studyMeta?.lastStudiedAt);
+  }, [articleId, studyMeta?.lastStudiedAt]);
+
   const handleLinkThread = useCallback(async () => {
     const tid = linkInput.trim();
     if (!tid || !onLinkThread) return;

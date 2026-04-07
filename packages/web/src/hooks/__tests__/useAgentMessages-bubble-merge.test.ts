@@ -281,7 +281,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       root.render(React.createElement(Harness));
     });
 
-    // Inv-2 is actively streaming
     const inv2Bubble = {
       id: 'msg-inv2',
       type: 'assistant',
@@ -295,7 +294,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     storeState.messages.push(inv2Bubble);
     storeState.catInvocations = { opus: { invocationId: 'inv-2' } };
 
-    // Activate the stream ref by sending a text event for inv-2
     act(() => {
       captured?.handleAgentMessage({
         type: 'text',
@@ -306,7 +304,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
 
     vi.clearAllMocks();
 
-    // Stale callback from inv-1 arrives late (retry / network delay)
     act(() => {
       captured?.handleAgentMessage({
         type: 'text',
@@ -318,15 +315,12 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       });
     });
 
-    // The stale callback must NOT have patched inv-2's bubble.
-    // It should have created a new standalone callback bubble instead.
     const newCallbackBubbles = mockAddMessage.mock.calls.filter(
       ([msg]) => msg.type === 'assistant' && msg.catId === 'opus' && msg.origin === 'callback',
     );
     expect(newCallbackBubbles.length).toBe(1);
     expect(newCallbackBubbles[0][0].content).toBe('Old inv-1 response');
 
-    // Inv-2's bubble must remain untouched (no appendToMessage with stale content)
     const appendToInv2 = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-inv2');
     expect(appendToInv2).toHaveLength(0);
   });
@@ -336,7 +330,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       root.render(React.createElement(Harness));
     });
 
-    // A newer invocationless bubble exists (invocation_created was missed)
     const newerBubble = {
       id: 'msg-newer',
       type: 'assistant',
@@ -344,14 +337,12 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       content: 'Newer response',
       isStreaming: true,
       origin: 'stream',
-      extra: { stream: {} }, // no invocationId — invocation_created was missed
+      extra: { stream: {} },
       timestamp: Date.now(),
     };
     storeState.messages.push(newerBubble);
-    // currentKnownInvId is undefined — no invocation tracked
     storeState.catInvocations = {};
 
-    // Activate the stream ref
     act(() => {
       captured?.handleAgentMessage({
         type: 'text',
@@ -362,7 +353,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
 
     vi.clearAllMocks();
 
-    // Old callback with explicit invocationId arrives
     act(() => {
       captured?.handleAgentMessage({
         type: 'text',
@@ -374,7 +364,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       });
     });
 
-    // Explicit-invocationId callback must NOT fall back to invocationless placeholder
     const appendToNewer = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-newer');
     expect(appendToNewer).toHaveLength(0);
   });
@@ -384,7 +373,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       root.render(React.createElement(Harness));
     });
 
-    // Invocationless streaming bubble (invocation_created was missed)
     storeState.messages.push({
       id: 'msg-live',
       type: 'assistant',
@@ -392,12 +380,11 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       content: 'Live response',
       isStreaming: true,
       origin: 'stream',
-      extra: { stream: {} }, // no invocationId
+      extra: { stream: {} },
       timestamp: Date.now(),
     });
-    storeState.catInvocations = {}; // unknown current invocation
+    storeState.catInvocations = {};
 
-    // Activate stream ref
     act(() => {
       captured?.handleAgentMessage({
         type: 'text',
@@ -406,7 +393,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       });
     });
 
-    // Stale callback with explicit invocationId → strict match fails → standalone bubble
     act(() => {
       captured?.handleAgentMessage({
         type: 'text',
@@ -420,7 +406,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
 
     vi.clearAllMocks();
 
-    // New stream chunk arrives for the LIVE invocation (no invocationId since missed)
     act(() => {
       captured?.handleAgentMessage({
         type: 'text',
@@ -429,7 +414,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       });
     });
 
-    // The live stream chunk must NOT be suppressed — it belongs to the current invocation
     const appendCalls = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-live');
     expect(appendCalls.length).toBeGreaterThanOrEqual(1);
   });

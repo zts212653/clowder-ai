@@ -19,6 +19,7 @@ import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { MarkdownContent } from './MarkdownContent';
 import { MetadataBadge } from './MetadataBadge';
 import { ReplyPill } from './ReplyPill';
+import { BriefingCard } from './rich/BriefingCard';
 import { RichBlocks } from './rich/RichBlocks';
 import { SummaryCard } from './SummaryCard';
 import { ThinkingContent } from './ThinkingContent';
@@ -113,6 +114,17 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   }
 
   if (isSystem) {
+    // F148 Phase E + VG-2: Briefing card — collapsible with source label
+    if (message.origin === 'briefing' && message.extra?.rich?.blocks?.length) {
+      return (
+        <div data-message-id={message.id} className="flex justify-center mb-3">
+          <div className="max-w-[85%] w-full opacity-80">
+            <BriefingCard block={message.extra.rich.blocks[0]} messageId={message.id} />
+          </div>
+        </div>
+      );
+    }
+
     if (message.variant === 'evidence' && message.evidence) {
       return <EvidencePanel data={message.evidence} />;
     }

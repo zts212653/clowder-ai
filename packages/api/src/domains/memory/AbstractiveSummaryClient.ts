@@ -134,7 +134,8 @@ function buildUserPrompt(input: AbstractiveInput): string {
 }
 
 // ─── Parse natural language output into structured segments ─────
-function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): AbstractiveResult | null {
+/** @internal Exported for testing only */
+export function parseNaturalLanguageOutput(text: string, input: AbstractiveInput): AbstractiveResult | null {
   if (!text || text.trim().length < 10) return null;
 
   // Extract title: first line starting with # or ## or ### or **bold title**

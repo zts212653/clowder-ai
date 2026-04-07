@@ -84,7 +84,7 @@ check_env() {
         if [ -f .env.example ]; then
             echo -e "${YELLOW}未找到 .env 文件，从模板创建...${NC}"
             cp .env.example .env
-            echo -e "${YELLOW}请编辑 .env 文件，填入 API Keys${NC}"
+            echo -e "${YELLOW}启动后在 Hub → 系统配置 → 账号配置 中添加 API Key${NC}"
         else
             echo -e "${RED}错误: 未找到 .env.example 模板${NC}"
             exit 1
@@ -154,7 +154,7 @@ main() {
     echo -e "${GREEN}🎉 Cat Café 初始化完成！${NC}"
     echo ""
     echo "下一步："
-    echo "  1. 编辑 .env 文件，填入 API Keys"
+    echo "  1. 打开 http://localhost:3003 → Hub → 系统配置 → 账号配置，添加 API Key"
     echo "  2. 启动 Redis: redis-server"
     echo "  3. 运行开发服务器: pnpm run start"
     echo ""

@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function stubLocation(overrides: Partial<Location> | null) {
   if (overrides === null) {
-    // Simulate SSR: no location on globalThis
     vi.stubGlobal('location', undefined);
     return;
   }
@@ -12,7 +11,6 @@ function stubLocation(overrides: Partial<Location> | null) {
     hostname: overrides.hostname ?? 'localhost',
     port: overrides.port ?? '',
     protocol: overrides.protocol ?? 'http:',
-    // Enough to satisfy getBrowserLocation() checks
     ...overrides,
   });
 }
@@ -36,7 +34,6 @@ describe('resolveApiUrl', () => {
   });
 
   async function loadResolveApiUrl() {
-    // Reset module cache so resolveApiUrl re-evaluates with current mocks
     vi.resetModules();
     const mod = await import('../api-client');
     return mod.resolveApiUrl;
@@ -70,7 +67,7 @@ describe('resolveApiUrl', () => {
 
   it('skips 127.0.0.1 env when accessed remotely', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:3004';
-    stubLocation({ hostname: '10.0.0.5', protocol: 'http:', port: '3003' });
+    stubLocation({ hostname: '10.0.0.5', protocol: 'http:', port: '3001' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://10.0.0.5:3004');
   });
@@ -79,7 +76,7 @@ describe('resolveApiUrl', () => {
 
   it('uses localhost env when accessed locally', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3004';
-    stubLocation({ hostname: 'localhost', port: '3003' });
+    stubLocation({ hostname: 'localhost', port: '3001' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://localhost:3004');
   });
@@ -95,14 +92,14 @@ describe('resolveApiUrl', () => {
   // ── No env, browser, direct port → port+1 ──
 
   it('derives API port from frontend port (3003→3004)', async () => {
-    stubLocation({ hostname: '192.168.1.10', protocol: 'http:', port: '3003' });
+    stubLocation({ hostname: '192.168.1.10', protocol: 'http:', port: '3001' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://192.168.1.10:3004');
   });
 
-  it('derives API port for dev convention (3001→3002)', async () => {
-    stubLocation({ hostname: 'localhost', protocol: 'http:', port: '3001' });
+  it('derives API port for alpha convention (3011→3012)', async () => {
+    stubLocation({ hostname: 'localhost', protocol: 'http:', port: '3011' });
     const resolve = await loadResolveApiUrl();
-    expect(resolve()).toBe('http://localhost:3002');
+    expect(resolve()).toBe('http://localhost:3012');
   });
 });

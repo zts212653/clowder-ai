@@ -251,12 +251,10 @@ export interface ChatMessage {
       invocationId?: string;
     };
   };
-  /** A2A chain group ID — messages in the same A2A chain share this ID */
-  a2aGroupId?: string;
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;
-  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
-  origin?: 'stream' | 'callback';
+  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech), briefing = F148 Phase E context briefing */
+  origin?: 'stream' | 'callback' | 'briefing';
   /** F35: Message visibility. undefined/public = visible to all */
   visibility?: 'public' | 'whisper';
   /** F35: Whisper recipients (cat IDs). Only meaningful when visibility='whisper' */

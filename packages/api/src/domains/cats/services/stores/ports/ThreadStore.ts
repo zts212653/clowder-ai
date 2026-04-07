@@ -51,7 +51,7 @@ export interface ThreadRoutingPolicyV1 {
   scopes?: Partial<Record<ThreadRoutingScope, ThreadRoutingRule>>;
 }
 
-/** F065 Phase B: Rolling thread-level memory across sealed sessions. */
+/** F065 Phase B + F148 VG-3: Rolling thread-level memory across sealed sessions. */
 export interface ThreadMemoryV1 {
   v: 1;
   /** Rolling summary text */
@@ -60,6 +60,12 @@ export interface ThreadMemoryV1 {
   sessionsIncorporated: number;
   /** Unix timestamp of last update */
   updatedAt: number;
+  /** VG-3: Key decisions extracted from sessions (max 8) */
+  decisions?: string[];
+  /** VG-3: Open questions extracted from sessions (max 5) */
+  openQuestions?: string[];
+  /** VG-3: Referenced artifacts — ADRs, Feature IDs (max 8) */
+  artifacts?: string[];
 }
 
 export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph';

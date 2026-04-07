@@ -56,6 +56,12 @@ function sealReasonLabel(reason?: string): string {
   if (reason === 'budget_exhausted') return 'budget';
   if (reason === 'max_compressions') return 'max compress';
   if (reason === 'manual') return 'manual';
+  if (reason === 'cli_session_replaced') return 'CLI replaced';
+  if (reason === 'overflow_circuit_breaker') return 'overflow';
+  if (reason === 'unseal_displacement') return 'unseal displaced';
+  if (reason === 'reconcile_stuck') return 'stuck reaper';
+  if (reason === 'global_reaper') return 'global reaper';
+  if (reason === 'lease_timeout') return 'lease timeout';
   return reason;
 }
 
@@ -268,63 +274,71 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
             <span className="text-[9px] font-bold text-cafe-muted uppercase tracking-wider">Sealed</span>
           </div>
           <div className="space-y-1">
-            {sealedSessions.map((session) => (
-              <div
-                key={session.id}
-                className="flex items-center gap-2 rounded border border-cafe bg-cafe-surface px-2.5 py-1.5"
-              >
+            {sealedSessions.map((session) => {
+              const sealedColors = CAT_SESSION_COLORS[session.catId] ?? DEFAULT_SESSION_COLORS;
+              return (
                 <div
-                  className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${
-                    session.sealReason?.includes('compact') ? 'bg-amber-100' : 'bg-cafe-surface-elevated'
-                  }`}
+                  key={session.id}
+                  className={`flex items-center gap-2 rounded border ${sealedColors.border} bg-cafe-surface px-2.5 py-1.5`}
                 >
-                  <span
-                    className={`text-[10px] ${
-                      session.sealReason?.includes('compact') ? 'text-amber-500' : 'text-cafe-muted'
+                  <div
+                    className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${
+                      session.sealReason?.includes('compact') ? 'bg-amber-100' : 'bg-cafe-surface-elevated'
                     }`}
                   >
-                    &#128274;
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-medium text-cafe-secondary">Session #{session.seq + 1}</span>
-                    <SessionIdTag id={session.cliSessionId ?? session.id} />
+                    <span
+                      className={`text-[10px] ${
+                        session.sealReason?.includes('compact') ? 'text-amber-500' : 'text-cafe-muted'
+                      }`}
+                    >
+                      &#128274;
+                    </span>
                   </div>
-                  <div className="text-[9px] text-cafe-muted truncate">
-                    {session.sealedAt ? timeAgo(session.sealedAt) : 'sealing'}
-                    {session.contextHealth ? ` · ${Math.round(session.contextHealth.fillRatio * 100)}%` : ''}
-                    {' · '}
-                    {session.messageCount} msgs
-                    {(session.compressionCount ?? 0) > 0 && ` · ${session.compressionCount} compress`}
-                    {session.sealReason ? ` · ${sealReasonLabel(session.sealReason)}` : ''}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-cafe-secondary">Session #{session.seq + 1}</span>
+                      <span
+                        className={`text-[9px] px-1 py-0.5 rounded-full ${sealedColors.badgeBg} ${sealedColors.badgeText} font-medium`}
+                      >
+                        {session.catId}
+                      </span>
+                      <SessionIdTag id={session.cliSessionId ?? session.id} />
+                    </div>
+                    <div className="text-[9px] text-cafe-muted truncate">
+                      {session.sealedAt ? timeAgo(session.sealedAt) : 'sealing'}
+                      {session.contextHealth ? ` · ${Math.round(session.contextHealth.fillRatio * 100)}%` : ''}
+                      {' · '}
+                      {session.messageCount} msgs
+                      {(session.compressionCount ?? 0) > 0 && ` · ${session.compressionCount} compress`}
+                      {session.sealReason ? ` · ${sealReasonLabel(session.sealReason)}` : ''}
+                    </div>
                   </div>
-                </div>
-                {(session.status === 'sealed' || session.status === 'sealing') && (
-                  <div className="flex items-center gap-1">
-                    {onViewSession && (
+                  {(session.status === 'sealed' || session.status === 'sealing') && (
+                    <div className="flex items-center gap-1">
+                      {onViewSession && (
+                        <button
+                          type="button"
+                          className="text-[10px] px-2 py-0.5 rounded border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated"
+                          onClick={() => onViewSession(session.id)}
+                        >
+                          查看
+                        </button>
+                      )}
                       <button
                         type="button"
-                        className="text-[10px] px-2 py-0.5 rounded border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated"
-                        onClick={() => onViewSession(session.id)}
+                        className="text-[10px] px-2 py-0.5 rounded border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                        onClick={() => {
+                          void handleUnseal(session.id);
+                        }}
+                        disabled={unsealingSessionId != null}
                       >
-                        查看
+                        {unsealingSessionId === session.id ? '解封中…' : '解封'}
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      className="text-[10px] px-2 py-0.5 rounded border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50"
-                      onClick={() => {
-                        void handleUnseal(session.id);
-                      }}
-                      disabled={unsealingSessionId != null}
-                    >
-                      {unsealingSessionId === session.id ? '解封中…' : '解封'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

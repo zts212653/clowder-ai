@@ -50,7 +50,7 @@ export type StoredDebugEvent = {
   catId?: string;
   messageId?: string;
   invocationId?: string;
-  origin?: 'stream' | 'callback';
+  origin?: 'stream' | 'callback' | 'briefing';
 };
 
 export type DebugEventInput = Partial<StoredDebugEvent> & {

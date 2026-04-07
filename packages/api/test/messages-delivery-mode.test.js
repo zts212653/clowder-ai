@@ -40,8 +40,11 @@ function buildDeps(overrides = {}) {
     },
     invocationTracker: {
       start: mock.fn(() => new AbortController()),
+      startAll: mock.fn(() => new AbortController()),
       tryStartThread: mock.fn(() => new AbortController()),
+      tryStartThreadAll: mock.fn(() => new AbortController()),
       complete: mock.fn(),
+      completeAll: mock.fn(),
       has: mock.fn(() => false),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
       isDeleting: mock.fn(() => false),
@@ -360,7 +363,9 @@ describe('POST /api/messages deliveryMode', () => {
 
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.invocationTracker.start.mock.mockImplementation(() => controller);
+    deps.invocationTracker.startAll.mock.mockImplementation(() => controller);
     deps.invocationTracker.tryStartThread.mock.mockImplementation(() => controller);
+    deps.invocationTracker.tryStartThreadAll.mock.mockImplementation(() => controller);
 
     // Router that yields one message, then aborts (simulating external force-cancel),
     // then ends normally (no throw) — this is the exact scenario砚砚 identified.

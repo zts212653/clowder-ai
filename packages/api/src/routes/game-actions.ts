@@ -86,6 +86,13 @@ export const gameActionRoutes: FastifyPluginAsync<GameActionRoutesOptions> = asy
       return { error: 'Access denied: you do not own this game thread' };
     }
 
+    // P1: Callback thread isolation — invocation must belong to the game's thread
+    const callbackThreadId = request.headers['x-callback-thread-id'] as string | undefined;
+    if (callbackThreadId && callbackThreadId !== runtime.threadId) {
+      reply.status(403);
+      return { error: 'Invocation thread does not match game thread' };
+    }
+
     if (runtime.status !== 'playing') {
       reply.status(409);
       return { error: `Game is not active (status: ${runtime.status})` };

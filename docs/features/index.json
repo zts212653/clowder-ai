@@ -81,7 +81,7 @@
     {
       "id": "F014",
       "name": "SVG 猫猫状态动画",
-      "status": "done | **Owner**: 三猫",
+      "status": "done (abandoned) | **Owner**: 三猫",
       "file": "F014-svg-cat-animation.md"
     },
     {
@@ -213,7 +213,7 @@
     {
       "id": "F036",
       "name": "Logo 一笔画动画（Stroke Drawing Animation）",
-      "status": "done | **Owner**: 三猫",
+      "status": "done (partial) | **Owner**: 三猫",
       "file": "F036-logo-stroke-animation.md"
     },
     {
@@ -627,7 +627,7 @@
     {
       "id": "F102",
       "name": "记忆组件 Adapter 化重构 — IEvidenceStore + 本地索引",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04",
       "file": "F102-memory-adapter-refactor.md"
     },
     {
@@ -843,7 +843,7 @@
     {
       "id": "F138",
       "name": "Cat Café Video Studio — AI 视频制作管线",
-      "status": "spec | **Owner**: 金渐层 | **Priority**: P1",
+      "status": "in-progress (Phase 1 基建中：spec 驱动 composition + FA 集成 + showcase 素材录制) | **Owner**: Ragdoll + 金渐层 | **Priority**: P1",
       "file": "F138-video-studio.md"
     },
     {
@@ -885,7 +885,7 @@
     {
       "id": "F145",
       "name": "MCP Portable Provisioning — 声明式 MCP 期望态 + 本机解析",
-      "status": "done | **Completed**: 2026-03-27 | **Owner**: Ragdoll + Maine Coon | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1",
       "file": "F145-mcp-portable-provisioning.md"
     },
     {
@@ -901,11 +901,29 @@
       "file": "F147-i18n-hub-locale-switch.md"
     },
     {
+      "id": "F148",
+      "name": "Hierarchical Context Transport — 分层上下文传输",
+      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1 | **Completed**: 2026-04-02",
+      "file": "F148-hierarchical-context-transport.md"
+    },
+    {
+      "id": "F149",
+      "name": "ACP Runtime Operations — 项目级进程池 + Session Lease",
+      "status": "in-progress | **Owner**: Maine Coon/gpt52 | **Priority**: P1",
+      "file": "F149-acp-runtime-operations.md"
+    },
+    {
+      "id": "F150",
+      "name": "Tool/Skill/MCP Usage Statistics — 工具使用可观测看板",
+      "status": "done | **Owner**: Community (bouillipx) + Ragdoll | **Priority**: P2",
+      "file": "F150-tool-usage-stats.md"
+    },
+    {
       "id": "F151",
       "name": "XiaoYi Channel Gateway — 小艺渠道接入",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F151-xiaoyi-channel-gateway.md"
     }
   ],
-  "generated_at": "2026-04-02T11:01:17.826Z"
+  "generated_at": "2026-04-07T20:17:16.446Z"
 }

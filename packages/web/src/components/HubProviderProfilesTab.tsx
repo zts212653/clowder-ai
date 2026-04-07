@@ -166,7 +166,7 @@ export function HubProviderProfilesTab() {
         onCreate={createProfile}
       />
       <p className="text-xs leading-5 text-[#B59A88]">
-        secrets 存储在 `~/.cat-cafe/provider-profiles.secrets.local.json`（全局），Git 忽略。
+        secrets 存储在 `~/.cat-cafe/credentials.json`（全局），Git 忽略。
       </p>
     </div>
   );

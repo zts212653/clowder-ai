@@ -12,6 +12,7 @@ import { createGameDriver } from '../domains/cats/services/game/createGameDriver
 import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
 import { GameViewBuilder } from '../domains/cats/services/game/GameViewBuilder.js';
+import { appendGameSystemMessage } from '../domains/cats/services/game/gameSystemMessage.js';
 import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -30,7 +31,7 @@ export interface GameRoutesOptions {
   socketManager: SocketLike;
   threadStore: IThreadStore;
   messageStore: IMessageStore;
-  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopAllLoops'>;
+  autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopLoop' | 'stopAllLoops'>;
 }
 
 const seatSchema = z.object({
@@ -183,19 +184,19 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
     }
 
     // Create independent game thread with play mode (Layer 1 info isolation, KD-40/AC-I9)
-    const gameTitle = `狼人杀 — ${clampedCount}人局`;
+    const ts = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(' ', '-').replaceAll(':', '');
+    const gameTitle = `狼人杀 — ${clampedCount}人局 (${ts})`;
     const gameThread = await threadStore.create(userId, gameTitle, `games/${gameType}`);
     const gameThreadId = gameThread.id;
     await threadStore.updateThinkingMode(gameThreadId, 'play');
+    await threadStore.updatePin(gameThreadId, true);
 
     // Store a system message in the game thread for context
-    await messageStore.append({
-      userId,
-      catId: null,
-      content: `🎮 ${gameTitle} 开始`,
-      mentions: [],
-      timestamp: Date.now(),
+    await appendGameSystemMessage({
       threadId: gameThreadId,
+      content: `🎮 ${gameTitle} 开始`,
+      messageStore,
+      socketManager,
     });
 
     // WerewolfLobby for role assignment, then orchestrator for persistence + broadcast
@@ -381,15 +382,33 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       return { error: 'No active game in this thread' };
     }
 
-    if (runtime.config.humanRole !== 'god-view') {
-      reply.status(403);
-      return { error: 'God actions require god-view mode' };
-    }
-
     const body = request.body as { action?: string };
     if (!body?.action) {
       reply.status(400);
       return { error: 'Missing action field' };
+    }
+
+    // 'stop' is always allowed — emergency kill switch regardless of humanRole
+    if (body.action === 'stop') {
+      try {
+        autoPlayer.stopLoop(runtime.gameId);
+        await gameStore.endGame(runtime.gameId, 'aborted');
+        clearGameNonces(runtime.gameId);
+        socketManager.broadcastToRoom(`thread:${runtime.threadId}`, 'game:aborted', {
+          gameId: runtime.gameId,
+          timestamp: Date.now(),
+        });
+        return { ok: true, action: 'stop' };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        reply.status(400);
+        return { error: message };
+      }
+    }
+
+    if (runtime.config.humanRole !== 'god-view') {
+      reply.status(403);
+      return { error: 'God actions require god-view mode' };
     }
 
     try {
@@ -423,6 +442,8 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, opt
       return { error: 'No active game in this thread' };
     }
 
+    // Stop the auto-play/narrator loop FIRST so it doesn't keep invoking LLMs
+    autoPlayer.stopLoop(runtime.gameId);
     await gameStore.endGame(runtime.gameId, 'aborted');
     clearGameNonces(runtime.gameId);
 

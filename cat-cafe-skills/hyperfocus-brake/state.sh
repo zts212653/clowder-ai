@@ -10,6 +10,40 @@ _resolve_state_file() {
   STATE_FILE="${TMPDIR:-/tmp}/hyperfocus-brake-state-${USER:-default}.json"
 }
 
+# 铲屎官活跃心跳文件（UserPromptSubmit hook 写入）
+_resolve_heartbeat_file() {
+  HEARTBEAT_FILE="${TMPDIR:-/tmp}/hyperfocus-brake-heartbeat-${USER:-default}"
+}
+
+# 记录铲屎官发了消息（由 UserPromptSubmit hook 调用）
+touch_user_heartbeat() {
+  _resolve_heartbeat_file
+  date +%s > "$HEARTBEAT_FILE"
+}
+
+# 检查铲屎官是否在（15 分钟内有消息 = 在）
+is_human_active() {
+  local timeout_sec="${1:-900}"  # 默认 15 分钟
+  _resolve_heartbeat_file
+
+  if [[ ! -f "$HEARTBEAT_FILE" ]]; then
+    # 没有心跳文件 = 首次运行，假设铲屎官在
+    return 0
+  fi
+
+  local last_beat
+  last_beat=$(cat "$HEARTBEAT_FILE" 2>/dev/null || echo "0")
+  local now
+  now=$(date +%s)
+  local gap=$((now - last_beat))
+
+  if [[ $gap -le $timeout_sec ]]; then
+    return 0  # 铲屎官在
+  else
+    return 1  # 铲屎官可能睡着了
+  fi
+}
+
 # P1-2 安全：拒绝 symlink（防止 symlink clobber 攻击）
 ensure_safe_state_file() {
   _resolve_state_file

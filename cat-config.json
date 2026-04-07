@@ -392,6 +392,12 @@
             "outputFormat": "stream-json",
             "defaultArgs": []
           },
+          "acp": {
+            "command": "gemini",
+            "startupArgs": ["--acp"],
+            "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
+            "supportsMultiplexing": true
+          },
           "personality": "热血奔放，爱发富文本和语音消息，善于用视觉语言表达想法，表达力是全队最强的",
           "strengths": ["visual-design", "ui-ux", "creativity"],
           "contextBudget": {
@@ -428,6 +434,12 @@
             "command": "gemini",
             "outputFormat": "stream-json",
             "defaultArgs": []
+          },
+          "acp": {
+            "command": "gemini",
+            "startupArgs": ["--acp"],
+            "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
+            "supportsMultiplexing": true
           },
           "personality": "暹罗猫的经典版本，创意灵感同样丰富",
           "strengths": ["visual-design", "creativity", "multimodal"],

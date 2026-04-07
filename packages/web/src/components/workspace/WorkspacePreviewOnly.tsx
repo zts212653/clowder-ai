@@ -10,14 +10,11 @@ interface WorkspacePreviewOnlyProps {
   onExit: () => void;
 }
 
-/**
- * Minimal preview-only shell used by WorkspacePanel.
- * Keeps exit controls and keyboard escape handling in one small component.
- */
+/** Browser preview in focus mode — full workspace, no chrome. */
 export function WorkspacePreviewOnly({ initialPort, initialPath, onNavigate, onExit }: WorkspacePreviewOnlyProps) {
   return (
     <WorkspaceFocusShell onExit={onExit}>
-      <BrowserPanel initialPort={initialPort} initialPath={initialPath} onNavigate={onNavigate} previewOnly />
+      <BrowserPanel initialPort={initialPort} initialPath={initialPath} previewOnly onNavigate={onNavigate} />
     </WorkspaceFocusShell>
   );
 }

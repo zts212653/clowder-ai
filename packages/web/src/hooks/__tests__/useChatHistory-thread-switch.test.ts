@@ -309,7 +309,10 @@ describe('useChatHistory thread switch ordering', () => {
       }
       if (typeof url === 'string' && url.includes('/queue')) {
         return Promise.resolve(
-          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: ['opus'] }), { status: 200 }),
+          new Response(
+            JSON.stringify({ queue: [], paused: false, activeInvocations: [{ catId: 'opus', startedAt: Date.now() }] }),
+            { status: 200 },
+          ),
         );
       }
       if (typeof url === 'string' && url.includes('/task-progress')) {

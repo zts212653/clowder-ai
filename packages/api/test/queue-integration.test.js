@@ -132,7 +132,16 @@ function mockInvocationTracker() {
         activeThreads.add(threadId);
         return new AbortController();
       },
-      complete(threadId, _controller) {
+      startAll(threadId, catIds, userId) {
+        starts.push({ threadId, catId: catIds[0], userId, catIds });
+        activeThreads.add(threadId);
+        return new AbortController();
+      },
+      complete(threadId, _catId, _controller) {
+        completes.push({ threadId });
+        activeThreads.delete(threadId);
+      },
+      completeAll(threadId, _catIds, _controller) {
         completes.push({ threadId });
         activeThreads.delete(threadId);
       },
@@ -457,8 +466,15 @@ describe('Queue Integration (E2E scenarios)', () => {
         activeSlots.add(`${threadId}:${catId}`);
         return new AbortController();
       },
+      startAll(threadId, catIds) {
+        for (const catId of catIds) activeSlots.add(`${threadId}:${catId}`);
+        return new AbortController();
+      },
       complete(threadId, catId, _controller) {
         activeSlots.delete(`${threadId}:${catId}`);
+      },
+      completeAll(threadId, catIds) {
+        for (const catId of catIds) activeSlots.delete(`${threadId}:${catId}`);
       },
       has(threadId, catId) {
         if (catId) return activeSlots.has(`${threadId}:${catId}`);

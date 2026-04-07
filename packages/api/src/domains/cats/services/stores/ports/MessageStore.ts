@@ -64,8 +64,8 @@ export interface StoredMessage {
   timestamp: number;
   /** F045: Extended thinking content (accumulated from CLI thinking blocks). Persisted for F5 recovery. */
   thinking?: string;
-  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
-  origin?: 'stream' | 'callback';
+  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech), briefing = F148 Phase E context briefing (non-routing) */
+  origin?: 'stream' | 'callback' | 'briefing';
   /** F35: Message visibility. Default 'public' (undefined = public for backward compat) */
   visibility?: 'public' | 'whisper';
   /** F35: Whisper recipients. Only meaningful when visibility='whisper' */

@@ -19,9 +19,25 @@ export class KnowledgeResolver implements IKnowledgeResolver {
 
   async resolve(query: string, options?: SearchOptions): Promise<KnowledgeResult> {
     const limit = options?.limit ?? 10;
+    const dimension = options?.dimension ?? 'all';
+
+    // Dimension routing: project-only, global-only, or federated
+    if (dimension === 'project') {
+      const results = await this.projectStore.search(query, { ...options, limit });
+      return { results: results.slice(0, limit), sources: ['project'], query };
+    }
+
+    if (dimension === 'global') {
+      if (!this.globalStore) {
+        return { results: [], sources: [], query };
+      }
+      const results = await this.globalStore.search(query, { ...options, limit }).catch(() => []);
+      return { results: results.slice(0, limit), sources: results.length > 0 ? ['global'] : [], query };
+    }
+
+    // dimension === 'all': federated RRF fusion (original behavior)
     const sources: KnowledgeResult['sources'] = [];
 
-    // Fan-out: project store (always) + global store (if provided)
     const projectPromise = this.projectStore.search(query, { ...options, limit });
     const globalPromise = this.globalStore
       ? this.globalStore.search(query, { ...options, limit }).catch(() => null)
@@ -32,7 +48,6 @@ export class KnowledgeResolver implements IKnowledgeResolver {
     sources.push('project');
 
     if (!globalResults || globalResults.length === 0) {
-      // Project-only path (no global store or global returned nothing/errored)
       return {
         results: projectResults.slice(0, limit),
         sources,
@@ -42,7 +57,6 @@ export class KnowledgeResolver implements IKnowledgeResolver {
 
     sources.push('global');
 
-    // RRF fusion: merge + deduplicate + rank
     const fused = rrfFusion(projectResults, globalResults, limit);
     return { results: fused, sources, query };
   }

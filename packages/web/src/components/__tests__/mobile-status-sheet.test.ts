@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { MobileStatusSheet } from '@/components/MobileStatusSheet';
 import type { CatStatus, IntentMode } from '@/components/status-helpers';
 import type { CatInvocationInfo } from '@/stores/chatStore';
+import { useChatStore } from '@/stores/chatStore';
 
 describe('MobileStatusSheet', () => {
   let container: HTMLDivElement;
@@ -26,6 +27,7 @@ describe('MobileStatusSheet', () => {
   });
 
   beforeEach(() => {
+    useChatStore.setState({ activeInvocations: {} });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -33,6 +35,7 @@ describe('MobileStatusSheet', () => {
 
   afterEach(() => {
     act(() => root.unmount());
+    useChatStore.setState({ activeInvocations: {} });
     container.remove();
   });
 
@@ -123,5 +126,29 @@ describe('MobileStatusSheet', () => {
     });
     expect(container.textContent).toContain('猫猫状态');
     expect(container.textContent).not.toContain('当前调用');
+  });
+
+  it('shows cats that only exist in activeInvocations on mobile', () => {
+    useChatStore.setState({
+      activeInvocations: {
+        'inv-main': { catId: 'opus', mode: 'ideate' },
+        'inv-main-codex': { catId: 'codex', mode: 'ideate' },
+      },
+    });
+
+    const props = {
+      ...baseProps,
+      open: true,
+      targetCats: ['opus'],
+      catStatuses: { opus: 'streaming' as CatStatus, codex: 'pending' as CatStatus },
+    };
+
+    act(() => {
+      root.render(React.createElement(MobileStatusSheet, props));
+    });
+
+    expect(container.textContent).toContain('当前调用');
+    expect(container.textContent).toContain('布偶猫');
+    expect(container.textContent).toContain('缅因猫');
   });
 });

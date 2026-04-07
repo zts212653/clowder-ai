@@ -255,6 +255,10 @@ export const AuditEventTypes = {
 
   // === Session Sealing (F118) ===
 
+  /** requestSeal() accepted — session transitioning active → sealing */
+  SEAL_REQUESTED: 'seal_requested',
+  /** finalize() completed cleanly — session sealed with transcript + digest written. Not emitted on partial finalize (doFinalize failed but status forced to sealed). */
+  SEAL_FINALIZED: 'seal_finalized',
   /** finalize() failed or timed out */
   SEAL_FINALIZE_FAILED: 'seal_finalize_failed',
 } as const;

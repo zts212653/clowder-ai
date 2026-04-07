@@ -225,6 +225,40 @@ describe('Briefing Capsule Builder', () => {
     });
   });
 
+  describe('witch heal target', () => {
+    it('heal instruction includes target seat number of wolf kill victim', () => {
+      const rt = makeRuntime({
+        currentPhase: 'night_witch',
+        eventLog: [
+          {
+            eventId: 'e-wolf',
+            round: 1,
+            phase: 'night_wolf',
+            type: 'action.submitted',
+            scope: 'god',
+            payload: { seatId: 'P1', actionName: 'kill', target: 'P5' },
+            timestamp: 1,
+          },
+        ],
+      });
+
+      const result = buildFirstWakeBriefing({ gameRuntime: rt, seatId: 'P4' });
+      assert.ok(result.includes('action: "heal"'), 'should have heal option');
+      assert.ok(result.includes('target: 5'), 'heal must include target seat number of killed player');
+    });
+
+    it('heal instruction omitted when no kill target (peaceful night)', () => {
+      const rt = makeRuntime({
+        currentPhase: 'night_witch',
+        eventLog: [],
+      });
+
+      const result = buildFirstWakeBriefing({ gameRuntime: rt, seatId: 'P4' });
+      assert.ok(!result.includes('action: "heal"'), 'no heal option when no kill target');
+      assert.ok(result.includes('平安夜'), 'should mention peaceful night');
+    });
+  });
+
   describe('guard consecutive protection rule', () => {
     it('guard briefing mentions the consecutive protection restriction', () => {
       const rt = makeRuntime({

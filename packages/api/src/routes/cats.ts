@@ -5,7 +5,17 @@
  */
 
 import { resolve } from 'node:path';
-import { type CatConfig, type CatProvider, type ContextBudget, catRegistry, type RosterEntry } from '@cat-cafe/shared';
+import {
+  type CatConfig,
+  type CatProvider,
+  CLI_EFFORT_VALUES,
+  type CliConfig,
+  type ContextBudget,
+  catRegistry,
+  getCliEffortOptionsForProvider,
+  isValidCliEffortForProvider,
+  type RosterEntry,
+} from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -17,7 +27,7 @@ import {
 } from '../config/account-resolver.js';
 import { isSeedCat, resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { bootstrapCatCatalog, resolveCatCatalogPath } from '../config/cat-catalog-store.js';
-import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
+import { getAcpConfig, getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
@@ -36,10 +46,12 @@ const contextBudgetSchema = z.object({
   maxContentLengthPerMsg: z.number().int().positive(),
 });
 
+const cliEffortSchema = z.enum(CLI_EFFORT_VALUES);
 const cliSchema = z.object({
-  command: z.string().min(1),
-  outputFormat: z.string().min(1),
+  command: z.string().min(1).optional(),
+  outputFormat: z.string().min(1).optional(),
   defaultArgs: z.array(z.string().min(1)).optional(),
+  effort: cliEffortSchema.nullable().optional(),
 });
 
 const clientSchema = z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode']);
@@ -189,6 +201,36 @@ function defaultCliForClient(client: CatProvider): { command: string; outputForm
   }
 }
 
+type CliPatch = z.infer<typeof cliSchema>;
+
+function buildResolvedCliConfig(client: CatProvider, baseCli: CliConfig, patch?: CliPatch): CliConfig {
+  const defaultArgs =
+    patch?.defaultArgs !== undefined
+      ? patch.defaultArgs.length > 0
+        ? patch.defaultArgs
+        : undefined
+      : baseCli.defaultArgs && baseCli.defaultArgs.length > 0
+        ? [...baseCli.defaultArgs]
+        : undefined;
+
+  const effortTouched = patch ? Object.hasOwn(patch, 'effort') : false;
+  const nextEffort = effortTouched ? patch?.effort : baseCli.effort;
+  if (nextEffort !== undefined && nextEffort !== null && !isValidCliEffortForProvider(client, nextEffort)) {
+    const options = getCliEffortOptionsForProvider(client);
+    if (!options) {
+      throw new Error(`client "${client}" does not support cli.effort`);
+    }
+    throw new Error(`client "${client}" only supports cli.effort ${options.join(' / ')}`);
+  }
+
+  return {
+    command: patch?.command ?? baseCli.command,
+    outputFormat: patch?.outputFormat ?? baseCli.outputFormat,
+    ...(defaultArgs ? { defaultArgs } : {}),
+    ...(nextEffort !== undefined && nextEffort !== null ? { effort: nextEffort } : {}),
+  };
+}
+
 function resolveAccountRef(body: {
   accountRef?: string | null;
   providerProfileId?: string | null;
@@ -267,6 +309,7 @@ async function toCatResponse(
     accountRef: await resolveEffectiveAccountRef(cat),
     provider: cat.provider,
     defaultModel: cat.defaultModel,
+    cli: cat.cli,
     contextBudget: cat.contextBudget,
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,
@@ -292,6 +335,7 @@ async function toCatResponse(
         }
       : null,
     source: metadata.source,
+    adapterMode: cat.provider === 'google' ? (getAcpConfig(cat.id as string) ? 'acp' : 'cli') : undefined,
   };
 }
 
@@ -414,6 +458,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
           commandArgs: body.commandArgs,
         });
       } else {
+        const resolvedCli = buildResolvedCliConfig(body.client, defaultCliForClient(body.client), body.cli);
         createRuntimeCat(projectRoot, {
           catId: body.catId,
           name: body.name,
@@ -438,7 +483,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
               body.client === 'openai' ||
               body.client === 'google' ||
               body.client === 'opencode'),
-          cli: body.cli ?? defaultCliForClient(body.client),
+          cli: resolvedCli,
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
           ...(body.ocProviderName ? { ocProviderName: body.ocProviderName } : {}),
         });
@@ -550,6 +595,10 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
     try {
       const hasCommandArgsPatch = body.commandArgs !== undefined;
       const nextCommandArgs = body.commandArgs ?? [];
+      const clientSwitched = body.client !== undefined && body.client !== currentCat.provider;
+      const baseCli = clientSwitched || !currentCat.cli ? defaultCliForClient(effectiveClient) : currentCat.cli;
+      const shouldPatchCli = effectiveClient !== 'antigravity' && (body.cli !== undefined || clientSwitched);
+      const resolvedCli = shouldPatchCli ? buildResolvedCliConfig(effectiveClient, baseCli, body.cli) : undefined;
       const antigravityCliPatch =
         body.client === 'antigravity' || (currentCat.provider === 'antigravity' && hasCommandArgsPatch)
           ? {
@@ -584,7 +633,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
             }
           : {}),
         ...(!hasCommandArgsPatch ? antigravityCliPatch : {}),
-        ...(body.cli !== undefined ? { cli: body.cli } : {}),
+        ...(resolvedCli ? { cli: resolvedCli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
         ...(body.cliConfigArgs !== undefined ? { cliConfigArgs: body.cliConfigArgs } : {}),
         ...(body.ocProviderName !== undefined

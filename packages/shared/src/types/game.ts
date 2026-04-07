@@ -124,7 +124,7 @@ export function isValidActionStatus(value: unknown): value is ActionStatus {
 export interface PendingAction extends GameAction {
   status: ActionStatus;
   requestedAt: number;
-  fallbackSource?: 'heuristic' | 'random';
+  fallbackSource?: 'heuristic' | 'random' | 'skip';
 }
 
 export interface Ballot {

@@ -272,6 +272,60 @@ describe('CliOutputBlock', () => {
     expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
   });
 
+  // ── #349 regression: streaming→done should respect defaultExpanded ──
+  it('does NOT auto-collapse on streaming→done when defaultExpanded=true', () => {
+    // Start streaming with defaultExpanded=true → expanded
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'streaming',
+          defaultExpanded: true,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+
+    // Status changes to done → should stay expanded because default is expanded
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'done',
+          defaultExpanded: true,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+  });
+
+  // ── #349 regression: async config load should sync defaultExpanded ──
+  it('syncs expanded state when defaultExpanded prop changes from false to true', () => {
+    // Initial render with defaultExpanded=false (simulates store initial value)
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'done',
+          defaultExpanded: false,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+
+    // Config loads async → defaultExpanded becomes true
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'done',
+          defaultExpanded: true,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+  });
+
   // ── P1-3: duplicate label matching ──
   it('correctly matches tool_result for duplicate tool labels', () => {
     const dupeEvents: CliEvent[] = [

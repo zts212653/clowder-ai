@@ -262,6 +262,10 @@ export class TranscriptWriter {
         return 'edit';
       case 'delete':
         return 'delete';
+      case 'read':
+      case 'grep':
+      case 'glob':
+        return 'read';
       default:
         return null;
     }

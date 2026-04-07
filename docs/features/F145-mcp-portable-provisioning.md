@@ -8,7 +8,7 @@ created: 2026-03-27
 
 # F145: MCP Portable Provisioning — 声明式 MCP 期望态 + 本机解析
 
-> **Status**: done | **Completed**: 2026-03-27 | **Owner**: Ragdoll + Maine Coon | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1
 
 ## Why
 
@@ -67,6 +67,19 @@ created: 2026-03-27
    - 输出 ready/missing/unresolved 报告
    - 不能自动安装的宿主软件（如 Antigravity / VS Code 本体），给出一条明确安装指引
 
+### Phase C: Built-in Cat Café MCP Auto-Provision for ACP ✅
+
+**痛点**：ACP resolver (`acp-mcp-resolver.ts`) 把内置 `cat-cafe*` servers 和外部 MCP 一视同仁，全从 `.mcp.json` 读取。社区用户 clone 后没有 `.mcp.json`（gitignored），Gemini ACP 就拿不到任何 MCP server。
+
+**改法**（Maine Coon GPT-5.4 审定边界）：
+
+1. **共享 helper**：`resolveBuiltinCatCafeMcpServers(projectRoot, whitelist)` — 从 `packages/mcp-server/dist/` 自动生成内置 server 配置
+   - `cat-cafe` → `dist/index.js`（全量 server，含 limb tools）
+   - `cat-cafe-{suffix}` → `dist/{suffix}.js`
+2. **ACP resolver 改造**：内置 `cat-cafe*` 走 helper，外部 server（`pencil` 等）才 fallback 到 `.mcp.json`
+3. **capabilities.json bootstrap 补齐**：`cat-cafe` 主 server 加入 bootstrap/migration（当前只有 split 三件套）
+4. **mcp:doctor 对齐**：确认 doctor 报告包含 `cat-cafe` 主 server 状态
+
 ## Acceptance Criteria
 
 ### Phase A（Pencil Resolver + 去机器态）✅
@@ -84,6 +97,13 @@ created: 2026-03-27
 - [x] AC-B3: 看板能显示 skill 的 MCP 依赖就绪状态
 - [x] AC-B4: `pnpm mcp:doctor` 输出 ready/missing/unresolved 报告
 - [x] AC-B5: 新机器 clone + `pnpm install && pnpm mcp:doctor` 后，报告准确反映本机 MCP 状态
+
+### Phase C（Built-in MCP Auto-Provision for ACP）✅
+- [x] AC-C1: ACP resolver 不依赖 `.mcp.json` 获取 `cat-cafe*` servers — 从 `projectRoot` 自动生成
+- [x] AC-C2: 外部 MCP（`pencil` 等）仍从 `.mcp.json` fallback 读取
+- [x] AC-C3: `capabilities.json` bootstrap 包含 `cat-cafe` 主 server（含 limb tools）
+- [x] AC-C4: 新机器 clone + `pnpm install` 后，Gemini ACP session 自动获得内置 MCP servers（无需手写 `.mcp.json`）
+- [x] AC-C5: 现有 ACP adapter + resolver 测试全绿 + 新增 auto-provision 回归测试
 
 ## Dependencies
 

@@ -97,9 +97,16 @@ function buildFakeDeps(callLog, responseText = VALID_PODCAST_JSON) {
         callLog.push({ op: 'tracker.start' });
         return new AbortController();
       },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
       complete(_threadId, _controller) {
         callLog.push({ op: 'tracker.complete' });
       },
+      completeAll() {},
     },
   };
 }

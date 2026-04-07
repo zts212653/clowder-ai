@@ -26,7 +26,7 @@ const CAT_LABELS: Record<string, string> = {
   opencode: '金渐层',
 };
 
-/* Cozy Swiss palette — warm tones aligned with Cat Café design language */
+/* Cozy Swiss palette — warm tones aligned with Clowder AI design language */
 const CATEGORY_STYLE: Record<string, { color: string; bg: string; label: string; icon: string }> = {
   native: { color: '#7C6CA8', bg: '#F3F0FA', label: '原生工具', icon: '🔧' },
   mcp: { color: '#D4915A', bg: '#FDF3EB', label: 'MCP 桥接', icon: '🌉' },

@@ -8,6 +8,8 @@
  *
  * This test verifies the resetRefs enhancement: after calling resetRefs(), the
  * hook must NOT try to recover or append to the old bubble from a prior invocation.
+ *
+ * Intake source: clowder-ai#378 (selective absorb — resetRefs patch only)
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -249,8 +251,11 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
 
     vi.clearAllMocks();
 
-    // Step 3: A callback arrives for a NEW invocation
-    storeState.messages = [];
+    // Step 3: A callback arrives for a NEW invocation.
+    // IMPORTANT: old message stays in store (simulates fetchHistory keeping it).
+    // If finalizedStreamRef is NOT cleared, findInvocationlessStreamPlaceholder
+    // will find msg-stream via the stale ref and patch it instead of creating new.
+    storeState.messages[0] = { ...storeState.messages[0], isStreaming: false };
     storeState.catInvocations = {};
 
     act(() => {

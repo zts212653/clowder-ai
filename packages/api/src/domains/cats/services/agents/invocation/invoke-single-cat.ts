@@ -1010,43 +1010,52 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             const existing = await deps.sessionChainStore.getActive(catId, threadId);
             if (existing) {
               if (existing.cliSessionId !== msg.sessionId) {
-                // CLI session changed → old context is lost (resume failed / CLI restarted).
-                // Use requestSeal + finalize to ensure transcript/digest are written,
-                // not bare update(status:'sealed') which skips flush.
-                let sealAccepted = false;
-                if (deps.sessionSealer) {
-                  try {
-                    const result = await deps.sessionSealer.requestSeal({
-                      sessionId: existing.id,
-                      reason: 'cli_session_replaced',
-                    });
-                    sealAccepted = result.accepted;
-                    if (sealAccepted) {
-                      deps.sessionSealer.finalize({ sessionId: existing.id }).catch(() => {});
-                    }
-                  } catch {
-                    /* best-effort seal */
-                  }
-                } else {
-                  // Fallback: no sealer available — bare update (legacy path)
-                  const now = Date.now();
+                if (msg.ephemeralSession) {
+                  // ACP transport: sessionId is per-invocation (newSession() each time).
+                  // This is normal — NOT a "session replaced" event. Just update the tracked ID.
                   await deps.sessionChainStore.update(existing.id, {
-                    status: 'sealed',
-                    sealReason: 'cli_session_replaced',
-                    sealedAt: now,
-                    updatedAt: now,
-                  });
-                  sealAccepted = true;
-                }
-                // Only create new active record if old one was successfully sealed.
-                // Otherwise we'd have two active records — a dirty state.
-                if (sealAccepted || !deps.sessionSealer) {
-                  await deps.sessionChainStore.create({
                     cliSessionId: msg.sessionId,
-                    threadId,
-                    catId,
-                    userId,
+                    updatedAt: Date.now(),
                   });
+                } else {
+                  // CLI session changed → old context is lost (resume failed / CLI restarted).
+                  // Use requestSeal + finalize to ensure transcript/digest are written,
+                  // not bare update(status:'sealed') which skips flush.
+                  let sealAccepted = false;
+                  if (deps.sessionSealer) {
+                    try {
+                      const result = await deps.sessionSealer.requestSeal({
+                        sessionId: existing.id,
+                        reason: 'cli_session_replaced',
+                      });
+                      sealAccepted = result.accepted;
+                      if (sealAccepted) {
+                        deps.sessionSealer.finalize({ sessionId: existing.id }).catch(() => {});
+                      }
+                    } catch {
+                      /* best-effort seal */
+                    }
+                  } else {
+                    // Fallback: no sealer available — bare update (legacy path)
+                    const now = Date.now();
+                    await deps.sessionChainStore.update(existing.id, {
+                      status: 'sealed',
+                      sealReason: 'cli_session_replaced',
+                      sealedAt: now,
+                      updatedAt: now,
+                    });
+                    sealAccepted = true;
+                  }
+                  // Only create new active record if old one was successfully sealed.
+                  // Otherwise we'd have two active records — a dirty state.
+                  if (sealAccepted || !deps.sessionSealer) {
+                    await deps.sessionChainStore.create({
+                      cliSessionId: msg.sessionId,
+                      threadId,
+                      catId,
+                      userId,
+                    });
+                  }
                 }
               }
             } else {
@@ -1429,7 +1438,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         const iterResult = await abortableNext(serviceIter, signal);
         if (iterResult.done) break;
         const msg = iterResult.value;
-        resetInvocationTimeout();
+        // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
+        if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal') resetInvocationTimeout();
         if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
           const failureKind = classifyResumeFailure(msg.error);
           if (failureKind) {
@@ -1514,10 +1524,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
         }
 
-        for await (const out of streamProcessedOutputs(msg)) {
+        // F149: Map provider_signal / liveness_signal → system_info for frontend delivery
+        const deliveryMsg =
+          msg.type === 'provider_signal' || msg.type === 'liveness_signal'
+            ? { ...msg, type: 'system_info' as const }
+            : msg;
+        for await (const out of streamProcessedOutputs(deliveryMsg)) {
           yield out;
         }
-        if (msg.type !== 'error' && msg.type !== 'done' && msg.type !== 'session_init') {
+        if (
+          msg.type !== 'error' &&
+          msg.type !== 'done' &&
+          msg.type !== 'session_init' &&
+          msg.type !== 'provider_signal' &&
+          msg.type !== 'liveness_signal'
+        ) {
           attemptHasContentOutput = true;
           // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
           if (msg.type !== 'system_info') {

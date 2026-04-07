@@ -204,7 +204,7 @@ const MCP_TOOLS_SECTION = `
 MCP 工具用于异步汇报等场景（token 有效期有限）：
 
 **记忆工具（先搜后问）：**
-- cat_cafe_search_evidence: **首选入口** — 搜索项目知识库（决策/讨论/教训/phase history）
+- cat_cafe_search_evidence: **首选入口** — 搜索知识库。depth=raw 返回消息级细节
 - cat_cafe_reflect: 反思性问题 — 从项目知识中合成洞察
 
 **记忆 drill-down 工具（search_evidence 命中后深入）：**

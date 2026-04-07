@@ -76,6 +76,13 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
         : {};
   const mcpSupportPatch =
     cat && form.client !== cat.provider ? { mcpSupport: defaultMcpSupportForClient(form.client) } : {};
+  const trimmedCliEffort = trimText(form.cliEffort);
+  const cliPatch =
+    trimmedCliEffort.length > 0
+      ? { cli: { effort: trimmedCliEffort } }
+      : cat?.cli?.effort
+        ? { cli: { effort: null as null } }
+        : {};
   const common = {
     displayName,
     nickname: trimText(form.nickname),
@@ -115,6 +122,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     client: form.client,
     ...accountRefPatch,
     ...mcpSupportPatch,
+    ...cliPatch,
     defaultModel: trimText(form.defaultModel),
     cliConfigArgs: (form.cliConfigArgs ?? []).filter((arg) => arg.trim().length > 0),
     ...(form.client === 'opencode' && trimText(form.ocProviderName)

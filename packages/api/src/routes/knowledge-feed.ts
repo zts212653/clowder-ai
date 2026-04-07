@@ -7,15 +7,16 @@
 
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
-import type { IMarkerQueue } from '../domains/memory/interfaces.js';
+import type { IMarkerQueue, IMaterializationService } from '../domains/memory/interfaces.js';
 
 interface KnowledgeFeedDeps {
   markerQueue: IMarkerQueue;
   db: Database.Database;
+  materializationService?: IMaterializationService;
 }
 
 export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeFeedDeps) {
-  const { markerQueue, db } = deps;
+  const { markerQueue, db, materializationService } = deps;
 
   // GET /api/knowledge/feed — List candidates grouped by status
   app.get('/api/knowledge/feed', async (_req, reply) => {
@@ -74,7 +75,18 @@ export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeF
       if (!markerId) return reply.status(400).send({ error: 'markerId required' });
 
       await markerQueue.transition(markerId, 'approved');
-      return { status: 'approved', markerId };
+
+      // Auto-materialize if service available
+      let materialized;
+      if (materializationService) {
+        try {
+          materialized = await materializationService.materialize(markerId);
+        } catch {
+          // Materialize failure is non-fatal — marker stays approved
+        }
+      }
+
+      return { status: 'approved', markerId, materialized };
     } catch (err) {
       reply.status(500).send({ error: 'Failed to approve candidate' });
     }

@@ -22,6 +22,33 @@ triggers:
 
 ## 核心知识
 
+### Runtime Preflight Gate（运行时异常硬门禁）
+
+**如果 bug 涉及 runtime 行为**（前端显示异常、API 返回错误、猫猫行为异常、stream 错误等），**在进入 Phase 1 之前**必须先完成三件套验证：
+
+**一键运行**：`bash scripts/runtime-preflight.sh [目标commit]`
+
+脚本输出固定 7 行字段（绑端口而非 grep 猜测）：
+
+```
+PORT=3004              ← 默认 API 端口（3003=前端），只取 LISTEN PID
+PID=53507              ← 精确到监听进程（排除浏览器等客户端连接）
+START_TIME=...         ← 进程启动时间
+HEAD=abc1234 ...       ← runtime worktree HEAD
+TARGET_COMMIT=f78c984  ← 你预期的 commit
+PROCESS_AFTER_TARGET=yes/no  ← 进程是否在 commit 之后启动
+LOG_EVIDENCE=...       ← 当前 PID 在最新日志中的行数
+```
+
+**这 7 行没拿到之前，唯一允许说的话是"我还没查完"。**
+
+以下断言**必须附带 preflight 输出**，否则禁止说出：
+- "runtime 没更新" / "代码没编译" / "没重启" / "还是旧代码"
+
+**为什么这是硬门禁**：启动脚本会自动拉代码并编译。"没更新"本来就不太可能发生。在没有证据的情况下说"没更新" = 把自己的 bug 甩锅给铲屎官。这不是懒，是推卸责任。
+
+> 来源：铲屎官多次纠正（2026-04-05 定为 P0），Maine Coon协助定位根因 + 方案审查。
+
 ### 4 阶段流水线
 
 每个阶段必须完成才能进入下一个。
@@ -83,6 +110,8 @@ triggers:
 ```
 收到 bug / 看到失败
   ↓
+涉及 runtime？→ 是 → Runtime Preflight Gate（三件套）
+  ↓ 否 / 三件套完成
 填诊断胶囊（8 栏工作模板）← 入口！
   ↓
 Phase 1: 根因调查（胶囊驱动）
@@ -117,6 +146,7 @@ Phase 4: 先写失败测试 → 修复 → 验证
 - "跳过测试，我手工验一下"
 - "同时改几个地方"
 - "再试一次修复"（已经失败 2 次以上）
+- **"可能没更新/没编译/没重启"**（没跑三件套就说 = 推卸责任）
 
 ## Common Mistakes
 

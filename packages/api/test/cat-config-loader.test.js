@@ -149,6 +149,100 @@ describe('cat-config-loader', () => {
       }
     });
 
+    it('replaces cli object when catalog switches provider so stale effort/defaultArgs do not leak from base', () => {
+      const projectDir = mkdtempSync(join(tmpdir(), 'cat-cli-merge-project-'));
+      const templatePath = join(projectDir, 'cat-template.json');
+
+      const base = validConfig();
+      base.breeds[0].variants[0].cli = {
+        command: 'claude',
+        outputFormat: 'stream-json',
+        defaultArgs: ['--output-format', 'stream-json'],
+        effort: 'max',
+      };
+      writeFileSync(templatePath, JSON.stringify(base));
+      writeFileSync(join(projectDir, 'cat-config.json'), JSON.stringify(base));
+
+      const runtimeDir = join(projectDir, '.cat-cafe');
+      mkdirSync(runtimeDir, { recursive: true });
+      const catalog = validConfig();
+      catalog.breeds[0].variants[0].provider = 'openai';
+      catalog.breeds[0].variants[0].defaultModel = 'gpt-5.4';
+      catalog.breeds[0].variants[0].cli = {
+        command: 'codex',
+        outputFormat: 'json',
+      };
+      writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(catalog));
+
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      process.env.CAT_TEMPLATE_PATH = templatePath;
+      try {
+        const config = loadCatConfig();
+        const variant = config.breeds[0].variants[0];
+        assert.equal(variant.provider, 'openai');
+        assert.deepEqual(variant.cli, {
+          command: 'codex',
+          outputFormat: 'json',
+        });
+        assert.equal('effort' in variant.cli, false, 'base cli.effort must not leak across provider switch');
+        assert.equal('defaultArgs' in variant.cli, false, 'base cli.defaultArgs must not leak across provider switch');
+      } finally {
+        if (saved === undefined) {
+          delete process.env.CAT_TEMPLATE_PATH;
+        } else {
+          process.env.CAT_TEMPLATE_PATH = saved;
+        }
+      }
+    });
+
+    it('replaces cli object when catalog switches provider from openai back to anthropic', () => {
+      const projectDir = mkdtempSync(join(tmpdir(), 'cat-cli-reverse-merge-project-'));
+      const templatePath = join(projectDir, 'cat-template.json');
+
+      const base = validConfig();
+      base.breeds[0].variants[0].provider = 'openai';
+      base.breeds[0].variants[0].defaultModel = 'gpt-5.4';
+      base.breeds[0].variants[0].cli = {
+        command: 'codex',
+        outputFormat: 'json',
+        defaultArgs: ['exec', '--json'],
+        effort: 'xhigh',
+      };
+      writeFileSync(templatePath, JSON.stringify(base));
+      writeFileSync(join(projectDir, 'cat-config.json'), JSON.stringify(base));
+
+      const runtimeDir = join(projectDir, '.cat-cafe');
+      mkdirSync(runtimeDir, { recursive: true });
+      const catalog = validConfig();
+      catalog.breeds[0].variants[0].provider = 'anthropic';
+      catalog.breeds[0].variants[0].defaultModel = 'claude-opus-4-1';
+      catalog.breeds[0].variants[0].cli = {
+        command: 'claude',
+        outputFormat: 'stream-json',
+      };
+      writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(catalog));
+
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      process.env.CAT_TEMPLATE_PATH = templatePath;
+      try {
+        const config = loadCatConfig();
+        const variant = config.breeds[0].variants[0];
+        assert.equal(variant.provider, 'anthropic');
+        assert.deepEqual(variant.cli, {
+          command: 'claude',
+          outputFormat: 'stream-json',
+        });
+        assert.equal('effort' in variant.cli, false, 'base cli.effort must not leak back to anthropic');
+        assert.equal('defaultArgs' in variant.cli, false, 'base cli.defaultArgs must not leak back to anthropic');
+      } finally {
+        if (saved === undefined) {
+          delete process.env.CAT_TEMPLATE_PATH;
+        } else {
+          process.env.CAT_TEMPLATE_PATH = saved;
+        }
+      }
+    });
+
     it('rejects invalid JSON (missing required field)', () => {
       const bad = validConfig();
       delete bad.breeds[0].roleDescription;

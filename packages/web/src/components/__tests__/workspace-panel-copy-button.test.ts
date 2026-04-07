@@ -177,9 +177,7 @@ describe('WorkspacePanel Copy button', () => {
     setupMocks({ truncated: true, content: 'partial content...' });
     await renderPanel();
 
-    const btn = container.querySelector(
-      'button[title="复制已加载内容（文件已截断，非完整全文）"]',
-    ) as HTMLButtonElement;
+    const btn = container.querySelector('button[title="复制已加载内容"]') as HTMLButtonElement;
     expect(btn).not.toBeNull();
     expect(btn.textContent).toBe('Copy…');
   });

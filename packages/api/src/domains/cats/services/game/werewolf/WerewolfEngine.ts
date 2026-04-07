@@ -363,24 +363,26 @@ export class WerewolfEngine extends GameEngine {
   /** Record last words as a public event. */
   recordLastWords(seatId: string, text: string): void {
     const runtime = this.getRuntime();
+    const seat = runtime.seats.find((s) => s.seatId === seatId);
     this.appendEvent({
       round: runtime.round,
       phase: runtime.currentPhase,
       type: 'last_words',
       scope: 'public',
-      payload: { seatId, text },
+      payload: { seatId, actorId: seat?.actorId ?? seatId, text },
     });
   }
 
   /** Record a speech during discussion as a public event. */
   recordSpeech(seatId: string, text: string): void {
     const runtime = this.getRuntime();
+    const seat = runtime.seats.find((s) => s.seatId === seatId);
     this.appendEvent({
       round: runtime.round,
       phase: runtime.currentPhase,
       type: 'speech',
       scope: 'public',
-      payload: { seatId, text },
+      payload: { seatId, actorId: seat?.actorId ?? seatId, text },
     });
   }
 

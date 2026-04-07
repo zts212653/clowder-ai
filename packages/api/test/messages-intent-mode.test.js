@@ -59,8 +59,11 @@ function makeMockInvocationTracker() {
     has: () => false,
     isDeleting: () => false,
     start: () => new AbortController(),
+    startAll: () => new AbortController(),
     tryStartThread: () => new AbortController(),
+    tryStartThreadAll: () => new AbortController(),
     complete: () => {},
+    completeAll: () => {},
   };
 }
 

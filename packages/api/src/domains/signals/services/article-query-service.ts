@@ -12,6 +12,7 @@ import {
 import { computeSignalArticleStats, type SignalArticleStats } from './article-stats.js';
 import { normalizeArticleUrl } from './deduplication.js';
 import { type InboxRecord, readInboxRecords as readInboxRecordsFromStore } from './inbox-records.js';
+import { StudyMetaService } from './study-meta-service.js';
 
 export type { SignalArticleDetail } from './article-document.js';
 
@@ -75,6 +76,19 @@ function toDateBound(value: string | undefined, fallback: number, mode: 'start' 
     return parsed + DAY_IN_MS - 1;
   }
   return parsed;
+}
+
+async function enrichWithStudyMeta(article: SignalArticle, studyMeta: StudyMetaService): Promise<SignalArticle> {
+  const meta = await studyMeta.readMeta(article.id, article.filePath);
+  const studyCount = meta.threads.length + meta.artifacts.length;
+  if (studyCount === 0 && !meta.lastStudiedAt) {
+    return article;
+  }
+  return {
+    ...article,
+    studyCount,
+    ...(meta.lastStudiedAt ? { lastStudiedAt: meta.lastStudiedAt } : {}),
+  };
 }
 
 async function readArticleDetailsSafely(
@@ -159,6 +173,7 @@ interface SignalArticleQueryDeps {
 export class SignalArticleQueryService {
   private readonly paths: SignalPaths;
   private readonly deps: SignalArticleQueryDeps;
+  private readonly studyMeta: StudyMetaService;
 
   constructor(options?: { paths?: SignalPaths | undefined; deps?: Partial<SignalArticleQueryDeps> | undefined }) {
     this.paths = options?.paths ?? resolveSignalPaths();
@@ -166,6 +181,7 @@ export class SignalArticleQueryService {
       readInboxRecords: options?.deps?.readInboxRecords ?? readInboxRecordsFromStore,
       readArticleDocument: options?.deps?.readArticleDocument ?? readArticleDocumentFromStore,
     };
+    this.studyMeta = new StudyMetaService();
   }
 
   async listInbox(options: ListInboxOptions = {}): Promise<readonly SignalArticle[]> {
@@ -174,7 +190,8 @@ export class SignalArticleQueryService {
     const date = dateInput && dateInput.length > 0 ? dateInput : undefined;
     if (date) {
       const records = await this.deps.readInboxRecords(this.paths, date);
-      return selectInboxArticles(records, options, limit, this.deps.readArticleDocument);
+      const articles = await selectInboxArticles(records, options, limit, this.deps.readArticleDocument);
+      return Promise.all(articles.map((a) => enrichWithStudyMeta(a, this.studyMeta)));
     }
 
     const scanBudget = Math.max(limit * INBOX_RECORD_SCAN_MULTIPLIER, MIN_INBOX_RECORD_SCAN_BUDGET);
@@ -189,12 +206,12 @@ export class SignalArticleQueryService {
 
     let selected = await selectInboxArticles(initialRecords, options, limit, this.deps.readArticleDocument);
     if (selected.length >= limit || !hasMoreHistory) {
-      return selected;
+      return Promise.all(selected.map((a) => enrichWithStudyMeta(a, this.studyMeta)));
     }
 
     const allRecords = await this.deps.readInboxRecords(this.paths, undefined);
     selected = await selectInboxArticles(allRecords, options, limit, this.deps.readArticleDocument);
-    return selected;
+    return Promise.all(selected.map((a) => enrichWithStudyMeta(a, this.studyMeta)));
   }
 
   async getArticleById(id: string): Promise<SignalArticleDetail | null> {
@@ -208,8 +225,9 @@ export class SignalArticleQueryService {
     if (!detail) {
       return null;
     }
+    const enriched = await enrichWithStudyMeta(detail.article, this.studyMeta);
     return {
-      ...detail.article,
+      ...enriched,
       content: detail.content,
     };
   }
@@ -231,8 +249,9 @@ export class SignalArticleQueryService {
     if (!detail) {
       return null;
     }
+    const enriched = await enrichWithStudyMeta(detail.article, this.studyMeta);
     return {
-      ...detail.article,
+      ...enriched,
       content: detail.content,
     };
   }
@@ -273,9 +292,10 @@ export class SignalArticleQueryService {
       .sort((left, right) => Date.parse(right.fetchedAt) - Date.parse(left.fetchedAt));
 
     const limit = options.limit ?? 20;
+    const enriched = await Promise.all(matched.slice(0, limit).map((a) => enrichWithStudyMeta(a, this.studyMeta)));
     return {
       total: matched.length,
-      items: matched.slice(0, limit),
+      items: enriched,
     };
   }
 
@@ -309,8 +329,9 @@ export class SignalArticleQueryService {
       content: detail.content,
     });
 
+    const enriched = await enrichWithStudyMeta(nextArticle, this.studyMeta);
     return {
-      ...nextArticle,
+      ...enriched,
       content: detail.content,
     };
   }
@@ -319,7 +340,7 @@ export class SignalArticleQueryService {
     const records = await this.deps.readInboxRecords(this.paths, undefined);
     const details = await readArticleDetailsSafely(records, this.deps.readArticleDocument);
     return computeSignalArticleStats(
-      details.map((detail) => detail.article),
+      details.filter((detail) => !detail.article.deletedAt).map((detail) => detail.article),
       now,
     );
   }

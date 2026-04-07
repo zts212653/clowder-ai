@@ -15,7 +15,7 @@ import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { SIGNAL_FLAGS } from './summary-config.js';
 import type { VectorStore } from './VectorStore.js';
 
-const KIND_DIRS: Record<string, EvidenceKind> = {
+export const KIND_DIRS: Record<string, EvidenceKind> = {
   features: 'feature',
   decisions: 'decision',
   plans: 'plan',
@@ -272,14 +272,21 @@ export class IndexBuilder implements IIndexBuilder {
     }
 
     // Phase E-3: Index thread message passages
+    let threads: ThreadSnapshot[] = [];
     if (this.messageListFn && this.threadListFn && !threadListFailed) {
-      let threads: ThreadSnapshot[];
       try {
         threads = await this.threadListFn();
       } catch {
         threads = [];
       }
       await this.indexPassages(threads);
+    }
+
+    // Phase I (AC-I1/I3): Backfill from JSONL transcripts for threads with expired Redis messages
+    if (this.transcriptDataDir && threads.length > 0) {
+      for (const thread of threads) {
+        this.backfillPassagesFromTranscript(thread.id);
+      }
     }
 
     // Remove stale anchors that no longer exist on disk
@@ -430,6 +437,7 @@ export class IndexBuilder implements IIndexBuilder {
 
   private discoverFiles(): Array<{ path: string; kind: EvidenceKind }> {
     const results: Array<{ path: string; kind: EvidenceKind }> = [];
+    const discoveredPaths = new Set<string>();
 
     // Helper: recursively scan a directory for .md files
     const scanDir = (dirPath: string, kind: EvidenceKind, depth = 0) => {
@@ -445,6 +453,7 @@ export class IndexBuilder implements IIndexBuilder {
 
             if (lst.isFile() && entry.endsWith('.md')) {
               results.push({ path: fullPath, kind });
+              discoveredPaths.add(fullPath);
             } else if (lst.isDirectory()) {
               scanDir(fullPath, kind, depth + 1);
             }
@@ -491,6 +500,7 @@ export class IndexBuilder implements IIndexBuilder {
         try {
           if (statSync(fullPath).isFile()) {
             results.push({ path: fullPath, kind: 'plan' as EvidenceKind });
+            discoveredPaths.add(fullPath);
           }
         } catch {
           // skip
@@ -499,6 +509,40 @@ export class IndexBuilder implements IIndexBuilder {
     } catch {
       // skip
     }
+
+    // Phase 4 (F-2): Recursive fallback — index .md files in non-standard directories
+    // Enables legacy projects without KIND_DIRS structure to be indexed
+    const FALLBACK_EXCLUDE = new Set([
+      'node_modules',
+      '.git',
+      'archive',
+      'mailbox', // review requests — operational noise, not knowledge
+      ...Object.keys(KIND_DIRS),
+    ]);
+
+    const scanFallback = (dirPath: string, depth = 0) => {
+      if (depth > 10) return;
+      try {
+        for (const entry of readdirSync(dirPath)) {
+          if (FALLBACK_EXCLUDE.has(entry)) continue;
+          const fullPath = join(dirPath, entry);
+          try {
+            const lst = lstatSync(fullPath);
+            if (lst.isSymbolicLink()) continue;
+            if (lst.isFile() && entry.endsWith('.md') && !discoveredPaths.has(fullPath)) {
+              results.push({ path: fullPath, kind: inferKindFromPath(fullPath) });
+            } else if (lst.isDirectory()) {
+              scanFallback(fullPath, depth + 1);
+            }
+          } catch {
+            // skip inaccessible
+          }
+        }
+      } catch {
+        // skip
+      }
+    };
+    scanFallback(this.docsRoot);
 
     return results;
   }
@@ -787,13 +831,13 @@ export class IndexBuilder implements IIndexBuilder {
     if (!this.messageListFn) return;
     const db = this.store.getDb();
 
+    // Phase I (AC-I2): INSERT OR IGNORE — passages only increase, never deleted on rebuild.
+    // Previously used DELETE-then-INSERT which lost passages when Redis messages expired.
     const upsertStmt = db.prepare(`
-      INSERT OR REPLACE INTO evidence_passages
+      INSERT OR IGNORE INTO evidence_passages
       (doc_anchor, passage_id, content, speaker, position, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
-    // P1 fix: clear stale passages before re-inserting (passage only-increase bug)
-    const deleteByAnchorStmt = db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ?');
 
     for (const thread of threads) {
       let messages: StoredMessageSnapshot[];
@@ -804,8 +848,6 @@ export class IndexBuilder implements IIndexBuilder {
       }
 
       const tx = db.transaction((msgs: StoredMessageSnapshot[]) => {
-        // Clear old passages for this thread before inserting current ones
-        deleteByAnchorStmt.run(`thread-${thread.id}`);
         for (let i = 0; i < msgs.length; i++) {
           const msg = msgs[i];
           upsertStmt.run(
@@ -821,6 +863,100 @@ export class IndexBuilder implements IIndexBuilder {
 
       tx(messages);
     }
+  }
+
+  /**
+   * Phase I (AC-I1): Backfill passages from JSONL transcript events.
+   * Reads events.jsonl files, aggregates text chunks per invocationId,
+   * and inserts as passages with INSERT OR IGNORE (idempotent).
+   * Returns count of newly added passages.
+   */
+  backfillPassagesFromTranscript(threadId: string): number {
+    if (!this.transcriptDataDir) return 0;
+    const db = this.store.getDb();
+    const threadDir = join(this.transcriptDataDir, 'threads', threadId);
+
+    let catDirs: string[];
+    try {
+      catDirs = readdirSync(threadDir).filter((e) => !e.startsWith('.'));
+    } catch {
+      return 0;
+    }
+
+    const insertStmt = db.prepare(`
+      INSERT OR IGNORE INTO evidence_passages
+      (doc_anchor, passage_id, content, speaker, position, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    let added = 0;
+    let position = 10000; // offset to avoid collision with Redis-sourced positions (0-based)
+
+    for (const catId of catDirs) {
+      const sessionsDir = join(threadDir, catId, 'sessions');
+      let sessionDirs: string[];
+      try {
+        sessionDirs = readdirSync(sessionsDir).filter((e) => !e.startsWith('.'));
+      } catch {
+        continue;
+      }
+
+      for (const sessionId of sessionDirs) {
+        const eventsPath = join(sessionsDir, sessionId, 'events.jsonl');
+        let content: string;
+        try {
+          content = readFileSync(eventsPath, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Accumulate text chunks by invocationId
+        const invocationTexts = new Map<string, { text: string; t: number; catId: string }>();
+
+        for (const line of content.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            const evt = JSON.parse(line);
+            if (evt.event?.type === 'text' && typeof evt.event?.content === 'string') {
+              const invId = evt.invocationId ?? `${sessionId}-noninv`;
+              const existing = invocationTexts.get(invId);
+              if (existing) {
+                existing.text += evt.event.content;
+              } else {
+                invocationTexts.set(invId, {
+                  text: evt.event.content,
+                  catId: evt.catId ?? catId,
+                  t: evt.t,
+                });
+              }
+            }
+          } catch {
+            /* skip malformed lines */
+          }
+        }
+
+        // Insert accumulated text per invocation as passages
+        const tx = db.transaction(() => {
+          for (const [invId, data] of invocationTexts) {
+            if (!data.text.trim()) continue;
+            // Guard: skip entries with missing/invalid timestamp (P1 fix)
+            const ts = new Date(data.t);
+            if (Number.isNaN(ts.getTime())) continue;
+            const result = insertStmt.run(
+              `thread-${threadId}`,
+              `transcript-${invId}`,
+              data.text,
+              data.catId,
+              position++,
+              ts.toISOString(),
+            );
+            if (result.changes > 0) added++;
+          }
+        });
+        tx();
+      }
+    }
+    return added;
   }
 
   private parseFile(filePath: string): EvidenceItem | null {

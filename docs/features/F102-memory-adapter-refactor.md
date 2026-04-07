@@ -8,7 +8,7 @@ created: 2026-03-11
 
 # F102: 记忆组件 Adapter 化重构 — IEvidenceStore + 本地索引
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04
 
 ## Why
 
@@ -437,7 +437,7 @@ search_evidence(query, {
 - lesson/pitfall 召回质量改进（keywords 补充 + FTS5 索引调优）
 - session digest 路径修复（确认 transcriptDataDir 解析正确）
 
-### Phase F: 多项目记忆 — 猫猫出征新家/接手老项目（待实现）
+### Phase F: 多项目记忆 — 猫猫出征新家/接手老项目（F-1/F-2/F-3 ✅，F-4 ✅）
 
 > **触发**：team lead问"猫出征到 dare/studio-flow 怎么办？记忆系统怎么办？"
 > **核心决策**：KD-35（两种策略）+ KD-36（遗留项目 frontmatter formatter）
@@ -461,12 +461,12 @@ search_evidence(query, {
 - 可选人工确认或全自动
 - 提升 kind 推断准确度和检索质量
 
-**F-4. 全局知识层（跟猫走）**
+**F-4. 全局知识层（跟猫走）** ✅ PR #886
 
-- 编译 `global_knowledge.sqlite`：从 Skills/家规/MEMORY.md/lessons-learned 编译只读索引
-- 放在猫猫 home 目录（`~/.cat-cafe/global_knowledge.sqlite`），不在项目里
-- `KnowledgeResolver` 联邦检索：search 时同时查 project + global 两个 SQLite，RRF 融合
-- 猫出征新项目 → 带走全局层，在新项目搜"Redis 坑"能命中 cat-cafe 的教训
+- ~~编译 `global_knowledge.sqlite`：从 Skills/家规/MEMORY.md/lessons-learned 编译只读索引~~
+- ~~放在猫猫 home 目录（`~/.cat-cafe/global_knowledge.sqlite`），不在项目里~~
+- ~~`KnowledgeResolver` 联邦检索：search 时同时查 project + global 两个 SQLite，RRF 融合~~
+- ~~猫出征新项目 → 带走全局层，在新项目搜"Redis 坑"能命中 cat-cafe 的教训~~
 
 **当前可用度**（无需 Phase F 即可用）：
 - 新项目 docs 自动索引 ✅（如果按标准目录建）
@@ -480,7 +480,7 @@ search_evidence(query, {
 - 跨项目检索（在 dare 里搜 cat-cafe 的教训）
 - frontmatter 自动补全工具
 
-### Phase G: Abstractive Summary + Durable Memory Lifecycle（🚧 基础设施已合入，运行时验收中）
+### Phase G: Abstractive Summary + Durable Memory Lifecycle（✅ 基础设施 + 运行时验收已合入）
 
 > **触发**：team lead发起 Lossless Claw（LCM）调研，三猫（opus + opencode + gpt52）协作对比 LC 与 session chain / F102，收敛出可学习的改进点。
 > **核心学习**：从 LC 学到的不是 DAG 数据结构，是"压缩不等于丢弃，摘要必须可穿透"的理念。
@@ -731,43 +731,37 @@ interface EvidenceItemWithDrillDown extends EvidenceItem {
 
 此项不在 F102 内实现，作为独立 ADR 立项，link 回 F102 + F065 + F088。
 
-## 已知 Gap（待后续实现的猫猫注意！）
+## Embedding 状态收敛（2026-04-01 更新）
 
-> 以下问题由本线程（f102 记忆组件解耦 thread）在 runtime 测试中发现，记录在此供后续实现的猫猫参考。
+> 以下三条最初是在 runtime 验收里暴露出来的 gap。到 2026-04-01 为止，它们对**我们当前 runtime**已经不是未解决问题，但保留在此作为历史追踪和开源默认值说明。
 
-### Gap-1: Embedding 未开启（Phase C 代码就绪但默认 off）
+### Gap-1（已闭环）: 我们的 runtime embedding 已开启
 
-**现状**：`EMBED_MODE` 默认 `off`，runtime 跑的是纯 BM25 lexical 检索。Phase C 建的整套向量基础设施（EmbeddingService + VectorStore + SemanticReranker + 三态开关 + fail-open + 版本锚）全部空转。
+**当前真相**：
+- 我们仓库根 `.env` 已设 `EMBED_MODE=on`
+- `index.ts` 会把 `process.env.EMBED_MODE` 透传进 memory factory
+- `ConfigRegistry` 里 `f102.embedMode` 也会反映真实 env 值
 
-**影响**：中英混搜弱（搜 "cat naming" 找不到中文"猫名故事"），同义表达不匹配（搜 "标题太长" 找不到 "title truncated"）。
+**结论**：
+- 对**我们当前 runtime**，Phase C 的 embedding / vector rerank 基础设施不是空转，Gap-1 已闭环
+- 对**开源默认**，不传 env 仍然是 `off`，这是有意保留的保守默认值，不是我们 runtime 的现状
 
-**修法**：设 `EMBED_MODE=on`（或先 `shadow`）。模型 Qwen3-Embedding-0.6B ONNX ~614MB，首次加载下载，之后缓存。Mac 上内存占用 ~1GB，推理 <100ms/条。
+### Gap-2（已收敛）: shadow 不再是待补日志的问题，而是已废弃路径
 
-**注意**：直接跳 `on` 可能更合理——见 Gap-2。
+**当前真相**：
+- 运行时检索只有 `mode === 'on'` 才会真正启用 embedding rerank
+- `shadow` 没有继续作为运营中的 A/B 模式推进
+- 我们已经收敛成 `off → on`，而不是继续投资 shadow logging
 
-### Gap-2: Shadow 模式无日志（跑了白跑）
+**结论**：
+- “shadow 跑了白跑，需要补日志”这条不再是 active gap
+- 当前策略是：保留类型/配置兼容，但产品与 runtime 路线按 `off → on` 走
 
-**现状**：`EMBED_MODE=shadow` 时，代码确实跑了向量检索 + rerank，但结果存到 `_reranked` 变量后**直接丢弃**，没有任何日志或对比数据记录。
+### Gap-3（已随 Gap-1 收敛）: Stories/Lessons 中英混搜
 
-**代码位置**：`SqliteEvidenceStore.ts` L216-219：
-```typescript
-} else if (this.embedDeps.mode === 'shadow') {
-  const _reranked = reranker.rerankWithDistances(lexicalResults, vecResults);
-  // Silent comparison — actual logging added in eval phase  ← 从没加过
-}
-```
-
-**修法选项**：
-- A: 补 shadow 日志（记录 lexical vs reranked 排序差异，用于 A/B 评估）
-- B: 直接跳过 shadow，上 `on`（Phase C eval corpus 已证明 embedding rerank 对 Recall 的提升）
-- **team lead倾向 B**（shadow 没实际产出，浪费 CPU）
-
-### Gap-3: Stories/Lessons 中英混搜需要 embedding
-
-**实测证据**（本线程测试 thread）：
-- 搜 "cat naming origin story"（英文）→ 0 命中。搜 "stories cat-names 名字"（中文+路径）→ 5 命中。
-- 根因：FTS5 unicode61 tokenizer 不做中文分词，中英之间无语义桥接。
-- **只有开启 embedding 才能真正解决**（向量空间里 "cat naming" 和 "猫名故事" 自然靠近）。
+**结论**：
+- 对我们当前 runtime，随着 `EMBED_MODE=on`，中英混搜不再是未处理 gap
+- 对开源默认或未开 embedding 的环境，这个能力仍会退化回纯 lexical，这是配置差异，不是我们 runtime 的未完成项
 - 临时补 frontmatter topics 能治标但不可持续——每个新文档都要手动加。
 
 ### 建议实现顺序
@@ -943,7 +937,7 @@ Workspace 面板顶部：
 
 > **待做**：IMaterializationService（approved → docs/*.md 自动写入） · Siamese精细视觉设计
 
-### Phase I: Message-Level Permanence Repair — JSONL-backed passage reconciliation
+### Phase I: Message-Level Permanence Repair — JSONL-backed passage reconciliation ✅
 
 > **触发**：金渐层（CVO）深度使用 `search_evidence` 暴露核心架构空洞——Session JSONL 永久保存了所有消息，但搜索链路完全绕过它。Passage 索引数据源是 Redis（7 天 TTL 默认），rebuild 后过期消息的 passage 会丢失。
 > **Ragdoll + Maine Coon(GPT-5.4) 讨论收敛（2026-03-30）**：共识优先级 P1 JSONL backfill > P2 时间过滤 > P3 配置透明化。命名 "message-level permanence repair"——本质是永久性修复，不是搜索增强。
@@ -995,7 +989,7 @@ L2 检索投影：evidence_passages / passage_fts（SQLite）
 - `env-registry.ts` 对 `MESSAGE_TTL_SECONDS` 描述补充默认 7 天行为 + TTL=0 含义
 - 考虑 `depth=raw` 搜索结果标注 `source: 'redis' | 'transcript'`（便于调试）
 
-### Phase J: Memory Hub — 记忆系统的人类产品面
+### Phase J: Memory Hub — 记忆系统的人类产品面 ✅
 
 > **触发**：team lead发现社区用户用不起来记忆系统——"藏得太死了"。F088/F137/定时任务都有前端页面，记忆系统却完全隐形。
 > **team lead核心洞察**："你们在收记忆的时候，我要是能偷偷看一眼你们到底搜到了什么记忆，这种体验最好。"
@@ -1004,9 +998,9 @@ L2 检索投影：evidence_passages / passage_fts（SQLite）
 
 **产品定位**：Memory 不是开发者工具，是**人猫共用的知识中枢**。人能主动探索，也能在猫用记忆时被动看到过程。
 
-**J-1. 主入口：`/memory` 独立路由页面（左侧导航）**
+**J-1. 主入口：`/memory` 独立路由页面（左侧 sidebar 底部按钮）**
 
-位置：左侧导航栏，和对话列表/IM Hub 同级（team lead确认 2026-03-30）。
+位置：左侧 sidebar 底部按钮区（ThreadSidebar），排列顺序：`[猫猫新手训练营] [Memory] [IM Hub]`。SVG 图标，不用 emoji。（team lead 2026-03-31 拍板）
 
 ```
 /memory
@@ -1021,6 +1015,11 @@ L2 检索投影：evidence_passages / passage_fts（SQLite）
 - 和 `/signals` 同等级的独立路由（不是 Hub 模态弹窗里的 tab）
 - 搜索体验对标 evidence MCP 工具的能力——mode（lexical/semantic/hybrid）、scope、depth 都可调
 - 索引状态让team lead一眼看到"记忆系统是不是健康的"
+
+**设计约束（Maine Coon V2 review + team lead 2026-03-31 拍板）**：
+- **`?from=threadId` 返回链路**：和 `/signals` 一样，`/memory?from=<threadId>` 支持 "Back to Chat" 稳定返回来源对话
+- **移动端入口**：sidebar 底部按钮在移动端随 sidebar collapse/expand 自然隐藏/展示，无需额外策略
+- **图标**：SVG 图标（不用 emoji），风格与训练营/IM Hub 按钮一致
 
 **J-2. 上下文入口：Workspace Recall Feed（对话中联动）**
 
@@ -1172,22 +1171,43 @@ Knowledge Feed（Phase H）从 Workspace "知识模式"迁移到 `/memory` Tab 1
 - [x] AC-E8: lesson/pitfall 召回质量改进 — **PR #537 merged（splitLessonsLearned 32 个独立条目）**
 
 ### Phase I（Message-Level Permanence Repair — JSONL-backed passage reconciliation）
-- [ ] AC-I1: `indexPassages()` 优先从 Redis 取消息，Redis 缺失（消息数 < 已有 passage 数）时从 JSONL transcript fallback 补全
-- [ ] AC-I2: rebuild 时 passage 只增不减——不因 Redis 消息过期导致已索引 passage 被删除
-- [ ] AC-I3: 新消息热路径不变（Redis → passage，延迟 <5ms）
-- [ ] AC-I4: `SearchOptions` 支持 `dateFrom`/`dateTo` 参数，`evidence_docs` 和 `evidence_passages` 均支持时间范围过滤
-- [ ] AC-I5: `env-registry.ts` 对 `MESSAGE_TTL_SECONDS` 描述明确说明默认 7 天行为 + TTL≤0 变为永不过期的含义
-- [ ] AC-I6: 回归测试——模拟 Redis 消息过期场景下 rebuild 仍能通过 JSONL 恢复 passage（红→绿）
+- [x] AC-I1: `indexPassages()` 优先从 Redis 取消息，Redis 缺失（消息数 < 已有 passage 数）时从 JSONL transcript fallback 补全
+- [x] AC-I2: rebuild 时 passage 只增不减——不因 Redis 消息过期导致已索引 passage 被删除
+- [x] AC-I3: 新消息热路径不变（Redis → passage，延迟 <5ms）
+- [x] AC-I4: `SearchOptions` 支持 `dateFrom`/`dateTo` 参数，`evidence_docs` 和 `evidence_passages` 均支持时间范围过滤
+- [x] AC-I5: `env-registry.ts` 对 `MESSAGE_TTL_SECONDS` 描述明确说明默认 7 天行为 + TTL≤0 变为永不过期的含义
+- [x] AC-I6: 回归测试——模拟 Redis 消息过期场景下 rebuild 仍能通过 JSONL 恢复 passage（红→绿）
 
-### Phase J（Memory Hub — 记忆系统的人类产品面）
-- [ ] AC-J1: `/memory` 独立路由页面存在，左侧导航栏有入口（和对话列表/IM Hub 同级）
-- [ ] AC-J2: `/memory` 页面包含人类可用的搜索栏，支持 mode/scope/depth 参数调节
-- [ ] AC-J3: Knowledge Feed（Phase H）从 Workspace 知识模式迁移到 `/memory` Tab 1
-- [ ] AC-J4: `/memory` Tab 3 展示索引状态（docs/threads/passages 数量、最近 rebuild 时间、TTL 配置、embedding mode）
-- [ ] AC-J5: Workspace Recall Feed——猫调 `search_evidence` 时，右侧面板实时展示 query + results + scores
-- [ ] AC-J6: Recall Feed 不需要猫做额外工作——invocation 层自动拦截 tool_use 事件并推送前端
-- [ ] AC-J7: Hub Group 3（监控与治理）有 Memory 状态 tab，含索引速览 + "打开 Memory" 跳转按钮
-- [ ] AC-J8: Workspace 原"知识"模式更名为"记忆" / "Recall"，承载 Recall Feed 而非完整 Knowledge Feed
+**Phase I Follow-up: Passage 返回丰富化 + 上下文窗口**（team lead 2026-03-31 指示）
+
+> 金渐层痛点："搜到了只知道某个 thread 讨论过 X，不知道具体哪条消息"。Phase I 的 passage 已存了消息级内容，但返回字段太少、没有上下文窗口。
+
+- [x] AC-I7: `searchPassages()` 返回增加 `created_at`、`passageId`（含 messageId/invocationId）字段，猫和人都能定位到具体消息 — **PR #885 merged**
+- [x] AC-I8: `searchPassages()` 支持上下文窗口参数（类似 grep `-C`），返回命中 passage 前后 N 条 passage — **PR #885 merged**
+- [x] AC-I9: MCP `search_evidence(depth=raw)` 返回值包含 passage 级细节（speaker + timestamp + 上下文），猫猫可直接引用具体消息 — **PR #885 merged**
+- [x] AC-I10: CLAUDE.md / SystemPromptBuilder 中 `search_evidence` 用法指南更新——教猫用 `depth=raw` 做消息级定位，而非只用 drill-down 工具链 — **PR #885 merged**
+
+### Phase F-1/F-2/F-3（多项目记忆 — Project Onboarding & Ingestion）✅
+- [x] AC-F1-1: `project-init` CLI 命令存在（`pnpm project:init <dir>`），在目标目录创建 13 个标准 KIND_DIRS 子目录 + 基础骨架文件（ROADMAP.md / VISION.md）
+- [x] AC-F1-2: 初始化后 `IndexBuilder.rebuild()` 能正常运行，产出健康的 evidence.sqlite（docsIndexed >= 0, ok=true）
+- [x] AC-F1-3: 已有 cat-cafe 标准目录的项目（如 cat-cafe 自身）跑 `project:init` 不覆盖已有文件（幂等安全）
+- [x] AC-F2-1: `discoverFiles()` 增加通用递归 fallback——KIND_DIRS 扫完后，递归扫 docsRoot 下剩余 `.md` 文件（排除 node_modules / .git / archive）
+- [x] AC-F2-2: 递归发现的 `.md` 文件 kind 推断链：frontmatter `doc_kind` → 父目录名匹配 KIND_DIRS → 默认 `plan`
+- [x] AC-F2-3: 遗留项目（无标准目录结构，只有散落的 `.md`）rebuild 后 `search_evidence` 可搜到这些文档
+- [x] AC-F3-1: `frontmatter-formatter` CLI 命令存在，扫描指定目录的 `.md` 文件，报告缺失 frontmatter 的文件列表
+- [x] AC-F3-2: 自动推断并补充 `doc_kind`（从路径/内容关键词）、`topics`（从标题提取）、`anchor`（从文件名）
+- [x] AC-F3-3: 支持 `--dry-run`（只报告不修改）和 `--apply`（实际写入 frontmatter）两种模式
+- [x] AC-F3-4: 已有完整 frontmatter 的文件不被修改（幂等安全）
+
+### Phase J（Memory Hub — 记忆系统的人类产品面）✅
+- [x] AC-J1: `/memory` 独立路由页面存在，左侧 sidebar 底部有 SVG 按钮（训练营→Memory→IM Hub 顺序），支持 `?from=threadId` 返回链路
+- [x] AC-J2: `/memory` 页面包含人类可用的搜索栏，支持 mode/scope/depth 参数调节
+- [x] AC-J3: Knowledge Feed（Phase H）从 Workspace 知识模式迁移到 `/memory` Tab 1
+- [x] AC-J4: `/memory` Tab 3 展示索引状态（docs/threads/passages 数量、最近 rebuild 时间、TTL 配置、embedding mode）
+- [x] AC-J5: Workspace Recall Feed——猫调 `search_evidence` 时，右侧面板实时展示 query + results + scores
+- [x] AC-J6: Recall Feed 不需要猫做额外工作——invocation 层自动拦截 tool_use 事件并推送前端
+- [x] AC-J7: Hub Group 3（监控与治理）有 Memory 状态 tab，含索引速览 + "打开 Memory" 跳转按钮
+- [x] AC-J8: Workspace 原"知识"模式更名为"记忆" / "Recall"，承载 Recall Feed 而非完整 Knowledge Feed
 
 ## Dependencies
 
@@ -1262,23 +1282,123 @@ Knowledge Feed（Phase H）从 Workspace "知识模式"迁移到 `/memory` Tab 1
 | KD-45 | **消息真相源三层分层（L0/L1/L2）**——L0 Redis（热状态，TTL-bound）/ L1 Session JSONL（永久原文）/ L2 evidence_passages（检索投影）。L2 构建必须以 L1 为终极兜底，不能只依赖 L0 | 金渐层深度使用暴露：JSONL 永久保存但搜索链路绕过它；Ragdoll+Maine Coon共识 | 2026-03-30 |
 | KD-46 | **KD-32 修正：Redis 默认 7 天 TTL，非永久**——KD-32 假设"真相源在 Redis（TTL=0 永久）"，实际 `DEFAULT_TTL_SECONDS = 604800`（7 天），.env 未覆盖。Passage 索引不能假设 Redis 永久可用 | 代码审计 + .env 检查确认 | 2026-03-30 |
 | KD-47 | **时间过滤必须排在 JSONL backfill 之后**——先保证旧消息永远能搜到，再做按时间切片搜。否则时间过滤会放大"明明 transcript 在但搜不到"的体验落差 | Maine Coon风险分析 | 2026-03-30 |
-| KD-48 | **Memory 主入口是独立路由页面 `/memory`（左侧导航），不是 Workspace 模式**——Workspace 只做上下文 Recall Feed（副入口）。Maine Coon评审："继续把 Memory 藏在 Workspace 里是绕路，违反面向终态设计" | Maine Coon评审 + team lead确认 | 2026-03-30 |
+| KD-48 | **Memory 主入口是独立路由页面 `/memory`，不是 Workspace 模式**——Workspace 只做上下文 Recall Feed（副入口）。物理位置：**左侧 sidebar 底部按钮区**（训练营→Memory→IM Hub），SVG 图标。team lead 2026-03-31 拍板 | Maine Coon评审 + team lead拍板 | 2026-03-30; 2026-03-31 |
 | KD-49 | **Recall Feed = 猫搜记忆时人实时可见**——invocation 层拦截 search_evidence tool_use → 推送 query+results 到前端 Workspace 面板。猫不需要额外工作，前端自动展示 | team lead核心洞察："偷偷看一眼猫搜到了什么记忆" | 2026-03-30 |
+
+## Known Issues（team lead 2026-04-01 Report）— ✅ 已全部修复 (PR #908)
+
+### Issue 1: Workspace Recall Feed 全部显示 (unknown)
+
+**严重度**: P1（功能不可用）
+**位置**: `packages/web/src/hooks/useRecallEvents.ts:112`
+**根因**: 参数名不匹配 — `parseDetail()` 解析 `params.q`，但 MCP 工具 `cat_cafe_search_evidence` 的参数名是 `query`（见 `packages/mcp-server/src/tools/evidence-tools.ts:16`）。`toStoredToolEvent` 序列化出 `{"query":"...","mode":"hybrid"}`，前端找 `.q` 永远 undefined → fallback 到 `'(unknown)'`。
+**修法**: `params.q` → `params.query`（一行修）
+
+### Issue 2: Memory Hub 搜索展示粗糙，后端元数据未被前端利用
+
+**严重度**: P2（可用但体验差）
+**位置**: `packages/web/src/components/memory/EvidenceSearch.tsx:161-162`
+**现象**:
+- 搜索结果默认只返回 5 条（`effectiveLimit = limit ?? 5`），无分页、无"加载更多"
+- 所有 doc_kind 标签统一紫色（`bg-cocreator-light`），英文原值（`discussion`/`phase`），无图标
+- 后端 frontmatter-formatter 补全的 `doc_kind`/`topics`/`anchor` 元数据，前端只用了 `sourceType` 显示原值，`topics` 完全未展示
+- 已有更好的 `EvidenceCard` 组件（含 `SOURCE_CONFIG` 分类图标 + confidence 分色），但 EvidenceSearch 没复用
+
+**改进方向**:
+1. 复用 `EvidenceCard` 替换搜索结果卡片（分类图标 + 分色）
+2. `doc_kind` 标签中文化 + 按类型分色
+3. limit 提到 10-15 + 加载更多
+4. topics 作为可点击筛选标签
+
+### Issue 3: Recall Feed 展开后只显示 1 条结果（实际 5 hits）
+
+**严重度**: P1（关键信息丢失）
+**位置**: `packages/api/src/domains/cats/services/agents/routing/route-helpers.ts:178`
+**根因**: `tool_result` 的 detail 被 `truncateDetail(raw, 220)` 硬截断到 220 字符。search_evidence 返回 5 条结果（每条含 `[confidence] title` + `anchor` + `type` + `snippet`），完整文本远超 220 字符，截断后 `parseTextResults()` 只能解析出第 1 条，其余 4 条丢失。
+**影响**: team lead看到 "5 hits" 但展开只看到 1 条结果，无法知道猫猫到底搜到了什么。
+**修法**: 对 `search_evidence` 类 tool_result 使用更大的 detail 限制（如 1500 字符），或单独序列化结构化结果（不依赖截断文本解析）。
+
+### Issue 4: Knowledge Feed "已沉淀" 标签语义不准确（Maine Coon愿景守护 2026-04-01）
+
+**严重度**: P1（愿景级 — 语义在撒谎）
+**位置**: `packages/web/src/components/workspace/KnowledgeFeed.tsx:115,227`
+**根因**: F102 的真相源约束明确区分三个状态：`approved`（候选通过）→ `materialized`（写入 docs/*.md）→ `indexed`（被 IndexBuilder 索引）。但前端 KnowledgeFeed 的 tab 名叫"已沉淀"（line 115），卡片状态也显示"已沉淀"（line 227），而后端 `settled` 桶实际混合了 `approved + materialized + indexed`。用户看到"已沉淀"会以为知识已经持久化到文档，但实际可能只是被批准了还没写入。
+**修法**: tab 改名"已确认"或按真实状态分 3 列；至少不要把 `approved` 叫"已沉淀"。
+
+### Issue 5: `classifySource()` 把 7+ 种 doc_kind 压扁为 4 种 sourceType
+
+**严重度**: P2（语义丢失）
+**位置**: `packages/api/src/routes/evidence-helpers.ts:65-71`
+**根因**: `classifySource()` 只按路径匹配 4 种类型（decision/phase/discussion/commit）。`lesson`/`research`/`feature`/`plan` 等 doc_kind 如果不在对应标准路径下，全部 fallback 到 `commit`。frontmatter-formatter 辛苦补的 `doc_kind` 在搜索结果层被丢弃。
+**修法**: `classifySource()` 应优先读 frontmatter 的 `doc_kind`，路径匹配作为 fallback；`EvidenceSourceType` 扩展到覆盖所有 KIND_DIRS 类型。
+
+### Issue 6: IndexStatus 面板交付少于 AC-J4 承诺
+
+**严重度**: P2（功能缩水）
+**位置**: `packages/web/src/components/memory/IndexStatus.tsx:96-102`
+**根因**: AC-J4 承诺展示 "docs/threads/passages 数量、最近 rebuild 时间、TTL 配置、embedding mode"。实际只展示 Backend/Documents/Edges/Last rebuild。缺失：threads 数量、passages 数量、TTL 配置、embedding mode。
+**修法**: 后端 `/api/evidence/status` 补充返回 threads/passages count + TTL + embedding mode；前端 IndexStatus 增加对应行。
+
+### Maine Coon建议但需后续讨论的项
+
+- **跨项目切换器**：Maine Coon认为 `/memory` 缺少 "当前项目 vs 全局记忆 vs 其他项目" 维度。核实：AC-J2 只承诺了 mode/scope/depth，项目切换器在 spec wireframe 里标注为 `[Phase F]` 功能，不属于 Phase J 范围。后端 F-4 联邦检索已就绪，前端呈现属于后续 Phase。
+- ~~**Recall Feed 缺 snippet/source link/drill-down**~~：✅ 已全部补齐 — snippet (PR #915) + inline expand (PR #923) + source link (PR #939)。
 
 ## 实现路线图（F/G/Gap 整体规划）
 
-> **当前状态**：Phase A~E ✅ 完成 + Phase G foundation ✅ 已合入（PR #604）+ Phase H ✅ 已合入（PR #737）+ Phase I 已立项（message-level permanence repair）+ Phase J 已立项（Memory Hub 人类产品面）。Phase F + G 运行时验收 + Phase I + Phase J + IMaterializationService 待开。
+> **当前状态**：Phase A~E ✅ + G foundation ✅ + H ✅ + I ✅ + F-4 ✅ + J ✅ + F-1/2/3 ✅ + Known Issues fix ✅ (PR #908) + Batch 1/2/3 ✅ + follow-up ✅。F102 已进入 feature close。
 > **team lead指示**：开源同步时增强功能需要开关，默认 off。
 
-### 整体顺序
+### 收尾三批次（2026-04-01 三方收敛：Ragdoll+Maine Coon GPT-5.4+team lead）
+
+> **原则**：先补真相源闭环，再验运行时，再打磨人类入口。
 
 ```
-① 立即  Gap-1: EMBED_MODE=on（改 env，零代码）
-② 第一批  F-1 + F-2（通用扫描 + formatter）  ←─┐ 可并行
-          G-2 + G-3（schema + 定时任务调度器） ←─┘
-③ 第二批  G-1（Opus 调用 + topic segment 切分）← 依赖 G-2/G-3
-④ 第三批  G-4 + G-5（bootstrap + drillDown）  ← 依赖 G-1
-⑤ 最后   F-3 + F-4（全局知识层 + project-init）← 独立但较大
+Batch 1: IMaterializationService 终态 ✅ PR #911
+         approved → docs/*.md 写入 → git commit → reindex trigger → 冲突处理
+         验收：工程闭环 + team lead短验收（改真相源文档，语义风险高）
+
+Batch 2: Phase G 运行时验收闭环 ✅ PR #912
+         thread 摘要 / dirty thread 调度 / candidate extraction → 真实运行质量确认
+         前提：Batch 1 完成（否则 candidate 生命周期链不完整）
+         验收：真实 thread / candidate / approve 全链路跑通
+
+Batch 3: /memory 体验层收口 ✅ PR #915
+         a. project/global 维度切换器（后端 F-4 联邦检索已就绪，补前端入口）
+         b. Recall Feed snippet / source link / drill-down（从"能看"到"好用"）
+         验收：必须team lead亲手体验，才能说收口
+```
+
+### 历史整体顺序（2026-03-30 三方收敛，已全部完成）
+
+```
+① 已完成 Gap-1: runtime EMBED_MODE=on（PR #618 auto-derive + 当前 .env 已启用）
+② Stage 1: Phase I — Message-Level Permanence Repair ✅ PR #884 + #885
+③ Stage 2: Phase F-4 — Global Knowledge Foundation ✅ PR #886
+④ Stage 3: Phase J — Memory Hub ✅ PR #899
+            注：跨项目切换器属于 Phase F 范围（wireframe 标注 [Phase F]），不在 J 内
+⑤ Stage 4: Phase F-1/F-2/F-3 — Project Onboarding & Ingestion ✅ PR #904
+⑥ Known Issues 1-6 fix ✅ PR #908
+⑦ Batch 1: IMaterializationService 终态 ✅ PR #911
+⑧ Batch 2: Phase G 运行时验收闭环 ✅ PR #912
+⑨ Batch 3: /memory 体验层收口 ✅ PR #915
+⑩ Batch 3 follow-up: inline expand + brain icon + config panel + source link ✅ PR #923/#935/#937/#939
+```
+
+**Why this order**（Maine Coon 2026-03-30 收紧）：
+- **不并行 I 和 F-4**——两者都动 KnowledgeResolver / memory 边界，并行容易交叉返工
+- **I 先于 F-4**——先修单项目 permanence 再叠加全局层，层次更干净；否则全局层只是把单项目的问题复制到全局
+- **J 必须等 I + F-4**——否则 UI 会自然滑向"先做单项目版再补跨项目"的脚手架模式
+- **F-1/2/3 最后做**——给 Memory Hub 持续喂内容，但不阻塞 Hub 的产品形态
+
+### 旧路线图（仅供参考，已被上述替代）
+
+```
+（旧）② 第一批  F-1 + F-2（通用扫描 + formatter）  ←─┐ 可并行
+               G-2 + G-3（schema + 定时任务调度器） ←─┘
+（旧）③ 第二批  G-1（Opus 调用 + topic segment 切分）← 依赖 G-2/G-3
+（旧）④ 第三批  G-4 + G-5（bootstrap + drillDown）  ← 依赖 G-1
+（旧）⑤ 最后   F-3 + F-4（全局知识层 + project-init）← 独立但较大
 ```
 
 ### Gap 处理

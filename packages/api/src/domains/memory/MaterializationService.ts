@@ -1,14 +1,35 @@
 // F102: IMaterializationService — approved marker → .md file → trigger reindex
 // Phase A: basic skeleton; Phase B: full .md patch + git commit
 
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { IMarkerQueue, IMaterializationService, MaterializeResult } from './interfaces.js';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import type {
+  EvidenceKind,
+  IIndexBuilder,
+  IMarkerQueue,
+  IMaterializationService,
+  MaterializeResult,
+} from './interfaces.js';
+import { EVIDENCE_KINDS } from './interfaces.js';
+
+const KIND_TO_DIR: Record<EvidenceKind, string> = {
+  feature: 'features',
+  decision: 'decisions',
+  plan: 'plans',
+  session: 'evidence',
+  lesson: 'lessons',
+  thread: 'evidence',
+  discussion: 'discussions',
+  research: 'research',
+  'pack-knowledge': 'pack-knowledge',
+};
 
 export class MaterializationService implements IMaterializationService {
   constructor(
     private readonly markerQueue: IMarkerQueue,
     private readonly docsRoot: string,
+    private readonly indexBuilder?: Pick<IIndexBuilder, 'incrementalUpdate'>,
   ) {}
 
   async canMaterialize(markerId: string): Promise<boolean> {
@@ -25,11 +46,23 @@ export class MaterializationService implements IMaterializationService {
       throw new Error(`Marker ${markerId} not approved (status: ${marker.status})`);
     }
 
-    // Determine output path based on targetKind
+    // Validate and determine output path based on targetKind
     const kind = marker.targetKind ?? 'lesson';
+    if (!EVIDENCE_KINDS.includes(kind)) {
+      throw new Error(`Invalid targetKind: ${kind}`);
+    }
     const anchor = `${kind}-${markerId}`;
-    const subDir = kind === 'lesson' ? 'lessons' : `${kind}s`;
-    const outputPath = join(this.docsRoot, subDir, `${anchor}.md`);
+    const subDir = KIND_TO_DIR[kind];
+    const dir = join(this.docsRoot, subDir);
+    mkdirSync(dir, { recursive: true });
+
+    // Conflict handling: append -N suffix if file already exists
+    let outputPath = join(dir, `${anchor}.md`);
+    if (existsSync(outputPath)) {
+      let n = 2;
+      while (existsSync(join(dir, `${anchor}-${n}.md`))) n++;
+      outputPath = join(dir, `${anchor}-${n}.md`);
+    }
 
     // Write .md file with frontmatter
     const md = [
@@ -45,9 +78,31 @@ export class MaterializationService implements IMaterializationService {
     ].join('\n');
     writeFileSync(outputPath, md);
 
+    // Git commit the materialized file (parameterized — no shell interpolation)
+    let committed = false;
+    try {
+      const cwd = dirname(outputPath);
+      execFileSync('git', ['add', outputPath], { cwd, stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', `materialize: ${anchor}`], { cwd, stdio: 'pipe' });
+      committed = true;
+    } catch {
+      // Not in a git repo or commit failed — continue gracefully
+    }
+
+    // Trigger reindex if indexBuilder provided
+    let reindexed = false;
+    if (this.indexBuilder) {
+      try {
+        await this.indexBuilder.incrementalUpdate([outputPath]);
+        reindexed = true;
+      } catch {
+        // Reindex failed — continue gracefully
+      }
+    }
+
     // Transition marker to materialized
     await this.markerQueue.transition(markerId, 'materialized');
 
-    return { markerId, outputPath, anchor };
+    return { markerId, outputPath, anchor, committed, reindexed };
   }
 }

@@ -6,6 +6,7 @@ import { type Thread, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { BootcampIcon } from '../icons/BootcampIcon';
 import { HubIcon } from '../icons/HubIcon';
+import { MemoryIcon } from '../icons/MemoryIcon';
 import { TaskPanel } from '../TaskPanel';
 import { readProjectNames, writeProjectNames } from './active-workspace';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
@@ -474,6 +475,21 @@ export function ThreadSidebar({ onClose, className, onBootcampClick, onHubClick 
               data-testid="sidebar-bootcamp"
             >
               <BootcampIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const fromParam = currentThreadId ? `?from=${encodeURIComponent(currentThreadId)}` : '';
+                router.push(`/memory${fromParam}`);
+                if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                  onClose?.();
+                }
+              }}
+              className="text-xs px-2 py-1 rounded-lg border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
+              title="Memory Hub"
+              data-testid="sidebar-memory"
+            >
+              <MemoryIcon className="w-3.5 h-3.5 inline-block -mt-0.5" />
             </button>
             {onHubClick && (
               <button

@@ -195,6 +195,7 @@ community_issue: "#109"
 | R-8 | **切换认证方式（订阅↔API key）没有一键切换** — 要一只猫一只猫改 provider profile binding | 高（UX 痛点） | team lead想批量切换认证方式时 | 加"一键切换所有猫的 provider profile"功能 |
 | R-9 | **nuoda.vip 代理 model name 格式混淆** — API 代理用 `claude-opus-4-6`（Anthropic 原生），但 opencode CLI 需要 `anthropic/claude-opus-4-6`（provider/model 格式），Hub 不知道该用哪个 | 中（配置困惑） | 用第三方 API 代理时 | Hub 编辑器应按 client 类型自动处理 model name 格式 |
 | R-10 | **本地反代 `anthropic-proxy.mjs` 的 upstream 配置未初始化** — `start-dev.sh` 启动的反代（端口 9877）依赖 `.cat-cafe/proxy-upstreams.json` 配置上游，但 F127 intake 后 runtime 里该文件不存在。API key profile 创建应自动注册 upstream 到反代 | 中（反代功能不可用） | 配置 API key profile 用本地反代时 | profile 创建/更新时自动写 `proxy-upstreams.json` |
+| R-11 | ~~**Hub 缺少结构化、provider-aware 的 `cli.effort` 编辑**~~ — ✅ 已修复（PR #882）。Hub 已提供结构化 effort 字段；Claude=`low/medium/high/max`，Codex=`low/medium/high/xhigh`；保存写 `variant.cli.effort`；只对新 invocation 生效，不强切旧 session；开源跟踪 issue: [clowder-ai#315](https://github.com/zts212653/clowder-ai/issues/315) | ~~高（易错 + UX 差）~~ done | — | — |
 
 ## AC-B3 验收矩阵（E2E 验证清单）
 

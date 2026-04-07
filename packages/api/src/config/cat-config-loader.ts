@@ -13,6 +13,7 @@ import type {
   CatConfig,
   CatFeatures,
   CatId,
+  CatProvider,
   CatVariant,
   CoCreatorConfig,
   ContextBudget,
@@ -20,7 +21,7 @@ import type {
   ReviewPolicy,
   Roster,
 } from '@cat-cafe/shared';
-import { createCatId } from '@cat-cafe/shared';
+import { createCatId, normalizeCliEffortForProvider } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { bootstrapCatCatalog, readCatCatalogRaw, resolveCatCatalogPath } from './cat-catalog-store.js';
@@ -256,6 +257,11 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
     const oVal = overlay[key];
     if (Array.isArray(oVal) && Array.isArray(bVal) && oVal.length > 0 && isIdArray(oVal) && isIdArray(bVal)) {
       merged[key] = mergeById(bVal as HasId[], oVal as HasId[]);
+    } else if (key === 'cli' && isPlainObject(oVal)) {
+      // CLI config is provider-specific. When the runtime catalog switches a cat
+      // from Claude ↔ Codex, preserving nested base fields like defaultArgs/effort
+      // revives the old provider's flags during default loads.
+      merged[key] = oVal;
     } else if (isPlainObject(oVal) && isPlainObject(bVal)) {
       merged[key] = deepMergeConfig(bVal as Record<string, unknown>, oVal as Record<string, unknown>);
     } else {
@@ -435,6 +441,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         provider: variant.provider,
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
+        cli: variant.cli,
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
           ? { cliConfigArgs: [...variant.cliConfigArgs] }
@@ -681,9 +688,9 @@ export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
  *   codex (openai):     'xhigh'
  *   others:             'high'
  */
-export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLevel {
+export function getCatEffort(catId: string, config?: CatCafeConfig, fallbackProvider?: CatProvider): CliEffortLevel {
   const cfg = config ?? getCachedConfig();
-  if (!cfg) return 'max';
+  if (!cfg) return normalizeCliEffortForProvider(fallbackProvider ?? 'anthropic', undefined) ?? 'high';
 
   if (!_catIdToVariant || _catIdToVariantSource !== cfg) {
     _catIdToVariant = buildCatIdToVariantIndex(cfg);
@@ -691,12 +698,57 @@ export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLe
   }
 
   const variant = _catIdToVariant.get(catId);
-  if (variant?.cli.effort) return variant.cli.effort;
+  const effectiveProvider = variant?.provider ?? fallbackProvider;
+  const normalized = normalizeCliEffortForProvider(effectiveProvider ?? 'anthropic', variant?.cli.effort);
+  return normalized ?? 'high';
+}
 
-  // Provider-aware defaults
-  if (variant?.provider === 'openai') return 'xhigh';
-  if (variant?.provider === 'anthropic') return 'max';
-  return 'high';
+// ── F149: ACP config accessor (raw variant field, not in CatConfig type) ──────
+
+export interface AcpVariantConfig {
+  command: string;
+  startupArgs: string[];
+  mcpWhitelist?: string[];
+  supportsMultiplexing?: boolean;
+  /** Phase C: optional pool config overrides */
+  pool?: {
+    maxLiveProcesses?: number;
+    idleTtlMs?: number;
+  };
+}
+
+/**
+ * Get ACP config for a cat from the raw cat-config.json variant.
+ * Returns undefined if the variant has no `acp` section (= use legacy CLI).
+ * Reads raw JSON because `acp` is not in the typed CatConfig (intentionally).
+ */
+export function getAcpConfig(catId: string): AcpVariantConfig | undefined {
+  try {
+    const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+    const projectRoot = dirname(templatePath);
+    const catalogRaw = readCatCatalogRaw(projectRoot);
+    let raw: string;
+    if (catalogRaw !== null) {
+      const baseRaw = readConfigWithFallback(projectRoot, templatePath);
+      const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
+      const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;
+      raw = JSON.stringify(deepMergeConfig(baseJson, catalogJson));
+    } else {
+      raw = readConfigWithFallback(projectRoot, templatePath);
+    }
+    const json = JSON.parse(raw) as {
+      breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig }> }>;
+    };
+    for (const breed of json.breeds ?? []) {
+      for (const variant of breed.variants ?? []) {
+        const resolvedCatId = variant.catId ?? breed.catId;
+        if (resolvedCatId === catId && variant.acp) return variant.acp;
+      }
+    }
+  } catch {
+    // Config unreadable → no ACP config
+  }
+  return undefined;
 }
 
 /** Reset cached config (for testing) */

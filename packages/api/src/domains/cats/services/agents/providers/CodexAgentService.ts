@@ -174,6 +174,7 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
     'CAT_CAFE_INVOCATION_ID',
     'CAT_CAFE_CALLBACK_TOKEN',
     'CAT_CAFE_USER_ID',
+    'CAT_CAFE_CAT_ID',
     'CAT_CAFE_SIGNAL_USER',
   ] as const;
   for (const key of callbackKeys) {
@@ -240,7 +241,7 @@ export class CodexAgentService implements AgentService {
 
     const sandboxMode = getCodexSandboxMode();
     const approvalPolicy = getCodexApprovalPolicy();
-    const effortLevel = getCatEffort(this.catId as string);
+    const effortLevel = getCatEffort(this.catId as string, undefined, 'openai');
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);

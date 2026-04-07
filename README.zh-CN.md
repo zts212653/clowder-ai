@@ -78,7 +78,7 @@ pnpm install
 # 3. 构建所有包（首次启动前必需）
 pnpm build
 
-# 4. 配置 — 至少添加一个模型 API key
+# 4. 配置基础设施（API key 在启动后通过前端 UI 添加）
 cp .env.example .env
 
 # 5. 启动（自动创建运行时 worktree，启动 Redis + API + 前端）
@@ -94,7 +94,7 @@ pnpm start:status
 pnpm stop
 ```
 
-打开 `http://localhost:3003`，开始和你的团队对话。
+打开 `http://localhost:3003` → 进入 **Hub → 系统配置 → 账号配置** 添加模型 API key（Claude、GPT、Gemini，或第三方 provider 如 Kimi、GLM、MiniMax）。
 
 > **裸机一键安装（macOS · Linux · Windows）：** `bash scripts/install.sh` 一步搞定 Homebrew/系统依赖、Node、pnpm、Redis、AI CLI 工具、项目依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
@@ -215,7 +215,7 @@ https://github.com/user-attachments/assets/cf75fb92-ce20-4a0d-8b2b-c288ce9bfb48
 | **Skills** | 按需加载的技能（TDD、调试、审查等） |
 | **Quota Board** | 实时 token 用量和费用追踪 |
 | **Routing Policy** | 任务路由策略 — 哪只猫处理什么类型的任务 |
-| **Provider Profiles** | 模型配置、API 密钥、每个 provider 的输出格式 |
+| **账号配置** | 添加模型 API key、配置 OAuth、管理 Provider Profile（Claude、GPT、Gemini、Kimi、GLM、MiniMax 等） |
 
 <details><summary>📹 演示：Hub & 作战中枢操作演示</summary>
 
@@ -357,7 +357,7 @@ https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 
 | 功能 | 状态 |
 |------|------|
-| 多用户协作（OAuth + ACL） | 规划中 |
+| 多用户协作（OAuth + Provider Profiles） | Phase 1 完成 |
 | 作战中枢（跨项目指挥面板） | Phase 2 完成 |
 | 冷启动验证器 | 规划中 |
 
@@ -412,6 +412,7 @@ AI 不一定是冰冷的 API 和无状态调用。它可以是陪伴——有持
 
 - **[教程](https://github.com/zts212653/cat-cafe-tutorials)** — Clowder AI 的分步教程
 - **[SETUP.zh-CN.md](SETUP.zh-CN.md)** — 完整安装和配置指南
+- **[第三方 AI Provider 配置指南](docs/guides/provider-configuration.md)** — 配置 Kimi、GLM、MiniMax、Qwen、OpenRouter 等国产/第三方模型
 - **[使用小 Tips](docs/TIPS.md)** — Magic Words、@提及、语音陪伴等使用技巧
 - **[docs/](docs/)** — 架构决策、功能规格、经验教训
 

@@ -64,8 +64,9 @@ export function BrakeModal() {
     if (triggerId - lastTriggerRef.current < 2000) return;
     lastTriggerRef.current = triggerId;
 
-    // Play first cat's message
-    const msg = MESSAGES[level]?.[0];
+    // Play a random cat's message (rotate all three voices)
+    const msgs = MESSAGES[level];
+    const msg = msgs?.[Math.floor(Math.random() * msgs.length)];
     if (msg) {
       synthesize(`brake-${triggerId}`, msg.text, msg.catId);
     }
@@ -92,7 +93,8 @@ export function BrakeModal() {
   }, [showReason, reason, checkin]);
 
   const handleTtsRetry = useCallback(() => {
-    const msg = MESSAGES[level]?.[0];
+    const msgs = MESSAGES[level];
+    const msg = msgs?.[Math.floor(Math.random() * msgs.length)];
     if (msg) {
       synthesize(`brake-retry-${Date.now()}`, msg.text, msg.catId);
     }

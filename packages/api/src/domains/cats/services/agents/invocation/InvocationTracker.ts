@@ -13,6 +13,15 @@ interface ActiveInvocation {
   catId: string;
   /** Cat(s) being invoked — used for cancel feedback broadcast */
   catIds: string[];
+  /** Server-side wall-clock start time (ms since epoch) */
+  startedAt: number;
+  /** For startAll slots: reference to primaryCat's controller (batch identity for completeAll) */
+  batchController?: AbortController;
+}
+
+export interface ActiveSlotInfo {
+  catId: string;
+  startedAt: number;
 }
 
 export interface CancelResult {
@@ -51,7 +60,7 @@ export class InvocationTracker {
     // Abort existing invocation for this SAME slot only
     this.active.get(key)?.controller.abort('preempted');
     const controller = new AbortController();
-    this.active.set(key, { controller, userId, catId, catIds });
+    this.active.set(key, { controller, userId, catId, catIds, startedAt: Date.now() });
     return controller;
   }
 
@@ -73,7 +82,7 @@ export class InvocationTracker {
     if (this.has(threadId)) return null;
     const controller = new AbortController();
     const key = this.slotKey(threadId, catId);
-    this.active.set(key, { controller, userId, catId, catIds });
+    this.active.set(key, { controller, userId, catId, catIds, startedAt: Date.now() });
     return controller;
   }
 
@@ -162,13 +171,72 @@ export class InvocationTracker {
     return false;
   }
 
-  /** Get all active catIds for a thread. */
-  getActiveSlots(threadId: string): string[] {
+  /**
+   * Start tracking ALL target cats for a unified multi-cat dispatch.
+   * Each cat gets its own independent AbortController (per-cat cancel safe).
+   * Returns the primaryCat's (catIds[0]) controller for execution signal.
+   * All slots share a `batchController` ref so completeAll can match the batch.
+   */
+  startAll(threadId: string, catIds: string[], userId: string = 'unknown'): AbortController {
+    if (this.deleting.has(threadId)) {
+      const controller = new AbortController();
+      controller.abort();
+      return controller;
+    }
+    const now = Date.now();
+    let primaryController: AbortController | undefined;
+    for (const catId of catIds) {
+      const key = this.slotKey(threadId, catId);
+      this.active.get(key)?.controller.abort('preempted');
+      const controller = new AbortController();
+      primaryController ??= controller;
+      this.active.set(key, { controller, userId, catId, catIds, startedAt: now, batchController: primaryController });
+    }
+    return primaryController ?? new AbortController();
+  }
+
+  /**
+   * Non-preemptive thread-level start for ALL target cats.
+   * Atomically checks if ANY slot is active, then registers all cats with independent controllers.
+   */
+  tryStartThreadAll(threadId: string, catIds: string[], userId: string = 'unknown'): AbortController | null {
+    if (this.deleting.has(threadId)) return null;
+    if (this.has(threadId)) return null;
+    const now = Date.now();
+    let primaryController: AbortController | undefined;
+    for (const catId of catIds) {
+      const key = this.slotKey(threadId, catId);
+      const controller = new AbortController();
+      primaryController ??= controller;
+      this.active.set(key, { controller, userId, catId, catIds, startedAt: now, batchController: primaryController });
+    }
+    return primaryController ?? new AbortController();
+  }
+
+  /**
+   * Complete ALL slots for the given cats.
+   * Matches via controller OR batchController — safe for startAll batches
+   * where each cat has an independent controller but shares batchController.
+   */
+  completeAll(threadId: string, catIds: string[], controller?: AbortController): void {
+    for (const catId of catIds) {
+      const key = this.slotKey(threadId, catId);
+      const inv = this.active.get(key);
+      if (!inv) continue;
+      if (controller) {
+        if (inv.controller !== controller && inv.batchController !== controller) continue;
+      }
+      this.active.delete(key);
+    }
+  }
+
+  /** Get all active slot info for a thread (catId + startedAt for F5 recovery). */
+  getActiveSlots(threadId: string): ActiveSlotInfo[] {
     const prefix = `${threadId}:`;
-    const result: string[] = [];
+    const result: ActiveSlotInfo[] = [];
     for (const [key, inv] of this.active) {
       if (key.startsWith(prefix)) {
-        result.push(inv.catId);
+        result.push({ catId: inv.catId, startedAt: inv.startedAt });
       }
     }
     return result;

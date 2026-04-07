@@ -70,6 +70,26 @@ describe('toCliEvents', () => {
     expect(events[0].detail).toBe('not json');
   });
 
+  it('F148: filters out legacy "unknown" tool events and their paired results', () => {
+    const toolEvents: ToolEvent[] = [
+      { id: 'u1', type: 'tool_use', label: 'gemini → unknown', timestamp: 1000 },
+      { id: 'r1', type: 'tool_result', label: 'gemini ← result', detail: 'UNKNOWN_RESULT', timestamp: 2000 },
+      { id: 'u2', type: 'tool_use', label: 'gemini → Read', detail: '{"file_path":"SKILL.md"}', timestamp: 3000 },
+      { id: 'r2', type: 'tool_result', label: 'gemini ← result', detail: 'READ_RESULT', timestamp: 4000 },
+      { id: 'u3', type: 'tool_use', label: 'gemini → unknown', timestamp: 5000 },
+      { id: 'r3', type: 'tool_result', label: 'gemini ← result', detail: 'UNKNOWN_RESULT_2', timestamp: 6000 },
+    ];
+    const events = toCliEvents(toolEvents, undefined);
+    const uses = events.filter((e) => e.kind === 'tool_use');
+    const results = events.filter((e) => e.kind === 'tool_result');
+    // Only the Read tool_use + its result survive
+    expect(uses).toHaveLength(1);
+    expect(results).toHaveLength(1);
+    expect(uses[0].label).toBe('Read SKILL.md');
+    // Positional pairing: uses[0] must pair with results[0] = READ_RESULT, not UNKNOWN_RESULT
+    expect(results[0].detail).toBe('READ_RESULT');
+  });
+
   it('preserves tool_result events', () => {
     const toolEvents: ToolEvent[] = [
       { id: 't1', type: 'tool_use', label: 'opus → Read', timestamp: 1000 },

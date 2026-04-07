@@ -164,4 +164,38 @@ describe('EventFlow', () => {
     expect(html).not.toContain('data-testid="chat-bubble"');
     expect(html).toContain('P1');
   });
+
+  // --- P2 fix: night_thought rendering ---
+
+  it('renders night_thought as chat bubble with "心声" label', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-nt',
+        type: 'night_thought',
+        scope: 'faction:wolf',
+        payload: { seatId: 'P1', actorId: 'opus', text: 'P2太可疑了' },
+      }),
+    ];
+    const html = render(events, { opus: '布偶猫(opus)' });
+    expect(html).toContain('data-testid="chat-bubble"');
+    expect(html).toContain('心声');
+    expect(html).toContain('P2太可疑了');
+    expect(html).toContain('布偶猫(opus)');
+  });
+
+  // --- P2 fix: displayName fallback ---
+
+  it('falls back to seatId when displayName would be empty', () => {
+    const events = [
+      makeEvent({
+        eventId: 'e-empty',
+        type: 'speech',
+        payload: { seatId: 'P5', text: 'hello' },
+      }),
+    ];
+    // No catDisplayNames, no seatToActor — should fall back to 'P5'
+    const html = render(events);
+    expect(html).toContain('P5');
+    expect(html).toContain('发言');
+  });
 });

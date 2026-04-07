@@ -128,6 +128,7 @@ function createStubThreadStore() {
         createdAt: Date.now(),
       };
     },
+    async updatePin() {},
   };
 }
 
@@ -169,8 +170,11 @@ describe('/game command bridge in POST /api/messages', () => {
         has: () => false,
         isDeleting: () => false,
         tryStartThread: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
         start: () => new AbortController(),
+        startAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
       },
       invocationRecordStore: {
         create: async () => ({ outcome: 'created', invocationId: 'inv-stub' }),
@@ -348,8 +352,11 @@ describe('/game command bridge in POST /api/messages', () => {
         has: () => false,
         isDeleting: () => false,
         tryStartThread: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
         start: () => new AbortController(),
+        startAll: () => new AbortController(),
         complete: () => {},
+        completeAll: () => {},
       },
       invocationRecordStore: {
         create: async () => ({ outcome: 'created', invocationId: 'inv-stub' }),

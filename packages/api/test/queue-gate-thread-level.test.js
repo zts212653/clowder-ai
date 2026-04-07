@@ -45,8 +45,11 @@ function buildDeps(overrides = {}) {
     },
     invocationTracker: {
       start: mock.fn(() => new AbortController()),
+      startAll: mock.fn(() => new AbortController()),
       tryStartThread: mock.fn(() => new AbortController()),
+      tryStartThreadAll: mock.fn(() => new AbortController()),
       complete: mock.fn(),
+      completeAll: mock.fn(),
       // Realistic slot-aware mock: only gemini slot is active
       has: mock.fn((threadId, catId) => {
         if (catId === undefined) {

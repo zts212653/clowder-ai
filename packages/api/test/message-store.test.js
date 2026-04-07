@@ -526,4 +526,24 @@ describe('MessageStore', () => {
     assert.equal(msgs.length, 1, 'forged scheduler message must NOT bypass userId filter');
     assert.equal(msgs[0].content, 'legit');
   });
+
+  test('getByThread() includes system messages persisted with catId=null when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append({ userId: 'user-1', catId: null, content: 'hello', mentions: [], timestamp: 1, threadId: 'th' });
+    store.append({
+      userId: 'system',
+      catId: null,
+      content: 'Error: stream_idle_stall: Gemini stopped responding',
+      mentions: [],
+      timestamp: 2,
+      threadId: 'th',
+    });
+
+    const msgs = store.getByThread('th', 50, 'user-1');
+    assert.equal(msgs.length, 2, 'should include own message + persisted system error');
+    assert.equal(msgs[1].userId, 'system');
+    assert.equal(msgs[1].catId, null);
+  });
 });

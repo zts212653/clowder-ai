@@ -1,13 +1,15 @@
 'use client';
 
 import type { SignalArticle, SignalArticleStatus, SignalTier } from '@cat-cafe/shared';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import {
   createCollection,
   deleteSignalArticle,
   fetchCollections,
   fetchSignalArticle,
+  fetchSignalSources,
   fetchSignalStats,
   fetchSignalsInbox,
   type SignalArticleDetail,
@@ -45,6 +47,8 @@ function toSignalTier(value: string | undefined): SignalTier | undefined {
 
 export function SignalInboxView() {
   const ime = useIMEGuard();
+  const searchParams = useSearchParams();
+  const deepLinkHandled = useRef(false);
   const [items, setItems] = useState<readonly SignalArticle[]>([]);
   const [showServerSearchResults, setShowServerSearchResults] = useState(false);
   const [stats, setStats] = useState<SignalArticleStats | null>(null);
@@ -56,11 +60,15 @@ export function SignalInboxView() {
   const [error, setError] = useState<string | null>(null);
   const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
   const [collections, setCollections] = useState<readonly StudyCollection[]>([]);
+  const [allSourceNames, setAllSourceNames] = useState<readonly string[]>([]);
 
-  // Load collections on mount
+  // Load collections and source config on mount
   useEffect(() => {
     fetchCollections()
       .then(setCollections)
+      .catch(() => {});
+    fetchSignalSources()
+      .then((sources) => setAllSourceNames(sources.map((s) => s.name).sort()))
       .catch(() => {});
   }, []);
 
@@ -123,6 +131,24 @@ export function SignalInboxView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount
   }, [refreshInbox]);
 
+  // Deep-link: /signals?article=<id> → switch to 'all' tab and auto-select
+  useEffect(() => {
+    if (deepLinkHandled.current || loading) return;
+    const articleId = searchParams.get('article');
+    if (!articleId) return;
+    deepLinkHandled.current = true;
+    // Switch to 'all' tab so the article is visible regardless of status
+    setFilters((current) => ({ ...current, status: 'all' }));
+    void refreshInbox('all').then(() => {
+      setSelectedArticleId(articleId);
+      setDetailLoading(true);
+      fetchSignalArticle(articleId)
+        .then(setSelectedArticle)
+        .catch(() => {})
+        .finally(() => setDetailLoading(false));
+    });
+  }, [loading, searchParams, refreshInbox]);
+
   const handleStatusTab = useCallback(
     (status: SignalArticleFilters['status']) => {
       setFilters((current) => ({ ...current, status }));
@@ -135,7 +161,7 @@ export function SignalInboxView() {
     () => (showServerSearchResults ? items : filterSignalArticles(items, filters)),
     [showServerSearchResults, items, filters],
   );
-  const sources = useMemo(() => uniqueSources(items), [items]);
+  const sources = allSourceNames.length > 0 ? allSourceNames : uniqueSources(items);
 
   const handleSearchSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -186,16 +212,30 @@ export function SignalInboxView() {
     }
   }, []);
 
-  const handleStatusChange = useCallback(async (articleId: string, status: SignalArticleStatus) => {
-    setError(null);
-    try {
-      const updated = await updateSignalArticle(articleId, { status });
-      setItems((current) => current.map((item) => (item.id === articleId ? updated : item)));
-      setSelectedArticle((current) => (current && current.id === articleId ? updated : current));
-    } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : '更新文章失败');
-    }
-  }, []);
+  const handleStatusChange = useCallback(
+    async (articleId: string, status: SignalArticleStatus) => {
+      setError(null);
+      try {
+        const updated = await updateSignalArticle(articleId, { status });
+        setItems((current) => {
+          const next = current.map((item) => (item.id === articleId ? updated : item));
+          // In non-'all' filter mode, remove articles that no longer match
+          if (filters.status !== 'all' && updated.status !== filters.status) {
+            return next.filter((item) => item.id !== articleId);
+          }
+          return next;
+        });
+        setSelectedArticle((current) => (current && current.id === articleId ? updated : current));
+        // Refresh stats to reflect the status change
+        fetchSignalStats()
+          .then(setStats)
+          .catch(() => {});
+      } catch (updateError) {
+        setError(updateError instanceof Error ? updateError.message : '更新文章失败');
+      }
+    },
+    [filters.status],
+  );
 
   const handleTagsChange = useCallback(async (articleId: string, tags: readonly string[]) => {
     setError(null);
@@ -226,6 +266,10 @@ export function SignalInboxView() {
       setItems((current) => current.filter((item) => item.id !== articleId));
       setSelectedArticle(null);
       setSelectedArticleId(null);
+      // Refresh stats to exclude the deleted article
+      fetchSignalStats()
+        .then(setStats)
+        .catch(() => {});
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : '删除失败');
     }
@@ -249,7 +293,9 @@ export function SignalInboxView() {
             {(
               [
                 ['inbox', 'Inbox'],
+                ['starred', '收藏'],
                 ['read', '已读'],
+                ['archived', '归档'],
                 ['all', '全部'],
               ] as const
             ).map(([key, label]) => (

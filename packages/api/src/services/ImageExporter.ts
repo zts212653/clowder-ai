@@ -44,11 +44,12 @@ export class ImageExporter {
         timeout: 30000,
       });
 
-      // Wait for messages to render (export mode uses flow layout, no data-chat-container)
-      await page.waitForSelector('[data-message-id]', { timeout: 15000 });
+      // Wait for messages AND cat data to fully load and render.
+      // data-export-ready is set by ChatContainer when !isLoadingHistory && messages.length > 0 && !isLoadingCatData.
+      await page.waitForSelector('[data-export-ready="true"]', { timeout: 20000 });
 
-      // Let React settle
-      await this.waitForPaint(page);
+      // Wait for React to finish rendering all messages (height stabilizes)
+      await this.waitForStableHeight(page);
 
       const pageHeight = await page.evaluate(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,6 +96,14 @@ export class ImageExporter {
         if (chunkH < CHUNK_HEIGHT) {
           await page.setViewport({ width: VIEWPORT_WIDTH, height: chunkH });
           await this.waitForPaint(page);
+          // Re-scroll after resize: with the larger viewport, scrollTo(y) above was
+          // clamped to maxScrollTop (= pageHeight - oldViewportHeight). After shrinking
+          // the viewport, maxScrollTop increases, so we can now reach y.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await page.evaluate((scrollY: number) => {
+            (globalThis as any).window.scrollTo(0, scrollY);
+          }, y);
+          await this.waitForPaint(page);
         }
 
         const chunk = (await page.screenshot({ type: 'png' })) as Buffer;
@@ -128,6 +137,36 @@ export class ImageExporter {
     } catch (error) {
       throw new Error(`Screenshot capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * Wait until document.scrollHeight stabilizes (no change for multiple consecutive checks).
+   * Handles React rendering large message lists that may take many frames to commit.
+   */
+  private async waitForStableHeight(page: puppeteer.Page, maxWait = 8000, interval = 300): Promise<void> {
+    const requiredStableChecks = 3;
+    let lastHeight = 0;
+    let stableChecks = 0;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWait) {
+      const height = await page.evaluate(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        () => (globalThis as any).document.documentElement.scrollHeight as number,
+      );
+      if (height === lastHeight && height > 0) {
+        stableChecks++;
+        if (stableChecks >= requiredStableChecks) {
+          log.info({ height, elapsed: Date.now() - start }, 'Page height stabilized');
+          return;
+        }
+      } else {
+        stableChecks = 0;
+        lastHeight = height;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, interval));
+    }
+    log.warn({ lastHeight, elapsed: Date.now() - start }, 'Page height did not stabilize within maxWait, proceeding');
   }
 
   /** Wait for two animation frames (one paint cycle). */

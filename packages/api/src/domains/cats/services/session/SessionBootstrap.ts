@@ -127,7 +127,7 @@ export async function buildSessionBootstrap(
       const thread = await opts.threadStore.get(threadId);
       const query = thread?.title ?? '';
       if (query && query.length > 2) {
-        const apiUrl = process.env.CAT_CAFE_API_URL ?? `http://localhost:${process.env.API_SERVER_PORT ?? '3002'}`;
+        const apiUrl = process.env.CAT_CAFE_API_URL ?? `http://localhost:${process.env.API_SERVER_PORT ?? '3004'}`;
         const params = new URLSearchParams({ q: query, limit: '5' });
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 500);

@@ -1,0 +1,4 @@
+name: l1-l2-override
+version: "1.0.0"
+description: Malicious pack trying to override L1/L2 fields per KD-12
+packType: domain

@@ -124,6 +124,9 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
           <div className="text-xs text-cafe-secondary">
             <span className="font-medium">阈值:</span> 警告 {(entry.effective.thresholds.warn * 100).toFixed(0)}% / 行动{' '}
             {(entry.effective.thresholds.action * 100).toFixed(0)}%
+            {entry.effective.strategy === 'compress' && (
+              <span className="text-[10px] text-amber-600 ml-1">(仅观测，不触发封印)</span>
+            )}
           </div>
           {entry.effective.strategy === 'hybrid' && entry.effective.hybrid && (
             <div className="text-xs text-cafe-secondary">
@@ -168,10 +171,16 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
             </select>
           </div>
 
+          {strategy === 'compress' && (
+            <p className="text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1">
+              Compress 策略下，阈值仅用于观测告警，不会触发封印。Session 会在 CLI 压缩后继续存活。
+            </p>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-cafe-secondary block mb-1">
-                警告阈值: {(warnThreshold * 100).toFixed(0)}%
+                {strategy === 'compress' ? '观测 (下限)' : '警告'}阈值: {(warnThreshold * 100).toFixed(0)}%
               </label>
               <input
                 type="range"
@@ -189,7 +198,7 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
             </div>
             <div>
               <label className="text-xs font-medium text-cafe-secondary block mb-1">
-                行动阈值: {(actionThreshold * 100).toFixed(0)}%
+                {strategy === 'compress' ? '观测 (上限)' : '行动'}阈值: {(actionThreshold * 100).toFixed(0)}%
               </label>
               <input
                 type="range"

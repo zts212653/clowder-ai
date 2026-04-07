@@ -113,7 +113,7 @@ Maine Coon发散了 5 个方向后收敛为一套：
 #### A2: Design Token 体系 (奶油猫咖色板)
 
 - **色板 (Pencil 已落地)**:
-  - `$cat-cream-white`: `#FFF9F0` (背景基调)
+  - `$cat-cream-white`: `#fdf8f3` (背景基调)
   - `$cat-soft-blue`: `#81D4FA` (功能强调/跨线程隔离)
   - `$cat-warm-brown`: `#8D6E63` (文字/边框)
   - `$cat-paw-pink`: `#FFAB91` (重要交互/彩蛋)

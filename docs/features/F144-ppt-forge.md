@@ -130,13 +130,136 @@ deck.pptx
 4. Skill 化 — team lead一句话触发全流程
 5. 企业风格模板库 — nvidia-like/IBM/Apple（HTML+Tailwind 模板，比 JSON token 表达力强 10 倍）
 
-### Phase C: 进阶能力（可选）
+### Phase C: SVG 渲染后端 — 确定性 SVG 编译器
 
-1. Combo chart 双轴（pptxgenjs combo API 稳定后）
-2. 演讲者备注自动生成
-3. Narrative 编辑部（reference-retriever / deck-critic / redundancy-pruner）
-4. 多语言支持
-5. Gate patch loop（qa.report.json → 局部回修）+ Gate scorecard 评分协议
+> **方向纠偏（2026-03-31）**：Phase B 的 HTML→DOM→pptxgenjs 路线在复杂中文嵌套布局（diagram 71 shapes）仍然崩溃。team lead指出应学习 pptx-craft 的 SVG 路线。核心发现：pptx-craft 不是"Promptware"，其 `svg_to_shapes.py`(70k) 是成熟的 SVG→DrawingML 原生 shapes 转换器。
+>
+> **选型收敛（2026-04-02）**：Ragdoll+Maine Coon讨论，team lead约束"不引入 Python，用我们自己的 TS/JS 技术栈"。最终方案：**C3 为主（确定性 SVG 编译）+ C2 为辅（AI-direct SVG 可选高创意模式）**。C1（Python）team lead否决，C4（图片降级）只做应急兜底。
+
+#### 选型决策过程
+
+**team lead约束**：❌ 不引入 Python | ✅ 有 Pencil MCP | ✅ 纯 TS/JS 技术栈
+
+| 方案 | 结论 | 理由 |
+|------|------|------|
+| C1 吸收 Python 转换器 | ❌ 否决 | team lead约束：不引入 Python |
+| **C3 确定性 SVG 编译（默认）** | ✅ **主选** | 确定性强、可测、可回归，符合 Phase B「语义编译器」方向（Maine Coon推荐） |
+| C2 AI-direct SVG（可选） | ⚠️ 辅助 | 创意强但输出不稳定，进入人工验收通道（非默认） |
+| C4 Diagram 图片降级 | ⚠️ 兜底 | 改动最小但不可编辑，仅应急 |
+
+#### 终态架构
+
+```
+简单元素 (text/table/kpi/chart)
+    → 现有 pptxgenjs renderer（已验证可用，不改）
+
+复杂元素 (diagram/架构图)  [C3-Core]
+    → Blueprint DiagramElement
+    → TS SVG 编译器（确定性生成 1280×720 SVG string）
+    → TS svg-to-shapes 转换器（SVG → pptxgenjs addShape/addText 调用）
+    → pptxgenjs 组装 deck.pptx（原生可编辑）
+
+高创意模式（可选）  [C2-Assist]
+    → AI 直接生成 SVG（非确定性，需人工验收 gate）
+    → 同一 svg-to-shapes 转换器
+    → pptxgenjs 组装
+```
+
+**Pencil MCP 定位**：design-time 模板产出与视觉校准，不在 runtime 主路径（Maine Coon pushback：运行时依赖 Pencil 不够硬）。
+
+#### C3-Core: TS SVG→Shapes 转换器
+
+**核心子集**（diagram-first，不追 pptx-craft 全覆盖）：
+
+| SVG 元素 | Phase C | 映射 |
+|----------|---------|------|
+| `<rect>` | ✅ | `addShape('rect', {x,y,w,h,fill,line})` |
+| `<text>` | ✅ | `addText([{text,options}], {x,y,w,h})` — CJK 字宽表 |
+| `<line>` | ✅ | `addShape('line', ...)` |
+| `<g transform>` | ✅ | 递归坐标变换（translate/scale） |
+| `<circle>` | ✅ | `addShape('ellipse', ...)` |
+| `<path>` | Phase D | 复杂路径 |
+| gradient/filter | Phase D | 视觉增强 |
+
+**工程量评估**（Maine Coon校准）：
+- 代码：2.5k–4k 行 TS（含 CJK 文本排版、baseline/字距/行高）
+- 测试：1.5k–3k 行
+- 周期：2–3 周（1 只主力猫）
+
+#### 风险（Maine Coon补充）
+
+| 风险 | 缓解 |
+|------|------|
+| 中文文本不只是换行：baseline/字距/行高/fallback 字体跨平台漂移 | CJK 字宽预设表 + 跨平台测试矩阵 |
+| 字体嵌入/子集化未补齐前视觉保真反复打脸 | Phase C 与 AC-B4 字体嵌入并行推进 |
+| SVG 安全（外链资源/filter/foreignObject） | 白名单机制：只允许 Phase C 核心子集 SVG 元素 |
+| 高密 slide（50+ box）编译耗时与输出体积 | 性能 gate：编译时间 < 5s / 单 slide 体积 < 2MB |
+
+#### pptx-craft 架构参考（不直接引入）
+
+```
+AI 生成 SVG (1280×720 viewBox, 逐页)
+    ↓ page_N_draft.svg (640×360 低分辨率先定布局)
+    ↓ page_N.svg (1280×720 精装修)
+svg_to_shapes.py (70k Python) → DrawingML native shapes
+svg_to_pptx.py (41k Python) → python-pptx 组装
+```
+
+**我们学方法论，不学实现**：SVG 作为布局中间层的思路正确，但用 TS 重写核心子集（不引入 Python）。
+
+#### OfficeCLI 评估
+
+- github.com/iOfficeAI/OfficeCLI，Apache 2.0，925 stars，.NET CLI
+- **结论**: 不适合我们 Node.js 管线
+
+#### Phase C 交付项
+
+1. **C3-Core**: TS SVG 编译器 + svg-to-shapes 转换器（diagram-first），确定性生产链
+2. **C2-Assist**: AI-direct SVG 可选通道 + 人工验收 gate
+3. **AC-B4 并行**: 字体嵌入（SVG 保真的前置依赖）
+
+### Phase D: AI 猫猫画 HTML — 学 pptx-craft 超越 pptx-craft
+
+> **方向转变（2026-04-03）**：Phase C 的确定性 SVG 编译器解决了 CJK 渲染问题（不再竖排乱码），但布局密度仍不够华为级。team lead分析 pptx-craft 后拍板：**核心页面让猫猫直接写 HTML+CSS，不靠编译器算布局**。
+
+#### 核心思路
+
+pptx-craft 的关键技术：**AI (Opus) 直接生成 HTML+Tailwind (1280×720) → Playwright → dom-to-pptx → pptxgenjs**。密度高是因为 AI 懂 CSS 布局、会自动填充空间，且有两阶段设计强制密度。
+
+我们的差异化：
+1. **Research 质量**：deep-research + 多猫讨论 >> 对方 web fetch
+2. **多猫审核**：Siamese视觉审 + Maine Coon准确性审
+3. **Phase C SVG 编译器作为 diagram fallback**：结构化数据仍走确定性路径
+
+#### Phase D 交付项
+
+1. **D1-Core**: AI 猫猫直接写 HTML+Tailwind 页面布局（不走 Blueprint→编译器，猫猫拿 storyline.md + theme tokens 直接画）
+2. **D2-TwoPhase**: 两阶段密度控制 — Draft(640×360, 强制高密度) → Final(1280×720, 只增强不减密)
+3. **D3-DensityGate**: Playwright 渲染后自动检测白空间占比 + 溢出检测，不达标退回猫猫重画
+4. **D4-Integration**: 集成进 F144 管线 — Research → Narrative → **AI 画 HTML** → Playwright → dom-to-pptx → .pptx
+5. **D5-VerticalSlice**: 先做 1 页高密页验证"猫猫画 HTML → PPTX"全链路（HTML→截图→density 报告→PPTX），通过后再扩页。输入六件套（品牌/受众/页型/观看模式/页目的/证据源），输出四件套（HTML/截图/density/PPTX）
+
+#### 华为级密度填充技巧（team lead反馈沉淀 2026-04-05）
+
+team lead反复指出猫猫画的 HTML"空白太多"。根本问题不是空白检测不够，而是猫猫没有用足页面空间。华为真正的 PPT 会用以下手段把页面塞满：
+
+1. **SmartArt/流程图**：把端到端工作流画成箭头连接的步骤图，占满横向空间
+2. **多区块混排**：一页同时包含表格 + 文字总结 + 图表 + 截图/示意图
+3. **格子间距极小**：表格/卡片的 cell padding 和 gap 压到最小（4px 级）
+4. **文字密度**：关键信息用加粗/颜色区分，辅助信息用 9-10px 紧排
+5. **全版面利用**：华为 PPT 几乎不留空白区域，每个角落都有内容或装饰
+6. **数据可视化填充**：空余区域用迷你图表、进度条、状态指示器填充
+7. **信息层级压缩**：别人用 4-5 页讲的内容，华为用 1-2 页讲清，靠的是排版密度而非内容删减
+8. **结论性文字条**：页面底部用深色底条放核心结论，不浪费任何空间
+
+#### 其他进阶能力（Phase E+）
+
+1. SVG 全覆盖（path/gradient/filter/clipPath）
+2. Combo chart 双轴（pptxgenjs combo API 稳定后）
+3. 演讲者备注自动生成
+4. Narrative 编辑部（reference-retriever / deck-critic / redundancy-pruner）
+5. 多语言支持
+6. Gate patch loop（qa.report.json → 局部回修）+ Gate scorecard 评分协议
 
 ## Acceptance Criteria
 
@@ -163,6 +286,23 @@ deck.pptx
 - [ ] AC-B6: Skill 化 — team lead一句话触发全流程（research → storyline → blueprint → HTML → compile → .pptx）
 - [ ] AC-B7: ≥3 种企业风格 HTML+Tailwind 模板可用（huawei-like/nvidia-like/Apple）
 
+### Phase C（SVG 渲染后端 — 确定性 SVG 编译器）
+- [x] AC-C1: TS SVG 编译器 — DiagramElement → 确定性 1280×720 SVG string（含 CJK 字宽预设表）
+- [x] AC-C2: TS svg-to-shapes 转换器 — SVG(rect/text/line/circle/g) → pptxgenjs shapes，原生可编辑
+- [ ] AC-C3: 同一 DiagramElement 对比 V1 renderer vs Phase C SVG 编译器，中文不再竖排/溢出
+- [ ] AC-C4: SVG 安全白名单 — 只允许 Phase C 核心子集元素，拒绝外链/filter/foreignObject
+- [ ] AC-C5: 性能 gate — 50+ box diagram 编译 < 5s，单 slide 体积 < 2MB
+- [ ] AC-C6: （可选）C2-Assist 通道 — AI-direct SVG + 人工验收 gate 可用
+
+### Phase D（AI 猫猫画 HTML — 学 pptx-craft 超越 pptx-craft）
+- [x] AC-D1: AI 猫猫直接写 HTML+Tailwind 页面（拿 storyline.md + theme tokens 画布局，不走确定性编译器）
+- [x] AC-D2: 两阶段密度控制 — Draft(640×360) 强制高密度 → Final(1280×720) 只增强不减密
+- [x] AC-D3: Playwright 白空间检测 — 渲染后自动检测白空间占比 < 30%，溢出检测，不达标退回
+- [x] AC-D4: 同一主题对比 pptx-craft vs Phase D 输出，信息密度 ≥ 对方，内容准确性 > 对方（research 质量差异）
+- [ ] AC-D5: 垂直切片验证 — 1 页高密页走完 HTML→截图→density 报告→PPTX 全链路。输入六件套（品牌/受众/页型/观看模式/页目的/证据源），输出四件套（HTML/截图/density/PPTX）。Maine Coon D1 结构审 + Siamese D2 美学审
+- [ ] AC-D6: 华为级视觉验收 — team lead确认"一两页讲清楚重点"，信息密度达华为参考图水平，运用密度填充技巧（SmartArt/多区块混排/极小间距/全版面利用）
+- [ ] AC-D7: 集成进管线 — Research → Narrative → AI 画 HTML → Playwright → dom-to-pptx → .pptx，team lead一句话触发
+
 ## Dependencies
 
 - **Related**: F138（Video Studio — 同属内容生成管线家族，共享 HTML+CSS → 媒体输出 思路）
@@ -185,6 +325,9 @@ deck.pptx
 | OOXML repair dialog（GPT Pro 警告） | 回归测试：生成 .pptx → PPT 365 打开 → 无 repair 弹窗 |
 | 华为级信息密度超出 layout 覆盖 | Level 1/Level 2 分级：表格+KPI 先行，架构图作为挑战目标 |
 | Blueprint 对页面容量失明（GPT Pro #3） | renderBudget 注入 Blueprint（Phase A 只激活 `maxWords` 预警；`minFontPt`/`overflowPolicy` 为 Phase B reserved） |
+| CJK 文本排版跨平台漂移（Maine Coon Phase C 补充） | baseline/字距/行高/fallback 字体差异 → CJK 字宽预设表 + 跨平台测试矩阵 |
+| SVG 安全边界（Phase C） | 外链资源/filter/foreignObject 可被注入 → 白名单机制，只允许核心子集元素 |
+| 高密 slide 编译性能（Phase C） | 50+ box diagram 编译耗时 / 输出体积膨胀 → 性能 gate（< 5s / < 2MB） |
 
 ## Key Decisions
 
@@ -203,6 +346,11 @@ deck.pptx
 | KD-10 | **CJK 图表字体升级为 release-gate P1** | Maine Coon要求：首发场景是中文企业汇报，图表 CJK 翻车 = 现场打脸自己 | 2026-03-27 |
 | KD-11 | **Pushback renderer-agnostic adapter** | Ragdoll+Maine Coon共识：YAGNI，但守住 contract 不泄漏 renderer 细节（ChartData + hints 折中） | 2026-03-27 |
 | KD-12 | **Phase A 分 Level 1/2 两级** | Level 1 = 表格+KPI+图表（必须做到）；Level 2 = DiagramElement 架构图（挑战目标） | 2026-03-27 |
+| KD-14 | **Phase C 选型：C3 确定性 SVG 编译为主，C2 AI-direct SVG 为辅** | Ragdoll+Maine Coon共识：C3 确定性强/可测/可回归；C2 创意强但不稳定，进人工验收通道。C1 team lead否决（不引入 Python），C4 仅应急兜底 | 2026-04-02 |
+| KD-15 | **Pencil MCP 定位为 design-time，不进 runtime 主路径** | Maine Coon pushback：Pencil 主打 .pen 编辑/导出，自动化 Blueprint→稳定 SVG 链路不够硬。适合模板设计与视觉校准 | 2026-04-02 |
+| KD-16 | **Phase D 方向转变：AI 猫猫直接画 HTML，不靠确定性编译器排版** | team lead拍板：确定性编译器/规则自动生成布局效果不够好，密度不够华为级。学习 pptx-craft 的 "AI 直接写 HTML+CSS" 路线——让猫猫（Opus）直接画布局，而不是用算法算。Phase C SVG 编译器保留为 diagram fallback。核心差异化：我们的 research pipeline（deep-research + 多猫讨论）内容质量碾压对方 web fetch，配合 AI 画 HTML 实现"高质量内容 × 高密度布局" | 2026-04-03 |
+| KD-17 | **默认主路径：AI 猫猫画 HTML 是唯一创作路径** | 编译器（Phase B/C）不替猫猫做版式决策。猫猫拿 storyline + theme tokens 直接画 1280×720 HTML+CSS。编译器降级为基础设施：只负责 HTML→可编辑 PPTX 的转换 + 密度/溢出门禁检测。chart/table/KPI 保留语义 emitter（原生可编辑对象），但版式由猫猫在 HTML 中决定。猫猫画的 D4 华为高密战略页密度远超编译器自动布局，team lead直接确认。Ragdoll+Maine Coon共识 | 2026-04-05 |
+| KD-18 | **D4 对比口径：密度结论有效，baseline 是模拟非实测** | AC-D4 的 4.1% vs 43.9% 白空间对比有效证明方向正确，但 pptx-craft baseline 是竞品报告模拟生成、非实际 pptx-craft 跑出来的。后续需对方实际输出作为对拍基准集。不影响 Phase D 默认路径决策 | 2026-04-05 |
 
 ## Review Gate
 

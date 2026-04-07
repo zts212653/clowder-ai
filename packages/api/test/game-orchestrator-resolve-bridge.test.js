@@ -278,7 +278,7 @@ describe('P2-1: fallback actionName uses phase-specific definition', () => {
     const updated = await store.getGame(runtime.gameId);
     const fallback = updated.eventLog.find((e) => e.type === 'action.fallback' && e.payload.seatId === 'P3');
     assert.ok(fallback, 'should have fallback for guard');
-    assert.equal(fallback.payload.actionName, 'guard', 'fallback actionName should be "guard", not "vote"');
+    assert.equal(fallback.payload.actionName, 'skip', 'non-wolf night fallback should be "skip" (not random action)');
   });
 
   it('wolf fallback uses actionName="kill"', async () => {

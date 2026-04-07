@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Clowder AI - Windows Repo-Local Install Helper
+  Cat Cafe - Windows Repo-Local Install Helper
 
 .DESCRIPTION
-  Installs prerequisites and sets up the current checked-out clowder-ai repo.
+  Installs prerequisites and sets up the current checked-out cat-cafe repo.
   Clone or download the repo first, then run this helper from inside it.
   Steps: env detect -> preflight network check -> Node/pnpm install -> Redis -> .env generate
          -> deps & build -> skills mount -> AI CLI tools -> auth config -> verify & optionally start
@@ -92,7 +92,7 @@ function Resolve-ProjectRoot {
     $projectRoot = Split-Path -Parent $ScriptDir
     if (-not (Test-Path (Join-Path $projectRoot "package.json")) -or
         -not (Test-Path (Join-Path $projectRoot "packages/api"))) {
-        Write-Err "Run this helper from a checked-out clowder-ai repo: .\scripts\install.ps1"
+        Write-Err "Run this helper from a checked-out cat-cafe repo: .\scripts\install.ps1"
         exit 1
     }
     $gitRepoUnavailable = $false
@@ -273,7 +273,7 @@ if (Test-Path $envFile) {
 } elseif (Test-Path $envExample) {
     Copy-Item $envExample $envFile
     Write-Ok ".env created from .env.example"
-    Write-Warn "Edit .env to add your API keys and customize ports"
+    Write-Warn "After launch, add API keys in Hub > System Settings > Account Configuration"
 } else {
     Write-Warn ".env.example not found - creating minimal .env"
     @"
@@ -405,7 +405,7 @@ if (-not $allGood -and -not $SkipBuild) {
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor Green
-Write-Host "  Clowder AI installed!" -ForegroundColor Green
+Write-Host "  Cat Cafe installed!" -ForegroundColor Green
 Write-Host "  ========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Project: $ProjectRoot"

@@ -96,11 +96,11 @@ API 契约：
 
 ## Post-QG Delta (Phase E, 2026-03-31)
 
-QG 通过后追加的改动（均已 push 到 PR #299）：
+QG 通过后追加的改动（均已 push 到 clowder-ai PR #299）：
 
 | Commit | 改动 | 原因 |
 |--------|------|------|
-| `424269e` | SVG → Gemini 动漫风格 PNG 插画 + Bug 1 修复（`govRefetch`） | 铲屎官要求动漫猫猫风格；切换 thread 后治理状态不刷新 |
+| `424269e` | SVG → Gemini 动漫风格 PNG 插画 + Bug 1 修复（`govRefetch`） | team lead要求动漫猫猫风格；切换 thread 后治理状态不刷新 |
 | `770712a` | 去除 PNG 白色背景（PIL 阈值抠图） | 白底与卡片背景色不融合 |
 | `f1742a2` | `items-center` 对齐 + 1.2s 最小展示时间 | 图文错落；init/skip 闪烁 |
 | `70a69a1` | `key={threadId}` 强制重挂载 | Bug 1 复现：组件内部 state 残留 |
@@ -108,8 +108,8 @@ QG 通过后追加的改动（均已 push 到 PR #299）：
 增量 QG 结论：
 - Biome: 0 error, 8 warning（均为 `<img>` vs `<Image />`，可接受）
 - TypeScript: 0 error
-- Tests: 252/254 pass（2 failures 为 pre-existing `BACKLOG.md` vs `ROADMAP.md`，非 F113-E）
-- UX 手测：铲屎官确认对齐、融合、闪烁均已修复
+- Tests: 252/254 pass（2 failures 为 pre-existing `ROADMAP.md` vs `ROADMAP.md`，非 F113-E）
+- UX 手测：team lead确认对齐、融合、闪烁均已修复
 
 ## Notes
 

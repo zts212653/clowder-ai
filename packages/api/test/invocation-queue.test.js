@@ -408,6 +408,111 @@ describe('InvocationQueue', () => {
     assert.equal(remaining[0].content, 'fresh-merge');
   });
 
+  // ── Stale agent entry defense (review P1/P2) ──
+
+  it('enqueue does NOT merge into stale agent tail entry', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'stale handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    // Backdate to make it stale
+    const listed = queue.list('t1', 'system');
+    listed[0].createdAt = Date.now() - 120_000;
+
+    // New A2A handoff for same cat — must NOT merge into stale tail
+    const r2 = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'fresh handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    assert.equal(r2.outcome, 'enqueued', 'must create fresh entry, not merge into stale tail');
+    // Fresh entry must have its own createdAt (not inherited stale timestamp)
+    assert.ok(
+      r2.entry.createdAt > Date.now() - 5_000,
+      'fresh entry createdAt must be recent, not inherited from stale tail',
+    );
+  });
+
+  it('countAgentEntriesForThread excludes stale queued agent entries', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'stale',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'fresh',
+      source: 'agent',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'codex',
+    });
+    // Backdate first entry to make it stale
+    const listed = queue.list('t1', 'system');
+    listed[0].createdAt = Date.now() - 120_000;
+
+    assert.equal(
+      queue.countAgentEntriesForThread('t1'),
+      1,
+      'stale queued agent entries must not count toward A2A depth limit',
+    );
+  });
+
+  it('enqueue does NOT return full when capacity is only occupied by stale agent entries', () => {
+    // Fill to MAX_QUEUE_DEPTH with agent entries, then backdate them all to stale
+    for (let i = 0; i < 5; i++) {
+      queue.enqueue({
+        threadId: 't1',
+        userId: 'system',
+        content: `stale-${i}`,
+        source: 'agent',
+        targetCats: [`cat${i}`],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'opus',
+      });
+    }
+    const listed = queue.list('t1', 'system');
+    for (const e of listed) {
+      e.createdAt = Date.now() - 120_000; // stale (> 60s threshold)
+    }
+
+    // New enqueue must succeed — stale entries should not block capacity
+    const r = queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'fresh handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    assert.equal(
+      r.outcome,
+      'enqueued',
+      'stale queued agent entries must not consume capacity — otherwise thread locks up until restart',
+    );
+  });
+
   // ── F122B: agent source + autoExecute ──
 
   it('accepts agent source with autoExecute and callerCatId', () => {
@@ -488,6 +593,27 @@ describe('InvocationQueue', () => {
   it('hasQueuedAgentForCat returns false for user-sourced entries', () => {
     queue.enqueue(entry({ targetCats: ['opus'] }));
     assert.equal(queue.hasQueuedAgentForCat('t1', 'opus'), false, 'user entries should not block A2A dedup');
+  });
+
+  it('hasQueuedAgentForCat returns false for stale queued entry (> STALE_QUEUED_THRESHOLD_MS)', () => {
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'system',
+      content: 'callback handoff',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+    });
+    // Backdate createdAt to 2 minutes ago — well past the 60s stale threshold
+    const listed = queue.list('t1', 'system');
+    listed[0].createdAt = Date.now() - 120_000;
+    assert.equal(
+      queue.hasQueuedAgentForCat('t1', 'codex'),
+      false,
+      'stale queued entry (>60s) must NOT block A2A callback dedup — causes permanent routing deadlock',
+    );
   });
 
   it('hasQueuedAgentForCat returns false after entry completes', () => {

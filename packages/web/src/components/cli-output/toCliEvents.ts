@@ -44,9 +44,18 @@ export function toCliEvents(toolEvents: ToolEvent[] | undefined, streamContent: 
   const events: CliEvent[] = [];
 
   if (toolEvents) {
+    // F148: collect IDs of "unknown" tool_use events so we can also skip their paired tool_result.
+    // CliOutputBlock pairs toolUses[i] with toolResults[i] by position, so skipping a use
+    // without its result would mis-pair all subsequent rows.
+    let skipNextResult = false;
     for (const te of toolEvents) {
       if (te.type === 'tool_use') {
         const toolName = cleanToolLabel(te.label);
+        if (toolName === 'unknown') {
+          skipNextResult = true;
+          continue;
+        }
+        skipNextResult = false;
         const primaryArg = extractPrimaryArg(te.detail);
         events.push({
           id: te.id,
@@ -56,7 +65,11 @@ export function toCliEvents(toolEvents: ToolEvent[] | undefined, streamContent: 
           detail: te.detail,
         });
       } else {
-        // tool_result: strip "catId ← result" label, keep detail
+        // tool_result: skip if its preceding tool_use was "unknown"
+        if (skipNextResult) {
+          skipNextResult = false;
+          continue;
+        }
         events.push({
           id: te.id,
           kind: te.type,

@@ -212,7 +212,7 @@ describe('GET /api/evidence/search', () => {
     const body = res.json();
     assert.equal(body.results[0].sourceType, 'decision');
     assert.equal(body.results[1].sourceType, 'phase');
-    assert.equal(body.results[2].sourceType, 'discussion');
+    assert.equal(body.results[2].sourceType, 'feature');
     assert.equal(body.results[3].sourceType, 'discussion');
   });
 });

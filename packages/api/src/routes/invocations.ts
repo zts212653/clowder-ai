@@ -115,9 +115,9 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       };
     }
 
-    // ⑥ Start invocation tracking (may abort prior invocation for this slot)
+    // ⑥ Start invocation tracking for ALL target cats (multi-cat F5 recovery)
     const primaryCat = record.targetCats[0] ?? 'unknown';
-    const controller = opts.invocationTracker.start(record.threadId, primaryCat, record.userId, record.targetCats);
+    const controller = opts.invocationTracker.startAll(record.threadId, record.targetCats, record.userId);
     if (controller.signal.aborted) {
       await opts.invocationRecordStore.update(id, { status: 'canceled' });
       reply.status(409);
@@ -137,7 +137,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       expectedStatus: snapshotStatus,
     });
     if (!claimed) {
-      opts.invocationTracker.complete(record.threadId, primaryCat, controller);
+      opts.invocationTracker.completeAll(record.threadId, record.targetCats, controller);
       reply.status(409);
       return {
         error: `Cannot retry invocation with status '${snapshotStatus}'`,
@@ -258,7 +258,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         );
       } finally {
         clearInterval(heartbeatInterval);
-        opts.invocationTracker.complete(record.threadId, primaryCat, controller);
+        opts.invocationTracker.completeAll(record.threadId, record.targetCats, controller);
         // F39: Notify queue processor for auto-dequeue chain
         opts.queueProcessor?.onInvocationComplete(record.threadId, primaryCat, finalStatus).catch(() => {
           /* best-effort */
