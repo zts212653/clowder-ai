@@ -102,7 +102,7 @@ pnpm stop
 
 Open `http://localhost:3003` and start talking to your team.
 
-> **One-line alternative (Linux):** `bash scripts/install.sh` handles Node, pnpm, Redis, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
+> **Bare-metal / one-line install (macOS · Linux · Windows):** `bash scripts/install.sh` handles Homebrew/system deps, Node, pnpm, Redis, AI CLIs, dependencies, `.env`, and first launch in one step. Options: `--start` (auto-start), `--memory` (skip Redis), `--registry=URL` (custom npm mirror). On **Windows**, use `scripts/install.ps1` then `scripts/start-windows.ps1`.
 
 **Full setup guide** (API keys, CLI auth, voice, Feishu/Telegram, troubleshooting): **[SETUP.opensource.md](SETUP.opensource.md)**
 
@@ -336,7 +336,7 @@ We build in the open. Here's where we are.
 | MCP Callback Bridge | Shipped |
 | SOP Auto-Guardian | Shipped |
 | Self-Evolution | Shipped |
-| Linux Repo-Local Install Helper | Shipped |
+| Cross-Platform One-Click Install (macOS · Linux · Windows) | Shipped |
 
 ### Integrations
 

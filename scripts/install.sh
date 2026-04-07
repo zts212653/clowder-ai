@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Clowder AI — Linux Repo-Local Install Helper (F113)
+# Clowder AI — Repo-Local Install Helper (F113)
 # Usage: bash scripts/install.sh [--start] [--memory] [--registry=URL] [--skip-preflight]
-# Supported: Debian/Ubuntu, CentOS/RHEL/Fedora
+# Supported: macOS (Homebrew), Debian/Ubuntu, CentOS/RHEL/Fedora
 
 set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -38,10 +38,40 @@ info() { echo -e "${CYAN}$*${NC}"; }; ok() { echo -e "  ${GREEN}✓${NC} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $*"; }; fail() { echo -e "  ${RED}✗${NC} $*"; }
 step() { echo ""; echo -e "${BOLD}$*${NC}"; }
 USED_FNM=false
+resolve_realpath() { realpath "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || echo "$1"; }
+# P1 review: On Apple Silicon, /usr/local/bin is often not writable without
+# sudo, and we deliberately skip sudo on Darwin. Use ~/.local/bin instead.
+USER_BIN_DIR="/usr/local/bin"
 persist_user_bin() {
     local bin="$1" path=""; path="$(command -v "$bin" 2>/dev/null || true)"
-    [[ -n "$path" ]] || return 0; $SUDO mkdir -p /usr/local/bin
-    $SUDO ln -sfn "$(readlink -f "$path" 2>/dev/null || echo "$path")" "/usr/local/bin/$bin"
+    [[ -n "$path" ]] || return 0
+    local real_src; real_src="$(resolve_realpath "$path")"
+    local target="$USER_BIN_DIR/$bin"
+    # Guard: GNU ln -sfn errors when source and target resolve to the same path.
+    [[ "$(resolve_realpath "$target" 2>/dev/null)" == "$real_src" ]] && return 0
+    $SUDO mkdir -p "$USER_BIN_DIR"
+    $SUDO ln -sfn "$real_src" "$target"
+}
+# Append a line to the user's shell profile (idempotent).
+append_to_profile() {
+    local line="$1" profile="$2"
+    if [[ -f "$profile" ]] && grep -qF "$line" "$profile" 2>/dev/null; then return 0; fi
+    # Ensure a leading newline if the file doesn't end with one, so we don't
+    # concatenate onto the previous line and break shell parsing.
+    if [[ -f "$profile" && -s "$profile" ]] && [[ $(tail -c 1 "$profile") ]]; then
+        echo >> "$profile"
+    fi
+    echo "$line" >> "$profile"
+}
+# Return macOS login profile paths for both zsh and bash.
+# zsh: ~/.zprofile (respects ZDOTDIR). bash: ~/.bash_profile or ~/.profile.
+darwin_login_profiles() {
+    echo "${ZDOTDIR:-$HOME}/.zprofile"
+    if [[ -f "$HOME/.bash_profile" ]]; then
+        echo "$HOME/.bash_profile"
+    else
+        echo "$HOME/.profile"
+    fi
 }
 
 # TTY-safe read + pnpm install with registry fallback
@@ -503,35 +533,105 @@ fs.writeFileSync(pf, JSON.stringify(profiles)); if (secrets) fs.writeFileSync(sf
 EONODE
 }
 
+PLATFORM="$(uname -s)"
+
 if [[ "$SOURCE_ONLY" == true ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
 # ── [1/9] Environment detection ────────────────────────────
 step "[1/9] Detecting environment / 环境检测..."
-
-if [[ "$(uname -s)" != "Linux" ]]; then
-    fail "This script is for Linux only. Detected: $(uname -s)"; exit 1
+# macOS: Homebrew refuses to run as root — fail early with a clear message
+# so users don't sudo the whole script after seeing Homebrew's sudo prompt.
+if [[ "$PLATFORM" == "Darwin" && $EUID -eq 0 ]]; then
+    fail "macOS 下不要用 sudo 运行 install.sh，直接 bash scripts/install.sh 即可"
+    fail "Don't run install.sh as root on macOS — just: bash scripts/install.sh"
+    exit 1
 fi
-
 DISTRO_FAMILY=""; DISTRO_NAME=""; PKG_INSTALL=""; PKG_UPDATE=""
-if [[ -f /etc/os-release ]]; then
-    . /etc/os-release; DISTRO_NAME="${ID:-unknown}"
-    case "$DISTRO_NAME" in
-        ubuntu|debian|linuxmint|pop) DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
-            PKG_INSTALL="apt-get install -y"; export DEBIAN_FRONTEND=noninteractive ;;
-        centos|rhel|rocky|almalinux|fedora) DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
-            if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y"; else PKG_INSTALL="yum install -y"; fi ;;
-    esac
-fi
+case "$PLATFORM" in
+    Darwin)
+        DISTRO_FAMILY="darwin"; DISTRO_NAME="macOS"
+        # Detect existing Homebrew even when PATH is not initialized (non-login shells).
+        # Pick the arch-native prefix first to avoid ARM/x86 conflicts on dual-Homebrew machines.
+        if [[ "$(uname -m)" == "arm64" ]]; then
+            _brew_candidates=(/opt/homebrew/bin/brew /usr/local/bin/brew)
+        else
+            _brew_candidates=(/usr/local/bin/brew /opt/homebrew/bin/brew)
+        fi
+        _brew_recovered=false
+        if ! command -v brew &>/dev/null; then
+            for _brew in "${_brew_candidates[@]}"; do
+                if [[ -x "$_brew" ]]; then
+                    eval "$("$_brew" shellenv)"
+                    _brew_recovered=true
+                    break
+                fi
+            done
+        fi
+        if ! command -v brew &>/dev/null; then
+            info "  Homebrew not found — installing..."
+            info "  (Homebrew may ask for your macOS password — that's normal, don't re-run with sudo)"
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL --connect-timeout 15 --max-time 60 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+            for _brew in "${_brew_candidates[@]}"; do
+                if [[ -x "$_brew" ]]; then
+                    eval "$("$_brew" shellenv)"
+                    break
+                fi
+            done
+            command -v brew &>/dev/null || { fail "Homebrew install failed. Install manually: https://brew.sh"; exit 1; }
+            _brew_recovered=true
+        fi
+        # Persist brew shellenv to login profiles so new terminals find brew, node, etc.
+        if [[ "$_brew_recovered" == true ]]; then
+            _shellenv_line="eval \"\$($(command -v brew) shellenv)\"  # Homebrew (added by Clowder AI)"
+            for _prof in $(darwin_login_profiles); do
+                append_to_profile "$_shellenv_line" "$_prof"
+            done
+            unset _shellenv_line
+        fi
+        unset _brew_candidates _brew _brew_recovered
+        PKG_INSTALL="brew install"; PKG_UPDATE="brew update"
+        ;;
+    Linux)
+        if [[ -f /etc/os-release ]]; then
+            . /etc/os-release; DISTRO_NAME="${ID:-unknown}"
+            case "$DISTRO_NAME" in
+                ubuntu|debian|linuxmint|pop) DISTRO_FAMILY="debian"; PKG_UPDATE="apt-get update -qq"
+                    PKG_INSTALL="apt-get install -y"; export DEBIAN_FRONTEND=noninteractive ;;
+                centos|rhel|rocky|almalinux|fedora) DISTRO_FAMILY="rhel"; PKG_UPDATE="true"
+                    if command -v dnf &>/dev/null; then PKG_INSTALL="dnf install -y"; else PKG_INSTALL="yum install -y"; fi ;;
+            esac
+        fi
+        ;;
+    *) fail "Unsupported platform: $PLATFORM. Need: macOS or Linux"; exit 1 ;;
+esac
 
-if [[ -z "$DISTRO_FAMILY" ]]; then fail "Unsupported: ${DISTRO_NAME:-unknown}. Need: Ubuntu/Debian or CentOS/RHEL/Fedora"; exit 1; fi
+if [[ -z "$DISTRO_FAMILY" ]]; then fail "Unsupported: ${DISTRO_NAME:-unknown}. Need: macOS, Ubuntu/Debian, or CentOS/RHEL/Fedora"; exit 1; fi
 ok "OS: ${PRETTY_NAME:-$DISTRO_NAME} ($DISTRO_FAMILY)"
 
 SUDO=""
-if [[ $EUID -ne 0 ]]; then
+if [[ "$DISTRO_FAMILY" != "darwin" && $EUID -ne 0 ]]; then
     command -v sudo &>/dev/null || { fail "Not root and sudo not found / 请以 root 运行或安装 sudo"; exit 1; }
     SUDO="sudo"
+fi
+# P1 review: On Darwin (especially Apple Silicon), /usr/local/bin often
+# requires sudo which we skip. Use ~/.local/bin for user-local binaries.
+if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+    USER_BIN_DIR="$HOME/.local/bin"
+    mkdir -p "$USER_BIN_DIR"
+    # Ensure USER_BIN_DIR is on current session PATH (bare-metal installs may not have it)
+    case ":$PATH:" in
+        *":$USER_BIN_DIR:"*) ;;
+        *) export PATH="$USER_BIN_DIR:$PATH" ;;
+    esac
+    # Persist ~/.local/bin to login profiles unconditionally so that any later
+    # persist_user_bin symlinks (CLI tools, etc.) survive in new terminals —
+    # even when Node and pnpm are already installed and their blocks are skipped.
+    for _prof in $(darwin_login_profiles); do
+        append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
+    done
+    unset _prof
 fi
 
 resolve_project_dir
@@ -564,15 +664,42 @@ for cmd in git curl; do
         NEED_PKGS+=("$cmd")
     fi
 done
-if ! command -v gcc &>/dev/null || ! command -v g++ &>/dev/null || ! command -v make &>/dev/null; then
-    warn "C/C++ build toolchain incomplete — will install"
-    case "$DISTRO_FAMILY" in debian) NEED_PKGS+=(build-essential) ;; rhel) NEED_PKGS+=(gcc gcc-c++ make) ;; esac
+if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+    # Xcode CLT provides git, make, clang — install if missing
+    if ! xcode-select -p &>/dev/null; then
+        warn "Xcode Command Line Tools not found — installing..."
+        xcode-select --install 2>/dev/null || true
+        # Wait for the installer to finish (user-interactive on macOS).
+        # Use a long, non-fatal timeout: CLT install can legitimately take
+        # longer on slow networks or first-time setups.
+        _xcode_wait=0
+        _xcode_timeout=1800
+        until xcode-select -p &>/dev/null; do
+            sleep 5; _xcode_wait=$((_xcode_wait + 5))
+            if [[ $_xcode_wait -ge $_xcode_timeout ]]; then
+                warn "Xcode CLT not ready after 30 min. Continuing setup; run again after CLT finishes if build tools are missing."
+                break
+            fi
+        done
+        if xcode-select -p &>/dev/null; then
+            ok "Xcode Command Line Tools installed"
+        else
+            warn "Xcode Command Line Tools still not ready. You may need: xcode-select --install"
+        fi
+        unset _xcode_wait _xcode_timeout
+    else ok "Xcode Command Line Tools present"
+    fi
+else
+    if ! command -v gcc &>/dev/null || ! command -v g++ &>/dev/null || ! command -v make &>/dev/null; then
+        warn "C/C++ build toolchain incomplete — will install"
+        case "$DISTRO_FAMILY" in debian) NEED_PKGS+=(build-essential) ;; rhel) NEED_PKGS+=(gcc gcc-c++ make) ;; esac
+    fi
+    # Ensure HTTPS/GPG deps exist (needed for NodeSource)
+    case "$DISTRO_FAMILY" in
+        debian) for p in ca-certificates gnupg; do dpkg -s "$p" &>/dev/null || NEED_PKGS+=("$p"); done ;;
+        rhel) rpm -q ca-certificates &>/dev/null || NEED_PKGS+=(ca-certificates); rpm -q gnupg2 &>/dev/null || NEED_PKGS+=(gnupg2) ;;
+    esac
 fi
-# Ensure HTTPS/GPG deps exist (needed for NodeSource)
-case "$DISTRO_FAMILY" in
-    debian) for p in ca-certificates gnupg; do dpkg -s "$p" &>/dev/null || NEED_PKGS+=("$p"); done ;;
-    rhel) rpm -q ca-certificates &>/dev/null || NEED_PKGS+=(ca-certificates); rpm -q gnupg2 &>/dev/null || NEED_PKGS+=(gnupg2) ;;
-esac
 if [[ ${#NEED_PKGS[@]} -gt 0 ]]; then
     info "  Installing: ${NEED_PKGS[*]}..."
     $SUDO $PKG_UPDATE 2>/dev/null || true
@@ -614,6 +741,27 @@ install_node_fnm() {
 if node_needs_install; then
     NODE_OK=false
     case "$DISTRO_FAMILY" in
+        darwin)
+            # Prefer fnm for version management; fall back to Homebrew
+            install_node_fnm && NODE_OK=true
+            if [[ "$NODE_OK" == false ]]; then
+                brew install node@20 2>/dev/null || true
+                # node@20 is keg-only — Homebrew does not link it into PATH by default.
+                # Add the keg bin to PATH for this session AND persist to shell profile.
+                _keg_prefix="$(brew --prefix node@20 2>/dev/null || true)"
+                _keg_bin="${_keg_prefix:+$_keg_prefix/bin}"
+                if [[ -n "$_keg_bin" && -d "$_keg_bin" ]]; then
+                    export PATH="$_keg_bin:$PATH"
+                    _keg_line="export PATH=\"$_keg_bin:\$PATH\"  # Homebrew node@20 keg"
+                    for _prof in $(darwin_login_profiles); do
+                        append_to_profile "$_keg_line" "$_prof"
+                    done
+                    ok "Node keg PATH persisted to login profiles"
+                fi
+                unset _keg_prefix _keg_bin _keg_line _prof
+                node_needs_install || NODE_OK=true
+            fi
+            ;;
         debian)
             $SUDO mkdir -p /etc/apt/keyrings
             if timeout 15 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -633,6 +781,20 @@ if node_needs_install; then
     esac
     node_needs_install && NODE_OK=false
     [[ "$NODE_OK" == false ]] && { fail "Could not install Node.js 20. Install manually: https://nodejs.org"; exit 1; }
+    # Persist PATH additions to login profiles (zsh + bash) for new terminals.
+    if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+        for _prof in $(darwin_login_profiles); do
+            # ~/.local/bin for persist_user_bin symlinks (fnm, pnpm, etc.)
+            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
+            # fnm shell init (only if fnm was used)
+            if [[ "$USED_FNM" == true ]]; then
+                _fnm_shell="zsh"
+                [[ "$_prof" == *bash* || "$_prof" == *profile ]] && _fnm_shell="bash"
+                append_to_profile "eval \"\$(fnm env --shell $_fnm_shell 2>/dev/null)\" 2>/dev/null || true  # fnm" "$_prof"
+            fi
+        done
+        unset _prof _fnm_shell
+    fi
     ok "Node.js $(node -v) installed"
 else
     ok "Node.js $(node -v) already installed (>= 20)"
@@ -649,21 +811,49 @@ if ! command -v pnpm &>/dev/null; then
     if ! command -v pnpm &>/dev/null; then
         npm_global_install pnpm || { warn "npm failed — trying npmmirror"; $SUDO npm install -g pnpm --registry https://registry.npmmirror.com; }
     fi
-    [[ "$USED_FNM" == true ]] && persist_user_bin pnpm
+    persist_user_bin pnpm
+    # Ensure ~/.local/bin is on PATH for new terminals (may not have been written
+    # if Node was already present and the Node install step was skipped).
+    if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+        for _prof in $(darwin_login_profiles); do
+            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
+        done
+        unset _prof
+    fi
     ok "pnpm $(pnpm -v) installed"
 else ok "pnpm $(pnpm -v) already installed"
 fi
 # Redis: detect → already running / --memory skip / ask user
 install_redis_local() {
-    case "$DISTRO_FAMILY" in debian) $SUDO $PKG_INSTALL redis-server ;; rhel) $SUDO $PKG_INSTALL redis ;; esac
-    $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
-    $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; ok "Redis installed and started"
+    case "$DISTRO_FAMILY" in
+        darwin)
+            if ! brew install redis 2>/dev/null; then
+                fail "brew install redis failed"; return 1
+            fi
+            # Start is best-effort — install is what matters
+            if ! brew services start redis 2>/dev/null; then
+                warn "brew services start redis failed — you can start it later with: brew services start redis"
+            fi
+            ;;
+        debian) $SUDO $PKG_INSTALL redis-server ;;
+        rhel) $SUDO $PKG_INSTALL redis ;;
+    esac
+    if [[ "$DISTRO_FAMILY" != "darwin" ]]; then
+        $SUDO systemctl enable redis-server 2>/dev/null || $SUDO systemctl enable redis 2>/dev/null || true
+        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
+    fi
+    ok "Redis installed"
+}
+start_redis_if_stopped() {
+    if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+        brew services start redis 2>/dev/null || true
+    else
+        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true
+    fi
 }
 if [[ "$MEMORY_MODE" == true ]]; then warn "Memory mode (--memory) — skipping Redis"
 elif command -v redis-server &>/dev/null; then ok "Redis already installed"
-    redis-cli ping &>/dev/null 2>&1 || {
-        warn "Redis not running — starting..."
-        $SUDO systemctl start redis-server 2>/dev/null || $SUDO systemctl start redis 2>/dev/null || true; }
+    redis-cli ping &>/dev/null 2>&1 || { warn "Redis not running — starting..."; start_redis_if_stopped; sleep 1; redis-cli ping &>/dev/null 2>&1 || warn "Redis started but not responding to ping"; }
 else
     warn "Redis not found — installing locally"
     install_redis_local
@@ -696,20 +886,44 @@ else fail "cat-cafe-skills/ not found"; exit 1; fi
 step "[6/9] Installing AI CLI tools / 安装 AI 命令行工具..."
 info "  Clowder spawns CLI subprocesses — these are required"
 install_npm_cli() {
-    local name="$1" cmd="$2" pkg="$3"; info "  Installing $name ($pkg)..."; npm_global_install "$pkg" 2>&1; hash -r 2>/dev/null || true
-    command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }; ok "$name installed"
+    local name="$1" cmd="$2" pkg="$3"
+    info "  Installing $name ($pkg)..."
+    npm_global_install "$pkg" 2>&1
+    # npm global bin may not be on PATH (custom prefix, fnm, etc.)
+    local _npm_bin; _npm_bin="$(npm config get prefix 2>/dev/null)/bin"
+    if [[ -d "$_npm_bin" ]]; then
+        case ":$PATH:" in *":$_npm_bin:"*) ;; *) export PATH="$_npm_bin:$PATH" ;; esac
+    fi
+    hash -r 2>/dev/null || true
+    command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: npm install -g $pkg"; exit 1; }
+    persist_user_bin "$cmd"
+    ok "$name installed"
+}
+install_brew_cask() {
+    local name="$1" cmd="$2" cask="$3"
+    info "  Installing $name via Homebrew cask ($cask)..."
+    brew install --cask "$cask" 2>&1
+    hash -r 2>/dev/null || true
+    command -v "$cmd" &>/dev/null || { fail "$name install failed. Try: brew install --cask $cask"; exit 1; }; ok "$name installed"
 }
 install_claude_cli() {
     info "  Installing Claude Code..."
-    # Download the installer to a temp file first, then run it.
-    # Running `curl ... | bash </dev/null` breaks the pipe because bash's stdin
-    # becomes the pipe from curl. A temp file avoids the stdin conflict.
-    local tmp_installer; tmp_installer="$(mktemp)"
-    curl -fsSL https://claude.ai/install.sh -o "$tmp_installer" 2>&1
-    bash "$tmp_installer" </dev/null 2>&1
-    rm -f "$tmp_installer"
-    export PATH="$HOME/.local/bin:$HOME/.claude/bin:$PATH"; hash -r 2>/dev/null || true
-    command -v claude &>/dev/null || { fail "Claude install failed. Try: curl -fsSL https://claude.ai/install.sh | bash"; exit 1; }; ok "Claude Code installed"
+    if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+        # macOS: brew cask — "claude-code" is the CLI, "claude" is the desktop app
+        # claude.ai/install.sh is region-blocked in some countries
+        install_brew_cask "Claude Code" "claude" "claude-code"
+    else
+        # Linux: use npm — Homebrew is not available on most Linux servers
+        install_npm_cli "Claude Code" "claude" "@anthropic-ai/claude-code"
+    fi
+}
+install_codex_cli() {
+    info "  Installing Codex CLI..."
+    if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+        install_brew_cask "Codex CLI" "codex" "codex"
+    else
+        install_npm_cli "Codex CLI" "codex" "@openai/codex"
+    fi
 }
 # Detect missing CLIs
 MISSING_AGENTS=()
@@ -738,7 +952,7 @@ if [[ ${#MISSING_AGENTS[@]} -gt 0 ]]; then
     for agent in "${INSTALL_AGENTS[@]}"; do
         case "$agent" in
             claude) install_claude_cli ;;
-            codex)  install_npm_cli "Codex CLI" "codex" "@openai/codex" ;;
+            codex)  install_codex_cli ;;
             gemini) install_npm_cli "Gemini CLI" "gemini" "@google/gemini-cli" ;;
         esac
     done
@@ -824,8 +1038,9 @@ elif [[ -f .env.example ]]; then
 else fail ".env.example not found in $PROJECT_DIR"; exit 1
 fi
 # Write collected auth config + Docker detection
-for key in "${ENV_DELETE_KEYS[@]}"; do delete_env_key "$key"; done
-for i in "${!ENV_KEYS[@]}"; do write_env_key "${ENV_KEYS[$i]}" "${ENV_VALUES[$i]}"; done
+# Bash <4.4 treats empty arrays as unbound under set -u; guard with ${arr[@]+"${arr[@]}"}.
+for key in ${ENV_DELETE_KEYS[@]+"${ENV_DELETE_KEYS[@]}"}; do delete_env_key "$key"; done
+for i in ${ENV_KEYS[@]+"${!ENV_KEYS[@]}"}; do write_env_key "${ENV_KEYS[$i]}" "${ENV_VALUES[$i]}"; done
 [[ ${#ENV_KEYS[@]} -gt 0 ]] && ok "Auth config written to .env"
 # Auto-detect Docker: only set host default on a freshly generated .env.
 maybe_write_docker_api_host
@@ -835,6 +1050,14 @@ chmod 600 .env 2>/dev/null || true
 step "[9/9] Installation complete! / 安装完成！"
 echo -e "\n  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
 START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
+# The script runs as a subprocess — PATH changes don't propagate to the parent
+# shell. On macOS, prefix the banner command with `source ~/.zprofile` so the
+# user can copy-paste and have the correct PATH (including ~/.local/bin).
+if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
+    _profile="${ZDOTDIR:-$HOME}/.zprofile"
+    START_CMD="source $_profile && $START_CMD"
+    unset _profile
+fi
 echo -e "  Start: $START_CMD\n  Open:  $(default_frontend_url)\n"
 if [[ "$AUTO_START" == true ]]; then
     echo -e "${CYAN}Starting service (--start)...${NC}"; echo ""

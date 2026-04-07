@@ -270,6 +270,49 @@ printf '%s' "$(default_frontend_url)"
   assert.equal(output, 'http://localhost:3123');
 });
 
+test('append_to_profile adds newline before appending when file lacks trailing newline', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'clowder-install-append-nl-'));
+
+  try {
+    const profile = join(tmpDir, '.zprofile');
+    // Write a file WITHOUT a trailing newline
+    writeFileSync(profile, 'export EXISTING=true', 'utf8');
+
+    const output = runSourceOnlySnippet(`
+append_to_profile 'export NEW_LINE=added' "${profile}"
+cat "${profile}"
+`);
+
+    // The new line must be on its own line, not concatenated
+    assert.match(output, /^export EXISTING=true$/m, 'existing line must be intact');
+    assert.match(output, /^export NEW_LINE=added$/m, 'new line must be on its own line');
+    assert.doesNotMatch(output, /trueexport/, 'must not concatenate onto previous line');
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('append_to_profile skips extra newline when file already ends with newline', () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'clowder-install-append-nl2-'));
+
+  try {
+    const profile = join(tmpDir, '.zprofile');
+    // Write a file WITH a trailing newline
+    writeFileSync(profile, 'export EXISTING=true\n', 'utf8');
+
+    const output = runSourceOnlySnippet(`
+append_to_profile 'export NEW_LINE=added' "${profile}"
+cat "${profile}"
+`);
+
+    // Should not add an extra blank line
+    assert.doesNotMatch(output, /true\n\n/, 'must not add extra blank line');
+    assert.match(output, /^export NEW_LINE=added$/m);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('default_frontend_url prefers the project .env FRONTEND_PORT', () => {
   const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-frontend-port-'));
 
