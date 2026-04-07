@@ -86,19 +86,21 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     // P1-2 fix: don't rely solely on lastRun — query ledger for ANY matching run.
     // Also include tasks whose subjectKind matches active thread task kinds.
     const ledger = taskRunner.getLedger();
-    const filtered = summaries.filter((s) => {
+    const filtered = summaries.flatMap((s) => {
       // Quick path: if lastRun matches, include immediately
-      if (s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key)) return true;
+      if (s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key)) return [s];
       // Slow path: check if ANY run for this task matches thread's subject keys
       for (const sk of threadSubjectKeys) {
         const runs = ledger.queryBySubject(s.id, sk, 1);
-        if (runs.length > 0) return true;
+        if (runs.length > 0) return [s];
       }
-      // Kind-match path (#320 P1): thread has active task of matching kind → include.
-      // Previously gated by !s.lastRun, which blocked builtin tasks (cicd-check etc.)
-      // that had already run for OTHER PRs from appearing for a newly tracked PR.
-      if (s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) return true;
-      return false;
+      // Kind-match path (#320 P1): thread has active task of matching kind → include,
+      // but scrub run metadata that belongs to other threads/PRs.
+      if (s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) {
+        const { lastRun: _, subjectPreview: __, ...rest } = s;
+        return [{ ...rest, lastRun: null, subjectPreview: null }];
+      }
+      return [];
     });
 
     return { tasks: filtered };

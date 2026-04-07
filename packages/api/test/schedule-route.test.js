@@ -163,7 +163,11 @@ describe('Schedule Routes', () => {
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.payload);
       // cicd-check has subjectKind='pr' and thread has active pr_tracking → must appear
-      assert.ok(body.tasks.some((task) => task.id === 'cicd-check'));
+      const cicd = body.tasks.find((task) => task.id === 'cicd-check');
+      assert.ok(cicd, 'cicd-check should appear for thread with active PR tracking');
+      // Kind-match included tasks must have foreign run metadata scrubbed
+      assert.equal(cicd.lastRun, null, 'lastRun from other PR must be scrubbed');
+      assert.equal(cicd.subjectPreview, null, 'subjectPreview from other PR must be scrubbed');
     });
 
     it('excludes PR scheduler tasks for threads without any PR tracking', async () => {
