@@ -120,23 +120,41 @@ const RECONNECT_RECONCILE_DELAY_MS = 2000;
 let reconcileGeneration = 0;
 
 /**
- * After socket reconnect, bidirectionally reconcile invocation state with server.
- * Socket disconnect can lose done(isFinal) events (UI stuck in "replying") or
- * cause local state to drift from server truth. Fetches the queue endpoint and:
- * - Server has active cats → re-hydrate local slots to match (fixes ID mismatches)
- * - Server has no active cats → clear stale local invocation state
+ * Clear stale loading/invocation/streaming state for the active thread.
+ * Used by reconciliation when we need to unstick the UI regardless of
+ * whether we also fetch missed messages (catch-up).
+ * Returns true if state was actually cleared.
+ */
+function clearStaleActiveState(threadId: string): boolean {
+  const store = useChatStore.getState();
+  if (store.currentThreadId !== threadId || !store.hasActiveInvocation) return false;
+  store.clearAllActiveInvocations();
+  store.setLoading(false);
+  store.setIntentMode(null);
+  store.clearCatStatuses();
+  for (const msg of store.messages) {
+    if (msg.type === 'assistant' && msg.isStreaming) {
+      store.setStreaming(msg.id, false);
+    }
+  }
+  return true;
+}
+
+/**
+ * After socket reconnect, reconcile invocation state with server truth.
+ *
+ * Three branches:
+ * 1. Server still processing → re-hydrate local slots so done(isFinal) works
+ * 2. Server done (confirmed) → clear stale state + catch-up for missed messages
+ * 3. Queue unreachable → clear stale state only (no catch-up — unknown state
+ *    means replace-history could race with live stream → ref desync → #266)
  */
 function reconcileInvocationStateOnReconnect(activeThreadId: string | null): void {
   const generation = ++reconcileGeneration;
   const state = useChatStore.getState();
 
-  // Collect threads to reconcile: always check the active thread (server might
-  // still be processing even if local cleared state during disconnect), plus
-  // any background threads that think they have active invocations.
   const threadsToCheck: string[] = [];
-  if (activeThreadId) {
-    threadsToCheck.push(activeThreadId);
-  }
+  if (activeThreadId) threadsToCheck.push(activeThreadId);
   for (const [threadId, ts] of Object.entries(state.threadStates ?? {})) {
     if (ts.hasActiveInvocation && threadId !== activeThreadId) {
       threadsToCheck.push(threadId);
@@ -144,60 +162,60 @@ function reconcileInvocationStateOnReconnect(activeThreadId: string | null): voi
   }
   if (threadsToCheck.length === 0) return;
 
-  // Small delay: let any buffered socket events arrive first
+  // Delay: let buffered socket events arrive before querying server
   setTimeout(async () => {
-    // Discard if a newer reconnect has started its own reconciliation
     if (generation !== reconcileGeneration) return;
+
     for (const threadId of threadsToCheck) {
       if (generation !== reconcileGeneration) return;
+
+      // ── Fetch server state ──
+      let serverActiveCats: string[] | null = null;
+      let queueReachable = false;
+
       try {
         const res = await apiFetch(`/api/threads/${threadId}/queue`);
-        if (generation !== reconcileGeneration) return; // stale after await
-        if (!res.ok) continue;
-        const data = (await res.json()) as { activeInvocations?: string[] };
-        if (generation !== reconcileGeneration) return; // stale after await
-        const store = useChatStore.getState();
-        const serverActiveCats =
-          data.activeInvocations && data.activeInvocations.length > 0 ? data.activeInvocations : null;
-        const isActiveThread = store.currentThreadId === threadId;
-
-        if (serverActiveCats) {
-          // Server still processing — re-hydrate local slots to match server truth.
-          // Stale hydrated/mismatched invocationIds get replaced so done(isFinal)
-          // cleanup works correctly when the response finishes.
-          store.clearThreadActiveInvocation(threadId);
-          store.replaceThreadTargetCats(threadId, serverActiveCats);
-          for (const catId of serverActiveCats) {
-            store.updateThreadCatStatus(threadId, catId, 'streaming');
-            const syntheticId = `hydrated-${threadId}-${catId}`;
-            if (isActiveThread) {
-              store.addActiveInvocation(syntheticId, catId, 'execute');
-            } else {
-              store.addThreadActiveInvocation(threadId, syntheticId, catId, 'execute');
-            }
-          }
-          console.log('[ws] Reconnect reconciliation: re-hydrated active slots from server', {
-            threadId,
-            cats: serverActiveCats,
-          });
-          continue;
+        if (generation !== reconcileGeneration) return;
+        if (res.ok) {
+          const data = (await res.json()) as { activeInvocations?: string[] };
+          if (generation !== reconcileGeneration) return;
+          serverActiveCats = data.activeInvocations?.length ? data.activeInvocations : null;
+          queueReachable = true;
         }
+      } catch {
+        if (generation !== reconcileGeneration) continue;
+      }
 
-        if (isActiveThread && store.hasActiveInvocation) {
-          store.clearAllActiveInvocations();
-          store.setLoading(false);
-          store.setIntentMode(null);
-          store.clearCatStatuses();
-          for (const msg of store.messages) {
-            if (msg.type === 'assistant' && msg.isStreaming) {
-              store.setStreaming(msg.id, false);
-            }
+      const store = useChatStore.getState();
+      const isActiveThread = store.currentThreadId === threadId;
+
+      // ── Branch 1: Server still processing → re-hydrate local slots ──
+      if (queueReachable && serverActiveCats) {
+        store.clearThreadActiveInvocation(threadId);
+        store.replaceThreadTargetCats(threadId, serverActiveCats);
+        for (const catId of serverActiveCats) {
+          store.updateThreadCatStatus(threadId, catId, 'streaming');
+          const syntheticId = `hydrated-${threadId}-${catId}`;
+          if (isActiveThread) {
+            store.addActiveInvocation(syntheticId, catId, 'execute');
+          } else {
+            store.addThreadActiveInvocation(threadId, syntheticId, catId, 'execute');
           }
-          // Reconnect catch-up (#276): server finished during disconnect,
-          // done(isFinal) was lost → fetch missed messages so user doesn't need F5
-          store.requestStreamCatchUp(threadId);
-          console.log('[ws] Reconnect reconciliation: cleared stale active-thread invocation state', { threadId });
-        } else if (!isActiveThread) {
+        }
+        console.log('[ws] Reconciliation: re-hydrated active slots', { threadId, cats: serverActiveCats });
+        continue;
+      }
+
+      // ── Branch 2: Server done (confirmed) → clear state + catch-up ──
+      if (queueReachable && !serverActiveCats) {
+        if (isActiveThread) {
+          if (clearStaleActiveState(threadId)) {
+            // Safe to catch-up: server confirmed no active invocations,
+            // so no stream events will arrive to race with replace-history.
+            store.requestStreamCatchUp(threadId);
+            console.log('[ws] Reconciliation: server done, catch-up triggered', { threadId });
+          }
+        } else {
           const ts = store.getThreadState(threadId);
           if (ts.hasActiveInvocation) {
             store.clearThreadActiveInvocation(threadId);
@@ -207,14 +225,20 @@ function reconcileInvocationStateOnReconnect(activeThreadId: string | null): voi
                 store.setThreadMessageStreaming(threadId, msg.id, false);
               }
             }
-            console.log('[ws] Reconnect reconciliation: cleared stale background-thread invocation state', {
-              threadId,
-            });
+            console.log('[ws] Reconciliation: background thread done', { threadId });
           }
         }
-      } catch {
-        // Non-critical — don't break reconnect flow
+        continue;
       }
+
+      // ── Branch 3: Queue unreachable → do nothing ──
+      // We can't determine if the invocation is done or still streaming.
+      // - Clearing state is unsafe: stream events don't re-set isLoading/hasActiveInvocation,
+      //   so user loses Stop button and can send conflicting messages mid-stream.
+      // - Catch-up is unsafe: replace-history could race with live stream → ref desync (#266).
+      // Safe inaction: if stream is alive, done(isFinal) will clean up naturally.
+      // If done was truly lost, user can refresh. Next reconnect will retry reconciliation.
+      console.warn('[ws] Reconciliation: queue unreachable, no action taken', { threadId });
     }
   }, RECONNECT_RECONCILE_DELAY_MS);
 }
@@ -338,18 +362,12 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         reconnectGame(tid).catch(() => {});
       }
 
-      // #266 ghost-message safety net: if the socket reconnected while an
-      // invocation was in progress (isLoading still true because done(isFinal)
-      // was never received), WebSocket events may have been lost during the
-      // disconnect window. Trigger a history catch-up so the user sees the
-      // response without needing F5.
-      const storeState = useChatStore.getState();
-      if (tid && storeState.isLoading && storeState.currentThreadId === tid) {
-        console.warn('[ws] Reconnect catch-up: isLoading=true after reconnect — requesting history catch-up', {
-          threadId: tid,
-        });
-        storeState.requestStreamCatchUp(tid);
-      }
+      // #266 Round 2: Do NOT request immediate catch-up here.
+      // The eager catch-up replaced store messages while stream was still active,
+      // causing Zustand store / useRef desync → duplicate bubbles.
+      // The 2s reconciliation below checks server for active invocations first —
+      // if the cat is still running, no catch-up fires and refs stay consistent.
+      // If done(isFinal) was truly lost, the reconciliation handles it safely.
 
       // Reconnect reconciliation: verify invocation state against server truth.
       // Socket disconnect can lose done(isFinal) events, leaving stale "replying" UI.
