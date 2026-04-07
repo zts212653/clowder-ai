@@ -84,7 +84,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     threadSubjectKeys.add(`thread:${threadId}`);
 
     // P1-2 fix: don't rely solely on lastRun — query ledger for ANY matching run.
-    // Also include tasks whose subjectKind matches even with zero runs (newly registered).
+    // Also include tasks whose subjectKind matches active thread task kinds.
     const ledger = taskRunner.getLedger();
     const filtered = summaries.filter((s) => {
       // Quick path: if lastRun matches, include immediately
@@ -94,9 +94,10 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         const runs = ledger.queryBySubject(s.id, sk, 1);
         if (runs.length > 0) return true;
       }
-      // Zero-run path only: newly registered tasks should show up immediately,
-      // but once a task has runs we must not leak it across threads by subject kind.
-      if (!s.lastRun && s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) return true;
+      // Kind-match path (#320 P1): thread has active task of matching kind → include.
+      // Previously gated by !s.lastRun, which blocked builtin tasks (cicd-check etc.)
+      // that had already run for OTHER PRs from appearing for a newly tracked PR.
+      if (s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) return true;
       return false;
     });
 

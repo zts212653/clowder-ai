@@ -1,17 +1,7 @@
+import type { TaskItem } from '@cat-cafe/shared';
 import { create } from 'zustand';
 
-export interface TaskItem {
-  id: string;
-  kind: 'work' | 'pr_tracking';
-  threadId: string;
-  title: string;
-  ownerCatId: string | null;
-  status: 'todo' | 'doing' | 'blocked' | 'done';
-  why: string;
-  createdBy: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export type { TaskItem } from '@cat-cafe/shared';
 
 interface TaskState {
   tasks: TaskItem[];

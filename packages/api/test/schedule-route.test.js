@@ -149,7 +149,7 @@ describe('Schedule Routes', () => {
       assert.ok(!body.tasks.some((task) => task.id === 'review-feedback'));
     });
 
-    it('does not leak cross-thread PR summaries via subjectKind fallback once a task has runs', async () => {
+    it('includes PR scheduler tasks for threads with active PR tracking even if task has prior runs (#320 P1)', async () => {
       taskStore.upsertBySubject({
         kind: 'pr_tracking',
         subjectKey: 'pr:another/repo#7',
@@ -160,6 +160,15 @@ describe('Schedule Routes', () => {
       });
 
       const res = await app.inject({ method: 'GET', url: '/api/schedule/tasks?threadId=abc123' });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      // cicd-check has subjectKind='pr' and thread has active pr_tracking → must appear
+      assert.ok(body.tasks.some((task) => task.id === 'cicd-check'));
+    });
+
+    it('excludes PR scheduler tasks for threads without any PR tracking', async () => {
+      // thread xyz999 has no tasks at all
+      const res = await app.inject({ method: 'GET', url: '/api/schedule/tasks?threadId=xyz999' });
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.payload);
       assert.ok(!body.tasks.some((task) => task.id === 'cicd-check'));
