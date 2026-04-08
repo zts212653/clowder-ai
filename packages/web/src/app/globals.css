@@ -58,6 +58,91 @@
   --color-cocreator-dark: #815b5b;
   --color-cocreator-bg: #fff5f2;
 
+  /* --- Connector Identity Colors (light defaults) --- */
+  --conn-slate-bg: #f1f5f9;
+  --conn-slate-ring: #e2e8f0;
+  --conn-slate-text: #334155;
+  --conn-slate-hover: #0f172a;
+  --conn-slate-bubble-bg: #f8fafc;
+  --conn-slate-bubble-border: #e2e8f0;
+
+  --conn-gray-bg: #f3f4f6;
+  --conn-gray-ring: #d1d5db;
+  --conn-gray-text: #1f2937;
+  --conn-gray-hover: #000000;
+  --conn-gray-bubble-bg: #f9fafb;
+  --conn-gray-bubble-border: #d1d5db;
+
+  --conn-amber-bg: #fef3c7;
+  --conn-amber-ring: #fde68a;
+  --conn-amber-text: #b45309;
+  --conn-amber-hover: #78350f;
+  --conn-amber-bubble-bg: #fffbeb;
+  --conn-amber-bubble-border: #fde68a;
+
+  --conn-purple-bg: #f3e8ff;
+  --conn-purple-ring: #e9d5ff;
+  --conn-purple-text: #7e22ce;
+  --conn-purple-hover: #581c87;
+  --conn-purple-bubble-bg: #faf5ff;
+  --conn-purple-bubble-border: #e9d5ff;
+
+  --conn-emerald-bg: #d1fae5;
+  --conn-emerald-ring: #a7f3d0;
+  --conn-emerald-text: #047857;
+  --conn-emerald-hover: #064e3b;
+  --conn-emerald-bubble-bg: #ecfdf5;
+  --conn-emerald-bubble-border: #a7f3d0;
+
+  --conn-blue-bg: #dbeafe;
+  --conn-blue-ring: #bfdbfe;
+  --conn-blue-text: #1d4ed8;
+  --conn-blue-hover: #1e3a8a;
+  --conn-blue-bubble-bg: #eff6ff;
+  --conn-blue-bubble-border: #bfdbfe;
+
+  --conn-sky-bg: #e0f2fe;
+  --conn-sky-ring: #bae6fd;
+  --conn-sky-text: #0369a1;
+  --conn-sky-hover: #0c4a6e;
+  --conn-sky-bubble-bg: #f0f9ff;
+  --conn-sky-bubble-border: #bae6fd;
+
+  --conn-cyan-bg: #cffafe;
+  --conn-cyan-ring: #a5f3fc;
+  --conn-cyan-text: #0e7490;
+  --conn-cyan-hover: #164e63;
+  --conn-cyan-bubble-bg: #ecfeff;
+  --conn-cyan-bubble-border: #a5f3fc;
+
+  --conn-red-bg: #fee2e2;
+  --conn-red-ring: #fecaca;
+  --conn-red-text: #b91c1c;
+  --conn-red-hover: #7f1d1d;
+  --conn-red-bubble-bg: #fef2f2;
+  --conn-red-bubble-border: #fecaca;
+
+  --conn-indigo-bg: #e0e7ff;
+  --conn-indigo-ring: #c7d2fe;
+  --conn-indigo-text: #4338ca;
+  --conn-indigo-hover: #312e81;
+  --conn-indigo-bubble-bg: #eef2ff;
+  --conn-indigo-bubble-border: #c7d2fe;
+
+  --conn-violet-bg: #ede9fe;
+  --conn-violet-ring: #ddd6fe;
+  --conn-violet-text: #6d28d9;
+  --conn-violet-hover: #4c1d95;
+  --conn-violet-bubble-bg: #f5f3ff;
+  --conn-violet-bubble-border: #ddd6fe;
+
+  --conn-green-bg: #dcfce7;
+  --conn-green-ring: #bbf7d0;
+  --conn-green-text: #15803d;
+  --conn-green-hover: #14532d;
+  --conn-green-bubble-bg: #f0fdf4;
+  --conn-green-bubble-border: #bbf7d0;
+
   /* Legacy aliases (consumed by body selector + existing components) */
   --bg-app: var(--cafe-surface);
   --text-primary: var(--cafe-text);
@@ -102,6 +187,91 @@
   --color-codex-bg: rgba(91, 140, 90, 0.15);
   --color-gemini-bg: rgba(91, 155, 213, 0.15);
   --color-dare-bg: rgba(212, 167, 106, 0.15);
+
+  /* Connector dark mode overrides — muted translucent backgrounds, lighter text */
+  --conn-slate-bg: rgba(148, 163, 184, 0.15);
+  --conn-slate-ring: rgba(148, 163, 184, 0.25);
+  --conn-slate-text: #cbd5e1;
+  --conn-slate-hover: #e2e8f0;
+  --conn-slate-bubble-bg: rgba(30, 41, 59, 0.35);
+  --conn-slate-bubble-border: rgba(71, 85, 105, 0.6);
+
+  --conn-gray-bg: rgba(156, 163, 175, 0.15);
+  --conn-gray-ring: rgba(156, 163, 175, 0.25);
+  --conn-gray-text: #d1d5db;
+  --conn-gray-hover: #e5e7eb;
+  --conn-gray-bubble-bg: rgba(31, 41, 55, 0.35);
+  --conn-gray-bubble-border: rgba(75, 85, 99, 0.6);
+
+  --conn-amber-bg: rgba(245, 158, 11, 0.15);
+  --conn-amber-ring: rgba(245, 158, 11, 0.25);
+  --conn-amber-text: #fcd34d;
+  --conn-amber-hover: #fde68a;
+  --conn-amber-bubble-bg: rgba(120, 53, 15, 0.35);
+  --conn-amber-bubble-border: rgba(180, 83, 9, 0.5);
+
+  --conn-purple-bg: rgba(168, 85, 247, 0.15);
+  --conn-purple-ring: rgba(168, 85, 247, 0.25);
+  --conn-purple-text: #d8b4fe;
+  --conn-purple-hover: #e9d5ff;
+  --conn-purple-bubble-bg: rgba(88, 28, 135, 0.35);
+  --conn-purple-bubble-border: rgba(126, 34, 206, 0.5);
+
+  --conn-emerald-bg: rgba(16, 185, 129, 0.15);
+  --conn-emerald-ring: rgba(16, 185, 129, 0.25);
+  --conn-emerald-text: #6ee7b7;
+  --conn-emerald-hover: #a7f3d0;
+  --conn-emerald-bubble-bg: rgba(6, 78, 59, 0.35);
+  --conn-emerald-bubble-border: rgba(4, 120, 87, 0.5);
+
+  --conn-blue-bg: rgba(59, 130, 246, 0.15);
+  --conn-blue-ring: rgba(59, 130, 246, 0.25);
+  --conn-blue-text: #93c5fd;
+  --conn-blue-hover: #bfdbfe;
+  --conn-blue-bubble-bg: rgba(30, 58, 138, 0.35);
+  --conn-blue-bubble-border: rgba(29, 78, 216, 0.5);
+
+  --conn-sky-bg: rgba(14, 165, 233, 0.15);
+  --conn-sky-ring: rgba(14, 165, 233, 0.25);
+  --conn-sky-text: #7dd3fc;
+  --conn-sky-hover: #bae6fd;
+  --conn-sky-bubble-bg: rgba(7, 89, 133, 0.35);
+  --conn-sky-bubble-border: rgba(3, 105, 161, 0.5);
+
+  --conn-cyan-bg: rgba(6, 182, 212, 0.15);
+  --conn-cyan-ring: rgba(6, 182, 212, 0.25);
+  --conn-cyan-text: #67e8f9;
+  --conn-cyan-hover: #a5f3fc;
+  --conn-cyan-bubble-bg: rgba(21, 94, 117, 0.35);
+  --conn-cyan-bubble-border: rgba(14, 116, 144, 0.5);
+
+  --conn-red-bg: rgba(239, 68, 68, 0.15);
+  --conn-red-ring: rgba(239, 68, 68, 0.25);
+  --conn-red-text: #fca5a5;
+  --conn-red-hover: #fecaca;
+  --conn-red-bubble-bg: rgba(127, 29, 29, 0.35);
+  --conn-red-bubble-border: rgba(185, 28, 28, 0.5);
+
+  --conn-indigo-bg: rgba(99, 102, 241, 0.15);
+  --conn-indigo-ring: rgba(99, 102, 241, 0.25);
+  --conn-indigo-text: #a5b4fc;
+  --conn-indigo-hover: #c7d2fe;
+  --conn-indigo-bubble-bg: rgba(49, 46, 129, 0.35);
+  --conn-indigo-bubble-border: rgba(67, 56, 202, 0.5);
+
+  --conn-violet-bg: rgba(139, 92, 246, 0.15);
+  --conn-violet-ring: rgba(139, 92, 246, 0.25);
+  --conn-violet-text: #c4b5fd;
+  --conn-violet-hover: #ddd6fe;
+  --conn-violet-bubble-bg: rgba(76, 29, 149, 0.35);
+  --conn-violet-bubble-border: rgba(109, 40, 217, 0.5);
+
+  --conn-green-bg: rgba(34, 197, 94, 0.15);
+  --conn-green-ring: rgba(34, 197, 94, 0.25);
+  --conn-green-text: #86efac;
+  --conn-green-hover: #bbf7d0;
+  --conn-green-bubble-bg: rgba(20, 83, 45, 0.35);
+  --conn-green-bubble-border: rgba(21, 128, 61, 0.5);
 }
 
 body {

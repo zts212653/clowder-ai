@@ -82,10 +82,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#2563EB', secondary: '#EFF6FF' },
     description: 'GitHub PR review 邮件通知',
     tailwindTheme: {
-      avatar: 'bg-slate-100 ring-2 ring-slate-200',
-      label: 'text-slate-700',
-      labelLink: 'text-slate-700 hover:text-slate-900',
-      bubble: 'border border-slate-200 bg-slate-50',
+      avatar: 'bg-conn-slate-bg ring-2 ring-conn-slate-ring',
+      label: 'text-conn-slate-text',
+      labelLink: 'text-conn-slate-text hover:text-conn-slate-hover',
+      bubble: 'border border-conn-slate-bubble-border bg-conn-slate-bubble-bg',
     },
   },
   {
@@ -95,10 +95,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#2563EB', secondary: '#EFF6FF' },
     description: 'GitHub CI/CD 状态通知',
     tailwindTheme: {
-      avatar: 'bg-slate-100 ring-2 ring-slate-200',
-      label: 'text-slate-700',
-      labelLink: 'text-slate-700 hover:text-slate-900',
-      bubble: 'border border-slate-200 bg-slate-50',
+      avatar: 'bg-conn-slate-bg ring-2 ring-conn-slate-ring',
+      label: 'text-conn-slate-text',
+      labelLink: 'text-conn-slate-text hover:text-conn-slate-hover',
+      bubble: 'border border-conn-slate-bubble-border bg-conn-slate-bubble-bg',
     },
   },
   {
@@ -108,10 +108,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#D97706', secondary: '#FFFBEB' },
     description: 'GitHub PR 冲突状态通知',
     tailwindTheme: {
-      avatar: 'bg-amber-100 ring-2 ring-amber-200',
-      label: 'text-amber-700',
-      labelLink: 'text-amber-700 hover:text-amber-900',
-      bubble: 'border border-amber-200 bg-amber-50',
+      avatar: 'bg-conn-amber-bg ring-2 ring-conn-amber-ring',
+      label: 'text-conn-amber-text',
+      labelLink: 'text-conn-amber-text hover:text-conn-amber-hover',
+      bubble: 'border border-conn-amber-bubble-border bg-conn-amber-bubble-bg',
     },
   },
   {
@@ -121,10 +121,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#475569', secondary: '#F8FAFC' },
     description: 'GitHub PR review feedback 通知',
     tailwindTheme: {
-      avatar: 'bg-slate-100 ring-2 ring-slate-200',
-      label: 'text-slate-700',
-      labelLink: 'text-slate-700 hover:text-slate-900',
-      bubble: 'border border-slate-200 bg-slate-50',
+      avatar: 'bg-conn-slate-bg ring-2 ring-conn-slate-ring',
+      label: 'text-conn-slate-text',
+      labelLink: 'text-conn-slate-text hover:text-conn-slate-hover',
+      bubble: 'border border-conn-slate-bubble-border bg-conn-slate-bubble-bg',
     },
   },
   {
@@ -134,10 +134,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#24292e', secondary: '#F6F8FA' },
     description: 'GitHub 仓库事件通知（新 PR / 新 Issue）',
     tailwindTheme: {
-      avatar: 'bg-gray-100 ring-2 ring-gray-300',
-      label: 'text-gray-800',
-      labelLink: 'text-gray-800 hover:text-black',
-      bubble: 'border border-gray-300 bg-gray-50',
+      avatar: 'bg-conn-gray-bg ring-2 ring-conn-gray-ring',
+      label: 'text-conn-gray-text',
+      labelLink: 'text-conn-gray-text hover:text-conn-gray-hover',
+      bubble: 'border border-conn-gray-bubble-border bg-conn-gray-bubble-bg',
     },
   },
   {
@@ -147,10 +147,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#7C3AED', secondary: '#F5F3FF' },
     description: '投票系统自动汇总结果',
     tailwindTheme: {
-      avatar: 'bg-purple-100 ring-2 ring-purple-200',
-      label: 'text-purple-700',
-      labelLink: 'text-purple-700 hover:text-purple-900',
-      bubble: 'border border-purple-200 bg-purple-50',
+      avatar: 'bg-conn-purple-bg ring-2 ring-conn-purple-ring',
+      label: 'text-conn-purple-text',
+      labelLink: 'text-conn-purple-text hover:text-conn-purple-hover',
+      bubble: 'border border-conn-purple-bubble-border bg-conn-purple-bubble-bg',
     },
   },
   {
@@ -160,10 +160,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#059669', secondary: '#ECFDF5' },
     description: '多猫 @mention 聚合结果',
     tailwindTheme: {
-      avatar: 'bg-emerald-100 ring-2 ring-emerald-200',
-      label: 'text-emerald-700',
-      labelLink: 'text-emerald-700 hover:text-emerald-900',
-      bubble: 'border border-emerald-200 bg-emerald-50',
+      avatar: 'bg-conn-emerald-bg ring-2 ring-conn-emerald-ring',
+      label: 'text-conn-emerald-text',
+      labelLink: 'text-conn-emerald-text hover:text-conn-emerald-hover',
+      bubble: 'border border-conn-emerald-bubble-border bg-conn-emerald-bubble-bg',
     },
   },
   {
@@ -173,10 +173,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#3370FF', secondary: '#E8F0FE' },
     description: '飞书机器人',
     tailwindTheme: {
-      avatar: 'bg-blue-100 ring-2 ring-blue-200',
-      label: 'text-blue-700',
-      labelLink: 'text-blue-700 hover:text-blue-900',
-      bubble: 'border border-blue-200 bg-blue-50',
+      avatar: 'bg-conn-blue-bg ring-2 ring-conn-blue-ring',
+      label: 'text-conn-blue-text',
+      labelLink: 'text-conn-blue-text hover:text-conn-blue-hover',
+      bubble: 'border border-conn-blue-bubble-border bg-conn-blue-bubble-bg',
     },
   },
   {
@@ -186,10 +186,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#0088CC', secondary: '#E3F2FD' },
     description: 'Telegram Bot',
     tailwindTheme: {
-      avatar: 'bg-sky-100 ring-2 ring-sky-200',
-      label: 'text-sky-700',
-      labelLink: 'text-sky-700 hover:text-sky-900',
-      bubble: 'border border-sky-200 bg-sky-50',
+      avatar: 'bg-conn-sky-bg ring-2 ring-conn-sky-ring',
+      label: 'text-conn-sky-text',
+      labelLink: 'text-conn-sky-text hover:text-conn-sky-hover',
+      bubble: 'border border-conn-sky-bubble-border bg-conn-sky-bubble-bg',
     },
   },
   {
@@ -199,10 +199,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#3296FA', secondary: '#E8F4FE' },
     description: '钉钉企业内部应用',
     tailwindTheme: {
-      avatar: 'bg-cyan-100 ring-2 ring-cyan-200',
-      label: 'text-cyan-700',
-      labelLink: 'text-cyan-700 hover:text-cyan-900',
-      bubble: 'border border-cyan-200 bg-cyan-50',
+      avatar: 'bg-conn-cyan-bg ring-2 ring-conn-cyan-ring',
+      label: 'text-conn-cyan-text',
+      labelLink: 'text-conn-cyan-text hover:text-conn-cyan-hover',
+      bubble: 'border border-conn-cyan-bubble-border bg-conn-cyan-bubble-bg',
     },
   },
   {
@@ -212,10 +212,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#CF0A2C', secondary: '#FFF0F0' },
     description: '华为小艺 OpenClaw 模式',
     tailwindTheme: {
-      avatar: 'bg-red-100 ring-2 ring-red-200',
-      label: 'text-red-700',
-      labelLink: 'text-red-700 hover:text-red-900',
-      bubble: 'border border-red-200 bg-red-50',
+      avatar: 'bg-conn-red-bg ring-2 ring-conn-red-ring',
+      label: 'text-conn-red-text',
+      labelLink: 'text-conn-red-text hover:text-conn-red-hover',
+      bubble: 'border border-conn-red-bubble-border bg-conn-red-bubble-bg',
     },
   },
   {
@@ -225,10 +225,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#4F46E5', secondary: '#EEF2FF' },
     description: '企业微信智能机器人 (WebSocket)',
     tailwindTheme: {
-      avatar: 'bg-indigo-100 ring-2 ring-indigo-200',
-      label: 'text-indigo-700',
-      labelLink: 'text-indigo-700 hover:text-indigo-900',
-      bubble: 'border border-indigo-200 bg-indigo-50',
+      avatar: 'bg-conn-indigo-bg ring-2 ring-conn-indigo-ring',
+      label: 'text-conn-indigo-text',
+      labelLink: 'text-conn-indigo-text hover:text-conn-indigo-hover',
+      bubble: 'border border-conn-indigo-bubble-border bg-conn-indigo-bubble-bg',
     },
   },
   {
@@ -238,10 +238,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#7C3AED', secondary: '#F5F3FF' },
     description: '企业微信自建应用 (HTTP 回调)',
     tailwindTheme: {
-      avatar: 'bg-violet-100 ring-2 ring-violet-200',
-      label: 'text-violet-700',
-      labelLink: 'text-violet-700 hover:text-violet-900',
-      bubble: 'border border-violet-200 bg-violet-50',
+      avatar: 'bg-conn-violet-bg ring-2 ring-conn-violet-ring',
+      label: 'text-conn-violet-text',
+      labelLink: 'text-conn-violet-text hover:text-conn-violet-hover',
+      bubble: 'border border-conn-violet-bubble-border bg-conn-violet-bubble-bg',
     },
   },
   {
@@ -251,10 +251,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#07C160', secondary: '#E8F8EE' },
     description: '微信个人号 iLink Bot',
     tailwindTheme: {
-      avatar: 'bg-green-100 ring-2 ring-green-200',
-      label: 'text-green-700',
-      labelLink: 'text-green-700 hover:text-green-900',
-      bubble: 'border border-green-200 bg-green-50',
+      avatar: 'bg-conn-green-bg ring-2 ring-conn-green-ring',
+      label: 'text-conn-green-text',
+      labelLink: 'text-conn-green-text hover:text-conn-green-hover',
+      bubble: 'border border-conn-green-bubble-border bg-conn-green-bubble-bg',
     },
   },
   {
@@ -264,10 +264,10 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     color: { primary: '#F59E0B', secondary: '#FFFBEB' },
     description: '定时任务投递',
     tailwindTheme: {
-      avatar: 'bg-amber-100 ring-2 ring-amber-200',
-      label: 'text-amber-700',
-      labelLink: 'text-amber-700 hover:text-amber-900',
-      bubble: 'border border-amber-200 bg-amber-50',
+      avatar: 'bg-conn-amber-bg ring-2 ring-conn-amber-ring',
+      label: 'text-conn-amber-text',
+      labelLink: 'text-conn-amber-text hover:text-conn-amber-hover',
+      bubble: 'border border-conn-amber-bubble-border bg-conn-amber-bubble-bg',
     },
   },
   {

@@ -42,10 +42,10 @@ interface ConnectorBubbleProps {
 
 /** Default theme for connectors without a registered tailwindTheme. */
 const DEFAULT_CONNECTOR_THEME: ConnectorTailwindTheme = {
-  avatar: 'bg-blue-100 ring-2 ring-blue-200',
-  label: 'text-blue-700',
-  labelLink: 'text-blue-700 hover:text-blue-900',
-  bubble: 'border border-blue-200 bg-blue-50',
+  avatar: 'bg-conn-blue-bg ring-2 ring-conn-blue-ring',
+  label: 'text-conn-blue-text',
+  labelLink: 'text-conn-blue-text hover:text-conn-blue-hover',
+  bubble: 'border border-conn-blue-bubble-border bg-conn-blue-bubble-bg',
 };
 
 /** F056: Designed icon per connector — replaces emoji with SVG/PNG icons. */

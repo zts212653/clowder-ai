@@ -52,10 +52,10 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-purple-100');
-    expect(html).toContain('border-purple-200');
-    expect(html).not.toContain('bg-blue-100');
-    expect(html).not.toContain('bg-slate-100');
+    expect(html).toContain('bg-conn-purple-bg');
+    expect(html).toContain('border-conn-purple-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).not.toContain('bg-conn-slate-bg');
   });
 
   it('renders rich block fields inside connector bubble', () => {
@@ -120,9 +120,9 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-slate-100');
-    expect(html).toContain('border-slate-200');
-    expect(html).not.toContain('bg-blue-100');
+    expect(html).toContain('bg-conn-slate-bg');
+    expect(html).toContain('border-conn-slate-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
   });
 
   it('uses slate theme for github-ci connector (same as github-review)', () => {
@@ -145,9 +145,9 @@ describe('ConnectorBubble theme', () => {
 
     const html = container.innerHTML;
     // Same slate theme as github-review
-    expect(html).toContain('bg-slate-100');
-    expect(html).toContain('border-slate-200');
-    expect(html).not.toContain('bg-blue-100');
+    expect(html).toContain('bg-conn-slate-bg');
+    expect(html).toContain('border-conn-slate-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
     // Should render GitHubIcon SVG, not raw text "github"
     expect(html).toContain('<svg');
     expect(html).not.toContain('>github<');
@@ -193,9 +193,9 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-emerald-100');
-    expect(html).toContain('border-emerald-200');
-    expect(html).not.toContain('bg-blue-100');
+    expect(html).toContain('bg-conn-emerald-bg');
+    expect(html).toContain('border-conn-emerald-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
   });
 
   it('uses blue theme for feishu connector', () => {
@@ -216,8 +216,8 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-blue-100');
-    expect(html).toContain('border-blue-200');
+    expect(html).toContain('bg-conn-blue-bg');
+    expect(html).toContain('border-conn-blue-bubble-border');
   });
 
   it('uses sky theme for telegram connector', () => {
@@ -238,9 +238,9 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-sky-100');
-    expect(html).toContain('border-sky-200');
-    expect(html).not.toContain('bg-blue-100');
+    expect(html).toContain('bg-conn-sky-bg');
+    expect(html).toContain('border-conn-sky-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
   });
 
   it('uses default blue theme for unknown/unregistered connector (B5 fallback)', () => {
@@ -261,9 +261,9 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    // Unknown connectors fall back to default blue theme
-    expect(html).toContain('bg-blue-100');
-    expect(html).toContain('border-blue-200');
+    // Unknown connectors fall back to default blue theme (via semantic tokens)
+    expect(html).toContain('bg-conn-blue-bg');
+    expect(html).toContain('border-conn-blue-bubble-border');
   });
 
   it('uses indigo theme for wecom-bot connector', () => {
@@ -284,8 +284,8 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-indigo-100');
-    expect(html).toContain('border-indigo-200');
-    expect(html).not.toContain('bg-blue-100');
+    expect(html).toContain('bg-conn-indigo-bg');
+    expect(html).toContain('border-conn-indigo-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
   });
 });
