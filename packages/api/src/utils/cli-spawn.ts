@@ -467,7 +467,10 @@ function defaultSpawn(
   if (IS_WINDOWS) {
     const shimSpawn = resolveWindowsShimSpawn(command, args);
     if (shimSpawn) {
-      log.debug({ original: command, resolved: shimSpawn.command, args: shimSpawn.args }, 'Windows shim resolved');
+      log.debug(
+        { original: command, resolved: shimSpawn.command, argCount: shimSpawn.args.length },
+        'Windows shim resolved',
+      );
       return nodeSpawn(shimSpawn.command, shimSpawn.args, {
         cwd: options.cwd,
         env: options.env,
