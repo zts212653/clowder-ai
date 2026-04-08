@@ -1,7 +1,7 @@
 /** Kimi Agent Service — kimi-cli subprocess via print mode + stream-json. */
 
-import { dirname } from 'node:path';
 import { rmSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -23,10 +23,10 @@ import {
   writeMcpConfigFile,
 } from './kimi-config.js';
 import {
-  type KimiPrintMessage,
   buildKimiPrompt,
   extractTextContent,
   extractThinkingContent,
+  type KimiPrintMessage,
   parseToolArguments,
   parseUsage,
   readSessionIdFromMessage,
@@ -139,21 +139,63 @@ export class KimiAgentService implements AgentService {
 
       for await (const event of events) {
         if (isCliTimeout(event)) {
-          const { silenceDurationMs, processAlive, lastEventType, firstEventAt, lastEventAt, cliSessionId: csId, invocationId: invId, rawArchivePath } = event;
-          yield { type: 'system_info' as const, catId: this.catId, timestamp: Date.now(),
-            content: JSON.stringify({ type: 'timeout_diagnostics', silenceDurationMs, processAlive, lastEventType, firstEventAt, lastEventAt, cliSessionId: csId, invocationId: invId, rawArchivePath }) };
-          yield { type: 'error', catId: this.catId, metadata, timestamp: Date.now(),
-            error: `Kimi CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${firstEventAt == null ? ', 未收到首帧' : ''})` };
+          const {
+            silenceDurationMs,
+            processAlive,
+            lastEventType,
+            firstEventAt,
+            lastEventAt,
+            cliSessionId: csId,
+            invocationId: invId,
+            rawArchivePath,
+          } = event;
+          yield {
+            type: 'system_info' as const,
+            catId: this.catId,
+            timestamp: Date.now(),
+            content: JSON.stringify({
+              type: 'timeout_diagnostics',
+              silenceDurationMs,
+              processAlive,
+              lastEventType,
+              firstEventAt,
+              lastEventAt,
+              cliSessionId: csId,
+              invocationId: invId,
+              rawArchivePath,
+            }),
+          };
+          yield {
+            type: 'error',
+            catId: this.catId,
+            metadata,
+            timestamp: Date.now(),
+            error: `Kimi CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${firstEventAt == null ? ', 未收到首帧' : ''})`,
+          };
           continue;
         }
         if (isLivenessWarning(event)) {
           const w = event as { level?: string; silenceDurationMs?: number };
-          log.warn({ catId: this.catId, invocationId: options?.invocationId, level: w.level, silenceMs: w.silenceDurationMs }, '[KimiAgent] liveness warning — CLI may be stuck');
-          yield { type: 'system_info' as const, catId: this.catId, timestamp: Date.now(), content: JSON.stringify({ type: 'liveness_warning', ...event }) };
+          log.warn(
+            { catId: this.catId, invocationId: options?.invocationId, level: w.level, silenceMs: w.silenceDurationMs },
+            '[KimiAgent] liveness warning — CLI may be stuck',
+          );
+          yield {
+            type: 'system_info' as const,
+            catId: this.catId,
+            timestamp: Date.now(),
+            content: JSON.stringify({ type: 'liveness_warning', ...event }),
+          };
           continue;
         }
         if (isCliError(event)) {
-          yield { type: 'error', catId: this.catId, error: formatCliExitError('Kimi CLI', event), metadata, timestamp: Date.now() };
+          yield {
+            type: 'error',
+            catId: this.catId,
+            error: formatCliExitError('Kimi CLI', event),
+            metadata,
+            timestamp: Date.now(),
+          };
           continue;
         }
 

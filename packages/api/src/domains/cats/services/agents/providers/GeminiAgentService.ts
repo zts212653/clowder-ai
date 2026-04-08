@@ -127,7 +127,9 @@ function readGeminiThinkingFromLocalSession(
 
         const exact =
           normalizedAssistantText.length > 0
-            ? [...candidates].reverse().find((message) => normalizeGeminiContent(message.content) === normalizedAssistantText)
+            ? [...candidates]
+                .reverse()
+                .find((message) => normalizeGeminiContent(message.content) === normalizedAssistantText)
             : candidates[candidates.length - 1];
         const selected = exact ?? null;
         return selected ? formatGeminiThoughts(selected.thoughts ?? []) || null : null;
@@ -350,7 +352,11 @@ export class GeminiAgentService implements AgentService {
         }
       }
 
-      const thinking = readGeminiThinkingFromLocalSession(metadata.sessionId, fullAssistantText, options?.workingDirectory);
+      const thinking = readGeminiThinkingFromLocalSession(
+        metadata.sessionId,
+        fullAssistantText,
+        options?.workingDirectory,
+      );
       if (thinking) {
         yield {
           type: 'system_info',

@@ -240,7 +240,9 @@ describe('F24: SessionChainPanel', () => {
   });
 
   it('renders known cat display names in the active session badge', async () => {
-    mockSessionsResponse([{ id: 's1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() }]);
+    mockSessionsResponse([
+      { id: 's1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
+    ]);
     renderPanel('thread-1');
     await flushFetch();
     expect(container.textContent).toContain('梵花猫');

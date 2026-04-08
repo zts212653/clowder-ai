@@ -461,7 +461,11 @@ export function RightStatusPanel({
 
       <PlanBoardPanel threadId={threadId} catInvocations={catInvocations} />
 
-      <SessionChainPanel threadId={threadId} catInvocations={catInvocations} onViewSession={(id, catId) => setViewSession({ id, catId })} />
+      <SessionChainPanel
+        threadId={threadId}
+        catInvocations={catInvocations}
+        onViewSession={(id, catId) => setViewSession({ id, catId })}
+      />
 
       <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
         <h3 className="text-xs font-semibold text-cafe-secondary mb-2">对话信息</h3>

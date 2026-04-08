@@ -5,15 +5,7 @@
  * paths, and provides session/context reading helpers.
  */
 
-import {
-  existsSync,
-  promises as fs,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, promises as fs, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, normalize, resolve } from 'node:path';
 

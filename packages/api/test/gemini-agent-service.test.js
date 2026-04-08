@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -769,7 +769,9 @@ test('emits wrapped thinking from local Gemini session snapshots when available'
   process.env.HOME = fakeHome;
 
   try {
-    const promise = collect(service.invoke('test thinking', { workingDirectory: '/Users/liuzifan/Projects/clowder-ai' }));
+    const promise = collect(
+      service.invoke('test thinking', { workingDirectory: '/Users/liuzifan/Projects/clowder-ai' }),
+    );
 
     emitGeminiEvents(proc, [
       { type: 'init', session_id: 'gem-s1', model: 'gemini-3.1-pro-preview' },
@@ -823,7 +825,9 @@ test('skips Gemini local thinking hydration when the latest session content does
   process.env.HOME = fakeHome;
 
   try {
-    const promise = collect(service.invoke('test mismatch', { workingDirectory: '/Users/liuzifan/Projects/clowder-ai' }));
+    const promise = collect(
+      service.invoke('test mismatch', { workingDirectory: '/Users/liuzifan/Projects/clowder-ai' }),
+    );
 
     emitGeminiEvents(proc, [
       { type: 'init', session_id: 'gem-s2', model: 'gemini-3.1-pro-preview' },
