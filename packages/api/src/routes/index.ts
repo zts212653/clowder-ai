@@ -49,7 +49,6 @@ export { signalStudyRoutes } from './signal-study-routes.js';
 export { signalsRoutes } from './signals.js';
 export { skillsRoutes } from './skills.js';
 export { sliceRoutes } from './slice-routes.js';
-export { standupRoutes } from './standup.js';
 export { summariesRoutes } from './summaries.js';
 export { tasksRoutes } from './tasks.js';
 export { threadBranchRoutes } from './thread-branch.js';
