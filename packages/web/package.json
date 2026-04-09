@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest run && node eslint-plugins/no-hardcoded-colors.test.js",
+    "test": "vitest run && node --test test/next-config.test.cjs && node eslint-plugins/no-hardcoded-colors.test.js",
     "test:lint-rules": "node eslint-plugins/no-hardcoded-colors.test.js"
   },
   "dependencies": {

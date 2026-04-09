@@ -29,6 +29,14 @@ const nextConfig = {
   async rewrites() {
     return [
       {
+        source: '/api/:path*',
+        destination: `${apiBaseUrl}/api/:path*`,
+      },
+      {
+        source: '/socket.io/:path*',
+        destination: `${apiBaseUrl}/socket.io/:path*`,
+      },
+      {
         source: '/uploads/:path*',
         destination: `${apiBaseUrl}/uploads/:path*`,
       },
