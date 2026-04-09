@@ -25,17 +25,38 @@ function withEnv(overrides, run) {
   }
 }
 
-describe('next.config uploads rewrite', () => {
-  it('falls back to the default API port when env vars are unset', async () => {
+describe('next.config rewrites', () => {
+  it('proxies /api, /socket.io, and /uploads to default API port', async () => {
     await withEnv({}, async (config) => {
       const rewrites = await config.rewrites();
-      assert.deepEqual(
-        rewrites.find((entry) => entry.source === '/uploads/:path*'),
-        {
-          source: '/uploads/:path*',
-          destination: 'http://localhost:3004/uploads/:path*',
-        },
-      );
+      assert.deepEqual(rewrites, [
+        { source: '/api/:path*', destination: 'http://localhost:3004/api/:path*' },
+        { source: '/socket.io/:path*', destination: 'http://localhost:3004/socket.io/:path*' },
+        { source: '/uploads/:path*', destination: 'http://localhost:3004/uploads/:path*' },
+      ]);
+    });
+  });
+
+  it('respects NEXT_PUBLIC_API_URL', async () => {
+    await withEnv({ NEXT_PUBLIC_API_URL: 'http://myhost:9000' }, async (config) => {
+      const rewrites = await config.rewrites();
+      assert.equal(rewrites[0].destination, 'http://myhost:9000/api/:path*');
+      assert.equal(rewrites[1].destination, 'http://myhost:9000/socket.io/:path*');
+      assert.equal(rewrites[2].destination, 'http://myhost:9000/uploads/:path*');
+    });
+  });
+
+  it('respects API_SERVER_PORT', async () => {
+    await withEnv({ API_SERVER_PORT: '4000' }, async (config) => {
+      const rewrites = await config.rewrites();
+      assert.equal(rewrites[0].destination, 'http://localhost:4000/api/:path*');
+    });
+  });
+
+  it('respects FRONTEND_PORT (API = frontend + 1)', async () => {
+    await withEnv({ FRONTEND_PORT: '5000' }, async (config) => {
+      const rewrites = await config.rewrites();
+      assert.equal(rewrites[0].destination, 'http://localhost:5001/api/:path*');
     });
   });
 });
