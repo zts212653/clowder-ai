@@ -923,7 +923,13 @@
       "name": "XiaoYi Channel Gateway — 小艺渠道接入",
       "status": "done | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F151-xiaoyi-channel-gateway.md"
+    },
+    {
+      "id": "F152",
+      "name": "Expedition Memory — 外部项目记忆冷启动 + 经验回流",
+      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F152-expedition-memory.md"
     }
   ],
-  "generated_at": "2026-04-07T20:17:16.446Z"
+  "generated_at": "2026-04-09T04:33:26.998Z"
 }

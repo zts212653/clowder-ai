@@ -168,6 +168,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#E8DCCF] bg-cafe-surface text-[10px] text-[#8A776B]">
                   {avatar ? (
                     // biome-ignore lint/performance/noImgElement: co-creator avatar may be runtime upload URL
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={avatar} alt="Owner avatar preview" className="h-full w-full object-cover" />
                   ) : (
                     'ME'

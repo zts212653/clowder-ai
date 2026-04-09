@@ -93,7 +93,7 @@ team experience（2026-03-31）：
 - [x] AC-B1: Gemini ACP 在仓库 cwd 下可完成 `initialize → newSession → prompt`
 - [x] AC-B2: 同一 ACP process 内，至少两个 thread session 可顺序复用而不重新 `initialize`
 - [x] AC-B3: warm attach 路径不再重付 cold `initialize` 成本
-- [x] AC-B4: 失败分类至少区分 `init_failure / prompt_failure / model_capacity / mcp_pollution / lease_timeout`
+- [x] AC-B4: 失败分类至少区分 `init_failure / prompt_failure / model_capacity / mcp_pollution / turn_budget_exceeded`
 
 ### Phase C（项目级进程池 + Session Lease）✅
 - [x] AC-C1: 默认进程池 key 为 `(projectPath, providerProfile)`，thread 不直接拥有 ACP process
@@ -168,6 +168,7 @@ team experience（2026-03-31）：
 | KD-9 | 在 provider profile 中预留 `supports_multiplexing` 能力标志 | 今天 Gemini 默认 false；Phase A 验证通过后或新 carrier 进来后可切 true，调度器据此决定是否向同一进程并行下发。留 seam 不提前抽象（DeepThink 建议） | 2026-04-01 |
 | KD-10 | Gemini ACP 实测 `supportsMultiplexing = true` | OQ-6 实验验证：单进程双 session 并发 prompt（A="DELTA" B="ECHO"）正确完成，执行窗口重叠，无 cross-contamination。Phase C 池化可按 1 process : N sessions 设计，不需要每个并发 prompt 独占进程 | 2026-04-01 |
 | KD-11 | Stream idle watchdog：两段式（warning → stall），不做单阈值 kill + 不做自动重试 | 实际案例（2026-04-04 07:47）：firstEvent 5.8s 正常到达，eventCount=2 后静默 116s 至 timeout，stderr 零输出，errorCode=lease_timeout。team lead痛点："到底是谷歌的问题还是我们的？"。opus+gpt52 共识：(1) 只在 eventCount>0 后启用 idle watchdog (2) ~20s alive_but_silent warning / ~45s stream_idle_stall 终止 / 120s hard timeout 保留 (3) transport 注入 synthetic event（复用 capacity warning 管道）(4) 新 AgentMessageType 不复用 provider_signal（语义不同）(5) 不做自动重试（eventCount>0 不等于安全可重试，KD-7 约束）(6) 文案不过度归因"Google 的锅"，写"已开始回复但后续停滞" | 2026-04-04 |
+| KD-12 | 绝对超时降级为 turn budget，不再承载健康判定语义 | 连续三种故障（permission stall → Premature close → 300s 工具执行中被杀）暴露根因：idle watchdog 把健康判定/进度判定/资源回收混成一个 stdout timer。上游 #21783 确认 Gemini CLI 不发 MCP tool_call 事件，#24029 正在做 channel notifications 但未落地。opus+gpt52 喵约共识：(1) 300s 绝对超时改为可配 turn budget（默认 600s），语义从"你死了"变为"预算用完" (2) idle stall 90s 保留抓真挂死 (3) stderr 可做 activity hint 但非主判据 (4) 不自造 heartbeat/proxy，等上游 channel notifications 落地后接入 L2 信号 (5) 终态三层模型：L1 进程存活 / L2 外部活动信号 / L3 资源预算——分治不混用 | 2026-04-08 |
 
 ## Review Gate
 

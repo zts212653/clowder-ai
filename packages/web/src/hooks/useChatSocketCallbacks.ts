@@ -37,7 +37,6 @@ export function useChatSocketCallbacks({
     setHasActiveInvocation,
     setIntentMode,
     setTargetCats,
-    addMessage,
     removeThreadMessage,
     requestStreamCatchUp,
   } = useChatStore();
@@ -102,13 +101,13 @@ export function useChatSocketCallbacks({
     [
       handleAgentMessage,
       updateThreadTitle,
+      updateThreadParticipants,
       setLoading,
       setHasActiveInvocation,
       setIntentMode,
       setTargetCats,
       addTask,
       updateTask,
-      addMessage,
       removeThreadMessage,
       requestStreamCatchUp,
       resetTimeout,

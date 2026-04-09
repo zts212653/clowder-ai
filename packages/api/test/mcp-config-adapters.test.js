@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
+  cleanStaleClaudeProjectOverrides,
   readClaudeMcpConfig,
   readCodexMcpConfig,
   readGeminiMcpConfig,
@@ -516,6 +517,123 @@ enabled = true
     assert.equal(data.mcpServers['user-tool'].command, 'my-tool');
     // theme preserved
     assert.equal(data.theme, 'dark');
+  });
+});
+
+// ────────── Stale Override Cleanup (F145 Phase D) ──────────
+
+describe('cleanStaleClaudeProjectOverrides', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('stale-override');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('removes resolver-managed server from per-project mcpServers', async () => {
+    const file = join(dir, '.claude.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        projects: {
+          '/home/user/my-project': {
+            mcpServers: {
+              pencil: { command: '/old/pencil', args: ['--app', 'antigravity'] },
+              xiaohongshu: { command: 'npx', args: ['mcp-remote'] },
+            },
+          },
+        },
+      }),
+    );
+
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/home/user/my-project', ['pencil']);
+
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    assert.equal(data.projects['/home/user/my-project'].mcpServers.pencil, undefined);
+    assert.ok(data.projects['/home/user/my-project'].mcpServers.xiaohongshu);
+    assert.deepEqual(cleaned, ['pencil']);
+  });
+
+  it('leaves global mcpServers untouched', async () => {
+    const file = join(dir, '.claude.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        projects: {
+          '/my/project': {
+            mcpServers: { pencil: { command: '/proj/pencil' } },
+          },
+        },
+        mcpServers: {
+          pencil: { command: '/global/pencil' },
+        },
+      }),
+    );
+
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/my/project', ['pencil']);
+
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    // Per-project cleaned
+    assert.equal(data.projects['/my/project'].mcpServers.pencil, undefined);
+    // Global preserved — lower priority than .mcp.json, may serve other projects
+    assert.ok(data.mcpServers.pencil, 'global mcpServers should be preserved');
+    assert.equal(data.mcpServers.pencil.command, '/global/pencil');
+    assert.deepEqual(cleaned, ['pencil']);
+  });
+
+  it('returns empty array when no matching entries found', async () => {
+    const file = join(dir, '.claude.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: { jetbrains: { type: 'sse' } },
+      }),
+    );
+
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/any', ['pencil']);
+    assert.deepEqual(cleaned, []);
+
+    // File should not be rewritten
+    const raw = await readFile(file, 'utf-8');
+    assert.ok(!raw.includes('\n'), 'file should remain compact (not rewritten)');
+  });
+
+  it('does not modify non-resolver-backed servers', async () => {
+    const file = join(dir, '.claude.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        projects: {
+          '/my/project': {
+            mcpServers: {
+              pencil: { command: '/old/pencil' },
+              xiaohongshu: { command: 'npx', args: ['mcp-remote'] },
+              jetbrains: { type: 'sse', url: 'http://localhost:64342/sse' },
+            },
+          },
+        },
+      }),
+    );
+
+    await cleanStaleClaudeProjectOverrides(file, '/my/project', ['pencil']);
+
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    assert.ok(data.projects['/my/project'].mcpServers.xiaohongshu);
+    assert.ok(data.projects['/my/project'].mcpServers.jetbrains);
+  });
+
+  it('handles missing file gracefully', async () => {
+    const cleaned = await cleanStaleClaudeProjectOverrides(join(dir, 'nonexistent.json'), '/any', ['pencil']);
+    assert.deepEqual(cleaned, []);
+  });
+
+  it('handles malformed JSON gracefully', async () => {
+    const file = join(dir, '.claude.json');
+    await writeFile(file, 'not valid json');
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/any', ['pencil']);
+    assert.deepEqual(cleaned, []);
   });
 });
 

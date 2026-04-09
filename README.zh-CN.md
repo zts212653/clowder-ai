@@ -96,7 +96,7 @@ pnpm stop
 
 打开 `http://localhost:3003` → 进入 **Hub → 系统配置 → 账号配置** 添加模型 API key（Claude、GPT、Gemini，或第三方 provider 如 Kimi、GLM、MiniMax）。
 
-> **裸机一键安装（macOS · Linux · Windows）：** `bash scripts/install.sh` 一步搞定 Homebrew/系统依赖、Node、pnpm、Redis、AI CLI 工具、项目依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
+> **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
 **完整安装指南**（API key 配置、CLI 认证、语音、飞书/Telegram、常见问题）：**[SETUP.opensource.zh-CN.md](SETUP.opensource.zh-CN.md)**
 
@@ -331,7 +331,7 @@ https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 | MCP 回调桥接 | 已发布 |
 | SOP 自动守护 | 已发布 |
 | 自我进化 | 已发布 |
-| 跨平台一键安装（macOS · Linux · Windows） | 已发布 |
+| Linux 仓库内安装助手 | 已发布 |
 
 ### 集成
 

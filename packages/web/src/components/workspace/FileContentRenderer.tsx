@@ -51,6 +51,7 @@ export function FileContentRenderer({
     if (file.mime.startsWith('image/'))
       return (
         <div className="flex-1 flex items-center justify-center bg-[#1E1E24] p-4 overflow-auto">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={rawUrl(file.path)} alt={file.path} className="max-w-full max-h-full object-contain rounded" />
         </div>
       );

@@ -38,6 +38,7 @@ export function CatAvatar({ catId, size = 32, status }: CatAvatarProps) {
       {imgError ? (
         <PawIcon className="w-4 h-4 text-cafe-muted" />
       ) : (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={cat?.avatar ?? `/avatars/${catId}.png`}
           alt={cat?.displayName ?? catId}

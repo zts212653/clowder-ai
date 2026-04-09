@@ -61,7 +61,8 @@ function sealReasonLabel(reason?: string): string {
   if (reason === 'unseal_displacement') return 'unseal displaced';
   if (reason === 'reconcile_stuck') return 'stuck reaper';
   if (reason === 'global_reaper') return 'global reaper';
-  if (reason === 'lease_timeout') return 'lease timeout';
+  if (reason === 'turn_budget_exceeded') return 'budget exceeded';
+  if (reason === 'lease_timeout') return 'lease timeout'; // legacy
   return reason;
 }
 

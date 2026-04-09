@@ -119,6 +119,29 @@ created: 2026-03-27
 | Pencil 扩展路径在不同 OS/架构上不同 | 先只做 macOS ARM64（当前唯一 target），其他平台留 env override |
 | mcp-resolved.json 和 capabilities.json 不同步 | generateCliConfigs() 每次都先 resolve 再生成，不缓存旧结果 |
 
+## Known Issues
+
+### Phase D: ~/.claude.json stale override 遮蔽 resolver 输出（2026-04-08 发现）
+
+**症状**：Pencil resolver 正确解析到 VS Code 0.6.39（`--app vscode`），`.mcp.json` 也正确生成，但 Claude Code session 里 pencil 工具始终不可用。Siamese（Gemini ACP）同样不可用。
+
+**根因**：`~/.claude.json` 有两层 stale pencil 配置覆盖了 `.mcp.json`：
+1. **Per-project mcpServers**（优先级最高）：指向已卸载的 `pencildev-0.6.26`（文件不存在） + `--app antigravity`
+2. **Global mcpServers**：指向 `.pencil/mcp/antigravity/`（文件存在但用旧 `--app antigravity`）
+
+Claude Code 读配置时 per-project override > `.mcp.json` > global，拿到不存在的二进制 → 启动失败 → 静默跳过。
+
+**紧急修复（2026-04-08）**：手动清理 `~/.claude.json` 中 per-project 和 global 的 stale pencil entries。
+
+**根因修复**：`generateCliConfigs()` 在写完 `.mcp.json` 后，对 resolver-backed servers 清理 `~/.claude.json` 中 per-project overrides，防止 stale entries 遮蔽 resolver 输出。→ Phase D (PR #1017, merged `b527aac0`)
+
+### Phase D: generateCliConfigs() 清理 stale Claude overrides ✅
+
+- [x] AC-D1: `generateCliConfigs()` 写完 `.mcp.json` 后，清理 `~/.claude.json` per-project mcpServers 中 resolver-backed server 的 stale entries
+- [x] AC-D2: Global mcpServers 不清理（设计决策：global 优先级低于 `.mcp.json`，不遮蔽 resolver 输出，清理反而会影响其他项目）
+- [x] AC-D3: 不影响非 resolver-backed servers（如用户手动配置的 xiaohongshu、jetbrains 等）
+- [x] AC-D4: 清理操作有日志输出（`[F145] Cleaned ...` / `[F145] Failed ...`），不静默
+
 ## Key Decisions
 
 | # | 决策 | 理由 | 日期 |

@@ -219,6 +219,60 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
   await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
 }
 
+// ────────── Stale Override Cleanup ──────────
+
+/**
+ * Remove resolver-managed MCP servers from per-project overrides in ~/.claude.json.
+ *
+ * Claude Code stores per-project mcpServers in ~/.claude.json that shadow
+ * project-level .mcp.json (higher priority). For resolver-backed servers,
+ * the resolver → .mcp.json pipeline is the authority. Any per-project override
+ * is either already stale or will become stale on the next version upgrade,
+ * so we proactively remove them.
+ *
+ * Global mcpServers are intentionally left untouched — they have lower priority
+ * than .mcp.json and may serve other projects.
+ *
+ * Returns the list of server names that were cleaned.
+ */
+export async function cleanStaleClaudeProjectOverrides(
+  claudeConfigPath: string,
+  projectRoot: string,
+  resolverBackedServers: string[],
+): Promise<string[]> {
+  if (resolverBackedServers.length === 0) return [];
+
+  const raw = await safeReadFile(claudeConfigPath);
+  if (!raw) return [];
+
+  const data = safeJsonParse(raw);
+  if (!data) return [];
+
+  const cleaned: string[] = [];
+
+  // Only clean per-project mcpServers overrides.
+  // Global mcpServers are lower priority than .mcp.json and don't shadow resolver output.
+  const projects = data.projects;
+  if (projects && typeof projects === 'object') {
+    const proj = (projects as Record<string, Record<string, unknown>>)[projectRoot];
+    if (proj?.mcpServers && typeof proj.mcpServers === 'object') {
+      const mcpServers = proj.mcpServers as Record<string, unknown>;
+      for (const name of resolverBackedServers) {
+        if (name in mcpServers) {
+          delete mcpServers[name];
+          cleaned.push(name);
+        }
+      }
+    }
+  }
+
+  if (cleaned.length > 0) {
+    await writeFile(claudeConfigPath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
+  }
+
+  return cleaned;
+}
+
 // ────────── Helpers ──────────
 
 async function safeReadFile(filePath: string): Promise<string | null> {

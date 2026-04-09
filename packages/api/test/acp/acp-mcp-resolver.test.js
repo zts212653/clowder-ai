@@ -80,13 +80,13 @@ describe('resolveAcpMcpServers', () => {
   it('throws when .mcp.json is missing and external servers requested', () => {
     const root = makeTempRoot(); // no .mcp.json written
 
-    assert.throws(() => resolveAcpMcpServers(root, ['pencil']), /Cannot read/);
+    assert.throws(() => resolveAcpMcpServers(root, ['pencil']), /MCP whitelist entries.*missing/);
   });
 
-  it('throws when .mcp.json has no mcpServers key', () => {
+  it('throws when .mcp.json has no mcpServers key and external servers requested', () => {
     const root = makeTempRoot({ version: 1 });
 
-    assert.throws(() => resolveAcpMcpServers(root, ['pencil']), /no mcpServers key/);
+    assert.throws(() => resolveAcpMcpServers(root, ['pencil']), /MCP whitelist entries.*missing/);
   });
 });
 
@@ -170,8 +170,8 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
 
   it('does not treat typo cat-cafe-collabb as builtin (P1 fail-fast)', () => {
     const root = makeTempRoot(); // no .mcp.json
-    // Typo should NOT be treated as builtin — should throw because .mcp.json missing
-    assert.throws(() => resolveAcpMcpServers(root, ['cat-cafe-collabb']), /Cannot read/);
+    // Typo should NOT be treated as builtin — should throw because no servers resolved
+    assert.throws(() => resolveAcpMcpServers(root, ['cat-cafe-collabb']), /MCP whitelist entries.*missing/);
   });
 
   it('does not treat cat-cafeteria as builtin', () => {

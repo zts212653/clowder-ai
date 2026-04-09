@@ -23,6 +23,7 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
                 aria-label={`Enlarge ${item.alt ?? 'image'}`}
               >
                 {/* biome-ignore lint/performance/noImgElement: data URIs from MCP cannot use next/image */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={item.url}
                   alt={item.alt ?? ''}

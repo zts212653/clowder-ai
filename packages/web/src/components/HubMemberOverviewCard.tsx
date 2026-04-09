@@ -102,6 +102,7 @@ export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoC
           >
             {avatarSrc ? (
               // biome-ignore lint/performance/noImgElement: co-creator avatar may be runtime upload URL
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={avatarSrc} alt={`${coCreator.name} avatar`} className="h-full w-full object-cover" />
             ) : (
               'ME'

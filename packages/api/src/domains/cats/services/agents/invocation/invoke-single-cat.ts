@@ -93,6 +93,7 @@ import {
   isCliTimeoutError,
   isMissingClaudeSessionError,
   isPromptTokenLimitExceededError,
+  isTransientAcpPromptFailure,
   isTransientCliExitCode1,
   preflightRace,
 } from './invoke-helpers.js';
@@ -1464,7 +1465,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
-          isTransientCliExitCode1(msg.error)
+          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
         ) {
           suppressedTransientCliError = msg;
           continue;

@@ -73,5 +73,6 @@ export function SchedulerIcon({ className = 'w-5 h-5' }: IconProps) {
 
 /** Connector icon image — renders a designed PNG icon for IM platforms */
 export function ConnectorImage({ src, alt, className = 'w-5 h-5' }: { src: string; alt: string; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt={alt} className={`${className} rounded object-cover`} />;
 }

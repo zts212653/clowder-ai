@@ -261,7 +261,7 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    // Unknown connectors fall back to default blue theme (via semantic tokens)
+    // Unknown connectors fall back to default blue theme
     expect(html).toContain('bg-conn-blue-bg');
     expect(html).toContain('border-conn-blue-bubble-border');
   });

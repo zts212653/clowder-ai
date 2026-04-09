@@ -164,6 +164,7 @@ export function useScrollAnchor(
         offsetFromTop: el.getBoundingClientRect().top - container.getBoundingClientRect().top,
       };
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- containerRef is a live ref, not a dependency
   }, [threadGroups]);
 
   return { onScroll };

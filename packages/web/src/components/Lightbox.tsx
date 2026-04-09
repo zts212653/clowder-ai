@@ -91,6 +91,7 @@ export function Lightbox({
           &times;
         </button>
         {/* biome-ignore lint/performance/noImgElement: data URIs from MCP cannot use next/image */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={url} alt={alt} className="max-w-full max-h-[85vh] object-contain rounded-lg" />
         {caption && <p className="mt-2 text-sm text-white/80">{caption}</p>}
         <CopyButton url={url} />

@@ -188,6 +188,7 @@ export function FeishuQrPanel({ configured, onConfirmed, onDisconnected }: Feish
 
       {qrState === 'waiting' && qrUrl && (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-cafe bg-cafe-surface-elevated p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qrUrl} alt="Feishu QR code" className="h-48 w-48 rounded-lg" data-testid="feishu-qr-image" />
           <div className="flex items-center gap-2 text-xs text-cafe-secondary">
             <SpinnerIcon />

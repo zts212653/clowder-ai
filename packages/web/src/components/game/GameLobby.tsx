@@ -143,6 +143,7 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
                 }`}
                 style={selectedCats.has(cat.id) ? { color: cat.color.primary } : undefined}
               >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={cat.avatar}
                   alt={cat.displayName}
@@ -176,6 +177,7 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
                       : 'border-ww-subtle text-ww-dim hover:border-ww-active'
                   }`}
                 >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={cat.avatar}
                     alt={cat.displayName}

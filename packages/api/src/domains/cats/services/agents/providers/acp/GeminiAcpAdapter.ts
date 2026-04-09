@@ -8,7 +8,7 @@
  *   - Pool-backed: each invoke() acquires lease, releases in finally
  *   - Session per invocation: each invoke() calls newSession()
  *   - 4-window abort coverage (pre-invoke, post-newSession, post-yield, during-prompt)
- *   - Failure classification: init_failure / prompt_failure / model_capacity / mcp_pollution / stream_idle_stall / lease_timeout
+ *   - Failure classification: init_failure / prompt_failure / model_capacity / mcp_pollution / stream_idle_stall / turn_budget_exceeded
  *   - System prompt: prepended to prompt text (same as GeminiAgentService)
  */
 
@@ -356,7 +356,7 @@ function classifyError(
         errorMsg: `Provider capacity exhausted (upstream 429, evidence: recent_process_signal, ${ageS}s ago). ${clientRecentSignal.message}`,
       };
     }
-    return { errorCode: 'lease_timeout', errorMsg: err.message };
+    return { errorCode: 'turn_budget_exceeded', errorMsg: err.message };
   }
   // F149: Stream idle stall — provider started responding then went silent
   const msg = err instanceof Error ? err.message : String(err);
@@ -379,12 +379,17 @@ function toUserFacingError(errorCode: string, errorMsg: string): string {
       return `${base}\n⚠️ Gemini 服务端容量不足（Google 服务器繁忙），非 Clowder AI 系统故障。`;
     case 'stream_idle_stall':
       return `${base}\n⚠️ Gemini 服务端响应中断（Google 服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
-    case 'lease_timeout':
-      return `${base}\n⚠️ Gemini 请求超时，可能是 Google 服务端或网络链路问题，来源待确认。`;
+    case 'turn_budget_exceeded':
+      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(600 / 60)}分钟），烁烁可能在执行复杂工具链。非故障，可重试。`;
     case 'mcp_pollution':
       return `${base}\n⚠️ Gemini 工具调用异常（MCP 服务端错误）。`;
     case 'init_failure':
       return `${base}\n⚠️ Gemini CLI 启动失败（本地进程异常）。`;
+    case 'prompt_failure':
+      if (/Premature close|ECONNRESET|socket hang up/i.test(errorMsg)) {
+        return `${base}\n⚠️ Gemini 与 Google 服务端连接中断（Premature close），非 Clowder AI 系统故障。`;
+      }
+      return base;
     default:
       return base;
   }

@@ -59,15 +59,16 @@ function readMcpJson(mcpJsonPath: string): Record<string, McpJsonEntry> {
   try {
     raw = JSON.parse(readFileSync(mcpJsonPath, 'utf-8')) as typeof raw;
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      log.warn({ path: mcpJsonPath }, '.mcp.json not found — external MCP servers will be unavailable');
+      return {};
+    }
     throw new Error(
       `Cannot read ${mcpJsonPath}: ${err instanceof Error ? err.message : String(err)}. ` +
         'External MCP servers require .mcp.json with mcpServers entries.',
     );
   }
-  if (!raw.mcpServers) {
-    throw new Error(`.mcp.json has no mcpServers key.`);
-  }
-  return raw.mcpServers;
+  return raw.mcpServers ?? {};
 }
 
 // ─── Main resolver ───────────────────────────────────────────────

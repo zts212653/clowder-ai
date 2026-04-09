@@ -21,6 +21,7 @@ export function createWorkspaceImageComponent(basePath: string, worktreeId: stri
     const resolvedUrl = isRelative
       ? `${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId)}&path=${encodeURIComponent(resolveRelativePath(basePath, src))}`
       : src;
+    // eslint-disable-next-line @next/next/no-img-element
     return <img src={resolvedUrl} alt={alt ?? ''} className="max-w-full rounded my-2" loading="lazy" />;
   };
 }

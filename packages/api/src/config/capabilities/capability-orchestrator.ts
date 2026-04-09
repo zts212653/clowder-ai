@@ -15,6 +15,7 @@ import { relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import {
+  cleanStaleClaudeProjectOverrides,
   readClaudeMcpConfig,
   readCodexMcpConfig,
   readGeminiMcpConfig,
@@ -720,7 +721,8 @@ export async function resolveMachineSpecificServers(
  */
 export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliConfigPaths): Promise<void> {
   const perProvider = collectServersPerProvider(config);
-  await resolveMachineSpecificServers(perProvider, { projectRoot: resolve(paths.anthropic, '..') });
+  const projectRoot = resolve(paths.anthropic, '..');
+  await resolveMachineSpecificServers(perProvider, { projectRoot });
 
   const writes: Promise<void>[] = [];
   for (const [provider, servers] of Object.entries(perProvider)) {
@@ -732,6 +734,22 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
   }
 
   await Promise.all(writes);
+
+  // Best-effort: clean resolver-managed per-project overrides from ~/.claude.json (F145 Phase D).
+  // Per-project mcpServers shadow .mcp.json (higher priority), causing silent MCP failures
+  // when the binary path becomes outdated. Global mcpServers are left untouched.
+  const resolverBacked = config.capabilities.filter((c) => c.type === 'mcp' && c.mcpServer?.resolver).map((c) => c.id);
+  if (resolverBacked.length > 0) {
+    try {
+      const claudeConfigPath = resolve(homedir(), '.claude.json');
+      const cleaned = await cleanStaleClaudeProjectOverrides(claudeConfigPath, projectRoot, resolverBacked);
+      if (cleaned.length > 0) {
+        console.warn(`[F145] Cleaned resolver-managed overrides from ~/.claude.json: ${cleaned.join(', ')}`);
+      }
+    } catch (err) {
+      console.warn(`[F145] Failed to clean ~/.claude.json overrides (non-blocking): ${(err as Error).message}`);
+    }
+  }
 }
 
 /**

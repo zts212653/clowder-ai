@@ -48,6 +48,7 @@ export function HistorySearchModal({ onSelect, onClose }: HistorySearchModalProp
         onSelect(results[selectedIdx]);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ime.isComposing() reads a live ref; adding ime would cause unnecessary re-renders
     [results, selectedIdx, onSelect, onClose],
   );
 

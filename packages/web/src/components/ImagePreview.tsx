@@ -29,6 +29,7 @@ export function ImagePreview({ files, onRemove }: ImagePreviewProps) {
       <div className="flex gap-2 px-4 py-2 overflow-x-auto">
         {files.map((file, i) => (
           <div key={`${file.name}-${i}`} className="relative flex-shrink-0 group">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={urls[i]}
               alt={file.name}

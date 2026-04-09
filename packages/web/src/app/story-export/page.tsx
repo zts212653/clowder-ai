@@ -40,6 +40,7 @@ function StoryBubble({ msg }: { msg: StoryMessage }) {
           ['--tw-ring-color' as string]: style.primary,
         }}
       >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={style.avatar} alt={nameLabel} width={32} height={32} className="object-cover w-full h-full" />
       </div>
 

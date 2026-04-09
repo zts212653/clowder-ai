@@ -3,11 +3,24 @@ feature_ids: []
 topics: [cat, cafe, skills]
 doc_kind: decision
 created: 2026-02-26
+status: drifted
+drifted_by: [F070]
+last_reviewed: 2026-04-07
+drift_note: >
+  F070 (2026-03-08) introduced project-level governance skill mounts
+  (.claude/.codex/.gemini/skills), creating a dual-layer mount model
+  that ADR-009 did not anticipate. Runtime mount policy, health checks,
+  and capabilities board now operate on inconsistent assumptions.
+  See clowder-ai#386 for community report.
 ---
 
 # ADR-009: Cat Café Skills 分发策略
 
-> 状态：已决策
+> **⚠️ DRIFTED** — 本决策的"仅用户级分发"假设已被 [F070](../features/F070-portable-governance.md) 的项目级 governance bootstrap 事实性推翻。当前系统同时存在用户级和项目级两层挂载，且无一致性校验。新的 canonical mount policy 待定（successor ADR 待立）。
+>
+> 原始决策内容保留如下，作为历史记录。
+
+> 状态：~~已决策~~ → drifted（2026-04-07 标注）
 > 日期：2026-02-10
 > 决策者：铲屎官 + Ragdoll
 

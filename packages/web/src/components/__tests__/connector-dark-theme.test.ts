@@ -30,7 +30,8 @@ describe('connector dark mode themes', () => {
   });
 
   it('conn-* token utilities are registered in Tailwind config for all color groups', () => {
-    const connColors = tailwindConfig.theme?.extend?.colors?.conn as Record<string, string> | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tailwind config type doesn't include custom color groups
+    const connColors = (tailwindConfig.theme?.extend?.colors as any)?.conn as Record<string, string> | undefined;
     expect(connColors).toBeDefined();
 
     const colorGroups = [

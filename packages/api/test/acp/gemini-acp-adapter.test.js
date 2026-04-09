@@ -639,7 +639,7 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(types.includes('done'), `Should yield done, got: ${JSON.stringify(types)}`);
   });
 
-  it('timeout with capacity stderr yields model_capacity not lease_timeout', async () => {
+  it('timeout with capacity stderr yields model_capacity not turn_budget_exceeded', async () => {
     const { AcpTimeoutError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
 
     const listeners = new Set();
@@ -788,7 +788,7 @@ describe('GeminiAcpAdapter integration', () => {
     );
   });
 
-  it('no capacity stderr during prompt yields lease_timeout (listener isolation)', async () => {
+  it('no capacity stderr during prompt yields turn_budget_exceeded (listener isolation)', async () => {
     const { AcpTimeoutError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
 
     const fakeClient = {
@@ -826,8 +826,8 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(errorMsg, 'Should yield error message');
     assert.equal(
       errorMsg.errorCode,
-      'lease_timeout',
-      `Expected lease_timeout when no capacity signal, got ${errorMsg.errorCode}`,
+      'turn_budget_exceeded',
+      `Expected turn_budget_exceeded when no capacity signal, got ${errorMsg.errorCode}`,
     );
   });
 
@@ -983,8 +983,8 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(errorMsg, 'Should yield error message');
     assert.equal(
       errorMsg.errorCode,
-      'lease_timeout',
-      `Expected lease_timeout for stale signal, got ${errorMsg.errorCode}`,
+      'turn_budget_exceeded',
+      `Expected turn_budget_exceeded for stale signal, got ${errorMsg.errorCode}`,
     );
   });
 
@@ -1025,13 +1025,13 @@ describe('GeminiAcpAdapter integration', () => {
       projectRoot: '/tmp',
     });
 
-    // --- Invoke 1: timeout with no signal anywhere → lease_timeout ---
+    // --- Invoke 1: timeout with no signal anywhere → turn_budget_exceeded ---
     const msgs1 = [];
     for await (const msg of adapter.invoke('first prompt')) {
       msgs1.push(msg);
     }
     const err1 = msgs1.find((m) => m.type === 'error');
-    assert.equal(err1.errorCode, 'lease_timeout', 'First invoke: no signal → lease_timeout');
+    assert.equal(err1.errorCode, 'turn_budget_exceeded', 'First invoke: no signal → turn_budget_exceeded');
 
     // --- Simulate: 429 stderr arrives 5 min later (between invokes) ---
     // Listener was removed by first invoke's finally block, so this only hits client-level capture
@@ -1111,7 +1111,7 @@ describe('GeminiAcpAdapter integration', () => {
     );
     assert.ok(!msgs1.some((m) => m.type === 'error'), 'Invoke 1 should have no errors');
 
-    // --- Invoke 2: timeout, but provider had recovered → must be lease_timeout ---
+    // --- Invoke 2: timeout, but provider had recovered → must be turn_budget_exceeded ---
     const msgs2 = [];
     for await (const msg of adapter.invoke('unrelated timeout')) {
       msgs2.push(msg);
@@ -1120,8 +1120,8 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(err2, 'Invoke 2 should yield error');
     assert.equal(
       err2.errorCode,
-      'lease_timeout',
-      `Expected lease_timeout after recovery, got ${err2.errorCode} — stale signal should have been cleared`,
+      'turn_budget_exceeded',
+      `Expected turn_budget_exceeded after recovery, got ${err2.errorCode} — stale signal should have been cleared`,
     );
   });
 
@@ -1481,7 +1481,7 @@ describe('GeminiAcpAdapter integration', () => {
     assert.equal(texts.length, 2, `Expected 2 text messages, got ${texts.length}`);
   });
 
-  it('F149: stream idle stall classified as stream_idle_stall (not lease_timeout)', async () => {
+  it('F149: stream idle stall classified as stream_idle_stall (not turn_budget_exceeded)', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),

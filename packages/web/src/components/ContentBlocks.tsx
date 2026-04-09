@@ -18,6 +18,7 @@ export function ContentBlocks({ blocks }: { blocks: MessageContent[] }) {
           const src = block.url.startsWith('/uploads/') ? `${API_URL}${block.url}` : block.url;
           return (
             // biome-ignore lint/performance/noImgElement: uploaded images cannot use next/image
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               key={i}
               src={src}

@@ -221,6 +221,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
           style={{ backgroundColor: coCreatorPrimary, boxShadow: `0 0 0 2px ${coCreatorSecondary}` }}
         >
           {coCreator.avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={coCreator.avatar}
               alt={coCreator.name}

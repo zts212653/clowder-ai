@@ -70,6 +70,13 @@ export function isTransientCliExitCode1(message: string | undefined): boolean {
   return /CLI 异常退出 \(code:\s*1(?:,\s*signal:\s*none)?\)/i.test(message);
 }
 
+/** Transient ACP prompt failure: Google API connection dropped mid-stream.
+ *  "Premature close" = HTTP/2 stream reset or TCP drop from upstream. */
+export function isTransientAcpPromptFailure(message: string | undefined): boolean {
+  if (!message) return false;
+  return /Premature close|ECONNRESET|socket hang up/i.test(message);
+}
+
 export function isPromptTokenLimitExceededError(message: string | undefined): boolean {
   if (!message) return false;
   return /(prompt token count|input tokens?).*exceeds the limit of \d+/i.test(message);

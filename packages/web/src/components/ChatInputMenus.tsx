@@ -124,6 +124,7 @@ export function ChatInputMenus({
                   onInsertMention(opt);
                 }}
               >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={opt.avatar}
                   alt={opt.label}

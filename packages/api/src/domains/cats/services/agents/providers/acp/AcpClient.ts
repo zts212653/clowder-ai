@@ -220,9 +220,16 @@ export class AcpClient {
     text: string,
     options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
   ): AsyncGenerator<AcpSessionUpdate, AcpStopReason> {
-    const timeoutMs = options?.timeoutMs ?? 120_000;
+    // KD-12: Turn budget — resource cap, NOT health detection.
+    // Gemini CLI doesn't emit tool_call for MCP tools (upstream #21783), so
+    // long MCP chains are invisible to the event stream. Idle stall (90s) catches
+    // true hangs; this budget is the last-resort guard against runaway sessions.
+    // Upstream #24029 (MCP channel notifications) will provide proper L2 signals.
+    const timeoutMs = options?.timeoutMs ?? 600_000;
     const idleWarningMs = options?.idleWarningMs ?? 20_000;
-    const idleStallMs = options?.idleStallMs ?? 45_000;
+    // Idle stall catches true hangs. Gemini CLI doesn't emit tool_call for MCP
+    // tools, so pendingTool never activates. 90s covers most MCP calls (10-30s).
+    const idleStallMs = options?.idleStallMs ?? 90_000;
     const queue: AcpSessionUpdate[] = [];
     let waitResolve: (() => void) | null = null;
     let done = false;
@@ -306,10 +313,27 @@ export class AcpClient {
       // and flat (params.sessionUpdate) — must handle both, same as acp-event-transformer.
       const inner = (params.update ?? params) as Record<string, unknown>;
       const updateType = inner.sessionUpdate as string | undefined;
-      if (updateType === 'tool_call') {
+      // Diagnostic: log every event type + raw keys for unclassified events
+      if (updateType) {
+        log.info({ sessionId, eventCount, updateType, pendingTool }, 'ACP listener: event received');
+      } else {
+        // Unknown event — dump raw structure to diagnose Gemini CLI payload format
+        const rawKeys = Object.keys(params);
+        const innerKeys = params.update ? Object.keys(params.update as Record<string, unknown>) : [];
+        const method = (notif as unknown as Record<string, unknown>).method;
+        log.warn(
+          { sessionId, eventCount, method, rawKeys, innerKeys, pendingTool, raw: JSON.stringify(params).slice(0, 500) },
+          'ACP listener: unclassified event — no sessionUpdate type',
+        );
+      }
+      if (updateType === 'tool_call' || updateType === 'permission_pending') {
         pendingTool = true;
-      } else if (pendingTool && updateType !== 'tool_call_update') {
-        pendingTool = false; // Non-tool event → tool execution completed
+      } else if (
+        pendingTool &&
+        updateType !== 'tool_call_update' &&
+        updateType !== 'agent_thought_chunk' // Thought chunks during tool execution are normal — don't reset
+      ) {
+        pendingTool = false; // Real output event → tool execution completed
       }
       scheduleIdleCheck();
       if (waitResolve) {
@@ -465,9 +489,29 @@ export class AcpClient {
         this.pending.delete(id);
         resolve(msg as unknown as AcpResponse);
       } else if (method && !id) {
-        // Notification from agent (session/update)
-        for (const listener of this.notificationListeners) {
-          listener(msg as unknown as AcpNotification);
+        if (method === ACP_METHODS.requestPermission) {
+          // Gemini CLI sends request_permission as notification (no id) when not in yolo mode.
+          // Best-effort auto-approve with synthetic id (Gemini may ignore it).
+          // Also notify stream listeners so idle watchdog suppresses stall during permission wait.
+          const permParams = msg.params as Record<string, unknown>;
+          log.info(
+            { method, sessionId: permParams.sessionId },
+            'ACP: permission notification (no id) — auto-approve + suppress stall',
+          );
+          this.handleAgentRequest({ ...msg, id: `synth-perm-${Date.now()}` } as unknown as AcpAgentRequest);
+          // Inject synthetic event into stream so promptStream sets pendingTool=true
+          for (const listener of this.notificationListeners) {
+            listener({
+              jsonrpc: '2.0',
+              method: ACP_METHODS.sessionUpdate,
+              params: { sessionId: permParams.sessionId, sessionUpdate: 'permission_pending' },
+            } as unknown as AcpNotification);
+          }
+        } else {
+          // Notification from agent (session/update)
+          for (const listener of this.notificationListeners) {
+            listener(msg as unknown as AcpNotification);
+          }
         }
       } else if (method && id) {
         // Request from agent (permission, fs, terminal) — needs our response

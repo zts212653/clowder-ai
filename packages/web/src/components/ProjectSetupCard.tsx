@@ -87,6 +87,7 @@ export function ProjectSetupCard({
           className={`max-w-[85%] w-full rounded-lg border p-4 ${state === 'done' ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}
         >
           <div className="flex items-center gap-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={state === 'done' ? '/images/setup-cat-done.png' : '/images/setup-cat-working.png'}
               alt={state === 'done' ? '完成' : '工作中'}
@@ -123,6 +124,7 @@ export function ProjectSetupCard({
       <div className="max-w-[85%] w-full rounded-lg border border-cocreator-primary/20 bg-cocreator-bg/30 p-5">
         {/* Header */}
         <div className="flex items-center gap-4 mb-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/images/setup-cat-idle.png" alt="设置" className="w-20 h-20 flex-shrink-0 object-contain" />
           <div>
             <p className="text-sm font-medium text-cafe-black">发现了一片新大陆！</p>

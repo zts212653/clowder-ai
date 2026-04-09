@@ -37,6 +37,7 @@ export function InlineTreeInput({ depth, kind, defaultValue = '', onConfirm, onC
         onCancel();
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ime.isComposing() reads a live ref; adding ime would cause unnecessary re-renders
     [value, onConfirm, onCancel],
   );
 
