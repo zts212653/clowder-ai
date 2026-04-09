@@ -97,8 +97,10 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       // Kind-match path (#320 P1): thread has active task of matching kind → include,
       // but scrub run metadata that belongs to other threads/PRs.
       if (s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) {
-        const { lastRun: _, subjectPreview: __, ...rest } = s;
-        return [{ ...rest, lastRun: null, subjectPreview: null }];
+        const { lastRun: _, subjectPreview: __, runStats: ___, ...rest } = s;
+        return [
+          { ...rest, lastRun: null, subjectPreview: null, runStats: { total: 0, delivered: 0, failed: 0, skipped: 0 } },
+        ];
       }
       return [];
     });

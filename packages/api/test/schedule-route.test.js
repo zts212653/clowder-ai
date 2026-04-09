@@ -168,6 +168,11 @@ describe('Schedule Routes', () => {
       // Kind-match included tasks must have foreign run metadata scrubbed
       assert.equal(cicd.lastRun, null, 'lastRun from other PR must be scrubbed');
       assert.equal(cicd.subjectPreview, null, 'subjectPreview from other PR must be scrubbed');
+      assert.deepEqual(
+        cicd.runStats,
+        { total: 0, delivered: 0, failed: 0, skipped: 0 },
+        'runStats from other PRs must be zeroed',
+      );
     });
 
     it('excludes PR scheduler tasks for threads without any PR tracking', async () => {
