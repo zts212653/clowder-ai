@@ -1035,7 +1035,7 @@ describe('GPT-5.2 variant mention aliases in project config', () => {
             variants: [
               {
                 id: 'opus-default',
-                provider: 'anthropic',
+                clientId: 'anthropic',
                 defaultModel: 'claude-opus-4-6',
                 mcpSupport: true,
                 cli: { command: 'claude', outputFormat: 'stream-json' },
@@ -1044,7 +1044,7 @@ describe('GPT-5.2 variant mention aliases in project config', () => {
               {
                 id: 'sonnet-variant',
                 catId: 'sonnet',
-                provider: 'anthropic',
+                clientId: 'anthropic',
                 defaultModel: 'claude-sonnet-4-6',
                 mcpSupport: true,
                 cli: { command: 'claude', outputFormat: 'stream-json' },
