@@ -19,9 +19,11 @@ export interface RunStats {
 }
 
 export interface TriggerSpec {
-  type: 'interval' | 'cron';
+  type: 'interval' | 'cron' | 'once';
   ms?: number;
   expression?: string;
+  /** #415: epoch ms — when the once trigger will fire */
+  fireAt?: number;
 }
 
 export interface TaskDisplayMeta {
@@ -93,6 +95,16 @@ export function fallbackCategory(taskId: string): DisplayCategory {
 
 export function formatTrigger(trigger: TriggerSpec): string {
   if (trigger.type === 'cron') return `cron: ${trigger.expression}`;
+  if (trigger.type === 'once') {
+    if (!trigger.fireAt) return 'once';
+    const d = new Date(trigger.fireAt);
+    const now = Date.now();
+    if (trigger.fireAt <= now) return 'once (fired)';
+    const diff = trigger.fireAt - now;
+    if (diff < 60_000) return `once in ${Math.ceil(diff / 1000)}s`;
+    if (diff < 3_600_000) return `once in ${Math.ceil(diff / 60_000)}m`;
+    return `once @ ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
   const ms = trigger.ms ?? 0;
   if (ms >= 3600000) return `${Math.round(ms / 3600000)}h`;
   if (ms >= 60000) return `${Math.round(ms / 60000)}m`;
