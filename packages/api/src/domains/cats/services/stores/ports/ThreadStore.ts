@@ -68,7 +68,7 @@ export interface ThreadMemoryV1 {
   artifacts?: string[];
 }
 
-export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph';
+export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action';
 export type MentionActionabilityMode = 'strict' | 'relaxed';
 
 export interface ThreadMentionRoutingFeedbackItem {

@@ -7,13 +7,8 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
-
-interface ParticipantActivity {
-  catId: string;
-  lastMessageAt: number;
-  messageCount: number;
-  lastResponseHealthy?: boolean;
-}
+import type { ParticipantActivityInput } from './thread-cats-core.js';
+import { categorizeThreadCats } from './thread-cats-core.js';
 
 export interface ThreadCatsRoutesOptions {
   threadStore: {
@@ -25,7 +20,7 @@ export interface ThreadCatsRoutesOptions {
           title?: string | null;
           routingPolicy?: { v: number; scopes?: unknown } | null;
         } | null>;
-    getParticipantsWithActivity(threadId: string): ParticipantActivity[] | Promise<ParticipantActivity[]>;
+    getParticipantsWithActivity(threadId: string): ParticipantActivityInput[] | Promise<ParticipantActivityInput[]>;
   };
   agentRegistry: {
     getAllEntries(): Map<string, unknown>;
@@ -60,46 +55,18 @@ export const threadCatsRoutes: FastifyPluginAsync<ThreadCatsRoutesOptions> = asy
       }
     }
 
-    // 3. Gather data
+    // 3. Categorize via shared core (KD-9)
     const participantActivity = await threadStore.getParticipantsWithActivity(id);
-    const registeredServices = agentRegistry.getAllEntries();
-    const allCatIds = getAllCatIds();
-    const participantIds = new Set(participantActivity.map((p) => p.catId));
-
-    // 4. Categorize (KD-9: notRoutable = strictly available=false, non-participants only)
-    const routableNow: Array<{ catId: string; displayName: string }> = [];
-    const routableNotJoined: Array<{ catId: string; displayName: string }> = [];
-    const notRoutable: Array<{ catId: string; displayName: string }> = [];
-
-    for (const catId of allCatIds) {
-      const hasService = registeredServices.has(catId);
-      const available = isCatAvailable(catId);
-      const isParticipant = participantIds.has(catId);
-
-      if (!available && !isParticipant) {
-        notRoutable.push({ catId, displayName: getCatDisplayName(catId) });
-      } else if (hasService && available && !isParticipant) {
-        routableNotJoined.push({ catId, displayName: getCatDisplayName(catId) });
-      }
-    }
-
-    // routableNow = participants with service + available
-    for (const p of participantActivity) {
-      if (registeredServices.has(p.catId) && isCatAvailable(p.catId)) {
-        routableNow.push({ catId: p.catId, displayName: getCatDisplayName(p.catId) });
-      }
-    }
+    const result = categorizeThreadCats({
+      participantActivity,
+      registeredServices: agentRegistry.getAllEntries(),
+      allCatIds: getAllCatIds(),
+      getCatDisplayName,
+      isCatAvailable,
+    });
 
     return {
-      participants: participantActivity.map((p) => ({
-        catId: p.catId,
-        displayName: getCatDisplayName(p.catId),
-        lastMessageAt: p.lastMessageAt,
-        messageCount: p.messageCount,
-      })),
-      routableNow,
-      routableNotJoined,
-      notRoutable,
+      ...result,
       routingPolicy: thread.routingPolicy ? `v${thread.routingPolicy.v}` : null,
     };
   });

@@ -37,7 +37,7 @@ function buildAuthHeaders(): Record<string, string> {
 
 export const listSessionChainInputSchema = {
   threadId: z.string().min(1).describe('Thread ID'),
-  catId: z.string().optional().describe('Filter by cat ID (opus/codex/gemini)'),
+  catId: z.string().optional().describe('Filter by cat ID (any valid registered catId)'),
   limit: z.number().int().min(1).max(100).optional().describe('Max results'),
 };
 
@@ -316,7 +316,7 @@ export const sessionChainTools = [
     name: 'cat_cafe_list_session_chain',
     description:
       'List session chain for a thread. Shows session IDs, sequence numbers, status, and context health for each cat. ' +
-      'Use when you need to find a specific session ID to drill into (e.g. "what did opus do in thread X?"). ' +
+      'Use when you need to find a specific session ID to drill into (e.g. "what did a specific cat do in thread X?"). ' +
       'WORKFLOW: list_session_chain → read_session_digest (overview first) → read_session_events (detail). ' +
       'TIP: Filter by catId to narrow results when a thread has many sessions from different cats.',
     inputSchema: listSessionChainInputSchema,
