@@ -246,4 +246,22 @@ export const CORE_COMMANDS: readonly SlashCommandDefinition[] = [
     surface: 'connector',
     source: 'core',
   },
+  // --- routing (F154: Cat Routing Personalization) ---
+  {
+    name: '/focus',
+    usage: '/focus [猫名|clear]',
+    description: '查看/设置当前 thread 的首选猫',
+    category: 'connector',
+    surface: 'connector',
+    source: 'core',
+    subcommands: ['clear'],
+  },
+  {
+    name: '/ask',
+    usage: '/ask <猫名> <消息>',
+    description: '单次定向：把这条消息发给指定猫，不改变首选猫设置',
+    category: 'connector',
+    surface: 'connector',
+    source: 'core',
+  },
 ] as const;

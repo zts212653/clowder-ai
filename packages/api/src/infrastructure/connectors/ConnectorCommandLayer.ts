@@ -1,4 +1,4 @@
-import { parseCommand } from '@cat-cafe/shared';
+import { normalizeCatId, parseCommand } from '@cat-cafe/shared';
 import type { CommandRegistry } from '../commands/CommandRegistry.js';
 import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
@@ -28,13 +28,17 @@ export interface CommandResult {
     | 'commands'
     | 'cats'
     | 'status'
+    | 'focus'
+    | 'ask'
     | 'not-command';
   readonly response?: string;
   readonly newActiveThreadId?: string;
   /** Thread context for storing command exchange in messageStore */
   readonly contextThreadId?: string;
-  /** Message content to forward to target thread after switching (used by /thread) */
+  /** Message content to forward to target thread after switching (used by /thread, /ask) */
   readonly forwardContent?: string;
+  /** F154: one-shot target cat for /ask routing */
+  readonly targetCatId?: string;
 }
 
 interface ThreadEntry {
@@ -51,11 +55,13 @@ export interface ConnectorCommandLayerDeps {
     get(
       id: string,
     ):
-      | { id: string; title?: string | null; createdAt?: number }
+      | { id: string; title?: string | null; createdAt?: number; preferredCats?: string[] }
       | null
-      | Promise<{ id: string; title?: string | null; createdAt?: number } | null>;
+      | Promise<{ id: string; title?: string | null; createdAt?: number; preferredCats?: string[] } | null>;
     /** List threads owned by userId (sorted by lastActiveAt desc). Phase C: cross-platform thread view */
     list(userId: string): ThreadEntry[] | Promise<ThreadEntry[]>;
+    /** F154: Update thread preferred cats for /focus command */
+    updatePreferredCats?(threadId: string, catIds: string[]): void | Promise<void>;
   };
   /** Phase D: optional backlog store for feat-number matching in /use */
   readonly backlogStore?: {
@@ -112,7 +118,12 @@ export class ConnectorCommandLayer {
     const registry = this.deps.commandRegistry;
     const parsed = registry ? parseCommand(trimmed, registry.getAll()) : null;
     const cmd = parsed?.name ?? trimmed.split(/\s+/)[0]?.toLowerCase();
-    const cmdArgs = parsed?.args ?? trimmed.split(/\s+/).slice(1).join(' ');
+    // F154 P1 fix: subcommand must be re-joined into args (parseCommand extracts it separately)
+    const cmdArgs = parsed
+      ? parsed.subcommand
+        ? `${parsed.subcommand} ${parsed.args}`.trim()
+        : parsed.args
+      : trimmed.split(/\s+/).slice(1).join(' ');
     switch (cmd) {
       case '/where':
         return this.handleWhere(connectorId, externalChatId);
@@ -136,6 +147,10 @@ export class ConnectorCommandLayer {
         return this.handleAllowGroup(connectorId, externalChatId, senderId, cmdArgs);
       case '/deny-group':
         return this.handleDenyGroup(connectorId, externalChatId, senderId, cmdArgs);
+      case '/focus':
+        return this.handleFocus(connectorId, externalChatId, userId, cmdArgs);
+      case '/ask':
+        return this.handleAsk(connectorId, externalChatId, userId, cmdArgs);
       default: // F142-B: unrecognized commands flow to cat (AC-B4)
         return { kind: 'not-command' };
     }
@@ -346,6 +361,91 @@ export class ConnectorCommandLayer {
       response: removed
         ? `🚫 群 ${targetChatId.slice(-8)} 已从白名单移除`
         : `⚠️ 群 ${targetChatId.slice(-8)} 不在白名单中`,
+    };
+  }
+
+  // ── F154: /focus — set/view/clear preferred cat ────────────────────────
+
+  private async handleFocus(
+    connectorId: string,
+    externalChatId: string,
+    _userId: string,
+    args: string,
+  ): Promise<CommandResult> {
+    const binding = await this.deps.bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) {
+      return { kind: 'focus', response: '📍 当前没有绑定的 thread。先发送消息创建 thread 后再使用 /focus。' };
+    }
+    const thread = await this.deps.threadStore.get(binding.threadId);
+    const trimmed = args.trim();
+
+    // /focus (no args) — query current preferred cat
+    if (!trimmed) {
+      const preferred = thread?.preferredCats;
+      if (preferred && preferred.length > 0) {
+        return { kind: 'focus', response: `🐱 当前首选猫：${preferred.join(', ')}` };
+      }
+      return { kind: 'focus', response: '🐾 当前未设置首选猫，使用全局默认。' };
+    }
+
+    // /focus clear — clear preferred cats
+    if (trimmed === 'clear') {
+      await this.deps.threadStore.updatePreferredCats?.(binding.threadId, []);
+      return { kind: 'focus', response: '✅ 已清除首选猫设置，回到全局默认。' };
+    }
+
+    // /focus <catName> — set preferred cat (single, KD-5)
+    const resolved = normalizeCatId(trimmed);
+    if (!resolved.ok) {
+      if (resolved.reason === 'ambiguous') {
+        return {
+          kind: 'focus',
+          response: `🤔 找到多只匹配的猫：${resolved.candidates.join(', ')}，请输入更精确的名字。`,
+        };
+      }
+      return { kind: 'focus', response: `❌ 找不到猫「${resolved.input}」。` };
+    }
+    await this.deps.threadStore.updatePreferredCats?.(binding.threadId, [String(resolved.catId)]);
+    return { kind: 'focus', response: `🐱 已将首选猫设为 ${resolved.catId}` };
+  }
+
+  // ── F154: /ask — one-shot directed routing (KD-4: normal pipeline) ────
+
+  private async handleAsk(
+    connectorId: string,
+    externalChatId: string,
+    _userId: string,
+    args: string,
+  ): Promise<CommandResult> {
+    // F154 P1-2 fix: check binding exists before claiming success
+    const binding = await this.deps.bindingStore.getByExternal(connectorId, externalChatId);
+    if (!binding) {
+      return { kind: 'ask', response: '📍 当前没有绑定的 thread，请先发送消息创建 thread。' };
+    }
+
+    const parts = args.trim().split(/\s+/);
+    if (parts.length < 2 || !parts[0]) {
+      return { kind: 'ask', response: '用法：/ask <猫名> <消息>' };
+    }
+    const [catInput, ...msgParts] = parts;
+    const message = msgParts.join(' ');
+
+    const resolved = normalizeCatId(catInput);
+    if (!resolved.ok) {
+      if (resolved.reason === 'ambiguous') {
+        return {
+          kind: 'ask',
+          response: `🤔 找到多只匹配的猫：${resolved.candidates.join(', ')}，请输入更精确的名字。`,
+        };
+      }
+      return { kind: 'ask', response: `❌ 找不到猫「${resolved.input}」。` };
+    }
+
+    return {
+      kind: 'ask',
+      response: `🎯 已定向发送给 ${resolved.catId}`,
+      forwardContent: message,
+      targetCatId: String(resolved.catId),
     };
   }
 }

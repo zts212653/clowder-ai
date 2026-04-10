@@ -52,7 +52,7 @@ describe('HubAccountItem', () => {
       displayName: 'Claude API',
       name: 'Claude API',
       authType: 'api_key',
-      protocol: 'anthropic',
+
       kind: 'api_key',
       builtin: false,
       mode: 'api_key',
@@ -95,7 +95,7 @@ describe('HubAccountItem', () => {
       displayName: 'Codex API',
       name: 'Codex API',
       authType: 'api_key',
-      protocol: 'openai',
+
       kind: 'api_key',
       builtin: false,
       mode: 'api_key',
@@ -139,7 +139,7 @@ describe('HubAccountItem', () => {
       displayName: 'Codex (OAuth)',
       name: 'Codex (OAuth)',
       authType: 'oauth',
-      protocol: 'openai',
+
       kind: 'builtin',
       builtin: true,
       mode: 'subscription',
@@ -166,7 +166,7 @@ describe('HubAccountItem', () => {
       displayName: 'OpenCode (client-auth)',
       name: 'OpenCode (client-auth)',
       authType: 'oauth',
-      protocol: 'anthropic',
+
       kind: 'builtin',
       builtin: true,
       mode: 'subscription',
@@ -193,7 +193,7 @@ describe('HubAccountItem', () => {
       displayName: 'Codex Sponsor',
       name: 'Codex Sponsor',
       authType: 'api_key',
-      protocol: 'openai',
+
       kind: 'api_key',
       builtin: false,
       mode: 'api_key',

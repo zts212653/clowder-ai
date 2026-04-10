@@ -30,6 +30,16 @@ function stubThreadStore(data) {
     },
     get: async (id) => map.get(id) ?? null,
     list: async () => [...map.values()],
+    // F154: updatePreferredCats support
+    updatePreferredCats(threadId, catIds) {
+      const thread = map.get(threadId);
+      if (!thread) return;
+      if (catIds.length > 0) {
+        thread.preferredCats = [...new Set(catIds)];
+      } else {
+        delete thread.preferredCats;
+      }
+    },
   };
 }
 
@@ -1236,5 +1246,303 @@ describe('ConnectorCommandLayer + CommandRegistry (F142-B)', () => {
       result.response.includes('/thread <thread_id> <message>'),
       `handler error hint must match CORE_COMMANDS usage, got: ${result.response}`,
     );
+  });
+});
+
+// ─── F154: /focus + /ask tests ──────────────────────────────────────────
+describe('F154: /focus command (AC-A1, AC-A3, AC-A6, AC-A7)', () => {
+  let ConnectorCommandLayer;
+  const THREAD_ID = 'thread-focus-test';
+  const CID = 'feishu';
+  const EXT = 'chat-focus';
+  const UID = 'user1';
+
+  const binding = { connectorId: CID, externalChatId: EXT, threadId: THREAD_ID, userId: UID, createdAt: Date.now() };
+
+  before(async () => {
+    // Set up catRegistry with test cats
+    const { catRegistry, CAT_CONFIGS, createCatId } = await import('@cat-cafe/shared');
+    catRegistry.reset();
+    catRegistry.register('opus', { ...CAT_CONFIGS.opus });
+    catRegistry.register('opus-45', {
+      ...CAT_CONFIGS.opus,
+      id: createCatId('opus-45'),
+      name: '布偶猫 Opus 4.5',
+      displayName: '布偶猫 Opus 4.5',
+      nickname: undefined,
+      mentionPatterns: ['@opus-45'],
+    });
+    catRegistry.register('codex', { ...CAT_CONFIGS.codex });
+
+    const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
+    ConnectorCommandLayer = mod.ConnectorCommandLayer;
+  });
+
+  function makeLayer(threadData) {
+    return new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: stubThreadStore(threadData || { id: THREAD_ID, title: 'Focus Test' }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+  }
+
+  it('/focus opus — sets preferredCats to [opus]', async () => {
+    const ts = stubThreadStore({ id: THREAD_ID, title: 'Focus Test' });
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: ts,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/focus opus');
+    assert.equal(result.kind, 'focus');
+    assert.ok(result.response);
+    const thread = await ts.get(THREAD_ID);
+    assert.deepStrictEqual(thread.preferredCats, ['opus']);
+  });
+
+  it('/focus (no args) — shows current preferred cat', async () => {
+    const ts = stubThreadStore({ id: THREAD_ID, title: 'Focus Test', preferredCats: ['codex'] });
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: ts,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/focus');
+    assert.equal(result.kind, 'focus');
+    assert.ok(
+      result.response.includes('codex') || result.response.includes('缅因'),
+      `should mention codex, got: ${result.response}`,
+    );
+  });
+
+  it('/focus (no args, no preferred) — shows no preferred cat', async () => {
+    const layer = makeLayer();
+    const result = await layer.handle(CID, EXT, UID, '/focus');
+    assert.equal(result.kind, 'focus');
+    // Should indicate no preferred cat is set
+    assert.ok(result.response);
+  });
+
+  it('/focus clear — clears preferredCats', async () => {
+    const ts = stubThreadStore({ id: THREAD_ID, title: 'Focus Test', preferredCats: ['opus'] });
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: ts,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/focus clear');
+    assert.equal(result.kind, 'focus');
+    const thread = await ts.get(THREAD_ID);
+    assert.equal(thread.preferredCats, undefined);
+  });
+
+  it('/focus unknown — returns not-found error', async () => {
+    const layer = makeLayer();
+    const result = await layer.handle(CID, EXT, UID, '/focus nonexistent');
+    assert.equal(result.kind, 'focus');
+    assert.ok(
+      result.response.includes('找不到') || result.response.includes('not found'),
+      `should indicate not found, got: ${result.response}`,
+    );
+  });
+
+  it('/focus ambiguous — returns candidates (AC-A7)', async () => {
+    const layer = makeLayer();
+    const result = await layer.handle(CID, EXT, UID, '/focus 猫');
+    assert.equal(result.kind, 'focus');
+    assert.ok(result.response.includes('opus'), `should list opus candidate, got: ${result.response}`);
+    assert.ok(result.response.includes('codex'), `should list codex candidate, got: ${result.response}`);
+  });
+
+  it('/focus with no binding — returns error', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(null),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/focus opus');
+    assert.equal(result.kind, 'focus');
+    assert.ok(result.response);
+  });
+});
+
+describe('F154: /ask command (AC-A2, AC-A5, AC-A6)', () => {
+  let ConnectorCommandLayer;
+  const THREAD_ID = 'thread-ask-test';
+  const CID = 'feishu';
+  const EXT = 'chat-ask';
+  const UID = 'user1';
+
+  const binding = { connectorId: CID, externalChatId: EXT, threadId: THREAD_ID, userId: UID, createdAt: Date.now() };
+
+  before(async () => {
+    const { catRegistry, CAT_CONFIGS, createCatId } = await import('@cat-cafe/shared');
+    catRegistry.reset();
+    catRegistry.register('opus', { ...CAT_CONFIGS.opus });
+    catRegistry.register('codex', { ...CAT_CONFIGS.codex });
+
+    const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
+    ConnectorCommandLayer = mod.ConnectorCommandLayer;
+  });
+
+  it('/ask opus 帮我看代码 — returns ask result with forwardContent', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: stubThreadStore({ id: THREAD_ID, title: 'Ask Test' }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/ask opus 帮我看代码');
+    assert.equal(result.kind, 'ask');
+    assert.equal(result.targetCatId, 'opus');
+    assert.equal(result.forwardContent, '帮我看代码');
+    assert.ok(result.response);
+  });
+
+  it('/ask (no args) — returns usage hint', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: stubThreadStore({ id: THREAD_ID, title: 'Ask Test' }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/ask');
+    assert.equal(result.kind, 'ask');
+    assert.ok(result.response.includes('/ask'), `should show usage, got: ${result.response}`);
+  });
+
+  it('/ask unknown 消息 — returns not-found error', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: stubThreadStore({ id: THREAD_ID, title: 'Ask Test' }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/ask nonexistent hello');
+    assert.equal(result.kind, 'ask');
+    assert.ok(result.response.includes('找不到') || result.response.includes('not found'));
+    assert.equal(result.forwardContent, undefined);
+  });
+
+  it('/ask does NOT modify preferredCats', async () => {
+    const ts = stubThreadStore({ id: THREAD_ID, title: 'Ask Test', preferredCats: ['codex'] });
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: ts,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    await layer.handle(CID, EXT, UID, '/ask opus hello');
+    const thread = await ts.get(THREAD_ID);
+    assert.deepStrictEqual(thread.preferredCats, ['codex'], 'preferredCats must not change');
+  });
+
+  it('/ask with multi-word message preserves full message', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: stubThreadStore({ id: THREAD_ID, title: 'Ask Test' }),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/ask opus 帮我看一下这段代码 有没有问题');
+    assert.equal(result.kind, 'ask');
+    assert.equal(result.forwardContent, '帮我看一下这段代码 有没有问题');
+  });
+
+  it('/ask with no binding — returns error (P1-2 fix)', async () => {
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(null),
+      threadStore: stubThreadStore(),
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    const result = await layer.handle(CID, EXT, UID, '/ask opus hello');
+    assert.equal(result.kind, 'ask');
+    assert.equal(result.forwardContent, undefined, 'should NOT have forwardContent when no binding');
+    assert.ok(result.response, 'should have error response');
+  });
+});
+
+describe('F154: /focus + /ask with commandRegistry (P1/P2 regression)', () => {
+  let ConnectorCommandLayer;
+  let CommandRegistry;
+  let CORE_COMMANDS;
+  const THREAD_ID = 'thread-registry-test';
+  const CID = 'feishu';
+  const EXT = 'chat-reg';
+  const UID = 'user1';
+  const binding = { connectorId: CID, externalChatId: EXT, threadId: THREAD_ID, userId: UID, createdAt: Date.now() };
+
+  before(async () => {
+    const shared = await import('@cat-cafe/shared');
+    shared.catRegistry.reset();
+    shared.catRegistry.register('opus', { ...shared.CAT_CONFIGS.opus });
+    shared.catRegistry.register('codex', { ...shared.CAT_CONFIGS.codex });
+    CORE_COMMANDS = shared.CORE_COMMANDS;
+
+    const mod = await import('../dist/infrastructure/connectors/ConnectorCommandLayer.js');
+    ConnectorCommandLayer = mod.ConnectorCommandLayer;
+    const regMod = await import('../dist/infrastructure/commands/CommandRegistry.js');
+    CommandRegistry = regMod.CommandRegistry;
+  });
+
+  function makeLayerWithRegistry(threadData) {
+    const registry = new CommandRegistry(CORE_COMMANDS);
+    return new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: stubThreadStore(threadData || { id: THREAD_ID, title: 'Registry Test' }),
+      frontendBaseUrl: 'https://cafe.example.com',
+      commandRegistry: registry,
+    });
+  }
+
+  it('/focus clear with registry — actually clears preferredCats (P1-1)', async () => {
+    const ts = stubThreadStore({ id: THREAD_ID, title: 'Registry Test', preferredCats: ['opus'] });
+    const registry = new CommandRegistry(CORE_COMMANDS);
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: ts,
+      frontendBaseUrl: 'https://cafe.example.com',
+      commandRegistry: registry,
+    });
+    const result = await layer.handle(CID, EXT, UID, '/focus clear');
+    assert.equal(result.kind, 'focus');
+    const thread = await ts.get(THREAD_ID);
+    assert.equal(thread.preferredCats, undefined, 'preferredCats must be cleared');
+  });
+
+  it('/focus opus with registry — sets preferredCats', async () => {
+    const ts = stubThreadStore({ id: THREAD_ID, title: 'Registry Test' });
+    const registry = new CommandRegistry(CORE_COMMANDS);
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: ts,
+      frontendBaseUrl: 'https://cafe.example.com',
+      commandRegistry: registry,
+    });
+    const result = await layer.handle(CID, EXT, UID, '/focus opus');
+    assert.equal(result.kind, 'focus');
+    const thread = await ts.get(THREAD_ID);
+    assert.deepStrictEqual(thread.preferredCats, ['opus']);
+  });
+
+  it('/ask opus hello with registry — returns forwardContent', async () => {
+    const layer = makeLayerWithRegistry();
+    const result = await layer.handle(CID, EXT, UID, '/ask opus hello');
+    assert.equal(result.kind, 'ask');
+    assert.equal(result.targetCatId, 'opus');
+    assert.equal(result.forwardContent, 'hello');
+  });
+
+  it('/focus updatePreferredCats is awaited (P1-3)', async () => {
+    let asyncCallCompleted = false;
+    const ts = stubThreadStore({ id: THREAD_ID, title: 'Await Test' });
+    const origUpdate = ts.updatePreferredCats.bind(ts);
+    ts.updatePreferredCats = async (threadId, catIds) => {
+      await new Promise((r) => setTimeout(r, 5));
+      origUpdate(threadId, catIds);
+      asyncCallCompleted = true;
+    };
+    const layer = new ConnectorCommandLayer({
+      bindingStore: stubStore(binding),
+      threadStore: ts,
+      frontendBaseUrl: 'https://cafe.example.com',
+    });
+    await layer.handle(CID, EXT, UID, '/focus opus');
+    assert.equal(asyncCallCompleted, true, 'updatePreferredCats must be awaited before returning');
   });
 });

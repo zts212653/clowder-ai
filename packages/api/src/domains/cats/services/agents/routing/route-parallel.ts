@@ -27,6 +27,7 @@ import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
+import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
@@ -113,6 +114,12 @@ export async function* routeParallel(
       /* best-effort */
     }
   }
+
+  // F148 OQ-2: briefing→invocation link per cat (must be before Promise.all — TDZ fix)
+  const catBriefingMessageId = new Map<string, string>();
+  // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
+  const catToolNames = new Map<string, string[]>();
+  const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
 
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
@@ -241,6 +248,8 @@ export async function* routeParallel(
           const briefingInput = buildBriefingMessage(inc.coverageMap, threadId, inc.briefingContext);
           try {
             const stored = await deps.messageStore.append(briefingInput);
+            catBriefingMessageId.set(catId, stored.id);
+            catCoverageMap.set(catId, inc.coverageMap);
             // P1-3: Include full stored message in payload so frontend can addMessage directly
             degradationMsgs.push({
               type: 'system_info' as AgentMessageType,
@@ -433,6 +442,13 @@ export async function* routeParallel(
       catToolEvents.set(msg.catId, arr);
     }
 
+    // F148 OQ-2: Collect tool names for context eval
+    if (msg.type === 'tool_use' && msg.toolName && msg.catId) {
+      const names = catToolNames.get(msg.catId) ?? [];
+      names.push(msg.toolName);
+      catToolNames.set(msg.catId, names);
+    }
+
     // F150: Fire-and-forget tool usage counter
     if (msg.type === 'tool_use' && deps.toolUsageCounter && msg.catId) {
       deps.toolUsageCounter.recordToolUse(
@@ -513,6 +529,30 @@ export async function* routeParallel(
 
     if (msg.type === 'done' && msg.catId) {
       completedCount++;
+
+      // F148 OQ-2: Log briefing→invocation link + context eval signals
+      const doneBriefingId = catBriefingMessageId.get(msg.catId);
+      const doneInvId = catInvocationId.get(msg.catId);
+      if (doneBriefingId && doneInvId) {
+        const doneCoverage = catCoverageMap.get(msg.catId);
+        const evalSignals = doneCoverage
+          ? extractContextEvalSignals({
+              coverageMap: doneCoverage,
+              toolNames: catToolNames.get(msg.catId) ?? [],
+              responseTokenEstimate: estimateTokens(catText.get(msg.catId) ?? ''),
+            })
+          : undefined;
+        log.info({
+          f148: 'briefing-invocation-link',
+          briefingMessageId: doneBriefingId,
+          invocationId: doneInvId,
+          catId: msg.catId,
+          threadId,
+          hadError: catHadProviderError.has(msg.catId),
+          ...(evalSignals ? { eval: evalSignals } : {}),
+        });
+      }
+
       // F22: Consume MCP-buffered rich blocks BEFORE text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
       const ownInvId = catInvocationId.get(msg.catId);

@@ -814,7 +814,7 @@ Hub 里新增一个"知识动态"页面，集中展示所有从 thread 对话中
 
 🟡 [lesson] embedding 不能偷懒用 in-process CPU
    来源：team lead"你这实现我拒绝" · LL-034
-   置信度：explicit → 已自动写入 docs/lessons-learned.md ✓
+   置信度：explicit → 已自动写入 docs/public-lessons.md ✓
    [撤回] [编辑]
 
 🟢 [method] 让模型说人话程序加格式

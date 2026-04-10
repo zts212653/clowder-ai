@@ -8,7 +8,7 @@ created: 2026-03-04
 
 # F056: Cat Café 设计语言 — 猫猫化不是猫化
 
-> **Status**: doing | **Owner**: Maine Coon/GPT-5.2 主导设计执行 + Ragdoll工程架构 + Siamese概念方向
+> **Status**: doing | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向
 > **Priority**: P1
 > **Evolved from**: F051（猫粮看板猫爪导航概念）、F052 Phase C（跨线程气泡设计打样）
 
@@ -98,6 +98,9 @@ Maine Coon发散了 5 个方向后收敛为一套：
 2. **灵动细节 (Living Details)** — 微交互有生命感，但有上限机制（KD-7）
 3. **猫咖隐喻 (Cafe Metaphors)** — 可解释的隐喻（邮戳/肉垫/香气），不堆砌猫 emoji
 4. **温润色彩 (Cozy Palette)** — 奶油白/软蓝/暖棕，single accent discipline
+
+**实践规则**（F154 事故后补充）：
+- **在地设计 (Design in Context)** — 新交互必须先放回真实页面结构中验证。先看现场，再决定放哪里、替代什么、会不会挤、对现有效率是增益还是负担。猫咖感来自"和环境自然相处"，不是把新元素硬塞进每个角落。
 
 **三猫打样竞赛结果**（team lead评选）：
 

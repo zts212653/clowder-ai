@@ -8,10 +8,17 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { resolve } from 'node:path';
+import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
 import { configStore } from '../config/ConfigStore.js';
+import {
+  clearRuntimeDefaultCatId,
+  getDefaultCatId,
+  hasRuntimeDefaultCatOverride,
+  setRuntimeDefaultCatId,
+} from '../config/cat-config-loader.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import type { ConfigSnapshot } from '../config/config-snapshot.js';
 import {
@@ -343,5 +350,50 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     }
 
     return { ok: true, envFilePath, summary: buildEnvSummary() };
+  });
+
+  // ── F154 AC-A4: Default cat runtime override (owner-gated) ──────────
+
+  app.get('/api/config/default-cat', async () => ({
+    catId: getDefaultCatId(),
+    isOverride: hasRuntimeDefaultCatOverride(),
+  }));
+
+  const defaultCatPutSchema = z.object({
+    catId: z.string().min(1).nullable(),
+  });
+
+  app.put('/api/config/default-cat', async (request: FastifyRequest, reply: FastifyReply) => {
+    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    if (!operator) {
+      reply.status(400);
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+
+    const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
+    if (!ownerId || operator !== ownerId) {
+      reply.status(403);
+      return { error: 'Only the owner can change the default cat' };
+    }
+
+    const parsed = defaultCatPutSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+
+    if (parsed.data.catId === null) {
+      clearRuntimeDefaultCatId();
+      return { ok: true, catId: getDefaultCatId(), isOverride: false };
+    }
+
+    // Validate catId is registered
+    if (!catRegistry.has(parsed.data.catId)) {
+      reply.status(400);
+      return { error: `Unknown catId: ${parsed.data.catId}` };
+    }
+
+    setRuntimeDefaultCatId(parsed.data.catId);
+    return { ok: true, catId: parsed.data.catId, isOverride: true };
   });
 }

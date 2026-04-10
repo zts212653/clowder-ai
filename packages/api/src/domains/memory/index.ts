@@ -1,10 +1,13 @@
 // F102: Memory domain barrel export
 
+// F152 Phase A: Scanners
+export { CatCafeScanner } from './CatCafeScanner.js';
 // Phase C: embedding + vector
 export { EmbeddingService } from './EmbeddingService.js';
 export type { MemoryConfig, MemoryServices } from './factory.js';
 // Factory
 export { createMemoryServices } from './factory.js';
+export { GenericRepoScanner } from './GenericRepoScanner.js';
 export { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
 export type { MessageListFn, StoredMessageSnapshot } from './IndexBuilder.js';
 export { IndexBuilder } from './IndexBuilder.js';
@@ -29,8 +32,12 @@ export type {
   MarkerFilter,
   MarkerStatus,
   MaterializeResult,
+  Provenance,
+  ProvenanceTier,
   RebuildResult,
   ReflectionContext,
+  RepoScanner,
+  ScannedEvidence,
   SearchOptions,
 } from './interfaces.js';
 export {
@@ -42,6 +49,7 @@ export {
   IMarkerQueueSymbol,
   IMaterializationServiceSymbol,
   IReflectionServiceSymbol,
+  IRepoScannerSymbol,
   MARKER_STATUSES,
   resolveEmbedConfig,
 } from './interfaces.js';

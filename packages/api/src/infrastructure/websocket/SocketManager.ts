@@ -6,7 +6,7 @@
 import { Server as HttpServer } from 'node:http';
 import { createCatId } from '@cat-cafe/shared';
 import { Server, Socket } from 'socket.io';
-import { resolveFrontendCorsOrigins } from '../../config/frontend-origin.js';
+import { isOriginAllowed, resolveFrontendCorsOrigins } from '../../config/frontend-origin.js';
 import type {
   CancelResult,
   InvocationTracker,
@@ -64,6 +64,25 @@ export class SocketManager {
         origin: corsOrigins,
         credentials: true,
       },
+      // F156: Guard WebSocket upgrades. Socket.IO's `cors` only protects HTTP
+      // long-polling; WebSocket upgrades bypass CORS entirely. This hook is
+      // the real security boundary against cross-site WebSocket hijacking.
+      // Ref: OpenClaw ClawJacked (2026-02), CVE-2026-25253.
+      allowRequest: (req, callback) => {
+        const origin = req.headers.origin;
+        if (!origin) {
+          // No Origin header = non-browser client (curl, MCP, etc.).
+          // In single-user mode this is safe to allow.
+          callback(null, true);
+          return;
+        }
+        if (isOriginAllowed(origin, corsOrigins)) {
+          callback(null, true);
+          return;
+        }
+        log.warn({ origin }, 'WebSocket upgrade rejected: origin not in allowlist');
+        callback('Origin not allowed', false);
+      },
     });
 
     this.setupEventHandlers();
@@ -71,9 +90,10 @@ export class SocketManager {
 
   private setupEventHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
-      const authUserId = typeof socket.handshake.auth?.userId === 'string' ? socket.handshake.auth.userId.trim() : '';
-      const queryUserId = typeof socket.handshake.query.userId === 'string' ? socket.handshake.query.userId.trim() : '';
-      const userId = authUserId || queryUserId || 'anonymous';
+      // F156: Server determines identity — never trust client-supplied userId.
+      // In single-user mode, all connections are 'default-user'.
+      // F077 will replace this with session/cookie-based identity.
+      const userId = 'default-user';
       log.info({ socketId: socket.id, userId }, 'Client connected');
       log.debug(
         {
@@ -86,9 +106,9 @@ export class SocketManager {
       );
 
       // F39: Auto-join user-scoped room for emitToUser (multi-tab support)
-      if (userId !== 'anonymous') {
-        socket.join(`user:${userId}`);
-      }
+      // F156: userId is always 'default-user' in single-user mode (F077 will
+      // derive it from session). Auto-join is unconditional.
+      socket.join(`user:${userId}`);
 
       socket.on('disconnect', () => {
         log.info({ socketId: socket.id }, 'Client disconnected');
@@ -98,6 +118,18 @@ export class SocketManager {
         // Validate room name format — only allow known prefixes
         if (!/^(thread:|worktree:|preview:global$|workspace:global$|user:)/.test(room)) {
           log.warn({ socketId: socket.id, room }, 'Attempted to join invalid room');
+          return;
+        }
+        // F156: Room ACL — user: rooms are identity-scoped
+        if (room.startsWith('user:') && room !== `user:${userId}`) {
+          log.warn({ socketId: socket.id, room, userId }, 'Room ACL denied: cannot join another user room');
+          return;
+        }
+        // F156 B-3: Global rooms carry metadata (file paths, worktreeIds, preview ports).
+        // Require authenticated userId. In single-user mode userId is always set;
+        // F077 will add workspace membership check for multi-user.
+        if ((room === 'workspace:global' || room === 'preview:global') && !userId) {
+          log.warn({ socketId: socket.id, room }, 'Global room requires authentication');
           return;
         }
         socket.join(room);
@@ -130,10 +162,19 @@ export class SocketManager {
           // F108 + F086: Also abort multi-mention dispatches for this specific cat
           this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, data.catId);
         } else {
-          // Backward compat: cancel all slots in thread
-          this.invocationTracker.cancelAll(data.threadId);
-          this.multiMentionOrchestrator?.abortByThread(data.threadId);
-          log.info({ threadId: data.threadId, socketId: socket.id, userId }, 'Cancelled all invocations');
+          // F156: Pass userId to cancelAll so it only cancels this user's invocations.
+          // cancelAll returns the catIds that were actually cancelled, so we can
+          // scope the orchestrator abort to just those cats — not the entire thread.
+          const cancelledCatIds = this.invocationTracker.cancelAll(data.threadId, userId);
+          // F156 P1-fix: Use per-cat abortBySlot instead of thread-wide abortByThread.
+          // abortByThread would kill other users' multi-mention dispatches too.
+          for (const catId of cancelledCatIds) {
+            this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, catId);
+          }
+          log.info(
+            { threadId: data.threadId, socketId: socket.id, userId, cancelledCatIds },
+            'Cancelled all invocations',
+          );
         }
       });
     });
