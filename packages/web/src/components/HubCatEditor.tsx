@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
@@ -562,8 +563,10 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
                       body: JSON.stringify({ catId: value ? cat.id : null }),
                     });
                     if (res.ok) {
-                      setDefaultResponderCatId(value ? cat.id : null);
+                      const newCatId = value ? cat.id : null;
+                      setDefaultResponderCatId(newCatId);
                       setDefaultResponderName(value ? form.displayName || form.name : null);
+                      useChatStore.setState({ defaultResponderCatId: newCatId ?? 'opus' });
                     }
                   }
                 : undefined

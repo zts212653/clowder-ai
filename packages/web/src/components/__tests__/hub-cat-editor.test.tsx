@@ -2651,5 +2651,9 @@ describe('HubCatEditor', () => {
     expect(patchCall).toBeTruthy();
     const patchBody = JSON.parse(String(patchCall?.[1]?.body));
     expect(patchBody.catId).toBeNull();
+
+    // Verify chatStore was synced (P2 fix: shared state update)
+    const { useChatStore } = await import('@/stores/chatStore');
+    expect(useChatStore.getState().defaultResponderCatId).toBe('opus');
   });
 });
