@@ -1127,6 +1127,22 @@ describe('GPT-5.2 variant mention aliases in project config', () => {
       }
     });
 
+    it('falls back when configured cat is deleted from roster (stale ID)', () => {
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      const cfg = validV2Config({ defaultResponderCatId: 'ghost' });
+      // 'ghost' is not in roster at all — simulates a deleted cat
+      const path = writeTempConfig(cfg);
+      process.env.CAT_TEMPLATE_PATH = path;
+      _resetCachedConfig();
+      try {
+        assert.equal(getDefaultResponderCatId(), 'opus');
+      } finally {
+        if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved;
+        _resetCachedConfig();
+      }
+    });
+
     it('falls back to getDefaultCatId when configured cat is unavailable', () => {
       const saved = process.env.CAT_TEMPLATE_PATH;
       const cfg = validV2Config({ defaultResponderCatId: 'sonnet' });

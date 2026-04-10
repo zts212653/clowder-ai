@@ -677,7 +677,8 @@ export function getDefaultResponderCatId(): CatId {
   const config = getCachedConfig();
   if (config?.version === 2) {
     const configured = (config as CatCafeConfigV2).defaultResponderCatId;
-    if (configured && isCatAvailable(configured, config)) return createCatId(configured);
+    const roster = getRoster(config);
+    if (configured && configured in roster && isCatAvailable(configured, config)) return createCatId(configured);
   }
   return getDefaultCatId();
 }
