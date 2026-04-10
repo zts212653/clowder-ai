@@ -86,7 +86,7 @@ export const postMessageInputSchema = {
     .array(z.string().min(1))
     .optional()
     .describe(
-      'Optional explicit target cat IDs (e.g. ["codex","gpt52"]). Merged with @mentions parsed from content. Used for direction rendering in frontend.',
+      'Optional explicit target cat IDs. Merged with @mentions parsed from content. Used for direction rendering in frontend. Use get_thread_cats to discover valid catIds.',
     ),
 };
 
@@ -494,7 +494,7 @@ export const updateWorkflowInputSchema = {
     .string()
     .min(1)
     .optional()
-    .describe('Unique handle of the cat currently holding the baton (e.g. "opus", "codex")'),
+    .describe('Unique handle of the cat currently holding the baton (a valid registered catId)'),
   nextSkill: z
     .string()
     .nullable()
@@ -561,7 +561,7 @@ export const multiMentionInputSchema = {
     .array(z.string().min(1))
     .min(1)
     .max(3)
-    .describe('Cat IDs to invoke in parallel (max 3). Example: ["codex","gemini"]'),
+    .describe('Cat IDs to invoke in parallel (max 3). Use get_thread_cats to discover valid catIds.'),
   question: z.string().min(1).max(5000).describe('The question or request for the target cats'),
   callbackTo: z.string().min(1).describe('Cat ID to route all responses back to (required, usually yourself)'),
   context: z.string().max(5000).optional().describe('Additional context to include for the targets'),
@@ -631,7 +631,7 @@ export const startVoteInputSchema = {
     .array(z.string().min(1).max(50))
     .min(1)
     .max(20)
-    .describe('CatIds of voters (e.g. ["opus", "codex", "gemini"])'),
+    .describe('CatIds of voters. Use get_thread_cats to discover valid catIds.'),
   anonymous: z.boolean().optional().describe('Anonymous voting (default: false)'),
   timeoutSec: z.number().int().min(10).max(600).optional().describe('Timeout in seconds (default: 120)'),
 };
@@ -674,7 +674,7 @@ export const updateBootcampStateInputSchema = {
     ])
     .optional()
     .describe('New bootcamp phase to advance to'),
-  leadCat: z.string().optional().describe('Selected lead cat ID (e.g. "opus", "codex", "gemini")'),
+  leadCat: z.string().optional().describe('Selected lead cat ID (a valid registered catId)'),
   selectedTaskId: z.string().max(50).optional().describe('Selected task ID (e.g. "Q1", "Q7")'),
   envCheck: z
     .record(z.object({ ok: z.boolean(), version: z.string().optional(), note: z.string().optional() }))
@@ -714,14 +714,22 @@ export async function handleBootcampEnvCheck(input: { threadId: string }): Promi
   return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId });
 }
 
+// ============ Thread Cats Discovery (TD #408) ============
+
+export const getThreadCatsInputSchema = {};
+
+export async function handleGetThreadCats(): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/thread-cats');
+}
+
 export const callbackTools = [
   {
     name: 'cat_cafe_post_message',
     description:
       'Post a proactive async message to YOUR CURRENT thread mid-task (e.g. progress updates, sharing results). ' +
       'Always posts to the thread your invocation belongs to. To post to a DIFFERENT thread, use cat_cafe_cross_post_message instead. ' +
-      'To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires. ' +
-      'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to inline @mention in your response text. ' +
+      'To hand off to another cat, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route — it is treated as narrative only). ' +
+      'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
       'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
@@ -754,6 +762,15 @@ export const callbackTools = [
     handler: handleGetThreadContext,
   },
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
+  {
+    name: 'cat_cafe_get_thread_cats',
+    description:
+      'Discover which cats are in the current thread: participants (with activity stats), routable cats, and availability. ' +
+      'Use BEFORE multi_mention / start_vote / @mentions to find valid catIds — do NOT guess catIds from memory. ' +
+      'Returns: participants (catId, displayName, lastMessageAt, messageCount), routableNow, routableNotJoined, notRoutable.',
+    inputSchema: getThreadCatsInputSchema,
+    handler: handleGetThreadCats,
+  },
   {
     name: 'cat_cafe_list_threads',
     description:
@@ -878,7 +895,7 @@ export const callbackTools = [
       'Start a voting session in the current thread for collective decision-making ' +
       '(e.g. "REST vs GraphQL?"). Voters receive notification and reply with [VOTE:option]. ' +
       'Auto-closes when all voters have voted or timeout expires (default 120s). ' +
-      'GOTCHA: voters must be valid catIds (e.g. ["opus", "codex", "gemini"]). Options need at least 2 choices.',
+      'GOTCHA: voters must be valid registered catIds (use get_thread_cats to discover them). Options need at least 2 choices.',
     inputSchema: startVoteInputSchema,
     handler: handleStartVote,
   },

@@ -218,7 +218,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 
 **添加国产 / 第三方 provider（Kimi、GLM、MiniMax、Qwen、OpenRouter）：**
 
-这些 provider 以 API key 账号形式配置，需要填写自定义 base URL。详细配置说明（base URL、模型名、协议选择、常见坑）请参阅 **[第三方 AI Provider 配置指南](docs/guides/provider-configuration.md)**。
+这些 provider 以 API key 账号形式配置，需要填写自定义 base URL。在**账号配置** UI 中添加新账号，选择 provider，输入 API key，填入该 provider 的 OpenAI 兼容端点 URL，选择对应协议，点击**测试**验证连通性。
 
 > **兼容模式：** 系统仍会从 `.env` 读取 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GOOGLE_API_KEY` 作为兜底，但这条路径已不推荐。新安装请统一用 UI 配置。
 
@@ -233,6 +233,31 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 ## 可选功能
 
 只要有模型访问 + Redis（或 `--memory` 模式），Clowder 就能开箱即用。以下功能全是可选的。
+
+### 设计工具（Pencil MCP）
+
+设计任务、UI 迭代、截图、设计转代码等工作流需要在编辑器（VS Code、Cursor 或 Antigravity）中安装 [Pencil](https://marketplace.visualstudio.com/items?itemName=highagency.pencildev)。
+
+不装 Pencil：Clowder 照常运行，编码任务不受影响，设计任务退化为纯文本指导。
+
+**自动配置：** 能力编排器会自动检测你的 Pencil 安装，按以下顺序扫描：
+
+1. `PENCIL_MCP_BIN` 环境变量（显式路径 — 最高优先级）
+2. `~/.antigravity/extensions/highagency.pencildev-*/`
+3. `~/.vscode/extensions/highagency.pencildev-*/`
+4. `~/.cursor/extensions/highagency.pencildev-*/`
+5. `~/.vscode-insiders/extensions/highagency.pencildev-*/`
+
+自动选择所有编辑器中最新的版本。当两个编辑器安装了相同版本时，优先选择 Antigravity。
+
+**环境变量覆盖：**
+
+| 变量 | 用途 | 示例 |
+|------|------|------|
+| `PENCIL_MCP_BIN` | 强制指定 Pencil 二进制路径 | `/path/to/mcp-server-darwin-arm64` |
+| `PENCIL_MCP_APP` | 强制连接到指定编辑器 | `vscode`、`antigravity`、`cursor`、`vscode-insiders` |
+
+**诊断：** `pnpm mcp:doctor` 显示 MCP 就绪状态（ready / missing / unresolved）。
 
 ### 语音输入 / 输出
 

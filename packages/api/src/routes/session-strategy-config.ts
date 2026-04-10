@@ -49,13 +49,13 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
       cats.push({
         catId,
         displayName: entry.config.displayName,
-        provider: entry.config.provider,
+        clientId: entry.config.clientId,
         breedId: entry.config.breedId,
         effective,
         source,
         hasOverride: override != null,
         override: override ?? null,
-        hybridCapable: HOOK_CAPABLE_PROVIDERS.has(entry.config.provider),
+        hybridCapable: HOOK_CAPABLE_PROVIDERS.has(entry.config.clientId),
         sessionChainEnabled: isSessionChainEnabled(catId),
       });
     }
@@ -98,12 +98,12 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
     }
 
     // Guard: hybrid requires hook-capable provider
-    if (override.strategy === 'hybrid' && !HOOK_CAPABLE_PROVIDERS.has(entry.config.provider)) {
+    if (override.strategy === 'hybrid' && !HOOK_CAPABLE_PROVIDERS.has(entry.config.clientId)) {
       reply.status(422);
       return {
         error:
           `hybrid strategy requires a hook-capable provider (${[...HOOK_CAPABLE_PROVIDERS].join(', ')}), ` +
-          `but "${catId}" uses provider "${entry.config.provider}"`,
+          `but "${catId}" uses provider "${entry.config.clientId}"`,
       };
     }
 

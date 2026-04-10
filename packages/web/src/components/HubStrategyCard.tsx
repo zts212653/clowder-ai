@@ -101,7 +101,7 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">{entry.displayName}</span>
           <span className="text-[10px] text-cafe-muted font-mono">{entry.catId}</span>
-          <span className="text-[10px] text-cafe-muted">{entry.provider}</span>
+          <span className="text-[10px] text-cafe-muted">{entry.clientId}</span>
         </div>
         {entry.sessionChainEnabled ? (
           <SourceBadge source={entry.source} />
@@ -134,7 +134,7 @@ export function CatStrategyCard({ entry, onSaved }: { entry: CatStrategyEntry; o
             </div>
           )}
           {!entry.hybridCapable && (
-            <div className="text-[10px] text-amber-600">Provider {entry.provider} 不支持 hybrid 策略</div>
+            <div className="text-[10px] text-amber-600">Provider {entry.clientId} 不支持 hybrid 策略</div>
           )}
           <div className="flex gap-2 pt-1">
             <button

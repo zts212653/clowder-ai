@@ -122,15 +122,24 @@ export class InvocationTracker {
     return { cancelled: true, catIds };
   }
 
-  /** Cancel ALL active slots for a thread (e.g., thread deletion). */
-  cancelAll(threadId: string): void {
+  /**
+   * Cancel ALL active slots for a thread.
+   * F156: When requestUserId is provided, only cancels invocations owned by that user.
+   * Without requestUserId, cancels all (system/admin action, e.g. thread deletion).
+   * Returns the catIds that were actually cancelled (for orchestrator scoping).
+   */
+  cancelAll(threadId: string, requestUserId?: string): string[] {
     const prefix = `${threadId}:`;
+    const cancelledCatIds: string[] = [];
     for (const [key, inv] of this.active) {
       if (key.startsWith(prefix)) {
+        if (requestUserId && inv.userId !== requestUserId) continue;
+        cancelledCatIds.push(inv.catId);
         inv.controller.abort();
         this.active.delete(key);
       }
     }
+    return cancelledCatIds;
   }
 
   /** Get the userId who started the invocation for a specific slot. */

@@ -21,9 +21,8 @@ export interface CatData {
   mentionPatterns: string[];
   breedId?: string;
   accountRef?: string;
-  /** Legacy compatibility while older runtime data is migrated. */
-  providerProfileId?: string;
-  provider: string;
+  /** F340 P5: CLI client identity (renamed from provider). */
+  clientId: string;
   defaultModel: string;
   cli?: {
     command?: string;
@@ -33,7 +32,8 @@ export interface CatData {
   };
   commandArgs?: string[];
   cliConfigArgs?: string[];
-  ocProviderName?: string;
+  /** F340 P5: Model provider name (renamed from ocProviderName). */
+  provider?: string;
   contextBudget?: {
     maxPromptTokens: number;
     maxContextTokens: number;
@@ -88,7 +88,7 @@ function buildFallbackCats(): CatData[] {
     color: { primary: c.color.primary, secondary: c.color.secondary },
     mentionPatterns: [...c.mentionPatterns],
     breedId: undefined,
-    provider: c.provider,
+    clientId: c.clientId,
     defaultModel: c.defaultModel,
     avatar: c.avatar,
     roleDescription: c.roleDescription,
@@ -128,8 +128,8 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       displayName: cat.displayName ?? cat.id ?? '',
       color: cat.color ?? { primary: '#000000', secondary: '#ffffff' },
       mentionPatterns: Array.isArray(cat.mentionPatterns) ? cat.mentionPatterns : [],
-      accountRef: cat.accountRef ?? cat.providerProfileId,
-      provider: cat.provider ?? 'openai',
+      accountRef: cat.accountRef,
+      clientId: cat.clientId ?? 'openai',
       defaultModel: cat.defaultModel ?? '',
       cli: cat.cli,
       avatar: cat.avatar ?? '',

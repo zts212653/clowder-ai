@@ -61,6 +61,12 @@ created: 2026-03-04
 - 不改 thread participation 逻辑
 - 不做 7B 意图识别（成本高、CJK 准确率不够、双通道已够兜底）
 
+### 相关改进（#417）
+
+- 协议明确区分：inline `@xx` = semantic only，line-start `@xx` = actionable handoff
+- `callback-tools.ts` post_message 描述已统一为"行首 @猫名"，避免误导
+- `detectInlineActionMentions()` 补上 write-side feedback，句中 action-like @ 不再静默丢弃
+
 ---
 
 ## Acceptance Criteria

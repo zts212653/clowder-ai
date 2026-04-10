@@ -339,7 +339,7 @@
     {
       "id": "F056",
       "name": "Cat Café 设计语言 — 猫猫化不是猫化",
-      "status": "doing | **Owner**: Maine Coon/GPT-5.2 主导设计执行 + Ragdoll工程架构 + Siamese概念方向",
+      "status": "doing | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向",
       "file": "F056-cat-cafe-design-language.md"
     },
     {
@@ -807,7 +807,7 @@
     {
       "id": "F132",
       "name": "DingTalk + WeCom Chat Gateway — 钉钉/企微接入",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Completed**: 2026-04-09 | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F132-dingtalk-wecom-gateway.md"
     },
     {
@@ -927,9 +927,39 @@
     {
       "id": "F152",
       "name": "Expedition Memory — 外部项目记忆冷启动 + 经验回流",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F152-expedition-memory.md"
+    },
+    {
+      "id": "F153",
+      "name": "Observability Infrastructure — 运行时可观测基础设施",
+      "status": "spec | **Owner**: Community (PR author) + Ragdoll | **Priority**: P2",
+      "file": "F153-observability-infra.md"
+    },
+    {
+      "id": "F154",
+      "name": "Cat Routing Personalization — 全局默认猫 + 首选猫入口 + 单次定向",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P2",
+      "file": "F154-cat-routing-personalization.md"
+    },
+    {
+      "id": "F155",
+      "name": "Scene-Based Guidance Engine — 场景式交互引导",
+      "status": "needs-discussion | **Source**: Community (mindfn) | **Priority**: TBD",
+      "file": "F155-scene-guidance-engine.md"
+    },
+    {
+      "id": "F156",
+      "name": "Security Hardening — 实时通道 + 本机信任边界加固",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P0",
+      "file": "F156-websocket-security-hardening.md"
+    },
+    {
+      "id": "F157",
+      "name": "Feishu Receipt Ack — 猫猫即时接住替代\"思考中→撤回\"",
+      "status": "done | **Completed**: 2026-04-10 | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F157-feishu-receipt-ack.md"
     }
   ],
-  "generated_at": "2026-04-09T04:33:26.998Z"
+  "generated_at": "2026-04-10T11:52:59.639Z"
 }

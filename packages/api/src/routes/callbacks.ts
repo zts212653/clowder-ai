@@ -38,6 +38,7 @@ import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
+import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
 import { detectUserMention } from './user-mention.js';
@@ -51,8 +52,10 @@ export interface CallbackRoutesOptions {
   socketManager: SocketManager;
   taskStore?: ITaskStore;
   backlogStore?: IBacklogStore;
-  /** For thinking mode filtering in thread-context */
+  /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
+  /** TD #408: AgentRegistry for thread-cats MCP callback */
+  agentRegistry?: { getAllEntries(): Map<string, unknown> };
   /** For post_message @mention → invocation triggering */
   router?: AgentRouter;
   invocationRecordStore?: IInvocationRecordStore;
@@ -1296,6 +1299,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   // F087: Bootcamp state transition callbacks
   if (opts.threadStore) {
     registerCallbackBootcampRoutes(app, { registry, threadStore: opts.threadStore });
+  }
+
+  // TD #408: Thread cats discovery for MCP
+  if (opts.threadStore && opts.agentRegistry) {
+    registerCallbackThreadCatsRoutes(app, {
+      registry,
+      threadStore: opts.threadStore,
+      agentRegistry: opts.agentRegistry,
+    });
   }
 
   await registerCallbackMemoryRoutes(app, {

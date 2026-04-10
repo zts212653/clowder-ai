@@ -45,8 +45,8 @@ describe('F099 Hub navigation', () => {
       expect(group?.id).toBe('cats');
     });
 
-    it('finds settings group for "provider-profiles"', () => {
-      const group = findGroupForTab('provider-profiles');
+    it('finds settings group for "accounts"', () => {
+      const group = findGroupForTab('accounts');
       expect(group).toBeDefined();
       expect(group?.id).toBe('settings');
     });

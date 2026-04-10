@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 // Phase C: embedding metadata (model/dim version anchor)
 export const SCHEMA_V2 = `
@@ -311,6 +311,22 @@ export function applyMigrations(db: Database.Database): void {
     `);
 
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(9, new Date().toISOString());
+  }
+
+  if (currentVersion < 10) {
+    // F152 Phase A: provenance tracking for scanner-produced evidence
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN provenance_tier TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN provenance_source TEXT');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_evidence_docs_provenance ON evidence_docs(provenance_tier)');
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString());
   }
 }
 

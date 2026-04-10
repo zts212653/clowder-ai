@@ -226,8 +226,8 @@ export class RedisMessageStore {
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
       ...(data._tombstone === '1' ? { _tombstone: true as const } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
-      ...(data.origin === 'stream' || data.origin === 'callback'
-        ? { origin: data.origin as 'stream' | 'callback' }
+      ...(data.origin === 'stream' || data.origin === 'callback' || data.origin === 'briefing'
+        ? { origin: data.origin as 'stream' | 'callback' | 'briefing' }
         : {}),
       ...(data.visibility === 'whisper' ? { visibility: 'whisper' as const } : {}),
       ...(data.whisperTo ? { whisperTo: safeParseMentions(data.whisperTo) } : {}),
@@ -832,7 +832,9 @@ export class RedisMessageStore {
         ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
         ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
         ...(d.thinking ? { thinking: d.thinking } : {}),
-        ...(d.origin === 'stream' || d.origin === 'callback' ? { origin: d.origin as 'stream' | 'callback' } : {}),
+        ...(d.origin === 'stream' || d.origin === 'callback' || d.origin === 'briefing'
+          ? { origin: d.origin as 'stream' | 'callback' | 'briefing' }
+          : {}),
         ...(d.visibility === 'whisper' ? { visibility: 'whisper' as const } : {}),
         ...(d.whisperTo ? { whisperTo: safeParseMentions(d.whisperTo) } : {}),
         ...(d.revealedAt ? { revealedAt: parseInt(d.revealedAt, 10) } : {}),

@@ -10,3 +10,5 @@ export {
 } from './CatRegistry.js';
 
 export { catIdSchema } from './cat-id-schema.js';
+
+export { type NormalizeCatResult, normalizeCatId } from './normalize-cat-id.js';

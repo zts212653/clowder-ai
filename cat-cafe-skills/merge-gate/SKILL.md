@@ -124,7 +124,16 @@ gh pr merge {PR_NUMBER} --squash --delete-branch
 # 7.5 Phase 文档同步（每次 merge 必做！）🔴
 # → 见下方「Phase 文档同步」章节
 
-# 8. 更新本地 + 清理
+# 8. 更新本地 + 清理（fail-closed）
+# ⚠️ 发现脏工作树就停止，不要“即兴”用 git stash -u 清理。
+# 原因：git stash -u/--include-untracked 会删除 untracked 文件（内部 git clean），
+# 在多 session 共享工作目录时可能导致其他 session 的未 commit 产出丢失。
+if [ -n "$(git status --porcelain)" ]; then
+  echo "❌ 工作树不干净，停止 merge-gate（fail-closed）"
+  echo "请先处理改动后再继续。禁止使用 git stash -u/--include-untracked。"
+  git status --short
+  exit 1
+fi
 git checkout main && git pull origin main
 git worktree remove ../cat-cafe-{feature-name}
 git branch -d {branch-name} && git worktree prune

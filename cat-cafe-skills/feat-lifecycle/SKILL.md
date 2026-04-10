@@ -123,6 +123,9 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
 详见 `shared-rules.md` §13 元思考触发器。先搜现状，再开讨论。
 
+**在地设计检查 (Design in Context) 🔴**：
+凡是改动或往已有页面/组件添加新 UI 元素，必须逐项过 `cat-cafe-skills/refs/design-in-context-checklist.md`。禁止在真空中凭想象画已有页面的布局。
+
 **流程**：
 1. 判断功能类型 → 选择确认路径
 2. 前端：画 wireframe（Pencil / 文字版 ASCII）→ 发铲屎官 → 等 OK

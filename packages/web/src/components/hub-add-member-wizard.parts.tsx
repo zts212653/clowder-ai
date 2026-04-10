@@ -1,9 +1,9 @@
 'use client';
 
-import { CLIENT_OPTIONS, type ClientValue } from './hub-cat-editor.model';
+import { CLIENT_OPTIONS, type ClientId } from './hub-cat-editor.model';
 
-export const CLIENT_ROW_1: ClientValue[] = ['anthropic', 'openai', 'google', 'kimi'];
-export const CLIENT_ROW_2: ClientValue[] = ['opencode', 'dare', 'antigravity'];
+export const CLIENT_ROW_1: ClientId[] = ['anthropic', 'openai', 'google', 'kimi'];
+export const CLIENT_ROW_2: ClientId[] = ['opencode', 'dare', 'antigravity'];
 export const FALLBACK_ANTIGRAVITY_ARGS = '. --remote-debugging-port=9000';
 export const FALLBACK_ANTIGRAVITY_MODELS = ['gemini-3.1-pro', 'claude-opus-4-6'] as const;
 
@@ -40,7 +40,7 @@ function cardClass(selected: boolean, client?: ClientValue) {
   return 'border-[#D49266] bg-[#F7EEE6] text-[#D49266] shadow-sm';
 }
 
-export function clientLabel(client: ClientValue) {
+export function clientLabel(client: ClientId) {
   return CLIENT_OPTIONS.find((option) => option.value === client)?.label ?? client;
 }
 

@@ -527,6 +527,88 @@ describe('resolvePencilCommand', () => {
     assert.ok(resolved.command.includes('.vscode/extensions'));
     assert.deepEqual(resolved.args, ['--app', 'vscode']);
   });
+
+  it('prefers Antigravity over VS Code when both have the same version', async () => {
+    const antigravityDir = join(dir, 'ag');
+    const vscodeDir = join(dir, 'vsc');
+    // Both have 0.6.40 — Antigravity as -universal suffix, VS Code without
+    await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', 'out'), { recursive: true });
+    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX), '');
+    await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
+    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+
+    const resolved = await resolvePencilCommand({
+      antigravityDir,
+      vscodeDir,
+      cursorDir: join(dir, 'cursor-empty'),
+      vscodeInsidersDir: join(dir, 'insiders-empty'),
+    });
+
+    assert.ok(resolved);
+    assert.ok(resolved.command.includes('ag'), `expected Antigravity path, got: ${resolved.command}`);
+    assert.deepEqual(resolved.args, ['--app', 'antigravity']);
+  });
+
+  it('respects PENCIL_MCP_APP env to filter candidates (without PENCIL_MCP_BIN)', async () => {
+    const antigravityDir = join(dir, 'ag');
+    const vscodeDir = join(dir, 'vsc');
+    // Antigravity has older version, VS Code has newer — but env says prefer antigravity
+    await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.39-universal', 'out'), { recursive: true });
+    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.39-universal', PENCIL_BINARY_SUFFIX), '');
+    await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
+    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+
+    const resolved = await resolvePencilCommand({
+      env: { PENCIL_MCP_APP: 'antigravity' },
+      antigravityDir,
+      vscodeDir,
+      cursorDir: join(dir, 'cursor-empty'),
+      vscodeInsidersDir: join(dir, 'insiders-empty'),
+    });
+
+    assert.ok(resolved);
+    assert.ok(resolved.command.includes('ag'), `expected Antigravity path, got: ${resolved.command}`);
+    assert.deepEqual(resolved.args, ['--app', 'antigravity']);
+  });
+
+  it('normalizes PENCIL_MCP_APP aliases (vscode-insiders → vscode)', async () => {
+    const antigravityDir = join(dir, 'ag');
+    const vscodeDir = join(dir, 'vsc');
+    // Both have same version — env says vscode-insiders (alias for vscode)
+    await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', 'out'), { recursive: true });
+    await writeFile(join(antigravityDir, 'highagency.pencildev-0.6.40-universal', PENCIL_BINARY_SUFFIX), '');
+    await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
+    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+
+    const resolved = await resolvePencilCommand({
+      env: { PENCIL_MCP_APP: 'vscode-insiders' },
+      antigravityDir,
+      vscodeDir,
+      cursorDir: join(dir, 'cursor-empty'),
+      vscodeInsidersDir: join(dir, 'insiders-empty'),
+    });
+
+    assert.ok(resolved);
+    assert.ok(resolved.command.includes('vsc'), `expected VS Code path, got: ${resolved.command}`);
+    assert.deepEqual(resolved.args, ['--app', 'vscode']);
+  });
+
+  it('PENCIL_MCP_APP falls back to any candidate if preferred app has no installations', async () => {
+    const vscodeDir = join(dir, 'vsc');
+    await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.40', 'out'), { recursive: true });
+    await writeFile(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX), '');
+
+    const resolved = await resolvePencilCommand({
+      env: { PENCIL_MCP_APP: 'antigravity' },
+      antigravityDir: join(dir, 'ag-empty'),
+      vscodeDir,
+      cursorDir: join(dir, 'cursor-empty'),
+      vscodeInsidersDir: join(dir, 'insiders-empty'),
+    });
+
+    assert.ok(resolved, 'should fall back to VS Code when Antigravity is empty');
+    assert.deepEqual(resolved.args, ['--app', 'vscode']);
+  });
 });
 
 describe('buildCatCafeMcpDescriptor', () => {
@@ -1119,7 +1201,7 @@ describe('generateCliConfigs', () => {
   it('removes managed commandless entries from Gemini settings', async () => {
     const hasGoogleCat = catRegistry.getAllIds().some((id) => {
       const entry = catRegistry.tryGet(id);
-      return entry?.config.provider === 'google';
+      return entry?.config.clientId === 'google';
     });
     if (!hasGoogleCat) return;
 

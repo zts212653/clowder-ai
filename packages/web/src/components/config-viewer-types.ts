@@ -11,7 +11,7 @@ export interface CoCreatorConfig {
 
 export interface CatConfig {
   displayName: string;
-  provider: string;
+  clientId: string;
   model: string;
   mcpSupport: boolean;
 }

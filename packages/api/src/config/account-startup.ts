@@ -1,74 +1,50 @@
 /**
- * F136 Phase 4a — Startup hook: migration + conflict scan + invariant guard
+ * F340 — Account startup hook (fail-fast contract)
  *
- * HC-3: Run one-time migration from provider-profiles → accounts + credentials.
- * HC-5: Scan all known project roots for accountRef conflicts.
- * LL-043: Startup invariant — legacy source present + accounts missing → hard error.
- *
- * Called once after the API server binds its port.
+ * Triggers migration, verifies accounts + credentials are readable,
+ * and enforces LL-043: legacy source present + no accounts = hard error.
  */
-import { type AccountConflict, detectAccountConflicts } from './account-conflict-guard.js';
-import { readCatalogAccounts } from './catalog-accounts.js';
-import {
-  hasLegacyProviderProfiles,
-  type MigrationResult,
-  migrateProviderProfilesToAccounts,
-} from './migrate-provider-profiles.js';
+import { hasLegacyProviderProfiles, readCatalogAccounts } from './catalog-accounts.js';
+import { assertCredentialsReadable } from './credentials.js';
 
 export interface AccountStartupResult {
-  migration: MigrationResult;
-  conflicts: AccountConflict[];
+  accountCount: number;
 }
 
 /**
- * Run migration + conflict detection + invariant check at startup.
- * HC-5: Throws on conflict — caller must NOT swallow the error.
- * LL-043: Throws if legacy source exists but accounts are missing after migration.
+ * Startup check — trigger migration and verify system health.
+ * Throws on: migration conflict, corrupt accounts/credentials, LL-043 invariant.
  */
 export function accountStartupHook(projectRoot: string): AccountStartupResult {
-  let migration: MigrationResult;
+  // readCatalogAccounts triggers ensureMigrated → may throw on account conflicts
+  let accounts: Record<string, unknown>;
   try {
-    migration = migrateProviderProfilesToAccounts(projectRoot);
+    accounts = readCatalogAccounts(projectRoot);
   } catch (err) {
-    // If legacy source exists and migration threw (e.g. corrupted catalog JSON),
-    // wrap as LL-043 so index.ts propagates it as a hard error instead of best-effort.
-    if (hasLegacyProviderProfiles()) {
+    // Wrap with context if legacy source exists (LL-043: migration failed)
+    if (hasLegacyProviderProfiles(projectRoot)) {
       throw new Error(
-        `F136 LL-043: migration failed while legacy provider-profiles.json exists. ` +
-          `Catalog may be corrupted. Original error: ${err instanceof Error ? err.message : String(err)}`,
+        `F340 LL-043: account read/migration failed while legacy provider-profiles.json exists. ` +
+          `Original: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     throw err;
   }
 
-  const conflicts = detectAccountConflicts(projectRoot);
-
-  // HC-5: Cross-project conflict is a hard error — refuse to start with mismatched credentials.
-  if (conflicts.length > 0) {
-    const details = conflicts.map((c) => `"${c.accountRef}": ${c.details} (${c.projects.join(' vs ')})`).join('; ');
-    throw new Error(`F136 HC-5: account conflict detected at startup — ${details}`);
+  // Verify credentials file is readable (fail-fast on corrupt JSON)
+  try {
+    assertCredentialsReadable(projectRoot);
+  } catch (err) {
+    throw new Error(`F340 startup: credentials read failed — ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // LL-043: Startup invariant — legacy source present but accounts missing = migration failed silently.
-  // This prevents the server from running with an empty accounts page when old data exists.
-  if (hasLegacyProviderProfiles()) {
-    let accounts: Record<string, unknown>;
-    try {
-      accounts = readCatalogAccounts(projectRoot);
-    } catch (err) {
-      // Catalog read failed (e.g. corrupted JSON) — same LL-043 treatment.
-      throw new Error(
-        `F136 LL-043: cannot read catalog accounts while legacy provider-profiles.json exists. ` +
-          `Catalog may be corrupted. Original error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (Object.keys(accounts).length === 0) {
-      throw new Error(
-        'F136 LL-043: legacy provider-profiles.json exists but catalog has no accounts after migration. ' +
-          'Migration may have failed silently. Check migration logs and retry.',
-      );
-    }
+  // LL-043: Legacy source present but no accounts after migration = silent failure
+  if (hasLegacyProviderProfiles(projectRoot) && Object.keys(accounts).length === 0) {
+    throw new Error(
+      'F340 LL-043: legacy provider-profiles.json exists but no accounts after migration. ' +
+        'Migration may have failed silently. Check migration logs.',
+    );
   }
 
-  return { migration, conflicts };
+  return { accountCount: Object.keys(accounts).length };
 }

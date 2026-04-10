@@ -128,6 +128,27 @@ test('Windows command forwarding helpers avoid PowerShell automatic $args collis
   assert.doesNotMatch(helpersScript, /\$args = @\("claude-profile", "set"/);
 });
 
+test('Windows OAuth helpers do not force-remove global installer accounts before set', () => {
+  const codexOAuthBody = helpersScript.match(/function Set-CodexOAuthMode \{([\s\S]*?)^}/m)?.[1] ?? '';
+  const geminiOAuthBody = helpersScript.match(/function Set-GeminiOAuthMode \{([\s\S]*?)^}/m)?.[1] ?? '';
+  const claudeRemoveBody = helpersScript.match(/function Remove-ClaudeInstallerProfile \{([\s\S]*?)^}/m)?.[1] ?? '';
+
+  assert.notEqual(codexOAuthBody, '', 'expected Set-CodexOAuthMode body');
+  assert.notEqual(geminiOAuthBody, '', 'expected Set-GeminiOAuthMode body');
+  assert.notEqual(claudeRemoveBody, '', 'expected Remove-ClaudeInstallerProfile body');
+
+  assert.match(codexOAuthBody, /"client-auth", "set".*"--mode", "oauth"/s);
+  assert.doesNotMatch(codexOAuthBody, /"client-auth", "remove"/);
+  assert.doesNotMatch(codexOAuthBody, /"--force", "true"/);
+
+  assert.match(geminiOAuthBody, /"client-auth", "set".*"--mode", "oauth"/s);
+  assert.doesNotMatch(geminiOAuthBody, /"client-auth", "remove"/);
+  assert.doesNotMatch(geminiOAuthBody, /"--force", "true"/);
+
+  assert.match(claudeRemoveBody, /"claude-profile", "remove"/);
+  assert.doesNotMatch(claudeRemoveBody, /"--force", "true"/);
+});
+
 test('Windows installer probes the npm shim path when pnpm is installed but not yet on PATH', () => {
   assert.match(
     commandHelpersScript,

@@ -24,14 +24,14 @@ export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProp
     }
   };
 
-  // Provider display name mapping
-  const providerLabel = (provider: string) => {
+  // Client display name mapping
+  const clientIdLabel = (clientId: string) => {
     const map: Record<string, string> = {
       anthropic: 'Anthropic',
       openai: 'OpenAI',
       google: 'Google',
     };
-    return map[provider] ?? provider;
+    return map[clientId] ?? clientId;
   };
 
   return (
@@ -42,7 +42,7 @@ export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProp
         return (
           <div key={breedId}>
             <div className="text-[10px] text-cafe-muted mb-1">
-              {breedName}家族 · {providerLabel(cats[0].provider)}
+              {breedName}家族 · {clientIdLabel(cats[0].clientId)}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {cats.map((cat) => {

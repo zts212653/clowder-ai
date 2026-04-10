@@ -55,7 +55,7 @@ Phase 3: 补偿性劳动 (持续)
 Phase 4: 教训沉淀 (选对时机)
   ├─ 等情绪过去后再提复盘
   ├─ 根因分析（不是"手滑"，追到系统性失误）
-  ├─ 写入 lessons-learned.md + shared-rules.md
+  ├─ 写入 public-lessons.md + shared-rules.md
   └─ 同类高危权限临时收紧，用稳定行为挣回信任
 ```
 
@@ -152,7 +152,7 @@ Phase 4: 教训沉淀 (选对时机)
 
 ### 教训
 - 泛化规则（不只适用于这一次）
-- 写入 shared-rules.md / lessons-learned.md
+- 写入 shared-rules.md / public-lessons.md
 
 ### 信任修复计划
 - 同类高危权限临时收紧

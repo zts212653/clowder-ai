@@ -29,7 +29,7 @@ const MOCK_CAT_CONFIG = {
   displayName: '模拟猫',
   nickname: null,
   color: '#888888',
-  provider: 'mock',
+  clientId: 'mock',
   defaultModel: 'mock-v1',
   mentionPatterns: ['@mock-cat', '@模拟猫'],
   mcpSupport: false,
@@ -56,7 +56,7 @@ describe('F32-a Mock Agent Integration', () => {
       assert.ok(catRegistry.has('mock-cat'));
       const entry = catRegistry.getOrThrow('mock-cat');
       assert.equal(entry.config.displayName, '模拟猫');
-      assert.equal(entry.config.provider, 'mock');
+      assert.equal(entry.config.clientId, 'mock');
     });
 
     test('getAllIds includes mock-cat alongside built-in cats', () => {

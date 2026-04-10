@@ -196,7 +196,9 @@ describe('F088 Phase B+4 Integration', () => {
       await streamingHook.onStreamStart('thread-stream-1', 'opus');
       assert.equal(adapter.sent.length, 1);
       assert.equal(adapter.sent[0].type, 'placeholder');
-      assert.ok(adapter.sent[0].text.includes('思考'));
+      // F157: Feishu gets cat-personality receipt text, not generic "思考中"
+      assert.ok(adapter.sent[0].text.length > 0, 'placeholder text must be non-empty');
+      assert.ok(!adapter.sent[0].text.includes('思考中'), 'Feishu should get receipt, not generic placeholder');
 
       // 2. First chunk: too soon, should be skipped (rate limit)
       await streamingHook.onStreamChunk('thread-stream-1', 'Hello');

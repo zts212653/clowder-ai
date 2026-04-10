@@ -48,7 +48,6 @@ created: 2026-02-26
 | F127 | 猫猫管理重构 — 账户配置与猫猫实例分离，动态创建猫 + 自定义别名 @ 路由 | in-progress | 金渐层 + Maine Coon | community [#109](https://github.com/zts212653/clowder-ai/issues/109) | [F127](features/F127-cat-instance-management.md) |
 | F128 | Cat-Initiated Thread Creation — 猫程序化创建 Thread | spec | 待定 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | in-progress | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
-| F132 | DingTalk + WeCom Chat Gateway — 钉钉/企微接入 | in-progress | Ragdoll | internal | [F132](features/F132-dingtalk-wecom-gateway.md) |
 | F135 | 狸花猫开箱即用 — DARE Out-of-the-Box | spec | bouillipx | community [#195](https://github.com/zts212653/clowder-ai/issues/195) | [F135](features/F135-dare-ootb.md) |
 | F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |
 | F143 | Hostable Agent Runtime — 统一宿主抽象 | spec | Ragdoll | internal | [F143](features/F143-hostable-agent-runtime.md) |
@@ -57,4 +56,9 @@ created: 2026-02-26
 | F147 | i18n — Hub 界面中英文切换 | idea | 待定 | internal | — |
 | F149 | ACP Runtime Operations — 项目级进程池 + Session Lease | spec | Maine Coon | internal | [F149](features/F149-acp-runtime-operations.md) |
 | F152 | Expedition Memory — 外部项目记忆冷启动 + 经验回流 | spec | Ragdoll | internal | [F152](features/F152-expedition-memory.md) |
+| F153 | Observability Infrastructure — 运行时可观测基础设施 | spec | Community + Ragdoll | community [#388](https://github.com/zts212653/clowder-ai/issues/388) | [F153](features/F153-observability-infra.md) |
+| F154 | Cat Routing Personalization — 全局默认猫 + 首选猫入口 + 单次定向 | spec | Ragdoll | community [#385](https://github.com/zts212653/clowder-ai/issues/385) [#391](https://github.com/zts212653/clowder-ai/pull/391) | [F154](features/F154-cat-routing-personalization.md) |
+| F155 | Scene-Based Guidance Engine — 场景式交互引导 | needs-discussion | 待定 | internal | [F155](features/F155-scene-guidance-engine.md) |
+| F156 | WebSocket Security Hardening — 实时通道安全加固 | in-progress | Ragdoll | internal | [F156](features/F156-websocket-security-hardening.md) |
+
 

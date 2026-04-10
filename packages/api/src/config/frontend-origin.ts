@@ -10,11 +10,22 @@ const DEFAULT_FRONTEND_BASE_URL = 'http://localhost:3003';
 const DEFAULT_CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:3003', 'https://cafe.clowder-ai.com'];
 
 /**
- * Match origins from private networks (RFC 1918 + Tailscale CGNAT 100.64/10 + loopback).
- * Safe to auto-accept: these IPs never appear on the public internet.
+ * F156: Loopback (127.x.x.x) is ALWAYS allowed — it is genuinely local.
+ * Separated from RFC 1918 private networks because the threat model is different:
+ * an evil website's JS runs in the same loopback context, but its Origin header
+ * will be `https://evil.example`, not `http://127.0.0.1:*`. So loopback Origin
+ * is safe to auto-accept.
  */
-const PRIVATE_NETWORK_ORIGIN =
-  /^https?:\/\/(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+|127\.\d+\.\d+\.\d+)(:\d+)?$/;
+export const LOOPBACK_ORIGIN = /^https?:\/\/127\.\d+\.\d+\.\d+(:\d+)?$/;
+
+/**
+ * Match origins from private networks (RFC 1918 + Tailscale CGNAT 100.64/10).
+ * F156: Only included when CORS_ALLOW_PRIVATE_NETWORK=true.
+ * These ARE a trust boundary concern: a malicious page hosted on a LAN device
+ * (router admin, NAS) would have a matching Origin and could connect.
+ */
+export const PRIVATE_NETWORK_ORIGIN =
+  /^https?:\/\/(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+)(:\d+)?$/;
 
 function normalizeConfiguredUrl(rawUrl: string): string | null {
   try {
@@ -104,7 +115,23 @@ export function resolveFrontendCorsOrigins(env: NodeJS.ProcessEnv, logger?: Warn
   }
 
   const result: (string | RegExp)[] = [...origins];
-  // Auto-accept private/Tailscale networks (safe for home/dev environments)
-  result.push(PRIVATE_NETWORK_ORIGIN);
+  // F156: Loopback is always safe — same machine, different from LAN.
+  result.push(LOOPBACK_ORIGIN);
+  // F156: RFC 1918 / Tailscale private networks only with explicit opt-in.
+  if (env.CORS_ALLOW_PRIVATE_NETWORK === 'true') {
+    result.push(PRIVATE_NETWORK_ORIGIN);
+  }
   return result;
+}
+
+/**
+ * F156: Check if a given origin is allowed by the origin list.
+ * Used by Socket.IO `allowRequest` hook to guard WebSocket upgrades,
+ * because Socket.IO's `cors` config does NOT protect WebSocket transport
+ * (only HTTP long-polling). This is the real security boundary.
+ *
+ * Ref: Socket.IO docs "Handling CORS" (2026-02-16), OpenClaw ClawJacked.
+ */
+export function isOriginAllowed(origin: string, allowedOrigins: (string | RegExp)[]): boolean {
+  return allowedOrigins.some((allowed) => (allowed instanceof RegExp ? allowed.test(origin) : allowed === origin));
 }

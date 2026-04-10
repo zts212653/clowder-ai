@@ -5,11 +5,20 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-function runSourceOnlySnippet(scriptPath, snippet) {
+function baseShellEnv(overrides = {}) {
+  return {
+    PATH: process.env.PATH ?? '',
+    HOME: process.env.HOME ?? '',
+    TERM: process.env.TERM ?? 'xterm-256color',
+    ...overrides,
+  };
+}
+
+function runSourceOnlySnippet(scriptPath, snippet, envOverrides = {}) {
   const result = spawnSync(
     'bash',
     ['-lc', `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\n${snippet}`],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', env: baseShellEnv(envOverrides) },
   );
 
   assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
@@ -135,12 +144,11 @@ test('explicit port env vars override .env values for direct startup', () => {
     ],
     {
       encoding: 'utf8',
-      env: {
-        ...process.env,
+      env: baseShellEnv({
         FRONTEND_PORT: '3023',
         API_SERVER_PORT: '3024',
         REDIS_PORT: '6409',
-      },
+      }),
     },
   );
 
@@ -158,10 +166,9 @@ test('explicit NEXT_PUBLIC_API_URL override survives project .env during direct 
     ],
     {
       encoding: 'utf8',
-      env: {
-        ...process.env,
+      env: baseShellEnv({
         NEXT_PUBLIC_API_URL: 'http://localhost:3035',
-      },
+      }),
     },
   );
 
@@ -179,10 +186,9 @@ test('explicit PREVIEW_GATEWAY_PORT override survives project .env during direct
     ],
     {
       encoding: 'utf8',
-      env: {
-        ...process.env,
+      env: baseShellEnv({
         PREVIEW_GATEWAY_PORT: '5120',
-      },
+      }),
     },
   );
 
@@ -195,12 +201,9 @@ test('direct command mode can prefer current .env ports over ambient shell ports
   const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-dotenv-ports-'));
   const tempScriptPath = join(tempRoot, 'scripts', 'start-dev.sh');
   const tempOverridesPath = join(tempRoot, 'scripts', 'download-source-overrides.sh');
-  const baseEnv = {
-    PATH: process.env.PATH ?? '',
-    HOME: process.env.HOME ?? '',
-    TERM: process.env.TERM ?? 'xterm-256color',
+  const baseEnv = baseShellEnv({
     CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
-  };
+  });
 
   try {
     mkdirSync(join(tempRoot, 'scripts'), { recursive: true });
@@ -258,12 +261,7 @@ test('raw dev entry remaps setup-style Redis 6399 defaults to dev Redis 6398', (
       {
         cwd: tempRoot,
         encoding: 'utf8',
-        env: {
-          ...process.env,
-          PATH: process.env.PATH ?? '',
-          HOME: process.env.HOME ?? '',
-          TERM: process.env.TERM ?? 'xterm-256color',
-        },
+        env: baseShellEnv(),
       },
     );
 
@@ -295,13 +293,9 @@ test('respect-dotenv mode keeps explicit Redis 6399 defaults intact for wrappers
       {
         cwd: tempRoot,
         encoding: 'utf8',
-        env: {
-          ...process.env,
-          PATH: process.env.PATH ?? '',
-          HOME: process.env.HOME ?? '',
-          TERM: process.env.TERM ?? 'xterm-256color',
+        env: baseShellEnv({
           CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
-        },
+        }),
       },
     );
 
@@ -325,11 +319,10 @@ test('redis port override also recomputes isolated redis dirs', () => {
       ],
       {
         encoding: 'utf8',
-        env: {
-          ...process.env,
+        env: baseShellEnv({
           HOME: tempHome,
           REDIS_PORT: '6409',
-        },
+        }),
       },
     );
 

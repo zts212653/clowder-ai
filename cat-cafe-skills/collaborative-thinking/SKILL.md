@@ -72,7 +72,7 @@ Phase 6: 铲屎官反馈 + 最终确认 → 进入 Mode C
 
 **1. 否决理由 → ADR**：这次讨论有否决某个技术方案？有 → 补到对应 ADR 的否决记录段。
 
-**2. 踩坑教训 → lessons-learned.md**：这次讨论有暴露新坑？有 → 追加到 `docs/lessons-learned.md`（7 槽位格式）。
+**2. 踩坑教训 → public-lessons.md**：这次讨论有暴露新坑？有 → 追加到 `docs/public-lessons.md`（7 槽位格式）。
 
 **3. 操作规则 → 指引文件**：这次讨论有产生新的必须遵守的规则？有 → 更新 CLAUDE.md / AGENTS.md / GEMINI.md（或 `refs/shared-rules.md`）。
 

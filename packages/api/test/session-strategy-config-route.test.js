@@ -50,7 +50,7 @@ describe('session-strategy-config routes', () => {
       const first = body.cats[0];
       assert.ok(first.catId);
       assert.ok(first.displayName);
-      assert.ok(first.provider);
+      assert.ok(first.clientId);
       assert.ok(first.effective);
       assert.ok(first.source);
       assert.equal(typeof first.hasOverride, 'boolean');

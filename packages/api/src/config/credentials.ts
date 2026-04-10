@@ -1,25 +1,26 @@
 /**
- * F136 Phase 4a — Credential keychain (HC-1: object structure, global scope)
+ * F340 — Credential keychain
  *
- * Pure read/write layer for ~/.cat-cafe/credentials.json.
- * No metadata, no business logic — just a keychain.
+ * Pure read/write layer for {projectRoot}/.cat-cafe/credentials.json.
+ * Override: CAT_CAFE_GLOBAL_CONFIG_ROOT env → uses that root instead.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { CredentialEntry } from '@cat-cafe/shared';
 
-const CAT_CAFE_DIR = '.cat-cafe';
+const CONFIG_SUBDIR = '.cat-cafe';
 const CREDENTIALS_FILENAME = 'credentials.json';
 
-function resolveGlobalRoot(): string {
+function resolveGlobalRoot(projectRoot?: string): string {
   const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   if (envRoot) return resolve(envRoot);
+  if (projectRoot) return resolve(projectRoot);
   return homedir();
 }
 
-export function resolveCredentialsPath(): string {
-  return resolve(resolveGlobalRoot(), CAT_CAFE_DIR, CREDENTIALS_FILENAME);
+export function resolveCredentialsPath(projectRoot?: string): string {
+  return resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR, CREDENTIALS_FILENAME);
 }
 
 function writeFileAtomic(filePath: string, content: string): void {
@@ -37,8 +38,8 @@ function writeFileAtomic(filePath: string, content: string): void {
   }
 }
 
-function readAll(): Record<string, CredentialEntry> {
-  const credPath = resolveCredentialsPath();
+function readAll(projectRoot?: string): Record<string, CredentialEntry> {
+  const credPath = resolveCredentialsPath(projectRoot);
   if (!existsSync(credPath)) return {};
   try {
     const raw = readFileSync(credPath, 'utf-8');
@@ -50,34 +51,45 @@ function readAll(): Record<string, CredentialEntry> {
   }
 }
 
-function writeAll(creds: Record<string, CredentialEntry>): void {
-  const credPath = resolveCredentialsPath();
-  mkdirSync(resolve(resolveGlobalRoot(), CAT_CAFE_DIR), { recursive: true });
+export function assertCredentialsReadable(projectRoot?: string): void {
+  const credPath = resolveCredentialsPath(projectRoot);
+  if (!existsSync(credPath)) return;
+
+  const raw = readFileSync(credPath, 'utf-8');
+  const parsed = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid credentials JSON at ${credPath}: expected object`);
+  }
+}
+
+function writeAll(creds: Record<string, CredentialEntry>, projectRoot?: string): void {
+  const credPath = resolveCredentialsPath(projectRoot);
+  mkdirSync(resolve(resolveGlobalRoot(projectRoot), CONFIG_SUBDIR), { recursive: true });
   writeFileAtomic(credPath, `${JSON.stringify(creds, null, 2)}\n`);
   chmodSync(credPath, 0o600);
 }
 
-export function readCredentials(): Record<string, CredentialEntry> {
-  return readAll();
+export function readCredentials(projectRoot?: string): Record<string, CredentialEntry> {
+  return readAll(projectRoot);
 }
 
-export function readCredential(ref: string): CredentialEntry | undefined {
-  return readAll()[ref];
+export function readCredential(ref: string, projectRoot?: string): CredentialEntry | undefined {
+  return readAll(projectRoot)[ref];
 }
 
-export function writeCredential(ref: string, entry: CredentialEntry): void {
-  const creds = readAll();
+export function writeCredential(ref: string, entry: CredentialEntry, projectRoot?: string): void {
+  const creds = readAll(projectRoot);
   creds[ref] = entry;
-  writeAll(creds);
+  writeAll(creds, projectRoot);
 }
 
-export function deleteCredential(ref: string): void {
-  const creds = readAll();
+export function deleteCredential(ref: string, projectRoot?: string): void {
+  const creds = readAll(projectRoot);
   if (!(ref in creds)) return;
   delete creds[ref];
-  writeAll(creds);
+  writeAll(creds, projectRoot);
 }
 
-export function hasCredential(ref: string): boolean {
-  return ref in readAll();
+export function hasCredential(ref: string, projectRoot?: string): boolean {
+  return ref in readAll(projectRoot);
 }

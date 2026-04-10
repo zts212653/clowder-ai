@@ -36,8 +36,9 @@ import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
+import { detectInlineActionMentions, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
+import { extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
@@ -142,6 +143,9 @@ export async function* routeSerial(
     while (index < worklist.length) {
       if (signal?.aborted) break;
       const catId = worklist[index]!;
+      // F148 OQ-2: briefing→invocation link + context eval
+      let briefingMessageId: string | undefined;
+      let briefingCoverageMap: import('./context-transport.js').CoverageMap | undefined;
 
       // Only pass images/uploads for the first cat (user's original target)
       const isOriginalTarget = index < targetCats.length;
@@ -300,6 +304,8 @@ export async function* routeSerial(
           const briefingInput = buildBriefingMessage(inc.coverageMap, threadId, inc.briefingContext);
           try {
             const stored = await deps.messageStore.append(briefingInput);
+            briefingMessageId = stored.id;
+            briefingCoverageMap = inc.coverageMap;
             // P1-3: Include full stored message in payload so frontend can addMessage directly
             yield {
               type: 'system_info' as AgentMessageType,
@@ -384,6 +390,8 @@ export async function* routeSerial(
       // Collect error text separately for system-message persistence (F5 reload)
       let collectedErrorText = '';
       const collectedToolEvents: StoredToolEvent[] = [];
+      // F148 OQ-2: Collect tool names for context eval signals
+      const collectedToolNames: string[] = [];
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
@@ -490,6 +498,11 @@ export async function* routeSerial(
         const toolEvt = toStoredToolEvent(msg);
         if (toolEvt) {
           collectedToolEvents.push(toolEvt);
+        }
+
+        // F148 OQ-2: Collect tool names for context eval
+        if (msg.type === 'tool_use' && msg.toolName) {
+          collectedToolNames.push(msg.toolName);
         }
 
         // F150: Fire-and-forget tool usage counter
@@ -653,6 +666,25 @@ export async function* routeSerial(
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
         a2aMentions = parseA2AMentions(storedContent, catId);
+
+        // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
+        if (deps.invocationDeps.threadStore) {
+          const inlineHits = detectInlineActionMentions(storedContent, catId, a2aMentions);
+          if (inlineHits.length > 0) {
+            try {
+              await deps.invocationDeps.threadStore.setMentionRoutingFeedback(threadId, catId, {
+                sourceTimestamp: Date.now(),
+                items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
+              });
+              log.info(
+                { catId: catId as string, threadId, targets: inlineHits.map((h) => h.catId) },
+                'Inline action @mention detected — wrote routing feedback',
+              );
+            } catch {
+              /* best-effort */
+            }
+          }
+        }
 
         // F079 Phase 2: Vote interception — extract [VOTE:xxx] from cat response
         const votedOption = extractVoteFromText(storedContent);
@@ -1089,6 +1121,26 @@ export async function* routeSerial(
             log.error({ catId: catId as string, err }, 'ackCursor failed');
           }
         }
+      }
+
+      // F148 OQ-2: Log briefing→invocation link + context eval signals
+      if (briefingMessageId && ownInvocationId) {
+        const evalSignals = briefingCoverageMap
+          ? extractContextEvalSignals({
+              coverageMap: briefingCoverageMap,
+              toolNames: collectedToolNames,
+              responseTokenEstimate: estimateTokens(textContent),
+            })
+          : undefined;
+        log.info({
+          f148: 'briefing-invocation-link',
+          briefingMessageId,
+          invocationId: ownInvocationId,
+          catId,
+          threadId,
+          hadError: hadProviderError,
+          ...(evalSignals ? { eval: evalSignals } : {}),
+        });
       }
 
       // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)

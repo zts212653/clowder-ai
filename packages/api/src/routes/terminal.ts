@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import * as pty from 'node-pty';
+import { isOriginAllowed, resolveFrontendCorsOrigins } from '../config/frontend-origin.js';
 import type { PortDiscoveryService } from '../domains/preview/port-discovery.js';
 import type { AgentPaneRegistry } from '../domains/terminal/agent-pane-registry.js';
 import { TerminalSessionStore } from '../domains/terminal/session-store.js';
@@ -20,9 +21,26 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
   const { tmuxGateway, agentPaneRegistry, portDiscovery } = opts;
   const store = new TerminalSessionStore();
   const ptys = new Map<string, PtyBinding>();
+  const corsOrigins = resolveFrontendCorsOrigins(process.env, console);
+
+  // F156 Phase B-1: Origin guard for WebSocket upgrades.
+  // @fastify/websocket routes bypass Socket.IO's allowRequest entirely.
+  // Without this, evil.example can open ws://127.0.0.1:3004/api/terminal/sessions/x/ws
+  // and get a read-write PTY shell.
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.headers.upgrade?.toLowerCase() !== 'websocket') return;
+    const origin = req.headers.origin as string | undefined;
+    if (!origin) return; // Non-browser client (curl, MCP) — OK in single-user mode
+    if (isOriginAllowed(origin, corsOrigins)) return;
+    reply.status(403);
+    return reply.send({ error: 'Origin not allowed' });
+  });
 
   // --- Auth gate ---
   app.addHook('preHandler', async (req, reply) => {
+    // F156: WebSocket identity is server-determined (default-user in single-user mode).
+    // Skip client identity check for WS — the Origin guard above is the real boundary.
+    if (req.headers.upgrade?.toLowerCase() === 'websocket') return;
     if (!resolveUserId(req)) {
       reply.status(401);
       return reply.send({ error: 'Identity required (X-Cat-Cafe-User header or userId query)' });
@@ -87,7 +105,9 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
     Params: { sessionId: string };
   }>('/api/terminal/sessions/:sessionId/ws', { websocket: true }, (socket, req) => {
     const { sessionId } = req.params;
-    const userId = resolveUserId(req) as string;
+    // F156: Server determines identity — never trust client-supplied userId on WS.
+    // Single-user mode: all connections are 'default-user'. F077 will derive from session.
+    const userId = 'default-user';
     const session = store.getByIdAndUser(sessionId, userId);
     const binding = ptys.get(sessionId);
 
@@ -224,7 +244,8 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
   }>('/api/terminal/agent-panes/:paneId/ws', { websocket: true }, (socket, req) => {
     const { paneId } = req.params;
     const { worktreeId } = req.query;
-    const userId = resolveUserId(req) as string;
+    // F156: Server determines identity — same as terminal session WS above.
+    const userId = 'default-user';
 
     if (!worktreeId || !agentPaneRegistry || !tmuxGateway) {
       socket.close(4004, 'Agent pane tracking not enabled or missing worktreeId');

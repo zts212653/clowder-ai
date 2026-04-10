@@ -161,7 +161,7 @@ export function createMissionControlMockBackend(): MissionControlMockBackend {
             nickname: '砚砚',
             color: { primary: '#4B5563', secondary: '#E5E7EB' },
             mentionPatterns: ['@codex'],
-            provider: 'openai',
+            clientId: 'openai',
             defaultModel: 'gpt-5.3-codex',
             avatar: '/avatars/codex.png',
             roleDescription: 'review',

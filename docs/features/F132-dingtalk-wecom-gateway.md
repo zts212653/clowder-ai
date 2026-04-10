@@ -8,7 +8,7 @@ created: 2026-03-22
 
 # F132: DingTalk + WeCom Chat Gateway — 钉钉/企微接入
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Completed**: 2026-04-09 | **Owner**: Ragdoll | **Priority**: P1
 >
 > **分工**：金渐层（@opencode）实现 → Maine Coon（@codex）review → Ragdoll（@opus）愿景守护
 > 实现过程中不 @ Ragdoll，保持 owner 上下文干净。每个 Phase PR merge 后触发愿景守护。
@@ -241,22 +241,22 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 - [x] AC-C6: final-only 模式（无 streaming），长回复分块发送
 - [x] AC-C7: 公共层零改动
 
-### Phase D（Bootstrap + 富文本映射 + 文档）
-- [ ] AC-D1: connector-gateway-bootstrap 动态注册三个 adapter（有 env var 才启用）
-- [ ] AC-D2: MessageEnvelope → 各平台原生卡片映射完整
-- [ ] AC-D3: Rich blocks 在所有平台正确降级
-- [ ] AC-D4: IM 接入指南文档覆盖钉钉 + 企微 Bot + 企微 Agent 配置步骤
-- [ ] AC-D5: 现有飞书/Telegram 功能无回归
+### Phase D（Bootstrap + 富文本映射 + 文档）✅ PR #1018 merged
+- [x] AC-D1: connector-gateway-bootstrap 动态注册三个 adapter（有 env var 才启用）
+- [x] AC-D2: MessageEnvelope → 各平台原生卡片映射完整
+- [x] AC-D3: Rich blocks 在所有平台正确降级
+- [x] AC-D4: IM 接入指南文档覆盖钉钉 + 企微 Bot + 企微 Agent 配置步骤
+- [x] AC-D5: 现有飞书/Telegram 功能无回归
 
 ## 需求点 Checklist
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "接入钉钉" | AC-A1~A7 | test + manual DM | [x] |
-| R2 | "接入企业微信" | AC-B1~B6, AC-C1~C7 | test + manual DM（两种模式） | [ ] |
-| R3 | "必须复用我们的 channel 等等架构设计" | AC-A6, AC-A1.6, AC-A2.7, AC-B6, AC-C7 | code review: 公共层 diff = 0 | [ ] |
-| R4 | "学习飞书的接入" | AC-D2~D3 | adapter 结构对照 FeishuAdapter | [ ] |
-| R5 | 参考 OpenClaw 生态 | KD-1, KD-4 | 设计文档引用 + 调研综合报告 | [ ] |
+| R2 | "接入企业微信" | AC-B1~B6, AC-C1~C7 | test + manual DM（两种模式） | [x] |
+| R3 | "必须复用我们的 channel 等等架构设计" | AC-A6, AC-A1.6, AC-A2.7, AC-B6, AC-C7 | code review: 公共层 diff = 0 | [x] |
+| R4 | "学习飞书的接入" | AC-D2~D3 | adapter 结构对照 FeishuAdapter | [x] |
+| R5 | 参考 OpenClaw 生态 | KD-1, KD-4 | 设计文档引用 + 调研综合报告 | [x] |
 | R6 | "富文本/媒体原生发送都支持完整" | AC-A1.1~A1.5 | 语音/文件/图片原生发送，不降级 | [x] |
 | R7 | "群聊对接飞书 IM Hub 抽象" | AC-A2.1~A2.7 | 群聊收发 + @回复 + 名称解析 | [x] |
 

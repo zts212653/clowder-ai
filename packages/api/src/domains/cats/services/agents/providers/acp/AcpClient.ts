@@ -126,8 +126,7 @@ export class AcpClient {
   async initialize(): Promise<AcpInitializeResult> {
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
 
-    // Resolve Windows .cmd shim — same strategy as cli-spawn.ts defaultSpawn (#64)
-    // Skip when custom spawnFn is injected (tests handle their own spawning)
+    // Mirror cli-spawn.ts on Windows so ACP agents can bypass npm-global .cmd shims.
     let command = this.config.command;
     let args = [...this.config.args];
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
@@ -260,7 +259,7 @@ export class AcpClient {
     // long MCP chains are invisible to the event stream. Idle stall (90s) catches
     // true hangs; this budget is the last-resort guard against runaway sessions.
     // Upstream #24029 (MCP channel notifications) will provide proper L2 signals.
-    const timeoutMs = options?.timeoutMs ?? 600_000;
+    const timeoutMs = options?.timeoutMs ?? 900_000;
     const idleWarningMs = options?.idleWarningMs ?? 20_000;
     // Idle stall catches true hangs. Gemini CLI doesn't emit tool_call for MCP
     // tools, so pendingTool never activates. 90s covers most MCP calls (10-30s).
@@ -297,7 +296,10 @@ export class AcpClient {
       const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
       idleTimer = setTimeout(() => {
         if (done || eventCount === 0) return;
-        const idleSinceMs = Date.now() - lastEventAt;
+        // Clamp to at least the threshold that triggered this timer — a threshold
+        // event must never report a duration smaller than its own trigger point.
+        const rawIdle = Date.now() - lastEventAt;
+        const idleSinceMs = Math.max(rawIdle, idleWarningFired ? idleStallMs : idleWarningMs);
         if (!idleWarningFired) {
           idleWarningFired = true;
           if (pendingTool) {
