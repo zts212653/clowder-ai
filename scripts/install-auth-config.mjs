@@ -336,6 +336,21 @@ function migrateLegacyProfiles(projectDir) {
   }
 }
 
+/** Run all legacy migration sources: projectDir, globalRoot, and homedir (if different). */
+function migrateAllLegacySources(projectDir) {
+  if (projectDir) migrateLegacyProfiles(projectDir);
+  migrateLegacyProfiles(null); // reads from globalDir() = resolveGlobalRoot()
+  // Also try homedir: pre-F340 installer without --project-dir wrote there.
+  const home = homedir();
+  if (path.resolve(resolveGlobalRoot()) !== path.resolve(home)) {
+    try {
+      migrateLegacyProfiles(home);
+    } catch {
+      // Best-effort: don't block operation if homedir legacy files are corrupt.
+    }
+  }
+}
+
 // ── Commands ──
 
 function setClientAuth(client, mode, options) {
@@ -453,8 +468,7 @@ try {
     // Migrate legacy files before applying
     const projDir = getOptional(values, 'project-dir', '');
     _activeProjectDir = projDir;
-    if (projDir) migrateLegacyProfiles(projDir);
-    migrateLegacyProfiles(null);
+    migrateAllLegacySources(projDir);
     const mode = getRequired(values, 'mode');
     if (mode === 'oauth') {
       setClientAuth(client, 'oauth', {});
@@ -486,8 +500,7 @@ try {
     const projectDir = getRequired(values, 'project-dir');
     _activeProjectDir = projectDir;
     // Migrate legacy files before removal so accounts/credentials are in global store
-    if (projectDir) migrateLegacyProfiles(projectDir);
-    migrateLegacyProfiles(null);
+    migrateAllLegacySources(projectDir);
     const force = values.get('force')?.[0] === 'true';
     removeClientAuth(client, `installer-${client}`, projectDir, { force });
     process.exit(0);
@@ -497,8 +510,7 @@ try {
     const projectDir = getOptional(values, 'project-dir', '');
     _activeProjectDir = projectDir;
     // Migrate legacy files before applying new setting
-    if (projectDir) migrateLegacyProfiles(projectDir);
-    migrateLegacyProfiles(null);
+    migrateAllLegacySources(projectDir);
     const apiKey = getOptional(values, 'api-key', '') || process.env._INSTALLER_API_KEY || '';
     if (!apiKey) {
       console.error('Error: API key required via --api-key or _INSTALLER_API_KEY env var');
