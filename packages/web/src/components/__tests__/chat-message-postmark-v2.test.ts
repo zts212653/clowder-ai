@@ -76,7 +76,7 @@ describe('ChatMessage Postmark v2 source pill', () => {
       displayName: '缅因猫',
       variantLabel: 'GPT-5.2',
       breedId: 'maine-coon',
-      provider: 'openai',
+      clientId: 'openai',
       defaultModel: 'gpt-5.2',
       avatar: '/avatars/gpt52.png',
       mentionPatterns: [],

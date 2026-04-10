@@ -650,7 +650,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const cats: Record<string, boolean> = {};
       for (const catId of catIds) {
         const entry = catRegistry.tryGet(catId);
-        const provider = entry?.config.provider ?? 'unknown';
+        const provider = entry?.config.clientId ?? 'unknown';
         const presentForProvider = (providerSkills[provider] ?? []).includes(cap.id);
         if (!presentForProvider) continue; // Sparse cats: omit irrelevant cats so frontend filter works
         const override = cap.overrides?.find((o) => o.catId === catId);

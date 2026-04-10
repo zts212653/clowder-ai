@@ -27,7 +27,7 @@ import {
 // ────────── Constants ──────────
 
 const CAPABILITIES_FILENAME = 'capabilities.json';
-const CAT_CAFE_DIR = '.cat-cafe';
+const CONFIG_SUBDIR = '.cat-cafe';
 const MCP_RESOLVED_FILENAME = 'mcp-resolved.json';
 
 const PENCIL_EXTENSIONS_DIR = resolve(homedir(), '.antigravity/extensions');
@@ -290,7 +290,7 @@ function safePath(projectRoot: string, ...segments: string[]): string {
 }
 
 export async function readCapabilitiesConfig(projectRoot: string): Promise<CapabilitiesConfig | null> {
-  const filePath = safePath(projectRoot, CAT_CAFE_DIR, CAPABILITIES_FILENAME);
+  const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
   try {
     const raw = await readFile(filePath, 'utf-8');
     const data = JSON.parse(raw) as CapabilitiesConfig;
@@ -302,14 +302,14 @@ export async function readCapabilitiesConfig(projectRoot: string): Promise<Capab
 }
 
 export async function writeCapabilitiesConfig(projectRoot: string, config: CapabilitiesConfig): Promise<void> {
-  const dir = safePath(projectRoot, CAT_CAFE_DIR);
+  const dir = safePath(projectRoot, CONFIG_SUBDIR);
   await mkdir(dir, { recursive: true });
-  const filePath = safePath(projectRoot, CAT_CAFE_DIR, CAPABILITIES_FILENAME);
+  const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
   await writeFile(filePath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
 }
 
 export async function readResolvedMcpState(projectRoot: string): Promise<ResolvedMcpState> {
-  const filePath = safePath(projectRoot, CAT_CAFE_DIR, MCP_RESOLVED_FILENAME);
+  const filePath = safePath(projectRoot, CONFIG_SUBDIR, MCP_RESOLVED_FILENAME);
   try {
     const raw = await readFile(filePath, 'utf-8');
     const data = JSON.parse(raw) as ResolvedMcpState;
@@ -320,9 +320,9 @@ export async function readResolvedMcpState(projectRoot: string): Promise<Resolve
 }
 
 export async function writeResolvedMcpState(projectRoot: string, state: ResolvedMcpState): Promise<void> {
-  const dir = safePath(projectRoot, CAT_CAFE_DIR);
+  const dir = safePath(projectRoot, CONFIG_SUBDIR);
   await mkdir(dir, { recursive: true });
-  const filePath = safePath(projectRoot, CAT_CAFE_DIR, MCP_RESOLVED_FILENAME);
+  const filePath = safePath(projectRoot, CONFIG_SUBDIR, MCP_RESOLVED_FILENAME);
   await writeFile(filePath, `${JSON.stringify(state, null, 2)}\n`, 'utf-8');
 }
 
@@ -598,7 +598,7 @@ const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic']);
  */
 export function resolveServersForCat(config: CapabilitiesConfig, catId: string): McpServerDescriptor[] {
   const entry = catRegistry.tryGet(catId);
-  const provider = entry?.config.provider;
+  const provider = entry?.config.clientId;
 
   return config.capabilities
     .filter((cap) => cap.type === 'mcp' && cap.mcpServer)
@@ -645,7 +645,7 @@ function collectServersPerProvider(config: CapabilitiesConfig): Record<string, M
   for (const catId of catRegistry.getAllIds()) {
     const entry = catRegistry.tryGet(catId as string);
     if (!entry) continue;
-    const provider = entry.config.provider;
+    const provider = entry.config.clientId;
 
     if (!providerServers[provider]) {
       providerServers[provider] = new Map();

@@ -152,7 +152,7 @@ function resolveFallbackStrategy(catName: string): {
   }
 
   // Provider default or global default
-  const provider = catRegistry.tryGet(catName)?.config.provider ?? CAT_CONFIGS[catName]?.provider;
+  const provider = catRegistry.tryGet(catName)?.config.clientId ?? CAT_CONFIGS[catName]?.clientId;
   if (provider && DEFAULT_STRATEGY_BY_PROVIDER[provider]) {
     return { effective: base, source: 'provider_default' };
   }
@@ -180,7 +180,7 @@ export function mergeStrategyConfig(
 
 function getBaseStrategy(catName: string): SessionStrategyConfig {
   // Try catRegistry first (runtime, includes variants), then static CAT_CONFIGS fallback
-  const provider = catRegistry.tryGet(catName)?.config.provider ?? CAT_CONFIGS[catName]?.provider;
+  const provider = catRegistry.tryGet(catName)?.config.clientId ?? CAT_CONFIGS[catName]?.clientId;
   if (provider) {
     const providerDefault = DEFAULT_STRATEGY_BY_PROVIDER[provider];
     if (providerDefault) return providerDefault;
@@ -196,7 +196,7 @@ function validateProviderCapability(config: SessionStrategyConfig, catName: stri
   if (config.strategy !== 'hybrid') return config;
 
   const entry = catRegistry.tryGet(catName);
-  const provider = entry?.config.provider;
+  const provider = entry?.config.clientId;
 
   if (!provider || !HOOK_CAPABLE_PROVIDERS.has(provider)) {
     log.warn(

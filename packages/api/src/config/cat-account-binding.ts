@@ -5,8 +5,6 @@ import { builtinAccountIdForClient, resolveBuiltinClientForProvider } from './ac
 import { loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 
-type LegacyAwareCatConfig = CatConfig & { providerProfileId?: string };
-
 function trimBinding(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -25,23 +23,18 @@ export function isSeedCat(projectRoot: string, catId: string): boolean {
 export function resolveBoundAccountRefForCat(
   projectRoot: string,
   catId: string,
-  catConfig: LegacyAwareCatConfig | null | undefined,
+  catConfig: CatConfig | null | undefined,
 ): string | undefined {
   if (!catConfig) return undefined;
-
-  const explicitProviderProfileId = trimBinding(catConfig.providerProfileId);
-  if (explicitProviderProfileId) return explicitProviderProfileId;
 
   const explicitAccountRef = trimBinding(catConfig.accountRef);
   if (!explicitAccountRef) return undefined;
 
-  const builtinClient = resolveBuiltinClientForProvider(catConfig.provider);
-  const runtimeCatalogExists = existsSync(resolve(projectRoot, '.cat-cafe', 'cat-catalog.json'));
-  const inheritedTemplateDefaultBinding =
-    !runtimeCatalogExists && !!builtinClient && explicitAccountRef === builtinAccountIdForClient(builtinClient);
-  const inheritedSeedBootstrapBinding = runtimeCatalogExists && isSeedCat(projectRoot, catId);
-
-  if (inheritedTemplateDefaultBinding || inheritedSeedBootstrapBinding) {
+  const builtinClient = resolveBuiltinClientForProvider(catConfig.clientId);
+  const isDefaultBinding = !!builtinClient && explicitAccountRef === builtinAccountIdForClient(builtinClient);
+  // F340: only suppress default accountRef for seed cats (template-originated), not custom ones
+  const isSeed = isSeedCat(projectRoot, catId);
+  if (isSeed && isDefaultBinding) {
     return undefined;
   }
 

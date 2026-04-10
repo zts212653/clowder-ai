@@ -19,8 +19,8 @@ const MOCK_CATS = [
     nickname: '宪宪',
     color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
     mentionPatterns: ['@opus'],
-    provider: 'anthropic',
-    providerProfileId: 'claude-oauth',
+    clientId: 'anthropic',
+    accountRef: 'claude-oauth',
     defaultModel: 'claude-opus-4-6',
     avatar: '/avatars/opus.png',
     roleDescription: '架构',
@@ -33,8 +33,8 @@ const MOCK_CATS = [
     nickname: '砚砚',
     color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
     mentionPatterns: ['@codex'],
-    provider: 'openai',
-    providerProfileId: 'codex-oauth',
+    clientId: 'openai',
+    accountRef: 'codex-oauth',
     defaultModel: 'gpt-5.4',
     avatar: '/avatars/codex.png',
     roleDescription: 'review',
@@ -47,8 +47,8 @@ const MOCK_CATS = [
     nickname: 'Spark',
     color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
     mentionPatterns: ['@spark'],
-    provider: 'openai',
-    providerProfileId: 'codex-sponsor',
+    clientId: 'openai',
+    accountRef: 'codex-sponsor',
     defaultModel: 'gpt-5.4-mini',
     avatar: '/avatars/spark.png',
     roleDescription: 'fast coding',
@@ -61,8 +61,8 @@ const MOCK_CATS = [
     nickname: 'Gemini 2.5',
     color: { primary: '#EAA54B', secondary: '#F8E7C7' },
     mentionPatterns: ['@gemini25'],
-    provider: 'google',
-    providerProfileId: 'gemini-oauth',
+    clientId: 'google',
+    accountRef: 'gemini-oauth',
     defaultModel: 'gemini-2.5-pro',
     avatar: '/avatars/gemini25.png',
     roleDescription: 'design',
@@ -75,7 +75,7 @@ const MOCK_CATS = [
     nickname: '豹猫',
     color: { primary: '#C97A35', secondary: '#F5E4D0' },
     mentionPatterns: ['@antigravity'],
-    provider: 'antigravity',
+    clientId: 'antigravity',
     defaultModel: 'gemini-3.1-pro',
     avatar: '/avatars/antigravity.png',
     roleDescription: 'bridge',
@@ -132,7 +132,7 @@ function jsonResponse(payload: unknown): Response {
 
 function defaultQuotaApiFetch(path: string) {
   if (path === '/api/quota') return Promise.resolve(jsonResponse(MOCK_QUOTA_RESPONSE));
-  if (path === '/api/provider-profiles') {
+  if (path === '/api/accounts') {
     return Promise.resolve(
       jsonResponse({
         projectPath: '/tmp/project',
@@ -351,7 +351,7 @@ describe('HubQuotaBoardTab — account pool grouping', () => {
 
   it('shows a visible error banner when provider profiles fail to load', async () => {
     mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/provider-profiles') return Promise.resolve(new Response('{}', { status: 503 }));
+      if (path === '/api/accounts') return Promise.resolve(new Response('{}', { status: 503 }));
       return defaultQuotaApiFetch(path);
     });
 

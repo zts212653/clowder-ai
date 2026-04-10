@@ -104,14 +104,14 @@ describe('HubAddMemberWizard', () => {
             cats: [
               {
                 id: 'antigravity-template',
-                provider: 'antigravity',
+                clientId: 'antigravity',
                 source: 'seed',
                 defaultModel: 'template-antigravity-model',
                 commandArgs: ['. --remote-debugging-port=9010'],
               },
               {
                 id: 'runtime-antigravity-preview',
-                provider: 'antigravity',
+                clientId: 'antigravity',
                 source: 'runtime',
                 defaultModel: 'runtime-custom-model',
                 commandArgs: ['. --remote-debugging-port=9999'],
@@ -120,7 +120,7 @@ describe('HubAddMemberWizard', () => {
           }),
         );
       }
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -231,7 +231,7 @@ describe('HubAddMemberWizard', () => {
     expect(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').value).toBe('gpt-5.4-mini');
   });
 
-  it('allows opencode member with bare model (ocProviderName is set in editor)', async () => {
+  it('allows opencode member with bare model (provider is set in editor)', async () => {
     const onComplete = vi.fn();
 
     await act(async () => {
@@ -248,7 +248,7 @@ describe('HubAddMemberWizard', () => {
     await click(queryButton(container, 'OpenCode'));
     await click(queryButton(container, 'Codex Sponsor'));
 
-    // Finish button should NOT be disabled — bare model is allowed, editor will collect ocProviderName.
+    // Finish button should NOT be disabled — bare model is allowed, editor will collect provider.
     const finishButton = queryButton(container, '创建后继续编辑');
     expect(finishButton.disabled).toBe(false);
 

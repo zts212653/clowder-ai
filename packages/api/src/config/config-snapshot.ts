@@ -52,7 +52,7 @@ export interface ConfigSnapshot {
     string,
     {
       displayName: string;
-      provider: string;
+      clientId: string;
       model: string;
       mcpSupport: boolean;
     }

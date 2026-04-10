@@ -1,3 +1,4 @@
+export { accountsRoutes } from './accounts.js';
 export { auditRoutes } from './audit.js';
 export { authorizationRoutes } from './authorization.js';
 export { backlogRoutes } from './backlog.js';
@@ -32,7 +33,6 @@ export { packsRoutes } from './packs.js';
 export { projectsRoutes } from './projects.js';
 export { mkdirRoute } from './projects-mkdir.js';
 export { projectSetupRoute } from './projects-setup.js';
-export { providerProfilesRoutes } from './provider-profiles.js';
 export { pushRoutes } from './push.js';
 export { queueRoutes } from './queue.js';
 export { quotaRoutes } from './quota.js';

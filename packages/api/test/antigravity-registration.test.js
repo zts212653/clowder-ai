@@ -8,7 +8,7 @@ describe('Antigravity provider registration', () => {
     const bengal = config.breeds.find((b) => b.id === 'bengal');
     assert.ok(bengal, 'bengal breed should exist in config');
     assert.ok(bengal.variants.length > 0, 'bengal should have variants');
-    assert.equal(bengal.variants[0].provider, 'antigravity');
+    assert.equal(bengal.variants[0].clientId, 'antigravity');
   });
 
   test('AntigravityAgentService is importable', async () => {

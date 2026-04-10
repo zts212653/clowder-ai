@@ -2,31 +2,31 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { HubProviderProfileItem, type ProfileEditPayload } from './HubProviderProfileItem';
-import { CreateApiKeyProfileSection, ProviderProfilesSummaryCard } from './hub-provider-profiles.sections';
-import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
-import { ensureBuiltinProviderProfiles, resolveAccountActionId } from './hub-provider-profiles.view';
+import { HubAccountItem, type ProfileEditPayload } from './HubAccountItem';
+import { AccountsSummaryCard, CreateApiKeyAccountSection } from './hub-accounts.sections';
+import type { AccountsResponse } from './hub-accounts.types';
+import { ensureBuiltinAccounts, resolveAccountActionId } from './hub-accounts.view';
 
-export function HubProviderProfilesTab() {
+export function HubAccountsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ProviderProfilesResponse | null>(null);
+  const [data, setData] = useState<AccountsResponse | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [createDisplayName, setCreateDisplayName] = useState('');
   const [createBaseUrl, setCreateBaseUrl] = useState('');
   const [createApiKey, setCreateApiKey] = useState('');
   const [createModels, setCreateModels] = useState<string[]>([]);
 
-  const fetchProfiles = useCallback(async () => {
+  const fetchAccounts = useCallback(async () => {
     setError(null);
     try {
-      const res = await apiFetch('/api/provider-profiles');
+      const res = await apiFetch('/api/accounts');
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         setError((body.error as string) ?? '加载失败');
         return;
       }
-      const body = (await res.json()) as ProviderProfilesResponse;
+      const body = (await res.json()) as AccountsResponse;
       setData(body);
     } catch {
       setError('网络错误');
@@ -37,8 +37,8 @@ export function HubProviderProfilesTab() {
 
   useEffect(() => {
     setLoading(true);
-    fetchProfiles();
-  }, [fetchProfiles]);
+    fetchAccounts();
+  }, [fetchAccounts]);
 
   const callApi = useCallback(async (path: string, init: RequestInit) => {
     const res = await apiFetch(path, {
@@ -55,7 +55,7 @@ export function HubProviderProfilesTab() {
     return body;
   }, []);
 
-  const createProfile = useCallback(async () => {
+  const createAccount = useCallback(async () => {
     if (!createDisplayName.trim()) {
       setError('请输入账号显示名');
       return;
@@ -67,7 +67,7 @@ export function HubProviderProfilesTab() {
     setBusyId('create');
     setError(null);
     try {
-      await callApi('/api/provider-profiles', {
+      await callApi('/api/accounts', {
         method: 'POST',
         body: JSON.stringify({
           displayName: createDisplayName.trim(),
@@ -81,56 +81,56 @@ export function HubProviderProfilesTab() {
       setCreateBaseUrl('');
       setCreateApiKey('');
       setCreateModels([]);
-      await fetchProfiles();
-      window.dispatchEvent(new CustomEvent('provider-profiles-changed'));
+      await fetchAccounts();
+      window.dispatchEvent(new CustomEvent('accounts-changed'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyId(null);
     }
-  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, fetchProfiles]);
+  }, [callApi, createApiKey, createBaseUrl, createDisplayName, createModels, fetchAccounts]);
 
-  const deleteProfile = useCallback(
-    async (profileId: string) => {
-      setBusyId(profileId);
+  const deleteAccount = useCallback(
+    async (accountId: string) => {
+      setBusyId(accountId);
       setError(null);
       try {
-        await callApi(`/api/provider-profiles/${profileId}`, { method: 'DELETE' });
-        await fetchProfiles();
-        window.dispatchEvent(new CustomEvent('provider-profiles-changed'));
+        await callApi(`/api/accounts/${accountId}`, { method: 'DELETE' });
+        await fetchAccounts();
+        window.dispatchEvent(new CustomEvent('accounts-changed'));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setBusyId(null);
       }
     },
-    [callApi, fetchProfiles],
+    [callApi, fetchAccounts],
   );
 
-  const saveProfile = useCallback(
-    async (profileId: string, payload: ProfileEditPayload) => {
-      setBusyId(profileId);
+  const saveAccount = useCallback(
+    async (accountId: string, payload: ProfileEditPayload) => {
+      setBusyId(accountId);
       setError(null);
       try {
-        await callApi(`/api/provider-profiles/${profileId}`, {
+        await callApi(`/api/accounts/${accountId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
-        await fetchProfiles();
-        window.dispatchEvent(new CustomEvent('provider-profiles-changed'));
+        await fetchAccounts();
+        window.dispatchEvent(new CustomEvent('accounts-changed'));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setBusyId(null);
       }
     },
-    [callApi, fetchProfiles],
+    [callApi, fetchAccounts],
   );
 
-  const displayProfiles = useMemo(() => ensureBuiltinProviderProfiles(data?.providers ?? []), [data?.providers]);
-  const builtinProfiles = useMemo(() => displayProfiles.filter((profile) => profile.builtin), [displayProfiles]);
-  const customProfiles = useMemo(() => displayProfiles.filter((profile) => !profile.builtin), [displayProfiles]);
-  const displayCards = useMemo(() => [...builtinProfiles, ...customProfiles], [builtinProfiles, customProfiles]);
+  const displayAccounts = useMemo(() => ensureBuiltinAccounts(data?.providers ?? []), [data?.providers]);
+  const builtinAccounts = useMemo(() => displayAccounts.filter((a) => a.builtin), [displayAccounts]);
+  const customAccounts = useMemo(() => displayAccounts.filter((a) => !a.builtin), [displayAccounts]);
+  const displayCards = useMemo(() => [...builtinAccounts, ...customAccounts], [builtinAccounts, customAccounts]);
 
   if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
   if (!data) return <p className="text-sm text-cafe-muted">暂无数据</p>;
@@ -139,21 +139,21 @@ export function HubProviderProfilesTab() {
     <div className="space-y-4">
       {error && <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
 
-      <ProviderProfilesSummaryCard />
+      <AccountsSummaryCard />
 
-      <div role="group" aria-label="Provider Profile List" className="space-y-4">
-        {displayCards.map((profile) => (
-          <HubProviderProfileItem
-            key={profile.id}
-            profile={profile}
-            busy={busyId === resolveAccountActionId(profile)}
-            onSave={(_profileId, payload) => saveProfile(resolveAccountActionId(profile), payload)}
-            onDelete={() => deleteProfile(resolveAccountActionId(profile))}
+      <div role="group" aria-label="Account List" className="space-y-4">
+        {displayCards.map((account) => (
+          <HubAccountItem
+            key={account.id}
+            profile={account}
+            busy={busyId === resolveAccountActionId(account)}
+            onSave={(_id, payload) => saveAccount(resolveAccountActionId(account), payload)}
+            onDelete={() => deleteAccount(resolveAccountActionId(account))}
           />
         ))}
       </div>
 
-      <CreateApiKeyProfileSection
+      <CreateApiKeyAccountSection
         displayName={createDisplayName}
         baseUrl={createBaseUrl}
         apiKey={createApiKey}
@@ -163,7 +163,7 @@ export function HubProviderProfilesTab() {
         onBaseUrlChange={setCreateBaseUrl}
         onApiKeyChange={setCreateApiKey}
         onModelsChange={setCreateModels}
-        onCreate={createProfile}
+        onCreate={createAccount}
       />
       <p className="text-xs leading-5 text-[#B59A88]">
         secrets 存储在 `~/.cat-cafe/credentials.json`（全局），Git 忽略。

@@ -51,7 +51,7 @@ export function AdvancedRuntimeSection({
     approvalPolicy: 'on-request' as const,
     authMode: 'oauth' as const,
   };
-  const cliEffortOptions = getCliEffortOptionsForClient(form.client);
+  const cliEffortOptions = getCliEffortOptionsForClient(form.clientId);
 
   return (
     <SectionCard
@@ -115,20 +115,22 @@ export function AdvancedRuntimeSection({
             tone="success"
           />
         ) : null}
-        {form.client === 'openai' || form.client === 'opencode' ? (
+        {form.clientId === 'openai' || form.clientId === 'opencode' ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-[#3D2E22]">额外 CLI 参数</p>
             <TagEditor
               tags={form.cliConfigArgs}
               onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
               addLabel="+ 添加参数"
-              placeholder={form.client === 'opencode' ? '例如 --variant low' : '例如 --config model_provider="custom"'}
+              placeholder={
+                form.clientId === 'opencode' ? '例如 --variant low' : '例如 --config model_reasoning_effort="low"'
+              }
               emptyLabel="无额外参数"
               tone="green"
             />
             <p className="text-[11px] leading-4 text-[#8A776B]">
               每条直接追加到 CLI 命令，不做隐式转换。`CLI Effort` 请优先用上面的结构化字段。参考：
-              {form.client === 'opencode' ? (
+              {form.clientId === 'opencode' ? (
                 <a href="https://opencode.ai/docs/cli" target="_blank" rel="noreferrer" className="underline">
                   OpenCode CLI
                 </a>

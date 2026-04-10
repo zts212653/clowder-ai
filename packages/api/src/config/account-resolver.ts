@@ -4,13 +4,13 @@
  * Single resolution path: accounts (cat-catalog.json) + credentials (credentials.json).
  * Outputs RuntimeProviderProfile for backward-compatible consumption.
  */
-import type { AccountConfig, AccountProtocol, CatProvider } from '@cat-cafe/shared';
+import type { AccountConfig, AccountProtocol, ClientId } from '@cat-cafe/shared';
 import { readCatalogAccounts } from './catalog-accounts.js';
 import { readCredential } from './credentials.js';
 
 // ── Types surviving from provider-profiles.types.ts (F136 Phase 4d) ──
 
-export type BuiltinAccountClient = 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode';
+export type BuiltinAccountClient = Extract<ClientId, 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode'>;
 export type ProviderProfileKind = 'builtin' | 'api_key';
 
 export interface RuntimeProviderProfile {
@@ -31,8 +31,8 @@ export interface AnthropicRuntimeProfile {
   apiKey?: string;
 }
 
-/** Map CatProvider to BuiltinAccountClient (null for providers without builtin accounts). */
-export function resolveBuiltinClientForProvider(provider: CatProvider): BuiltinAccountClient | null {
+/** Map ClientId to BuiltinAccountClient (null for clients without builtin accounts). */
+export function resolveBuiltinClientForProvider(provider: ClientId): BuiltinAccountClient | null {
   switch (provider) {
     case 'anthropic':
     case 'openai':
@@ -60,6 +60,7 @@ export function builtinAccountIdForClient(client: BuiltinAccountClient): string 
 }
 
 export function resolveAnthropicRuntimeProfile(projectRoot: string): AnthropicRuntimeProfile {
+  // F340: Use full discovery chain (claude → builtin_anthropic → installer-anthropic).
   const runtime = resolveForClient(projectRoot, 'anthropic');
   if (runtime?.apiKey) {
     return {
@@ -72,11 +73,8 @@ export function resolveAnthropicRuntimeProfile(projectRoot: string): AnthropicRu
   return { id: 'builtin_anthropic', mode: 'subscription' };
 }
 
-function protocolToClient(protocol: AccountProtocol): BuiltinAccountClient {
-  return protocol as BuiltinAccountClient;
-}
-
 // Known builtin OAuth account refs — both legacy names and new naming convention.
+// F340: protocol is derived from client identity, no longer stored on accounts.
 const BUILTIN_ACCOUNT_MAP: Record<string, { client: BuiltinAccountClient; protocol: AccountProtocol }> = {
   claude: { client: 'anthropic', protocol: 'anthropic' },
   builtin_anthropic: { client: 'anthropic', protocol: 'anthropic' },
@@ -98,7 +96,7 @@ const BUILTIN_ACCOUNT_MAP: Record<string, { client: BuiltinAccountClient; protoc
 export function resolveByAccountRef(projectRoot: string, accountRef: string): RuntimeProviderProfile | null {
   const accounts = readCatalogAccounts(projectRoot);
   const account = accounts[accountRef];
-  if (account) return accountToRuntimeProfile(accountRef, account);
+  if (account) return accountToRuntimeProfile(accountRef, account, projectRoot);
 
   // Synthetic builtin profile for known OAuth refs
   const builtin = BUILTIN_ACCOUNT_MAP[accountRef];
@@ -115,9 +113,12 @@ export function resolveByAccountRef(projectRoot: string, accountRef: string): Ru
 }
 
 /**
- * Resolve a RuntimeProviderProfile for a given built-in client/protocol.
+ * Resolve a RuntimeProviderProfile for a given built-in client.
  * If preferredAccountRef is given, tries that first.
- * Falls back to finding any account matching the protocol.
+ * Falls back to the well-known builtin account ID for the client.
+ *
+ * F340: No longer matches by account.protocol — protocol is derived from
+ * client identity at runtime, not stored on accounts.
  */
 export function resolveForClient(
   projectRoot: string,
@@ -126,27 +127,11 @@ export function resolveForClient(
 ): RuntimeProviderProfile | null {
   const accounts = readCatalogAccounts(projectRoot);
 
-  // Try preferred first
+  // Try preferred first — fail closed if explicit ref doesn't resolve.
   if (preferredAccountRef) {
     const preferred = accounts[preferredAccountRef];
-    if (preferred) return accountToRuntimeProfile(preferredAccountRef, preferred);
-  }
-
-  // Find accounts matching the protocol — return only if unambiguous (exactly one match)
-  const protocol = normalizeProtocol(client);
-  const matches: Array<[string, AccountConfig]> = [];
-  for (const [ref, account] of Object.entries(accounts)) {
-    if (account.protocol === protocol) {
-      matches.push([ref, account]);
-    }
-  }
-  if (matches.length === 1) {
-    return accountToRuntimeProfile(matches[0][0], matches[0][1]);
-  }
-
-  // Synthetic builtin fallback: only when no real accounts match the protocol
-  // (e.g. fresh install before migration, or test env with no catalog)
-  if (preferredAccountRef && matches.length === 0) {
+    if (preferred) return accountToRuntimeProfile(preferredAccountRef, preferred, projectRoot);
+    // Not in accounts — only allow synthetic builtin (fresh install with empty accounts).
     const builtin = BUILTIN_ACCOUNT_MAP[preferredAccountRef];
     if (builtin) {
       return {
@@ -157,38 +142,76 @@ export function resolveForClient(
         protocol: builtin.protocol,
       };
     }
+    return null;
   }
 
-  // 0 matches = no account configured; >1 = ambiguous → fall through to legacy
+  // F340: Walk the full discovery chain; prefer accounts with credentials.
+  // This ensures installer-${client} (which holds API keys) is chosen over
+  // an OAuth builtin that has no stored credential.
+  const normalizedClient = normalizeToClient(client);
+  if (normalizedClient) {
+    const wellKnownId = LEGACY_BUILTIN_IDS[normalizedClient];
+    const candidateIds = [wellKnownId, `builtin_${normalizedClient}`, `installer-${normalizedClient}`];
+    let firstMatch: RuntimeProviderProfile | null = null;
+    for (const id of candidateIds) {
+      if (accounts[id]) {
+        const profile = accountToRuntimeProfile(id, accounts[id], projectRoot);
+        if (profile.authType === 'api_key' && profile.apiKey) return profile;
+        firstMatch ??= profile;
+      }
+    }
+    if (firstMatch) return firstMatch;
+  }
+
+  // Synthetic builtin fallback: only when no real accounts matched at all
+  // (fresh install, test env with empty accounts)
+  if (normalizedClient) {
+    const wellKnownRef = LEGACY_BUILTIN_IDS[normalizedClient];
+    const builtin = wellKnownRef ? BUILTIN_ACCOUNT_MAP[wellKnownRef] : undefined;
+    if (builtin) {
+      return {
+        id: wellKnownRef,
+        authType: 'oauth',
+        kind: 'builtin',
+        client: builtin.client,
+        protocol: builtin.protocol,
+      };
+    }
+  }
+
   return null;
 }
 
-function normalizeProtocol(clientOrProtocol: string): AccountProtocol {
-  if (
-    clientOrProtocol === 'anthropic' ||
-    clientOrProtocol === 'openai' ||
-    clientOrProtocol === 'openai-responses' ||
-    clientOrProtocol === 'google'
-  ) {
-    return clientOrProtocol;
+/** Map a client ID or protocol string to its BuiltinAccountClient equivalent. */
+function normalizeToClient(clientOrProtocol: string): BuiltinAccountClient | null {
+  switch (clientOrProtocol) {
+    case 'anthropic':
+    case 'openai':
+    case 'google':
+    case 'dare':
+    case 'opencode':
+      return clientOrProtocol;
+    case 'openai-responses':
+      return 'openai';
+    default:
+      return null;
   }
-  // dare → openai, opencode → anthropic
-  if (clientOrProtocol === 'dare') return 'openai';
-  if (clientOrProtocol === 'opencode') return 'anthropic';
-  return 'openai'; // safe default
 }
 
-function accountToRuntimeProfile(ref: string, account: AccountConfig): RuntimeProviderProfile {
-  const credential = readCredential(ref);
+function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoot?: string): RuntimeProviderProfile {
+  const credential = readCredential(ref, projectRoot);
   const apiKey = credential?.apiKey;
 
   const isBuiltin = account.authType === 'oauth';
+  // F340: Derive client and protocol solely from well-known account ID map.
+  // account.protocol is retired — not read, not written.
+  const builtinInfo = BUILTIN_ACCOUNT_MAP[ref];
   return {
     id: ref,
     authType: account.authType,
     kind: isBuiltin ? 'builtin' : 'api_key',
-    ...(isBuiltin ? { client: protocolToClient(account.protocol) } : {}),
-    protocol: account.protocol,
+    ...(isBuiltin && builtinInfo ? { client: builtinInfo.client } : {}),
+    ...(builtinInfo?.protocol ? { protocol: builtinInfo.protocol } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(apiKey ? { apiKey } : {}),
     ...(account.models && account.models.length > 0 ? { models: [...account.models] } : {}),
@@ -198,16 +221,16 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig): RuntimePr
 // ── Validation helpers (moved from provider-binding-compat.ts, F136 Phase 4d) ──
 
 export function validateRuntimeProviderBinding(
-  provider: CatProvider,
+  clientId: ClientId,
   profile: RuntimeProviderProfile,
   _defaultModel?: string | null,
 ): string | null {
-  if (provider === 'google' && profile.kind !== 'builtin') {
+  if (clientId === 'google' && profile.kind !== 'builtin') {
     return 'client "google" only supports builtin Gemini auth';
   }
-  const expectedClient = resolveBuiltinClientForProvider(provider);
+  const expectedClient = resolveBuiltinClientForProvider(clientId);
   if (expectedClient && profile.kind === 'builtin' && profile.client && profile.client !== expectedClient) {
-    return `bound provider profile "${profile.id}" is incompatible with client "${provider}"`;
+    return `bound provider profile "${profile.id}" is incompatible with client "${clientId}"`;
   }
   // Protocol matching removed: protocol is now provider-determined, not an
   // account-level attribute. Runtime env injection uses provider directly.
@@ -215,17 +238,17 @@ export function validateRuntimeProviderBinding(
 }
 
 export function validateModelFormatForProvider(
-  provider: CatProvider,
+  clientId: ClientId,
   defaultModel?: string | null,
   profileKind?: ProviderProfileKind,
-  ocProviderName?: string | null,
+  providerName?: string | null,
   options?: { legacyCompat?: boolean; accountModels?: string[] },
 ): string | null {
-  if (provider !== 'opencode') return null;
+  if (clientId !== 'opencode') return null;
   if (profileKind === 'api_key') {
-    const trimmedOcProvider = ocProviderName?.trim();
+    const trimmedProvider = providerName?.trim();
     // F189 intake: provider/model in defaultModel is the primary path.
-    // ocProviderName is only required when defaultModel is a bare model name.
+    // provider name is only required when defaultModel is a bare model name.
     // Must match parseOpenCodeModel logic: slash must have content on both sides
     // (rejects trailing slash like "minimax/" and leading slash like "/model").
     const modelTrimmed = defaultModel?.trim() ?? '';
@@ -238,7 +261,7 @@ export function validateModelFormatForProvider(
     //     Synced with BUILTIN_OPENCODE_PROVIDERS in invoke-single-cat.ts.
     //   Layer 2 — Account model list fallback (for non-builtin providers like minimax):
     //     if "x/y" is in the list AND bare "y" is also in the list → canonical (dual-form).
-    //     if "x/y" is in the list but bare "y" is not → ambiguous namespace → require ocProviderName.
+    //     if "x/y" is in the list but bare "y" is not → ambiguous namespace → require provider name.
     //     if "x/y" is NOT in the list → user-provided canonical form → accept.
     const KNOWN_CANONICAL_PROVIDERS = new Set(['anthropic', 'openai', 'openrouter', 'google']);
     const bareModel = looksLikeProviderModel ? modelTrimmed.slice(slashIdx + 1) : '';
@@ -250,11 +273,11 @@ export function validateModelFormatForProvider(
       models?.some((m) => m === modelTrimmed) === true &&
       models?.some((m) => m === bareModel) !== true;
     const modelHasProvider = looksLikeProviderModel && !isNamespacedModel;
-    if (!trimmedOcProvider && !modelHasProvider) {
+    if (!trimmedProvider && !modelHasProvider) {
       if (options?.legacyCompat) return null;
       return 'client "opencode" with API key auth requires either a provider/model format (e.g. minimax/MiniMax-M2.7) or an explicit Provider name';
     }
-    if (trimmedOcProvider?.includes('/')) {
+    if (trimmedProvider?.includes('/')) {
       return 'OpenCode Provider name must not contain "/" — use a plain identifier (e.g. "openrouter", not "openrouter/google")';
     }
   }

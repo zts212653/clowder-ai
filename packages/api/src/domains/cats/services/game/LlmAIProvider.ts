@@ -11,7 +11,6 @@
  * - 10s timeout per call; fallback to null on failure (caller handles fallback).
  */
 
-import type { AccountProtocol } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveForClient } from '../../../../config/account-resolver.js';
 import { getCatModel } from '../../../../config/cat-models.js';
@@ -30,7 +29,7 @@ export class LlmAIProvider implements AIProvider {
   constructor(catId: string) {
     this.model = getCatModel(catId);
     const entry = catRegistry.tryGet(catId);
-    this.provider = entry?.config.provider ?? 'anthropic';
+    this.provider = entry?.config.clientId ?? 'anthropic';
   }
 
   async generateAction(prompt: string, _schema: Record<string, unknown>): Promise<AIActionResponse> {
@@ -64,20 +63,15 @@ export class LlmAIProvider implements AIProvider {
     }
   }
 
-  /** Resolve API key for a given protocol through the unified resolver chain (F136 Phase 4b). */
-  private resolveApiKey(protocol: AccountProtocol, ...envFallbacks: string[]): string | undefined {
-    const profile = resolveForClient(process.cwd(), protocol);
-    if (profile?.apiKey) return profile.apiKey;
-    for (const envKey of envFallbacks) {
-      const val = process.env[envKey];
-      if (val) return val;
-    }
-    return undefined;
+  /** Resolve API key via full account discovery chain (well-known → builtin_ → installer-). */
+  private resolveApiKey(client: 'anthropic' | 'openai' | 'google'): string | undefined {
+    const profile = resolveForClient(process.cwd(), client);
+    return profile?.apiKey;
   }
 
   private async callAnthropic(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('anthropic', 'ANTHROPIC_API_KEY');
-    if (!apiKey) throw new Error('No Anthropic API key in credentials or ANTHROPIC_API_KEY env');
+    const apiKey = this.resolveApiKey('anthropic');
+    if (!apiKey) throw new Error('No Anthropic API key in credentials.json — run install-auth-config.mjs to configure');
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -104,8 +98,8 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callOpenAI(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('openai', 'OPENAI_API_KEY');
-    if (!apiKey) throw new Error('No OpenAI API key in credentials or OPENAI_API_KEY env');
+    const apiKey = this.resolveApiKey('openai');
+    if (!apiKey) throw new Error('No OpenAI API key in credentials.json — run install-auth-config.mjs to configure');
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -131,8 +125,8 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callGoogle(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('google', 'GOOGLE_AI_API_KEY', 'GEMINI_API_KEY');
-    if (!apiKey) throw new Error('No Google API key in credentials or GOOGLE_AI_API_KEY env');
+    const apiKey = this.resolveApiKey('google');
+    if (!apiKey) throw new Error('No Google API key in credentials.json — run install-auth-config.mjs to configure');
 
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`,

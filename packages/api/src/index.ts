@@ -110,6 +110,7 @@ import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { gameRoutes } from './routes/games.js';
 import {
+  accountsRoutes,
   auditRoutes,
   authorizationRoutes,
   backlogRoutes,
@@ -142,7 +143,6 @@ import {
   packsRoutes,
   projectSetupRoute,
   projectsRoutes,
-  providerProfilesRoutes,
   pushRoutes,
   queueRoutes,
   quotaRoutes,
@@ -360,13 +360,9 @@ async function main(): Promise<void> {
           projectRoot = thread.projectPath;
         }
         const catConfig = catRegistry.tryGet(catId)?.config;
-        if (catConfig?.provider === 'anthropic' || catConfig?.provider === 'opencode') {
-          const boundAccountRef = resolveBoundAccountRefForCat(
-            projectRoot,
-            catId,
-            catConfig as CatConfig & { providerProfileId?: string },
-          );
-          const runtime = resolveForClient(projectRoot, catConfig.provider, boundAccountRef);
+        if (catConfig?.clientId === 'anthropic' || catConfig?.clientId === 'opencode') {
+          const boundAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
+          const runtime = resolveForClient(projectRoot, catConfig.clientId, boundAccountRef);
           if (!runtime?.apiKey) return null;
           return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
         }
@@ -557,7 +553,7 @@ async function main(): Promise<void> {
 
       // Abstractive summary API config resolution (priority order):
       // 1. F102_API_BASE + F102_API_KEY (explicit override)
-      // 2. ANTHROPIC_API_KEY + local proxy (http://127.0.0.1:{ANTHROPIC_PROXY_PORT}/{first-slug})
+      // 2. Unified accounts system (credentials.json) + local proxy
       // 3. null → skip abstractive
       const generateAbstractive = createAbstractiveClient(
         async () => {
@@ -565,8 +561,9 @@ async function main(): Promise<void> {
           if (process.env.F102_API_BASE && process.env.F102_API_KEY) {
             return { mode: 'api_key' as const, baseUrl: process.env.F102_API_BASE, apiKey: process.env.F102_API_KEY };
           }
-          // Priority 2: use existing ANTHROPIC_API_KEY + local proxy
-          const apiKey = process.env.ANTHROPIC_API_KEY;
+          // Priority 2: resolve via full discovery chain (#340: system callers use resolveForClient)
+          const profile = resolveForClient(process.cwd(), 'anthropic');
+          const apiKey = profile?.apiKey;
           if (!apiKey) return null;
           const proxyPort = process.env.ANTHROPIC_PROXY_PORT || '9877';
           // Read first upstream slug from proxy-upstreams.json
@@ -742,7 +739,7 @@ async function main(): Promise<void> {
       // F32-b P1 fix: do NOT pass model here — let constructors resolve via
       // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
       let service: AgentService;
-      switch (config.provider) {
+      switch (config.clientId) {
         case 'anthropic':
           service = new ClaudeAgentService({ catId });
           break;
@@ -817,7 +814,7 @@ async function main(): Promise<void> {
           break;
         }
         default:
-          app.log.warn(`[api] Unknown provider "${config.provider}" for cat "${id}". It will not be routable.`);
+          app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
           continue;
       }
       agentRegistry.register(id, service);
@@ -1278,7 +1275,7 @@ async function main(): Promise<void> {
   await app.register(configRoutes);
   await app.register(configSecretsRoutes);
   await app.register(featureDocDetailRoutes);
-  await app.register(providerProfilesRoutes);
+  await app.register(accountsRoutes);
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes);
@@ -1624,26 +1621,12 @@ async function main(): Promise<void> {
     app.log.warn(`[api] CLI config regeneration failed (best-effort): ${String(err)}`);
   }
 
-  // F136 Phase 4a: Migrate provider-profiles → accounts + conflict scan (HC-3/HC-5/LL-043).
-  // HC-5: conflict is a HARD error — must propagate, not swallow.
-  // LL-043: legacy source present + accounts missing is a HARD error — don't run with empty accounts.
-  // Migration filesystem errors are best-effort.
-  try {
+  // F340: Account startup — fail-fast (LL-043 / migration conflict / corrupt credentials).
+  // Errors propagate to main().catch → process.exit(1).
+  {
     const { accountStartupHook } = await import('./config/account-startup.js');
     const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
-    if (startupResult.migration.migrated) {
-      app.log.info(
-        `[api] F136 account migration: ${startupResult.migration.accountsMigrated} account(s), ${startupResult.migration.credentialsMigrated} credential(s)`,
-      );
-    }
-  } catch (err) {
-    // HC-5 and LL-043 errors are HARD errors — let them crash the server.
-    if (err instanceof Error && (err.message.includes('HC-5') || err.message.includes('LL-043'))) {
-      app.log.error(`[api] ${err.message}`);
-      throw err;
-    }
-    // Other errors (migration filesystem issues) are best-effort.
-    app.log.warn(`[api] F136 account startup hook failed (best-effort): ${String(err)}`);
+    app.log.info(`[api] F340 accounts: ${startupResult.accountCount} account(s) loaded`);
   }
 
   // F101 Phase G: Recover auto-play loops for active games after restart.

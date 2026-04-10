@@ -223,8 +223,14 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
                 type="text"
                 value={newDirName}
                 onChange={(e) => setNewDirName(e.target.value)}
+                onCompositionStart={ime.onCompositionStart}
+                onCompositionEnd={ime.onCompositionEnd}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateDir();
+                  if (e.key === 'Enter' && ime.isComposing()) {
+                    e.preventDefault();
+                    return;
+                  }
+                  if (e.key === 'Enter') handleCreateDir();
                   if (e.key === 'Escape') {
                     setCreatingDir(false);
                     setMkdirError(null);

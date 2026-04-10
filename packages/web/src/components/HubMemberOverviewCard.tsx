@@ -8,31 +8,31 @@ function safeAvatarSrc(value: string | null | undefined): string | null {
   return null;
 }
 
-function humanizeProvider(provider: string) {
-  if (provider === 'openai') return 'OpenAI';
-  if (provider === 'anthropic') return 'Anthropic';
-  if (provider === 'google') return 'Gemini';
-  if (provider === 'dare') return 'Dare';
-  if (provider === 'opencode') return 'OpenCode';
-  if (provider === 'antigravity') return 'Antigravity';
-  return provider;
+function humanizeClientId(clientId: string) {
+  if (clientId === 'openai') return 'OpenAI';
+  if (clientId === 'anthropic') return 'Anthropic';
+  if (clientId === 'google') return 'Gemini';
+  if (clientId === 'dare') return 'Dare';
+  if (clientId === 'opencode') return 'OpenCode';
+  if (clientId === 'antigravity') return 'Antigravity';
+  return clientId;
 }
 
 function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
-  const accountRef = (cat.accountRef ?? cat.providerProfileId ?? '').toLowerCase();
+  const accountRef = (cat.accountRef ?? '').toLowerCase();
   if (accountRef.includes('claude')) return 'Claude';
   if (accountRef.includes('codex')) return 'Codex';
   if (accountRef.includes('gemini')) return 'Gemini';
   if (accountRef.includes('opencode')) return 'OpenCode';
   if (accountRef.includes('dare')) return 'Dare';
-  if (cat.provider === 'antigravity') return 'Antigravity';
-  if (cat.source === 'runtime' && cat.provider === 'openai') return 'OpenAI-Compatible';
-  return humanizeProvider(configCat?.provider ?? cat.provider);
+  if (cat.clientId === 'antigravity') return 'Antigravity';
+  if (cat.source === 'runtime' && cat.clientId === 'openai') return 'OpenAI-Compatible';
+  return humanizeClientId(configCat?.clientId ?? cat.clientId);
 }
 
 function accountSummary(cat: CatData) {
-  const accountRef = cat.accountRef?.trim() ?? cat.providerProfileId?.trim() ?? '';
-  if (!accountRef) return humanizeProvider(cat.provider);
+  const accountRef = cat.accountRef?.trim() ?? '';
+  if (!accountRef) return humanizeClientId(cat.clientId);
   if (
     accountRef === 'claude' ||
     accountRef === 'codex' ||
@@ -46,7 +46,7 @@ function accountSummary(cat: CatData) {
 }
 
 function getMetaSummary(cat: CatData, configCat?: CatConfig) {
-  if (cat.provider === 'antigravity') {
+  if (cat.clientId === 'antigravity') {
     return `Antigravity · ${configCat?.model ?? cat.defaultModel} · CLI Bridge`;
   }
 

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { TagEditor } from './hub-tag-editor';
 
-export function ProviderProfilesSummaryCard() {
+export function AccountsSummaryCard() {
   return (
     <div className="rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
       <p className="text-[13px] font-semibold text-[#E29578]">系统配置 &gt; 账号配置</p>
@@ -14,7 +14,7 @@ export function ProviderProfilesSummaryCard() {
   );
 }
 
-export function CreateApiKeyProfileSection({
+export function CreateApiKeyAccountSection({
   displayName,
   baseUrl,
   apiKey,

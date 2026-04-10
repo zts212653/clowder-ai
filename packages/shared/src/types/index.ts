@@ -92,9 +92,11 @@ export type {
 export type {
   CatColor,
   CatConfig,
+  /** @deprecated F340: Use ClientId instead. */
   CatProvider,
   CatState,
   CatStatus,
+  ClientId,
 } from './cat.js';
 export {
   CAT_CONFIGS,

@@ -178,7 +178,7 @@ describe('parseOpenCodeModel', () => {
 });
 
 describe('deriveOpenCodeApiType', () => {
-  test('derives apiType solely from ocProviderName', () => {
+  test('derives apiType solely from providerName', () => {
     const scenarios = [
       { ocProviderName: 'anthropic', expected: 'anthropic' },
       { ocProviderName: 'google', expected: 'google' },

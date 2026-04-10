@@ -263,13 +263,6 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 REDIS_PORT=6399
 REDIS_URL=redis://localhost:6399
 
-# ── Model API Keys 模型密钥 ──────────────────────────────────
-# Optional if your CLI subscription already handles auth.
-# 如果 CLI 订阅已管理认证，这里可以留空。
-# ANTHROPIC_API_KEY=
-# OPENAI_API_KEY=
-# GOOGLE_API_KEY=
-
 # ── API Gateway Proxy 反向代理 ───────────────────────────────
 ANTHROPIC_PROXY_ENABLED=$([ "$ENABLE_PROXY" = true ] && echo "1" || echo "0")
 # ANTHROPIC_PROXY_PORT=9877

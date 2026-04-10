@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { apiFetch } from '@/utils/api-client';
 
 const storeState = {
-  hubState: { open: true, tab: 'provider-profiles' },
+  hubState: { open: true, tab: 'accounts' },
   closeHub: () => {},
   threads: [],
   currentThreadId: 'thread-active',
@@ -27,7 +27,7 @@ vi.mock('@/hooks/useCatData', () => ({
         nickname: '宪宪',
         color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
         mentionPatterns: ['@opus'],
-        provider: 'anthropic',
+        clientId: 'anthropic',
         defaultModel: 'claude-opus-4-6',
         avatar: '/avatars/opus.png',
         roleDescription: '架构',
@@ -48,7 +48,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 import { CatCafeHub } from '@/components/CatCafeHub';
-import { HubProviderProfilesTab } from '@/components/HubProviderProfilesTab';
+import { HubAccountsTab } from '@/components/HubAccountsTab';
 
 const mockApiFetch = vi.mocked(apiFetch);
 
@@ -120,7 +120,7 @@ describe('CatCafeHub provider profiles tab', () => {
   });
 
   it('renders provider profiles tab initial loading state', () => {
-    const html = renderToStaticMarkup(React.createElement(HubProviderProfilesTab));
+    const html = renderToStaticMarkup(React.createElement(HubAccountsTab));
     expect(html).toContain('加载中');
   });
 
@@ -133,31 +133,27 @@ describe('CatCafeHub provider profiles tab', () => {
       return Promise.resolve(
         jsonResponse({
           activeProfileId: null,
-          bootstrapBindings: {},
           providers: [],
         }),
       );
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
     // Global profiles: no projectPath in URL
-    expect(requestedPath).toBe('/api/provider-profiles');
+    expect(requestedPath).toBe('/api/accounts');
   });
 
   it('keeps ragdoll rescue controls out of provider profiles after tab data loads', async () => {
     mockApiFetch.mockImplementation((path: string) => {
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
             activeProfileId: 'claude-oauth',
-            bootstrapBindings: {
-              anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude-oauth' },
-            },
             providers: [
               {
                 id: 'claude-oauth',
@@ -224,7 +220,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
@@ -246,15 +242,11 @@ describe('CatCafeHub provider profiles tab', () => {
 
   it('does not surface verify or activation controls on provider cards', async () => {
     mockApiFetch.mockImplementation((path: string) => {
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
             activeProfileId: 'claude-oauth',
-            bootstrapBindings: {
-              anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude-oauth' },
-              openai: { enabled: true, mode: 'api_key', accountRef: 'codex-sponsor' },
-            },
             providers: [
               {
                 id: 'claude-oauth',
@@ -293,7 +285,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
@@ -305,15 +297,11 @@ describe('CatCafeHub provider profiles tab', () => {
 
   it('renders provider cards without binding-scope action buttons', async () => {
     mockApiFetch.mockImplementation((path: string) => {
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
             activeProfileId: 'claude-oauth',
-            bootstrapBindings: {
-              anthropic: { enabled: true, mode: 'oauth', accountRef: 'claude-oauth' },
-              openai: { enabled: true, mode: 'oauth', accountRef: 'codex-oauth' },
-            },
             providers: [
               {
                 id: 'claude-oauth',
@@ -324,7 +312,7 @@ describe('CatCafeHub provider profiles tab', () => {
                 protocol: 'anthropic',
                 builtin: true,
                 mode: 'subscription',
-                client: 'anthropic',
+                clientId: 'anthropic',
                 models: ['claude-opus-4-6'],
                 hasApiKey: false,
                 createdAt: '2026-03-18T00:00:00.000Z',
@@ -339,7 +327,7 @@ describe('CatCafeHub provider profiles tab', () => {
                 protocol: 'openai',
                 builtin: true,
                 mode: 'subscription',
-                client: 'openai',
+                clientId: 'openai',
                 models: ['gpt-5.4'],
                 hasApiKey: false,
                 createdAt: '2026-03-18T00:00:00.000Z',
@@ -368,7 +356,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
@@ -378,7 +366,7 @@ describe('CatCafeHub provider profiles tab', () => {
 
   it('renders API key creation form without protocol selector (auto-inferred)', async () => {
     mockApiFetch.mockImplementation((path: string) => {
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -449,7 +437,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
@@ -476,7 +464,7 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(createApiKeyInput?.getAttribute('autocomplete')).toBe('off');
     expect(container.textContent).toContain('+ 添加模型');
 
-    const profileList = container.querySelector('[aria-label="Provider Profile List"]');
+    const profileList = container.querySelector('[aria-label="Account List"]');
     expect(profileList?.textContent).not.toContain('Antigravity');
     expect(container.textContent).toContain('可用模型');
     expect(container.textContent).not.toContain('测试');
@@ -484,7 +472,7 @@ describe('CatCafeHub provider profiles tab', () => {
 
   it('creates api-key profile from name, url, api key, and supported models only', async () => {
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles' && init?.method === 'POST') {
+      if (path === '/api/accounts' && init?.method === 'POST') {
         return Promise.resolve(
           jsonResponse({
             provider: {
@@ -494,7 +482,7 @@ describe('CatCafeHub provider profiles tab', () => {
           }),
         );
       }
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -522,7 +510,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
@@ -560,7 +548,7 @@ describe('CatCafeHub provider profiles tab', () => {
     // Global profiles: no projectPath in POST body
     let createPayload: Record<string, unknown> | null = null;
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles' && init?.method === 'POST') {
+      if (path === '/api/accounts' && init?.method === 'POST') {
         createPayload = JSON.parse(String(init.body)) as Record<string, unknown>;
         return Promise.resolve(
           jsonResponse({
@@ -571,11 +559,10 @@ describe('CatCafeHub provider profiles tab', () => {
           }),
         );
       }
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             activeProfileId: null,
-            bootstrapBindings: {},
             providers: [
               {
                 id: 'claude-oauth',
@@ -599,7 +586,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
@@ -654,7 +641,7 @@ describe('CatCafeHub provider profiles tab', () => {
 
   it('shows built-in and custom provider cards together without the old filter tabs', async () => {
     mockApiFetch.mockImplementation((path: string) => {
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -725,11 +712,11 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 
-    const profileList = container.querySelector('[aria-label="Provider Profile List"]');
+    const profileList = container.querySelector('[aria-label="Account List"]');
     expect(profileList?.textContent).toContain('Claude (OAuth)');
     expect(profileList?.textContent).toContain('Codex (OAuth)');
     expect(profileList?.textContent).toContain('Gemini (OAuth)');
@@ -745,7 +732,7 @@ describe('CatCafeHub provider profiles tab', () => {
 
   it('does not expose 测试 buttons on provider cards', async () => {
     mockApiFetch.mockImplementation((path: string) => {
-      if (path.startsWith('/api/provider-profiles')) {
+      if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -788,7 +775,7 @@ describe('CatCafeHub provider profiles tab', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubProviderProfilesTab));
+      root.render(React.createElement(HubAccountsTab));
     });
     await flushEffects();
 

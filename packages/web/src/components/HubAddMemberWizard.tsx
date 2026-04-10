@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
 import {
   ChoiceButton,
   CLIENT_ROW_1,
@@ -13,11 +14,10 @@ import {
 } from './hub-add-member-wizard.parts';
 import {
   builtinAccountIdForClient,
-  type ClientValue,
+  type ClientId,
   filterAccounts,
   type HubCatEditorDraft,
 } from './hub-cat-editor.model';
-import type { ProfileItem, ProviderProfilesResponse } from './hub-provider-profiles.types';
 
 interface HubAddMemberWizardProps {
   open: boolean;
@@ -28,18 +28,18 @@ interface HubAddMemberWizardProps {
 export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWizardProps) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [seedCats, setSeedCats] = useState<
-    Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }>
+    Array<{ clientId: string; source?: string; defaultModel?: string; commandArgs?: string[] }>
   >([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [client, setClient] = useState<ClientValue | null>(null);
+  const [client, setClient] = useState<ClientId | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [commandArgs, setCommandArgs] = useState(FALLBACK_ANTIGRAVITY_ARGS);
 
   const antigravityDefaults = useMemo((): { command: string; models: string[] } => {
     const templateAntigravity = seedCats.filter(
-      (cat) => cat.provider === 'antigravity' && (cat.source === 'seed' || cat.source === undefined),
+      (cat) => cat.clientId === 'antigravity' && (cat.source === 'seed' || cat.source === undefined),
     );
     const command = templateAntigravity.find((cat) => (cat.commandArgs?.length ?? 0) > 0)?.commandArgs?.join(' ');
     const models = templateAntigravity.map((cat) => cat.defaultModel?.trim() ?? '').filter((value) => value.length > 0);
@@ -88,10 +88,10 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
     if (!open) return;
     let cancelled = false;
     setLoadingProfiles(true);
-    apiFetch('/api/provider-profiles')
+    apiFetch('/api/accounts')
       .then(async (res) => {
         if (!res.ok) throw new Error(`账号配置加载失败 (${res.status})`);
-        return (await res.json()) as ProviderProfilesResponse;
+        return (await res.json()) as AccountsResponse;
       })
       .then((body) => {
         if (!cancelled) setProfiles(body.providers);
@@ -114,7 +114,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
       .then(async (res) => {
         if (!res.ok) throw new Error(`成员模板加载失败 (${res.status})`);
         return (await res.json()) as {
-          cats?: Array<{ provider: string; source?: string; defaultModel?: string; commandArgs?: string[] }>;
+          cats?: Array<{ clientId: string; source?: string; defaultModel?: string; commandArgs?: string[] }>;
         };
       })
       .then((body) => {
@@ -153,7 +153,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
       (client === 'antigravity' ? commandArgs.trim().length > 0 : Boolean(selectedProfile)),
   );
 
-  const handleClientSelect = (nextClient: ClientValue) => {
+  const handleClientSelect = (nextClient: ClientId) => {
     setClient(nextClient);
     setSelectedProfileId(nextClient === 'antigravity' ? '' : (builtinAccountIdForClient(nextClient) ?? ''));
     setDefaultModel(nextClient === 'antigravity' ? (antigravityDefaults.models[0] ?? '') : '');
@@ -170,7 +170,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
     if (!client || !defaultModel.trim()) return;
     if (client === 'antigravity') {
       onComplete({
-        client,
+        clientId: client,
         defaultModel: defaultModel.trim(),
         commandArgs: commandArgs.trim(),
       });
@@ -180,7 +180,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
       availableProfiles.find((profile) => profile.id === selectedProfileId)?.id ?? selectedProfileId.trim();
     if (!resolvedProfileId) return;
     onComplete({
-      client,
+      clientId: client,
       accountRef: resolvedProfileId,
       defaultModel: defaultModel.trim(),
     });

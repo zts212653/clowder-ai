@@ -109,20 +109,26 @@ describe('env-registry', () => {
     assert.equal(hindsightVars.length, 0, 'All HINDSIGHT_* vars should be removed');
   });
 
-  it('marks OPENAI_API_KEY, GITHUB_MCP_PAT, F102_API_KEY as sensitive + runtimeEditable', () => {
-    for (const name of ['OPENAI_API_KEY', 'GITHUB_MCP_PAT', 'F102_API_KEY']) {
+  it('marks GITHUB_MCP_PAT, F102_API_KEY as sensitive + runtimeEditable (#340 P6: OPENAI_API_KEY removed)', () => {
+    for (const name of ['GITHUB_MCP_PAT', 'F102_API_KEY']) {
       const def = ENV_VARS.find((v) => v.name === name);
       assert.ok(def, `${name} should be in registry`);
       assert.equal(def.sensitive, true, `${name} should be sensitive`);
       assert.equal(def.runtimeEditable, true, `${name} should be runtimeEditable`);
       assert.ok(isSensitiveEditableEnvVar(def), `${name} should pass isSensitiveEditableEnvVar`);
     }
+    // #340 P6: OPENAI_API_KEY is no longer runtimeEditable (managed by accounts system)
+    const openai = ENV_VARS.find((v) => v.name === 'OPENAI_API_KEY');
+    assert.ok(openai, 'OPENAI_API_KEY should still be in registry');
+    assert.equal(openai.sensitive, true, 'OPENAI_API_KEY should remain sensitive');
+    assert.ok(!openai.runtimeEditable, 'OPENAI_API_KEY should not be runtimeEditable');
   });
 
   it('hasSensitiveEditableVars detects whitelisted sensitive vars', () => {
-    assert.ok(hasSensitiveEditableVars(['OPENAI_API_KEY']));
+    assert.ok(hasSensitiveEditableVars(['GITHUB_MCP_PAT']));
     assert.ok(hasSensitiveEditableVars(['FRONTEND_URL', 'F102_API_KEY']));
     assert.ok(!hasSensitiveEditableVars(['FRONTEND_URL', 'AUDIT_LOG_DIR']));
+    assert.ok(!hasSensitiveEditableVars(['OPENAI_API_KEY']), 'OPENAI_API_KEY is no longer editable (#340 P6)');
   });
 
   it('marks DEFAULT_OWNER_USER_ID as non-editable (trust anchor)', () => {
@@ -386,7 +392,7 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
-  it('rejects sensitive env writes when DEFAULT_OWNER_USER_ID is not configured', async () => {
+  it('rejects OPENAI_API_KEY env write since it is no longer runtimeEditable (#340 P6)', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
@@ -411,9 +417,8 @@ describe('PATCH /api/config/env (route)', () => {
         },
       });
 
-      assert.equal(res.statusCode, 403);
-      const body = JSON.parse(res.payload);
-      assert.match(body.error, /DEFAULT_OWNER_USER_ID/);
+      // #340 P6: OPENAI_API_KEY is no longer runtimeEditable (managed by accounts system)
+      assert.equal(res.statusCode, 400);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'OPENAI_API_KEY=sk-old\n');
     } finally {
       await app.close();

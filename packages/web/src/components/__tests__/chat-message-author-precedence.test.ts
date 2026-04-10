@@ -66,7 +66,7 @@ describe('ChatMessage author precedence', () => {
         color: { primary: '#5B8C5A', secondary: '#E6F2E6' },
         mentionPatterns: [],
         breedId: 'maine-coon',
-        provider: 'openai',
+        clientId: 'openai',
         defaultModel: 'gpt-5.2',
         avatar: '/avatars/gpt52.png',
         roleDescription: '',

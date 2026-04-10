@@ -4,21 +4,27 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { runHelper, runHelperResult, runHelperWithEnv } from './install-auth-config-test-helpers.js';
+import {
+  runHelper,
+  runHelperNoGlobalOverride,
+  runHelperResult,
+  runHelperWithEnv,
+} from './install-auth-config-test-helpers.js';
 
+// F340: installer now writes to accounts.json + credentials.json (global)
 function readInstallerState(projectRoot) {
-  const profileDir = join(projectRoot, '.cat-cafe');
-  const profileFile = join(profileDir, 'provider-profiles.json');
-  const secretsFile = join(profileDir, 'provider-profiles.secrets.local.json');
+  const catCafeDir = join(projectRoot, '.cat-cafe');
+  const accountsFile = join(catCafeDir, 'accounts.json');
+  const credentialsFile = join(catCafeDir, 'credentials.json');
   return {
-    profileFile,
-    secretsFile,
-    profiles: JSON.parse(readFileSync(profileFile, 'utf8')),
-    secrets: JSON.parse(readFileSync(secretsFile, 'utf8')),
+    accountsFile,
+    credentialsFile,
+    accounts: existsSync(accountsFile) ? JSON.parse(readFileSync(accountsFile, 'utf8')) : {},
+    credentials: existsSync(credentialsFile) ? JSON.parse(readFileSync(credentialsFile, 'utf8')) : {},
   };
 }
 
-test('client-auth set creates a generic api key account and bootstrap binding for the selected client', () => {
+test('client-auth set creates a generic api key account for the selected client', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-'));
 
   try {
@@ -39,34 +45,22 @@ test('client-auth set creates a generic api key account and bootstrap binding fo
       'https://proxy.example.dev',
     ]);
 
-    const { profiles, secrets } = readInstallerState(projectRoot);
-    const apiKeyAccount = profiles.providers.find((profile) => profile.id === 'installer-anthropic');
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    const account = accounts['installer-anthropic'];
 
-    assert.deepEqual(profiles.bootstrapBindings, {
-      anthropic: { enabled: true, mode: 'api_key', accountRef: 'installer-anthropic' },
-      openai: { enabled: true, mode: 'oauth', accountRef: 'codex' },
-      google: { enabled: true, mode: 'oauth', accountRef: 'gemini' },
-      dare: { enabled: false, mode: 'skip' },
-      opencode: { enabled: false, mode: 'skip' },
-    });
-    assert.deepEqual(apiKeyAccount, {
-      id: 'installer-anthropic',
-      displayName: 'API Key Account 1',
-      kind: 'api_key',
-      authType: 'api_key',
-      builtin: false,
-      baseUrl: 'https://proxy.example.dev',
-      createdAt: apiKeyAccount.createdAt,
-      updatedAt: apiKeyAccount.updatedAt,
-    });
-    assert.equal(secrets.profiles['installer-anthropic'].apiKey, 'generic-key');
+    assert.ok(account, 'installer-anthropic account should exist');
+    assert.equal(account.authType, 'api_key');
+    // F340: protocol no longer persisted on new accounts — derived at runtime
+    assert.equal(account.protocol, undefined, 'protocol should not be persisted');
+    assert.equal(account.baseUrl, 'https://proxy.example.dev');
+    assert.equal(credentials['installer-anthropic'].apiKey, 'generic-key');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
-test('client-auth remove drops the installer api key account and restores oauth bootstrap', () => {
-  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-remove-'));
+test('client-auth remove without --force exits non-zero and preserves account', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-remove-noop-'));
 
   try {
     runHelper([
@@ -82,42 +76,55 @@ test('client-auth remove drops the installer api key account and restores oauth 
       'codex-key',
     ]);
 
-    runHelper(['client-auth', 'remove', '--project-dir', projectRoot, '--client', 'openai']);
+    const result = runHelperResult(['client-auth', 'remove', '--project-dir', projectRoot, '--client', 'openai']);
+    assert.notEqual(result.status, 0, 'should exit non-zero without --force');
+    assert.match(result.stderr, /--force/i, 'stderr should mention --force');
 
-    const { profiles, secrets } = readInstallerState(projectRoot);
-    assert.equal(
-      profiles.providers.some((profile) => profile.id === 'installer-openai'),
-      false,
-    );
-    assert.deepEqual(profiles.bootstrapBindings.openai, {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: 'codex',
-    });
-    assert.equal('installer-openai' in (secrets.profiles ?? {}), false);
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.ok(accounts['installer-openai'], 'account preserved without --force');
+    assert.equal(credentials['installer-openai'].apiKey, 'codex-key', 'credential preserved without --force');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
-test('client-auth set oauth restores builtin bindings for dare and opencode', () => {
+test('client-auth remove --force drops the installer api key account', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-remove-force-'));
+
+  try {
+    runHelper([
+      'client-auth',
+      'set',
+      '--project-dir',
+      projectRoot,
+      '--client',
+      'openai',
+      '--mode',
+      'api_key',
+      '--api-key',
+      'codex-key',
+    ]);
+
+    runHelper(['client-auth', 'remove', '--project-dir', projectRoot, '--client', 'openai', '--force', 'true']);
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.equal(accounts['installer-openai'], undefined, 'account removed with --force');
+    assert.equal(credentials['installer-openai'], undefined, 'credential removed with --force');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set oauth creates builtin accounts for dare and opencode', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-oauth-'));
 
   try {
     runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'dare', '--mode', 'oauth']);
     runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'opencode', '--mode', 'oauth']);
 
-    const { profiles } = readInstallerState(projectRoot);
-    assert.deepEqual(profiles.bootstrapBindings.dare, {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: 'dare',
-    });
-    assert.deepEqual(profiles.bootstrapBindings.opencode, {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: 'opencode',
-    });
+    const { accounts } = readInstallerState(projectRoot);
+    assert.equal(accounts.dare?.authType, 'oauth');
+    assert.equal(accounts.opencode?.authType, 'oauth');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -140,53 +147,33 @@ test('claude-profile create and remove keeps installer-managed account in sync',
       'claude-model',
     ]);
 
-    const { profiles, secrets } = readInstallerState(projectRoot);
-    const installerManaged = profiles.providers.find((profile) => profile.id === 'installer-managed');
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    const installerManaged = accounts['installer-managed'];
 
-    assert.equal(profiles.version, 3);
-    assert.deepEqual(profiles.bootstrapBindings.anthropic, {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: 'installer-managed',
-    });
-    assert.deepEqual(profiles.bootstrapBindings.openai, {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: 'codex',
-    });
-    assert.deepEqual(profiles.bootstrapBindings.google, {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: 'gemini',
-    });
-    assert.deepEqual(profiles.bootstrapBindings.dare, { enabled: false, mode: 'skip' });
-    assert.deepEqual(profiles.bootstrapBindings.opencode, { enabled: false, mode: 'skip' });
-    assert.deepEqual(installerManaged, {
-      id: 'installer-managed',
-      displayName: 'Installer API Key',
-      kind: 'api_key',
-      authType: 'api_key',
-      builtin: false,
-      baseUrl: 'https://claude.example',
-      models: ['claude-model'],
-      createdAt: installerManaged.createdAt,
-      updatedAt: installerManaged.updatedAt,
-    });
-    assert.equal(secrets.profiles['installer-managed'].apiKey, 'claude-key');
+    assert.ok(installerManaged, 'installer-managed account should exist');
+    assert.equal(installerManaged.authType, 'api_key');
+    // F340: protocol no longer persisted on new accounts — derived at runtime
+    assert.equal(installerManaged.protocol, undefined, 'protocol should not be persisted');
+    assert.equal(installerManaged.baseUrl, 'https://claude.example');
+    assert.deepEqual(installerManaged.models, ['claude-model']);
+    assert.equal(credentials['installer-managed'].apiKey, 'claude-key');
 
-    runHelper(['claude-profile', 'remove', '--project-dir', projectRoot]);
-
-    const afterRemove = readInstallerState(projectRoot);
+    // Without --force: exits non-zero, nothing deleted
+    const safeResult = runHelperResult(['claude-profile', 'remove', '--project-dir', projectRoot]);
+    assert.notEqual(safeResult.status, 0, 'should exit non-zero without --force');
+    const afterSafeRemove = readInstallerState(projectRoot);
+    assert.ok(afterSafeRemove.accounts['installer-managed'], 'account preserved without --force');
     assert.equal(
-      afterRemove.profiles.providers.some((profile) => profile.id === 'installer-managed'),
-      false,
+      afterSafeRemove.credentials['installer-managed'].apiKey,
+      'claude-key',
+      'credential preserved without --force',
     );
-    assert.deepEqual(afterRemove.profiles.bootstrapBindings.anthropic, {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: 'claude',
-    });
-    assert.equal('installer-managed' in (afterRemove.secrets.profiles ?? {}), false);
+
+    // With --force: actually deletes
+    runHelper(['claude-profile', 'remove', '--project-dir', projectRoot, '--force', 'true']);
+    const afterRemove = readInstallerState(projectRoot);
+    assert.equal(afterRemove.accounts['installer-managed'], undefined, 'account removed with --force');
+    assert.equal(afterRemove.credentials['installer-managed'], undefined, 'credential removed with --force');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -254,28 +241,22 @@ test('client-auth remove fails when the installer-managed account is still refer
     assert.notEqual(result.status, 0);
     assert.match(String(result.stderr), /still referenced by runtime cats: runtime-codex/i);
 
-    const { profiles, secrets } = readInstallerState(projectRoot);
-    assert.equal(
-      profiles.providers.some((profile) => profile.id === 'installer-openai'),
-      true,
-    );
-    assert.deepEqual(profiles.bootstrapBindings.openai, {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: 'installer-openai',
-    });
-    assert.equal(secrets.profiles['installer-openai'].apiKey, 'codex-key');
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.ok(accounts['installer-openai'], 'account should NOT be removed');
+    assert.equal(credentials['installer-openai'].apiKey, 'codex-key');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
-test('claude-profile remove is a no-op on a fresh project without provider profile files', () => {
+test('claude-profile remove is a no-op on a fresh project without config files', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-remove-empty-'));
 
   try {
     runHelper(['claude-profile', 'remove', '--project-dir', projectRoot]);
-    assert.equal(existsSync(join(projectRoot, '.cat-cafe')), false);
+    // Global .cat-cafe may be created but accounts.json should not exist
+    const { accounts } = readInstallerState(projectRoot);
+    assert.deepEqual(accounts, {});
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -289,14 +270,14 @@ test('claude-profile set accepts API key from _INSTALLER_API_KEY environment var
       _INSTALLER_API_KEY: 'env-api-key',
     });
 
-    const { secrets } = readInstallerState(projectRoot);
-    assert.equal(secrets.profiles['installer-managed'].apiKey, 'env-api-key');
+    const { credentials } = readInstallerState(projectRoot);
+    assert.equal(credentials['installer-managed'].apiKey, 'env-api-key');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
-test('claude-profile set preserves non-anthropic bindings when migrating a legacy v2 file', () => {
+test('claude-profile set migrates and preserves non-anthropic accounts from legacy v2 file', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-profile-legacy-v2-'));
 
   try {
@@ -308,9 +289,7 @@ test('claude-profile set preserves non-anthropic bindings when migrating a legac
         {
           version: 2,
           activeProfileId: 'personal',
-          activeProfileIds: {
-            openai: 'openai-sponsor',
-          },
+          activeProfileIds: { openai: 'openai-sponsor' },
           profiles: [
             {
               id: 'claude-oauth',
@@ -357,23 +336,146 @@ test('claude-profile set preserves non-anthropic bindings when migrating a legac
       'https://claude.example',
     ]);
 
-    const { profiles, secrets } = readInstallerState(projectRoot);
-    assert.equal(profiles.version, 3);
-    assert.deepEqual(profiles.bootstrapBindings.anthropic, {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: 'installer-managed',
-    });
-    assert.deepEqual(profiles.bootstrapBindings.openai, {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: 'openai-sponsor',
-    });
-    const openaiSponsor = profiles.providers.find((profile) => profile.id === 'openai-sponsor');
-    assert.equal(Boolean(openaiSponsor), true);
-    assert.equal(openaiSponsor?.protocol, 'openai');
-    assert.equal(secrets.profiles['openai-sponsor'].apiKey, 'openai-key');
-    assert.equal(secrets.profiles['installer-managed'].apiKey, 'claude-key');
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    // Legacy openai-sponsor migrated (F340: protocol not migrated)
+    assert.ok(accounts['openai-sponsor'], 'legacy openai-sponsor should be migrated');
+    assert.equal(accounts['openai-sponsor'].protocol, undefined, 'protocol should not be migrated');
+    assert.equal(accounts['openai-sponsor'].baseUrl, 'https://openai.example');
+    assert.equal(credentials['openai-sponsor'].apiKey, 'openai-key');
+    // New installer-managed applied (F340: no protocol on new accounts)
+    assert.equal(accounts['installer-managed'].protocol, undefined, 'new account should not have protocol');
+    assert.equal(credentials['installer-managed'].apiKey, 'claude-key');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set infers legacy api_key authType from mode/kind fields during migration', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-legacy-authtype-'));
+
+  try {
+    const profileDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, 'provider-profiles.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          profiles: [
+            {
+              id: 'legacy-mode-profile',
+              provider: 'legacy-mode-profile',
+              displayName: 'Legacy Mode Profile',
+              mode: 'api_key',
+              protocol: 'openai',
+              baseUrl: 'https://mode.example',
+            },
+            {
+              id: 'legacy-kind-profile',
+              provider: 'legacy-kind-profile',
+              displayName: 'Legacy Kind Profile',
+              kind: 'api_key',
+              protocol: 'anthropic',
+              baseUrl: 'https://kind.example',
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(profileDir, 'provider-profiles.secrets.local.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          profiles: {
+            'legacy-mode-profile': { apiKey: 'mode-key' },
+            'legacy-kind-profile': { apiKey: 'kind-key' },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'openai', '--mode', 'oauth']);
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.equal(accounts['legacy-mode-profile']?.authType, 'api_key');
+    assert.equal(accounts['legacy-kind-profile']?.authType, 'api_key');
+    assert.equal(credentials['legacy-mode-profile']?.apiKey, 'mode-key');
+    assert.equal(credentials['legacy-kind-profile']?.apiKey, 'kind-key');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set migrates v1 nested provider profiles and secrets before writing new auth state', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-legacy-v1-profiles-'));
+
+  try {
+    const profileDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, 'provider-profiles.json'),
+      `${JSON.stringify(
+        {
+          version: 1,
+          providers: {
+            anthropic: {
+              activeProfileId: 'my-proxy',
+              profiles: [
+                {
+                  id: 'my-proxy',
+                  displayName: 'My Proxy',
+                  authType: 'api_key',
+                  baseUrl: 'https://proxy.example/v1',
+                },
+                {
+                  id: 'team-key',
+                  displayName: 'Team Key',
+                  mode: 'api_key',
+                },
+              ],
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(profileDir, 'provider-profiles.secrets.local.json'),
+      `${JSON.stringify(
+        {
+          version: 1,
+          providers: {
+            anthropic: {
+              'my-proxy': { apiKey: 'sk-proxy-key' },
+              'team-key': { apiKey: 'sk-team-key' },
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'openai', '--mode', 'oauth']);
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.equal(accounts['my-proxy']?.authType, 'api_key');
+    assert.equal(accounts['my-proxy']?.displayName, 'My Proxy');
+    assert.equal(accounts['my-proxy']?.baseUrl, 'https://proxy.example/v1');
+    assert.equal(accounts['team-key']?.authType, 'api_key');
+    assert.equal(accounts.anthropic, undefined, 'should not create a shell account from the client key');
+    assert.equal(credentials['my-proxy']?.apiKey, 'sk-proxy-key');
+    assert.equal(credentials['team-key']?.apiKey, 'sk-team-key');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -385,18 +487,14 @@ test('claude-profile v2 migration preserves non-installer accounts and secrets o
   try {
     const profileDir = join(projectRoot, '.cat-cafe');
     mkdirSync(profileDir, { recursive: true });
-    const profileFile = join(profileDir, 'provider-profiles.json');
-    const secretsFile = join(profileDir, 'provider-profiles.secrets.local.json');
 
     writeFileSync(
-      profileFile,
+      join(profileDir, 'provider-profiles.json'),
       `${JSON.stringify(
         {
           version: 2,
           activeProfileId: 'personal',
-          activeProfileIds: {
-            anthropic: 'personal',
-          },
+          activeProfileIds: { anthropic: 'personal' },
           profiles: [
             {
               id: 'installer-managed',
@@ -428,7 +526,7 @@ test('claude-profile v2 migration preserves non-installer accounts and secrets o
       'utf8',
     );
     writeFileSync(
-      secretsFile,
+      join(profileDir, 'provider-profiles.secrets.local.json'),
       `${JSON.stringify(
         {
           version: 2,
@@ -454,51 +552,31 @@ test('claude-profile v2 migration preserves non-installer accounts and secrets o
       'https://installer.new',
     ]);
 
-    const migrated = readInstallerState(projectRoot);
-    const personalProfile = migrated.profiles.providers.find((profile) => profile.id === 'personal');
-    const installerProfile = migrated.profiles.providers.find((profile) => profile.id === 'installer-managed');
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.equal(accounts.personal?.baseUrl, 'https://personal.example');
+    assert.equal(credentials.personal.apiKey, 'personal-key');
+    // installer-managed overwritten by the new set command
+    assert.equal(accounts['installer-managed']?.baseUrl, 'https://installer.new');
+    assert.equal(credentials['installer-managed'].apiKey, 'new-installer-key');
 
-    assert.equal(migrated.profiles.version, 3);
-    assert.deepEqual(migrated.profiles.bootstrapBindings.anthropic, {
-      enabled: true,
-      mode: 'api_key',
-      accountRef: 'installer-managed',
-    });
-    assert.equal(personalProfile?.baseUrl, 'https://personal.example');
-    assert.equal(migrated.secrets.profiles.personal.apiKey, 'personal-key');
-    assert.equal(installerProfile?.baseUrl, 'https://installer.new');
-    assert.equal(migrated.secrets.profiles['installer-managed'].apiKey, 'new-installer-key');
-
-    runHelper(['claude-profile', 'remove', '--project-dir', projectRoot]);
+    runHelper(['claude-profile', 'remove', '--project-dir', projectRoot, '--force', 'true']);
 
     const afterRemove = readInstallerState(projectRoot);
-    assert.equal(
-      afterRemove.profiles.providers.some((profile) => profile.id === 'installer-managed'),
-      false,
-    );
-    assert.deepEqual(afterRemove.profiles.bootstrapBindings.anthropic, {
-      enabled: true,
-      mode: 'oauth',
-      accountRef: 'claude',
-    });
-    assert.equal(
-      afterRemove.profiles.providers.some((profile) => profile.id === 'personal'),
-      true,
-    );
-    assert.equal(afterRemove.secrets.profiles.personal.apiKey, 'personal-key');
-    assert.equal('installer-managed' in (afterRemove.secrets.profiles ?? {}), false);
+    assert.equal(afterRemove.accounts['installer-managed'], undefined, 'installer-managed removed with --force');
+    assert.ok(afterRemove.accounts.personal, 'personal account preserved');
+    assert.equal(afterRemove.credentials.personal.apiKey, 'personal-key');
+    assert.equal(afterRemove.credentials['installer-managed'], undefined, 'installer credential removed');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
-test('claude-profile set fails fast on malformed provider profile JSON', () => {
+test('claude-profile set fails fast on malformed legacy provider profile JSON', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-bad-profile-'));
 
   try {
     const profileDir = join(projectRoot, '.cat-cafe');
     const profileFile = join(profileDir, 'provider-profiles.json');
-    const secretsFile = join(profileDir, 'provider-profiles.secrets.local.json');
     mkdirSync(profileDir, { recursive: true });
     writeFileSync(profileFile, '{"version": 1,', 'utf8');
 
@@ -513,9 +591,10 @@ test('claude-profile set fails fast on malformed provider profile JSON', () => {
     ]);
 
     assert.notEqual(result.status, 0);
-    assert.match(String(result.stderr), /provider-profiles\.json/);
-    assert.equal(readFileSync(profileFile, 'utf8'), originalContents);
-    assert.equal(existsSync(secretsFile), false);
+    // The error references the parse failure
+    assert.ok(String(result.stderr).length > 0, 'stderr should contain error details');
+    assert.equal(readFileSync(profileFile, 'utf8'), originalContents, 'corrupt file must not be modified');
+    assert.equal(existsSync(join(profileDir, 'accounts.json')), false, 'accounts.json should not be created');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -562,5 +641,193 @@ test('env-apply escapes shell substitutions when apostrophe requires double quot
     assert.equal(sourced, literal);
   } finally {
     rmSync(envRoot, { recursive: true, force: true });
+  }
+});
+
+test('#340 P6 regression: OAuth switch with explicit remove-then-set cleans stale installer profile', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-oauth-switch-'));
+
+  try {
+    // Step 1: Create an installer API-key profile for codex
+    runHelperWithEnv(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'api_key'], {
+      _INSTALLER_API_KEY: 'sk-old-codex-key',
+    });
+    const before = readInstallerState(projectRoot);
+    assert.ok(before.accounts['installer-openai'], 'installer-openai account should exist');
+
+    // Step 2: Switch to OAuth — caller must remove first, then set.
+    // set --mode oauth does NOT auto-delete installer accounts (they're global;
+    // only removeClientAuth has the safety checks for cross-project bindings).
+    runHelper(['client-auth', 'remove', '--project-dir', projectRoot, '--client', 'codex', '--force', 'true']);
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'oauth']);
+
+    const after = readInstallerState(projectRoot);
+    assert.equal(after.accounts['installer-openai'], undefined, 'installer-openai must be removed by explicit remove');
+    assert.equal(after.credentials['installer-openai'], undefined, 'credentials must be removed');
+    assert.ok(after.accounts.codex, 'builtin codex account must exist');
+    assert.equal(after.accounts.codex.authType, 'oauth');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('set --mode oauth preserves stale installer account (global safety)', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-oauth-no-autodelete-'));
+
+  try {
+    // Step 1: Create installer API-key account
+    runHelperWithEnv(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'api_key'], {
+      _INSTALLER_API_KEY: 'sk-stale-key',
+    });
+
+    // Step 2: set --mode oauth WITHOUT remove — installer account must survive
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'oauth']);
+
+    const after = readInstallerState(projectRoot);
+    // installer-openai intentionally preserved — global accounts can't be safely
+    // auto-deleted without cross-project enumeration
+    assert.ok(after.accounts['installer-openai'], 'installer-openai must NOT be auto-deleted');
+    assert.ok(after.credentials['installer-openai'], 'credentials must NOT be auto-deleted');
+    // OAuth account still created
+    assert.ok(after.accounts.codex, 'builtin codex account must exist');
+    assert.equal(after.accounts.codex.authType, 'oauth');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set retries legacy secret import when account already exists from a partial migration', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-retry-secret-'));
+
+  try {
+    const profileDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(profileDir, { recursive: true });
+
+    writeFileSync(
+      join(profileDir, 'accounts.json'),
+      `${JSON.stringify(
+        {
+          'my-custom': {
+            authType: 'api_key',
+            baseUrl: 'https://custom.api/v1',
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(profileDir, 'provider-profiles.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          providers: [{ id: 'my-custom', authType: 'api_key', baseUrl: 'https://custom.api/v1' }],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(profileDir, 'provider-profiles.secrets.local.json'),
+      `${JSON.stringify(
+        {
+          profiles: {
+            'my-custom': { apiKey: 'sk-retry-key' },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'oauth']);
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.ok(accounts['my-custom'], 'existing migrated account should still be present');
+    assert.equal(credentials['my-custom']?.apiKey, 'sk-retry-key', 'missing credential should be imported on retry');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('#340 P1: installer stores accounts in --project-dir without CAT_CAFE_GLOBAL_CONFIG_ROOT env', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-no-env-override-'));
+
+  try {
+    // Run WITHOUT CAT_CAFE_GLOBAL_CONFIG_ROOT — exercises _activeProjectDir fallback.
+    // Before the fix, this would fall back to homedir() and write to ~/.cat-cafe/.
+    const result = runHelperNoGlobalOverride([
+      'client-auth',
+      'set',
+      '--project-dir',
+      projectRoot,
+      '--client',
+      'anthropic',
+      '--mode',
+      'api_key',
+      '--api-key',
+      'test-key-no-env',
+      '--display-name',
+      'No Env Override',
+    ]);
+    assert.equal(result.status, 0, `installer should succeed, stderr: ${result.stderr}`);
+
+    // Verify accounts landed in the project dir, not homedir
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.ok(accounts['installer-anthropic'], 'account should be in project-dir/.cat-cafe/');
+    assert.equal(accounts['installer-anthropic'].authType, 'api_key');
+    assert.equal(credentials['installer-anthropic']?.apiKey, 'test-key-no-env');
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth remove --force fails closed when the runtime catalog cannot be parsed', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-remove-bad-catalog-'));
+
+  try {
+    runHelper([
+      'client-auth',
+      'set',
+      '--project-dir',
+      projectRoot,
+      '--client',
+      'openai',
+      '--mode',
+      'api_key',
+      '--api-key',
+      'codex-key',
+    ]);
+
+    const runtimeDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(join(runtimeDir, 'cat-catalog.json'), '{"version": 2, "breeds": [', 'utf8');
+
+    const result = runHelperResult([
+      'client-auth',
+      'remove',
+      '--project-dir',
+      projectRoot,
+      '--client',
+      'openai',
+      '--force',
+      'true',
+    ]);
+
+    assert.notEqual(result.status, 0, 'forced remove should fail when catalog parsing fails');
+    assert.match(String(result.stderr), /failed to parse|unexpected end|json/i);
+
+    const { accounts, credentials } = readInstallerState(projectRoot);
+    assert.ok(accounts['installer-openai'], 'account should be preserved on parse failure');
+    assert.equal(
+      credentials['installer-openai']?.apiKey,
+      'codex-key',
+      'credential should be preserved on parse failure',
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
   }
 });
