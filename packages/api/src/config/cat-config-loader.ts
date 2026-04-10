@@ -21,7 +21,7 @@ import type {
   ReviewPolicy,
   Roster,
 } from '@cat-cafe/shared';
-import { createCatId, normalizeCliEffortForProvider } from '@cat-cafe/shared';
+import { createCatId, getDefaultCliEffortForProvider, isValidCliEffortForProvider } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { bootstrapCatCatalog, readCatCatalogRaw, resolveCatCatalogPath } from './cat-catalog-store.js';
@@ -687,10 +687,14 @@ export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
  *   claude (anthropic): 'max'
  *   codex (openai):     'xhigh'
  *   others:             'high'
+ *
+ * @note Stale cross-provider effort values are cleaned at write time in the
+ * cats PATCH route, so runtime lookup only needs to read persisted values and
+ * fall back to provider defaults.
  */
 export function getCatEffort(catId: string, config?: CatCafeConfig, fallbackProvider?: CatProvider): CliEffortLevel {
   const cfg = config ?? getCachedConfig();
-  if (!cfg) return normalizeCliEffortForProvider(fallbackProvider ?? 'anthropic', undefined) ?? 'high';
+  if (!cfg) return getDefaultCliEffortForProvider(fallbackProvider ?? 'anthropic') ?? 'high';
 
   if (!_catIdToVariant || _catIdToVariantSource !== cfg) {
     _catIdToVariant = buildCatIdToVariantIndex(cfg);
@@ -698,9 +702,16 @@ export function getCatEffort(catId: string, config?: CatCafeConfig, fallbackProv
   }
 
   const variant = _catIdToVariant.get(catId);
-  const effectiveProvider = variant?.provider ?? fallbackProvider;
-  const normalized = normalizeCliEffortForProvider(effectiveProvider ?? 'anthropic', variant?.cli.effort);
-  return normalized ?? 'high';
+  const effectiveProvider = variant?.provider ?? fallbackProvider ?? 'anthropic';
+
+  // Defense-in-depth: validate persisted effort against current provider.
+  // Write-time cleanup (PATCH route) prevents new stale values, but historical
+  // catalogs from before this fix may still carry cross-provider effort values.
+  if (variant?.cli.effort && isValidCliEffortForProvider(effectiveProvider, variant.cli.effort)) {
+    return variant.cli.effort;
+  }
+
+  return getDefaultCliEffortForProvider(effectiveProvider) ?? 'high';
 }
 
 // ── F149: ACP config accessor (raw variant field, not in CatConfig type) ──────

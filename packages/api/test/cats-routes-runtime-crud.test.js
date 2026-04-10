@@ -1364,6 +1364,114 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(patchBody.cat.accountRef, sponsorProfile.id);
   });
 
+  it('PATCH /api/cats/:id rebases inherited seed binding when switching client families', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const beforeRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(beforeRes.statusCode, 200);
+    const beforeBody = JSON.parse(beforeRes.body);
+    const opusBefore = beforeBody.cats.find((cat) => cat.id === 'opus');
+    assert.ok(opusBefore, 'seed opus member must exist');
+    assert.equal(opusBefore.provider, 'anthropic');
+    assert.equal(opusBefore.accountRef, 'claude');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      // Simulate editor payload carrying the previous visible accountRef while switching client.
+      body: JSON.stringify({
+        client: 'openai',
+        defaultModel: 'gpt-5.4',
+        providerProfileId: opusBefore.accountRef,
+      }),
+    });
+
+    assert.equal(patchRes.statusCode, 200);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.equal(patchBody.cat.provider, 'openai');
+    assert.equal(patchBody.cat.defaultModel, 'gpt-5.4');
+    assert.equal(patchBody.cat.accountRef, 'codex');
+  });
+
+  it('PATCH /api/cats/:id resets stale CLI config when switching client families', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // First, set a non-default CLI config (including effort) on opus (anthropic)
+    const firstPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        cli: {
+          command: 'claude',
+          outputFormat: 'stream-json',
+          effort: 'low', // Non-default for anthropic (default is 'max')
+        },
+      }),
+    });
+
+    assert.equal(firstPatchRes.statusCode, 200);
+
+    // Verify the non-default effort was persisted
+    let runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    let opusBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'opus');
+    let opusVariant = opusBreed.variants.find((variant) => variant.id === opusBreed.defaultVariantId);
+    assert.equal(opusVariant.cli.effort, 'low', 'non-default effort should be persisted');
+
+    // Now switch to openai provider
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        client: 'openai',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(patchRes.statusCode, 200);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.equal(patchBody.cat.provider, 'openai');
+    assert.equal(patchBody.cat.defaultModel, 'gpt-5.4');
+
+    // Verify CLI was reset to openai defaults (including effort)
+    runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    opusBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'opus');
+    opusVariant = opusBreed.variants.find((variant) => variant.id === opusBreed.defaultVariantId);
+    assert.ok(opusVariant, 'runtime opus default variant should exist');
+    assert.deepEqual(
+      opusVariant.cli,
+      {
+        command: 'codex',
+        outputFormat: 'json',
+        effort: 'xhigh', // Reset to openai's default
+      },
+      'CLI should be reset to openai defaults including effort',
+    );
+  });
+
   it('PATCH /api/cats/:id allows non-provider edits for unbound opencode seed member', async () => {
     if (savedTemplatePath === undefined) {
       delete process.env.CAT_TEMPLATE_PATH;

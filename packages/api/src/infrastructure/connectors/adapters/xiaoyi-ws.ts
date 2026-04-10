@@ -7,8 +7,8 @@
  * F151 | ADR-014
  */
 
+import { createRequire } from 'node:module';
 import type { FastifyBaseLogger } from 'fastify';
-import WebSocket from 'ws';
 import {
   APP_HEARTBEAT_MS,
   envelope,
@@ -23,6 +23,9 @@ import {
   type WsChannel,
   type XiaoyiAdapterOptions,
 } from './xiaoyi-protocol.js';
+
+const require = createRequire(import.meta.url);
+const WebSocket: any = require('ws');
 
 export class XiaoyiWsManager {
   private channels: WsChannel[] = [];

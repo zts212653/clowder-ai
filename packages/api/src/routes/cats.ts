@@ -13,12 +13,14 @@ import {
   type ContextBudget,
   catRegistry,
   getCliEffortOptionsForProvider,
+  getDefaultCliEffortForProvider,
   isValidCliEffortForProvider,
   type RosterEntry,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
+  builtinAccountIdForClient,
   resolveBuiltinClientForProvider,
   resolveByAccountRef,
   resolveForClient,
@@ -133,6 +135,8 @@ const updateCatSchema = z.object({
   ocProviderName: z.string().min(1).nullable().optional(),
 });
 
+type UpdateCatRequestBody = z.infer<typeof updateCatSchema>;
+
 function resolveOperator(raw: unknown): string | null {
   if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
   if (Array.isArray(raw)) {
@@ -240,6 +244,122 @@ function resolveAccountRef(body: {
   return undefined;
 }
 
+function resolveDefaultAccountRefForClient(projectRoot: string, client: CatProvider): string | undefined {
+  const builtinClient = resolveBuiltinClientForProvider(client);
+  if (!builtinClient) return undefined;
+  return resolveForClient(projectRoot, builtinClient)?.id ?? builtinAccountIdForClient(builtinClient);
+}
+
+/**
+ * Resolve the accountRef that should be persisted for this PATCH.
+ *
+ * Seed members can inherit a provider binding from the current default account.
+ * When the editor echoes that inherited binding back during a client switch, we
+ * intentionally drop it instead of persisting a stale explicit binding.
+ */
+function resolveTargetAccountRef(params: {
+  body: UpdateCatRequestBody;
+  currentCat: CatConfig;
+  currentExplicitAccountRef: string | undefined;
+  currentEffectiveAccountRef: string | undefined;
+}): string | null | undefined {
+  const { body, currentCat, currentExplicitAccountRef, currentEffectiveAccountRef } = params;
+
+  const nextAccountRef = resolveAccountRef(body);
+  const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
+  const carriesCurrentEffectiveBinding =
+    nextAccountRef !== undefined && (nextAccountRef ?? undefined) === currentEffectiveAccountRef;
+
+  return isClientSwitch && !currentExplicitAccountRef && carriesCurrentEffectiveBinding ? undefined : nextAccountRef;
+}
+
+/**
+ * Resolve the effective accountRef for validation after applying a PATCH.
+ * This may differ from the persisted value when a seed member continues to
+ * inherit the default binding of the newly selected client family.
+ */
+function resolveEffectiveAccountRefForUpdate(params: {
+  projectRoot: string;
+  body: UpdateCatRequestBody;
+  currentCat: CatConfig;
+  currentExplicitAccountRef: string | undefined;
+  currentEffectiveAccountRef: string | undefined;
+  effectiveClient: CatProvider;
+  targetAccountRef: string | null | undefined;
+}): string | undefined {
+  const {
+    projectRoot,
+    body,
+    currentCat,
+    currentExplicitAccountRef,
+    currentEffectiveAccountRef,
+    effectiveClient,
+    targetAccountRef,
+  } = params;
+
+  if (targetAccountRef !== undefined) return targetAccountRef ?? undefined;
+
+  const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
+  if (isClientSwitch && !currentExplicitAccountRef) {
+    return resolveDefaultAccountRefForClient(projectRoot, effectiveClient);
+  }
+  return currentEffectiveAccountRef;
+}
+
+/**
+ * Resolve the target CLI config when patching a cat.
+ *
+ * Rules:
+ * - Explicit body.cli takes precedence (including any effort value user sets)
+ * - Provider switch: reset CLI to new provider's default (command, outputFormat, effort)
+ * - antigravity commandArgs patch: preserve defaultArgs while using antigravity CLI
+ *
+ * Note: When switching providers, stale effort values from the previous provider
+ * are reset to the new provider's default to avoid cross-provider mismatches.
+ */
+function resolveNextCli(params: {
+  body: UpdateCatRequestBody;
+  currentCat: CatConfig;
+  effectiveClient: CatProvider;
+  hasCommandArgsPatch: boolean;
+  nextCommandArgs: string[];
+}): CliConfig | undefined {
+  const { body, currentCat, effectiveClient, hasCommandArgsPatch, nextCommandArgs } = params;
+  const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
+  const defaultCli = defaultCliForClient(effectiveClient);
+  const defaultEffort = getDefaultCliEffortForProvider(effectiveClient);
+
+  if (body.cli !== undefined) {
+    const baseCli =
+      isClientSwitch || !currentCat.cli
+        ? {
+            ...defaultCli,
+            ...(defaultEffort ? { effort: defaultEffort } : {}),
+          }
+        : currentCat.cli;
+    return buildResolvedCliConfig(effectiveClient, baseCli, body.cli);
+  }
+
+  if (isClientSwitch) {
+    return {
+      ...defaultCli,
+      ...(defaultEffort ? { effort: defaultEffort } : {}),
+      ...(effectiveClient === 'antigravity' && hasCommandArgsPatch && nextCommandArgs.length > 0
+        ? { defaultArgs: nextCommandArgs }
+        : {}),
+    };
+  }
+
+  if (effectiveClient === 'antigravity' && hasCommandArgsPatch) {
+    return {
+      ...defaultCliForClient('antigravity'),
+      ...(nextCommandArgs.length > 0 ? { defaultArgs: nextCommandArgs } : {}),
+    };
+  }
+
+  return undefined;
+}
+
 function buildEffectiveAccountRefResolver(projectRoot: string) {
   const inheritedBindingCache = new Map<string, Promise<string | undefined>>();
 
@@ -253,7 +373,9 @@ function buildEffectiveAccountRefResolver(projectRoot: string) {
 
     let runtimeProfilePromise = inheritedBindingCache.get(builtinClient);
     if (!runtimeProfilePromise) {
-      runtimeProfilePromise = Promise.resolve(resolveForClient(projectRoot, builtinClient)?.id);
+      runtimeProfilePromise = Promise.resolve(
+        resolveForClient(projectRoot, builtinClient, builtinAccountIdForClient(builtinClient))?.id,
+      );
       inheritedBindingCache.set(builtinClient, runtimeProfilePromise);
     }
     return (await runtimeProfilePromise) ?? cat.accountRef;
@@ -547,15 +669,28 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
       return { error: `Cat "${request.params.id}" not found` };
     }
     const effectiveClient = body.client ?? currentCat.provider;
-    const nextAccountRef = resolveAccountRef(body);
+    const currentExplicitAccountRef = resolveBoundAccountRefForCat(projectRoot, request.params.id, currentCat);
     const currentEffectiveAccountRef = await resolveEffectiveAccountRef(currentCat);
-    const effectiveAccountRef =
-      nextAccountRef !== undefined ? (nextAccountRef ?? undefined) : currentEffectiveAccountRef;
+    const targetAccountRef = resolveTargetAccountRef({
+      body,
+      currentCat,
+      currentExplicitAccountRef,
+      currentEffectiveAccountRef,
+    });
+    const effectiveAccountRef = resolveEffectiveAccountRefForUpdate({
+      projectRoot,
+      body,
+      currentCat,
+      currentExplicitAccountRef,
+      currentEffectiveAccountRef,
+      effectiveClient,
+      targetAccountRef,
+    });
     const effectiveDefaultModel = body.defaultModel !== undefined ? body.defaultModel : currentCat.defaultModel;
     const providerConfigTouched =
       body.client !== undefined ||
       body.defaultModel !== undefined ||
-      nextAccountRef !== undefined ||
+      targetAccountRef !== undefined ||
       body.ocProviderName !== undefined;
 
     if (providerConfigTouched) {
@@ -567,7 +702,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
         // NOT allowed when: switching accountRef, or switching client to opencode
         // from another provider — both create a new binding that must have ocProviderName.
         // Compare against current binding — editor always sends accountRef even when unchanged.
-        const isBindingChange = nextAccountRef !== undefined && nextAccountRef !== currentEffectiveAccountRef;
+        const isBindingChange = targetAccountRef !== undefined && targetAccountRef !== currentEffectiveAccountRef;
         const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
         const isExistingOpencode = currentCat.provider === 'opencode';
         const legacyCompat =
@@ -595,19 +730,13 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
     try {
       const hasCommandArgsPatch = body.commandArgs !== undefined;
       const nextCommandArgs = body.commandArgs ?? [];
-      const clientSwitched = body.client !== undefined && body.client !== currentCat.provider;
-      const baseCli = clientSwitched || !currentCat.cli ? defaultCliForClient(effectiveClient) : currentCat.cli;
-      const shouldPatchCli = effectiveClient !== 'antigravity' && (body.cli !== undefined || clientSwitched);
-      const resolvedCli = shouldPatchCli ? buildResolvedCliConfig(effectiveClient, baseCli, body.cli) : undefined;
-      const antigravityCliPatch =
-        body.client === 'antigravity' || (currentCat.provider === 'antigravity' && hasCommandArgsPatch)
-          ? {
-              cli: {
-                ...defaultCliForClient('antigravity'),
-                ...(hasCommandArgsPatch && nextCommandArgs.length > 0 ? { defaultArgs: nextCommandArgs } : {}),
-              },
-            }
-          : {};
+      const nextCli = resolveNextCli({
+        body,
+        currentCat,
+        effectiveClient,
+        hasCommandArgsPatch,
+        nextCommandArgs,
+      });
       updateRuntimeCat(projectRoot, request.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
@@ -615,7 +744,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
         ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
-        ...(nextAccountRef !== undefined ? { accountRef: nextAccountRef } : {}),
+        ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
         ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
         ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
         ...(body.personality !== undefined ? { personality: body.personality } : {}),
@@ -628,12 +757,10 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
         ...(body.mcpSupport !== undefined ? { mcpSupport: body.mcpSupport } : {}),
         ...(hasCommandArgsPatch
           ? {
-              ...antigravityCliPatch,
               commandArgs: body.commandArgs,
             }
           : {}),
-        ...(!hasCommandArgsPatch ? antigravityCliPatch : {}),
-        ...(resolvedCli ? { cli: resolvedCli } : {}),
+        ...(nextCli !== undefined ? { cli: nextCli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
         ...(body.cliConfigArgs !== undefined ? { cliConfigArgs: body.cliConfigArgs } : {}),
         ...(body.ocProviderName !== undefined

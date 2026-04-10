@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 const {
   loadCatConfig,
   getDefaultVariant,
+  getCatEffort,
   toFlatConfigs,
   toAllCatConfigs,
   findBreedByMention,
@@ -834,6 +835,51 @@ describe('F32-b P4c: personality fallback to default variant', () => {
     const config = loadCatConfig(writeTempConfig(multiVariantConfig()));
     const all = toAllCatConfigs(config);
     assert.equal(all.opus.personality, '温柔');
+  });
+});
+
+describe('getCatEffort', () => {
+  // Note: Stale cross-provider effort values are now cleaned at write time
+  // (when switching providers via PATCH /api/cats/:id), so runtime
+  // normalization is no longer needed here.
+  it('returns effort from cli config if set', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].cli = {
+      command: 'claude',
+      outputFormat: 'stream-json',
+      effort: 'low',
+    };
+    const config = loadCatConfig(writeTempConfig(cfg));
+
+    assert.equal(getCatEffort('opus', config), 'low');
+  });
+
+  it('returns provider-aware default when not configured', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].provider = 'openai';
+    cfg.breeds[0].variants[0].cli = {
+      command: 'codex',
+      outputFormat: 'json',
+    };
+    const config = loadCatConfig(writeTempConfig(cfg));
+
+    assert.equal(getCatEffort('opus', config), 'xhigh');
+  });
+
+  it('rejects stale cross-provider effort from historical data (defense-in-depth)', () => {
+    // Simulates a catalog written before the PATCH write-time cleanup was added:
+    // an openai cat still carrying anthropic-only effort 'max'.
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].provider = 'openai';
+    cfg.breeds[0].variants[0].cli = {
+      command: 'codex',
+      outputFormat: 'json',
+      effort: 'max', // invalid for openai — only anthropic supports 'max'
+    };
+    const config = loadCatConfig(writeTempConfig(cfg));
+
+    // Should fall back to openai default ('xhigh'), not return 'max'
+    assert.equal(getCatEffort('opus', config), 'xhigh');
   });
 });
 
