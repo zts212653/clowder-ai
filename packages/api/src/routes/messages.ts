@@ -60,7 +60,12 @@ interface OutboundDeliveryHookLike {
 
 /** F088 ISSUE-15: Minimal streaming hook interface. */
 interface StreamingHookLike {
-  onStreamStart(threadId: string, catId?: string, invocationId?: string): Promise<void>;
+  onStreamStart(
+    threadId: string,
+    catId?: string,
+    invocationId?: string,
+    senderHint?: { id: string; name?: string },
+  ): Promise<void>;
   onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
   onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;

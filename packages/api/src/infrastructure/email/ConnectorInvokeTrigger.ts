@@ -133,6 +133,7 @@ export class ConnectorInvokeTrigger {
       undefined,
       contentBlocks,
       policy?.suggestedSkill,
+      sender,
     ).catch((err) => {
       // Last-resort guard: prevent unhandledRejection from pre-try errors
       this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
@@ -245,6 +246,7 @@ export class ConnectorInvokeTrigger {
         createResult.invocationId,
         undefined,
         suggestedSkill,
+        sender,
       );
       return;
     }
@@ -278,6 +280,7 @@ export class ConnectorInvokeTrigger {
       createResult.invocationId,
       undefined,
       suggestedSkill,
+      sender,
     );
   }
 
@@ -290,6 +293,7 @@ export class ConnectorInvokeTrigger {
     existingInvocationId?: string,
     contentBlocks?: readonly MessageContent[],
     suggestedSkill?: string,
+    sender?: { id: string; name?: string },
   ): Promise<void> {
     const { router, socketManager, invocationRecordStore, invocationTracker, invocationQueue, log } = this.opts;
     const targetCats: CatId[] = [catId];
@@ -361,7 +365,7 @@ export class ConnectorInvokeTrigger {
       let streamStartPromise: Promise<void> | undefined;
       if (this.opts.streamingHook) {
         streamStartPromise = this.opts.streamingHook
-          .onStreamStart(threadId, catId, createResult.invocationId)
+          .onStreamStart(threadId, catId, createResult.invocationId, sender)
           .catch((err) => {
             log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamStart failed');
           });

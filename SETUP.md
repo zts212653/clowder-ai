@@ -218,7 +218,7 @@ There are two types of accounts:
 
 **Adding Chinese / third-party providers (Kimi, GLM, MiniMax, Qwen, OpenRouter):**
 
-These providers are configured as API key accounts with a custom base URL. For detailed setup instructions (base URLs, model names, protocol selection, common pitfalls), see the **[Third-Party AI Provider Guide](docs/guides/provider-configuration.md)**.
+These providers are configured as API key accounts with a custom base URL. In the **Account Configuration** UI, add a new account, choose the provider, enter your API key, and set the base URL to the provider's OpenAI-compatible endpoint. Select the appropriate protocol and click **Test** to verify connectivity.
 
 > **Legacy `.env` fallback:** The system still reads `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GOOGLE_API_KEY` from `.env` as a fallback, but this path is deprecated. Use the UI for all new setups.
 
@@ -233,6 +233,31 @@ To add team members (cats) that use specific providers:
 ## Optional Features
 
 Clowder works out of the box with model access and Redis (or `--memory` mode). Everything below is opt-in.
+
+### Design Tooling (Pencil MCP)
+
+For design tasks, UI iteration, screenshots, and design-to-code workflows, install [Pencil](https://marketplace.visualstudio.com/items?itemName=highagency.pencildev) in your editor (VS Code, Cursor, or Antigravity).
+
+Without Pencil: Clowder still runs, coding tasks still work, design tasks degrade to plain text guidance.
+
+**Auto-configuration:** The capability orchestrator automatically detects your Pencil installation by scanning (in order):
+
+1. `PENCIL_MCP_BIN` environment variable (explicit path — highest priority)
+2. `~/.antigravity/extensions/highagency.pencildev-*/`
+3. `~/.vscode/extensions/highagency.pencildev-*/`
+4. `~/.cursor/extensions/highagency.pencildev-*/`
+5. `~/.vscode-insiders/extensions/highagency.pencildev-*/`
+
+The newest version across all editors is selected. When two editors have the same version, Antigravity is preferred.
+
+**Environment variable overrides:**
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `PENCIL_MCP_BIN` | Force a specific Pencil binary path | `/path/to/mcp-server-darwin-arm64` |
+| `PENCIL_MCP_APP` | Force which editor to connect to | `vscode`, `antigravity`, `cursor`, `vscode-insiders` |
+
+**Diagnostics:** `pnpm mcp:doctor` shows MCP readiness (ready / missing / unresolved).
 
 ### Voice Input / Output
 

@@ -622,14 +622,16 @@ export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfi
 // ── F32-b: Default cat resolution ─────────────────────────────────────
 
 let _defaultCatId: CatId | null = null;
+/** F154 AC-A4: Runtime override for default cat (set via Hub API, owner-gated). */
+let _runtimeDefaultCatId: CatId | null = null;
 
 /**
- * Get the default cat ID (= breeds[0].defaultVariantId's resolved catId).
+ * Get the default cat ID.
+ * Priority: runtime override (F154) → breeds[0].defaultVariantId (F32-b R4).
  * Used as ultimate fallback in AgentRouter when no mentions/participants/preferredCats.
- *
- * F32-b R4: Explicit derivation from defaultVariantId — NOT registry order dependent.
  */
 export function getDefaultCatId(): CatId {
+  if (_runtimeDefaultCatId) return _runtimeDefaultCatId;
   if (_defaultCatId) return _defaultCatId;
 
   const config = getCachedConfig();
@@ -643,6 +645,21 @@ export function getDefaultCatId(): CatId {
 
   // Ultimate fallback (should not trigger — config always has at least 1 breed)
   return createCatId('opus');
+}
+
+/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */
+export function setRuntimeDefaultCatId(catId: string): void {
+  _runtimeDefaultCatId = createCatId(catId);
+}
+
+/** F154 AC-A4: Clear runtime override — falls back to breeds[0]. */
+export function clearRuntimeDefaultCatId(): void {
+  _runtimeDefaultCatId = null;
+}
+
+/** F154 AC-A4: Check whether a runtime override is active. */
+export function hasRuntimeDefaultCatOverride(): boolean {
+  return _runtimeDefaultCatId !== null;
 }
 
 // ── Variant CLI effort accessor ──────────────────────────────────────
@@ -671,10 +688,6 @@ export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
  *   claude (anthropic): 'max'
  *   codex (openai):     'xhigh'
  *   others:             'high'
- *
- * @note Stale cross-provider effort values are cleaned at write time in the
- * cats PATCH route, so runtime lookup only needs to read persisted values and
- * fall back to provider defaults.
  */
 export function getCatEffort(catId: string, config?: CatCafeConfig, fallbackProvider?: ClientId): CliEffortLevel {
   const cfg = config ?? getCachedConfig();

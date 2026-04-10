@@ -231,7 +231,7 @@ Phase 4 实施过程中暴露的 runtime 层问题：
 - proxy 被误杀和生命周期管理
 - 修 A 炸 B 链条分析
 
-已收敛（两猫 3/13）：4.1=A profile 化, 4.2=全做, 4.3=A+C, 4.4=交互式 setup → [ADR-016](../decisions/016-sync-runtime-negation-decisions.md) + [LL-030](../lessons-learned.md#LL-030)
+已收敛（两猫 3/13）：4.1=A profile 化, 4.2=全做, 4.3=A+C, 4.4=交互式 setup → [ADR-016](../decisions/016-sync-runtime-negation-decisions.md) + [LL-030](../public-lessons.md#LL-030)
 
 **Phase 4c: Hotfix Lane 设计（3/14 平行 session 提出）** ✅ 已实现（Maine Coon code review 3/13 放行）
 

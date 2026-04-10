@@ -12,12 +12,21 @@ function extractProjectDir(args) {
   return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : undefined;
 }
 
+/** Build env overrides: isolate both global root and HOME to prevent homedir migration leaks. */
+function isolatedEnv(projectDir, extraEnv) {
+  return {
+    ...process.env,
+    ...(projectDir ? { CAT_CAFE_GLOBAL_CONFIG_ROOT: projectDir, HOME: projectDir } : {}),
+    ...extraEnv,
+  };
+}
+
 export function runHelper(args) {
   const projectDir = extractProjectDir(args);
   return execFileSync('node', [helperScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, ...(projectDir ? { CAT_CAFE_GLOBAL_CONFIG_ROOT: projectDir } : {}) },
+    env: isolatedEnv(projectDir),
   });
 }
 
@@ -26,7 +35,7 @@ export function runHelperResult(args) {
   return spawnSync('node', [helperScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, ...(projectDir ? { CAT_CAFE_GLOBAL_CONFIG_ROOT: projectDir } : {}) },
+    env: isolatedEnv(projectDir),
   });
 }
 
@@ -35,16 +44,17 @@ export function runHelperWithEnv(args, env) {
   return execFileSync('node', [helperScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, ...(projectDir ? { CAT_CAFE_GLOBAL_CONFIG_ROOT: projectDir } : {}), ...env },
+    env: isolatedEnv(projectDir, env),
   });
 }
 
 /** Run installer WITHOUT CAT_CAFE_GLOBAL_CONFIG_ROOT — exercises _activeProjectDir fallback. */
 export function runHelperNoGlobalOverride(args) {
+  const projectDir = extractProjectDir(args);
   const { CAT_CAFE_GLOBAL_CONFIG_ROOT: _stripped, ...cleanEnv } = process.env;
   return spawnSync('node', [helperScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: cleanEnv,
+    env: { ...cleanEnv, ...(projectDir ? { HOME: projectDir } : {}) },
   });
 }

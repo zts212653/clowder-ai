@@ -194,6 +194,88 @@ describe('Search Mode Split (KD-44)', () => {
       assert.notEqual(r.kind, 'session', 'scope=docs should exclude sessions');
     }
   });
+
+  it('semantic mode filters by provenanceTier (P1-3 fix)', async () => {
+    if (!vectorStore) return;
+    // Add provenance to existing docs
+    store.upsert([
+      {
+        anchor: 'doc-cat-names',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Cat Cafe 花名册 — 名字的由来',
+        summary: '宪宪来自 Constitutional AI 的宪',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'authoritative', source: 'docs/cat-names.md' },
+      },
+      {
+        anchor: 'doc-redis-pitfall',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Redis keyPrefix 陷阱',
+        summary: 'ioredis keyPrefix 不影响 eval 脚本内的 KEYS 参数',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'soft_clue', source: 'CHANGELOG.md' },
+      },
+    ]);
+    // Re-seed vectors for the updated docs
+    vectorStore.upsert('doc-cat-names', new Float32Array([0.9, 0.1, 0.0]));
+    vectorStore.upsert('doc-redis-pitfall', new Float32Array([0.85, 0.1, 0.05]));
+
+    // Mock embed returns a vector close to both docs
+    const mockEmbed = createMockEmbedding(new Float32Array([0.88, 0.1, 0.02]));
+    store.setEmbedDeps({ embedding: mockEmbed, vectorStore, mode: 'on' });
+
+    const authOnly = await store.search('cat naming', {
+      mode: 'semantic',
+      provenanceTier: 'authoritative',
+      limit: 10,
+    });
+    assert.ok(
+      authOnly.every((r) => r.provenance?.tier === 'authoritative'),
+      'semantic mode should respect provenanceTier filter',
+    );
+  });
+
+  it('hybrid mode filters by provenanceTier (P1-3 fix)', async () => {
+    if (!vectorStore) return;
+    // Add provenance to existing docs
+    store.upsert([
+      {
+        anchor: 'doc-cat-names',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Cat Cafe 花名册 — 名字的由来',
+        summary: '宪宪来自 Constitutional AI 的宪',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'authoritative', source: 'docs/cat-names.md' },
+      },
+      {
+        anchor: 'doc-redis-pitfall',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Redis keyPrefix 陷阱',
+        summary: 'ioredis keyPrefix 不影响 eval 脚本内的 KEYS 参数',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'soft_clue', source: 'CHANGELOG.md' },
+      },
+    ]);
+    vectorStore.upsert('doc-cat-names', new Float32Array([0.9, 0.1, 0.0]));
+    vectorStore.upsert('doc-redis-pitfall', new Float32Array([0.85, 0.1, 0.05]));
+
+    const mockEmbed = createMockEmbedding(new Float32Array([0.88, 0.1, 0.02]));
+    store.setEmbedDeps({ embedding: mockEmbed, vectorStore, mode: 'on' });
+
+    const authOnly = await store.search('花名册', {
+      mode: 'hybrid',
+      provenanceTier: 'authoritative',
+      limit: 10,
+    });
+    assert.ok(
+      authOnly.every((r) => r.provenance?.tier === 'authoritative'),
+      'hybrid mode should respect provenanceTier filter',
+    );
+  });
 });
 
 describe('G-4: drillDown hints', () => {

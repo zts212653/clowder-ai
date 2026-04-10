@@ -25,16 +25,20 @@ async function collect(iterable) {
 let tempDir;
 let invokeSingleCat;
 let originalGlobalConfigRoot;
+let originalHome;
 let testGlobalConfigRoot;
 
 before(() => {
   originalGlobalConfigRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+  originalHome = process.env.HOME;
 });
 
 beforeEach(async () => {
   // Provider profiles are global; each test gets its own isolated global store.
   testGlobalConfigRoot = await mkdtemp(join(tmpdir(), 'invoke-single-cat-global-'));
   process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = testGlobalConfigRoot;
+  // Isolate homedir so the homedir migration doesn't pick up real ~/.cat-cafe/ files
+  process.env.HOME = testGlobalConfigRoot;
   // F340: reset global accounts migration cache between tests
   const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
   resetMigrationState();
@@ -47,6 +51,8 @@ afterEach(async () => {
   }
   if (originalGlobalConfigRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = originalGlobalConfigRoot;
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
 });
 
 describe('invokeSingleCat audit events (P1 fix)', () => {

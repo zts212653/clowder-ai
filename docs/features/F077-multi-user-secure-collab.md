@@ -1,6 +1,6 @@
 ---
 feature_ids: [F077]
-related_features: [F044, F059, F074]
+related_features: [F044, F059, F074, F156]
 topics: [auth, oauth, multi-user, security, session, thread-acl, github]
 doc_kind: spec
 created: 2026-03-07

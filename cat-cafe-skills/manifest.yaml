@@ -339,6 +339,29 @@ skills:
     sop_step: null
     merged_from: ["deep-research-pipeline"]
 
+  # ── 知识工程（F152 Phase 0）──
+  knowledge-engineering:
+    description: >
+      猫猫指导外部项目文档重构 — AI FDE 知识工程方法论。
+      Use when: 猫猫部署到外部项目、用户项目缺少结构化文档、需要知识工程指导、冷启动理解业务。
+      Not for: cat-cafe 项目自身开发、已有完善 docs/ 结构的项目（直接用 CatCafeScanner）。
+      Output: 文档现状诊断 + 路径选择 + 三层知识注入建议 + 文档骨架模板。
+    triggers:
+      - "知识工程"
+      - "文档重构"
+      - "外部项目"
+      - "knowledge engineering"
+      - "冷启动"
+      - "AI FDE"
+      - "帮我整理文档"
+    not_for:
+      - "cat-cafe 自身开发"
+      - "已有完善 docs/ 结构"
+    output: "Documentation assessment + path selection + three-layer knowledge injection + skeleton templates"
+    next: []
+    sop_step: null
+    merged_from: null
+
   # ── 定时任务 ──
   schedule-tasks:
     description: >

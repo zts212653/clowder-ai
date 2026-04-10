@@ -174,7 +174,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 每次讨论收敛后必须过清单：
 1. 否决理由 → 写回 ADR
-2. 踩坑教训 → lessons-learned.md
+2. 踩坑教训 → public-lessons.md
 3. 操作规则 → 对应猫猫指引文件
 
 ## 9. 愿景守护（Anti-Drift Protocol）

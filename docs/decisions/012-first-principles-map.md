@@ -18,7 +18,7 @@ related_decisions: [005]
 - `cat-cafe-skills/refs/shared-rules.md`
 - `docs/features/F059-open-source-plan.md`
 - `docs/features/F086-cat-orchestration-multi-mention.md`
-- `docs/lessons-learned.md`
+- `docs/public-lessons.md`
 - `docs/decisions/005-hindsight-integration-decisions.md`
 - `cat-cafe-tutorials/docs/lessons/`
 
@@ -129,7 +129,7 @@ Cat Café 的治理结构分为三层：
 
 ### D. 教训与反思层
 
-- `docs/lessons-learned.md`
+- `docs/public-lessons.md`
 - *(internal reference removed)*
 
 关键映射：
@@ -154,7 +154,7 @@ Cat Café 的治理结构分为三层：
 2. **tutorial 不是规则层**  
    tutorial 用于解释、教学、外显，不负责定义新规则。
 3. **只有完成蒸馏的内容才进入真相源**  
-   新规则进入 `shared-rules.md`，新教训进入 `lessons-learned.md`，新决策进入 ADR。
+   新规则进入 `shared-rules.md`，新教训进入 `public-lessons.md`，新决策进入 ADR。
 
 ## Consequences
 

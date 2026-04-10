@@ -380,7 +380,7 @@ function toUserFacingError(errorCode: string, errorMsg: string): string {
     case 'stream_idle_stall':
       return `${base}\n⚠️ Gemini 服务端响应中断（Google 服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
     case 'turn_budget_exceeded':
-      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(600 / 60)}分钟），烁烁可能在执行复杂工具链。非故障，可重试。`;
+      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(900 / 60)}分钟），烁烁可能在执行复杂工具链。非故障，可重试。`;
     case 'mcp_pollution':
       return `${base}\n⚠️ Gemini 工具调用异常（MCP 服务端错误）。`;
     case 'init_failure':

@@ -44,20 +44,8 @@ export interface A2AInbound {
   };
 }
 
-/**
- * Minimal runtime shape required by Xiaoyi WS manager.
- * Kept local to avoid coupling build success to external ws type resolution.
- */
-export interface WsLike {
-  readyState: number;
-  send(data: string): void;
-  ping(): void;
-  terminate(): void;
-  removeAllListeners(): void;
-}
-
 export interface WsChannel {
-  ws: WsLike | null;
+  ws: import('ws').default | null;
   url: string;
   label: string;
   appTimer: ReturnType<typeof setInterval> | null;

@@ -576,11 +576,14 @@ describe('SystemPromptBuilder', () => {
   test('buildStaticIdentity includes configured co-creator name and mention handles', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    // Owner config has name: "You", mentionPatterns: ["@co-creator", "@co-creator", "@co-creator"]
-    assert.ok(identity.includes('You'), 'Should include co-creator name from config');
-    assert.ok(identity.includes('@co-creator'), 'Should include @co-creator mention handle');
-    assert.ok(identity.includes('@co-creator'), 'Should include @co-creator mention handle');
+    // Config resolution: cat-template.json (base) + .cat-cafe/cat-catalog.json (overlay).
+    // Template has coCreator.name="You", catalog may override to deployment-specific name.
+    // Test structural invariants that hold regardless of deployment config:
+    assert.ok(identity.includes('铲屎官'), 'Should include 铲屎官 (always in CVO line)');
     assert.ok(identity.includes('行首'), 'Should teach line-start rule for owner mentions');
+    // CVO line: "{name}（铲屎官/CVO）…行首写 `@handle` / `@handle2`。"
+    assert.ok(/重要决策由.+拍板/.test(identity), 'Should include decision authority line');
+    assert.ok(/行首写\s+`@\S+`/.test(identity), 'CVO line should contain backtick-wrapped mention handle after 行首写');
   });
 
   // F032 Phase D2: Reviewer section tests

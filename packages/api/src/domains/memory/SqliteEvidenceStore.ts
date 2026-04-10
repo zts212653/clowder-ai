@@ -110,6 +110,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       anchorSql += ' AND anchor = ?';
       anchorParams.push(threadAnchor);
     }
+    // F152 AC-A6: provenance tier filter
+    if (options?.provenanceTier) {
+      anchorSql += ' AND provenance_tier = ?';
+      anchorParams.push(options.provenanceTier);
+    }
     const exactRow = this.db?.prepare(anchorSql).get(...anchorParams) as RowShape | undefined;
     if (exactRow) {
       results.push(rowToItem(exactRow));
@@ -163,9 +168,15 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           sql += ' AND d.updated_at <= ?';
           params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
         }
+        // F152 AC-A6: provenance tier filter
+        if (options?.provenanceTier) {
+          sql += ' AND d.provenance_tier = ?';
+          params.push(options.provenanceTier);
+        }
 
-        // Superseded items sort last (KD-16), archive results deprioritized (P2 fix)
-        sql += " ORDER BY (d.superseded_by IS NOT NULL), (d.source_path LIKE 'archive/%'), rank";
+        // Superseded items sort last (KD-16), archive results deprioritized (P2 fix), authoritative first (F152 AC-A6, P1-2 NULL-safe)
+        sql +=
+          " ORDER BY (d.superseded_by IS NOT NULL), (d.source_path LIKE 'archive/%'), (CASE WHEN d.provenance_tier = 'authoritative' THEN 0 WHEN d.provenance_tier IS NOT NULL THEN 1 ELSE 2 END), rank";
         sql += ' LIMIT ?';
         params.push(bm25Pool);
 
@@ -210,7 +221,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           kwSql += ' AND anchor = ?';
           kwParams.push(threadAnchor);
         }
-        kwSql += " ORDER BY (superseded_by IS NOT NULL), (source_path LIKE 'archive/%'), updated_at DESC LIMIT ?";
+        // F152 AC-A6: provenance tier filter
+        if (options?.provenanceTier) {
+          kwSql += ' AND provenance_tier = ?';
+          kwParams.push(options.provenanceTier);
+        }
+        kwSql +=
+          " ORDER BY (superseded_by IS NOT NULL), (source_path LIKE 'archive/%'), (CASE WHEN provenance_tier = 'authoritative' THEN 0 WHEN provenance_tier IS NOT NULL THEN 1 ELSE 2 END), updated_at DESC LIMIT ?";
         kwParams.push(bm25Pool);
         try {
           const kwRows = this.db?.prepare(kwSql).all(...kwParams) as RowShape[];
@@ -396,6 +413,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       sql += ' AND anchor = ?';
       params.push(semanticThreadAnchor);
     }
+    // P1-3 fix: provenanceTier filter for semantic search
+    if (options?.provenanceTier) {
+      sql += ' AND provenance_tier = ?';
+      params.push(options.provenanceTier);
+    }
 
     const rows = this.db?.prepare(sql).all(...params) as RowShape[];
     const docMap = new Map(rows.map((r) => [r.anchor, rowToItem(r)]));
@@ -478,6 +500,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         sql += ' AND anchor = ?';
         params.push(hybridThreadAnchor);
       }
+      // P1-3 fix: provenanceTier filter for hybrid NN hydrate
+      if (options?.provenanceTier) {
+        sql += ' AND provenance_tier = ?';
+        params.push(options.provenanceTier);
+      }
 
       const rows = this.db.prepare(sql).all(...params) as RowShape[];
       for (const row of rows) {
@@ -503,8 +530,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const stmt = db.prepare(`
 				INSERT OR REPLACE INTO evidence_docs
 				(anchor, kind, status, title, summary, keywords, source_path, source_hash,
-				 superseded_by, materialized_from, updated_at, pack_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 superseded_by, materialized_from, updated_at, pack_id, provenance_tier, provenance_source)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`);
 
     const tx = db.transaction((items: EvidenceItem[]) => {
@@ -522,6 +549,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           item.materializedFrom ?? null,
           item.updatedAt,
           item.packId ?? null,
+          item.provenance?.tier ?? null,
+          item.provenance?.source ?? null,
         );
       }
     });
@@ -721,6 +750,8 @@ interface RowShape {
   materialized_from: string | null;
   updated_at: string;
   pack_id: string | null;
+  provenance_tier: string | null;
+  provenance_source: string | null;
 }
 
 function rowToItem(row: RowShape): EvidenceItem {
@@ -738,5 +769,11 @@ function rowToItem(row: RowShape): EvidenceItem {
   if (row.superseded_by != null) item.supersededBy = row.superseded_by;
   if (row.materialized_from != null) item.materializedFrom = row.materialized_from;
   if (row.pack_id != null) item.packId = row.pack_id;
+  if (row.provenance_tier != null) {
+    item.provenance = {
+      tier: row.provenance_tier as 'authoritative' | 'derived' | 'soft_clue',
+      source: row.provenance_source ?? '',
+    };
+  }
   return item;
 }

@@ -184,6 +184,14 @@ export class ConnectorRouter {
       return { kind: 'skipped', reason: 'duplicate' };
     }
 
+    // F157: Fire-and-forget emoji reaction as instant ack (< 500ms)
+    const ackAdapter = this.opts.adapters?.get(connectorId);
+    if (ackAdapter?.addReaction && externalMessageId) {
+      ackAdapter.addReaction(externalMessageId, 'HEART').catch((err) => {
+        log.warn({ err, connectorId, externalMessageId }, '[ConnectorRouter] addReaction failed (non-fatal)');
+      });
+    }
+
     const trimmedText = text.trim();
 
     // 1a. F134 Phase D: Group whitelist check
@@ -311,6 +319,55 @@ export class ConnectorRouter {
           }
 
           return { kind: 'routed', threadId: fwdThreadId, messageId: fwdStored.id };
+        }
+
+        // F154: /ask one-shot routing — forward to current thread with explicit targetCatId.
+        // Unlike /thread, this stays in the same binding's thread (KD-4: normal routing pipeline).
+        if (cmdResult.forwardContent && cmdResult.targetCatId && !cmdResult.newActiveThreadId) {
+          const askBinding = await bindingStore.getByExternal(connectorId, externalChatId);
+          const askThreadId = askBinding?.threadId;
+          if (askThreadId) {
+            const askText = cmdResult.forwardContent;
+            const def2 = getConnectorDefinition(connectorId);
+            const askSource: ConnectorSource = {
+              connector: connectorId,
+              label: def2?.displayName ?? connectorId,
+              icon: def2?.icon ?? 'message',
+              ...(sender ? { sender } : {}),
+            };
+            const askCatId = cmdResult.targetCatId as CatId;
+            const askTimestamp = Date.now();
+            const askStored = await messageStore.append({
+              threadId: askThreadId,
+              userId: this.opts.defaultUserId,
+              catId: null,
+              content: askText,
+              source: askSource,
+              mentions: [askCatId],
+              timestamp: askTimestamp,
+            });
+            emitConnectorMessage(socketManager, askThreadId, {
+              id: askStored.id,
+              content: askText,
+              source: askSource,
+              timestamp: askTimestamp,
+            });
+            const triggerOutcome = invokeTrigger.trigger(
+              askThreadId,
+              askCatId,
+              this.opts.defaultUserId,
+              askText,
+              askStored.id,
+            );
+            log.info(
+              { connectorId, threadId: askThreadId, catId: askCatId, triggerOutcome },
+              '[ConnectorRouter] /ask message forwarded to current thread',
+            );
+            if (triggerOutcome === 'full' && adapter?.onDeliveryBatchDone) {
+              await adapter.onDeliveryBatchDone(externalChatId, true);
+            }
+            return { kind: 'routed', threadId: askThreadId, messageId: askStored.id };
+          }
         }
 
         // F151: Close the A2A task after command response (non-forward path).

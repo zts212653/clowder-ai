@@ -81,6 +81,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     null;
   private editMessageFn: ((params: { messageId: string; content: string }) => Promise<unknown>) | null = null;
   private deleteMessageFn: ((params: { messageId: string }) => Promise<unknown>) | null = null;
+  private addReactionFn: ((params: { messageId: string; emojiType: string }) => Promise<unknown>) | null = null;
   private botOpenId: string | null = null;
   private static CACHE_TTL_MS = 30 * 60 * 1000;
   private senderNameCache = new Map<string, { name: string; expiresAt: number }>();
@@ -709,6 +710,50 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   }
 
   /**
+   * F157: Add an emoji reaction to a message (e.g. ❤️ on user's inbound message).
+   * Fire-and-forget — errors are logged but never thrown.
+   */
+  async addReaction(platformMessageId: string, emojiType: string): Promise<void> {
+    if (this.addReactionFn) {
+      await this.addReactionFn({ messageId: platformMessageId, emojiType });
+      return;
+    }
+    try {
+      await this.client.im.messageReaction.create({
+        path: { message_id: platformMessageId },
+        data: { reaction_type: { emoji_type: emojiType } },
+      });
+    } catch (err) {
+      this.log.warn({ err, platformMessageId, emojiType }, '[FeishuAdapter] addReaction failed (non-fatal)');
+    }
+  }
+
+  /**
+   * F157: Edit a streaming card to a minimal "✅ 已回复" completion state.
+   * Preferred over deleteMessage to avoid Feishu's "recalled" notification.
+   */
+  async finalizeStreamCard(_externalChatId: string, platformMessageId: string, catDisplayName: string): Promise<void> {
+    const card = {
+      config: { update_multi: true },
+      header: {
+        title: { tag: 'plain_text' as const, content: `✅ ${catDisplayName || '猫猫'}已回复` },
+        template: 'green' as const,
+      },
+      elements: [] as unknown[],
+    };
+
+    if (this.editMessageFn) {
+      await this.editMessageFn({ messageId: platformMessageId, content: JSON.stringify(card) });
+      return;
+    }
+
+    await this.client.im.message.patch({
+      path: { message_id: platformMessageId },
+      data: { content: JSON.stringify(card) },
+    });
+  }
+
+  /**
    * Test helper: inject a mock send function.
    * @internal
    */
@@ -730,6 +775,14 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
    */
   _injectDeleteMessage(fn: (params: { messageId: string }) => Promise<unknown>): void {
     this.deleteMessageFn = fn;
+  }
+
+  /**
+   * Test helper: inject a mock addReaction function.
+   * @internal
+   */
+  _injectAddReaction(fn: (params: { messageId: string; emojiType: string }) => Promise<unknown>): void {
+    this.addReactionFn = fn;
   }
 
   /**

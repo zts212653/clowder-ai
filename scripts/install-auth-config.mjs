@@ -530,8 +530,7 @@ try {
   if (positionals[0] === 'claude-profile' && positionals[1] === 'remove') {
     const projectDir = getRequired(values, 'project-dir');
     _activeProjectDir = projectDir;
-    if (projectDir) migrateLegacyProfiles(projectDir);
-    migrateLegacyProfiles(null);
+    migrateAllLegacySources(projectDir);
     const forceRemove = values.get('force')?.[0] === 'true';
     removeClientAuth('anthropic', 'installer-managed', projectDir, { force: forceRemove });
     process.exit(0);

@@ -8,7 +8,6 @@ import { describe, it } from 'node:test';
 const {
   loadCatConfig,
   getDefaultVariant,
-  getCatEffort,
   toFlatConfigs,
   toAllCatConfigs,
   findBreedByMention,
@@ -16,6 +15,7 @@ const {
   getMissionHubSelfClaimScope,
   getDefaultCatId,
   buildCatIdToBreedIndex,
+  getCatEffort,
   _resetCachedConfig,
 } = await import('../dist/config/cat-config-loader.js');
 
@@ -893,7 +893,6 @@ describe('getCatEffort', () => {
     assert.equal(getCatEffort('opus', config), 'xhigh');
   });
 });
-
 describe('F32-b P4c: Sonnet variant in project config', () => {
   it('project cat-template.json loads with Sonnet variant', () => {
     const config = loadCatConfig();
