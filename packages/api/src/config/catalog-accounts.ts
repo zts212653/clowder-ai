@@ -347,9 +347,14 @@ function migrateHomedirLegacyProviderProfiles(projectRoot?: string): void {
     migrateLegacyFrom(home, projectRoot);
     migratedHomedirLegacy.add(resolvedTarget);
   } catch (err) {
-    // Best-effort: don't block startup if homedir legacy files are corrupt.
-    console.error('[catalog-accounts] homedir legacy→global migration failed:', err);
-    migratedHomedirLegacy.add(resolvedTarget);
+    // Only swallow parse/read errors (corrupt homedir files). Re-throw account
+    // conflicts and other migration errors so callers get a fail-fast signal.
+    if (err instanceof SyntaxError || (err instanceof Error && err.message.includes('ENOENT'))) {
+      console.error('[catalog-accounts] homedir legacy→global migration failed (corrupt source, skipped):', err);
+      migratedHomedirLegacy.add(resolvedTarget);
+    } else {
+      throw err;
+    }
   }
 }
 
