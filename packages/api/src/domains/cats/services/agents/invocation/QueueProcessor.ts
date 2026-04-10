@@ -65,7 +65,12 @@ export interface OutboundDeliveryHookLike {
 
 /** Minimal streaming outbound interface — avoids importing full StreamingOutboundHook. */
 export interface StreamingOutboundHookLike {
-  onStreamStart(threadId: string, catId: string, invocationId: string): Promise<void>;
+  onStreamStart(
+    threadId: string,
+    catId: string,
+    invocationId: string,
+    senderHint?: { id: string; name?: string },
+  ): Promise<void>;
   onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
   onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
@@ -579,9 +584,11 @@ export class QueueProcessor {
       // F088 fix: start streaming placeholder on external platforms
       let streamStartPromise: Promise<void> | undefined;
       if (this.deps.streamingHook) {
-        streamStartPromise = this.deps.streamingHook.onStreamStart(threadId, primaryCat, invocationId).catch((err) => {
-          log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamStart failed');
-        });
+        streamStartPromise = this.deps.streamingHook
+          .onStreamStart(threadId, primaryCat, invocationId, entry.senderMeta)
+          .catch((err) => {
+            log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamStart failed');
+          });
       }
 
       // F151: Mid-loop delivery to preserve ordering (same fix as ConnectorInvokeTrigger)

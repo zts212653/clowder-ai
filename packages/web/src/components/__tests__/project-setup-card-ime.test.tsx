@@ -6,7 +6,7 @@ import { ProjectSetupCard } from '@/components/ProjectSetupCard';
 const mockApiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
 
 vi.mock('@/utils/api-client', () => ({
-  apiFetch: (...args: string[]) => mockApiFetch(args[0], args[1] as unknown as Record<string, unknown>),
+  apiFetch: () => mockApiFetch(),
 }));
 
 describe('ProjectSetupCard IME guard', () => {

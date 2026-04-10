@@ -375,4 +375,48 @@ describe('RedisMessageStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }
     const ids = afterMsg1.map((m) => m.id);
     assert.ok(ids.includes(msg2.id), 'msg2 with same deliveredAt score should appear via ID tiebreaker');
   });
+
+  it('F148: origin=briefing survives append → getById round-trip', async () => {
+    const msg = await store.append({
+      userId: 'system',
+      catId: null,
+      content: 'briefing summary',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread-briefing-rt',
+      origin: 'briefing',
+      extra: { rich: { v: 1, blocks: [{ id: 'b1', kind: 'card', v: 1, title: 'test', tone: 'info' }] } },
+    });
+    assert.equal(msg.origin, 'briefing', 'append should return origin=briefing');
+
+    const fetched = await store.getById(msg.id);
+    assert.equal(fetched.origin, 'briefing', 'getById must deserialize origin=briefing');
+    assert.ok(fetched.extra?.rich?.blocks?.length, 'rich blocks must survive round-trip');
+  });
+
+  it('F148: origin=briefing survives hydrateMessages (getByThread)', async () => {
+    const now = Date.now();
+    await store.append({
+      userId: 'system',
+      catId: null,
+      content: 'briefing card',
+      mentions: [],
+      timestamp: now,
+      threadId: 'thread-briefing-hydrate',
+      origin: 'briefing',
+    });
+    await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'normal',
+      mentions: [],
+      timestamp: now + 1,
+      threadId: 'thread-briefing-hydrate',
+    });
+
+    const msgs = await store.getByThread('thread-briefing-hydrate', 10);
+    assert.equal(msgs.length, 2);
+    assert.equal(msgs[0].origin, 'briefing', 'briefing message must keep origin via hydrateMessages');
+    assert.equal(msgs[1].origin, undefined, 'normal message should have no origin');
+  });
 });

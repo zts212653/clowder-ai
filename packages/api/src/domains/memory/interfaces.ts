@@ -41,6 +41,27 @@ export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
 export type EvidenceStatus = 'active' | 'done' | 'archived';
 
+// ── F152 Phase A: Provenance + Scanner types ────────────────────────
+
+export type ProvenanceTier = 'authoritative' | 'derived' | 'soft_clue';
+
+export interface Provenance {
+  tier: ProvenanceTier;
+  source: string;
+}
+
+export interface ScannedEvidence {
+  item: Omit<EvidenceItem, 'sourceHash'>;
+  provenance: Provenance;
+  rawContent: string;
+}
+
+export interface RepoScanner {
+  discover(projectRoot: string, options?: Record<string, unknown>): ScannedEvidence[];
+}
+
+export const IRepoScannerSymbol = Symbol.for('IRepoScanner');
+
 // ── Data types ───────────────────────────────────────────────────────
 
 export interface EvidenceItem {
@@ -63,6 +84,8 @@ export interface EvidenceItem {
     params: Record<string, string>;
     hint: string;
   };
+  /** F152 Phase A: provenance tracking for scanner-produced evidence */
+  provenance?: Provenance;
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
     passageId: string;
@@ -115,6 +138,8 @@ export interface SearchOptions {
   threadId?: string;
   /** F102 Batch 3: knowledge dimension — project, global, or all (default) */
   dimension?: 'project' | 'global' | 'all';
+  /** F152 Phase A (AC-A6): filter by provenance tier */
+  provenanceTier?: ProvenanceTier;
 }
 
 export interface MarkerFilter {

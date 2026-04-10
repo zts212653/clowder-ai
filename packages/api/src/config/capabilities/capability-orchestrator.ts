@@ -192,10 +192,17 @@ export function deduplicateDiscoveredMcpServers<T extends DiscoveredMcpLike>(ser
   return [...byName.values()];
 }
 
+/** Normalize a raw app name to the PencilApp union. Returns undefined for unknown values. */
+function normalizePencilApp(raw?: string): PencilApp | undefined {
+  const v = raw?.trim().toLowerCase();
+  if (v === 'antigravity') return 'antigravity';
+  if (v === 'vscode' || v === 'cursor' || v === 'vscode-insiders' || v === 'visual_studio_code') return 'vscode';
+  return undefined;
+}
+
 function inferPencilApp(command: string, envApp?: string): PencilApp {
-  const explicit = envApp?.trim().toLowerCase();
-  if (explicit === 'vscode' || explicit === 'cursor' || explicit === 'vscode-insiders') return 'vscode';
-  if (explicit === 'antigravity') return 'antigravity';
+  const normalized = normalizePencilApp(envApp);
+  if (normalized) return normalized;
   if (
     command.includes(`${sep}.vscode${sep}extensions${sep}`) ||
     command.includes(`${sep}.cursor${sep}extensions${sep}`) ||
@@ -247,7 +254,7 @@ export async function resolvePencilCommand(
     return { command: explicitCommand, args: ['--app', app] };
   }
 
-  const candidates = (
+  const allCandidates = (
     await Promise.all([
       collectAccessiblePencilCandidates(options.antigravityDir ?? PENCIL_EXTENSIONS_DIR, 'antigravity'),
       collectAccessiblePencilCandidates(options.vscodeDir ?? VSCODE_EXTENSIONS_DIR, 'vscode'),
@@ -256,7 +263,21 @@ export async function resolvePencilCommand(
     ])
   )
     .flat()
-    .sort((a, b) => comparePencilDirs(a.dirName, b.dirName));
+    .sort((a, b) => {
+      const versionCmp = comparePencilDirs(a.dirName, b.dirName);
+      if (versionCmp !== 0) return versionCmp;
+      // Tie-break: prefer antigravity over vscode (specialty editor; if installed, user likely prefers it)
+      return (a.app === 'antigravity' ? 1 : 0) - (b.app === 'antigravity' ? 1 : 0);
+    });
+
+  // PENCIL_MCP_APP (without PENCIL_MCP_BIN) filters candidates to the preferred app.
+  // Normalize aliases (cursor, vscode-insiders → vscode) to match candidate app values.
+  // Falls back to all candidates if the preferred app has no installations.
+  const preferredApp = normalizePencilApp(env.PENCIL_MCP_APP?.trim());
+  const candidates =
+    preferredApp && allCandidates.some((c) => c.app === preferredApp)
+      ? allCandidates.filter((c) => c.app === preferredApp)
+      : allCandidates;
 
   const latest = candidates[candidates.length - 1];
   if (latest) {

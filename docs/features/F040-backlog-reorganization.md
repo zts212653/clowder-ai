@@ -94,11 +94,11 @@ docs/
 
 | ID | 名称 | Status | Owner | Link |
 |----|------|--------|-------|------|
-| F010 | 手机端猫猫 | in-progress | Ragdoll | [F010](features/F010-mobile-cat.md) |
-| F032 | Agent Plugin Architecture | review | Ragdoll | [F032](features/F032-agent-plugin.md) |
-| F037 | Agent Swarm 协同模式 | in-progress | 三猫 | [F037](features/F037-agent-swarm.md) |
-| F039 | 消息排队投递 | spec | Ragdoll | [F039](features/F039-message-queue.md) |
-| F040 | BACKLOG 整理 | in-progress | Ragdoll | [F040](features/F040-backlog-reorganization.md) |
+| F010 | 手机端猫猫 | in-progress | Ragdoll | [F010](F010-mobile-cat.md) |
+| F032 | Agent Plugin Architecture | review | Ragdoll | [F032](F032-agent-plugin-architecture.md) |
+| F037 | Agent Swarm 协同模式 | in-progress | 三猫 | [F037](F037-agent-swarm.md) |
+| F039 | 消息排队投递 | spec | Ragdoll | [F039](F039-message-queue-delivery.md) |
+| F040 | BACKLOG 整理 | in-progress | Ragdoll | [F040](F040-backlog-reorganization.md) |
 ```
 
 > **超级简洁！** 只有 ~10 行活跃项，不是 200+ 行历史。
@@ -335,7 +335,7 @@ F014 → F015 → F036
 ### Phase 4: 沉淀同步（2026-02-27，已完成）
 
 - [x] 写 ADR: Metadata Contract — **Ragdoll**（`docs/decisions/011-metadata-contract.md`，commit `14a8b53`）
-- [x] 更新 lessons-learned.md（LL-024: 状态字段多点写入会复发蜘蛛网）— **Ragdoll**
+- [x] 更新 public-lessons.md（LL-024: 状态字段多点写入会复发蜘蛛网）— **Ragdoll**
 - [x] 同步 CLAUDE.md/AGENTS.md/GEMINI.md（frontmatter 规范 + feat-kickoff/completion 触发）— **Ragdoll**
 
 ### Phase 5: 验收与优化（2026-02-27，已完成）
@@ -433,7 +433,7 @@ F014 → F015 → F036
 
 ### Step 3: 更新 lessons-learned（P2，~10min）
 
-1. 编辑 `docs/lessons-learned.md`
+1. 编辑 `docs/public-lessons.md`
 2. 添加："状态字段多点写入会复发蜘蛛网"
 3. 关联 F040
 

@@ -319,9 +319,6 @@ function resolveEffectiveAccountRefForUpdate(params: {
  * - Explicit body.cli takes precedence (including any effort value user sets)
  * - Provider switch: reset CLI to new provider's default (command, outputFormat, effort)
  * - antigravity commandArgs patch: preserve defaultArgs while using antigravity CLI
- *
- * Note: When switching providers, stale effort values from the previous provider
- * are reset to the new provider's default to avoid cross-provider mismatches.
  */
 function resolveNextCli(params: {
   body: UpdateCatRequestBody;

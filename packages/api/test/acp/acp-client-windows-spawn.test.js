@@ -1,5 +1,5 @@
 /**
- * Windows ACP spawn regression test (#64 follow-up).
+ * Windows ACP spawn regression test (#401).
  *
  * Covers AcpClient.initialize() default spawn path (no custom spawnFn),
  * ensuring .cmd shim resolution rewrites spawn to: node <script.js> ...

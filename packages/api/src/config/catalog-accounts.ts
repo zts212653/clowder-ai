@@ -146,6 +146,7 @@ function inferLegacyAuthType(profile: Record<string, unknown>): AccountConfig['a
 function mergeIntoGlobal(
   source: Record<string, AccountConfig>,
   projectRoot?: string,
+  opts?: { skipConflicts?: boolean },
 ): { merged: string[]; skipped: string[] } {
   const global = readAllGlobal(projectRoot);
   const merged: string[] = [];
@@ -153,6 +154,13 @@ function mergeIntoGlobal(
   for (const [ref, account] of Object.entries(source)) {
     if (ref in global) {
       if (!accountsEquivalent(global[ref], account)) {
+        if (opts?.skipConflicts) {
+          console.error(
+            `[catalog-accounts] conflict for "${ref}" — global wins: ${describeAccountConflict(global[ref], account)}`,
+          );
+          skipped.push(ref);
+          continue;
+        }
         throw new Error(`Account conflict for "${ref}": ${describeAccountConflict(global[ref], account)}`);
       }
       skipped.push(ref);
@@ -311,7 +319,9 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
     const projectAccounts = catalog?.accounts;
     if (!projectAccounts || typeof projectAccounts !== 'object' || Object.keys(projectAccounts).length === 0) return;
 
-    const { merged } = mergeIntoGlobal(projectAccounts as Record<string, AccountConfig>, projectRoot);
+    const { merged } = mergeIntoGlobal(projectAccounts as Record<string, AccountConfig>, projectRoot, {
+      skipConflicts: true,
+    });
 
     // F340: project catalog.accounts is intentionally left untouched.
     // Runtime only reads global accounts.json, so the project section is
@@ -322,10 +332,10 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
     }
     migratedProjects.add(key);
   } catch (err) {
-    // Migration is best-effort — don't mark done so next call retries.
-    // But log the error so failures aren't invisible.
+    // Best-effort: log and mark done to avoid retry loops on persistent
+    // errors (corrupt catalog JSON, permission issues, etc.).
     console.error(`[catalog-accounts] project→global migration failed for ${key}:`, err);
-    throw err;
+    migratedProjects.add(key);
   }
 }
 
@@ -358,7 +368,74 @@ function migrateHomedirLegacyProviderProfiles(projectRoot?: string): void {
   }
 }
 
+// ── Homedir credentials.json migration (pre-F340 credentials written directly to homedir) ──
+
+const migratedHomedirCredentials = new Set<string>();
+
+function migrateHomedirCredentials(projectRoot?: string): void {
+  const globalRoot = resolveGlobalRoot(projectRoot);
+  const resolvedTarget = resolve(globalRoot);
+  if (migratedHomedirCredentials.has(resolvedTarget)) return;
+  const home = homedir();
+  if (resolvedTarget === resolve(home)) {
+    migratedHomedirCredentials.add(resolvedTarget);
+    return;
+  }
+  const homeCredPath = resolve(home, CONFIG_SUBDIR, 'credentials.json');
+  if (!existsSync(homeCredPath)) {
+    migratedHomedirCredentials.add(resolvedTarget);
+    return;
+  }
+  try {
+    const homeCreds = JSON.parse(readFileSync(homeCredPath, 'utf-8'));
+    if (typeof homeCreds !== 'object' || homeCreds === null || Array.isArray(homeCreds)) {
+      migratedHomedirCredentials.add(resolvedTarget);
+      return;
+    }
+    const targetCredPath = resolve(globalRoot, CONFIG_SUBDIR, 'credentials.json');
+    let targetCreds: Record<string, unknown> = {};
+    if (existsSync(targetCredPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(targetCredPath, 'utf-8'));
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          targetCreds = parsed;
+        }
+      } catch {
+        targetCreds = {};
+      }
+    }
+    // Only fill gaps: preserve user-set target credentials, don't overwrite with stale homedir.
+    // Priority is ensured by running this BEFORE legacy secrets migration in ensureMigrated().
+    let imported = 0;
+    for (const [ref, entry] of Object.entries(homeCreds)) {
+      if (typeof entry === 'object' && entry !== null && !(ref in targetCreds)) {
+        targetCreds[ref] = entry;
+        imported++;
+      }
+    }
+    if (imported > 0) {
+      mkdirSync(resolve(globalRoot, CONFIG_SUBDIR), { recursive: true });
+      writeFileAtomic(targetCredPath, `${JSON.stringify(targetCreds, null, 2)}\n`, 0o600);
+      console.error(
+        `[catalog-accounts] homedir credentials.json: ${imported} credential(s) merged into ${resolvedTarget}`,
+      );
+    }
+    migratedHomedirCredentials.add(resolvedTarget);
+  } catch (err) {
+    if (err instanceof SyntaxError || (err instanceof Error && err.message.includes('ENOENT'))) {
+      console.error('[catalog-accounts] homedir credentials.json migration failed (corrupt source, skipped):', err);
+      migratedHomedirCredentials.add(resolvedTarget);
+    } else {
+      throw err;
+    }
+  }
+}
+
 function ensureMigrated(projectRoot: string): void {
+  // Homedir credentials.json FIRST (skip-existing): fills target before legacy
+  // secrets run, so legacy's `id in existing` check naturally defers to homedir.
+  // Priority: user-set target > homedir credentials.json > legacy secrets.
+  migrateHomedirCredentials(projectRoot);
   migrateLegacyProviderProfiles(projectRoot);
   migrateProjectLegacyProviderProfiles(projectRoot);
   migrateHomedirLegacyProviderProfiles(projectRoot);
@@ -369,6 +446,7 @@ function ensureMigrated(projectRoot: string): void {
 export function resetMigrationState(): void {
   legacyMigrationDone = false;
   migratedHomedirLegacy.clear();
+  migratedHomedirCredentials.clear();
   migratedProjects.clear();
   migratedProjectLegacy.clear();
 }

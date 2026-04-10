@@ -288,4 +288,50 @@ describe('ConnectorBubble theme', () => {
     expect(html).toContain('border-conn-indigo-bubble-border');
     expect(html).not.toContain('bg-conn-blue-bg');
   });
+
+  it('uses cyan theme for dingtalk connector', () => {
+    const message: ChatMessage = {
+      id: 'm-dingtalk',
+      type: 'connector',
+      content: '来自钉钉的消息',
+      timestamp: Date.now(),
+      source: {
+        connector: 'dingtalk',
+        label: '钉钉',
+        icon: '/images/connectors/dingtalk.png',
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('bg-conn-cyan-bg');
+    expect(html).toContain('border-conn-cyan-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
+  });
+
+  it('uses violet theme for wecom-agent connector', () => {
+    const message: ChatMessage = {
+      id: 'm-wecom-agent',
+      type: 'connector',
+      content: '来自企微自建应用的消息',
+      timestamp: Date.now(),
+      source: {
+        connector: 'wecom-agent',
+        label: '企微自建应用',
+        icon: '/images/connectors/wecom-agent.png',
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('bg-conn-violet-bg');
+    expect(html).toContain('border-conn-violet-bubble-border');
+    expect(html).not.toContain('bg-conn-blue-bg');
+  });
 });

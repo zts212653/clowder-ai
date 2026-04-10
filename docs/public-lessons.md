@@ -913,6 +913,39 @@ created: 2026-02-26
 
 ---
 
+### LL-047: Socket.IO `cors` 不保护 WebSocket — `allowRequest` 才是安全边界
+- 状态：validated
+- 更新时间：2026-04-10
+
+- 背景：Cat Cafe Hub 的 Socket.IO 实时通道被发现存在 CSWSH（Cross-Site WebSocket Hijacking）风险。`Origin: https://evil.example` 可以成功建立 WebSocket 连接到 `127.0.0.1:3004`
+
+- 影响：恶意网页可从任意 Origin 连接本机 WebSocket，冒充用户、监听消息、干扰猫猫工作
+
+- 根因：
+  1. **Socket.IO v4 的 `cors` 配置只对 HTTP long-polling 生效**，不校验 WebSocket upgrade 请求的 Origin 头（Socket.IO 官方文档 2026-02-16 明确标注）
+  2. 身份自报（`handshake.auth.userId`）无服务端校验
+  3. Room 无 ACL，任何连接可加入任意 room
+  4. @fastify/websocket 的 plain WS 端点（terminal PTY）完全绕过 Socket.IO，无任何 Origin 检查
+
+- 修复：
+  1. **Phase A**（PR #1041）：`allowRequest` hook 显式校验 Origin + 禁止自报 userId + 私网 Origin 收紧
+  2. **Phase B**（PR #1045）：terminal WS Origin gate + cancelAll 授权 + 全局 room ACL
+  3. **Phase D**（规划中）：HTTP session 替代自报身份 + Clickjacking + CSP + Prompt Injection 降权
+
+- 教训：
+  1. **框架的 CORS 配置 ≠ WebSocket 安全**——Socket.IO/Express 的 cors 中间件只管 HTTP，WebSocket upgrade 是独立的协议切换，必须在 upgrade 层单独校验
+  2. **本机 ≠ 安全**——浏览器同源策略不阻止 JS 向 localhost 发 WebSocket 连接，任何打开的网页都是潜在攻击面
+  3. **"能连上"比"能做什么"更危险**——一旦连接建立，后续的身份/Room/事件授权都是亡羊补牢；连接层拒绝是第一道也是最关键的防线
+  4. **Agent 产品的攻击面比传统 Web 应用更大**——Prompt Injection、工具调用误用、外部内容驱动的高危操作是传统安全审计不覆盖的维度
+
+- 来源锚点：
+  - F156 spec：`docs/features/F156-websocket-security-hardening.md`
+  - 三猫安全审计：*(internal reference removed)*
+  - PR #1041（Phase A）、PR #1045（Phase B）
+  - 外部参考：OpenClaw CVE-2026-25253 + ClawJacked（同类攻击链）
+
+---
+
 ## 8) 维护约定
 
 - 本文件是入口，不替代 ADR/bug-report 原文。

@@ -84,20 +84,25 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     threadSubjectKeys.add(`thread:${threadId}`);
 
     // P1-2 fix: don't rely solely on lastRun — query ledger for ANY matching run.
-    // Also include tasks whose subjectKind matches even with zero runs (newly registered).
+    // Also include tasks whose subjectKind matches active thread task kinds.
     const ledger = taskRunner.getLedger();
-    const filtered = summaries.filter((s) => {
+    const filtered = summaries.flatMap((s) => {
       // Quick path: if lastRun matches, include immediately
-      if (s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key)) return true;
+      if (s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key)) return [s];
       // Slow path: check if ANY run for this task matches thread's subject keys
       for (const sk of threadSubjectKeys) {
         const runs = ledger.queryBySubject(s.id, sk, 1);
-        if (runs.length > 0) return true;
+        if (runs.length > 0) return [s];
       }
-      // Zero-run path only: newly registered tasks should show up immediately,
-      // but once a task has runs we must not leak it across threads by subject kind.
-      if (!s.lastRun && s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) return true;
-      return false;
+      // Kind-match path (#320 P1): thread has active task of matching kind → include,
+      // but scrub run metadata that belongs to other threads/PRs.
+      if (s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) {
+        const { lastRun: _, subjectPreview: __, runStats: ___, ...rest } = s;
+        return [
+          { ...rest, lastRun: null, subjectPreview: null, runStats: { total: 0, delivered: 0, failed: 0, skipped: 0 } },
+        ];
+      }
+      return [];
     });
 
     return { tasks: filtered };

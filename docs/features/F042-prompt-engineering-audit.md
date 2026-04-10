@@ -136,7 +136,7 @@ Cat Cafe 的提示词和 Skills 体系存在系统性问题：
 - 项目详细介绍 → 指向 VISION.md
 - 技术栈详情 → 指向设计文档
 - 详细协作规则（五件套等）→ 进入对应 skill
-- 已知坑位 → lessons-learned.md
+- 已知坑位 → public-lessons.md
 - 12 条系统级准则 → 合并为"核心价值观" + 细节进 skill
 
 ### 2.4 SOP.md 瘦身（300行 → ~50行）

@@ -8,19 +8,19 @@ const mockApiFetch = vi.fn(async (url: string) => {
     return {
       ok: true,
       json: async () => ({
-        current: '/Users/orca',
+        current: '/home/user',
         name: 'orca',
         parent: '/Users',
-        homePath: '/Users/orca',
+        homePath: '/home/user',
         entries: [],
       }),
     };
   }
-  return { ok: true, json: async () => ({ current: '/Users/orca/new-folder' }) };
+  return { ok: true, json: async () => ({ current: '/home/user/new-folder' }) };
 });
 
 vi.mock('@/utils/api-client', () => ({
-  apiFetch: (...args: string[]) => mockApiFetch(args[0], args[1] as unknown as Record<string, unknown>),
+  apiFetch: (...args: string[]) => mockApiFetch(args[0]),
 }));
 
 describe('DirectoryBrowser IME guard', () => {
