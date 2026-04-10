@@ -329,15 +329,46 @@ function migrateProjectAccountsToGlobal(projectRoot: string): void {
   }
 }
 
+// ── Homedir legacy migration (picks up secrets written by pre-F340 installer without --project-dir) ──
+
+const migratedHomedirLegacy = new Set<string>();
+
+function migrateHomedirLegacyProviderProfiles(projectRoot?: string): void {
+  const globalRoot = resolveGlobalRoot(projectRoot);
+  const resolvedTarget = resolve(globalRoot);
+  if (migratedHomedirLegacy.has(resolvedTarget)) return;
+  const home = homedir();
+  if (resolvedTarget === resolve(home)) {
+    // Global root IS homedir — already covered by migrateLegacyProviderProfiles.
+    migratedHomedirLegacy.add(resolvedTarget);
+    return;
+  }
+  try {
+    migrateLegacyFrom(home, projectRoot);
+    migratedHomedirLegacy.add(resolvedTarget);
+  } catch (err) {
+    // Only swallow parse/read errors (corrupt homedir files). Re-throw account
+    // conflicts and other migration errors so callers get a fail-fast signal.
+    if (err instanceof SyntaxError || (err instanceof Error && err.message.includes('ENOENT'))) {
+      console.error('[catalog-accounts] homedir legacy→global migration failed (corrupt source, skipped):', err);
+      migratedHomedirLegacy.add(resolvedTarget);
+    } else {
+      throw err;
+    }
+  }
+}
+
 function ensureMigrated(projectRoot: string): void {
   migrateLegacyProviderProfiles(projectRoot);
   migrateProjectLegacyProviderProfiles(projectRoot);
+  migrateHomedirLegacyProviderProfiles(projectRoot);
   migrateProjectAccountsToGlobal(projectRoot);
 }
 
 /** Reset migration state (for tests). */
 export function resetMigrationState(): void {
   legacyMigrationDone = false;
+  migratedHomedirLegacy.clear();
   migratedProjects.clear();
   migratedProjectLegacy.clear();
 }

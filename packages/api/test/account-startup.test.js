@@ -8,12 +8,16 @@ describe('accountStartupHook (F340 fail-fast)', () => {
   let globalRoot;
   let projectRoot;
   let previousGlobalRoot;
+  let previousHome;
 
   beforeEach(async () => {
     globalRoot = await mkdtemp(join(tmpdir(), 'acct-startup-'));
     projectRoot = await mkdtemp(join(tmpdir(), 'acct-startup-proj-'));
     previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    previousHome = process.env.HOME;
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    // Isolate homedir so the homedir migration doesn't pick up real ~/.cat-cafe/ files
+    process.env.HOME = globalRoot;
     await mkdir(join(globalRoot, '.cat-cafe'), { recursive: true });
     await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
   });
@@ -21,6 +25,8 @@ describe('accountStartupHook (F340 fail-fast)', () => {
   afterEach(async () => {
     if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
     await rm(globalRoot, { recursive: true, force: true });
     await rm(projectRoot, { recursive: true, force: true });
   });
