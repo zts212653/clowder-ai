@@ -29,6 +29,7 @@ packages/web/public/worker-*.js
 .augment/
 .codex/
 .gemini/
+.kimi/
 .kiro/
 .trae/
 .dare/
