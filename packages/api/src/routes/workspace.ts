@@ -280,7 +280,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.get<{ Querystring: { repoRoot?: string } }>('/api/workspace/worktrees', async (request, reply) => {
     const { repoRoot } = request.query;
     if (repoRoot) {
-      if (!repoRoot.startsWith('/')) {
+      if (!isAbsolute(repoRoot)) {
         reply.status(400);
         return { error: 'repoRoot must be an absolute path' };
       }
