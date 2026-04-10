@@ -7,7 +7,13 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 describe('account-resolver (4b unified runtime resolution)', () => {
   let projectRoot;
   let previousGlobalRoot;
-  const ENV_KEYS_TO_ISOLATE = ['CAT_CAFE_GLOBAL_CONFIG_ROOT', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY'];
+  const ENV_KEYS_TO_ISOLATE = [
+    'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GOOGLE_API_KEY',
+    'HOME',
+  ];
   const savedEnv = {};
 
   beforeEach(async () => {
@@ -18,6 +24,8 @@ describe('account-resolver (4b unified runtime resolution)', () => {
       delete process.env[key];
     }
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
+    // Isolate homedir so the homedir migration doesn't pick up real ~/.cat-cafe/ files
+    process.env.HOME = projectRoot;
     await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
   });
 
