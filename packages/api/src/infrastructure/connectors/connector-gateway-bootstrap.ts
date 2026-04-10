@@ -192,6 +192,18 @@ export interface ConnectorGatewayHandle {
   stop(): Promise<void>;
 }
 
+/**
+ * Path traversal guard for media route -> local file resolution.
+ * Accepts mixed "/" URLs even on Windows where native separator is "\".
+ */
+export function isWithinBasePath(base: string, resolved: string, nativeSep = sep): boolean {
+  return (
+    resolved === base ||
+    resolved.startsWith(base + nativeSep) ||
+    (nativeSep !== '/' && resolved.startsWith(base + '/'))
+  );
+}
+
 export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
   return {
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
@@ -874,7 +886,7 @@ export async function startConnectorGateway(
     // Phase J P1: guard against path traversal (e.g. /uploads/../../etc/passwd)
     const safeResolve = (base: string, suffix: string): string | undefined => {
       const resolved = resolve(base, suffix);
-      if (!(resolved.startsWith(base + sep) || resolved.startsWith(base + '/') || resolved === base)) return undefined;
+      if (!isWithinBasePath(base, resolved)) return undefined;
       return existsSync(resolved) ? resolved : undefined;
     };
     if (url.startsWith('/uploads/')) return safeResolve(uploadDir, url.slice('/uploads/'.length));

@@ -1,7 +1,10 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { startConnectorGateway } from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
+import {
+  isWithinBasePath,
+  startConnectorGateway,
+} from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
 
 function noopLog() {
   const noop = () => {};
@@ -39,6 +42,24 @@ const baseDeps = {
 };
 
 describe('ConnectorGateway Bootstrap', () => {
+  it('isWithinBasePath: accepts Windows child path with native separator', () => {
+    const base = 'C:\\data\\connector-media';
+    const resolved = 'C:\\data\\connector-media\\voice\\a.ogg';
+    assert.equal(isWithinBasePath(base, resolved, '\\'), true);
+  });
+
+  it('isWithinBasePath: accepts mixed "/" child path on Windows', () => {
+    const base = 'C:\\data\\uploads';
+    const resolved = 'C:\\data\\uploads/avatar.png';
+    assert.equal(isWithinBasePath(base, resolved, '\\'), true);
+  });
+
+  it('isWithinBasePath: rejects traversal/outside path on Windows', () => {
+    const base = 'C:\\data\\uploads';
+    const resolved = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
+    assert.equal(isWithinBasePath(base, resolved, '\\'), false);
+  });
+
   it('creates gateway in QR-only mode when no connectors configured', async () => {
     const result = await startConnectorGateway({}, baseDeps);
     assert.ok(result, 'Gateway should be created even without env tokens (for WeChat QR login)');
