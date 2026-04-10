@@ -35,6 +35,8 @@ export interface PipelineContext {
   fetchContent?: (url: string) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
   invokeTrigger?: ScheduleInvokeTrigger;
+  /** #415: per-workItem outcome callback (used for failure notifications) */
+  onItemOutcome?: (taskId: string, subjectKey: string, outcome: RunOutcome, errorSummary: string | null) => void;
 }
 
 function withTimeout(promise: Promise<void>, ms: number, taskId: string): Promise<void> {
@@ -70,6 +72,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     deliver,
     fetchContent,
     invokeTrigger,
+    onItemOutcome,
   } = ctx;
   const startMs = Date.now();
   const tickCount = (tickCounts.get(task.id) ?? 0) + 1;
@@ -208,6 +211,9 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
         assigned_cat_id: assignedCatId,
         error_summary: errorSummary,
       });
+
+      // #415: notify on outcome (used for failure notifications)
+      if (onItemOutcome) onItemOutcome(task.id, item.subjectKey, outcome, errorSummary);
 
       // AC-D2: Record emission after successful thread-scoped delivery for self-echo suppression
       if (outcome === 'RUN_DELIVERED' && emissionStore && item.subjectKey.startsWith('thread-')) {

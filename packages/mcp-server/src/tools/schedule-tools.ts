@@ -57,7 +57,7 @@ export const registerScheduledTaskInputSchema = {
   trigger: z
     .string()
     .describe(
-      'Trigger config as JSON string. Examples: {"type":"cron","expression":"0 9 * * *"} or {"type":"interval","ms":3600000}',
+      'Trigger config as JSON string. Examples: {"type":"cron","expression":"0 9 * * *"} or {"type":"interval","ms":3600000} or {"type":"once","delayMs":120000} (fire once after 2min) or {"type":"once","fireAt":1712345678000} (fire once at epoch ms)',
     ),
   params: z
     .string()
@@ -203,6 +203,7 @@ export const scheduleTools = [
     name: 'cat_cafe_register_scheduled_task',
     description:
       'Create a new scheduled task from a template (confirm step). The task will be persisted and run automatically on schedule. ' +
+      'Supports recurring (cron/interval) and one-shot (once) triggers. Once tasks auto-retire after execution. ' +
       'When the task fires, a cat is woken with full capabilities — it can send rich blocks (images, audio, cards), search the web, generate content, etc. ' +
       'IMPORTANT: You MUST call preview_scheduled_task first and get user confirmation before calling this. ' +
       'trigger and params must be JSON strings, not objects.',
