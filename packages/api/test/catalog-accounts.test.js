@@ -26,7 +26,8 @@ describe('global accounts (F340)', () => {
   afterEach(async () => {
     if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
-    process.env.HOME = previousHome;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
     await rm(globalRoot, { recursive: true, force: true });
     await rm(projectRoot, { recursive: true, force: true });
   });
