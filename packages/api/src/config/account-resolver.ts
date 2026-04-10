@@ -10,7 +10,7 @@ import { readCredential } from './credentials.js';
 
 // ── Types surviving from provider-profiles.types.ts (F136 Phase 4d) ──
 
-export type BuiltinAccountClient = Extract<ClientId, 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode'>;
+export type BuiltinAccountClient = Extract<ClientId, 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode'>;
 export type ProviderProfileKind = 'builtin' | 'api_key';
 
 export interface RuntimeProviderProfile {
@@ -37,6 +37,7 @@ export function resolveBuiltinClientForProvider(provider: ClientId): BuiltinAcco
     case 'anthropic':
     case 'openai':
     case 'google':
+    case 'kimi':
     case 'dare':
     case 'opencode':
       return provider;
@@ -51,6 +52,7 @@ const LEGACY_BUILTIN_IDS: Record<BuiltinAccountClient, string> = {
   anthropic: 'claude',
   openai: 'codex',
   google: 'gemini',
+  kimi: 'kimi',
   dare: 'dare',
   opencode: 'opencode',
 };
@@ -82,6 +84,8 @@ const BUILTIN_ACCOUNT_MAP: Record<string, { client: BuiltinAccountClient; protoc
   builtin_openai: { client: 'openai', protocol: 'openai' },
   gemini: { client: 'google', protocol: 'google' },
   builtin_google: { client: 'google', protocol: 'google' },
+  kimi: { client: 'kimi', protocol: 'kimi' },
+  builtin_kimi: { client: 'kimi', protocol: 'kimi' },
   dare: { client: 'dare', protocol: 'openai' },
   builtin_dare: { client: 'dare', protocol: 'openai' },
   opencode: { client: 'opencode', protocol: 'anthropic' },
@@ -188,6 +192,7 @@ function normalizeToClient(clientOrProtocol: string): BuiltinAccountClient | nul
     case 'anthropic':
     case 'openai':
     case 'google':
+    case 'kimi':
     case 'dare':
     case 'opencode':
       return clientOrProtocol;

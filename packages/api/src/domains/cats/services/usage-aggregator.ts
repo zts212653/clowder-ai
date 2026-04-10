@@ -4,6 +4,7 @@
  */
 
 import type { InvocationRecord } from './stores/ports/InvocationRecordStore.js';
+import type { TokenUsage } from './types.js';
 
 /** Aggregated token stats for a single cat on a single day */
 export interface CatDailyUsage {
@@ -64,6 +65,22 @@ function toDateString(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 
+function resolveInputTokens(usage: TokenUsage): number {
+  if (typeof usage.inputTokens === 'number') return usage.inputTokens;
+  if (typeof usage.lastTurnInputTokens === 'number') return usage.lastTurnInputTokens;
+  if (typeof usage.contextUsedTokens === 'number') return usage.contextUsedTokens;
+  if (typeof usage.totalTokens === 'number') return usage.totalTokens;
+  return 0;
+}
+
+function resolveOutputTokens(usage: TokenUsage, resolvedInputTokens: number): number {
+  if (typeof usage.outputTokens === 'number') return usage.outputTokens;
+  if (typeof usage.totalTokens === 'number') {
+    return Math.max(0, usage.totalTokens - resolvedInputTokens);
+  }
+  return 0;
+}
+
 /**
  * Aggregate invocation records into a daily-by-cat usage report.
  * Pure function — no side effects, no I/O.
@@ -102,8 +119,9 @@ export function aggregateUsageByDay(records: InvocationRecord[], options: Aggreg
       }
 
       const existing = dayBucket.get(catId) ?? emptyCatUsage();
-      existing.inputTokens += usage.inputTokens ?? 0;
-      existing.outputTokens += usage.outputTokens ?? 0;
+      const resolvedInputTokens = resolveInputTokens(usage);
+      existing.inputTokens += resolvedInputTokens;
+      existing.outputTokens += resolveOutputTokens(usage, resolvedInputTokens);
       existing.cacheReadTokens += usage.cacheReadTokens ?? 0;
       existing.costUsd += usage.costUsd ?? 0;
       existing.participations += 1;

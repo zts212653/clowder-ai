@@ -19,12 +19,20 @@ function maxUtilization(quota: QuotaResponse | null): number {
   for (const item of quota.codex.usageItems) max = Math.max(max, toUtilization(item));
   for (const item of quota.claude.usageItems ?? []) max = Math.max(max, toUtilization(item));
   for (const item of quota.gemini?.usageItems ?? []) max = Math.max(max, toUtilization(item));
+  for (const item of quota.kimi?.usageItems ?? []) max = Math.max(max, toUtilization(item));
   for (const item of quota.antigravity?.usageItems ?? []) max = Math.max(max, toUtilization(item));
   return max;
 }
 
 function resolveRisk(quota: QuotaResponse | null, refreshError: string | null): 'ok' | 'warn' | 'high' {
-  if (refreshError || quota?.codex?.error || quota?.claude?.error || quota?.gemini?.error || quota?.antigravity?.error)
+  if (
+    refreshError ||
+    quota?.codex?.error ||
+    quota?.claude?.error ||
+    quota?.gemini?.error ||
+    quota?.kimi?.error ||
+    quota?.antigravity?.error
+  )
     return 'high';
   const max = maxUtilization(quota);
   if (max >= 95) return 'high';
@@ -141,18 +149,33 @@ export function HubQuotaBoardTab() {
     setRefreshing(true);
     setRefreshError(null);
     try {
-      const res = await apiFetch('/api/quota/refresh/official', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interactive: true }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setRefreshError(body.error ?? '获取官方额度失败');
+      const [officialRes, kimiRes] = await Promise.all([
+        apiFetch('/api/quota/refresh/official', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interactive: true }),
+        }),
+        apiFetch('/api/quota/refresh/kimi', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ]);
+
+      const errors: string[] = [];
+      if (!officialRes.ok) {
+        const body = (await officialRes.json().catch(() => ({}))) as { error?: string };
+        errors.push(body.error ?? '获取官方额度失败');
+      }
+      if (!kimiRes.ok) {
+        const body = (await kimiRes.json().catch(() => ({}))) as { error?: string };
+        errors.push(body.error ?? '刷新 Kimi 额度失败');
+      }
+      if (errors.length > 0) {
+        setRefreshError(errors.join('；'));
       }
       await fetchQuota();
     } catch {
-      setRefreshError('获取官方额度失败，请稍后重试');
+      setRefreshError('刷新配额失败，请稍后重试');
     } finally {
       setRefreshing(false);
     }
@@ -168,6 +191,7 @@ export function HubQuotaBoardTab() {
         quota?.codex?.error,
         quota?.claude?.error,
         quota?.gemini?.error,
+        quota?.kimi?.error,
         quota?.antigravity?.error,
       ].filter(Boolean) as string[],
     ),

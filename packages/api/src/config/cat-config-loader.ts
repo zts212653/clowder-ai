@@ -62,7 +62,8 @@ const catVariantSchema = z.object({
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
-  clientId: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a']),
+  clientId: z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'a2a']),
+
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
   cli: cliConfigSchema,

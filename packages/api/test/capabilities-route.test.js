@@ -7,7 +7,7 @@
  */
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdir, rm, symlink } from 'node:fs/promises';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -27,6 +27,54 @@ async function makeTmpDir(prefix) {
 }
 
 // ────────── PATCH logic (unit-level, no Fastify needed) ──────────
+
+describe('scanProviderSkillDirs', () => {
+  it('merges multi-source provider results deterministically', async () => {
+    const { scanProviderSkillDirs } = await import('../dist/routes/capabilities.js');
+    const root = join(process.cwd(), '.test-tmp-cap-scan-' + Date.now());
+    const kimiProject = join(root, '.kimi', 'skills');
+    const kimiUser = join(root, 'home', '.kimi', 'skills');
+    await mkdir(join(kimiProject, 'alpha'), { recursive: true });
+    await mkdir(join(kimiUser, 'beta'), { recursive: true });
+    await Promise.all([
+      writeFile(join(kimiProject, 'alpha', 'SKILL.md'), '# alpha'),
+      writeFile(join(kimiUser, 'beta', 'SKILL.md'), '# beta'),
+    ]);
+    try {
+      const result = await scanProviderSkillDirs([
+        { key: 'kimi-project', provider: 'kimi', path: kimiProject },
+        { key: 'kimi-user', provider: 'kimi', path: kimiUser },
+      ]);
+      assert.deepEqual(new Set(result.providerSkills.kimi), new Set(['alpha', 'beta']));
+      assert.deepEqual(result.scanResults['kimi-project'], ['alpha']);
+      assert.deepEqual(result.scanResults['kimi-user'], ['beta']);
+      assert.equal(result.scansOk, true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves null scan sentinels for failed project scans', async () => {
+    const { scanProviderSkillDirs } = await import('../dist/routes/capabilities.js');
+    const root = join(process.cwd(), '.test-tmp-cap-scan-fail-' + Date.now());
+    const kimiUser = join(root, 'home', '.kimi', 'skills');
+    await mkdir(join(kimiUser, 'beta'), { recursive: true });
+    await writeFile(join(kimiUser, 'beta', 'SKILL.md'), '# beta');
+    try {
+      const result = await scanProviderSkillDirs([
+        { key: 'kimi-project', provider: 'kimi', path: join(root, '.missing-unreadable') },
+        { key: 'kimi-user', provider: 'kimi', path: kimiUser },
+      ]);
+      assert.equal(
+        result.scanResults['kimi-project'] === null || Array.isArray(result.scanResults['kimi-project']),
+        true,
+      );
+      assert.deepEqual(result.scanResults['kimi-user'], ['beta']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('PATCH capabilities logic', () => {
   /** @type {string} */ let dir;
@@ -519,6 +567,32 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
+  it('includes Kimi mount state for cat-cafe skills in the board payload', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/capabilities',
+      headers: AUTH_HEADERS,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+
+    const catCafeSkill = (body.items ?? []).find(
+      (item) => item.type === 'skill' && item.source === 'cat-cafe' && item.mounts,
+    );
+    assert.ok(catCafeSkill, 'expected at least one cat-cafe skill with mount data');
+    assert.equal(typeof catCafeSkill.mounts.kimi, 'boolean');
+
+    await app.close();
+  });
+
   it('does not treat cat-cafe-skills/refs as a skill', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
@@ -819,5 +893,63 @@ describe('GET /api/capabilities (Fastify)', () => {
 
     await rm(projectDir, { recursive: true, force: true });
     await app.close();
+  });
+
+  it('extracts skill metadata from project-level .kimi/skills SKILL.md', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-kimi-project-meta-${Date.now()}`);
+    const kimiSkillsDir = join(projectDir, '.kimi', 'skills');
+    await mkdir(join(kimiSkillsDir, 'test-skill'), { recursive: true });
+
+    // Write SKILL.md with frontmatter containing description and triggers
+    await writeFile(
+      join(kimiSkillsDir, 'test-skill', 'SKILL.md'),
+      '---\ndescription: "Test skill for project-level Kimi metadata extraction"\ntriggers: ["test-trigger", "kimi-test"]\n---\n\n# Test Skill\n',
+    );
+
+    // Write capabilities.json with the skill
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'test-skill',
+          type: 'skill',
+          enabled: true,
+          source: 'project',
+        },
+      ],
+    });
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res.statusCode, 200);
+
+      const body = res.json();
+      const skillItem = body.items.find((i) => i.type === 'skill' && i.id === 'test-skill');
+      assert.ok(skillItem, 'Project-level Kimi skill should appear in board');
+      assert.equal(
+        skillItem.description,
+        'Test skill for project-level Kimi metadata extraction',
+        'Should extract description from project .kimi/skills SKILL.md',
+      );
+      assert.deepEqual(
+        skillItem.triggers,
+        ['test-trigger', 'kimi-test'],
+        'Should extract triggers from project .kimi/skills SKILL.md',
+      );
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
   });
 });

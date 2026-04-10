@@ -72,7 +72,7 @@ describe('governance-preflight', () => {
   it('fails when registry confirmed but skills symlinks removed', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
     await service.bootstrap(externalProject, { dryRun: false });
-    for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills']) {
+    for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills']) {
       await rm(join(externalProject, dir), { force: true }).catch(() => {});
     }
 
@@ -85,5 +85,25 @@ describe('governance-preflight', () => {
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
     assert.equal(result.ready, false);
     assert.ok(result.bootstrapCommand, 'Should include a bootstrap command hint');
+  });
+
+  it('uses KIMI.md and .kimi/skills when preflighting a kimi project', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    await service.bootstrap(externalProject, { dryRun: false });
+    await rm(join(externalProject, 'KIMI.md'));
+
+    const result = await checkGovernancePreflight(externalProject, catCafeRoot, 'kimi');
+    assert.equal(result.ready, false);
+    assert.ok(result.reason?.includes('KIMI.md'));
+  });
+
+  it('requires .kimi/skills when preflighting a kimi project', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    await service.bootstrap(externalProject, { dryRun: false });
+    await rm(join(externalProject, '.kimi/skills'), { force: true });
+
+    const result = await checkGovernancePreflight(externalProject, catCafeRoot, 'kimi');
+    assert.equal(result.ready, false);
+    assert.ok(result.reason?.includes('.kimi/skills'));
   });
 });

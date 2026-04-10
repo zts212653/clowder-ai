@@ -76,6 +76,7 @@ export function formatCliNotFoundError(command: string): string {
     claude: 'npm install -g @anthropic-ai/claude-code',
     codex: 'npm install -g @openai/codex',
     gemini: 'npm install -g @google/gemini-cli',
+    kimi: 'uv tool install --python 3.13 kimi-cli',
     opencode: 'npm install -g opencode',
   };
   const hint = installHints[command] ?? `install the "${command}" CLI`;

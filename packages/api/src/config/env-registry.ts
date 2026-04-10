@@ -24,6 +24,7 @@ export type EnvCategory =
   | 'codex'
   | 'dare'
   | 'gemini'
+  | 'kimi'
   | 'tts'
   | 'stt'
   | 'frontend'
@@ -64,6 +65,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   codex: '缅因猫 (Codex)',
   dare: '狸花猫 (Dare)',
   gemini: '暹罗猫 (Gemini)',
+  kimi: 'Kimi',
   tts: '语音合成 (TTS)',
   stt: '语音识别 (STT)',
   frontend: '前端',
@@ -916,6 +918,50 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
 
+  // --- kimi ---
+  {
+    name: 'MOONSHOT_API_KEY',
+    defaultValue: '(未设置)',
+    description: 'Kimi / Moonshot API Key（官方 kimi-cli API Key 模式用）',
+    category: 'kimi',
+    sensitive: true,
+    hubVisible: false,
+  },
+  {
+    name: 'KIMI_SHARE_DIR',
+    defaultValue: '~/.kimi',
+    description: '官方 kimi-cli 共享目录（session / mcp / logs）',
+    category: 'kimi',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'KIMI_CONFIG_FILE',
+    defaultValue: '~/.kimi/config.toml',
+    description: '官方 kimi-cli 配置文件路径（覆盖默认 ~/.kimi/config.toml）',
+    category: 'kimi',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'KIMI_AUTH_TOKEN',
+    defaultValue: '(未设置)',
+    description: 'Kimi 官方额度抓取用的 kimi-auth token（来自 kimi.com）',
+    category: 'quota',
+    sensitive: true,
+    hubVisible: false,
+  },
+  {
+    name: 'KIMI_QUOTA_API_FALLBACK_ENABLED',
+    defaultValue: '0（默认关闭）',
+    description: '设为 1 允许 Kimi 额度在 CLI /usage 失败时降级到 API（仍需 KIMI_AUTH_TOKEN）',
+    category: 'quota',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+
   // --- tts ---
   {
     name: 'TTS_URL',
@@ -1174,7 +1220,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'QUOTA_OFFICIAL_REFRESH_ENABLED',
     defaultValue: '0（默认关闭）',
-    description: '设为 1 允许官方额度抓取（需要 Chrome OAuth cookie）',
+    description: '设为 1 允许官方额度抓取（Claude/Codex OAuth + Kimi auth token）',
     category: 'quota',
     sensitive: false,
   },

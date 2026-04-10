@@ -72,6 +72,22 @@ describe('env-registry', () => {
     assert.equal(apiKey.sensitive, true);
   });
 
+  it('registers KIMI_QUOTA_API_FALLBACK_ENABLED as bootstrap-only quota config', () => {
+    const def = ENV_VARS.find((v) => v.name === 'KIMI_QUOTA_API_FALLBACK_ENABLED');
+    assert.ok(def, 'KIMI_QUOTA_API_FALLBACK_ENABLED should be in registry');
+    assert.equal(def.category, 'quota');
+    assert.equal(def.runtimeEditable, false);
+    assert.equal(def.hubVisible, false);
+  });
+
+  it('registers KIMI_CONFIG_FILE as bootstrap-only kimi config', () => {
+    const def = ENV_VARS.find((v) => v.name === 'KIMI_CONFIG_FILE');
+    assert.ok(def, 'KIMI_CONFIG_FILE should be in registry');
+    assert.equal(def.category, 'kimi');
+    assert.equal(def.runtimeEditable, false);
+    assert.equal(def.hubVisible, false);
+  });
+
   it('REDIS_URL has maskMode url', () => {
     const redis = ENV_VARS.find((v) => v.name === 'REDIS_URL');
     assert.ok(redis, 'REDIS_URL should be in registry');

@@ -23,6 +23,12 @@ module.exports = {
           dark: 'var(--color-gemini-dark)',
           bg: 'var(--color-gemini-bg)',
         },
+        kimi: {
+          primary: 'var(--color-kimi-primary)',
+          light: 'var(--color-kimi-light)',
+          dark: 'var(--color-kimi-dark)',
+          bg: 'var(--color-kimi-bg)',
+        },
         dare: {
           primary: 'var(--color-dare-primary)',
           light: 'var(--color-dare-light)',

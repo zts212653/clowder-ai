@@ -697,6 +697,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const isExplicitBindingCompatibilityError = (err: unknown): err is Error =>
       err instanceof Error &&
       (/bound provider profile/i.test(err.message) || /model ".+" is not available on provider/i.test(err.message));
+    const isBoundAccountResolutionError = (err: unknown): err is Error =>
+      err instanceof Error && /bound account ".+" not found/i.test(err.message);
 
     // Resolve account first, then use its protocol for env injection.
     // For API Key accounts, protocol is declared on the account itself.
@@ -705,7 +707,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     try {
       resolvedAccount = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
     } catch (err) {
-      if (isExplicitBindingCompatibilityError(err)) {
+      if (isExplicitBindingCompatibilityError(err) || isBoundAccountResolutionError(err)) {
         throw err;
       }
       if (boundAccountRef) {
@@ -729,6 +731,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       anthropic: 'anthropic',
       openai: 'openai',
       google: 'google',
+      kimi: 'kimi',
       dare: 'openai',
       opencode: 'anthropic',
       openrouter: 'openai',
@@ -811,6 +814,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (resolvedAccount.baseUrl) {
           callbackEnv.GEMINI_BASE_URL = resolvedAccount.baseUrl;
         }
+      }
+    } else if (effectiveProtocol === 'kimi') {
+      if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
+        callbackEnv.CAT_CAFE_KIMI_PROFILE_MODE = 'api_key';
+        callbackEnv.CAT_CAFE_KIMI_API_KEY = resolvedAccount.apiKey;
+        callbackEnv.MOONSHOT_API_KEY = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) {
+          callbackEnv.CAT_CAFE_KIMI_BASE_URL = resolvedAccount.baseUrl;
+        }
+      } else {
+        callbackEnv.CAT_CAFE_KIMI_PROFILE_MODE = 'subscription';
       }
     } else if (provider === 'anthropic' || provider === 'opencode') {
       // Fallback for unresolved accounts on anthropic/opencode providers

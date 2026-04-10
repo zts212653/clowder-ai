@@ -3102,6 +3102,68 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
   });
 
+  it('F127 P1: preserves explicit bound-account failures instead of masking them as generic resolution errors', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'f127-bound-account-missing-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(originalConfig, 'codex config should exist in registry');
+    const boundCatId = 'codex-missing-bound-account-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'openai',
+      accountRef: 'missing-openai-account',
+      defaultModel: 'gpt-5.4',
+    });
+
+    let invokeCount = 0;
+    const service = {
+      async *invoke() {
+        invokeCount++;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test missing bound account',
+          userId: 'user-f127-bound-account-missing',
+          threadId: 'thread-f127-bound-account-missing',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(invokeCount, 0, 'service.invoke should not run when the explicitly bound account is missing');
+      assert.ok(messages.some((m) => m.type === 'done'));
+      assert.ok(
+        messages.some((m) => m.type === 'error' && m.error === 'bound account "missing-openai-account" not found'),
+        'should preserve the specific bound-account failure',
+      );
+      assert.equal(
+        messages.some((m) => m.type === 'error' && /failed to resolve bound account/i.test(String(m.error))),
+        false,
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('F127: ignores legacy api_key protocol metadata when the member explicitly selected the client', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-bound-mismatch-'));

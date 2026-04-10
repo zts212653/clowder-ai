@@ -25,18 +25,21 @@ const CAT_PROVIDER_MAP: Record<string, Provider> = {
   anthropic: 'claude',
   openai: 'codex',
   google: 'gemini',
+  kimi: 'kimi',
 };
 
 const PROVIDER_CONFIG_FILE: Record<Provider, string> = {
   claude: 'CLAUDE.md',
   codex: 'AGENTS.md',
   gemini: 'GEMINI.md',
+  kimi: 'KIMI.md',
 };
 
 const PROVIDER_SKILLS_DIR: Record<Provider, string> = {
   claude: '.claude/skills',
   codex: '.codex/skills',
   gemini: '.gemini/skills',
+  kimi: '.kimi/skills',
 };
 
 export async function checkGovernancePreflight(
@@ -73,7 +76,7 @@ export async function checkGovernancePreflight(
   const configFile = govProvider ? PROVIDER_CONFIG_FILE[govProvider] : 'CLAUDE.md';
   const skillsDirs = govProvider
     ? [PROVIDER_SKILLS_DIR[govProvider]]
-    : ['.claude/skills', '.codex/skills', '.gemini/skills'];
+    : ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills'];
 
   try {
     const content = await readFile(join(projectPath, configFile), 'utf-8');

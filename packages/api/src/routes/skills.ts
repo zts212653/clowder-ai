@@ -2,7 +2,7 @@
  * Skills Route
  * GET /api/skills — Clowder AI 共享 Skills 看板数据
  *
- * 扫描 cat-cafe-skills/ 源目录，检查三猫 symlink 挂载状态，
+ * 扫描 cat-cafe-skills/ 源目录，检查 Claude/Codex/Gemini/Kimi provider symlink 挂载状态，
  * 解析 BOOTSTRAP.md 提取分类，解析 manifest.yaml 提取触发词。
  */
 
@@ -21,6 +21,7 @@ interface SkillMount {
   claude: boolean;
   codex: boolean;
   gemini: boolean;
+  kimi: boolean;
 }
 
 interface SkillEntry {
@@ -214,6 +215,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
       claude: join(home, '.claude', 'skills'),
       codex: join(home, '.codex', 'skills'),
       gemini: join(home, '.gemini', 'skills'),
+      kimi: join(home, '.kimi', 'skills'),
     };
 
     const [sourceSkills, bootstrapEntries, manifestMeta] = await Promise.all([
@@ -229,10 +231,11 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     await Promise.all(
       sourceSkills.map(async (name) => {
         const expectedTarget = join(skillsSrc, name);
-        const [claude, codex, gemini] = await Promise.all([
+        const [claude, codex, gemini, kimi] = await Promise.all([
           isCorrectSymlink(join(catDirs.claude, name), expectedTarget),
           isCorrectSymlink(join(catDirs.codex, name), expectedTarget),
           isCorrectSymlink(join(catDirs.gemini, name), expectedTarget),
+          isCorrectSymlink(join(catDirs.kimi, name), expectedTarget),
         ]);
         const entry = bootstrapEntries.get(name);
         const meta = manifestMeta.get(name);
@@ -241,7 +244,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
           name,
           category: entry?.category ?? '未分类',
           trigger,
-          mounts: { claude, codex, gemini },
+          mounts: { claude, codex, gemini, kimi },
           ...(meta?.requiresMcp?.length
             ? {
                 requiresMcp: meta.requiresMcp.map((id) => mcpStatuses.get(id) ?? { id, status: 'missing' }),
@@ -272,7 +275,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const phantom = [...bootstrapNames].filter((n) => !sourceNames.has(n));
     const registrationConsistent = unregistered.length === 0 && phantom.length === 0;
 
-    const allMounted = skills.every((s) => s.mounts.claude && s.mounts.codex && s.mounts.gemini);
+    const allMounted = skills.every((s) => s.mounts.claude && s.mounts.codex && s.mounts.gemini && s.mounts.kimi);
 
     const response: SkillsResponse = {
       skills,

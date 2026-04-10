@@ -58,6 +58,8 @@ interface CodexAgentServiceOptions {
   rawArchive?: RawArchiveSink;
   /** Inject session context resolver (for testing) */
   contextSnapshotResolver?: CodexSessionContextSnapshotResolver;
+  /** Override executable name/path for Codex-family CLIs. */
+  cliCommand?: string;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -222,6 +224,7 @@ export class CodexAgentService implements AgentService {
   private readonly auditLog: AuditLogSink;
   private readonly rawArchive: RawArchiveSink;
   private readonly contextSnapshotResolver: CodexSessionContextSnapshotResolver;
+  private readonly cliCommand: string;
 
   constructor(options?: CodexAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('codex');
@@ -230,6 +233,7 @@ export class CodexAgentService implements AgentService {
     this.auditLog = options?.auditLog ?? getEventAuditLog();
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
     this.contextSnapshotResolver = options?.contextSnapshotResolver ?? createCodexSessionContextSnapshotResolver();
+    this.cliCommand = options?.cliCommand ?? 'codex';
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -351,12 +355,12 @@ export class CodexAgentService implements AgentService {
 
       const semanticCompletionController = new AbortController();
 
-      const codexCommand = resolveCliCommand('codex');
+      const codexCommand = resolveCliCommand(this.cliCommand);
       if (!codexCommand) {
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: formatCliNotFoundError('codex'),
+          error: formatCliNotFoundError(this.cliCommand),
           metadata,
           timestamp: Date.now(),
         };

@@ -12,6 +12,7 @@ export { ClaudeAgentService } from './agents/providers/ClaudeAgentService.js';
 export { CodexAgentService } from './agents/providers/CodexAgentService.js';
 export { DareAgentService } from './agents/providers/DareAgentService.js';
 export { GeminiAgentService } from './agents/providers/GeminiAgentService.js';
+export { KimiAgentService } from './agents/providers/KimiAgentService.js';
 export { OpenCodeAgentService } from './agents/providers/OpenCodeAgentService.js';
 export { AgentRegistry } from './agents/registry/AgentRegistry.js';
 export type { AgentRouterOptions } from './agents/routing/AgentRouter.js';

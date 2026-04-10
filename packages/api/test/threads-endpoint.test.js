@@ -40,6 +40,17 @@ describe('Thread API', () => {
     assert.deepEqual(body.participants, []);
   });
 
+  it('POST /api/threads keeps omitted projectPath as default', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: { userId: 'alice', title: 'Lobby Chat' },
+    });
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.equal(body.projectPath, 'default');
+  });
+
   it('POST /api/threads with pinned=true creates a pinned thread', async () => {
     const res = await app.inject({
       method: 'POST',

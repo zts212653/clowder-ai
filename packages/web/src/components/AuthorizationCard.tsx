@@ -7,6 +7,7 @@ const CAT_LABELS: Record<string, string> = {
   opus: '布偶猫',
   codex: '缅因猫',
   gemini: '暹罗猫',
+  kimi: '梵花猫',
   dare: '狸花猫',
 };
 
