@@ -9,12 +9,18 @@
  *   - Phase B GeminiAcpAdapter (production)
  */
 
-import type { ChildProcess } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import {
+  escapeBashArg,
+  escapeCmdArg,
+  findGitBashPath,
+  resolveWindowsShimSpawn,
+} from '../../../../../../utils/cli-spawn-win.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,
@@ -32,6 +38,7 @@ import { ACP_METHODS } from './types.js';
 
 const log = createModuleLogger('acp-client');
 
+const IS_WINDOWS = process.platform === 'win32';
 const KILL_GRACE_MS = 3_000;
 
 // ─── Config ──────────────────────────────────────────────���─────
@@ -118,11 +125,39 @@ export class AcpClient {
 
   async initialize(): Promise<AcpInitializeResult> {
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
-    this.child = doSpawn(this.config.command, this.config.args, {
+
+    // Resolve Windows .cmd shim — same strategy as cli-spawn.ts defaultSpawn (#64)
+    // Skip when custom spawnFn is injected (tests handle their own spawning)
+    let command = this.config.command;
+    let args = [...this.config.args];
+    const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...this.config.env },
-    }) as ChildProcess;
+    };
+    if (IS_WINDOWS && !this.config.spawnFn) {
+      const shimSpawn = resolveWindowsShimSpawn(command, args);
+      if (shimSpawn) {
+        log.debug({ original: command, resolved: shimSpawn.command }, 'ACP: Windows shim resolved');
+        command = shimSpawn.command;
+        args = shimSpawn.args;
+      } else {
+        const gitBash = findGitBashPath();
+        if (gitBash) {
+          log.debug({ command, shell: gitBash }, 'ACP: Windows fallback to Git Bash');
+          command = escapeBashArg(command);
+          args = args.map(escapeBashArg);
+          spawnOpts.shell = gitBash;
+        } else {
+          log.debug({ command, shell: true }, 'ACP: Windows fallback to cmd.exe');
+          command = escapeCmdArg(command);
+          args = args.map(escapeCmdArg);
+          spawnOpts.shell = true;
+        }
+      }
+    }
+
+    this.child = doSpawn(command, args, spawnOpts) as ChildProcess;
 
     this.child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trimEnd();
