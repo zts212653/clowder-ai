@@ -2560,4 +2560,96 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('network dropped during cat save');
     expect(onSaved).not.toHaveBeenCalled();
   });
+
+  it('#385: shows default responder toggle in editor and sends PATCH on click', async () => {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [
+              {
+                id: 'anthropic',
+                provider: 'anthropic',
+                displayName: 'Anthropic',
+                name: 'Anthropic',
+                authType: 'oauth',
+                protocol: 'anthropic',
+                builtin: true,
+                mode: 'subscription',
+                models: ['claude-opus-4-6'],
+                hasApiKey: false,
+                createdAt: '',
+                updatedAt: '',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(
+          jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {}, defaultResponderCatId: 'opus' } }),
+        );
+      }
+      if (path === '/api/config/default-responder' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      if (path.startsWith('/api/config/session-strategy')) {
+        return Promise.resolve(jsonResponse({ strategy: 'compress' }));
+      }
+      if (path.startsWith('/api/config/codex-settings')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: {
+            id: 'opus',
+            displayName: 'Opus',
+            breedDisplayName: 'Ragdoll',
+            nickname: '',
+            clientId: 'anthropic',
+            defaultModel: 'claude-opus-4-6',
+            color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+            mentionPatterns: ['@opus'],
+            avatar: '/avatars/opus.png',
+            roleDescription: '主架构师',
+            source: 'seed',
+          },
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    // Toggle should be visible with label text
+    expect(container.textContent).toContain('全局默认回复猫');
+
+    // Find the toggle button (within the default responder section)
+    const toggleSection = Array.from(container.querySelectorAll('p'))
+      .find((p) => p.textContent === '全局默认回复猫')
+      ?.closest('div.mt-3');
+    const toggleButton = toggleSection?.querySelector('button');
+    expect(toggleButton).toBeTruthy();
+
+    // Click toggle to disable (opus is currently default)
+    await act(async () => {
+      toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    // Verify PATCH was sent to clear default responder
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([p, i]) => p === '/api/config/default-responder' && i?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const patchBody = JSON.parse(String(patchCall?.[1]?.body));
+    expect(patchBody.catId).toBeNull();
+  });
 });

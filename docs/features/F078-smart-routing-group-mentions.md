@@ -19,7 +19,7 @@ When users send messages without @mention, the system currently routes to ALL th
 
 Four routing improvements:
 
-1. **Default to last replier** -- When no @mention is present and the thread has participants, route only to the most recent replier (not all participants). When `preferredCats` is set, last-replier is scoped to that set; if last replier is outside preferred, falls back to first preferred cat (#58). No participants and no preferredCats -> default to opus.
+1. **Default to last replier** -- When no @mention is present and the thread has participants, route only to the most recent replier (not all participants). When `preferredCats` is set, last-replier is scoped to that set; if last replier is outside preferred, falls back to first preferred cat (#58). No participants and no preferredCats -> default to configured default responder (see #385, `getDefaultResponderCatId()`).
 
 2. **@all / @全体** -- Route to all available cats.
 
@@ -30,7 +30,7 @@ Four routing improvements:
 ## Acceptance Criteria
 
 - [x] AC-A1: Message without @mention routes to the cat that most recently replied in the thread
-- [x] AC-A2: New thread without participants defaults to opus (unchanged)
+- [x] AC-A2: New thread without participants defaults to configured default responder (#385 made this configurable; was opus)
 - [x] AC-A3: `@all` or `@全体` routes to all available cats
 - [x] AC-A4: `@全体Ragdoll` / `@all-ragdoll` routes to all ragdoll variants
 - [x] AC-A5: `@全体Maine Coon` / `@all-maine-coon` routes to all maine-coon variants
@@ -43,7 +43,7 @@ Four routing improvements:
 ## Key Decisions
 
 - Group mentions are parsed BEFORE individual mentions (they are longer patterns)
-- `@thread` requires ThreadStore access; if no participants, falls back to default cat (opus)
+- `@thread` requires ThreadStore access; if no participants, falls back to configured default responder (#385)
 - Breed group patterns derived from `cat-config.json` breeds array (not hardcoded)
 - Token boundary matching prevents substring collisions (e.g. `@allison` ≠ `@all`)
 
@@ -67,7 +67,7 @@ Four routing improvements:
 | # | Requirement | Source | AC | Status |
 |---|------------|--------|-----|--------|
 | R1 | Default to last replier when no @mention | Interview | AC-1 | done |
-| R2 | New thread defaults to opus | Interview | AC-2 | done |
+| R2 | New thread defaults to configured default responder (#385) | Interview | AC-2 | done |
 | R3 | @all broadcasts to all cats | Interview | AC-3 | done |
 | R4 | Per-breed group mentions | Interview | AC-4,5,6 | done |
 | R5 | @thread mentions all participants | Interview | AC-7 | done |
