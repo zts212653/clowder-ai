@@ -14,6 +14,7 @@ const {
   isSessionChainEnabled,
   getMissionHubSelfClaimScope,
   getDefaultCatId,
+  getDefaultResponderCatId,
   buildCatIdToBreedIndex,
   getCatEffort,
   _resetCachedConfig,
@@ -1011,5 +1012,119 @@ describe('GPT-5.2 variant mention aliases in project config', () => {
     const gpt52 = all.gpt52;
     assert.ok(gpt52, 'gpt52 cat config exists');
     assert.ok(gpt52.mentionPatterns.includes('@gpt'));
+  });
+
+  // ── #385: getDefaultResponderCatId ─────────────────────────────────
+
+  describe('getDefaultResponderCatId (#385)', () => {
+    /** Minimal v2 config with roster */
+    function validV2Config(extra = {}) {
+      return {
+        version: 2,
+        breeds: [
+          {
+            id: 'ragdoll',
+            catId: 'opus',
+            name: '布偶猫',
+            displayName: '布偶猫',
+            avatar: '/avatars/opus.png',
+            color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+            mentionPatterns: ['@opus'],
+            roleDescription: '主架构师',
+            defaultVariantId: 'opus-default',
+            variants: [
+              {
+                id: 'opus-default',
+                provider: 'anthropic',
+                defaultModel: 'claude-opus-4-6',
+                mcpSupport: true,
+                cli: { command: 'claude', outputFormat: 'stream-json' },
+                personality: '温柔',
+              },
+              {
+                id: 'sonnet-variant',
+                catId: 'sonnet',
+                provider: 'anthropic',
+                defaultModel: 'claude-sonnet-4-6',
+                mcpSupport: true,
+                cli: { command: 'claude', outputFormat: 'stream-json' },
+                personality: '灵活',
+              },
+            ],
+          },
+        ],
+        roster: {
+          opus: { family: 'ragdoll', roles: ['architect'], lead: true, available: true, evaluation: 'lead' },
+          sonnet: { family: 'ragdoll', roles: ['general'], lead: false, available: true, evaluation: 'flex' },
+        },
+        reviewPolicy: {
+          requireDifferentFamily: false,
+          preferActiveInThread: true,
+          preferLead: false,
+          excludeUnavailable: true,
+        },
+        ...extra,
+      };
+    }
+
+    it('falls back to getDefaultCatId when no defaultResponderCatId configured', () => {
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      const path = writeTempConfig(validV2Config());
+      process.env.CAT_TEMPLATE_PATH = path;
+      _resetCachedConfig();
+      try {
+        assert.equal(getDefaultResponderCatId(), getDefaultCatId());
+      } finally {
+        if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved;
+        _resetCachedConfig();
+      }
+    });
+
+    it('returns configured defaultResponderCatId when set', () => {
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      const path = writeTempConfig(validV2Config({ defaultResponderCatId: 'sonnet' }));
+      process.env.CAT_TEMPLATE_PATH = path;
+      _resetCachedConfig();
+      try {
+        assert.equal(getDefaultResponderCatId(), 'sonnet');
+      } finally {
+        if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved;
+        _resetCachedConfig();
+      }
+    });
+
+    it('does not affect getDefaultCatId when defaultResponderCatId is set', () => {
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      const path = writeTempConfig(validV2Config({ defaultResponderCatId: 'sonnet' }));
+      process.env.CAT_TEMPLATE_PATH = path;
+      _resetCachedConfig();
+      try {
+        // getDefaultCatId should still return breed-based default (opus)
+        assert.equal(getDefaultCatId(), 'opus');
+        // getDefaultResponderCatId should return the configured one
+        assert.equal(getDefaultResponderCatId(), 'sonnet');
+      } finally {
+        if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved;
+        _resetCachedConfig();
+      }
+    });
+
+    it('falls back through chain when v1 config (no defaultResponderCatId field)', () => {
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      const path = writeTempConfig(validConfig());
+      process.env.CAT_TEMPLATE_PATH = path;
+      _resetCachedConfig();
+      try {
+        // v1 config → no defaultResponderCatId → falls back to getDefaultCatId
+        assert.equal(getDefaultResponderCatId(), getDefaultCatId());
+      } finally {
+        if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved;
+        _resetCachedConfig();
+      }
+    });
   });
 });

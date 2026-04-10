@@ -473,11 +473,17 @@ export function RoutingSection({
   form,
   hasError,
   onChange,
+  isDefaultResponder,
+  onSetDefaultResponder,
+  currentDefaultName,
 }: {
   cat?: CatData | null;
   form: HubCatEditorFormState;
   hasError?: boolean;
   onChange: (patch: FormPatch) => void;
+  isDefaultResponder?: boolean;
+  onSetDefaultResponder?: (value: boolean) => void;
+  currentDefaultName?: string;
 }) {
   const aliases = currentAliasTags(form);
   return (
@@ -497,6 +503,33 @@ export function RoutingSection({
         placeholder="@codex, @缅因猫"
         className="sr-only"
       />
+
+      {onSetDefaultResponder ? (
+        <div className="mt-3 pt-3 border-t border-[#F1E7DF]">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[13px] font-semibold text-[#2D2118]">全局默认回复猫</p>
+              <p className="text-[11px] text-[#8A776B] mt-0.5">
+                仅影响新会话无历史时第一条消息，不影响已有 thread 的续接逻辑
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSetDefaultResponder(!isDefaultResponder)}
+              className={`relative w-10 h-[22px] rounded-full transition-colors ${isDefaultResponder ? 'bg-[#D49266]' : 'bg-[#D5C8BE]'}`}
+            >
+              <span
+                className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${isDefaultResponder ? 'translate-x-5' : 'translate-x-[2px]'}`}
+              />
+            </button>
+          </div>
+          {!isDefaultResponder && currentDefaultName ? (
+            <p className="mt-1.5 text-[11px] text-[#B59A88]">
+              当前默认: {currentDefaultName}。设为此成员后，原默认将自动取消。
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </SectionCard>
   );
 }

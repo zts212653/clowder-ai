@@ -437,6 +437,8 @@ interface ChatState {
   uiThinkingExpandedByDefault: boolean;
   /** Global bubble display defaults from Config Hub (server-side). */
   globalBubbleDefaults: GlobalBubbleDefaults;
+  /** #385: Configured default responder cat for new threads. */
+  defaultResponderCatId: string;
 
   // ── Active-thread actions (operate on flat state) ──
   addMessage: (msg: ChatMessage) => void;
@@ -663,6 +665,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     thinking: loadUiThinkingExpandedByDefault() ? 'expanded' : 'collapsed',
     cliOutput: 'collapsed',
   },
+  defaultResponderCatId: 'opus',
 
   setGlobalBubbleDefaults: (defaults) => set({ globalBubbleDefaults: defaults }),
 
@@ -672,15 +675,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await apiFetch('/api/config');
       if (!res.ok) return;
       const data = await res.json();
-      const ui = data.config?.ui;
+      const cfg = data.config;
+      const ui = cfg?.ui;
+      const patch: Record<string, unknown> = {};
       if (ui?.bubbleDefaults) {
-        set({
-          globalBubbleDefaults: {
-            thinking: ui.bubbleDefaults.thinking ?? 'collapsed',
-            cliOutput: ui.bubbleDefaults.cliOutput ?? 'collapsed',
-          },
-        });
+        patch.globalBubbleDefaults = {
+          thinking: ui.bubbleDefaults.thinking ?? 'collapsed',
+          cliOutput: ui.bubbleDefaults.cliOutput ?? 'collapsed',
+        };
       }
+      if (cfg?.defaultResponderCatId) {
+        patch.defaultResponderCatId = cfg.defaultResponderCatId;
+      }
+      if (Object.keys(patch).length > 0) set(patch);
     } catch {
       // Fallback to existing defaults on network error
     }

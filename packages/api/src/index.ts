@@ -501,7 +501,7 @@ async function main(): Promise<void> {
   const { TaskRunnerV2 } = await import('./infrastructure/scheduler/TaskRunnerV2.js');
   const { RunLedger } = await import('./infrastructure/scheduler/RunLedger.js');
   const { createActorResolver } = await import('./infrastructure/scheduler/ActorResolver.js');
-  const { getRoster } = await import('./config/cat-config-loader.js');
+  const { getRoster, getDefaultResponderCatId } = await import('./config/cat-config-loader.js');
   const schedulerDb = memoryServices.store.getDb();
   const runLedger = new RunLedger(schedulerDb);
   const actorResolver = createActorResolver(getRoster);
@@ -1953,7 +1953,7 @@ async function main(): Promise<void> {
     invokeTrigger,
     socketManager,
     defaultUserId: 'default-user' as const,
-    defaultCatId: 'opus' as CatId,
+    defaultCatId: getDefaultResponderCatId(),
     redis: redisClient ?? undefined,
     log: app.log,
     agentRegistry,

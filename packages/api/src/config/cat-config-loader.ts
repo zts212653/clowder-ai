@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import type {
   CatBreed,
   CatCafeConfig,
+  CatCafeConfigV2,
   CatConfig,
   CatFeatures,
   CatId,
@@ -206,6 +207,8 @@ const catCafeConfigSchemaV2 = z
     coCreator: coCreatorConfigSchema.optional(),
     /** @deprecated Accepted for backward compat; migrated to coCreator at parse time. */
     owner: coCreatorConfigSchema.optional(),
+    /** #385: Configurable default responder for new threads. */
+    defaultResponderCatId: z.string().min(1).optional(),
   })
   .transform((data) => {
     // Migrate legacy "owner" key → "coCreator" (coCreator takes precedence)
@@ -660,6 +663,23 @@ export function clearRuntimeDefaultCatId(): void {
 /** F154 AC-A4: Check whether a runtime override is active. */
 export function hasRuntimeDefaultCatOverride(): boolean {
   return _runtimeDefaultCatId !== null;
+}
+
+/**
+ * Get the configured default responder for new threads (#385).
+ *
+ * Used when: new thread, no history, no @mention, no preferredCats.
+ * Fallback chain: config.defaultResponderCatId → getDefaultCatId() → 'opus'.
+ *
+ * Does NOT change reviewer-matcher or error-broadcast fallback semantics.
+ */
+export function getDefaultResponderCatId(): CatId {
+  const config = getCachedConfig();
+  if (config?.version === 2) {
+    const configured = (config as CatCafeConfigV2).defaultResponderCatId;
+    if (configured) return createCatId(configured);
+  }
+  return getDefaultCatId();
 }
 
 // ── Variant CLI effort accessor ──────────────────────────────────────

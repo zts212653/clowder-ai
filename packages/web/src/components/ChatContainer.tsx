@@ -73,6 +73,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     rightPanelMode,
   } = useChatStore();
   const uiThinkingExpandedByDefault = useChatStore((s) => s.uiThinkingExpandedByDefault);
+  const defaultResponderCatId = useChatStore((s) => s.defaultResponderCatId);
 
   // F101: Game state from Zustand store
   const gameView = useGameStore((s) => s.gameView);
@@ -483,7 +484,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           onOpenMobileStatus={() => setMobileStatusOpen(true)}
           statusPanelOpen={statusPanelOpen}
           onToggleStatusPanel={() => setStatusPanelOpen((v) => !v)}
-          defaultCatId={targetCats[0] || 'opus'}
+          defaultCatId={targetCats[0] || defaultResponderCatId}
         />
 
         {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} />}

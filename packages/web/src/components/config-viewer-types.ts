@@ -50,4 +50,6 @@ export interface ConfigData {
       cliOutput: 'expanded' | 'collapsed';
     };
   };
+  /** #385: Configured default responder cat for new threads */
+  defaultResponderCatId?: string;
 }

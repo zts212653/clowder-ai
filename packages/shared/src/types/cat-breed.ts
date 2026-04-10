@@ -260,6 +260,8 @@ export interface CatCafeConfigV2 {
    * New code must use catalog-accounts.ts which reads the global file.
    */
   readonly accounts?: Readonly<Record<string, AccountConfig>>;
+  /** #385: Configurable default responder for new threads (no history, no @mention). */
+  readonly defaultResponderCatId?: string;
 }
 
 /**

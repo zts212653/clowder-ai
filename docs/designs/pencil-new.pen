@@ -1,0 +1,1081 @@
+{
+  "version": "2.10",
+  "children": [
+    {
+      "type": "frame",
+      "id": "OiXv6",
+      "x": 0,
+      "y": 0,
+      "name": "Current — 成员总览",
+      "width": 380,
+      "fill": "#F9F6F3",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": [
+        24,
+        20
+      ],
+      "children": [
+        {
+          "type": "text",
+          "id": "jlzbf",
+          "name": "curTitle",
+          "fill": "#8A776B",
+          "content": "CURRENT STATE",
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "700",
+          "letterSpacing": 2
+        },
+        {
+          "type": "frame",
+          "id": "l8R7f",
+          "name": "curToolbar",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "SDSVe",
+              "name": "curFilter",
+              "fill": "#8F8075",
+              "content": "全部 · 订阅 · API Key · 未启用",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "ZnnWn",
+              "name": "curAddBtn",
+              "fill": "#D49266",
+              "cornerRadius": 9999,
+              "padding": [
+                8,
+                16
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "R2wJg",
+                  "name": "curAddLbl",
+                  "fill": "#FFFFFF",
+                  "content": "+ 添加成员",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "700"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "KF87x",
+          "name": "coCard",
+          "width": "fill_container",
+          "fill": "#FFF8F0",
+          "cornerRadius": 20,
+          "stroke": {
+            "align": "inside",
+            "thickness": 2,
+            "fill": "#D4A76A"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "8so10",
+              "name": "coRow",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "fi01k",
+                  "name": "coLeft",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "ZULwt",
+                      "name": "coAvatar",
+                      "fill": "#D4A76A",
+                      "width": 32,
+                      "height": 32
+                    },
+                    {
+                      "type": "text",
+                      "id": "VRSyS",
+                      "name": "coName",
+                      "fill": "#2D2118",
+                      "content": "铲屎官",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "V1kQ5",
+                  "name": "ownerBadge",
+                  "fill": "#FFF3E0",
+                  "cornerRadius": 9999,
+                  "gap": 4,
+                  "padding": [
+                    4,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon_font",
+                      "id": "r1Zrw",
+                      "name": "ownerIcon",
+                      "width": 12,
+                      "height": 12,
+                      "iconFontName": "lock",
+                      "iconFontFamily": "lucide",
+                      "fill": "#E65100"
+                    },
+                    {
+                      "type": "text",
+                      "id": "6Z3H7",
+                      "name": "ownerLbl",
+                      "fill": "#E65100",
+                      "content": "Owner",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "clfXo",
+              "name": "coMeta",
+              "fill": "#8A776B",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "别名: 铲屎官 · 只能编辑，不能新增或删除",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "1gJVK",
+              "name": "coMention",
+              "fill": "#D4A76A",
+              "content": "@co-creator  @铲屎官",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "D1qTK",
+          "name": "opusCard",
+          "width": "fill_container",
+          "fill": "#FFFDFC",
+          "cornerRadius": 20,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#F1E7DF"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "13xRJ",
+              "name": "opusRow",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "rj98s",
+                  "name": "opusName",
+                  "fill": "#2D2118",
+                  "content": "布偶猫 · 宪宪",
+                  "fontFamily": "Inter",
+                  "fontSize": 17,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "Lfkbl",
+                  "name": "opusBadge",
+                  "fill": "#E8F5E9",
+                  "cornerRadius": 9999,
+                  "padding": [
+                    4,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Yf4Y3",
+                      "name": "opusBadgeLbl",
+                      "fill": "#4CAF50",
+                      "content": "已启用",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "XolBG",
+              "name": "opusMeta",
+              "fill": "#8A776B",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Anthropic · claude-opus-4-6 · 内置 OAuth 账号",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "7Nyk6",
+              "name": "opusMention",
+              "fill": "#9D7BC7",
+              "content": "@opus  @宪宪  @布偶猫",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "A0K32",
+          "name": "sonnetCard",
+          "width": "fill_container",
+          "fill": "#FFFDFC",
+          "cornerRadius": 20,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#F1E7DF"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "lyhRi",
+              "name": "sonnetRow",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "VHYbt",
+                  "name": "sonnetName",
+                  "fill": "#2D2118",
+                  "content": "布偶猫 · 克拉",
+                  "fontFamily": "Inter",
+                  "fontSize": 17,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "jCbHT",
+                  "name": "sonnetBadge",
+                  "fill": "#E8F5E9",
+                  "cornerRadius": 9999,
+                  "padding": [
+                    4,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "OiTqM",
+                      "name": "sonnetLbl",
+                      "fill": "#4CAF50",
+                      "content": "已启用",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "eCF1B",
+              "name": "sonnetMeta",
+              "fill": "#8A776B",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Anthropic · claude-sonnet-4-6 · 内置 OAuth 账号",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "KGzzZ",
+              "name": "sonnetMention",
+              "fill": "#9D7BC7",
+              "content": "@sonnet  @克拉",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "fPnC2",
+          "name": "curHint",
+          "fill": "#B59A88",
+          "content": "点击任意卡片进入成员配置 →",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "pO7Qz",
+      "x": 420,
+      "y": 0,
+      "name": "Proposed — 默认回复猫",
+      "width": 380,
+      "fill": "#F9F6F3",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": [
+        24,
+        20
+      ],
+      "children": [
+        {
+          "type": "text",
+          "id": "CPDRU",
+          "name": "propTitle",
+          "fill": "#7D6B3D",
+          "content": "PROPOSED STATE",
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "700",
+          "letterSpacing": 2
+        },
+        {
+          "type": "frame",
+          "id": "eAcKo",
+          "name": "propToolbar",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "NGHcx",
+              "name": "propFilter",
+              "fill": "#8F8075",
+              "content": "全部 · 订阅 · API Key · 未启用",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "pZ6QI",
+              "name": "propAddBtn",
+              "fill": "#D49266",
+              "cornerRadius": 9999,
+              "padding": [
+                8,
+                16
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "fE9J4",
+                  "name": "propAddLbl",
+                  "fill": "#FFFFFF",
+                  "content": "+ 添加成员",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "700"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "cKVVY",
+          "name": "coCard2",
+          "width": "fill_container",
+          "fill": "#FFF8F0",
+          "cornerRadius": 20,
+          "stroke": {
+            "align": "inside",
+            "thickness": 2,
+            "fill": "#D4A76A"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "iDwum",
+              "name": "coRow2",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "2lG8O",
+                  "name": "coLeft2",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "UfAzy",
+                      "name": "coAvatar2",
+                      "fill": "#D4A76A",
+                      "width": 32,
+                      "height": 32
+                    },
+                    {
+                      "type": "text",
+                      "id": "HmwEL",
+                      "name": "coName2",
+                      "fill": "#2D2118",
+                      "content": "铲屎官",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "nEmUI",
+                  "name": "ownerBadge2",
+                  "fill": "#FFF3E0",
+                  "cornerRadius": 9999,
+                  "gap": 4,
+                  "padding": [
+                    4,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon_font",
+                      "id": "QRNlr",
+                      "name": "ownerIcon2",
+                      "width": 12,
+                      "height": 12,
+                      "iconFontName": "lock",
+                      "iconFontFamily": "lucide",
+                      "fill": "#E65100"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Ia13u",
+                      "name": "ownerLbl2",
+                      "fill": "#E65100",
+                      "content": "Owner",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "IcO2D",
+              "name": "coMeta2",
+              "fill": "#8A776B",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "别名: 铲屎官 · 只能编辑，不能新增或删除",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "muXOJ",
+              "name": "coMention2",
+              "fill": "#D4A76A",
+              "content": "@co-creator  @铲屎官",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "NXLoH",
+          "name": "opusCard2",
+          "width": "fill_container",
+          "fill": "#FFFDFC",
+          "cornerRadius": 20,
+          "stroke": {
+            "align": "inside",
+            "thickness": 2,
+            "fill": "#D49266"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "U2N9w",
+              "name": "opusRow2",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "RJykU",
+                  "name": "opusLeft2",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "gsO2h",
+                      "name": "opusNameRow",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "KXiWk",
+                          "name": "opusName2",
+                          "fill": "#2D2118",
+                          "content": "布偶猫 · 宪宪",
+                          "fontFamily": "Inter",
+                          "fontSize": 17,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "VxU0Z",
+                          "name": "defBadge",
+                          "fill": "#FFF3E0",
+                          "cornerRadius": 9999,
+                          "gap": 4,
+                          "padding": [
+                            3,
+                            8
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "LrJtG",
+                              "name": "defIcon",
+                              "width": 11,
+                              "height": 11,
+                              "iconFontName": "star",
+                              "iconFontFamily": "lucide",
+                              "fill": "#E65100"
+                            },
+                            {
+                              "type": "text",
+                              "id": "x3HDg",
+                              "name": "defLbl",
+                              "fill": "#E65100",
+                              "content": "默认回复",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kRXgR",
+                  "name": "opusStatus2",
+                  "fill": "#E8F5E9",
+                  "cornerRadius": 9999,
+                  "padding": [
+                    4,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "4Pr5A",
+                      "name": "opusStatusLbl2",
+                      "fill": "#4CAF50",
+                      "content": "已启用",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "JN0ER",
+              "name": "opusMeta2",
+              "fill": "#8A776B",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Anthropic · claude-opus-4-6 · 内置 OAuth 账号",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "ZqThd",
+              "name": "opusMention2",
+              "fill": "#9D7BC7",
+              "content": "@opus  @宪宪  @布偶猫",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "P0zmQ",
+          "name": "sonnetCard2",
+          "width": "fill_container",
+          "fill": "#FFFDFC",
+          "cornerRadius": 20,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#F1E7DF"
+          },
+          "layout": "vertical",
+          "gap": 10,
+          "padding": 18,
+          "children": [
+            {
+              "type": "frame",
+              "id": "eex4h",
+              "name": "sonnetRow2",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "aC0aL",
+                  "name": "sonnetName2",
+                  "fill": "#2D2118",
+                  "content": "布偶猫 · 克拉",
+                  "fontFamily": "Inter",
+                  "fontSize": 17,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "GkpNJ",
+                  "name": "sonnetBadge2",
+                  "fill": "#E8F5E9",
+                  "cornerRadius": 9999,
+                  "padding": [
+                    4,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "y1ebZ",
+                      "name": "sonnetLbl2",
+                      "fill": "#4CAF50",
+                      "content": "已启用",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "Ud0fK",
+              "name": "sonnetMeta2",
+              "fill": "#8A776B",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Anthropic · claude-sonnet-4-6 · 内置 OAuth 账号",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "iAsZ3",
+              "name": "sonnetMention2",
+              "fill": "#9D7BC7",
+              "content": "@sonnet  @克拉",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "o1DmH",
+          "name": "propHint",
+          "fill": "#B59A88",
+          "content": "点击任意卡片进入成员配置 →",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "2PYl7",
+      "x": 840,
+      "y": 0,
+      "name": "Edit Member — 默认回复 Section",
+      "width": 360,
+      "fill": "#F9F6F3",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": [
+        24,
+        20
+      ],
+      "children": [
+        {
+          "type": "text",
+          "id": "hekCy",
+          "name": "editTitle",
+          "fill": "#7D6B3D",
+          "content": "EDIT MEMBER（片段）",
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "700",
+          "letterSpacing": 2
+        },
+        {
+          "type": "frame",
+          "id": "Y1lIW",
+          "name": "secAlias",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 12,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#F1E7DF"
+          },
+          "layout": "vertical",
+          "gap": 8,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "wfeqa",
+              "name": "secAliasTitle",
+              "fill": "#8A776B",
+              "content": "别名与 @ 路由",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "IdMY9",
+              "name": "secAliasContent",
+              "fill": "#9D7BC7",
+              "content": "@sonnet  @克拉",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "bRDdF",
+              "name": "secAliasHint",
+              "fill": "#B59A88",
+              "content": "（已有 section，此处省略细节）",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "hHEfU",
+          "name": "secRouting",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 12,
+          "stroke": {
+            "align": "inside",
+            "thickness": 2,
+            "fill": "#D49266"
+          },
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "jVKJA",
+              "name": "secRoutingTitle",
+              "fill": "#2D2118",
+              "content": "路由与默认",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "QhyqD",
+              "name": "toggleRow",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "MmzuK",
+                  "name": "toggleLblCol",
+                  "layout": "vertical",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "vpV8W",
+                      "name": "toggleLbl",
+                      "fill": "#2D2118",
+                      "content": "全局默认回复猫",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "c8WQj",
+                      "name": "toggleHint",
+                      "fill": "#8A776B",
+                      "textGrowth": "fixed-width",
+                      "width": 230,
+                      "content": "仅影响新会话无历史时第一条消息，不影响已有 thread 的续接逻辑",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "fh33S",
+                  "name": "toggleTrack",
+                  "width": 44,
+                  "height": 24,
+                  "fill": "#E0E0E0",
+                  "cornerRadius": 9999,
+                  "padding": 2,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "c4NHr",
+                      "name": "toggleKnob",
+                      "fill": "#FFFFFF",
+                      "width": 20,
+                      "height": 20,
+                      "effect": {
+                        "type": "shadow",
+                        "shadowType": "outer",
+                        "color": "#00000020",
+                        "offset": {
+                          "x": 0,
+                          "y": 1
+                        },
+                        "blur": 2
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SIfpM",
+              "name": "infoBox",
+              "width": "fill_container",
+              "fill": "#FFF8F0",
+              "cornerRadius": 10,
+              "gap": 8,
+              "padding": [
+                10,
+                12
+              ],
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "3s03R",
+                  "name": "infoIcon",
+                  "width": 14,
+                  "height": 14,
+                  "iconFontName": "info",
+                  "iconFontFamily": "lucide",
+                  "fill": "#D49266"
+                },
+                {
+                  "type": "text",
+                  "id": "BaWSk",
+                  "name": "infoText",
+                  "fill": "#8A776B",
+                  "textGrowth": "fixed-width",
+                  "width": 220,
+                  "content": "当前默认: 布偶猫·宪宪（opus）。设为此成员后，宪宪的默认状态将自动取消。若此成员不可用，将退回 breed 默认。",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "AfLwa",
+          "name": "secStatus",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 12,
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#F1E7DF"
+          },
+          "layout": "vertical",
+          "gap": 8,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "PgOwO",
+              "name": "secStatusTitle",
+              "fill": "#8A776B",
+              "content": "启用状态",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "W22mt",
+              "name": "statusRow",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "iXRxp",
+                  "name": "statusLbl",
+                  "fill": "#2D2118",
+                  "content": "已启用",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "nCPjB",
+                  "name": "statusTrack",
+                  "width": 44,
+                  "height": 24,
+                  "fill": "#4CAF50",
+                  "cornerRadius": 9999,
+                  "padding": 2,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "IAkjV",
+                      "name": "statusKnob",
+                      "fill": "#FFFFFF",
+                      "width": 20,
+                      "height": 20,
+                      "effect": {
+                        "type": "shadow",
+                        "shadowType": "outer",
+                        "color": "#00000020",
+                        "offset": {
+                          "x": 0,
+                          "y": 1
+                        },
+                        "blur": 2
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "Ouy82",
+              "name": "secStatusHint",
+              "fill": "#B59A88",
+              "content": "（已有 section，此处省略细节）",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

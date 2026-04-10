@@ -10,7 +10,7 @@ import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import { DEFAULT_CLI_TIMEOUT_MS, readCliTimeoutMsFromEnv } from '../utils/cli-timeout.js';
 import { configStore } from './ConfigStore.js';
 import { getAllCatBudgets } from './cat-budgets.js';
-import { getCoCreatorConfig } from './cat-config-loader.js';
+import { getCoCreatorConfig, getDefaultResponderCatId } from './cat-config-loader.js';
 import { getCatModel } from './cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from './codex-cli.js';
 import type { CodexAuthMode, ConfigSnapshot } from './config-snapshot.js';
@@ -133,6 +133,7 @@ export function collectConfigSnapshot(): ConfigSnapshot {
       doneTimeoutMs: 5 * 60 * 1000,
       heartbeatIntervalMs: 30_000,
     },
+    defaultResponderCatId: getDefaultResponderCatId(),
     deliberate: { status: 'types_only' },
     codexExecution: {
       model: codexExecutionModel,

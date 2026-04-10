@@ -57,6 +57,7 @@ export function CatOverviewTab({
             onEdit={onEditMember}
             onToggleAvailability={onToggleAvailability}
             togglingAvailability={togglingCatId === catData.id}
+            isDefaultResponder={config.defaultResponderCatId === catData.id}
           />
         ))}
       </div>

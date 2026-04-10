@@ -21,7 +21,7 @@
 import type { CatId, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
-import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { getDefaultCatId, getDefaultResponderCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, stripIntentTags } from '../../context/IntentParser.js';
@@ -584,10 +584,10 @@ export class AgentRouter {
         return this.applyThreadRoutingPolicy(thread, message, [validPreferred[0]]);
       }
 
-      return this.applyThreadRoutingPolicy(thread, message, [getDefaultCatId()]);
+      return this.applyThreadRoutingPolicy(thread, message, [getDefaultResponderCatId()]);
     }
 
-    return [getDefaultCatId()];
+    return [getDefaultResponderCatId()];
   }
 
   /** Resolve target cats and persist new mentions as thread participants */
@@ -639,10 +639,10 @@ export class AgentRouter {
         return this.applyThreadRoutingPolicy(thread, message, [validPreferred[0]]);
       }
 
-      return this.applyThreadRoutingPolicy(thread, message, [getDefaultCatId()]);
+      return this.applyThreadRoutingPolicy(thread, message, [getDefaultResponderCatId()]);
     }
 
-    return [getDefaultCatId()];
+    return [getDefaultResponderCatId()];
   }
 
   /** Build shared strategy dependencies (public for ModeOrchestrator) */

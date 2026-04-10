@@ -28,7 +28,7 @@ import {
   hasSensitiveEditableVars,
   isEditableEnvVarName,
 } from '../config/env-registry.js';
-import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
+import { updateDefaultResponderCatId, updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 
@@ -240,6 +240,47 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   app.patch('/api/config/owner', async (request, reply) => {
     request.log.warn('DEPRECATED: /api/config/owner — use /api/config/co-creator');
     return handleCoCreatorPatch(request, reply);
+  });
+
+  // #385: Set/clear default responder cat for new threads
+  const defaultResponderSchema = z.object({
+    catId: z.string().min(1).nullable(),
+  });
+
+  app.patch('/api/config/default-responder', async (request, reply) => {
+    const parsed = defaultResponderSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    if (!operator) {
+      reply.status(400);
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+
+    try {
+      updateDefaultResponderCatId(projectRoot, parsed.data.catId);
+    } catch (err) {
+      reply.status(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const next = collectConfigSnapshot();
+    try {
+      await auditLog.append({
+        type: AuditEventTypes.CONFIG_UPDATED,
+        data: {
+          target: 'defaultResponderCatId',
+          operator,
+          value: parsed.data.catId,
+        },
+      });
+    } catch (err) {
+      request.log.warn({ err }, 'defaultResponderCatId audit append failed');
+    }
+
+    return { config: next };
   });
 
   app.get('/api/config/env-summary', async () => {

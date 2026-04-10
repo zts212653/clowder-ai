@@ -55,6 +55,8 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [strategyBaselineHasOverride, setStrategyBaselineHasOverride] = useState(false);
   const [codexSettings, setCodexSettings] = useState<CodexRuntimeSettings | null>(null);
   const [codexSettingsBaseline, setCodexSettingsBaseline] = useState<CodexRuntimeSettings | null>(null);
+  const [defaultResponderCatId, setDefaultResponderCatId] = useState<string | null>(null);
+  const [defaultResponderName, setDefaultResponderName] = useState<string | null>(null);
 
   const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
   const selectedProfile = useMemo(
@@ -110,6 +112,27 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       cancelled = true;
     };
   }, [open, profilesVersion]);
+
+  // #385: Fetch current default responder
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    apiFetch('/api/config')
+      .then(async (res) => {
+        if (!res.ok) return;
+        const body = (await res.json()) as { config: ConfigData };
+        if (cancelled) return;
+        const id = body.config.defaultResponderCatId ?? null;
+        setDefaultResponderCatId(id);
+        if (id && body.config.cats[id]) {
+          setDefaultResponderName(body.config.cats[id].displayName);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open || !cat) {
@@ -524,7 +547,25 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             loadingProfiles={loadingProfiles}
             onChange={patchForm}
           />
-          <RoutingSection form={form} hasError={fieldErrors.routing} onChange={patchForm} />
+          <RoutingSection
+            form={form}
+            hasError={fieldErrors.routing}
+            onChange={patchForm}
+            isDefaultResponder={defaultResponderCatId === (cat?.id ?? form.catId)}
+            currentDefaultName={defaultResponderName ?? undefined}
+            onSetDefaultResponder={async (value) => {
+              const targetId = cat?.id ?? form.catId;
+              const res = await apiFetch('/api/config/default-responder', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ catId: value ? targetId : null }),
+              });
+              if (res.ok) {
+                setDefaultResponderCatId(value ? targetId : null);
+                setDefaultResponderName(value ? form.displayName || form.name : null);
+              }
+            }}
+          />
           <AdvancedRuntimeSection
             cat={cat}
             form={form}

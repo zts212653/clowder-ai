@@ -492,6 +492,23 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
   return writeAndValidateCatalog(projectRoot, catalog);
 }
 
+/**
+ * #385: Update (or clear) the default responder cat for new threads.
+ * Writes to cat-catalog.json `defaultResponderCatId` field.
+ */
+export function updateDefaultResponderCatId(projectRoot: string, catId: string | null): CatCafeConfig {
+  const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
+  if (catalog.version !== 2) {
+    throw new Error('defaultResponderCatId requires a version 2 runtime catalog');
+  }
+  if (catId) {
+    catalog.defaultResponderCatId = catId;
+  } else {
+    delete catalog.defaultResponderCatId;
+  }
+  return writeAndValidateCatalog(projectRoot, catalog);
+}
+
 export function deleteRuntimeCat(projectRoot: string, catId: string): CatCafeConfig {
   if (isSeedCat(projectRoot, catId)) {
     throw new Error(`Cannot delete seed cat "${catId}" from runtime catalog`);

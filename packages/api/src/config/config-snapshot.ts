@@ -86,6 +86,8 @@ export interface ConfigSnapshot {
     embedMode: string;
     abstractiveEnabled: boolean;
   };
+  /** #385: Configured default responder for new threads (resolved catId) */
+  defaultResponderCatId: string;
   /** UI display preferences (bubble expand/collapse defaults) */
   ui: {
     bubbleDefaults: {
