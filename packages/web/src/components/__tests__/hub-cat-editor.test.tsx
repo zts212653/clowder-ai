@@ -309,6 +309,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -388,6 +391,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/cats' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-opencode' } }, 201));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -638,6 +644,9 @@ describe('HubCatEditor', () => {
           }),
         );
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -780,6 +789,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -868,6 +880,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -955,6 +970,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-opencode' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-opencode' } }));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -1011,6 +1029,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/cats/runtime-opencode' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-opencode' } }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -1128,6 +1149,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -1204,6 +1228,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -1292,6 +1319,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -1352,6 +1382,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -1407,6 +1440,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/cats/runtime-antigravity') {
         return Promise.resolve(jsonResponse({ deleted: true }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -1507,6 +1543,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/config' && !init?.method) {
         return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -1654,6 +1693,9 @@ describe('HubCatEditor', () => {
             source: 'runtime_override',
           }),
         );
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -1823,6 +1865,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/config/session-strategy/codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ ok: true }));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -1900,6 +1945,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ config: {} }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -2020,6 +2068,9 @@ describe('HubCatEditor', () => {
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ error: 'Codex PATCH failed' }, 500));
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
 
@@ -2095,6 +2146,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ config: {} }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -2197,6 +2251,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ error: 'Codex PATCH failed' }, 500));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -2328,6 +2385,9 @@ describe('HubCatEditor', () => {
           return Promise.resolve(jsonResponse({ error: 'Second Codex PATCH failed' }, 500));
         }
         return Promise.resolve(jsonResponse({ config: {} }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
@@ -2468,6 +2528,9 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/cats/codex' && init?.method === 'PATCH') {
         return Promise.reject(new Error('network dropped during cat save'));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
       }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });

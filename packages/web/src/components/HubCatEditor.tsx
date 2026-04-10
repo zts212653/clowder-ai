@@ -551,20 +551,23 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             form={form}
             hasError={fieldErrors.routing}
             onChange={patchForm}
-            isDefaultResponder={defaultResponderCatId === (cat?.id ?? form.catId)}
+            isDefaultResponder={cat ? defaultResponderCatId === cat.id : false}
             currentDefaultName={defaultResponderName ?? undefined}
-            onSetDefaultResponder={async (value) => {
-              const targetId = cat?.id ?? form.catId;
-              const res = await apiFetch('/api/config/default-responder', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ catId: value ? targetId : null }),
-              });
-              if (res.ok) {
-                setDefaultResponderCatId(value ? targetId : null);
-                setDefaultResponderName(value ? form.displayName || form.name : null);
-              }
-            }}
+            onSetDefaultResponder={
+              cat
+                ? async (value) => {
+                    const res = await apiFetch('/api/config/default-responder', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ catId: value ? cat.id : null }),
+                    });
+                    if (res.ok) {
+                      setDefaultResponderCatId(value ? cat.id : null);
+                      setDefaultResponderName(value ? form.displayName || form.name : null);
+                    }
+                  }
+                : undefined
+            }
           />
           <AdvancedRuntimeSection
             cat={cat}

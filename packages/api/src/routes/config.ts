@@ -259,6 +259,17 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
 
+    // Validate that catId refers to a known, registered cat
+    if (parsed.data.catId) {
+      const { catRegistry } = await import('@cat-cafe/shared');
+      if (!catRegistry.has(parsed.data.catId)) {
+        reply.status(400);
+        return {
+          error: `Unknown cat '${parsed.data.catId}' — cat must be registered before setting as default responder`,
+        };
+      }
+    }
+
     try {
       updateDefaultResponderCatId(projectRoot, parsed.data.catId);
     } catch (err) {

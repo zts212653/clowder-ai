@@ -186,6 +186,9 @@ describe('HubAddMemberWizard', () => {
           }),
         );
       }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {} } }));
+      }
       throw new Error(`Unexpected apiFetch path: ${path}`);
     });
   });

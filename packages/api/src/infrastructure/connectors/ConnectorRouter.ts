@@ -17,6 +17,7 @@
 import type { CatId, ConnectorSource, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, getConnectorDefinition } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
+import { getDefaultResponderCatId } from '../../config/cat-config-loader.js';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import type { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
 import { ConnectorMessageFormatter } from './ConnectorMessageFormatter.js';
@@ -282,7 +283,7 @@ export class ConnectorRouter {
             icon: def2?.icon ?? 'message',
           };
           const mentionPatterns = this.getMentionPatterns();
-          const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.opts.defaultCatId);
+          const { targetCatId } = parseMentions(fwdText, mentionPatterns, getDefaultResponderCatId());
           const fwdTimestamp = Date.now();
           const fwdStored = await messageStore.append({
             threadId: fwdThreadId,
@@ -427,7 +428,7 @@ export class ConnectorRouter {
 
     // Parse @-mentions to determine target cat
     const mentionPatterns = this.getMentionPatterns();
-    const mentionResult = parseMentions(resolvedText, mentionPatterns, this.opts.defaultCatId);
+    const mentionResult = parseMentions(resolvedText, mentionPatterns, getDefaultResponderCatId());
     let targetCatId = mentionResult.targetCatId;
     if (!mentionResult.matched && this.opts.threadStore.getParticipantsWithActivity) {
       const participants = await this.opts.threadStore.getParticipantsWithActivity(binding.threadId);
