@@ -7,25 +7,24 @@ import { test } from 'node:test';
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
 
-test('provider profiles infer kimi protocol from provider selector', async () => {
+test('accounts route accepts kimi api_key account creation', async () => {
   const Fastify = (await import('fastify')).default;
-  const { providerProfilesRoutes } = await import('../dist/routes/provider-profiles.js');
+  const { accountsRoutes } = await import('../dist/routes/accounts.js');
   const app = Fastify();
-  await app.register(providerProfilesRoutes);
+  await app.register(accountsRoutes);
   await app.ready();
 
-  const projectDir = await mkdtemp(join(tmpdir(), 'provider-profiles-kimi-'));
+  const projectDir = await mkdtemp(join(tmpdir(), 'accounts-kimi-'));
   const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectDir;
 
   try {
     const createRes = await app.inject({
       method: 'POST',
-      url: '/api/provider-profiles',
+      url: '/api/accounts',
       headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
       payload: JSON.stringify({
         projectPath: projectDir,
-        provider: 'kimi',
         displayName: 'Moonshot',
         authType: 'api_key',
         baseUrl: 'https://api.moonshot.ai/v1',
@@ -33,17 +32,17 @@ test('provider profiles infer kimi protocol from provider selector', async () =>
         models: ['kimi-k2.5'],
       }),
     });
-    assert.equal(createRes.statusCode, 200);
+    assert.equal(createRes.statusCode, 200, `create failed: ${createRes.body}`);
 
     const listRes = await app.inject({
       method: 'GET',
-      url: `/api/provider-profiles?projectPath=${encodeURIComponent(projectDir)}`,
+      url: `/api/accounts?projectPath=${encodeURIComponent(projectDir)}`,
       headers: AUTH_HEADERS,
     });
     assert.equal(listRes.statusCode, 200);
-    const profile = listRes.json().providers.find((entry) => entry.displayName === 'Moonshot');
-    assert.ok(profile);
-    assert.equal(profile.protocol, 'kimi');
+    const account = listRes.json().providers.find((entry) => entry.displayName === 'Moonshot');
+    assert.ok(account, 'Kimi account should be listed');
+    assert.equal(account.kind, 'api_key');
   } finally {
     if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;

@@ -34,7 +34,6 @@ function writeFileAtomic(filePath: string, content: string): void {
 /** F340 P5: ClientId values — used to detect old `provider` field holding a clientId. */
 const CLIENT_ID_VALUES = new Set(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'a2a']);
 
-
 function collectCatIds(config: CatCafeConfig): Set<string> {
   const catIds = new Set<string>();
   for (const breed of config.breeds as unknown as Record<string, unknown>[]) {

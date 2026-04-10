@@ -380,7 +380,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           color: { primary: '#7c3aed', secondary: '#ede9fe' },
           mentionPatterns: ['@runtime-kimi'],
           roleDescription: '中文代码助手',
-          client: 'kimi',
+          clientId: 'kimi',
           accountRef: 'kimi',
           defaultModel: 'kimi-k2.5',
         }),
@@ -391,7 +391,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       const breeds = catalog.breeds;
       const kimiVariant = breeds.find((breed) => breed.catId === 'runtime-kimi')?.variants?.[0];
 
-      assert.equal(kimiVariant.provider, 'kimi');
+      assert.equal(kimiVariant.clientId, 'kimi');
       assert.deepEqual(kimiVariant.cli, { command: 'kimi', outputFormat: 'stream-json' });
       assert.equal(kimiVariant.accountRef, 'kimi');
     } finally {

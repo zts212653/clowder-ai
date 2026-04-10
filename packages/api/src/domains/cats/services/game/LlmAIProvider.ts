@@ -66,7 +66,7 @@ export class LlmAIProvider implements AIProvider {
   }
 
   /** Resolve API key via full account discovery chain (well-known → builtin_ → installer-). */
-  private resolveApiKey(client: 'anthropic' | 'openai' | 'google'): string | undefined {
+  private resolveApiKey(client: 'anthropic' | 'openai' | 'google' | 'kimi'): string | undefined {
     const profile = resolveForClient(process.cwd(), client);
     return profile?.apiKey;
   }
@@ -153,7 +153,7 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callKimi(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('kimi', 'MOONSHOT_API_KEY', 'OPENAI_API_KEY');
+    const apiKey = this.resolveApiKey('kimi');
     if (!apiKey) throw new Error('No Kimi API key in credentials or MOONSHOT_API_KEY env');
 
     const resp = await fetch('https://api.moonshot.ai/v1/chat/completions', {

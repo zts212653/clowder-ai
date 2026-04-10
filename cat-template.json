@@ -664,7 +664,7 @@
       "variants": [
         {
           "id": "kimi-default",
-          "provider": "kimi",
+          "clientId": "kimi",
           "defaultModel": "kimi-code/kimi-for-coding",
           "mcpSupport": true,
           "cli": {

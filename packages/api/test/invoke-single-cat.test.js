@@ -3116,8 +3116,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       ...originalConfig,
       id: boundCatId,
       mentionPatterns: [`@${boundCatId}`],
-      provider: 'openai',
-      providerProfileId: 'missing-openai-account',
+      clientId: 'openai',
+      accountRef: 'missing-openai-account',
       defaultModel: 'gpt-5.4',
     });
 

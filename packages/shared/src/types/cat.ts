@@ -155,7 +155,7 @@ export const CAT_CONFIGS: Record<string, CatConfig> = {
       secondary: '#E5E7EB',
     },
     mentionPatterns: ['@kimi', '@moonshot', '@月之暗面', '@梵花猫'],
-    provider: 'kimi',
+    clientId: 'kimi',
     defaultModel: 'kimi-code/kimi-for-coding',
     mcpSupport: true,
     breedId: 'moonshot',

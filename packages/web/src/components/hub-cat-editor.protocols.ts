@@ -20,5 +20,7 @@ export function protocolForClient(client: ClientId): 'anthropic' | 'openai' | 'g
 }
 
 export function defaultMcpSupportForClient(client: ClientId): boolean {
-  return client === 'anthropic' || client === 'openai' || client === 'google' || client === 'kimi' || client === 'opencode';
+  return (
+    client === 'anthropic' || client === 'openai' || client === 'google' || client === 'kimi' || client === 'opencode'
+  );
 }

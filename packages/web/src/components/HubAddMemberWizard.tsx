@@ -8,7 +8,6 @@ import {
   CLIENT_ROW_1,
   CLIENT_ROW_2,
   clientLabel,
-  clientSubtitle,
   FALLBACK_ANTIGRAVITY_ARGS,
   FALLBACK_ANTIGRAVITY_MODELS,
   PillChoiceButton,
@@ -72,8 +71,8 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
   }, [antigravityDefaults.models, client, defaultModel, selectedProfile]);
 
   function profileSubtitle(profile: ProfileItem) {
-    if (profile.builtin) return 'CLI（内置）';
-    return 'CLI（配置）';
+    if (profile.builtin) return '内置';
+    return 'API Key';
   }
 
   useEffect(() => {
@@ -214,10 +213,8 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
                   <PillChoiceButton
                     key={value}
                     label={clientLabel(value)}
-                    subtitle={clientSubtitle(value)}
                     selected={client === value}
                     onClick={() => handleClientSelect(value)}
-                    client={value}
                   />
                 ))}
               </div>

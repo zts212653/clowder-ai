@@ -406,9 +406,7 @@ export function AccountSection({
                   })
                   .map((profile) => ({
                     value: profile.id,
-                    label: profile.builtin
-                      ? `${profile.displayName}（CLI 内置）`
-                      : `${profile.displayName}（CLI 配置）`,
+                    label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
                   })),
               ]}
               onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}

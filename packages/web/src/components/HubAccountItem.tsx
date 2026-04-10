@@ -66,30 +66,10 @@ export function HubAccountItem({ profile, busy, onSave, onDelete }: HubAccountIt
           />
           {profile.authType === 'api_key' ? (
             <>
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-[#8A776B]">
-                  {isKimiConfigProfile(profile) ? 'CLI 配置协议' : 'API 协议'}
-                </p>
-                <select
-                  value={editProtocol}
-                  onChange={(e) => setEditProtocol(e.target.value)}
-                  className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm text-[#2D2118]"
-                >
-                  {PROTOCOL_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
               <input
                 value={editBaseUrl}
                 onChange={(e) => setEditBaseUrl(e.target.value)}
-                placeholder={
-                  isKimiConfigProfile(profile)
-                    ? 'CLI 服务地址，如 https://api.moonshot.ai/v1'
-                    : 'API 服务地址，如 https://api.example.com/v1'
-                }
+                placeholder="API 服务地址，如 https://api.example.com/v1"
                 className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
               />
               <div className="relative">
@@ -164,7 +144,7 @@ export function HubAccountItem({ profile, busy, onSave, onDelete }: HubAccountIt
             ) : null}
             {!profile.builtin ? (
               <span className="rounded-full bg-[#F3E8FF] px-2.5 py-1 text-[11px] font-semibold text-[#9D7BC7]">
-                {isKimiConfigProfile(profile) ? 'CLI 配置' : 'api_key'}
+                api_key
               </span>
             ) : null}
           </div>
