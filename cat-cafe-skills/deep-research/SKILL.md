@@ -161,6 +161,15 @@ docs/prompts/YYYY-MM-DD-{topic}-research-prompt.md
 | 忽略三方分歧 | 分歧 = 最有价值的信号，必须分析 |
 | Coder 猫盲信 web 报告 | 必须对照实际 codebase 验证 |
 
+## Step 5 — 在交接前持久化调研产出
+
+如果调研结果需要被后续 session、其他猫、或人类继续使用，就在结束该流程前 commit。
+- 在 worktree 里：commit 到当前分支
+- 在共享 main worktree：commit + push，确保其他 session 能看到
+- 多次 Edit 更新：每次重大更新后追加 commit
+
+**验证**：在总结 / handoff 里记录 commit SHA。`git log --oneline -1` 显示刚才的 commit。
+
 ## Next Step
 
 → `collaborative-thinking`（讨论调研结论，形成决策）

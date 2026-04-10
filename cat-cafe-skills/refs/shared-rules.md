@@ -143,6 +143,15 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 
 完成一个可验证的子任务就提交。
 
+**Write ≠ 持久化**：
+- `Write`/`Edit` 只是把内容写到文件系统，不等于持久化
+- 如果一个产出需要跨 session 保留，或需要被其他猫 / workflow / 人类后续消费，那么在任务完成前必须 commit
+
+**共享工作目录中禁止对 untracked 文件做破坏性清理**：
+- `git stash -u`、`git clean` 等命令会删除所有 untracked 文件，在多 session 共享工作目录时会静默破坏其他 session 的产出
+- 执行这类操作前必须先检查 untracked 文件并明确保全（commit 或确认无需保留）
+- **只用 `git stash`（不带 -u）**，或先 commit untracked 文件再 stash
+
 **签名（强制）**：commit message body 必须带猫猫签名，格式 `[昵称/模型🐾]`。
 签名必须包含**模型型号**，不能只写 `[Ragdoll🐾]`——同族有多个模型（Opus 4.6 / Opus 4.5 / Sonnet），不带型号无法区分是谁干的。
 签名表见 `refs/commit-signatures.md`。示例：`[Ragdoll/Opus-46🐾]`、`[Maine Coon/GPT-52🐾]`。
