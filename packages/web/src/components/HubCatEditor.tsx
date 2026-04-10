@@ -563,10 +563,11 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
                       body: JSON.stringify({ catId: value ? cat.id : null }),
                     });
                     if (res.ok) {
-                      const newCatId = value ? cat.id : null;
-                      setDefaultResponderCatId(newCatId);
+                      const body = (await res.json()) as { config: ConfigData };
+                      const confirmed = body.config?.defaultResponderCatId ?? null;
+                      setDefaultResponderCatId(confirmed);
                       setDefaultResponderName(value ? form.displayName || form.name : null);
-                      useChatStore.setState({ defaultResponderCatId: newCatId ?? 'opus' });
+                      useChatStore.setState({ defaultResponderCatId: confirmed ?? 'opus' });
                     }
                   }
                 : undefined

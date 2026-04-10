@@ -2593,7 +2593,10 @@ describe('HubCatEditor', () => {
         );
       }
       if (path === '/api/config/default-responder' && init?.method === 'PATCH') {
-        return Promise.resolve(jsonResponse({ ok: true }));
+        // Server returns effective config — when clearing, breed default kicks in (e.g. 'spark')
+        return Promise.resolve(
+          jsonResponse({ config: { cats: {}, cli: {}, codexExecution: {}, defaultResponderCatId: 'spark' } }),
+        );
       }
       if (path.startsWith('/api/config/session-strategy')) {
         return Promise.resolve(jsonResponse({ strategy: 'compress' }));
@@ -2652,8 +2655,8 @@ describe('HubCatEditor', () => {
     const patchBody = JSON.parse(String(patchCall?.[1]?.body));
     expect(patchBody.catId).toBeNull();
 
-    // Verify chatStore was synced (P2 fix: shared state update)
+    // Verify chatStore was synced from server response (not local derivation)
     const { useChatStore } = await import('@/stores/chatStore');
-    expect(useChatStore.getState().defaultResponderCatId).toBe('opus');
+    expect(useChatStore.getState().defaultResponderCatId).toBe('spark');
   });
 });
