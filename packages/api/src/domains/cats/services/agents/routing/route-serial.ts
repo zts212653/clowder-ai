@@ -36,7 +36,7 @@ import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
+import { detectInlineActionMentions, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
@@ -666,6 +666,25 @@ export async function* routeSerial(
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
         a2aMentions = parseA2AMentions(storedContent, catId);
+
+        // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
+        if (deps.invocationDeps.threadStore) {
+          const inlineHits = detectInlineActionMentions(storedContent, catId, a2aMentions);
+          if (inlineHits.length > 0) {
+            try {
+              await deps.invocationDeps.threadStore.setMentionRoutingFeedback(threadId, catId, {
+                sourceTimestamp: Date.now(),
+                items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
+              });
+              log.info(
+                { catId: catId as string, threadId, targets: inlineHits.map((h) => h.catId) },
+                'Inline action @mention detected — wrote routing feedback',
+              );
+            } catch {
+              /* best-effort */
+            }
+          }
+        }
 
         // F079 Phase 2: Vote interception — extract [VOTE:xxx] from cat response
         const votedOption = extractVoteFromText(storedContent);
