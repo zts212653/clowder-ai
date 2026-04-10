@@ -346,7 +346,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   const config = getConfig(catId as string);
   if (!config) return '';
 
-  const providerLabel = PROVIDER_LABELS[config.provider] ?? config.provider;
+  const providerLabel = PROVIDER_LABELS[config.clientId] ?? config.clientId;
   const lines: string[] = [];
 
   // Identity

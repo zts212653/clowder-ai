@@ -91,26 +91,9 @@ check_env() {
         fi
     fi
 
-    # 检查必要的 API Keys
+    # Auth is managed via unified accounts system (~/.cat-cafe/accounts.json + credentials.json).
+    # Run `node scripts/install-auth-config.mjs` to configure API keys.
     source .env 2>/dev/null || true
-
-    if [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo -e "${YELLOW}警告: ANTHROPIC_API_KEY 未设置${NC}"
-    else
-        echo -e "${GREEN}✓ ANTHROPIC_API_KEY 已设置${NC}"
-    fi
-
-    if [ -z "$OPENAI_API_KEY" ]; then
-        echo -e "${YELLOW}警告: OPENAI_API_KEY 未设置${NC}"
-    else
-        echo -e "${GREEN}✓ OPENAI_API_KEY 已设置${NC}"
-    fi
-
-    if [ -z "$GOOGLE_API_KEY" ]; then
-        echo -e "${YELLOW}警告: GOOGLE_API_KEY 未设置${NC}"
-    else
-        echo -e "${GREEN}✓ GOOGLE_API_KEY 已设置${NC}"
-    fi
 }
 
 # 安装依赖

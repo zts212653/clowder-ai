@@ -18,7 +18,7 @@ export interface EffectiveStrategy {
 export interface CatStrategyEntry {
   catId: string;
   displayName: string;
-  provider: string;
+  clientId: string;
   breedId?: string;
   effective: EffectiveStrategy;
   source: string;

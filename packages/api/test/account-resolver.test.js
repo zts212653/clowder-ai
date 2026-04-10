@@ -55,7 +55,6 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     await writeCatalog({
       'my-glm': {
         authType: 'api_key',
-        protocol: 'openai',
         baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
         models: ['glm-5'],
         displayName: 'My GLM',
@@ -68,7 +67,8 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.id, 'my-glm');
     assert.equal(profile.authType, 'api_key');
     assert.equal(profile.kind, 'api_key');
-    assert.equal(profile.protocol, 'openai');
+    // F340: protocol no longer on custom accounts — derived at runtime by client/provider
+    assert.equal(profile.protocol, undefined);
     assert.equal(profile.baseUrl, 'https://open.bigmodel.cn/api/paas/v4');
     assert.equal(profile.apiKey, 'glm-xxx');
     assert.deepEqual(profile.models, ['glm-5']);
@@ -79,7 +79,6 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     await writeCatalog({
       claude: {
         authType: 'oauth',
-        protocol: 'anthropic',
         models: ['claude-opus-4-6', 'claude-sonnet-4-6'],
       },
     });
@@ -105,7 +104,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
   it('resolveByAccountRef injects apiKey from credentials', async () => {
     const { resolveByAccountRef } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-3`);
     await writeCatalog({
-      custom: { authType: 'api_key', protocol: 'anthropic' },
+      custom: { authType: 'api_key' },
     });
     await writeCredentials({ custom: { apiKey: 'sk-custom-key' } });
 
@@ -114,10 +113,10 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.apiKey, 'sk-custom-key');
   });
 
-  it('resolveByAccountRef maps client from protocol for builtin accounts', async () => {
+  it('resolveByAccountRef maps client from well-known ID for builtin accounts', async () => {
     const { resolveByAccountRef } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-4`);
     await writeCatalog({
-      codex: { authType: 'oauth', protocol: 'openai', models: ['gpt-5.3-codex'] },
+      codex: { authType: 'oauth', models: ['gpt-5.3-codex'] },
     });
     await writeCredentials({});
 
@@ -126,24 +125,25 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.client, 'openai');
   });
 
-  it('resolveForClient resolves by protocol via accounts', async () => {
+  it('resolveForClient resolves by well-known builtin ID', async () => {
     const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-5`);
     await writeCatalog({
-      claude: { authType: 'oauth', protocol: 'anthropic', models: ['claude-opus-4-6'] },
-      codex: { authType: 'oauth', protocol: 'openai', models: ['gpt-5.3-codex'] },
+      claude: { authType: 'oauth', models: ['claude-opus-4-6'] },
+      codex: { authType: 'oauth', models: ['gpt-5.3-codex'] },
     });
     await writeCredentials({});
 
     const profile = resolveForClient(projectRoot, 'anthropic');
     assert.ok(profile);
+    assert.equal(profile.id, 'claude');
     assert.equal(profile.protocol, 'anthropic');
   });
 
   it('resolveForClient prefers preferredAccountRef when provided', async () => {
     const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-6`);
     await writeCatalog({
-      claude: { authType: 'oauth', protocol: 'anthropic' },
-      'my-ant': { authType: 'api_key', protocol: 'anthropic', baseUrl: 'https://custom.ant.com' },
+      claude: { authType: 'oauth' },
+      'my-ant': { authType: 'api_key', baseUrl: 'https://custom.ant.com' },
     });
     await writeCredentials({ 'my-ant': { apiKey: 'sk-custom' } });
 
@@ -154,53 +154,118 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.apiKey, 'sk-custom');
   });
 
-  it('resolveForClient returns null when multiple accounts match same protocol (ambiguous)', async () => {
+  it('resolveForClient returns null when explicit preferredAccountRef is not found (fail closed)', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-7`);
+    await writeCatalog({
+      claude: { authType: 'oauth' },
+    });
+    await writeCredentials({});
+
+    // Explicit ref that doesn't exist must return null, not silently fall back to 'claude'
+    const profile = resolveForClient(projectRoot, 'anthropic', 'deleted-custom-account');
+    assert.equal(profile, null, 'explicit preferredAccountRef miss must fail closed');
+  });
+
+  it('resolveForClient discovers installer-${client} API key account when no builtin exists', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-7b`);
+    // Only installer-openai exists — no canonical 'codex' or 'builtin_openai'
+    await writeCatalog({
+      'installer-openai': { authType: 'api_key', displayName: 'Installer OpenAI' },
+    });
+    await writeCredentials({ 'installer-openai': { apiKey: 'sk-installer-key' } });
+
+    const profile = resolveForClient(projectRoot, 'openai');
+    assert.ok(profile, 'installer-openai should be discoverable');
+    assert.equal(profile.id, 'installer-openai');
+    assert.equal(profile.apiKey, 'sk-installer-key');
+  });
+
+  it('resolveForClient falls through to synthetic builtin when no well-known ID matches', async () => {
     const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-8`);
     await writeCatalog({
-      'claude-main': { authType: 'api_key', protocol: 'anthropic', displayName: 'Claude Main' },
-      'claude-backup': { authType: 'api_key', protocol: 'anthropic', displayName: 'Claude Backup' },
+      'claude-main': { authType: 'api_key', displayName: 'Claude Main' },
+      'claude-backup': { authType: 'api_key', displayName: 'Claude Backup' },
     });
     await writeCredentials({});
 
-    // With two anthropic accounts and no preference, result must be null (not arbitrary first match)
-    const profile = resolveForClient(projectRoot, 'anthropic');
-    assert.equal(profile, null);
-  });
-
-  it('resolveForClient returns the account when only one matches protocol', async () => {
-    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-9`);
-    await writeCatalog({
-      'my-ant': { authType: 'api_key', protocol: 'anthropic' },
-      codex: { authType: 'api_key', protocol: 'openai' },
-    });
-    await writeCredentials({});
-
+    // F340: No protocol matching — custom accounts not discoverable by client.
+    // Falls through to synthetic builtin for 'anthropic' → 'claude'.
     const profile = resolveForClient(projectRoot, 'anthropic');
     assert.ok(profile);
-    assert.equal(profile.id, 'my-ant');
+    assert.equal(profile.id, 'claude');
+    assert.equal(profile.kind, 'builtin');
   });
 
-  it('resolveForClient returns baseUrl from custom account (game domain P2-1 pattern)', async () => {
+  it('resolveForClient finds custom account via preferredAccountRef (not protocol)', async () => {
     const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-10`);
     await writeCatalog({
       'custom-ant': {
         authType: 'api_key',
-        protocol: 'anthropic',
         baseUrl: 'https://custom-proxy.example.com',
       },
     });
     await writeCredentials({ 'custom-ant': { apiKey: 'sk-custom-proxy' } });
 
-    const profile = resolveForClient(projectRoot, 'anthropic');
+    // F340: Custom accounts require explicit preferredAccountRef
+    const profile = resolveForClient(projectRoot, 'anthropic', 'custom-ant');
     assert.ok(profile);
     assert.equal(profile.apiKey, 'sk-custom-proxy');
     assert.equal(profile.baseUrl, 'https://custom-proxy.example.com');
   });
 
-  it('env fallback retired (#329): resolveByAccountRef returns undefined apiKey when credentials absent', async () => {
-    const { resolveByAccountRef } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-7`);
+  it('resolveForClient prefers credentialed installer account over uncredentialed OAuth builtin', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-12`);
+    // Scenario: 'claude' exists as OAuth (no API key), 'installer-anthropic' has an API key.
+    // The resolver should skip 'claude' and return 'installer-anthropic'.
     await writeCatalog({
-      custom: { authType: 'api_key', protocol: 'anthropic' },
+      claude: { authType: 'oauth', models: ['claude-opus-4-6'] },
+      'installer-anthropic': { authType: 'api_key', displayName: 'Installer Anthropic' },
+    });
+    await writeCredentials({ 'installer-anthropic': { apiKey: 'sk-installer-ant' } });
+
+    const profile = resolveForClient(projectRoot, 'anthropic');
+    assert.ok(profile, 'should resolve an account');
+    assert.equal(profile.apiKey, 'sk-installer-ant', 'should prefer the credentialed installer account');
+    assert.equal(profile.id, 'installer-anthropic');
+  });
+
+  it('resolveForClient prefers api_key installer account over a credentialed OAuth builtin', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-12b`);
+    await writeCatalog({
+      codex: { authType: 'oauth', models: ['gpt-5.3-codex'] },
+      'installer-openai': { authType: 'api_key', displayName: 'Installer OpenAI' },
+    });
+    await writeCredentials({
+      codex: { apiKey: 'sk-oauth-stale' },
+      'installer-openai': { apiKey: 'sk-installer-openai' },
+    });
+
+    const profile = resolveForClient(projectRoot, 'openai');
+    assert.ok(profile, 'should resolve an account');
+    assert.equal(profile.id, 'installer-openai');
+    assert.equal(profile.authType, 'api_key');
+    assert.equal(profile.apiKey, 'sk-installer-openai');
+  });
+
+  it('resolveForClient returns OAuth builtin when no candidate has credentials (subscription mode)', async () => {
+    const { resolveForClient } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-13`);
+    // Scenario: only 'claude' OAuth exists, no credentials anywhere.
+    // Should still return 'claude' for subscription mode — not null.
+    await writeCatalog({
+      claude: { authType: 'oauth', models: ['claude-opus-4-6'] },
+    });
+    await writeCredentials({});
+
+    const profile = resolveForClient(projectRoot, 'anthropic');
+    assert.ok(profile, 'should still resolve the OAuth builtin');
+    assert.equal(profile.id, 'claude');
+    assert.equal(profile.apiKey, undefined, 'no credential expected');
+  });
+
+  it('env fallback retired (#329): resolveByAccountRef returns undefined apiKey when credentials absent', async () => {
+    const { resolveByAccountRef } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-11`);
+    await writeCatalog({
+      custom: { authType: 'api_key' },
     });
     // No credentials written — env fallback removed in #329 (protocol退場)
     const profile = resolveByAccountRef(projectRoot, 'custom');

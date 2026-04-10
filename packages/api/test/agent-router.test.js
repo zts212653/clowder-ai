@@ -238,7 +238,7 @@ function createAvailabilityConfigProject(availabilityOverrides = {}) {
     variants: [
       {
         id: `${id}-default`,
-        provider,
+        clientId: provider,
         defaultModel,
         mcpSupport: true,
         cli: {

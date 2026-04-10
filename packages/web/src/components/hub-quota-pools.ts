@@ -1,7 +1,7 @@
 'use client';
 
 import type { CatData } from '@/hooks/useCatData';
-import type { BuiltinAccountClient, ProfileItem } from './hub-provider-profiles.types';
+import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CodexUsageItem, QuotaResponse } from './quota-cards';
 
 export interface AccountQuotaPool {
@@ -60,7 +60,7 @@ function memberTag(cat: CatData): string {
 }
 
 function fallbackAccountRef(cat: CatData): string | null {
-  switch (cat.provider) {
+  switch (cat.clientId) {
     case 'anthropic':
       return 'claude';
     case 'openai':
@@ -80,7 +80,7 @@ function memberTagsForAccount(cats: CatData[], accountId: string): string[] {
   return uniqueTags(
     cats
       .filter((cat) => {
-        const boundAccountRef = cat.accountRef?.trim() || cat.providerProfileId?.trim() || fallbackAccountRef(cat);
+        const boundAccountRef = cat.accountRef?.trim() || fallbackAccountRef(cat);
         return boundAccountRef === accountId;
       })
       .map(memberTag),
@@ -127,14 +127,14 @@ export function buildAccountQuotaGroups(
       : (Object.entries(BUILTIN_ACCOUNT_IDS) as Array<[BuiltinAccountClient, string]>).map(([client, id]) => ({
           id,
           displayName: builtinDisplayName(client),
-          client,
+          clientId: client,
           builtin: true,
           authType: 'oauth' as const,
         }));
 
   const builtinPools = builtinProfiles.map<AccountQuotaPool>((profile) => ({
     id: profile.id,
-    title: profile.displayName || BUILTIN_CLIENT_LABELS[profile.client ?? 'anthropic'],
+    title: profile.displayName || BUILTIN_CLIENT_LABELS[profile.clientId ?? 'anthropic'],
     items: builtinQuotaItems(profile.id, quota),
     memberTags: memberTagsForAccount(cats, profile.id),
     emptyText: builtinEmptyText(profile.id),
@@ -150,7 +150,7 @@ export function buildAccountQuotaGroups(
       emptyText: '按账单周期计费，暂不展示官方用量',
     }));
 
-  const antigravityMemberTags = uniqueTags(cats.filter((cat) => cat.provider === 'antigravity').map(memberTag));
+  const antigravityMemberTags = uniqueTags(cats.filter((cat) => cat.clientId === 'antigravity').map(memberTag));
   const antigravityPools: AccountQuotaPool[] =
     antigravityMemberTags.length > 0 || (quota?.antigravity?.usageItems.length ?? 0) > 0
       ? [

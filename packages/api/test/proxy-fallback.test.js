@@ -39,7 +39,8 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
-    // F136 Phase 4d: create account via cat-catalog.json + credentials.json
+    // F340: Use well-known 'claude' ID so resolveForClient('anthropic') discovers it.
+    // Protocol retired — derived at runtime from BUILTIN_ACCOUNT_MAP.
     await writeFile(
       join(catCafeDir, 'cat-catalog.json'),
       JSON.stringify(
@@ -47,9 +48,8 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
           version: 2,
           breeds: [],
           accounts: {
-            'test-gateway': {
+            claude: {
               authType: 'api_key',
-              protocol: 'anthropic',
               baseUrl: 'https://api.test-gateway.example',
               displayName: 'test-gateway',
             },
@@ -64,7 +64,7 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
       join(catCafeDir, 'credentials.json'),
       JSON.stringify(
         {
-          'test-gateway': { apiKey: 'sk-test-fallback' },
+          claude: { apiKey: 'sk-test-fallback' },
         },
         null,
         2,
@@ -146,7 +146,7 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
 
-    // F136 Phase 4d: create account via cat-catalog.json + credentials.json
+    // F340: Use well-known 'claude' ID so resolveForClient('anthropic') discovers it.
     await writeFile(
       join(catCafeDir, 'cat-catalog.json'),
       JSON.stringify(
@@ -154,9 +154,8 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
           version: 2,
           breeds: [],
           accounts: {
-            'nan-port-gateway': {
+            claude: {
               authType: 'api_key',
-              protocol: 'anthropic',
               baseUrl: 'https://api.nan-port.example',
               displayName: 'nan-port-gateway',
             },
@@ -171,7 +170,7 @@ describe('F115 AC-C3: proxy fallback to direct upstream', () => {
       join(catCafeDir, 'credentials.json'),
       JSON.stringify(
         {
-          'nan-port-gateway': { apiKey: 'sk-nan-port' },
+          claude: { apiKey: 'sk-nan-port' },
         },
         null,
         2,

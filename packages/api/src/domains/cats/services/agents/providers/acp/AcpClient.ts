@@ -297,7 +297,10 @@ export class AcpClient {
       const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
       idleTimer = setTimeout(() => {
         if (done || eventCount === 0) return;
-        const idleSinceMs = Date.now() - lastEventAt;
+        // Clamp to at least the threshold that triggered this timer — a threshold
+        // event must never report a duration smaller than its own trigger point.
+        const rawIdle = Date.now() - lastEventAt;
+        const idleSinceMs = Math.max(rawIdle, idleWarningFired ? idleStallMs : idleWarningMs);
         if (!idleWarningFired) {
           idleWarningFired = true;
           if (pendingTool) {

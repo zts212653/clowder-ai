@@ -183,12 +183,11 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTHROPIC_API_KEY',
-    defaultValue: '(未设置 → 使用 proxy profile)',
-    description: 'Anthropic API Key（直连模式；proxy 模式由 provider profile 注入）',
+    defaultValue: '(未设置 → 由 accounts/credentials 系统注入)',
+    description: 'Anthropic API Key（#340 P6: 由统一账户系统管理，不再从 .env 读取）',
     category: 'server',
     sensitive: true,
     hubVisible: false,
-    exampleRecommended: true,
   },
   {
     name: 'LOG_LEVEL',
@@ -256,7 +255,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CAT_CAFE_GLOBAL_CONFIG_ROOT',
     defaultValue: '(未设置 → homedir())',
-    description: '全局配置根目录（cat catalog / credentials / provider profiles 查找路径）',
+    description: '全局配置根目录（accounts / credentials 查找路径的父目录，实际路径为 ${ROOT}/.cat-cafe/）',
     category: 'server',
     sensitive: false,
     hubVisible: false,
@@ -890,11 +889,10 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'OPENAI_API_KEY',
-    defaultValue: '(未设置)',
-    description: 'OpenAI API Key (api_key 模式用；env-owning，不走 accounts/credentials)',
+    defaultValue: '(未设置 → 由 accounts/credentials 系统注入)',
+    description: 'OpenAI API Key（#340 P6: 由统一账户系统管理，子进程通过 callbackEnv 注入）',
     category: 'codex',
     sensitive: true,
-    runtimeEditable: true,
   },
 
   // --- dare ---
@@ -904,12 +902,11 @@ export const ENV_VARS: EnvDefinition[] = [
   // --- gemini ---
   {
     name: 'GOOGLE_API_KEY',
-    defaultValue: '(未设置)',
-    description: 'Google API Key（暹罗猫 Gemini 直连用）',
+    defaultValue: '(未设置 → 由 accounts/credentials 系统注入)',
+    description: 'Google API Key（#340 P6: 由统一账户系统管理，子进程通过 callbackEnv 注入）',
     category: 'gemini',
     sensitive: true,
     hubVisible: false,
-    exampleRecommended: true,
   },
   {
     name: 'GEMINI_ADAPTER',

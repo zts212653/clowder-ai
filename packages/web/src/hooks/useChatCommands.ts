@@ -83,8 +83,8 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
   if (config.cats) {
     lines.push('猫猫配置');
     for (const [id, cat] of Object.entries(config.cats)) {
-      const c = cat as { displayName: string; provider: string; model: string; mcpSupport: boolean };
-      lines.push(`  ${c.displayName} (${id}): ${c.provider}/${c.model} ${c.mcpSupport ? '[MCP]' : ''}`);
+      const c = cat as { displayName: string; clientId: string; model: string; mcpSupport: boolean };
+      lines.push(`  ${c.displayName} (${id}): ${c.clientId}/${c.model} ${c.mcpSupport ? '[MCP]' : ''}`);
     }
     lines.push('');
   }

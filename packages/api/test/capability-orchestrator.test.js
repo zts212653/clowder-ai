@@ -1119,7 +1119,7 @@ describe('generateCliConfigs', () => {
   it('removes managed commandless entries from Gemini settings', async () => {
     const hasGoogleCat = catRegistry.getAllIds().some((id) => {
       const entry = catRegistry.tryGet(id);
-      return entry?.config.provider === 'google';
+      return entry?.config.clientId === 'google';
     });
     if (!hasGoogleCat) return;
 

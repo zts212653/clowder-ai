@@ -108,7 +108,7 @@ describe('ConfigRegistry', () => {
 
     assert.ok(snapshot.cats.opus, 'has opus');
     assert.ok(snapshot.cats.opus.displayName, 'opus has displayName');
-    assert.ok(snapshot.cats.opus.provider, 'opus has provider');
+    assert.ok(snapshot.cats.opus.clientId, 'opus has clientId');
     assert.ok(snapshot.cats.opus.model, 'opus has model');
     assert.equal(typeof snapshot.cats.opus.mcpSupport, 'boolean', 'opus has mcpSupport');
   });

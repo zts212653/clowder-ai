@@ -110,7 +110,7 @@
       "variants": [
         {
           "id": "opus-default",
-          "provider": "anthropic",
+          "clientId": "anthropic",
           "defaultModel": "claude-opus-4-6",
           "mcpSupport": true,
           "cli": {
@@ -143,7 +143,7 @@
           "variantLabel": "Sonnet",
           "displayName": "布偶猫",
           "mentionPatterns": ["@sonnet", "@布偶sonnet"],
-          "provider": "anthropic",
+          "clientId": "anthropic",
           "defaultModel": "claude-sonnet-4-6",
           "mcpSupport": true,
           "avatar": "/avatars/sonnet.png",
@@ -183,7 +183,7 @@
           "variantLabel": "Opus 4.5",
           "displayName": "布偶猫",
           "mentionPatterns": ["@opus45", "@opus-45", "@布偶opus45", "@布偶猫4.5"],
-          "provider": "anthropic",
+          "clientId": "anthropic",
           "defaultModel": "claude-opus-4-5-20251101",
           "mcpSupport": true,
           "avatar": "/avatars/opus-45.png",
@@ -242,7 +242,7 @@
       "variants": [
         {
           "id": "codex-default",
-          "provider": "openai",
+          "clientId": "openai",
           "defaultModel": "gpt-5.3-codex",
           "mcpSupport": true,
           "cli": {
@@ -286,7 +286,7 @@
             "@gpt-5.4",
             "@缅因gpt52"
           ],
-          "provider": "openai",
+          "clientId": "openai",
           "defaultModel": "gpt-5.4",
           "mcpSupport": true,
           "avatar": "/avatars/gpt52.png",
@@ -326,7 +326,7 @@
           "variantLabel": "Spark",
           "displayName": "缅因猫 Spark",
           "mentionPatterns": ["@spark", "@缅因spark", "@codex-spark"],
-          "provider": "openai",
+          "clientId": "openai",
           "defaultModel": "gpt-5.3-codex-spark",
           "mcpSupport": true,
           "avatar": "/avatars/sliced-finial/codex_box.png",
@@ -384,13 +384,19 @@
       "variants": [
         {
           "id": "gemini-default",
-          "provider": "google",
+          "clientId": "google",
           "defaultModel": "gemini-3.1-pro-preview",
           "mcpSupport": true,
           "cli": {
             "command": "gemini",
             "outputFormat": "stream-json",
             "defaultArgs": []
+          },
+          "acp": {
+            "command": "gemini",
+            "startupArgs": ["--acp", "--approval-mode", "yolo"],
+            "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
+            "supportsMultiplexing": true
           },
           "personality": "热血奔放，爱发富文本和语音消息，善于用视觉语言表达想法，表达力是全队最强的",
           "strengths": ["visual-design", "ui-ux", "creativity"],
@@ -416,7 +422,7 @@
           "variantLabel": "Gemini 2.5",
           "displayName": "暹罗猫",
           "mentionPatterns": ["@gemini25", "@gemini-25", "@暹罗gemini25"],
-          "provider": "google",
+          "clientId": "google",
           "defaultModel": "gemini-2.5-pro",
           "mcpSupport": true,
           "avatar": "/avatars/gemini25.png",
@@ -428,6 +434,12 @@
             "command": "gemini",
             "outputFormat": "stream-json",
             "defaultArgs": []
+          },
+          "acp": {
+            "command": "gemini",
+            "startupArgs": ["--acp", "--approval-mode", "yolo"],
+            "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
+            "supportsMultiplexing": true
           },
           "personality": "暹罗猫的经典版本，创意灵感同样丰富",
           "strengths": ["visual-design", "creativity", "multimodal"],
@@ -470,7 +482,7 @@
       "variants": [
         {
           "id": "dare-default",
-          "provider": "dare",
+          "clientId": "dare",
           "defaultModel": "z-ai/glm-4.7",
           "mcpSupport": false,
           "cli": {
@@ -512,7 +524,7 @@
         {
           "id": "antigravity-gemini",
           "variantLabel": "Gemini",
-          "provider": "antigravity",
+          "clientId": "antigravity",
           "defaultModel": "gemini-3.1-pro",
           "mcpSupport": false,
           "cli": {
@@ -544,7 +556,7 @@
           "variantLabel": "Claude Opus",
           "displayName": "孟加拉猫",
           "mentionPatterns": ["@antig-opus", "@孟加拉opus", "@antigravity-claude"],
-          "provider": "antigravity",
+          "clientId": "antigravity",
           "defaultModel": "claude-opus-4-6",
           "mcpSupport": false,
           "avatar": "/avatars/antig-opus.png",
@@ -599,7 +611,7 @@
       "variants": [
         {
           "id": "opencode-default",
-          "provider": "opencode",
+          "clientId": "opencode",
           "defaultModel": "claude-opus-4-6",
           "mcpSupport": true,
           "cli": {

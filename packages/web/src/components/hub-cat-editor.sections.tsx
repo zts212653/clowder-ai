@@ -2,6 +2,7 @@
 
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import type { ProfileItem } from './hub-accounts.types';
 import {
   CLIENT_OPTIONS,
   type HubCatEditorFormState,
@@ -11,7 +12,6 @@ import {
   splitStrengthTags,
 } from './hub-cat-editor.model';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
-import type { ProfileItem } from './hub-provider-profiles.types';
 import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
@@ -285,10 +285,10 @@ function ComboField({
   );
 }
 
-// Derive the opencode endpoint suffix from ocProviderName (sole authority).
+// Derive the opencode endpoint suffix from provider name (sole authority).
 // Account-level protocol is no longer used — mirrors backend deriveOpenCodeApiType.
-export function resolveOpenCodeEndpoint(ocProviderName: string): string {
-  const normalized = ocProviderName.toLowerCase();
+export function resolveOpenCodeEndpoint(providerName: string): string {
+  const normalized = providerName.toLowerCase();
   if (normalized === 'openai-responses') return '/v1/responses';
   if (normalized === 'anthropic') return '/v1/messages';
   if (normalized === 'google') return '/models/{model}:generateContent';
@@ -306,7 +306,7 @@ function buildCallHint(
   client: string,
   profile: ProfileItem | undefined,
   model: string,
-  ocProviderName: string,
+  providerName: string,
 ): CallHint | null {
   if (!profile || profile.builtin || !profile.baseUrl) return null;
   const base = profile.baseUrl.replace(/\/+$/, '');
@@ -314,8 +314,8 @@ function buildCallHint(
   // Strip trailing /v1 from base to avoid /v1/v1 duplication when pathSuffix already includes /v1
   const baseWithoutV1 = hasV1Suffix ? base.replace(/\/v1$/i, '') : base;
 
-  // For opencode, derive endpoint dynamically from ocProviderName (sole authority)
-  const ocPath = client === 'opencode' ? resolveOpenCodeEndpoint(ocProviderName) : undefined;
+  // For opencode, derive endpoint dynamically from provider name (sole authority)
+  const ocPath = client === 'opencode' ? resolveOpenCodeEndpoint(providerName) : undefined;
 
   const cliEndpoints: Record<string, { cli: string; pathSuffix: string }> = {
     anthropic: { cli: 'claude', pathSuffix: '/v1/messages' },
@@ -355,7 +355,7 @@ export function AccountSection({
 }) {
   const accountOptions = availableProfiles;
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
-  const callHint = buildCallHint(form.client, selectedProfile, form.defaultModel, form.ocProviderName);
+  const callHint = buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
   const providerSuggestions = useMemo(
     () => buildProviderSuggestions(selectedProfile?.models ?? []),
     [selectedProfile?.models],
@@ -366,15 +366,15 @@ export function AccountSection({
       <div className="space-y-2">
         <SelectField
           label="Client"
-          value={form.client}
+          value={form.clientId}
           options={CLIENT_OPTIONS}
           onChange={(value) =>
-            onChange({ client: value as HubCatEditorFormState['client'], ocProviderName: '', cliEffort: '' })
+            onChange({ clientId: value as HubCatEditorFormState['clientId'], provider: '', cliEffort: '' })
           }
           required
         />
 
-        {form.client === 'antigravity' ? (
+        {form.clientId === 'antigravity' ? (
           <>
             <TextField
               label="CLI Command"
@@ -401,7 +401,7 @@ export function AccountSection({
                 ...accountOptions
                   .filter((profile) => {
                     // Gemini CLI doesn't support custom API endpoints — only show builtin
-                    if (form.client === 'google' && !profile.builtin) return false;
+                    if (form.clientId === 'google' && !profile.builtin) return false;
                     return true;
                   })
                   .map((profile) => ({
@@ -409,7 +409,7 @@ export function AccountSection({
                     label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
                   })),
               ]}
-              onChange={(value) => onChange({ accountRef: value, defaultModel: '', ocProviderName: '' })}
+              onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
               disabled={loadingProfiles}
               required
             />
@@ -421,18 +421,18 @@ export function AccountSection({
               suggestions={modelOptions}
               required
               placeholder={
-                form.client === 'opencode'
+                form.clientId === 'opencode'
                   ? '例如 openai/gpt-5.4 或 openrouter/google/gemini-3-flash-preview'
                   : '模型标识符，如 claude-sonnet-4-5'
               }
             />
-            {form.client === 'opencode' && selectedProfile?.authType === 'api_key' ? (
+            {form.clientId === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <>
                 <ComboField
                   label="Provider 名称"
                   ariaLabel="OC Provider Name"
-                  value={form.ocProviderName}
-                  onChange={(value) => onChange({ ocProviderName: value })}
+                  value={form.provider}
+                  onChange={(value) => onChange({ provider: value })}
                   suggestions={providerSuggestions}
                   required
                   placeholder="如 anthropic、openai、openai-responses、openrouter、maas"
@@ -443,10 +443,10 @@ export function AccountSection({
                 </p>
               </>
             ) : null}
-            {form.client === 'opencode' &&
+            {form.clientId === 'opencode' &&
             form.defaultModel.trim() &&
             !form.defaultModel.includes('/') &&
-            !form.ocProviderName.trim() ? (
+            !form.provider.trim() ? (
               <div className="rounded-[10px] border border-dashed border-[#DCC9B8] bg-[#F7F3F0] px-3 py-2">
                 <p className="text-[11px] leading-4 text-[#8A776B]">
                   建议使用 `providerId/modelId` 格式（例如 `openai/gpt-5.4`），部分 provider 需要前缀才能正确路由。

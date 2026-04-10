@@ -15,7 +15,6 @@ import { rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import {
-  resolveAnthropicRuntimeProfile,
   resolveBuiltinClientForProvider,
   resolveForClient,
   validateRuntimeProviderBinding,
@@ -603,7 +602,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       await tryGovernanceBootstrap(workingDirectory, catCafeRoot);
       const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
       const catEntry = catRegistry.tryGet(catId as string);
-      const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.provider);
+      const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);
       if (!preflight.ready) {
         const reasonKind = preflight.needsBootstrap
           ? 'needs_bootstrap'
@@ -664,9 +663,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // F127 account injection:
     // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
-    // Legacy providerProfileId is still read as a migration fallback.
     const catConfig = catRegistry.tryGet(catId as string)?.config;
-    const provider = catConfig?.provider;
+    const provider = catConfig?.clientId;
     const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
     const defaultModel = catConfig?.defaultModel?.trim() || undefined;
     // Account resolution, proxy registration, and runtime config always use the
@@ -724,20 +722,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       );
     }
 
-    // Protocol is determined by provider — account.protocol is retired for all
-    // fixed-protocol providers. OpenCode is the sole exception: it can target
-    // multiple backends, so its env injection uses the bound account's protocol.
+    // F340: Protocol is fully derived from client/provider identity — account.protocol retired.
+    // Non-opencode clients have a fixed protocol. OpenCode derives protocol from the
+    // variant's model provider name or model string prefix, defaulting to anthropic.
     const protocolForProvider: Record<string, string> = {
       anthropic: 'anthropic',
       openai: 'openai',
       google: 'google',
       dare: 'openai',
+      opencode: 'anthropic',
+      openrouter: 'openai',
     };
-    const effectiveProtocol = provider
-      ? provider === 'opencode' && resolvedAccount?.protocol
-        ? resolvedAccount.protocol
-        : (protocolForProvider[provider] ?? null)
-      : null;
+    let effectiveProtocol: string | null = provider ? (protocolForProvider[provider] ?? null) : null;
+    if (provider === 'opencode') {
+      // Priority 1: explicit variant.provider field
+      const modelProviderHint = catConfig?.provider?.trim();
+      if (modelProviderHint && protocolForProvider[modelProviderHint]) {
+        effectiveProtocol = protocolForProvider[modelProviderHint];
+      } else {
+        // Priority 2: model string prefix (e.g. 'openrouter/google/model' → openrouter → openai)
+        const trimmedModel = typeof defaultModel === 'string' ? defaultModel.trim() : '';
+        const parsed = trimmedModel ? parseOpenCodeModel(trimmedModel) : null;
+        if (parsed && protocolForProvider[parsed.providerName]) {
+          effectiveProtocol = protocolForProvider[parsed.providerName];
+        }
+      }
+    }
 
     // effectiveProtocol is used below for env injection branching (anthropic/openai/google)
     // but is NOT passed to callbackEnv — it should not influence CLI routing decisions.
@@ -811,31 +821,31 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     const trimmedDefaultModel = typeof defaultModel === 'string' ? defaultModel.trim() : undefined;
-    const ocProviderName = catConfig?.ocProviderName?.trim() || undefined;
+    const modelProviderName = catConfig?.provider?.trim() || undefined;
     const parsedOpenCodeModel =
       provider === 'opencode' && trimmedDefaultModel ? parseOpenCodeModel(trimmedDefaultModel) : null;
     // F189 intake: determine effective provider + model.
     // Three cases for defaultModel shape:
-    //   1. Canonical "provider/model" where parsed provider === ocProviderName → use as-is
-    //   2. Namespaced "ns/model" where parsed prefix ≠ ocProviderName → prefix with ocProviderName
-    //   3. Bare "model" → prefix with ocProviderName if available
-    // When ocProviderName is absent, parseOpenCodeModel is the sole source.
+    //   1. Canonical "provider/model" where parsed provider === modelProviderName → use as-is
+    //   2. Namespaced "ns/model" where parsed prefix ≠ modelProviderName → prefix with modelProviderName
+    //   3. Bare "model" → prefix with modelProviderName if available
+    // When modelProviderName is absent, parseOpenCodeModel is the sole source.
     let effectiveProviderName: string | undefined;
     let effectiveModel: string | undefined;
     if (parsedOpenCodeModel) {
-      if (ocProviderName && parsedOpenCodeModel.providerName !== ocProviderName) {
+      if (modelProviderName && parsedOpenCodeModel.providerName !== modelProviderName) {
         // Namespace case: model's "/" is a namespace separator, not provider prefix
-        effectiveProviderName = ocProviderName;
-        effectiveModel = `${ocProviderName}/${trimmedDefaultModel}`;
+        effectiveProviderName = modelProviderName;
+        effectiveModel = `${modelProviderName}/${trimmedDefaultModel}`;
       } else {
-        // Canonical provider/model (with or without matching ocProviderName)
-        effectiveProviderName = ocProviderName || parsedOpenCodeModel.providerName;
+        // Canonical provider/model (with or without matching modelProviderName)
+        effectiveProviderName = modelProviderName || parsedOpenCodeModel.providerName;
         effectiveModel = trimmedDefaultModel!;
       }
-    } else if (ocProviderName && trimmedDefaultModel) {
-      // Bare model + ocProviderName fallback
-      effectiveProviderName = ocProviderName;
-      effectiveModel = `${ocProviderName}/${trimmedDefaultModel}`;
+    } else if (modelProviderName && trimmedDefaultModel) {
+      // Bare model + modelProviderName fallback
+      effectiveProviderName = modelProviderName;
+      effectiveModel = `${modelProviderName}/${trimmedDefaultModel}`;
     }
 
     if (provider === 'opencode') {
@@ -854,7 +864,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               }
             : null,
           defaultModel: trimmedDefaultModel ?? null,
-          ocProviderName: ocProviderName ?? null,
+          modelProviderName: modelProviderName ?? null,
           parsedOpenCodeModel,
           effectiveProviderName: effectiveProviderName ?? null,
           effectiveModel: effectiveModel ?? null,
@@ -862,11 +872,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         'Resolved OpenCode runtime inputs',
       );
     }
-    // fix(#280): explicit ocProviderName means we must force the F189 path so the
+    // fix(#280): explicit provider name means we must force the F189 path so the
     // effective "provider/model" string is injected into opencode, even for builtin
-    // providers. For legacy members without ocProviderName, only synthesize runtime
+    // providers. For legacy members without provider name, only synthesize runtime
     // config when the fully-qualified model is not already routable by `opencode models`.
-    const hasExplicitOcProvider = Boolean(ocProviderName);
+    const hasExplicitOcProvider = Boolean(modelProviderName);
     if (
       provider === 'opencode' &&
       resolvedAccount != null &&
@@ -1264,7 +1274,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   // 1) api_key + approx health can be noisy on third-party gateways
                   // 2) api_key + compress strategy should not be force-sealed here
                   // Keep context_health observability in both cases.
-                  const provider = catRegistry.tryGet(catId as string)?.config.provider;
+                  const provider = catRegistry.tryGet(catId as string)?.config.clientId;
                   const profileMode = callbackEnv[ANTHROPIC_PROFILE_MODE_KEY];
                   const strategy = getSessionStrategy(catId as string);
                   const isAnthropicApiKey = provider === 'anthropic' && profileMode === ANTHROPIC_PROFILE_MODE_API_KEY;

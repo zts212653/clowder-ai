@@ -1,6 +1,6 @@
 import type { CatData } from '@/hooks/useCatData';
 import {
-  type ClientValue,
+  type ClientId,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   type HubCatEditorFormState,
   normalizeMentionPattern,
@@ -18,7 +18,7 @@ function trimText(value: unknown): string {
  * Returns a hint string when the model does not follow "providerId/modelId" convention for opencode.
  * Advisory only — callers should display as a warning, not block submission.
  */
-export function hintModelFormatForClient(client: ClientValue, model: string): string | null {
+export function hintModelFormatForClient(client: ClientId, model: string): string | null {
   if (client !== 'opencode') return null;
   const trimmed = model.trim();
   const slashIndex = trimmed.indexOf('/');
@@ -30,9 +30,7 @@ export function hintModelFormatForClient(client: ClientValue, model: string): st
 export const validateModelFormatForClient = hintModelFormatForClient;
 
 function resolveFormAccountRef(form: HubCatEditorFormState): string {
-  return trimText(
-    form.accountRef ?? (form as HubCatEditorFormState & { providerProfileId?: string }).providerProfileId,
-  );
+  return trimText(form.accountRef);
 }
 
 export function buildContextBudget(form: HubCatEditorFormState) {
@@ -71,11 +69,11 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   const accountRefPatch =
     trimmedAccountRef.length > 0
       ? { accountRef: trimmedAccountRef }
-      : cat?.accountRef || cat?.providerProfileId
+      : cat?.accountRef
         ? { accountRef: null as null }
         : {};
   const mcpSupportPatch =
-    cat && form.client !== cat.provider ? { mcpSupport: defaultMcpSupportForClient(form.client) } : {};
+    cat && form.clientId !== cat.clientId ? { mcpSupport: defaultMcpSupportForClient(form.clientId) } : {};
   const trimmedCliEffort = trimText(form.cliEffort);
   const cliPatch =
     trimmedCliEffort.length > 0
@@ -103,12 +101,12 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     ...contextBudgetPatch,
   };
 
-  if (form.client === 'antigravity') {
+  if (form.clientId === 'antigravity') {
     const commandArgsSource = trimText(form.commandArgs) || DEFAULT_ANTIGRAVITY_COMMAND_ARGS;
     return {
       ...common,
       ...(cat ? { name: updateName } : { catId: trimText(form.catId), name: createName }),
-      client: 'antigravity' as const,
+      clientId: 'antigravity' as const,
       ...accountRefPatch,
       ...mcpSupportPatch,
       defaultModel: trimText(form.defaultModel),
@@ -119,16 +117,16 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   return {
     ...common,
     ...(cat ? { name: updateName } : { catId: trimText(form.catId), name: createName }),
-    client: form.client,
+    clientId: form.clientId,
     ...accountRefPatch,
     ...mcpSupportPatch,
     ...cliPatch,
     defaultModel: trimText(form.defaultModel),
     cliConfigArgs: (form.cliConfigArgs ?? []).filter((arg) => arg.trim().length > 0),
-    ...(form.client === 'opencode' && trimText(form.ocProviderName)
-      ? { ocProviderName: trimText(form.ocProviderName) }
-      : cat?.ocProviderName
-        ? { ocProviderName: null as null }
+    ...(form.clientId === 'opencode' && trimText(form.provider)
+      ? { provider: trimText(form.provider) }
+      : cat?.provider
+        ? { provider: null as null }
         : {}),
   };
 }

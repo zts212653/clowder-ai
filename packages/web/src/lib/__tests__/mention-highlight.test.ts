@@ -9,7 +9,7 @@ function makeCat(overrides: Partial<CatData> & { id: string; mentionPatterns: st
   return {
     displayName: overrides.id,
     color: { primary: '#000', secondary: '#fff' },
-    provider: 'anthropic',
+    clientId: 'anthropic',
     defaultModel: 'test',
     roleDescription: '',
     personality: '',

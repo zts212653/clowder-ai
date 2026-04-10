@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const tempDirs = [];
 let savedTemplatePath;
 let savedGlobalRoot;
 
-function makeCatalog(catId, displayName, provider = 'openai', defaultModel = 'gpt-5.4') {
+function makeCatalog(catId, displayName, clientId = 'openai', defaultModel = 'gpt-5.4') {
   return {
     version: 1,
     breeds: [
@@ -25,10 +28,10 @@ function makeCatalog(catId, displayName, provider = 'openai', defaultModel = 'gp
         variants: [
           {
             id: `${catId}-default`,
-            provider,
+            clientId,
             defaultModel,
-            mcpSupport: provider !== 'antigravity',
-            cli: { command: provider === 'antigravity' ? 'antigravity' : 'codex', outputFormat: 'json' },
+            mcpSupport: clientId !== 'antigravity',
+            cli: { command: clientId === 'antigravity' ? 'antigravity' : 'codex', outputFormat: 'json' },
           },
         ],
       },
@@ -89,7 +92,7 @@ function createMonorepoTemplateOnlyProject(template) {
 }
 
 function loadRepoTemplate() {
-  return JSON.parse(readFileSync(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8'));
+  return JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'cat-template.json'), 'utf-8'));
 }
 
 describe('cats routes read runtime catalog', { concurrency: false }, () => {
@@ -255,23 +258,24 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     }
   });
 
-  it('GET /api/cats recomputes seed accountRef from the active bootstrap binding', async () => {
+  it('GET /api/cats resolves seed accountRef from well-known account ID', async () => {
     const projectRoot = createTemplateOnlyProject(loadRepoTemplate());
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
 
     const { bootstrapCatCatalog } = await import('../dist/config/cat-catalog-store.js');
-    const { activateProviderProfile, createProviderProfile } = await import('./helpers/create-test-account.js');
+    const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+    const { writeCredential } = await import('../dist/config/credentials.js');
     bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
-    const sponsorProfile = await createProviderProfile(projectRoot, {
-      displayName: 'Codex Sponsor',
+    // F340: Custom accounts require well-known ID or explicit accountRef binding.
+    // Overwrite the 'codex' well-known account with an api_key sponsor account.
+    writeCatalogAccount(projectRoot, 'codex', {
       authType: 'api_key',
-      protocol: 'openai',
       baseUrl: 'https://api.codex-sponsor.example',
-      apiKey: 'sk-codex-sponsor',
       models: ['gpt-5.4-mini'],
+      displayName: 'Codex Sponsor',
     });
-    await activateProviderProfile(projectRoot, 'openai', sponsorProfile.id);
+    writeCredential('codex', { apiKey: 'sk-codex-sponsor' });
 
     const Fastify = (await import('fastify')).default;
     const { catsRoutes } = await import('../dist/routes/cats.js');
@@ -285,7 +289,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const codex = body.cats.find((cat) => cat.id === 'codex');
     assert.ok(codex, 'codex should be listed');
     assert.equal(codex.source, 'seed');
-    assert.equal(codex.accountRef, sponsorProfile.id);
+    assert.equal(codex.accountRef, 'codex');
 
     await app.close();
   });

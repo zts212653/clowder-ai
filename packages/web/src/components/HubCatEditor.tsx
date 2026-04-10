@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
+import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
 import { buildEditorLoadingNote, uploadAvatarAsset } from './hub-cat-editor.client';
 import {
   buildCatPayload,
@@ -24,7 +25,6 @@ import {
 import { AccountSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
-import type { ProfileItem, ProviderProfilesResponse } from './hub-provider-profiles.types';
 import type { CatStrategyEntry } from './hub-strategy-types';
 import { useConfirm } from './useConfirm';
 
@@ -56,16 +56,16 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [codexSettings, setCodexSettings] = useState<CodexRuntimeSettings | null>(null);
   const [codexSettingsBaseline, setCodexSettingsBaseline] = useState<CodexRuntimeSettings | null>(null);
 
-  const availableProfiles = useMemo(() => filterAccounts(form.client, profiles), [form.client, profiles]);
+  const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
   const selectedProfile = useMemo(
     () => availableProfiles.find((profile) => profile.id === form.accountRef) ?? null,
     [availableProfiles, form.accountRef],
   );
   const modelOptions = useMemo(() => {
-    if (form.client === 'antigravity') return [];
+    if (form.clientId === 'antigravity') return [];
     return selectedProfile?.models ?? [];
-  }, [form.client, selectedProfile]);
-  const showCodexSettings = form.client === 'openai';
+  }, [form.clientId, selectedProfile]);
+  const showCodexSettings = form.clientId === 'openai';
   const codexSettingsEditable = !showCodexSettings || codexSettingsBaseline !== null;
 
   useEffect(() => {
@@ -84,18 +84,18 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   const [profilesVersion, setProfilesVersion] = useState(0);
   useEffect(() => {
     const handler = () => setProfilesVersion((v) => v + 1);
-    window.addEventListener('provider-profiles-changed', handler);
-    return () => window.removeEventListener('provider-profiles-changed', handler);
+    window.addEventListener('accounts-changed', handler);
+    return () => window.removeEventListener('accounts-changed', handler);
   }, []);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setLoadingProfiles(true);
-    apiFetch('/api/provider-profiles')
+    apiFetch('/api/accounts')
       .then(async (res) => {
         if (!res.ok) throw new Error(`账号配置加载失败 (${res.status})`);
-        return (await res.json()) as ProviderProfilesResponse;
+        return (await res.json()) as AccountsResponse;
       })
       .then((body) => {
         if (!cancelled) setProfiles(body.providers);
@@ -184,7 +184,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
   }, [cat, open, showCodexSettings]);
 
   useEffect(() => {
-    if (form.client === 'antigravity') {
+    if (form.clientId === 'antigravity') {
       setForm((prev) => (prev.accountRef === '' ? prev : { ...prev, accountRef: '' }));
       return;
     }
@@ -193,7 +193,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
         return prev;
       }
       if (availableProfiles.length === 0) return prev;
-      const preferredBuiltin = builtinAccountIdForClient(prev.client);
+      const preferredBuiltin = builtinAccountIdForClient(prev.clientId);
       const nextProfile =
         availableProfiles.find((profile) => profile.id === prev.accountRef) ??
         (preferredBuiltin ? availableProfiles.find((profile) => profile.id === preferredBuiltin) : null) ??
@@ -203,26 +203,26 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       if (prev.accountRef === nextProfile.id) return prev;
       return { ...prev, accountRef: nextProfile.id };
     });
-  }, [availableProfiles, cat, draft, form.client]);
+  }, [availableProfiles, cat, draft, form.clientId]);
 
   useEffect(() => {
-    if (form.client === 'antigravity' || modelOptions.length === 0) return;
+    if (form.clientId === 'antigravity' || modelOptions.length === 0) return;
     if (form.defaultModel.trim().length > 0) return;
     setForm((prev) => {
-      if (prev.client === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
+      if (prev.clientId === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
       return { ...prev, defaultModel: modelOptions[0] ?? '' };
     });
-  }, [form.client, form.defaultModel, modelOptions]);
+  }, [form.clientId, form.defaultModel, modelOptions]);
 
   useEffect(() => {
-    if (form.client !== 'antigravity') return;
+    if (form.clientId !== 'antigravity') return;
     if (form.commandArgs.trim().length > 0) return;
     setForm((prev) => {
-      if (prev.client !== 'antigravity') return prev;
+      if (prev.clientId !== 'antigravity') return prev;
       if (prev.commandArgs.trim().length > 0) return prev;
       return { ...prev, commandArgs: DEFAULT_ANTIGRAVITY_COMMAND_ARGS };
     });
-  }, [form.client, form.commandArgs]);
+  }, [form.clientId, form.commandArgs]);
 
   if (!open) return null;
 
@@ -237,7 +237,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     if (patch.name !== undefined || patch.roleDescription !== undefined) {
       setFieldErrors((prev) => ({ ...prev, identity: false }));
     }
-    if (patch.defaultModel !== undefined || patch.client !== undefined) {
+    if (patch.defaultModel !== undefined || patch.clientId !== undefined) {
       setFieldErrors((prev) => ({ ...prev, account: false }));
     }
   };
@@ -290,9 +290,9 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
         errors.account = true;
         errorMessages.push('Model');
       } else if (
-        form.client === 'opencode' &&
+        form.clientId === 'opencode' &&
         selectedProfile?.authType === 'api_key' &&
-        !form.ocProviderName.trim() &&
+        !form.provider.trim() &&
         (() => {
           const m = form.defaultModel.trim();
           const si = m.indexOf('/');

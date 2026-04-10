@@ -7,9 +7,9 @@
 import { resolve } from 'node:path';
 import {
   type CatConfig,
-  type CatProvider,
   CLI_EFFORT_VALUES,
   type CliConfig,
+  type ClientId,
   type ContextBudget,
   catRegistry,
   getCliEffortOptionsForProvider,
@@ -75,7 +75,6 @@ const baseCatSchema = z.object({
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
   accountRef: z.string().min(1).optional(),
-  providerProfileId: z.string().min(1).optional(),
   contextBudget: contextBudgetSchema.optional(),
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
@@ -93,21 +92,21 @@ const modelSchema = z
   .pipe(z.string().min(1));
 
 const createNormalCatSchema = baseCatSchema.extend({
-  client: clientSchema.exclude(['antigravity']),
+  clientId: clientSchema.exclude(['antigravity']),
   defaultModel: modelSchema,
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
-  ocProviderName: z.string().min(1).optional(),
+  provider: z.string().min(1).optional(),
 });
 
 const createAntigravityCatSchema = baseCatSchema.extend({
-  client: z.literal('antigravity'),
+  clientId: z.literal('antigravity'),
   defaultModel: modelSchema,
   commandArgs: z.array(z.string().min(1)).min(1).optional(),
 });
 
-const createCatSchema = z.discriminatedUnion('client', [createNormalCatSchema, createAntigravityCatSchema]);
+const createCatSchema = z.discriminatedUnion('clientId', [createNormalCatSchema, createAntigravityCatSchema]);
 
 const updateCatSchema = z.object({
   name: z.string().min(1).optional(),
@@ -117,7 +116,6 @@ const updateCatSchema = z.object({
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
   accountRef: z.string().min(1).nullable().optional(),
-  providerProfileId: z.string().min(1).nullable().optional(),
   contextBudget: contextBudgetSchema.nullable().optional(),
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
@@ -126,13 +124,13 @@ const updateCatSchema = z.object({
   strengths: z.array(z.string().min(1)).optional(),
   sessionChain: z.boolean().optional(),
   available: z.boolean().optional(),
-  client: clientSchema.optional(),
+  clientId: clientSchema.optional(),
   defaultModel: modelSchema.optional(),
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
-  ocProviderName: z.string().min(1).nullable().optional(),
+  provider: z.string().min(1).nullable().optional(),
 });
 
 type UpdateCatRequestBody = z.infer<typeof updateCatSchema>;
@@ -184,7 +182,7 @@ function buildCatResponseMetadataResolver(projectRoot: string) {
   });
 }
 
-function defaultCliForClient(client: CatProvider): { command: string; outputFormat: string } {
+function defaultCliForClient(client: ClientId): { command: string; outputFormat: string } {
   switch (client) {
     case 'anthropic':
       return { command: 'claude', outputFormat: 'stream-json' };
@@ -207,7 +205,7 @@ function defaultCliForClient(client: CatProvider): { command: string; outputForm
 
 type CliPatch = z.infer<typeof cliSchema>;
 
-function buildResolvedCliConfig(client: CatProvider, baseCli: CliConfig, patch?: CliPatch): CliConfig {
+function buildResolvedCliConfig(client: ClientId, baseCli: CliConfig, patch?: CliPatch): CliConfig {
   const defaultArgs =
     patch?.defaultArgs !== undefined
       ? patch.defaultArgs.length > 0
@@ -235,16 +233,12 @@ function buildResolvedCliConfig(client: CatProvider, baseCli: CliConfig, patch?:
   };
 }
 
-function resolveAccountRef(body: {
-  accountRef?: string | null;
-  providerProfileId?: string | null;
-}): string | undefined | null {
-  if (body.providerProfileId !== undefined) return body.providerProfileId;
+function resolveAccountRef(body: { accountRef?: string | null }): string | undefined | null {
   if (body.accountRef !== undefined) return body.accountRef;
   return undefined;
 }
 
-function resolveDefaultAccountRefForClient(projectRoot: string, client: CatProvider): string | undefined {
+function resolveDefaultAccountRefForClient(projectRoot: string, client: ClientId): string | undefined {
   const builtinClient = resolveBuiltinClientForProvider(client);
   if (!builtinClient) return undefined;
   return resolveForClient(projectRoot, builtinClient)?.id ?? builtinAccountIdForClient(builtinClient);
@@ -266,11 +260,14 @@ function resolveTargetAccountRef(params: {
   const { body, currentCat, currentExplicitAccountRef, currentEffectiveAccountRef } = params;
 
   const nextAccountRef = resolveAccountRef(body);
-  const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
+  const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
   const carriesCurrentEffectiveBinding =
     nextAccountRef !== undefined && (nextAccountRef ?? undefined) === currentEffectiveAccountRef;
 
-  return isClientSwitch && !currentExplicitAccountRef && carriesCurrentEffectiveBinding ? undefined : nextAccountRef;
+  // Return null (clear the persisted accountRef) so the seed cat inherits the new client's default.
+  // undefined would mean "don't touch" — but the bootstrap may have persisted the old default as an
+  // explicit accountRef, which would survive the switch and point at the wrong client.
+  return isClientSwitch && !currentExplicitAccountRef && carriesCurrentEffectiveBinding ? null : nextAccountRef;
 }
 
 /**
@@ -284,7 +281,7 @@ function resolveEffectiveAccountRefForUpdate(params: {
   currentCat: CatConfig;
   currentExplicitAccountRef: string | undefined;
   currentEffectiveAccountRef: string | undefined;
-  effectiveClient: CatProvider;
+  effectiveClient: ClientId;
   targetAccountRef: string | null | undefined;
 }): string | undefined {
   const {
@@ -297,9 +294,18 @@ function resolveEffectiveAccountRefForUpdate(params: {
     targetAccountRef,
   } = params;
 
-  if (targetAccountRef !== undefined) return targetAccountRef ?? undefined;
+  const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
 
-  const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
+  // null targetAccountRef from client-switch rebase: seed cat inherits new client's default.
+  // null from explicit user clear: validation should catch "requires a provider binding".
+  if (targetAccountRef === null) {
+    if (isClientSwitch && !currentExplicitAccountRef) {
+      return resolveDefaultAccountRefForClient(projectRoot, effectiveClient);
+    }
+    return undefined;
+  }
+  if (targetAccountRef !== undefined) return targetAccountRef;
+
   if (isClientSwitch && !currentExplicitAccountRef) {
     return resolveDefaultAccountRefForClient(projectRoot, effectiveClient);
   }
@@ -320,12 +326,12 @@ function resolveEffectiveAccountRefForUpdate(params: {
 function resolveNextCli(params: {
   body: UpdateCatRequestBody;
   currentCat: CatConfig;
-  effectiveClient: CatProvider;
+  effectiveClient: ClientId;
   hasCommandArgsPatch: boolean;
   nextCommandArgs: string[];
 }): CliConfig | undefined {
   const { body, currentCat, effectiveClient, hasCommandArgsPatch, nextCommandArgs } = params;
-  const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
+  const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
   const defaultCli = defaultCliForClient(effectiveClient);
   const defaultEffort = getDefaultCliEffortForProvider(effectiveClient);
 
@@ -368,7 +374,7 @@ function buildEffectiveAccountRefResolver(projectRoot: string) {
     if (explicitAccountRef !== undefined) return explicitAccountRef;
     if (!isSeedCat(projectRoot, cat.id)) return cat.accountRef;
 
-    const builtinClient = resolveBuiltinClientForProvider(cat.provider);
+    const builtinClient = resolveBuiltinClientForProvider(cat.clientId);
     if (!builtinClient) return cat.accountRef;
 
     let runtimeProfilePromise = inheritedBindingCache.get(builtinClient);
@@ -384,10 +390,10 @@ function buildEffectiveAccountRefResolver(projectRoot: string) {
 
 async function validateAccountBindingOrThrow(
   projectRoot: string,
-  client: CatProvider,
+  client: ClientId,
   accountRef?: string | null,
   defaultModel?: string | null,
-  ocProviderName?: string | null,
+  providerName?: string | null,
   options?: { legacyCompat?: boolean },
 ): Promise<void> {
   const trimmedAccountRef = accountRef?.trim();
@@ -406,7 +412,7 @@ async function validateAccountBindingOrThrow(
   if (compatibilityError) {
     throw new Error(compatibilityError);
   }
-  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.kind, ocProviderName, {
+  const modelFormatError = validateModelFormatForProvider(client, defaultModel, runtimeProfile.kind, providerName, {
     ...options,
     accountModels: runtimeProfile.models,
   });
@@ -429,7 +435,7 @@ async function toCatResponse(
     mentionPatterns: cat.mentionPatterns,
     breedId: cat.breedId,
     accountRef: await resolveEffectiveAccountRef(cat),
-    provider: cat.provider,
+    clientId: cat.clientId,
     defaultModel: cat.defaultModel,
     cli: cat.cli,
     contextBudget: cat.contextBudget,
@@ -442,7 +448,7 @@ async function toCatResponse(
     sessionChain: cat.sessionChain,
     commandArgs: cat.commandArgs,
     cliConfigArgs: cat.cliConfigArgs,
-    ocProviderName: cat.ocProviderName,
+    provider: cat.provider,
     variantLabel: cat.variantLabel ?? undefined,
     isDefaultVariant: cat.isDefaultVariant ?? undefined,
     breedDisplayName: cat.breedDisplayName ?? undefined,
@@ -457,7 +463,7 @@ async function toCatResponse(
         }
       : null,
     source: metadata.source,
-    adapterMode: cat.provider === 'google' ? (getAcpConfig(cat.id as string) ? 'acp' : 'cli') : undefined,
+    adapterMode: cat.clientId === 'google' ? (getAcpConfig(cat.id as string) ? 'acp' : 'cli') : undefined,
   };
 }
 
@@ -544,16 +550,16 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
 
     const accountRef = resolveAccountRef(body);
     try {
-      const ocProviderNameForValidation = 'ocProviderName' in body ? body.ocProviderName : undefined;
+      const providerNameForValidation = 'provider' in body ? body.provider : undefined;
       await validateAccountBindingOrThrow(
         projectRoot,
-        body.client,
+        body.clientId,
         accountRef,
         body.defaultModel,
-        ocProviderNameForValidation,
+        providerNameForValidation,
       );
       const resolvedAvatar = body.avatar ?? '/avatars/default.png';
-      if (body.client === 'antigravity') {
+      if (body.clientId === 'antigravity') {
         createRuntimeCat(projectRoot, {
           catId: body.catId,
           name: body.name,
@@ -570,7 +576,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
           caution: body.caution,
           strengths: body.strengths,
           sessionChain: body.sessionChain,
-          provider: 'antigravity',
+          clientId: 'antigravity',
           defaultModel: body.defaultModel,
           mcpSupport: false,
           cli: {
@@ -580,7 +586,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
           commandArgs: body.commandArgs,
         });
       } else {
-        const resolvedCli = buildResolvedCliConfig(body.client, defaultCliForClient(body.client), body.cli);
+        const resolvedCli = buildResolvedCliConfig(body.clientId, defaultCliForClient(body.clientId), body.cli);
         createRuntimeCat(projectRoot, {
           catId: body.catId,
           name: body.name,
@@ -597,17 +603,17 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
           caution: body.caution,
           strengths: body.strengths,
           sessionChain: body.sessionChain,
-          provider: body.client,
+          clientId: body.clientId,
           defaultModel: body.defaultModel,
           mcpSupport:
             body.mcpSupport ??
-            (body.client === 'anthropic' ||
-              body.client === 'openai' ||
-              body.client === 'google' ||
-              body.client === 'opencode'),
+            (body.clientId === 'anthropic' ||
+              body.clientId === 'openai' ||
+              body.clientId === 'google' ||
+              body.clientId === 'opencode'),
           cli: resolvedCli,
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
-          ...(body.ocProviderName ? { ocProviderName: body.ocProviderName } : {}),
+          ...(body.provider ? { provider: body.provider } : {}),
         });
       }
     } catch (err) {
@@ -668,7 +674,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
       reply.status(404);
       return { error: `Cat "${request.params.id}" not found` };
     }
-    const effectiveClient = body.client ?? currentCat.provider;
+    const effectiveClient = body.clientId ?? currentCat.clientId;
     const currentExplicitAccountRef = resolveBoundAccountRefForCat(projectRoot, request.params.id, currentCat);
     const currentEffectiveAccountRef = await resolveEffectiveAccountRef(currentCat);
     const targetAccountRef = resolveTargetAccountRef({
@@ -688,26 +694,25 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
     });
     const effectiveDefaultModel = body.defaultModel !== undefined ? body.defaultModel : currentCat.defaultModel;
     const providerConfigTouched =
-      body.client !== undefined ||
+      body.clientId !== undefined ||
       body.defaultModel !== undefined ||
       targetAccountRef !== undefined ||
-      body.ocProviderName !== undefined;
+      body.provider !== undefined;
 
     if (providerConfigTouched) {
       try {
-        const effectiveOcProviderName =
-          body.ocProviderName !== undefined ? body.ocProviderName : currentCat.ocProviderName;
-        // Legacy compat: existing opencode+api_key members without ocProviderName
+        const effectiveProviderName = body.provider !== undefined ? body.provider : currentCat.provider;
+        // Legacy compat: existing opencode+api_key members without provider name
         // can still be edited for non-binding changes (name, model, etc.).
-        // NOT allowed when: switching accountRef, or switching client to opencode
-        // from another provider — both create a new binding that must have ocProviderName.
+        // NOT allowed when: switching accountRef, or switching clientId to opencode
+        // from another client — both create a new binding that must have provider name.
         // Compare against current binding — editor always sends accountRef even when unchanged.
         const isBindingChange = targetAccountRef !== undefined && targetAccountRef !== currentEffectiveAccountRef;
-        const isClientSwitch = body.client !== undefined && body.client !== currentCat.provider;
-        const isExistingOpencode = currentCat.provider === 'opencode';
+        const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
+        const isExistingOpencode = currentCat.clientId === 'opencode';
         const legacyCompat =
-          body.ocProviderName === undefined &&
-          !currentCat.ocProviderName &&
+          body.provider === undefined &&
+          !currentCat.provider &&
           !isBindingChange &&
           !isClientSwitch &&
           isExistingOpencode;
@@ -716,7 +721,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
           effectiveClient,
           effectiveAccountRef,
           effectiveDefaultModel,
-          effectiveOcProviderName,
+          effectiveProviderName,
           { legacyCompat },
         );
       } catch (err) {
@@ -752,7 +757,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
         ...(body.caution !== undefined ? { caution: body.caution } : {}),
         ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
         ...(body.sessionChain !== undefined ? { sessionChain: body.sessionChain } : {}),
-        ...(body.client !== undefined ? { provider: body.client } : {}),
+        ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
         ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),
         ...(body.mcpSupport !== undefined ? { mcpSupport: body.mcpSupport } : {}),
         ...(hasCommandArgsPatch
@@ -763,10 +768,10 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
         ...(nextCli !== undefined ? { cli: nextCli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
         ...(body.cliConfigArgs !== undefined ? { cliConfigArgs: body.cliConfigArgs } : {}),
-        ...(body.ocProviderName !== undefined
-          ? body.ocProviderName === null
-            ? { ocProviderName: null }
-            : { ocProviderName: body.ocProviderName }
+        ...(body.provider !== undefined
+          ? body.provider === null
+            ? { provider: null }
+            : { provider: body.provider }
           : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);

@@ -80,7 +80,7 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   for (const [id, config] of Object.entries(allConfigs)) {
     cats[id] = {
       displayName: config.displayName,
-      provider: config.provider,
+      clientId: config.clientId,
       model: getCatModel(id),
       mcpSupport: config.mcpSupport,
     };

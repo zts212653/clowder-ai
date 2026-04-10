@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import type { ProviderProfilesResponse } from './hub-provider-profiles.types';
+import type { AccountsResponse } from './hub-accounts.types';
 import { type AccountQuotaPoolGroup, buildAccountQuotaGroups } from './hub-quota-pools';
 import { type CodexUsageItem, QuotaPoolRow, type QuotaResponse, riskDotClass, toUtilization } from './quota-cards';
 
@@ -56,7 +56,7 @@ export function HubQuotaBoardTab() {
   const { cats } = useCatData();
   const [quota, setQuota] = useState<QuotaResponse | null>(null);
   const [quotaError, setQuotaError] = useState<string | null>(null);
-  const [profiles, setProfiles] = useState<ProviderProfilesResponse['providers']>([]);
+  const [profiles, setProfiles] = useState<AccountsResponse['providers']>([]);
   const [profilesError, setProfilesError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -88,13 +88,13 @@ export function HubQuotaBoardTab() {
   useEffect(() => {
     let cancelled = false;
     setProfilesError(null);
-    apiFetch('/api/provider-profiles')
+    apiFetch('/api/accounts')
       .then(async (res) => {
         if (!res.ok) {
           if (!cancelled) setProfilesError(`账号配置加载失败 (${res.status})，额度池成员归属可能不完整`);
           return null;
         }
-        return (await res.json()) as ProviderProfilesResponse;
+        return (await res.json()) as AccountsResponse;
       })
       .then((body) => {
         if (!cancelled && body) {

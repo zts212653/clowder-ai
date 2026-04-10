@@ -1,14 +1,7 @@
 /**
- * F136 Phase 4d — Test helper replacing old createProviderProfile / activateProviderProfile.
- *
- * Drop-in shim: writes accounts to cat-catalog.json + credentials.json
- * (the new canonical stores) and returns a profile-like object so existing
- * test assertions on `profile.id` continue to work.
- *
- * Key difference from the old provider-profiles.js helper: accounts now live
- * inside cat-catalog.json (same file as breeds). When no catalog exists yet,
- * this helper bootstraps one from the project template so that the runtime
- * catalog is valid (has breeds ≥ 1, roster, reviewPolicy).
+ * F340 — Test helper: writes accounts to global ~/.cat-cafe/accounts.json
+ * + credentials.json (the canonical stores) and returns a profile-like
+ * object so existing test assertions on `profile.id` continue to work.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -72,7 +65,7 @@ async function ensureCatalog(projectRoot) {
                 variants: [
                   {
                     id: 'stub-v',
-                    provider: 'anthropic',
+                    clientId: 'anthropic',
                     defaultModel: 'stub',
                     mcpSupport: false,
                     cli: { command: 'echo', outputFormat: 'stream-json' },
@@ -136,22 +129,26 @@ export async function createProviderProfile(projectRoot, opts) {
   const authType = opts.authType || (opts.mode === 'api_key' ? 'api_key' : 'oauth');
   const isBuiltin = authType === 'oauth';
 
-  // Write account to catalog (bootstrap first if needed)
-  const catalogPath = await ensureCatalog(projectRoot);
-  const catalog = readCatalog(catalogPath);
-  if (!catalog.accounts) catalog.accounts = {};
-  catalog.accounts[id] = {
+  // Ensure catalog exists (for breeds/roster, not for accounts)
+  await ensureCatalog(projectRoot);
+
+  // F340: Write account to global ~/.cat-cafe/accounts.json
+  const globalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT || projectRoot;
+  const globalCatCafeDir = resolve(globalRoot, '.cat-cafe');
+  mkdirSync(globalCatCafeDir, { recursive: true });
+  const accountsPath = resolve(globalCatCafeDir, 'accounts.json');
+  const accounts = existsSync(accountsPath) ? JSON.parse(readFileSync(accountsPath, 'utf-8')) : {};
+  // F340: protocol not persisted — derived at runtime from well-known account IDs.
+  accounts[id] = {
     authType,
-    protocol,
     ...(opts.displayName || opts.name ? { displayName: opts.displayName || opts.name } : {}),
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl.trim().replace(/\/+$/, '') } : {}),
     ...(opts.models?.length ? { models: opts.models } : {}),
   };
-  writeCatalog(catalogPath, catalog);
+  writeFileSync(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`, 'utf-8');
 
   // Write credential if API key provided
   if (opts.apiKey) {
-    const globalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT || projectRoot;
     const credPath = ensureCredentials(globalRoot);
     const creds = JSON.parse(readFileSync(credPath, 'utf-8'));
     creds[id] = { apiKey: opts.apiKey };
@@ -167,7 +164,7 @@ export async function createProviderProfile(projectRoot, opts) {
     displayName: opts.name,
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
     ...(opts.models?.length ? { models: [...opts.models] } : {}),
-    client: isBuiltin ? opts.provider : undefined,
+    clientId: isBuiltin ? opts.provider : undefined,
   };
 }
 
@@ -183,12 +180,13 @@ export async function activateProviderProfile(_projectRoot, _provider, _profileI
  * No-op replacement for the old deleteProviderProfile.
  */
 export async function deleteProviderProfile(projectRoot, profileId, _activeProfileId) {
-  const catalogPath = resolve(projectRoot, '.cat-cafe', 'cat-catalog.json');
-  if (!existsSync(catalogPath)) return;
-  const catalog = readCatalog(catalogPath);
-  if (catalog.accounts?.[profileId]) {
-    delete catalog.accounts[profileId];
-    writeCatalog(catalogPath, catalog);
+  const globalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT || projectRoot;
+  const accountsPath = resolve(globalRoot, '.cat-cafe', 'accounts.json');
+  if (!existsSync(accountsPath)) return;
+  const accounts = JSON.parse(readFileSync(accountsPath, 'utf-8'));
+  if (accounts[profileId]) {
+    delete accounts[profileId];
+    writeFileSync(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`, 'utf-8');
   }
 }
 
@@ -196,14 +194,15 @@ export async function deleteProviderProfile(projectRoot, profileId, _activeProfi
  * No-op replacement for the old updateProviderProfile.
  */
 export async function updateProviderProfile(projectRoot, profileId, _activeProfileId, updates) {
-  const catalogPath = resolve(projectRoot, '.cat-cafe', 'cat-catalog.json');
-  if (!existsSync(catalogPath)) return { error: 'not_found' };
-  const catalog = readCatalog(catalogPath);
-  const account = catalog.accounts?.[profileId];
+  const globalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT || projectRoot;
+  const accountsPath = resolve(globalRoot, '.cat-cafe', 'accounts.json');
+  if (!existsSync(accountsPath)) return { error: 'not_found' };
+  const accounts = JSON.parse(readFileSync(accountsPath, 'utf-8'));
+  const account = accounts[profileId];
   if (!account) return { error: 'not_found' };
   if (updates.name) account.displayName = updates.name;
   if (updates.baseUrl !== undefined) account.baseUrl = updates.baseUrl;
   if (updates.models) account.models = updates.models;
-  writeCatalog(catalogPath, catalog);
+  writeFileSync(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`, 'utf-8');
   return { id: profileId, ...account };
 }

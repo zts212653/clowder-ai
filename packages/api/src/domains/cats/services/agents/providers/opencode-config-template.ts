@@ -82,14 +82,14 @@ const NPM_ADAPTER_FOR_API_TYPE: Record<string, string> = {
 };
 
 /**
- * Derive the OpenCode API type from the member's ocProviderName binding.
+ * Derive the OpenCode API type from the member's provider name binding.
  *
  * Account-level protocol is no longer used — it was removed from the UI and
- * should not drive runtime routing. The sole authority is ocProviderName,
+ * should not drive runtime routing. The sole authority is the provider name,
  * which the user explicitly sets in the member editor "Provider 名称" field.
  */
-export function deriveOpenCodeApiType(ocProviderName: string | undefined): OpenCodeApiType {
-  const normalized = ocProviderName?.toLowerCase();
+export function deriveOpenCodeApiType(providerName: string | undefined): OpenCodeApiType {
+  const normalized = providerName?.toLowerCase();
   if (normalized === 'openai-responses') return 'openai-responses';
   if (normalized === 'anthropic') return 'anthropic';
   if (normalized === 'google') return 'google';
