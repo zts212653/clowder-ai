@@ -568,7 +568,7 @@ describe('accounts routes', () => {
   );
 
   it(
-    'DELETE /api/accounts returns structured error when account migration conflicts surface during existence check',
+    'DELETE /api/accounts succeeds even when project catalog has stale conflicting account (global wins)',
     { skip: skipRoots ? 'PROJECT_ALLOWED_ROOTS restricts temp dir access' : false },
     async () => {
       const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
@@ -611,10 +611,11 @@ describe('accounts routes', () => {
           method: 'DELETE',
           url: '/api/accounts/shared',
           headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
-          payload: JSON.stringify({ projectPath: projectDir }),
+          payload: JSON.stringify({ projectPath: projectDir, force: true }),
         });
-        assert.equal(res.statusCode, 400);
-        assert.match(res.json().error, /account conflict/i);
+        // Conflict is silently skipped (global wins), DELETE proceeds normally
+        assert.equal(res.statusCode, 200);
+        assert.deepStrictEqual(res.json(), { ok: true });
       } finally {
         restoreGlobalRoot();
         await rm(globalRoot, { recursive: true, force: true });
