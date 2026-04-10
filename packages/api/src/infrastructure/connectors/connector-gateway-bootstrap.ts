@@ -11,7 +11,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { type CatId, type ConnectorSource, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import * as lark from '@larksuiteoapi/node-sdk';
@@ -874,7 +874,7 @@ export async function startConnectorGateway(
     // Phase J P1: guard against path traversal (e.g. /uploads/../../etc/passwd)
     const safeResolve = (base: string, suffix: string): string | undefined => {
       const resolved = resolve(base, suffix);
-      if (!(resolved.startsWith(base + '/') || resolved === base)) return undefined;
+      if (!(resolved.startsWith(base + sep) || resolved.startsWith(base + '/') || resolved === base)) return undefined;
       return existsSync(resolved) ? resolved : undefined;
     };
     if (url.startsWith('/uploads/')) return safeResolve(uploadDir, url.slice('/uploads/'.length));
