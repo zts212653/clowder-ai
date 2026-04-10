@@ -133,6 +133,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       cancelled = true;
     };
   }, []);
+  // #385: hydrate defaultResponderCatId independently of sidebar lifecycle
+  useEffect(() => {
+    void useChatStore.getState().fetchGlobalBubbleDefaults();
+  }, []);
   // F063: resizable split pane — chatBasis as percentage (20-80), persisted
   const [chatBasis, setChatBasis, resetChatBasis] = usePersistedState('cat-cafe:chatBasis', 50);
   // clowder-ai#28: right status panel width in px, persisted
