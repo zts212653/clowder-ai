@@ -40,13 +40,7 @@ describe('ProjectSetupCard IME guard', () => {
 
     await act(async () => {
       root.render(
-        <ProjectSetupCard
-          projectPath="/tmp/demo"
-          isEmptyDir
-          isGitRepo={false}
-          gitAvailable
-          onComplete={onComplete}
-        />,
+        <ProjectSetupCard projectPath="/tmp/demo" isEmptyDir isGitRepo={false} gitAvailable onComplete={onComplete} />,
       );
     });
 

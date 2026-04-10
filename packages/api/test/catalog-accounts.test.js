@@ -9,12 +9,16 @@ describe('global accounts (F340)', () => {
   let globalRoot;
   let projectRoot;
   let previousGlobalRoot;
+  let previousHome;
 
   beforeEach(async () => {
     globalRoot = await mkdtemp(join(tmpdir(), 'global-accounts-'));
     projectRoot = await mkdtemp(join(tmpdir(), 'project-accounts-'));
     previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    previousHome = process.env.HOME;
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+    // Isolate homedir so the homedir migration doesn't pick up real ~/.cat-cafe/ files
+    process.env.HOME = globalRoot;
     await mkdir(join(globalRoot, '.cat-cafe'), { recursive: true });
     await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
   });
@@ -22,6 +26,8 @@ describe('global accounts (F340)', () => {
   afterEach(async () => {
     if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
     await rm(globalRoot, { recursive: true, force: true });
     await rm(projectRoot, { recursive: true, force: true });
   });
@@ -504,6 +510,102 @@ describe('global accounts (F340)', () => {
     if (existsSync(credPath)) {
       const creds = JSON.parse(await readFile(credPath, 'utf-8'));
       assert.equal(creds.shared, undefined, 'legacy secret must NOT be attached to different-source api_key account');
+    }
+  });
+
+  it('migrates legacy credentials from homedir when globalRoot differs from homedir', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    // Simulate: CAT_CAFE_GLOBAL_CONFIG_ROOT is unset, projectRoot != homedir.
+    // Old installer (pre-F340) wrote secrets to homedir when --project-dir was not given.
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-'));
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      // Legacy provider-profiles + secrets in homedir (old installer output)
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [{ id: 'homedir-account', authType: 'api_key', baseUrl: 'https://home.api/v1' }],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ profiles: { 'homedir-account': { apiKey: 'sk-from-homedir' } } }),
+        'utf-8',
+      );
+
+      // projectRoot is a separate directory — no legacy files there
+      const result = readCatalogAccounts(projectRoot);
+      assert.equal(result['homedir-account']?.baseUrl, 'https://home.api/v1', 'account from homedir must be migrated');
+
+      // Credentials should be migrated to globalRoot (= projectRoot when env unset)
+      const credRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const creds = JSON.parse(credRaw);
+      assert.equal(creds['homedir-account']?.apiKey, 'sk-from-homedir', 'API key from homedir must be migrated');
+    } finally {
+      process.env.HOME = savedHome;
+      // Restore env for subsequent tests
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await rm(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates homedir credentials to multiple projects in the same process', async () => {
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+
+    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-'));
+    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
+    const projectB = await mkdtemp(join(tmpdir(), 'project-b-'));
+    await mkdir(join(projectB, '.cat-cafe'), { recursive: true });
+    const savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
+        JSON.stringify({
+          version: 2,
+          providers: [{ id: 'homedir-account', authType: 'api_key', baseUrl: 'https://home.api/v1' }],
+        }),
+        'utf-8',
+      );
+      await writeFile(
+        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+        JSON.stringify({ profiles: { 'homedir-account': { apiKey: 'sk-from-homedir' } } }),
+        'utf-8',
+      );
+
+      // First project migrates successfully
+      const resultA = readCatalogAccounts(projectRoot);
+      assert.equal(resultA['homedir-account']?.baseUrl, 'https://home.api/v1', 'projectA must get homedir account');
+
+      // Second project must ALSO get the homedir credentials (not skipped by boolean cache)
+      const resultB = readCatalogAccounts(projectB);
+      assert.equal(
+        resultB['homedir-account']?.baseUrl,
+        'https://home.api/v1',
+        'projectB must also get homedir account',
+      );
+
+      const credRawB = await readFile(join(projectB, '.cat-cafe', 'credentials.json'), 'utf-8');
+      const credsB = JSON.parse(credRawB);
+      assert.equal(credsB['homedir-account']?.apiKey, 'sk-from-homedir', 'projectB must also get homedir API key');
+    } finally {
+      process.env.HOME = savedHome;
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await rm(fakeHome, { recursive: true, force: true });
+      await rm(projectB, { recursive: true, force: true });
     }
   });
 });
