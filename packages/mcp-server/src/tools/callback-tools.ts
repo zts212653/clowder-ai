@@ -728,8 +728,8 @@ export const callbackTools = [
     description:
       'Post a proactive async message to YOUR CURRENT thread mid-task (e.g. progress updates, sharing results). ' +
       'Always posts to the thread your invocation belongs to. To post to a DIFFERENT thread, use cat_cafe_cross_post_message instead. ' +
-      'To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires. ' +
-      'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to inline @mention in your response text. ' +
+      'To hand off to another cat, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route — it is treated as narrative only). ' +
+      'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
       'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
