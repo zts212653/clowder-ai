@@ -102,8 +102,8 @@ export function consumeBackgroundSystemInfo(
           timestamp: storedMessage.timestamp ?? Date.now(),
           ...(storedMessage.extra ? { extra: storedMessage.extra } : {}),
         });
+        consumed = true;
       }
-      consumed = true;
     } else if (parsed?.type === 'context_health') {
       const targetCatId = parsed.catId ?? msg.catId;
       options.store.setThreadCatInvocation(msg.threadId, targetCatId, {

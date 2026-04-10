@@ -553,6 +553,37 @@ describe('background thread socket handling', () => {
         }),
       ]);
     });
+
+    it('falls back to the raw system message when briefing payload is incomplete', () => {
+      const now = Date.now();
+      const rawBriefing = JSON.stringify({
+        type: 'context_briefing',
+        messageId: 'briefing-msg-2',
+        storedMessage: {
+          content: 'briefing without id should not be swallowed',
+          origin: 'briefing',
+          timestamp: now,
+        },
+      });
+
+      simulateBackgroundMessage({
+        type: 'system_info',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: rawBriefing,
+        timestamp: now,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toHaveLength(1);
+      expect(ts.messages[0]).toEqual(
+        expect.objectContaining({
+          type: 'system',
+          content: rawBriefing,
+          variant: 'info',
+        }),
+      );
+    });
   });
 
   describe('regression: background stream chunk merging', () => {
