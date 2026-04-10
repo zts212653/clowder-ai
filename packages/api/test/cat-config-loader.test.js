@@ -1126,5 +1126,23 @@ describe('GPT-5.2 variant mention aliases in project config', () => {
         _resetCachedConfig();
       }
     });
+
+    it('falls back to getDefaultCatId when configured cat is unavailable', () => {
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      const cfg = validV2Config({ defaultResponderCatId: 'sonnet' });
+      // Mark sonnet as unavailable
+      cfg.roster.sonnet.available = false;
+      const path = writeTempConfig(cfg);
+      process.env.CAT_TEMPLATE_PATH = path;
+      _resetCachedConfig();
+      try {
+        // sonnet is available=false → should fall back to breed default (opus)
+        assert.equal(getDefaultResponderCatId(), 'opus');
+      } finally {
+        if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved;
+        _resetCachedConfig();
+      }
+    });
   });
 });
