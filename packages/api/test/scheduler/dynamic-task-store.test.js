@@ -110,4 +110,17 @@ describe('DynamicTaskStore', () => {
     store.insert(SAMPLE_DEF);
     assert.throws(() => store.insert(SAMPLE_DEF), /UNIQUE|constraint/i);
   });
+
+  test('#415: once trigger round-trips correctly', () => {
+    const fireAt = Date.now() + 120_000;
+    const onceDef = {
+      ...SAMPLE_DEF,
+      id: 'dyn-once-rt',
+      trigger: { type: 'once', fireAt },
+    };
+    store.insert(onceDef);
+    const loaded = store.getById('dyn-once-rt');
+    assert.equal(loaded.trigger.type, 'once');
+    assert.equal(loaded.trigger.fireAt, fireAt);
+  });
 });

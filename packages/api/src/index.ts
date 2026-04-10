@@ -533,6 +533,7 @@ async function main(): Promise<void> {
   const { DynamicTaskStore } = await import('./infrastructure/scheduler/DynamicTaskStore.js');
   const { templateRegistry } = await import('./infrastructure/scheduler/templates/registry.js');
   const dynamicTaskStore = new DynamicTaskStore(schedulerDb);
+  taskRunnerV2.setDynamicTaskStore(dynamicTaskStore); // #415: wire store for once-trigger auto-retirement
 
   // ── F139 Phase 2+3A+3B: Schedule panel API routes ──
   const { scheduleRoutes } = await import('./routes/schedule.js');
@@ -543,6 +544,7 @@ async function main(): Promise<void> {
     globalControlStore,
     packTemplateStore,
     taskStore,
+    deliver: schedulerDeliver,
   });
 
   // ── Phase G: Summary Compaction (registers into unified scheduler) ──
