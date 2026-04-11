@@ -187,7 +187,9 @@ function reconcileInvocationStateOnReconnect(activeThreadId: string | null): voi
         }
 
         if (isActiveThread && store.hasActiveInvocation) {
-          store.clearAllActiveInvocations();
+          // Reconnect reconciliation is stale-state repair, not a real completion event.
+          // Use the non-stamping clear so idle-thread recency is not artificially bumped.
+          store.clearThreadActiveInvocation(threadId);
           store.setLoading(false);
           store.setIntentMode(null);
           store.clearCatStatuses();
