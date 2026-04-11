@@ -73,9 +73,9 @@ triggers:
 5. **需要接手人类已登录的 Chrome、复杂 iframe、多 tab 调试吗？**
    是 → 用 `claude-in-chrome` MCP（工具前缀 `mcp__claude-in-chrome__*`），参考 `refs/playwriter.md`
 6. **这是 CLI 型猫，没 webfetch / 没 VL，但能跑命令吗？**
-   是 → `refs/agent-browser.md`（MCP ID: `agent-browser`，`npx agent-browser-mcp`）
+   是 → `refs/agent-browser.md`（MCP ID: `agent-browser`，社区 wrapper，使用前先做本机验活）
 7. **需要长驻 daemon、持久 session、HTTP-first 服务吗？**
-   是 → `refs/pinchtab.md`（MCP ID: `pinchtab`，`npx pinchtab-mcp`）
+   是 → `refs/pinchtab.md`（MCP ID: `pinchtab`，优先 native binary `pinchtab mcp`，不要默认相信 npm wrapper）
 
 ## 路由矩阵
 
@@ -85,8 +85,8 @@ triggers:
 | 本地 WebApp 测试 / 回归 | `webapp-testing` + Playwright | `playwright` | 已接入 |
 | MCP 原生客户端的常规网页自动化 | `Playwright MCP` | `playwright` | ✅ 已接入 — `npx @playwright/mcp@latest` |
 | 已登录 Chrome、iframe-heavy、手工接管 | `claude-in-chrome` | `claude-in-chrome` | ✅ 已接入 — Chrome 扩展管理，无需手动启动 |
-| CLI 型猫、没 webfetch / 没 VL | `agent-browser` | `agent-browser` | ✅ 已接入 — `npx agent-browser-mcp` |
-| 服务化浏览器、持久化 session、重复批任务 | `PinchTab` | `pinchtab` | ✅ 已接入 — `npx pinchtab-mcp` |
+| CLI 型猫、没 webfetch / 没 VL | `agent-browser` | — (CLI 工具) | ✅ 可用 — `npm i -g agent-browser`，通过 Bash tool 调 CLI |
+| 服务化浏览器、持久化 session、重复批任务 | `PinchTab` | `pinchtab` | ✅ 已接入 — native binary `pinchtab mcp`（外网 URL 用 eval 导航，见 ref） |
 
 ## 常用组合打法
 
@@ -103,7 +103,7 @@ triggers:
 |-----|--------|------|
 | `refs/playwright-mcp.md` | `playwright` | 常规 MCP 原生网页自动化（默认） |
 | `refs/playwriter.md` | `claude-in-chrome` | 已登录 Chrome / iframe-heavy / 多 tab（实际用 `mcp__claude-in-chrome__*` 工具） |
-| `refs/agent-browser.md` | `agent-browser` | CLI 型猫 / 无 webfetch / 无 VL |
+| `refs/agent-browser.md` | — (CLI 工具) | CLI 型猫 / 无 webfetch / 无 VL |
 | `refs/pinchtab.md` | `pinchtab` | 服务化、持久 session、HTTP-first |
 
 ## 交付要求
@@ -130,7 +130,8 @@ triggers:
 | 简单抓取先上浏览器 | 成本高、速度慢、失败面更大 | 先判断是否能用更轻量工具 |
 | 把本地测试和外部网站操作混成一个动作 | 路由混乱，证据链不清楚 | `localhost` 和外部网站分开处理 |
 | 登录态责任不清楚就开干 | 容易误用人类 session | 先说清 session 属于谁，再动手 |
-| 做完只说“好了”不留证据 | 后续无法验收或复现 | 至少交付 URL/截图/文本/日志中的一种 |
+| 做完只说”好了”不留证据 | 后续无法验收或复现 | 至少交付 URL/截图/文本/日志中的一种 |
+| PinchTab 外网用 `pinchtab_navigate` | Clash TUN 下 403（Go 层 DNS 预检拦截 `198.18.x.x`） | 用 `pinchtab_eval` + `window.location.href` 导航，详见 `refs/pinchtab.md` |
 
 ## 和其他 skill 的区别
 

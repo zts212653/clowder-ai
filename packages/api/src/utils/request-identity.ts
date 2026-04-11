@@ -1,12 +1,12 @@
 /**
  * Unified request identity resolver.
  *
- * Priority: X-Cat-Cafe-User header > userId query param > fallbackUserId > defaultUserId
+ * Priority (F156 D-1): session cookie > X-Cat-Cafe-User header > body fallback > defaultUserId
  *
- * Header-based identity is preferred because:
- * - Not logged in access logs / referer headers / browser history
- * - Single injection point in frontend api-client
- * - Easier to upgrade to JWT/session later
+ * The userId query param path is removed to prevent identity self-reporting via
+ * URL. Session cookies are HttpOnly and server-issued, making them resistant to
+ * CSWSH and XSS. Body fallback is retained for legacy compatibility (POST body
+ * requires same-origin, unlike query params).
  */
 
 import type { FastifyRequest } from 'fastify';
@@ -25,22 +25,26 @@ function nonEmptyString(value: unknown): string | null {
 }
 
 /**
- * Trusted request identity source for browser/API calls.
+ * Trusted request identity source — session cookie first, header fallback.
  *
- * Unlike resolveUserId(), this does not accept caller-controlled query params.
+ * F156 D-1: session cookie (HttpOnly, server-issued) is the primary source.
+ * Header is retained as opt-in for non-browser callers (scripts, MCP tools).
  */
 export function resolveHeaderUserId(request: FastifyRequest): string | null {
+  const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
+  if (fromSession) return fromSession;
   return nonEmptyString(request.headers['x-cat-cafe-user']);
 }
 
 export function resolveUserId(request: FastifyRequest, options?: ResolveUserIdOptions): string | null {
+  // F156 D-1: session cookie is the primary identity source
+  const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
+  if (fromSession) return fromSession;
+
   const fromHeader = resolveHeaderUserId(request);
   if (fromHeader) return fromHeader;
 
-  const query = request.query as Record<string, unknown>;
-  const fromQuery = nonEmptyString(query.userId);
-  if (fromQuery) return fromQuery;
-
+  // Legacy body field fallback (requires same-origin POST, not an attack vector)
   const fromFallback = nonEmptyString(options?.fallbackUserId);
   if (fromFallback) return fromFallback;
 

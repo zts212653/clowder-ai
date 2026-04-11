@@ -12,6 +12,7 @@ import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.
 import { isConnectorSecret } from '../config/connector-secrets-allowlist.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
@@ -61,7 +62,7 @@ export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecr
       return { error: 'Invalid request', details: parsed.error.issues };
     }
 
-    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    const operator = resolveHeaderUserId(request);
     if (!operator) {
       reply.status(400);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };

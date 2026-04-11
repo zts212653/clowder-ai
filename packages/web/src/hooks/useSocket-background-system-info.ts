@@ -89,6 +89,21 @@ export function consumeBackgroundSystemInfo(
         options.store.setThreadMessageUsage(msg.threadId, existingRef.id, parsed.usage);
       }
       consumed = true;
+    } else if (parsed?.type === 'context_briefing') {
+      const storedMessage = parsed.storedMessage as
+        | { id: string; content: string; origin: string; timestamp: number; extra?: Record<string, unknown> }
+        | undefined;
+      if (storedMessage?.id) {
+        options.store.addMessageToThread(msg.threadId, {
+          id: storedMessage.id,
+          type: 'system',
+          content: storedMessage.content ?? '',
+          origin: (storedMessage.origin as 'briefing') ?? 'briefing',
+          timestamp: storedMessage.timestamp ?? Date.now(),
+          ...(storedMessage.extra ? { extra: storedMessage.extra } : {}),
+        });
+        consumed = true;
+      }
     } else if (parsed?.type === 'context_health') {
       const targetCatId = parsed.catId ?? msg.catId;
       options.store.setThreadCatInvocation(msg.threadId, targetCatId, {

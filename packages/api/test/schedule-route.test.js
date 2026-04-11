@@ -544,11 +544,10 @@ describe('Schedule Routes', () => {
       assert.equal(stored.params.triggerUserId, 'real-user-123', 'route must overwrite forged triggerUserId');
     });
 
-    it('P1: query-param userId does not leak into triggerUserId', async () => {
+    it('P1: request without identity header defaults triggerUserId to default-user', async () => {
       const createRes = await appDyn.inject({
         method: 'POST',
-        url: '/api/schedule/tasks?userId=victim-uid',
-        // no x-cat-cafe-user header
+        url: '/api/schedule/tasks',
         payload: {
           templateId: 'reminder',
           trigger: { type: 'interval', ms: 60000 },
@@ -559,7 +558,7 @@ describe('Schedule Routes', () => {
 
       const stored = store.getAll().find((d) => d.params?.message === 'query-forge-test');
       assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.params.triggerUserId, 'default-user', 'must ignore query-param userId');
+      assert.equal(stored.params.triggerUserId, 'default-user', 'must default to default-user without header');
     });
 
     it('P1: rejects non-object params with 400 (not 500)', async () => {

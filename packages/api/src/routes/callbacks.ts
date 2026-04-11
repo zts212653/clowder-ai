@@ -54,7 +54,7 @@ export interface CallbackRoutesOptions {
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
-  /** TD #408: AgentRegistry for thread-cats MCP callback */
+  /** AgentRegistry for thread-cats MCP callback */
   agentRegistry?: { getAllEntries(): Map<string, unknown> };
   /** For post_message @mention → invocation triggering */
   router?: AgentRouter;
@@ -1301,7 +1301,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackBootcampRoutes(app, { registry, threadStore: opts.threadStore });
   }
 
-  // TD #408: Thread cats discovery for MCP
+  // Thread cats discovery for MCP
   if (opts.threadStore && opts.agentRegistry) {
     registerCallbackThreadCatsRoutes(app, {
       registry,

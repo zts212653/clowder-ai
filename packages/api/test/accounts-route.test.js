@@ -624,4 +624,96 @@ describe('accounts routes', () => {
       }
     },
   );
+
+  it('DELETE /api/accounts ignores template-only bindings once the runtime catalog no longer references the account', async () => {
+    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
+      '../dist/config/catalog-accounts.js'
+    );
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('template-only-binding');
+    setGlobalRoot(projectDir);
+    resetMigrationState();
+    try {
+      writeCatalogAccount(projectDir, 'template-only-account', {
+        authType: 'api_key',
+        displayName: 'Template Only',
+      });
+      mkdirSync(join(projectDir, '.cat-cafe'), { recursive: true });
+      writeFileSync(
+        join(projectDir, '.cat-cafe', 'cat-catalog.json'),
+        JSON.stringify({
+          version: 1,
+          breeds: [
+            {
+              id: 'codex',
+              catId: 'codex',
+              name: '缅因猫',
+              displayName: '缅因猫',
+              avatar: '/avatars/codex.png',
+              color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+              mentionPatterns: ['@codex'],
+              roleDescription: 'review',
+              defaultVariantId: 'codex-default',
+              variants: [
+                {
+                  id: 'codex-default',
+                  clientId: 'openai',
+                  defaultModel: 'gpt-5.4',
+                  mcpSupport: false,
+                  cli: { command: 'codex', outputFormat: 'json' },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      writeFileSync(
+        join(projectDir, 'cat-template.json'),
+        JSON.stringify({
+          version: 1,
+          breeds: [
+            {
+              id: 'opus',
+              catId: 'opus',
+              name: '布偶猫',
+              displayName: '布偶猫',
+              avatar: '/avatars/opus.png',
+              color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+              mentionPatterns: ['@opus'],
+              roleDescription: '主架构师',
+              defaultVariantId: 'opus-default',
+              variants: [
+                {
+                  id: 'opus-default',
+                  clientId: 'anthropic',
+                  accountRef: 'template-only-account',
+                  defaultModel: 'claude-opus-4-6',
+                  mcpSupport: true,
+                  cli: { command: 'claude', outputFormat: 'stream-json' },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/accounts/template-only-account',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({ projectPath: projectDir }),
+      });
+      assert.equal(res.statusCode, 200, `expected 200 but got ${res.statusCode}: ${res.json().error ?? ''}`);
+      assert.equal(readCatalogAccounts(projectDir)['template-only-account'], undefined);
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
 });

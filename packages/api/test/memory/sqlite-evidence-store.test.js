@@ -328,4 +328,49 @@ describe('SqliteEvidenceStore', () => {
     const related = await store.getRelated('A');
     assert.equal(related.length, 1);
   });
+
+  // F152 Phase C: generalizable field
+  it('upsert + getByAnchor round-trips generalizable=true', async () => {
+    await store.upsert([
+      {
+        anchor: 'lesson-1',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Cross-project pattern',
+        generalizable: true,
+        updatedAt: '2026-04-10T00:00:00Z',
+      },
+    ]);
+    const got = await store.getByAnchor('lesson-1');
+    assert.equal(got.generalizable, true);
+  });
+
+  it('upsert + getByAnchor round-trips generalizable=false', async () => {
+    await store.upsert([
+      {
+        anchor: 'lesson-2',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Project-private context',
+        generalizable: false,
+        updatedAt: '2026-04-10T00:00:00Z',
+      },
+    ]);
+    const got = await store.getByAnchor('lesson-2');
+    assert.equal(got.generalizable, false);
+  });
+
+  it('generalizable defaults to undefined when not set (AC-C2: fail-closed)', async () => {
+    await store.upsert([
+      {
+        anchor: 'lesson-3',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Unmarked lesson',
+        updatedAt: '2026-04-10T00:00:00Z',
+      },
+    ]);
+    const got = await store.getByAnchor('lesson-3');
+    assert.equal(got.generalizable, undefined);
+  });
 });

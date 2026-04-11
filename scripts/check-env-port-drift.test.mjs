@@ -752,6 +752,50 @@ describe(
         'test:public should not pipe directly into tail, or failures become opaque',
       );
     });
+
+    it('real full sync exports from a detached origin/main source checkout', () => {
+      const content = readSyncScript();
+      assert.match(
+        content,
+        /prepare_source_sync_tree\(\) \{[\s\S]*git -C "\$SOURCE_DIR" fetch --no-tags origin main[\s\S]*git -C "\$SOURCE_DIR" worktree add --detach "\$SOURCE_SYNC_DIR" refs\/remotes\/origin\/main/m,
+        'real full sync should materialize a detached source worktree from origin/main',
+      );
+      assert.match(
+        content,
+        /if \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \]; then[\s\S]*if \[ "\$SYNC_MODULE" = "all" \]; then[\s\S]*prepare_source_sync_tree/m,
+        'only real full sync should switch the source baseline to origin/main',
+      );
+      assert.match(
+        content,
+        /MANIFEST="\$SOURCE_SYNC_DIR\/sync-manifest.yaml"/,
+        'manifest parsing should follow the detached source checkout, not the caller worktree',
+      );
+      assert.match(
+        content,
+        /git -C "\$SOURCE_SYNC_DIR" archive HEAD \| tar -x -C "\$STAGING_DIR"/,
+        'step 1 export should archive the detached origin/main checkout for real full sync',
+      );
+      assert.match(
+        content,
+        /SOURCE_DISPLAY_SHA="\$\{SOURCE_SHA_SHORT\} \(origin\/main\)"/,
+        'operator-facing provenance should make it explicit that full sync used origin/main',
+      );
+      assert.match(
+        content,
+        /prepare_source_sync_tree[\s\S]*?trap 'cleanup_source_sync_tree' EXIT/,
+        'source sync worktree cleanup must be registered immediately after creation (P2: no leaked worktrees on early exit)',
+      );
+      assert.match(
+        content,
+        /node "\$SOURCE_SYNC_DIR\/scripts\/export-public-feature-docs\.mjs"/,
+        'feature-doc exporter must run from SOURCE_SYNC_DIR, not SOURCE_DIR (P1: no mixed provenance)',
+      );
+      assert.match(
+        content,
+        /SANITIZER="\$SOURCE_SYNC_DIR\/scripts\/_sanitize-rules\.pl"/,
+        'sanitizer rules must load from SOURCE_SYNC_DIR, not SOURCE_DIR (P1: no mixed provenance)',
+      );
+    });
   },
 );
 

@@ -33,6 +33,55 @@ function httpGet(url) {
   });
 }
 
+/** HTTP GET with explicit Origin header (F156 D-5) */
+function httpGetWithOrigin(url, origin) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const opts = {
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: parsed.pathname + parsed.search,
+      headers: { Origin: origin },
+    };
+    http
+      .get(opts, (res) => {
+        let body = '';
+        res.on('data', (chunk) => (body += chunk));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      })
+      .on('error', reject);
+  });
+}
+
+/** Attempt raw HTTP Upgrade with Origin header (F156 D-5) */
+function wsUpgradeWithOrigin(gatewayPort, targetPort, origin) {
+  return new Promise((resolve) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: gatewayPort,
+      path: `/?__preview_port=${targetPort}`,
+      headers: {
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        Origin: origin,
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      },
+    });
+    req.on('response', (res) => {
+      let body = '';
+      res.on('data', (chunk) => (body += chunk));
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('upgrade', (res, socket) => {
+      socket.destroy();
+      resolve({ status: 101 });
+    });
+    req.on('error', (err) => resolve({ status: 0, error: err.message }));
+    req.end();
+  });
+}
+
 describe('PreviewGateway', () => {
   let fakeDevServer;
   let gateway;
@@ -133,6 +182,46 @@ describe('PreviewGateway', () => {
     // The WS patch must override the WebSocket constructor so HMR connections
     // include __preview_port, allowing the gateway to proxy them correctly
     assert.ok(res.body.includes('cat-cafe-ws-patch'), 'Should inject ws-patch script tag');
+  });
+
+  // --- F156 D-5: Origin validation ---
+
+  it('rejects HTTP request with evil Origin', async () => {
+    const url = `http://127.0.0.1:${gateway.actualPort}/?__preview_port=${fakeDevServer.port}`;
+    const res = await httpGetWithOrigin(url, 'https://evil.example');
+    assert.equal(res.status, 403);
+    assert.ok(res.body.includes('Origin'), 'Should mention Origin in error');
+  });
+
+  it('allows HTTP request with valid localhost Origin', async () => {
+    const url = `http://127.0.0.1:${gateway.actualPort}/?__preview_port=${fakeDevServer.port}`;
+    const res = await httpGetWithOrigin(url, 'http://localhost:3003');
+    assert.equal(res.status, 200);
+    assert.ok(res.body.includes('Hello from dev server'));
+  });
+
+  it('allows HTTP request with loopback Origin', async () => {
+    const url = `http://127.0.0.1:${gateway.actualPort}/?__preview_port=${fakeDevServer.port}`;
+    const res = await httpGetWithOrigin(url, 'http://127.0.0.1:5173');
+    assert.equal(res.status, 200);
+  });
+
+  it('allows HTTP request without Origin header (non-browser)', async () => {
+    // curl / server-to-server requests have no Origin — must be allowed
+    const url = `http://127.0.0.1:${gateway.actualPort}/?__preview_port=${fakeDevServer.port}`;
+    const res = await httpGet(url);
+    assert.equal(res.status, 200);
+  });
+
+  it('rejects WS upgrade with evil Origin', async () => {
+    const result = await wsUpgradeWithOrigin(gateway.actualPort, fakeDevServer.port, 'https://evil.example');
+    assert.equal(result.status, 403);
+  });
+
+  it('allows WS upgrade with valid Origin', async () => {
+    const result = await wsUpgradeWithOrigin(gateway.actualPort, fakeDevServer.port, 'http://localhost:3003');
+    // Should get through to the dev server (101 or connection established)
+    assert.notEqual(result.status, 403);
   });
 
   it('rejects start when configured port is already in use', async () => {

@@ -12,15 +12,16 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { IPushSubscriptionStore, PushSubscriptionRecord } from '../ports/PushSubscriptionStore.js';
 import { hashEndpoint, PushSubKeys } from '../redis-keys/push-keys.js';
 
-const DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
 export class RedisPushSubscriptionStore implements IPushSubscriptionStore {
   private readonly redis: RedisClient;
-  private readonly ttlSeconds: number;
+  private readonly ttlSeconds: number | null;
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
-    this.ttlSeconds = options?.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+    this.ttlSeconds = !Number.isFinite(raw) || raw <= 0 ? null : Math.floor(raw);
   }
 
   async upsert(record: PushSubscriptionRecord): Promise<void> {
@@ -33,7 +34,9 @@ export class RedisPushSubscriptionStore implements IPushSubscriptionStore {
     const fields = this.serialize(record);
     const pipeline = this.redis.multi();
     pipeline.hset(key, ...fields);
-    pipeline.expire(key, this.ttlSeconds);
+    if (this.ttlSeconds !== null) {
+      pipeline.expire(key, this.ttlSeconds);
+    }
     pipeline.sadd(PushSubKeys.ALL, eh);
     pipeline.sadd(PushSubKeys.userSet(record.userId), eh);
     if (previousUserId && previousUserId !== record.userId) {

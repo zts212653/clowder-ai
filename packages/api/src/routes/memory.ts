@@ -61,7 +61,7 @@ export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app,
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const { threadId, key, value, updatedBy } = parseResult.data;
@@ -89,7 +89,7 @@ export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app,
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const { threadId, key } = parseResult.data;
@@ -125,7 +125,7 @@ export const memoryRoutes: FastifyPluginAsync<MemoryRoutesOptions> = async (app,
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const { threadId, key } = parseResult.data;

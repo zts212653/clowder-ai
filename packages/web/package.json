@@ -27,6 +27,7 @@
     "@xterm/xterm": "^6.0.0",
     "@xyflow/react": "^12.10.1",
     "codemirror": "^6.0.2",
+    "dompurify": "^3.3.3",
     "esbuild-wasm": "^0.27.3",
     "next": "^14.1.0",
     "next-themes": "^0.4.6",
@@ -42,6 +43,7 @@
   "devDependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
     "@types/dagre": "^0.7.54",
+    "@types/dompurify": "^3.2.0",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",

@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_URL, apiFetch } from '@/utils/api-client';
-import { getUserId } from '@/utils/userId';
+
 import { AgentPaneList } from './AgentPaneList';
 import { AgentPaneViewer } from './AgentPaneViewer';
 import '@xterm/xterm/css/xterm.css';
@@ -65,8 +65,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
       // Connect WebSocket
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const apiUrl = new URL(API_URL);
-      const userId = encodeURIComponent(getUserId());
-      const ws = new WebSocket(`${wsProtocol}//${apiUrl.host}/api/terminal/sessions/${sessionId}/ws?userId=${userId}`);
+      const ws = new WebSocket(`${wsProtocol}//${apiUrl.host}/api/terminal/sessions/${sessionId}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {

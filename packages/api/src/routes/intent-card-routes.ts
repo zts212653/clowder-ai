@@ -7,6 +7,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import type { IntentCardStore } from '../domains/projects/intent-card-store.js';
 import { detectRisks } from '../domains/projects/risk-detection-service.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface IntentCardRoutesOptions {
   externalProjectStore: ExternalProjectStore;
@@ -17,7 +18,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
   const { externalProjectStore, intentCardStore } = opts;
 
   function requireUserId(request: FastifyRequest, reply: FastifyReply): string | null {
-    const userId = request.headers['x-cat-cafe-user'] as string | undefined;
+    const userId = resolveHeaderUserId(request) ?? undefined;
     if (!userId) {
       void reply.status(401).send({ error: 'Identity required' });
       return null;

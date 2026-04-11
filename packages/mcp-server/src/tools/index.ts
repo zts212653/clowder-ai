@@ -43,6 +43,15 @@ export {
 } from './callback-tools.js';
 
 export {
+  distillationTools,
+  handleMarkGeneralizable,
+  handleNominateForGlobal,
+  handleReviewDistillation,
+  markGeneralizableInputSchema,
+  nominateForGlobalInputSchema,
+  reviewDistillationInputSchema,
+} from './distillation-tools.js';
+export {
   evidenceTools,
   handleSearchEvidence,
   searchEvidenceInputSchema,

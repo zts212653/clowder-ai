@@ -61,9 +61,14 @@ export function builtinAccountIdForClient(client: BuiltinAccountClient): string 
   return LEGACY_BUILTIN_IDS[client];
 }
 
-export function resolveAnthropicRuntimeProfile(projectRoot: string): AnthropicRuntimeProfile {
-  // F340: Use full discovery chain (claude → builtin_anthropic → installer-anthropic).
-  const runtime = resolveForClient(projectRoot, 'anthropic');
+export function resolveAnthropicRuntimeProfile(
+  projectRoot: string,
+  preferredAccountRef?: string,
+): AnthropicRuntimeProfile {
+  // Deterministic binding: use explicit ref or well-known builtin.
+  // Never walk the discovery chain — prevents installer-* credential hijack (502 regression).
+  const accountRef = preferredAccountRef ?? builtinAccountIdForClient('anthropic');
+  const runtime = resolveForClient(projectRoot, 'anthropic', accountRef);
   if (runtime?.apiKey) {
     return {
       id: runtime.id,
@@ -72,7 +77,28 @@ export function resolveAnthropicRuntimeProfile(projectRoot: string): AnthropicRu
       apiKey: runtime.apiKey,
     };
   }
-  return { id: 'builtin_anthropic', mode: 'subscription' };
+  // Controlled fallback for installer-only setups (self-hosted, no Anthropic OAuth builtin):
+  // Only when no explicit preferredAccountRef AND no Anthropic builtin alias exists in catalog.
+  // Checks all known aliases (claude, builtin_anthropic) — not just the default accountRef.
+  // Single deterministic ref — NOT the discovery chain.
+  if (!preferredAccountRef) {
+    const accounts = readCatalogAccounts(projectRoot);
+    const hasRealAnthropicBuiltin = Object.entries(BUILTIN_ACCOUNT_MAP).some(
+      ([id, info]) => info.client === 'anthropic' && id in accounts,
+    );
+    if (!hasRealAnthropicBuiltin) {
+      const installer = resolveForClient(projectRoot, 'anthropic', 'installer-anthropic');
+      if (installer?.apiKey) {
+        return {
+          id: installer.id,
+          mode: 'api_key',
+          ...(installer.baseUrl ? { baseUrl: installer.baseUrl } : {}),
+          apiKey: installer.apiKey,
+        };
+      }
+    }
+  }
+  return { id: runtime?.id ?? 'builtin_anthropic', mode: 'subscription' };
 }
 
 // Known builtin OAuth account refs — both legacy names and new naming convention.
@@ -150,8 +176,9 @@ export function resolveForClient(
   }
 
   // F340: Walk the full discovery chain; prefer accounts with credentials.
-  // This ensures installer-${client} (which holds API keys) is chosen over
-  // an OAuth builtin that has no stored credential.
+  // This path is ONLY reached by system callers (e.g. resolveAnthropicRuntimeProfile)
+  // that have no explicit preferredAccountRef. Member invocations always pass their
+  // bound accountRef, which short-circuits above.
   const normalizedClient = normalizeToClient(client);
   if (normalizedClient) {
     const wellKnownId = LEGACY_BUILTIN_IDS[normalizedClient];

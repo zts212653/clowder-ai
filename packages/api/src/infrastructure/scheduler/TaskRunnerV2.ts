@@ -332,7 +332,7 @@ export class TaskRunnerV2 {
       this.deliver({
         threadId: def.deliveryThreadId,
         content,
-        catId: def.createdBy,
+        catId: 'system',
         userId: ((def.params as Record<string, unknown>).triggerUserId as string) ?? 'system',
       }).catch((err) => {
         this.logger.error(`[scheduler] ${def.id}: failed to send missed-window notification`, err);
@@ -402,6 +402,10 @@ export class TaskRunnerV2 {
   }
 
   private async executePipeline(task: AnyTaskSpec, isManualTrigger?: boolean): Promise<void> {
+    // #415 P2 fix: aggregate outcomes at run level, send one notification per tick
+    let hasDelivered = false;
+    let lastError: string | null = null;
+
     await executeTaskPipeline({
       task,
       ledger: this.ledger,
@@ -416,14 +420,20 @@ export class TaskRunnerV2 {
       deliver: this.deliver,
       fetchContent: this.fetchContent,
       invokeTrigger: this.invokeTrigger,
-      onItemOutcome: (taskId, _subjectKey, outcome, errorSummary) => {
-        const dynDefId = this.dynamicTaskIds.get(taskId);
-        if (!dynDefId || !this.dynamicTaskStore) return;
-        const def = this.dynamicTaskStore.getById(dynDefId);
-        if (!def) return;
-        if (outcome === 'RUN_FAILED') notifyTaskFailed(this.deliver, def, errorSummary);
-        if (outcome === 'RUN_DELIVERED') notifyTaskSucceeded(this.deliver, def);
+      onItemOutcome: (_taskId, _subjectKey, outcome, errorSummary) => {
+        if (outcome === 'RUN_DELIVERED') hasDelivered = true;
+        if (outcome === 'RUN_FAILED') lastError = errorSummary;
       },
     });
+
+    // Run-level notification: one message per tick, not per workItem
+    const dynDefId = this.dynamicTaskIds.get(task.id);
+    if (dynDefId && this.dynamicTaskStore) {
+      const def = this.dynamicTaskStore.getById(dynDefId);
+      if (def) {
+        if (lastError) notifyTaskFailed(this.deliver, def, lastError);
+        else if (hasDelivered) notifyTaskSucceeded(this.deliver, def);
+      }
+    }
   }
 }

@@ -15,7 +15,6 @@ import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { deleteCatalogAccount, readCatalogAccounts, writeCatalogAccount } from '../config/catalog-accounts.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
-import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';
@@ -83,14 +82,10 @@ function isProjectScopedGlobalStore(projectRoot: string): boolean {
   return resolve(projectRoot) === resolveGlobalConfigRoot(projectRoot);
 }
 
-/** Scan both runtime catalog and template for variant→account bindings. Returns Error on parse failure. */
+/** Scan the runtime catalog for variant→account bindings. Returns Error on parse failure. */
 function findBoundCatIds(projectRoot: string, accountRef: string): string[] | Error {
   const catalogPath = resolveCatCatalogPath(projectRoot);
-  const templatePath = resolveProjectTemplatePath(projectRoot);
-  const sources: Array<{ path: string; exists: boolean }> = [
-    { path: catalogPath, exists: existsSync(catalogPath) },
-    { path: templatePath, exists: existsSync(templatePath) },
-  ];
+  const sources: Array<{ path: string; exists: boolean }> = [{ path: catalogPath, exists: existsSync(catalogPath) }];
   const bound = new Set<string>();
   for (const src of sources) {
     if (!src.exists) continue;
@@ -201,7 +196,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const parsed = projectQuerySchema.safeParse(request.query);
@@ -229,7 +224,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const parsed = createBodySchema.safeParse(request.body);
@@ -281,7 +276,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const parsed = updateBodySchema.safeParse(request.body);
@@ -347,7 +342,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const parsed = deleteBodySchema.safeParse(request.body ?? {});
@@ -366,8 +361,8 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
       const accounts = readCatalogAccounts(projectRoot);
       const accountExists = Object.hasOwn(accounts, params.profileId);
 
-      // F340: Check current project's catalog AND template for dangling references.
-      // Template-only projects (pre-bootstrap) may still bind accountRefs in variants.
+      // Check the runtime catalog for dangling references. Template is bootstrap-only
+      // and is not part of runtime binding truth after catalog creation.
       if (!parsed.data.force && accountExists) {
         const boundCatIds = findBoundCatIds(projectRoot, params.profileId);
         if (boundCatIds instanceof Error) {

@@ -20,14 +20,11 @@ import {
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
-  builtinAccountIdForClient,
-  resolveBuiltinClientForProvider,
   resolveByAccountRef,
-  resolveForClient,
   validateModelFormatForProvider,
   validateRuntimeProviderBinding,
 } from '../config/account-resolver.js';
-import { isSeedCat, resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
+import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { bootstrapCatCatalog, resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { getAcpConfig, getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
@@ -35,6 +32,7 @@ import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
 import { deleteRuntimeOverride, getRuntimeOverride, setRuntimeOverride } from '../config/session-strategy-overrides.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const colorSchema = z.object({
   primary: z.string().min(1),
@@ -152,34 +150,17 @@ type CatSource = 'seed' | 'runtime';
 
 interface CatResponseMetadata {
   roster: RosterEntry | null;
-  source: CatSource;
 }
 
 function buildCatResponseMetadataResolver(projectRoot: string) {
-  const templatePath = resolveProjectTemplatePath(projectRoot);
-  let seedCatIds = new Set<string>();
-  try {
-    seedCatIds = new Set(Object.keys(toAllCatConfigs(loadCatConfig(templatePath))));
-  } catch {
-    seedCatIds = new Set();
-  }
-
   let roster: Record<string, RosterEntry> = {};
   try {
-    bootstrapCatCatalog(projectRoot, templatePath);
     roster = getRoster(loadCatConfig(resolveCatCatalogPath(projectRoot)));
   } catch {
-    try {
-      roster = getRoster(loadCatConfig(templatePath));
-    } catch {
-      roster = {};
-    }
+    roster = {};
   }
 
-  return (catId: string): CatResponseMetadata => ({
-    roster: roster[catId] ?? null,
-    source: seedCatIds.has(catId) ? 'seed' : 'runtime',
-  });
+  return (catId: string): CatResponseMetadata => ({ roster: roster[catId] ?? null });
 }
 
 function defaultCliForClient(client: ClientId): { command: string; outputFormat: string } {
@@ -240,80 +221,6 @@ function resolveAccountRef(body: { accountRef?: string | null }): string | undef
   return undefined;
 }
 
-function resolveDefaultAccountRefForClient(projectRoot: string, client: ClientId): string | undefined {
-  const builtinClient = resolveBuiltinClientForProvider(client);
-  if (!builtinClient) return undefined;
-  return resolveForClient(projectRoot, builtinClient)?.id ?? builtinAccountIdForClient(builtinClient);
-}
-
-/**
- * Resolve the accountRef that should be persisted for this PATCH.
- *
- * Seed members can inherit a provider binding from the current default account.
- * When the editor echoes that inherited binding back during a client switch, we
- * intentionally drop it instead of persisting a stale explicit binding.
- */
-function resolveTargetAccountRef(params: {
-  body: UpdateCatRequestBody;
-  currentCat: CatConfig;
-  currentExplicitAccountRef: string | undefined;
-  currentEffectiveAccountRef: string | undefined;
-}): string | null | undefined {
-  const { body, currentCat, currentExplicitAccountRef, currentEffectiveAccountRef } = params;
-
-  const nextAccountRef = resolveAccountRef(body);
-  const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
-  const carriesCurrentEffectiveBinding =
-    nextAccountRef !== undefined && (nextAccountRef ?? undefined) === currentEffectiveAccountRef;
-
-  // Return null (clear the persisted accountRef) so the seed cat inherits the new client's default.
-  // undefined would mean "don't touch" — but the bootstrap may have persisted the old default as an
-  // explicit accountRef, which would survive the switch and point at the wrong client.
-  return isClientSwitch && !currentExplicitAccountRef && carriesCurrentEffectiveBinding ? null : nextAccountRef;
-}
-
-/**
- * Resolve the effective accountRef for validation after applying a PATCH.
- * This may differ from the persisted value when a seed member continues to
- * inherit the default binding of the newly selected client family.
- */
-function resolveEffectiveAccountRefForUpdate(params: {
-  projectRoot: string;
-  body: UpdateCatRequestBody;
-  currentCat: CatConfig;
-  currentExplicitAccountRef: string | undefined;
-  currentEffectiveAccountRef: string | undefined;
-  effectiveClient: ClientId;
-  targetAccountRef: string | null | undefined;
-}): string | undefined {
-  const {
-    projectRoot,
-    body,
-    currentCat,
-    currentExplicitAccountRef,
-    currentEffectiveAccountRef,
-    effectiveClient,
-    targetAccountRef,
-  } = params;
-
-  const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
-
-  // null targetAccountRef from client-switch rebase: seed cat inherits new client's default.
-  // null from explicit user clear: validation should catch "requires a provider binding".
-  if (targetAccountRef === null) {
-    if (isClientSwitch && !currentExplicitAccountRef) {
-      return resolveDefaultAccountRefForClient(projectRoot, effectiveClient);
-    }
-    return undefined;
-  }
-  if (targetAccountRef !== undefined) return targetAccountRef;
-
-  if (isClientSwitch && !currentExplicitAccountRef) {
-    return resolveDefaultAccountRefForClient(projectRoot, effectiveClient);
-  }
-  return currentEffectiveAccountRef;
-}
-
 /**
  * Resolve the target CLI config when patching a cat.
  *
@@ -365,26 +272,9 @@ function resolveNextCli(params: {
   return undefined;
 }
 
-function buildEffectiveAccountRefResolver(projectRoot: string) {
-  const inheritedBindingCache = new Map<string, Promise<string | undefined>>();
-
-  return async (cat: CatConfig & { contextBudget?: ContextBudget }): Promise<string | undefined> => {
-    const explicitAccountRef = resolveBoundAccountRefForCat(projectRoot, cat.id, cat);
-    if (explicitAccountRef !== undefined) return explicitAccountRef;
-    if (!isSeedCat(projectRoot, cat.id)) return cat.accountRef;
-
-    const builtinClient = resolveBuiltinClientForProvider(cat.clientId);
-    if (!builtinClient) return cat.accountRef;
-
-    let runtimeProfilePromise = inheritedBindingCache.get(builtinClient);
-    if (!runtimeProfilePromise) {
-      runtimeProfilePromise = Promise.resolve(
-        resolveForClient(projectRoot, builtinClient, builtinAccountIdForClient(builtinClient))?.id,
-      );
-      inheritedBindingCache.set(builtinClient, runtimeProfilePromise);
-    }
-    return (await runtimeProfilePromise) ?? cat.accountRef;
-  };
+function buildEffectiveAccountRefResolver() {
+  return async (cat: CatConfig & { contextBudget?: ContextBudget }): Promise<string | undefined> =>
+    resolveBoundAccountRefForCat('', cat.id, cat);
 }
 
 async function validateAccountBindingOrThrow(
@@ -461,7 +351,7 @@ async function toCatResponse(
           evaluation: metadata.roster.evaluation,
         }
       : null,
-    source: metadata.source,
+    source: (cat.source ?? 'runtime') as CatSource,
     adapterMode: cat.clientId === 'google' ? (getAcpConfig(cat.id as string) ? 'acp' : 'cli') : undefined,
   };
 }
@@ -506,7 +396,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/cats', async () => {
     const projectRoot = resolveProjectRoot();
     const resolveMetadata = buildCatResponseMetadataResolver(projectRoot);
-    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver(projectRoot);
+    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
     return {
       cats: await Promise.all(
         Object.values(getResolvedCats(projectRoot)).map((cat) =>
@@ -517,7 +407,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/api/cats', async (request, reply) => {
-    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    const operator = resolveHeaderUserId(request);
     if (!operator) {
       reply.status(400);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
@@ -631,13 +521,13 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
     });
     const cat = resolved[body.catId];
     const metadata = buildCatResponseMetadataResolver(projectRoot);
-    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver(projectRoot);
+    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
     reply.status(201);
     return { cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef), updatedBy: operator };
   });
 
   app.patch<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
-    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    const operator = resolveHeaderUserId(request);
     if (!operator) {
       reply.status(400);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
@@ -667,30 +557,17 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver(projectRoot);
+    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
     const currentCat = getResolvedCats(projectRoot)[request.params.id] ?? catRegistry.tryGet(request.params.id)?.config;
     if (!currentCat) {
       reply.status(404);
       return { error: `Cat "${request.params.id}" not found` };
     }
     const effectiveClient = body.clientId ?? currentCat.clientId;
-    const currentExplicitAccountRef = resolveBoundAccountRefForCat(projectRoot, request.params.id, currentCat);
     const currentEffectiveAccountRef = await resolveEffectiveAccountRef(currentCat);
-    const targetAccountRef = resolveTargetAccountRef({
-      body,
-      currentCat,
-      currentExplicitAccountRef,
-      currentEffectiveAccountRef,
-    });
-    const effectiveAccountRef = resolveEffectiveAccountRefForUpdate({
-      projectRoot,
-      body,
-      currentCat,
-      currentExplicitAccountRef,
-      currentEffectiveAccountRef,
-      effectiveClient,
-      targetAccountRef,
-    });
+    const targetAccountRef = resolveAccountRef(body);
+    const effectiveAccountRef =
+      targetAccountRef !== undefined ? (targetAccountRef ?? undefined) : currentEffectiveAccountRef;
     const effectiveDefaultModel = body.defaultModel !== undefined ? body.defaultModel : currentCat.defaultModel;
     const providerConfigTouched =
       body.clientId !== undefined ||
@@ -706,7 +583,8 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
         // NOT allowed when: switching accountRef, or switching clientId to opencode
         // from another client — both create a new binding that must have provider name.
         // Compare against current binding — editor always sends accountRef even when unchanged.
-        const isBindingChange = targetAccountRef !== undefined && targetAccountRef !== currentEffectiveAccountRef;
+        const isBindingChange =
+          targetAccountRef !== undefined && (targetAccountRef ?? undefined) !== currentEffectiveAccountRef;
         const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
         const isExistingOpencode = currentCat.clientId === 'opencode';
         const legacyCompat =
@@ -796,7 +674,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.delete<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
-    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    const operator = resolveHeaderUserId(request);
     if (!operator) {
       reply.status(400);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
@@ -807,11 +685,6 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
     if (!currentCat) {
       reply.status(404);
       return { error: `Cat "${request.params.id}" not found` };
-    }
-    const metadata = buildCatResponseMetadataResolver(projectRoot);
-    if (metadata(request.params.id).source === 'seed') {
-      reply.status(409);
-      return { error: 'cannot delete seed cat' };
     }
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     const overrideBackup = getRuntimeOverride(request.params.id);
@@ -836,10 +709,10 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
       return { deleted: true, id: request.params.id, updatedBy: operator };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/not found/i.test(message)) {
-        reply.status(404);
-      } else if (/cannot delete seed cat/i.test(message)) {
+      if (/cannot delete seed cat/i.test(message)) {
         reply.status(409);
+      } else if (/not found/i.test(message)) {
+        reply.status(404);
       } else {
         reply.status(400);
       }

@@ -379,6 +379,7 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
         ...env,
         CAT_CAFE_RUNTIME_RESTART_OK: '1',
         CAT_CAFE_RUNTIME_DIR: normalizedRuntimeDir,
+        API_SERVER_PORT: '19899',
       },
     });
 

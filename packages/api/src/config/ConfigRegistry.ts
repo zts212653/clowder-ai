@@ -59,9 +59,9 @@ export function collectConfigSnapshot(): ConfigSnapshot {
   const codexApprovalPolicy = getCodexApprovalPolicy(env);
 
   // Storage (from Redis/memory store defaults)
-  const messageTTL = formatTtl(env.MESSAGE_TTL_SECONDS, 7 * 24 * 60 * 60);
-  const threadTTL = formatTtl(env.THREAD_TTL_SECONDS, 30 * 24 * 60 * 60);
-  const taskTTL = formatTtl(env.TASK_TTL_SECONDS, 30 * 24 * 60 * 60);
+  const messageTTL = formatTtl(env.MESSAGE_TTL_SECONDS, 0);
+  const threadTTL = formatTtl(env.THREAD_TTL_SECONDS, 0);
+  const taskTTL = formatTtl(env.TASK_TTL_SECONDS, 0);
   const maxMessagesStore = 2000;
   const maxThreads = 100;
 

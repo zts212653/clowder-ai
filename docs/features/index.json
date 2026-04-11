@@ -297,7 +297,7 @@
     {
       "id": "F050",
       "name": "External Agent Onboarding（A2A/CLI 接入契约）",
-      "status": "in-progress | **Owner**: 三猫（Phase 1 leader: Ragdoll Opus 4.6）",
+      "status": "done | **Owner**: 三猫（Phase 1 leader: Ragdoll Opus 4.6）",
       "file": "F050-a2a-external-agent-onboarding.md"
     },
     {
@@ -357,7 +357,7 @@
     {
       "id": "F059",
       "name": "Cat Café 开源计划",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P2 | **Target**: 2026-03-30（team lead定）",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P2 | **Target**: 2026-03-30（team lead定）| **Completed**: 2026-03-30",
       "file": "F059-open-source-plan.md"
     },
     {
@@ -465,7 +465,7 @@
     {
       "id": "F076",
       "name": "Mission Hub 跨项目作战面板 + 甲方项目治理引擎",
-      "status": "phase-2-done | **Owner**: Ragdoll",
+      "status": "done (superseded by F152) | **Owner**: Ragdoll | **Completed**: 2026-04-10",
       "file": "F076-mission-hub-cross-project.md"
     },
     {
@@ -543,7 +543,7 @@
     {
       "id": "F088",
       "name": "Multi-Platform Chat Gateway — 聊天平台接入网关",
-      "status": "Phase 1-6+A+B+C+D+E+G(8A)+8 done | **Owner**: Ragdoll",
+      "status": "done | **Completed**: 2026-04-10 | **Owner**: Ragdoll",
       "file": "F088-multi-platform-chat-gateway.md"
     },
     {
@@ -959,7 +959,13 @@
       "name": "Feishu Receipt Ack — 猫猫即时接住替代\"思考中→撤回\"",
       "status": "done | **Completed**: 2026-04-10 | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F157-feishu-receipt-ack.md"
+    },
+    {
+      "id": "F158",
+      "name": "Kimi CLI First-Class Cat",
+      "status": "done | **Owner**: 社区 (ZephaniaCN) + Ragdoll | **Priority**: P2",
+      "file": "F158-kimi-cli-first-class-cat.md"
     }
   ],
-  "generated_at": "2026-04-10T11:52:59.639Z"
+  "generated_at": "2026-04-11T10:36:07.580Z"
 }

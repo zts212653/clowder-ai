@@ -1,5 +1,5 @@
 /**
- * Thread cats categorization core — shared by F142 route and TD #408 callback.
+ * Thread cats categorization core — shared by F142 route and MCP callback.
  * Single source of truth for participant/routable/notRoutable classification.
  */
 
@@ -7,6 +7,7 @@ export interface ParticipantActivityInput {
   catId: string;
   lastMessageAt: number;
   messageCount: number;
+  lastResponseHealthy?: boolean;
 }
 
 export interface CatEntry {
@@ -15,7 +16,7 @@ export interface CatEntry {
 }
 
 export interface ThreadCatsCategorization {
-  participants: Array<CatEntry & { lastMessageAt: number; messageCount: number }>;
+  participants: Array<CatEntry & { lastMessageAt: number; messageCount: number; lastResponseHealthy?: boolean }>;
   routableNow: CatEntry[];
   routableNotJoined: CatEntry[];
   notRoutable: CatEntry[];
@@ -66,6 +67,7 @@ export function categorizeThreadCats(input: CategorizeThreadCatsInput): ThreadCa
     displayName: getCatDisplayName(p.catId),
     lastMessageAt: p.lastMessageAt,
     messageCount: p.messageCount,
+    ...(p.lastResponseHealthy !== undefined && { lastResponseHealthy: p.lastResponseHealthy }),
   }));
 
   return { participants, routableNow, routableNotJoined, notRoutable };

@@ -4,7 +4,7 @@ import type { IWorkflowSopStore } from '../ports/WorkflowSopStore.js';
 import { VersionConflictError } from '../ports/WorkflowSopStore.js';
 import { WorkflowSopKeys } from '../redis-keys/workflow-sop-keys.js';
 
-const DEFAULT_TTL = 90 * 24 * 60 * 60; // 90 days
+const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 
 const DEFAULT_CHECKS = {
   remoteMainSynced: 'unknown' as const,

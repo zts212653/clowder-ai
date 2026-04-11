@@ -32,7 +32,8 @@ export type EnvCategory =
   | 'signal'
   | 'github_review'
   | 'evidence'
-  | 'quota';
+  | 'quota'
+  | 'telemetry';
 
 export interface EnvDefinition {
   /** The env var name, e.g. 'REDIS_URL' */
@@ -74,6 +75,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   github_review: 'GitHub Review 监控',
   evidence: 'F102 记忆系统',
   quota: '额度监控',
+  telemetry: '可观测性 (OTel)',
 };
 
 export const ENV_VARS: EnvDefinition[] = [
@@ -1239,6 +1241,43 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'quota',
     sensitive: false,
     hubVisible: false,
+  },
+
+  // --- telemetry (F153) ---
+  {
+    name: 'TELEMETRY_HMAC_SALT',
+    defaultValue: '(dev/test 自动 fallback)',
+    description: 'HMAC salt — 遥测系统 ID 伪名化用。生产环境必设，缺失则禁用 OTel',
+    category: 'telemetry',
+    sensitive: true,
+  },
+  {
+    name: 'TELEMETRY_EXPORT_RAW_SYSTEM_IDS',
+    defaultValue: '(未设置 → HMAC 伪名化)',
+    description: '设为 1 跳过 HMAC，导出原始系统 ID（仅限自托管受控环境）',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
+    name: 'PROMETHEUS_PORT',
+    defaultValue: '9464',
+    description: 'Prometheus /metrics 抓取端口',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
+    name: 'OTEL_EXPORTER_OTLP_ENDPOINT',
+    defaultValue: '(未设置 → 仅 Prometheus)',
+    description: 'OTLP 导出端点（设置后同时推送 traces/metrics/logs 到该端点）',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
+    name: 'OTEL_SDK_DISABLED',
+    defaultValue: '(未设置 → 启用)',
+    description: '设为 true 完全禁用 OTel SDK',
+    category: 'telemetry',
+    sensitive: false,
   },
 ];
 

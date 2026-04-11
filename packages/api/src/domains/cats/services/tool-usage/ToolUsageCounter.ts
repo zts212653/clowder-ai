@@ -66,7 +66,7 @@ export class ToolUsageCounter {
       .then((val) => {
         // Set TTL only on first increment (val === 1)
         if (val === 1) {
-          this.redis.expire(key, TOOL_USAGE_TTL_SECONDS).catch(noop);
+          if (TOOL_USAGE_TTL_SECONDS > 0) this.redis.expire(key, TOOL_USAGE_TTL_SECONDS).catch(noop);
         }
       })
       .catch((err) => {

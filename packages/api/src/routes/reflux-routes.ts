@@ -6,6 +6,7 @@ import type { CreateRefluxPatternInput, RefluxCategory } from '@cat-cafe/shared'
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import type { RefluxPatternStore } from '../domains/projects/reflux-pattern-store.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface RefluxRoutesOptions {
   externalProjectStore: ExternalProjectStore;
@@ -16,7 +17,7 @@ export const refluxRoutes: FastifyPluginAsync<RefluxRoutesOptions> = async (app,
   const { externalProjectStore, refluxPatternStore } = opts;
 
   function requireUserId(request: FastifyRequest, reply: FastifyReply): string | null {
-    const userId = request.headers['x-cat-cafe-user'] as string | undefined;
+    const userId = resolveHeaderUserId(request) ?? undefined;
     if (!userId) {
       void reply.status(401).send({ error: 'Identity required' });
       return null;

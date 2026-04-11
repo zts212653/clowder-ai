@@ -214,11 +214,15 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 2. 选择一个 provider 或添加自定义 provider
 3. 内置 provider：选择 OAuth/订阅模式（CLI 已认证则无需 key）
 4. API key provider：输入 API key，可选填自定义 base URL
-5. 点击 **测试** 验证连通性
+5. 点击 **保存**
 
 **添加国产 / 第三方 provider（Kimi、GLM、MiniMax、Qwen、OpenRouter）：**
 
-这些 provider 以 API key 账号形式配置，需要填写自定义 base URL。在**账号配置** UI 中添加新账号，选择 provider，输入 API key，填入该 provider 的 OpenAI 兼容端点 URL，选择对应协议，点击**测试**验证连通性。
+这些 provider 以 API key 账号形式配置，需要填写自定义 base URL。在**账号配置** UI 中添加新账号，选择 provider，输入 API key，填入该 provider 的 OpenAI 兼容端点 URL，选择对应协议，点击**保存**。
+
+**示例 — 阿里百炼（Qwen）：**
+
+![百炼 Provider 账号配置](docs/setup/setup-provider-bailian.png)
 
 > **兼容模式：** 系统仍会从 `.env` 读取 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GOOGLE_API_KEY` 作为兜底，但这条路径已不推荐。新安装请统一用 UI 配置。
 
@@ -229,6 +233,8 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 1. 进入 **Hub → 成员协作 → 总览**
 2. 每个成员可以绑定账号配置中的一个 provider 账号
 3. 内置 provider 支持 OAuth；第三方 provider 使用 API key 账号
+
+![成员绑定百炼 Provider](docs/setup/setup-member-binding.png)
 
 ## 可选功能
 

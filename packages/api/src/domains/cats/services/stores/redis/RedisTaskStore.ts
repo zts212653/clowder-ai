@@ -19,7 +19,7 @@ import { generateSortableId } from '../ports/MessageStore.js';
 import { createSubjectOwnershipConflict, type ITaskStore } from '../ports/TaskStore.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 
-const DEFAULT_TTL = 30 * 24 * 60 * 60; // 30 days
+const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 const MAX_SUBJECT_LOOKUP_NULL_RETRIES = 3;
 const MAX_MISSING_TASK_RETRIES = 3;
 const MAX_AUTOMATION_STATE_PATCH_RETRIES = 5;
@@ -52,15 +52,11 @@ export class RedisTaskStore implements ITaskStore {
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (ttl <= 0) {
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL;
+    if (!Number.isFinite(raw) || raw <= 0) {
       this.ttlSeconds = null;
     } else {
-      this.ttlSeconds = Math.floor(ttl);
+      this.ttlSeconds = Math.floor(raw);
     }
   }
 

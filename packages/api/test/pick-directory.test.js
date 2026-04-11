@@ -79,9 +79,9 @@ describe('getProjectBrowseParent()', () => {
 });
 
 describe('POST /api/projects/pick-directory', () => {
-  it('returns 401 when only a spoofed userId query param is provided', async () => {
+  it('returns 401 without trusted identity header', async () => {
     const app = await buildApp();
-    const res = await app.inject({ method: 'POST', url: '/api/projects/pick-directory?userId=spoofed' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/pick-directory' });
     assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);
     assert.ok(body.error.includes('Identity required'));
@@ -131,9 +131,9 @@ describe('POST /api/projects/pick-directory', () => {
 });
 
 describe('GET /api/projects/browse (F113 cross-platform)', () => {
-  it('returns 401 when only a spoofed userId query param is provided', async () => {
+  it('returns 401 without trusted identity header', async () => {
     const app = await buildApp();
-    const res = await app.inject({ method: 'GET', url: '/api/projects/browse?userId=spoofed' });
+    const res = await app.inject({ method: 'GET', url: '/api/projects/browse' });
     assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);
     assert.ok(body.error.includes('Identity required'));

@@ -112,10 +112,9 @@ function migrateCatalogVariants(catalog: CatCafeConfig): { catalog: CatCafeConfi
         dirty = true;
       }
 
-      // F340: Do NOT backfill accountRef for unbound variants.
-      // Seed cats: resolveBoundAccountRefForCat suppresses default bindings → walks discovery chain.
-      // Custom cats: empty accountRef → resolveForClient walks full chain including installer-*.
-      // Backfilling would lock non-seed cats to builtin OAuth, skipping credentialed installer accounts.
+      // F340: Do NOT backfill accountRef for unbound runtime variants.
+      // Runtime catalog entries are authoritative; missing accountRef stays missing
+      // until the user explicitly binds one in the editor.
     }
   }
 
@@ -129,6 +128,11 @@ function applyBootstrapDefaultAccountRefs(catalog: CatCafeConfig, seedCatIds: Re
     const breedCatId = typeof breed.catId === 'string' ? breed.catId : '';
     const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
     for (const variant of variants) {
+      if (variant.source !== 'seed' && variant.source !== 'runtime') {
+        const catId = typeof variant.catId === 'string' ? variant.catId : breedCatId;
+        variant.source = catId && seedCatIds.has(catId) ? 'seed' : 'runtime';
+      }
+
       const existingAccountRef = typeof variant.accountRef === 'string' ? variant.accountRef.trim() : '';
       if (existingAccountRef) continue;
       const catId = typeof variant.catId === 'string' ? variant.catId : breedCatId;
@@ -195,8 +199,8 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
   // installs that still have cat-config.json but no runtime catalog yet.
   const { catalog: template, sourcePath } = readBootstrapSourceConfig(projectRoot, templatePath);
 
-  // Bootstrap persists the template's default seed binding into the runtime catalog.
-  // Runtime migrations stay non-backfilling so custom/runtime cats remain unbound.
+  // Bootstrap is the only time template-derived defaults are stamped into the runtime catalog.
+  // After this write, runtime reads only the catalog.
   const { catalog: migratedCatalog } = migrateCatalogVariants(template);
   const seedCatIds = sourcePath === templatePath ? collectCatIds(migratedCatalog) : readSeedCatIds(templatePath);
   const runtimeCatalog = applyBootstrapDefaultAccountRefs(migratedCatalog, seedCatIds);

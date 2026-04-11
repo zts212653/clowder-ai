@@ -2879,6 +2879,101 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENAI_API_BASE, 'https://api.activated.example');
   });
 
+  it('keeps default Anthropic seed cats on builtin claude subscription when installer account coexists', async () => {
+    const { bootstrapCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const root = await mkdtemp(join(tmpdir(), 'anthropic-seed-binding-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await mkdir(join(root, '.cat-cafe'), { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    const templateRaw = await readFile(join(__dirname, '..', '..', '..', 'cat-template.json'), 'utf-8');
+    await writeFile(join(root, 'cat-template.json'), templateRaw, 'utf-8');
+    await writeFile(
+      join(root, '.cat-cafe', 'accounts.json'),
+      JSON.stringify(
+        {
+          claude: { authType: 'oauth', models: ['claude-opus-4-6'] },
+          'installer-anthropic': {
+            authType: 'api_key',
+            displayName: 'Installer Anthropic',
+            baseUrl: 'https://proxy.example.dev',
+          },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+    await writeFile(
+      join(root, '.cat-cafe', 'credentials.json'),
+      JSON.stringify(
+        {
+          'installer-anthropic': { apiKey: 'sk-installer-anthropic' },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+
+    const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    const prevHome = process.env.HOME;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+    process.env.HOME = root;
+    bootstrapCatCatalog(root, join(root, 'cat-template.json'));
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(resolveCatCatalogPath(root))))) {
+      catRegistry.register(id, config);
+    }
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    const previousProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
+    try {
+      process.env.ANTHROPIC_PROXY_ENABLED = '0';
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service,
+          prompt: 'test anthropic seed binding',
+          userId: 'user-anthropic-seed-binding',
+          threadId: 'thread-anthropic-seed-binding',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
+      else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
+      if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE, 'subscription');
+    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY, undefined);
+    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL, undefined);
+  });
+
   it('F127 P1: prefers member-bound openai profile over protocol active profile', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-openai-profile-'));

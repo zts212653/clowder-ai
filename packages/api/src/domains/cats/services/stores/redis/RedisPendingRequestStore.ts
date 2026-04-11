@@ -16,7 +16,7 @@ import { generateSortableId } from '../ports/MessageStore.js';
 import type { CreatePendingInput, IPendingRequestStore } from '../ports/PendingRequestStore.js';
 import { PendingReqKeys } from '../redis-keys/authorization-keys.js';
 
-const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 const DEFAULT_MAX = 1000;
 
 /**
