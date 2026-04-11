@@ -1253,9 +1253,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
 
           // F153 Phase B: Retrospective LLM call span (created after-the-fact from done event)
-          if (invocationSpan) {
+          // Only create when durationApiMs is available — providers without timing data
+          // (Codex, Gemini, Kimi) would produce misleading 0-duration spans.
+          if (invocationSpan && msg.metadata.usage.durationApiMs) {
             const parentCtx = trace.setSpan(context.active(), invocationSpan);
-            const durationApiMs = msg.metadata.usage.durationApiMs ?? 0;
+            const durationApiMs = msg.metadata.usage.durationApiMs;
             const spanStartTime = new Date(Date.now() - durationApiMs);
             const llmSpan = tracer.startSpan(
               'cat_cafe.llm_call',

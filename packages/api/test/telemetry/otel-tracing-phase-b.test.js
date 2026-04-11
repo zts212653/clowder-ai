@@ -85,6 +85,23 @@ test('F153 Phase B: parentSpan threading through call chain', async (t) => {
     );
   });
 
+  const PROVIDERS_DIR = resolve(__dirname, '../../src/domains/cats/services/agents/providers');
+  const CLI_PROVIDERS = [
+    'ClaudeAgentService.ts',
+    'CodexAgentService.ts',
+    'GeminiAgentService.ts',
+    'OpenCodeAgentService.ts',
+    'DareAgentService.ts',
+    'KimiAgentService.ts',
+  ];
+
+  for (const file of CLI_PROVIDERS) {
+    await t.test(`${file} forwards parentSpan to cliOpts`, () => {
+      const src = readFileSync(resolve(PROVIDERS_DIR, file), 'utf8');
+      assert.ok(src.includes('parentSpan'), `${file} must forward parentSpan in cliOpts`);
+    });
+  }
+
   await t.test('invoke-single-cat passes invocationSpan as parentSpan', () => {
     const src = readFileSync(INVOKE_SRC, 'utf8');
     assert.ok(src.includes('parentSpan: invocationSpan'), 'Should pass invocationSpan as parentSpan in baseOptions');
@@ -102,6 +119,19 @@ test('F153 Phase B: llm_call retrospective span in invoke-single-cat.ts', async 
     assert.ok(
       src.includes('durationApiMs') && src.includes('startTime'),
       'Should compute span startTime from durationApiMs',
+    );
+  });
+
+  await t.test('only creates llm_call span when durationApiMs is available', () => {
+    // The guard must check msg.metadata.usage.durationApiMs is truthy,
+    // not fall back to 0 — providers without timing would produce misleading spans.
+    assert.ok(
+      src.includes('msg.metadata.usage.durationApiMs'),
+      'Guard must check durationApiMs before creating llm_call span',
+    );
+    assert.ok(
+      !src.includes('durationApiMs ?? 0'),
+      'Must NOT fallback durationApiMs to 0 — would produce fake 0-duration spans',
     );
   });
 
