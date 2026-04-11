@@ -254,10 +254,10 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       reply.status(400);
       return { error: 'Invalid request', details: parsed.error.issues };
     }
-    const operator = resolveOperator(request.headers['x-cat-cafe-user']);
+    const operator = resolveHeaderUserId(request);
     if (!operator) {
       reply.status(400);
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+      return { error: 'Identity required' };
     }
 
     // Validate that catId refers to a known, registered cat
