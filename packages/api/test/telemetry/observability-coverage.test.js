@@ -16,11 +16,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // --- Liveness probe registration tests ---
 
 test('F153: liveness probe register/unregister lifecycle', async (t) => {
-  const {
-    registerLivenessProbe,
-    unregisterLivenessProbe,
-    livenessStateToNumber,
-  } = await import('../../dist/infrastructure/telemetry/instruments.js');
+  const { registerLivenessProbe, unregisterLivenessProbe, livenessStateToNumber } = await import(
+    '../../dist/infrastructure/telemetry/instruments.js'
+  );
 
   await t.test('livenessStateToNumber maps correctly', () => {
     assert.equal(livenessStateToNumber('dead'), 0);
@@ -41,20 +39,11 @@ test('F153: liveness probe register/unregister lifecycle', async (t) => {
 });
 
 test('F153: cli-spawn wires liveness probes', () => {
-  const source = readFileSync(
-    resolve(__dirname, '../../src/utils/cli-spawn.ts'),
-    'utf8',
-  );
+  const source = readFileSync(resolve(__dirname, '../../src/utils/cli-spawn.ts'), 'utf8');
 
   // Must import both register and unregister
-  assert.ok(
-    source.includes('registerLivenessProbe'),
-    'cli-spawn must import registerLivenessProbe',
-  );
-  assert.ok(
-    source.includes('unregisterLivenessProbe'),
-    'cli-spawn must import unregisterLivenessProbe',
-  );
+  assert.ok(source.includes('registerLivenessProbe'), 'cli-spawn must import registerLivenessProbe');
+  assert.ok(source.includes('unregisterLivenessProbe'), 'cli-spawn must import unregisterLivenessProbe');
 
   // registerLivenessProbe must be called with invocationId
   assert.ok(
@@ -72,9 +61,7 @@ test('F153: cli-spawn wires liveness probes', () => {
 // --- AgentPaneRegistry unit tests ---
 
 test('F153: AgentPaneRegistry marks aborted invocations as crashed', async (t) => {
-  const { AgentPaneRegistry } = await import(
-    '../../dist/domains/terminal/agent-pane-registry.js'
-  );
+  const { AgentPaneRegistry } = await import('../../dist/domains/terminal/agent-pane-registry.js');
 
   const registry = new AgentPaneRegistry();
   const invId = 'inv-abort-test';
@@ -110,10 +97,7 @@ test('F153: AgentPaneRegistry marks aborted invocations as crashed', async (t) =
 
 test('F153: abort path marks pane as crashed (not done)', () => {
   const source = readFileSync(
-    resolve(
-      __dirname,
-      '../../src/domains/cats/services/agents/invocation/invoke-single-cat.ts',
-    ),
+    resolve(__dirname, '../../src/domains/cats/services/agents/invocation/invoke-single-cat.ts'),
     'utf8',
   );
 
@@ -127,10 +111,7 @@ test('F153: abort path marks pane as crashed (not done)', () => {
 
 test('F153: all three observation systems align on abort', () => {
   const source = readFileSync(
-    resolve(
-      __dirname,
-      '../../src/domains/cats/services/agents/invocation/invoke-single-cat.ts',
-    ),
+    resolve(__dirname, '../../src/domains/cats/services/agents/invocation/invoke-single-cat.ts'),
     'utf8',
   );
 
@@ -141,10 +122,7 @@ test('F153: all three observation systems align on abort', () => {
   );
 
   // OTel: must set span ERROR for abort
-  assert.ok(
-    source.includes("'invocation_aborted'"),
-    'OTel must emit invocation_aborted log for abort path',
-  );
+  assert.ok(source.includes("'invocation_aborted'"), 'OTel must emit invocation_aborted log for abort path');
 
   // Pane: abort must not silently markDone (checked by previous test)
 });
