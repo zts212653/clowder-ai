@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
-import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   resolveBuiltinClientForProvider,
   resolveForClient,
@@ -1038,6 +1038,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // #774: stallAutoKill — auto-kill on idle-silent stall (~5min) instead of waiting 30min
       livenessProbe: { stallAutoKill: true },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
+      parentSpan: invocationSpan,
     };
 
     let lastErrorMessage: string | undefined;
@@ -1251,6 +1252,36 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             llmCallDuration.record(msg.metadata.usage.durationApiMs / 1000, tokenAttrs);
           }
 
+          // F153 Phase B: Retrospective LLM call span (created after-the-fact from done event)
+          if (invocationSpan) {
+            const parentCtx = trace.setSpan(context.active(), invocationSpan);
+            const durationApiMs = msg.metadata.usage.durationApiMs ?? 0;
+            const spanStartTime = new Date(Date.now() - durationApiMs);
+            const llmSpan = tracer.startSpan(
+              'cat_cafe.llm_call',
+              {
+                attributes: {
+                  [AGENT_ID]: catId,
+                  [GENAI_SYSTEM]: providerSystem,
+                  [GENAI_MODEL]: modelBucket,
+                  ...(msg.metadata.usage.inputTokens
+                    ? { 'gen_ai.usage.input_tokens': msg.metadata.usage.inputTokens }
+                    : {}),
+                  ...(msg.metadata.usage.outputTokens
+                    ? { 'gen_ai.usage.output_tokens': msg.metadata.usage.outputTokens }
+                    : {}),
+                  ...(msg.metadata.usage.cacheReadTokens
+                    ? { 'gen_ai.usage.cache_read_tokens': msg.metadata.usage.cacheReadTokens }
+                    : {}),
+                },
+                startTime: spanStartTime,
+              },
+              parentCtx,
+            );
+            llmSpan.setStatus({ code: SpanStatusCode.OK });
+            llmSpan.end();
+          }
+
           outputs.push({
             type: 'system_info' as const,
             catId,
@@ -1416,6 +1447,24 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         outputs.push({ ...msg, isFinal: isLastCat });
       } else {
         outputs.push(attachInvocationIdToTaskProgress(msg));
+
+        // F153 Phase B: Create tool_use span under invocation span
+        if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
+          const parentCtx = trace.setSpan(context.active(), invocationSpan);
+          const toolSpan = tracer.startSpan(
+            'cat_cafe.tool_use',
+            {
+              attributes: {
+                [AGENT_ID]: catId,
+                'tool.name': msg.toolName,
+                ...(msg.toolInput ? { 'tool.input_keys': Object.keys(msg.toolInput as object).join(',') } : {}),
+              },
+            },
+            parentCtx,
+          );
+          toolSpan.setStatus({ code: SpanStatusCode.OK });
+          toolSpan.end();
+        }
 
         // F26: Detect task management tools and emit task_progress for frontend
         if (msg.type === 'tool_use' && msg.toolName) {
