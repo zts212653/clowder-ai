@@ -208,6 +208,11 @@ const PROCESS_START_AT = Date.now();
 
 async function main(): Promise<void> {
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
+
+  // F152: Initialize OpenTelemetry SDK (must be early, before routes)
+  const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
+  const shutdownTelemetry = initTelemetry();
+
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
 
   if (isDebugMode) {
@@ -244,6 +249,38 @@ async function main(): Promise<void> {
 
   // Health check
   app.get('/health', async () => ({ status: 'ok', timestamp: Date.now() }));
+
+  // F152: Readiness check — verifies dependencies are reachable.
+  // evidenceStoreRef is set after memoryServices init; handler runs at request time.
+  let evidenceStoreRef: { health(): Promise<boolean> } | null = null;
+  app.get('/ready', async (_request, reply) => {
+    const checks: Record<string, { ok: boolean; ms: number; error?: string }> = {};
+    // Redis probe
+    if (redisClient) {
+      const t0 = Date.now();
+      try {
+        await redisClient.ping();
+        checks.redis = { ok: true, ms: Date.now() - t0 };
+      } catch (err) {
+        checks.redis = { ok: false, ms: Date.now() - t0, error: String(err) };
+      }
+    } else {
+      checks.redis = { ok: true, ms: 0 }; // memory mode, always ready
+    }
+    // SQLite probe
+    if (evidenceStoreRef) {
+      const t0 = Date.now();
+      try {
+        const ok = await evidenceStoreRef.health();
+        checks.sqlite = { ok, ms: Date.now() - t0, ...(ok ? {} : { error: 'SELECT 1 failed' }) };
+      } catch (err) {
+        checks.sqlite = { ok: false, ms: Date.now() - t0, error: String(err) };
+      }
+    }
+    const allOk = Object.values(checks).every((c) => c.ok);
+    if (!allOk) reply.code(503);
+    return { status: allOk ? 'ready' : 'degraded', timestamp: Date.now(), checks };
+  });
 
   // Create invocation tracker for cancellation support
   const invocationTracker = new InvocationTracker();
@@ -453,6 +490,8 @@ async function main(): Promise<void> {
       return excluded;
     },
   });
+  // F152: Wire evidence store into /ready probe
+  evidenceStoreRef = memoryServices.evidenceStore;
   app.log.info('[api] F102: SQLite memory services initialized');
 
   // F152 Phase B: Expedition Bootstrap — state manager + service
@@ -2151,6 +2190,13 @@ async function main(): Promise<void> {
       } catch (err) {
         exitCode = 1;
         app.log.error(`[api] SocketManager close failed: ${String(err)}`);
+      }
+
+      // F152: Flush and shutdown OTel SDK before closing server
+      try {
+        await shutdownTelemetry();
+      } catch (err) {
+        app.log.error(`[api] OTel shutdown failed: ${String(err)}`);
       }
 
       // Close Fastify server
