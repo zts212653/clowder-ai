@@ -7,7 +7,7 @@
     "init": "./scripts/init-cafe.sh",
     "gate": "bash ./scripts/pre-merge-check.sh",
     "guards:install": "bash ./scripts/install-git-guards.sh",
-    "start": "./scripts/runtime-worktree.sh start",
+    "start": "node ./scripts/start-entry.mjs start --profile=opensource",
     "stop": "./scripts/start-dev.sh --stop",
     "start:status": "./scripts/start-dev.sh --status",
     "start:direct": "node ./scripts/start-entry.mjs start:direct --profile=opensource",
