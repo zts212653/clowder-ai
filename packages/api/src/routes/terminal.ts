@@ -43,7 +43,7 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
     if (req.headers.upgrade?.toLowerCase() === 'websocket') return;
     if (!resolveUserId(req)) {
       reply.status(401);
-      return reply.send({ error: 'Identity required (X-Cat-Cafe-User header or userId query)' });
+      return reply.send({ error: 'Identity required (session cookie or X-Cat-Cafe-User header)' });
     }
   });
 
@@ -105,9 +105,11 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
     Params: { sessionId: string };
   }>('/api/terminal/sessions/:sessionId/ws', { websocket: true }, (socket, req) => {
     const { sessionId } = req.params;
-    // F156: Server determines identity — never trust client-supplied userId on WS.
-    // Single-user mode: all connections are 'default-user'. F077 will derive from session.
-    const userId = 'default-user';
+    const userId = (req as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
+    if (!userId) {
+      socket.close(4001, 'Session required');
+      return;
+    }
     const session = store.getByIdAndUser(sessionId, userId);
     const binding = ptys.get(sessionId);
 
@@ -244,8 +246,11 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
   }>('/api/terminal/agent-panes/:paneId/ws', { websocket: true }, (socket, req) => {
     const { paneId } = req.params;
     const { worktreeId } = req.query;
-    // F156: Server determines identity — same as terminal session WS above.
-    const userId = 'default-user';
+    const userId = (req as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
+    if (!userId) {
+      socket.close(4001, 'Session required');
+      return;
+    }
 
     if (!worktreeId || !agentPaneRegistry || !tmuxGateway) {
       socket.close(4004, 'Agent pane tracking not enabled or missing worktreeId');

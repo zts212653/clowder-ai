@@ -20,4 +20,7 @@ export const ThreadKeys = {
 
   /** F046 D3: One-shot suppressed mention routing feedback per cat. */
   mentionRoutingFeedback: (id: string) => `thread:${id}:mention-routing-feedback`,
+
+  /** Tombstone left by hard-delete to prevent self-healing resurrection. */
+  tombstone: (id: string) => `thread:${id}:tombstone`,
 } as const;

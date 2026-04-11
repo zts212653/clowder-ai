@@ -91,7 +91,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/signals/inbox', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const parsed = listInboxQuerySchema.safeParse(request.query);
@@ -113,7 +113,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/signals/articles/:id', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const params = request.params as { id?: string };
@@ -133,7 +133,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/signals/articles/by-url', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const parsed = articleByUrlQuerySchema.safeParse(request.query);
@@ -153,7 +153,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/signals/search', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const parsed = searchQuerySchema.safeParse(request.query);
@@ -177,7 +177,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/api/signals/articles/:id', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const params = request.params as { id?: string };
@@ -203,7 +203,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/signals/sources', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const config = await loadSignalSources(paths);
@@ -212,7 +212,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/api/signals/sources/:id', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const params = request.params as { id?: string };
@@ -269,7 +269,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/api/signals/sources/:id/fetch', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const params = request.params as { id?: string };
@@ -305,7 +305,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/signals/stats', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     return articleQuery.getStats();
@@ -313,7 +313,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/api/signals/backfill', async (request, reply) => {
     if (!requireIdentity(request, reply)) {
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const body = z.object({ source: z.string().min(1) }).safeParse(request.body);

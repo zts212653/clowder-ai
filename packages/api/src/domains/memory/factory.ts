@@ -38,6 +38,8 @@ export interface MemoryServices {
   vectorStore?: VectorStore;
   /** F-4: Global knowledge index builder (Skills + MEMORY.md) */
   globalIndexBuilder?: GlobalIndexBuilder;
+  /** F152 Phase C: Global knowledge store for distillation */
+  globalStore?: SqliteEvidenceStore;
 }
 
 export interface MemoryConfig {
@@ -157,5 +159,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     embeddingService,
     vectorStore,
     globalIndexBuilder,
+    globalStore,
   };
 }

@@ -192,6 +192,27 @@ describe('ConnectorRouter media handling', () => {
     }
   });
 
+  it('ISSUE-3: image contentBlocks persisted to messageStore for queue replay', async () => {
+    const { ConnectorRouter } = await import('../dist/infrastructure/connectors/ConnectorRouter.js');
+
+    const mediaDownload = mock.fn(async () => ({
+      localUrl: '/api/connector-media/photo.jpg',
+      absPath: '/tmp/photo.jpg',
+      mimeType: 'image/jpeg',
+    }));
+
+    const deps = makeMockDeps({ mediaService: { download: mediaDownload } });
+    const router = new ConnectorRouter(deps);
+    await router.route('feishu', 'chat1', '[图片]', 'msg1', [{ type: 'image', platformKey: 'img_key_789' }]);
+
+    // The stored message must include contentBlocks so QueueProcessor can recover them on replay
+    const storedMessage = deps._messages[0];
+    assert.ok(storedMessage.contentBlocks, 'messageStore.append() must receive contentBlocks');
+    assert.ok(Array.isArray(storedMessage.contentBlocks), 'contentBlocks must be an array');
+    assert.ok(storedMessage.contentBlocks.length > 0, 'contentBlocks must not be empty');
+    assert.equal(storedMessage.contentBlocks[0].type, 'image');
+  });
+
   it('does not process attachments when no mediaService', async () => {
     const { ConnectorRouter } = await import('../dist/infrastructure/connectors/ConnectorRouter.js');
 

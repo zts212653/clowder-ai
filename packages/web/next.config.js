@@ -26,6 +26,21 @@ const nextConfig = {
   reactStrictMode: true,
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
+  async headers() {
+    // F156 D-3: Strict CSP baseline.
+    // Next.js hydration requires 'unsafe-inline' for scripts — nonce-based CSP
+    // needs middleware (future work). Blocking 'unsafe-eval' prevents eval() injection.
+    const csp = ["frame-ancestors 'none'", "script-src 'self' 'unsafe-inline'", "object-src 'none'"].join('; ');
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: csp },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

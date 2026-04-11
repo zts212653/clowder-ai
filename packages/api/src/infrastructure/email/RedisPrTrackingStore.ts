@@ -8,7 +8,7 @@ import type {
 } from './PrTrackingStore.js';
 import { PrTrackingKeys } from './pr-tracking-keys.js';
 
-const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
 // Lua: atomic remove — only del+zrem if hash still exists; otherwise just zrem orphan member
 const REMOVE_LUA = `
@@ -34,11 +34,12 @@ return 1
 
 export class RedisPrTrackingStore implements IPrTrackingStore {
   private readonly redis: RedisClient;
-  private readonly ttlSeconds: number;
+  private readonly ttlSeconds: number | null;
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
-    this.ttlSeconds = options?.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+    this.ttlSeconds = !Number.isFinite(raw) || raw <= 0 ? null : Math.floor(raw);
   }
 
   async register(input: PrTrackingInput): Promise<PrTrackingEntry> {
@@ -53,7 +54,9 @@ export class RedisPrTrackingStore implements IPrTrackingStore {
 
     const pipeline = this.redis.multi();
     pipeline.hset(key, this.serialize(entry));
-    pipeline.expire(key, this.ttlSeconds);
+    if (this.ttlSeconds !== null) {
+      pipeline.expire(key, this.ttlSeconds);
+    }
     pipeline.zadd(allKey, String(entry.registeredAt), member);
     await pipeline.exec();
 

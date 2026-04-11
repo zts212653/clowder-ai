@@ -162,4 +162,57 @@ describe('cat account binding', () => {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('resolves default Anthropic seed cats back to builtin claude when installer account coexists', async () => {
+    const { bootstrapCatCatalog, resolveCatCatalogPath } = await import('../dist/config/cat-catalog-store.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { resolveBoundAccountRefForCat, resolveEffectiveAccountRefForCat } = await import(
+      '../dist/config/cat-account-binding.js'
+    );
+    const projectRoot = await mkdtemp(join(tmpdir(), 'cat-account-binding-anthropic-seed-'));
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
+
+    try {
+      await seedTemplate(projectRoot);
+      bootstrapCatCatalog(projectRoot, join(projectRoot, 'cat-template.json'));
+      await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'accounts.json'),
+        JSON.stringify(
+          {
+            claude: { authType: 'oauth', models: ['claude-opus-4-6'] },
+            'installer-anthropic': {
+              authType: 'api_key',
+              displayName: 'Installer Anthropic',
+              baseUrl: 'https://proxy.example.dev',
+            },
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+      await writeFile(
+        join(projectRoot, '.cat-cafe', 'credentials.json'),
+        JSON.stringify(
+          {
+            'installer-anthropic': { apiKey: 'sk-installer-anthropic' },
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+
+      const opus = toAllCatConfigs(loadCatConfig(resolveCatCatalogPath(projectRoot))).opus;
+      assert.ok(opus, 'opus should be present in bootstrapped runtime catalog');
+      assert.equal(resolveBoundAccountRefForCat(projectRoot, 'opus', opus), undefined);
+      assert.equal(resolveEffectiveAccountRefForCat(projectRoot, 'opus', opus), 'claude');
+    } finally {
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

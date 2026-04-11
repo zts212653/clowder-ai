@@ -1,9 +1,12 @@
 'use client';
 
+import { useMemo } from 'react';
 import type { RichHtmlWidgetBlock } from '@/stores/chat-types';
+import { sanitizeWidgetHtml } from './sanitize-widget-html';
 
 export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
   const height = block.height ?? 300;
+  const safeHtml = useMemo(() => sanitizeWidgetHtml(block.html), [block.html]);
 
   return (
     <div className="rounded-lg border border-cafe dark:border-gray-700 overflow-hidden">
@@ -13,7 +16,7 @@ export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
         </div>
       )}
       <iframe
-        srcDoc={block.html}
+        srcDoc={safeHtml}
         sandbox="allow-scripts"
         title={block.title ?? 'Interactive Widget'}
         style={{ width: '100%', height: `${height}px`, border: 'none' }}

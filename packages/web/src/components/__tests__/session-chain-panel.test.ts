@@ -128,7 +128,7 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     expect(container.textContent).toContain('Session #3');
-    expect(container.textContent).toContain('布偶猫');
+    expect(container.textContent).toContain('opus');
     expect(container.textContent).toContain('Active');
     expect(container.textContent).toContain('8 msgs');
     // Session ID should be visible (truncated) with copy title
@@ -239,13 +239,13 @@ describe('F24: SessionChainPanel', () => {
     expect(html).toContain('border-kimi-primary/40');
   });
 
-  it('renders known cat display names in the active session badge', async () => {
+  it('renders catId in the active session badge (not breed displayName)', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('梵花猫');
+    expect(container.textContent).toContain('kimi');
   });
 
   it('shows post-compact safety alert when sessionSealed is true', async () => {
@@ -493,7 +493,7 @@ describe('F24: SessionChainPanel', () => {
     // Badge should use codex colors
     const badge = container.querySelector('.bg-codex-light.text-codex-dark');
     expect(badge).not.toBeNull();
-    expect(badge?.textContent).toContain('缅因猫');
+    expect(badge?.textContent).toContain('codex');
     // Must NOT have opus purple
     expect(container.querySelector('.border-opus-primary\\/40')).toBeNull();
     expect(container.querySelector('.bg-opus-light')).toBeNull();

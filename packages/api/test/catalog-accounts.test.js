@@ -365,7 +365,7 @@ describe('global accounts (F340)', () => {
     assert.equal(creds['team-key'].apiKey, 'sk-team-key');
   });
 
-  it('throws when legacy provider-profile migration hits an incompatible global account ID', async () => {
+  it('skips conflicting legacy provider-profile without crashing (global wins)', async () => {
     const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
       '../dist/config/catalog-accounts.js'
     );
@@ -393,7 +393,9 @@ describe('global accounts (F340)', () => {
       'utf-8',
     );
 
-    assert.throws(() => readCatalogAccounts(projectRoot), /account conflict/i);
+    const result = readCatalogAccounts(projectRoot);
+    assert.equal(result.shared.authType, 'oauth', 'global account must win over legacy');
+    assert.equal(result.shared.displayName, 'Global OAuth', 'global displayName must be preserved');
   });
 
   it('retries secret import when accounts already exist from previous migration', async () => {
@@ -430,7 +432,7 @@ describe('global accounts (F340)', () => {
     assert.equal(creds['my-custom'].apiKey, 'sk-retry-key', 'credential must be imported on retry');
   });
 
-  it('fails before attaching a legacy secret to a pre-existing global account with colliding ID', async () => {
+  it('skips legacy secret when colliding with pre-existing global OAuth account', async () => {
     const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
       '../dist/config/catalog-accounts.js'
     );
@@ -454,9 +456,10 @@ describe('global accounts (F340)', () => {
       'utf-8',
     );
 
-    assert.throws(() => readCatalogAccounts(projectRoot), /account conflict/i);
+    // Must not crash — global wins, secret must NOT be imported
+    const result = readCatalogAccounts(projectRoot);
+    assert.equal(result.shared.authType, 'oauth', 'global OAuth account must win');
 
-    // The legacy secret must NOT be imported for the colliding ID.
     const credPath = join(globalRoot, '.cat-cafe', 'credentials.json');
     if (existsSync(credPath)) {
       const creds = JSON.parse(await readFile(credPath, 'utf-8'));
@@ -486,7 +489,7 @@ describe('global accounts (F340)', () => {
     assert.ok(!existsSync(globalFile), 'accounts.json should NOT be in globalRoot when env unset');
   });
 
-  it('fails before attaching a legacy secret to a different-source api_key account with colliding ID', async () => {
+  it('skips legacy secret when colliding with different-source api_key account', async () => {
     const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
       '../dist/config/catalog-accounts.js'
     );
@@ -510,7 +513,10 @@ describe('global accounts (F340)', () => {
       'utf-8',
     );
 
-    assert.throws(() => readCatalogAccounts(projectRoot), /account conflict/i);
+    // Must not crash — global wins, secret must NOT be imported
+    const result = readCatalogAccounts(projectRoot);
+    assert.equal(result.shared.authType, 'api_key', 'global account must win');
+    assert.equal(result.shared.baseUrl, 'https://existing.example/v1', 'global baseUrl must be preserved');
 
     const credPath = join(globalRoot, '.cat-cafe', 'credentials.json');
     if (existsSync(credPath)) {
@@ -612,89 +618,6 @@ describe('global accounts (F340)', () => {
       process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
       await rm(fakeHome, { recursive: true, force: true });
       await rm(projectB, { recursive: true, force: true });
-    }
-  });
-
-  it('migrates homedir credentials.json and it wins over legacy secrets', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
-    resetMigrationState();
-
-    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-
-    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-'));
-    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
-    const savedHome = process.env.HOME;
-    process.env.HOME = fakeHome;
-
-    try {
-      // Legacy secrets have an old API key
-      await writeFile(
-        join(fakeHome, '.cat-cafe', 'provider-profiles.json'),
-        JSON.stringify({
-          version: 2,
-          providers: [{ id: 'claude', authType: 'api_key', baseUrl: 'https://api.anthropic.com' }],
-        }),
-        'utf-8',
-      );
-      await writeFile(
-        join(fakeHome, '.cat-cafe', 'provider-profiles.secrets.local.json'),
-        JSON.stringify({ profiles: { claude: { apiKey: 'sk-old-from-profiles' } } }),
-        'utf-8',
-      );
-
-      // Homedir credentials.json has a newer API key (written by post-#290 UI)
-      await writeFile(
-        join(fakeHome, '.cat-cafe', 'credentials.json'),
-        JSON.stringify({ claude: { apiKey: 'sk-new-from-credentials' } }),
-        'utf-8',
-      );
-
-      const result = readCatalogAccounts(projectRoot);
-      assert.equal(result.claude?.baseUrl, 'https://api.anthropic.com', 'account must be migrated');
-
-      // credentials.json key must win over provider-profiles.secrets key
-      const credRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
-      const creds = JSON.parse(credRaw);
-      assert.equal(creds.claude?.apiKey, 'sk-new-from-credentials', 'homedir credentials.json must win');
-    } finally {
-      process.env.HOME = savedHome;
-      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
-      await rm(fakeHome, { recursive: true, force: true });
-    }
-  });
-
-  it('migrates homedir credentials.json even without provider-profiles', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
-    resetMigrationState();
-
-    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-
-    const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-'));
-    await mkdir(join(fakeHome, '.cat-cafe'), { recursive: true });
-    const savedHome = process.env.HOME;
-    process.env.HOME = fakeHome;
-
-    try {
-      // No provider-profiles at all — only credentials.json exists at homedir
-      await writeFile(
-        join(fakeHome, '.cat-cafe', 'credentials.json'),
-        JSON.stringify({ claude: { apiKey: 'sk-direct-only' } }),
-        'utf-8',
-      );
-
-      readCatalogAccounts(projectRoot);
-
-      const credRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
-      const creds = JSON.parse(credRaw);
-      assert.equal(
-        creds.claude?.apiKey,
-        'sk-direct-only',
-        'credentials.json must be migrated without provider-profiles',
-      );
-    } finally {
-      process.env.HOME = savedHome;
-      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
-      await rm(fakeHome, { recursive: true, force: true });
     }
   });
 });

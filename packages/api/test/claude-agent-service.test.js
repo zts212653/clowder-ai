@@ -1032,3 +1032,66 @@ test('F24-fix: lastTurnInputTokens resets when final message_start has no usage 
     'lastTurnInputTokens must not carry over from a previous turn when the final turn lacks usage',
   );
 });
+
+// ── Model override regression tests (third-party Anthropic-compatible APIs) ──
+
+test('third-party model (glm-5): omits --model flag and injects ANTHROPIC_MODEL env var', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_API_URL: 'http://localhost:3004',
+        CAT_CAFE_INVOCATION_ID: 'inv-glm',
+        CAT_CAFE_CALLBACK_TOKEN: 'token-glm',
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-bigmodel',
+        CAT_CAFE_ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'glm-5',
+      },
+    }),
+  );
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+
+  // --model must NOT appear in args for non-Anthropic models
+  assert.ok(!args.includes('--model'), '--model flag must be omitted for third-party model glm-5');
+  // ANTHROPIC_MODEL env var must carry the model name
+  assert.equal(spawnOpts.env.ANTHROPIC_MODEL, 'glm-5', 'ANTHROPIC_MODEL env var must be set to glm-5');
+});
+
+test('native Anthropic model (claude-sonnet-4-6): keeps --model flag, no ANTHROPIC_MODEL env var', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_API_URL: 'http://localhost:3004',
+        CAT_CAFE_INVOCATION_ID: 'inv-native',
+        CAT_CAFE_CALLBACK_TOKEN: 'token-native',
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key',
+        CAT_CAFE_ANTHROPIC_API_KEY: 'sk-anthropic',
+        CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE: 'claude-sonnet-4-6',
+      },
+    }),
+  );
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  const modelIdx = args.indexOf('--model');
+
+  // --model must be present with the exact Anthropic model name
+  assert.ok(modelIdx >= 0, '--model flag must be present for native Anthropic model');
+  assert.equal(args[modelIdx + 1], 'claude-sonnet-4-6');
+  // ANTHROPIC_MODEL must NOT be set (native model goes through --model)
+  assert.ok(!spawnOpts.env.ANTHROPIC_MODEL, 'ANTHROPIC_MODEL env var must not be set for native Anthropic model');
+});

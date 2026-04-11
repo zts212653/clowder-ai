@@ -31,7 +31,7 @@ import {
 const log = createModuleLogger('redis-message-store');
 
 const DEFAULT_LIMIT = 50;
-const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
 export class RedisMessageStore {
   private readonly redis: RedisClient;
@@ -49,15 +49,11 @@ export class RedisMessageStore {
   ) {
     this.redis = redis;
     this.onAppend = options?.onAppend;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL_SECONDS;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL_SECONDS;
-    } else if (ttl <= 0) {
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+    if (!Number.isFinite(raw) || raw <= 0) {
       this.ttlSeconds = null;
     } else {
-      this.ttlSeconds = Math.floor(ttl);
+      this.ttlSeconds = Math.floor(raw);
     }
   }
 

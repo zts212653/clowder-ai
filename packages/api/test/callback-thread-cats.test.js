@@ -1,5 +1,5 @@
 /**
- * GET /api/callbacks/thread-cats — callback-authenticated thread cats discovery (TD #408)
+ * GET /api/callbacks/thread-cats — callback-authenticated thread cats discovery
  */
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
@@ -77,7 +77,9 @@ describe('GET /api/callbacks/thread-cats', () => {
       ['inv-1', { invocationId: 'inv-1', callbackToken: 'tok-1', threadId: 't-1', catId: 'opus' }],
     ]);
     const threads = new Map([['t-1', { id: 't-1' }]]);
-    const participants = new Map([['t-1', [{ catId: 'opus', lastMessageAt: 1000, messageCount: 5 }]]]);
+    const participants = new Map([
+      ['t-1', [{ catId: 'opus', lastMessageAt: 1000, messageCount: 5, lastResponseHealthy: true }]],
+    ]);
     const services = new Map([['opus', {}]]);
 
     await setup({ records, threads, participants, services });
@@ -92,6 +94,7 @@ describe('GET /api/callbacks/thread-cats', () => {
     assert.equal(body.participants.length, 1);
     assert.equal(body.participants[0].catId, 'opus');
     assert.equal(body.participants[0].messageCount, 5);
+    assert.equal(body.participants[0].lastResponseHealthy, true);
     // Categorization: opus is participant + has service → routableNow
     assert.equal(body.routableNow.length, 1);
     assert.equal(body.routableNow[0].catId, 'opus');

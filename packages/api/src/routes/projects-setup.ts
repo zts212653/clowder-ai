@@ -15,6 +15,11 @@ import { resolveHeaderUserId } from '../utils/request-identity.js';
 const VALID_MODES = ['clone', 'init', 'skip'] as const;
 type SetupMode = (typeof VALID_MODES)[number];
 
+export interface ProjectSetupRouteOptions {
+  memoryBootstrapService?: { bootstrap: (projectPath: string, options?: unknown) => Promise<unknown> };
+  socketManager?: { emitToUser(userId: string, event: string, data: unknown): void };
+}
+
 /** Only allow https:// and git@ URLs */
 const SAFE_URL_PATTERN = /^(https:\/\/|git@)/;
 
@@ -91,7 +96,7 @@ async function isEmptyDir(dirPath: string): Promise<boolean> {
   }
 }
 
-export const projectSetupRoute: FastifyPluginAsync = async (app) => {
+export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = async (app, opts) => {
   app.post('/api/projects/setup', async (request, reply) => {
     const userId = resolveHeaderUserId(request);
     if (!userId) {
@@ -173,6 +178,54 @@ export const projectSetupRoute: FastifyPluginAsync = async (app) => {
       const { GovernanceBootstrapService } = await import('../config/governance/governance-bootstrap.js');
       const service = new GovernanceBootstrapService(catCafeRoot);
       const report = await service.bootstrap(validated, { dryRun: false });
+
+      // F152 Phase B: fire-and-forget memory bootstrap after governance succeeds
+      if (opts?.memoryBootstrapService) {
+        opts.memoryBootstrapService
+          .bootstrap(validated, {
+            onProgress: (p: unknown) => {
+              if (userId && opts.socketManager) {
+                opts.socketManager.emitToUser(userId, 'index:progress', {
+                  ...(p as Record<string, unknown>),
+                  projectPath: validated,
+                });
+              }
+            },
+          })
+          .then((raw: unknown) => {
+            const result = raw as {
+              status: string;
+              docsIndexed?: number;
+              durationMs?: number;
+              summary?: unknown;
+              error?: string;
+            };
+            if (!userId || !opts.socketManager) return;
+            if (result.status === 'ready') {
+              opts.socketManager.emitToUser(userId, 'index:complete', {
+                projectPath: validated,
+                docsIndexed: result.docsIndexed,
+                durationMs: result.durationMs,
+                summary: result.summary,
+              });
+            } else if (result.status === 'failed') {
+              opts.socketManager.emitToUser(userId, 'index:failed', {
+                projectPath: validated,
+                error: result.error ?? 'Unknown error',
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            app.log.warn({ err, projectPath: validated }, 'Memory bootstrap failed (non-blocking)');
+            if (userId && opts.socketManager) {
+              opts.socketManager.emitToUser(userId, 'index:failed', {
+                projectPath: validated,
+                error: err instanceof Error ? err.message : 'Bootstrap failed',
+              });
+            }
+          });
+      }
+
       return { ok: true, governanceReport: report };
     } catch (err) {
       reply.status(500);

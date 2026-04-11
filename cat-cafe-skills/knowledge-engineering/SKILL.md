@@ -62,8 +62,7 @@ triggers:
 ### 路径 2: Autonomous — 猫自行扫描现有文档
 
 - **适合**：已有一定文档基础、只想快速让猫理解项目、不需要文档改善建议
-- **当前能力**：猫读取项目中已有的 `docs/`、`README.md`、manifest 等文件，尽力理解项目。如果项目已有 `docs/` + frontmatter 结构（场景 A），CatCafeScanner 可直接索引
-- **未来增强**（Phase A）：`GenericRepoScanner` 将支持自动扫描任意仓库结构，目前尚未实现
+- **当前能力**：猫读取项目中已有的 `docs/`、`README.md`、manifest 等文件，尽力理解项目。`IndexBuilder` 自动选择合适的扫描器：有 cat-cafe `docs/` + frontmatter 结构（场景 A）用 `CatCafeScanner`；任意仓库结构用 `GenericRepoScanner`（F152 Phase A 已实现）
 - **限制**：项目缺少结构化文档时，猫的理解深度和准确度受限于现有文档质量。如果扫描后发现理解不足，建议切换到 Guided 路径
 
 ### 向用户说明的要点

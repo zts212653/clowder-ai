@@ -280,4 +280,76 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.ok(profile);
     assert.equal(profile.apiKey, undefined, 'env fallback retired: no apiKey without stored credential');
   });
+
+  // ── Deterministic runtime resolution (502 regression) ──
+
+  it('resolveAnthropicRuntimeProfile uses deterministic binding, not discovery chain', async () => {
+    const { resolveAnthropicRuntimeProfile } = await import(
+      `../dist/config/account-resolver.js?t=${Date.now()}-hijack1`
+    );
+    // Setup: 'claude' OAuth (subscription) + 'installer-anthropic' with fake API key
+    // This simulates the 502 scenario: discovery chain would prefer installer-anthropic
+    await writeCatalog({
+      claude: { authType: 'oauth', models: ['claude-opus-4-6'] },
+      'installer-anthropic': { authType: 'api_key', displayName: 'Installer Anthropic' },
+    });
+    await writeCredentials({ 'installer-anthropic': { apiKey: 'sk-fake-installer-key' } });
+
+    const profile = resolveAnthropicRuntimeProfile(projectRoot);
+    // Must use deterministic 'claude' binding, NOT get hijacked by installer-anthropic
+    assert.equal(profile.id, 'claude', 'runtime must use deterministic claude binding, not discovery');
+    assert.equal(profile.mode, 'subscription', 'must be subscription mode (OAuth)');
+    assert.equal(profile.apiKey, undefined, 'must NOT pick up installer-anthropic fake key');
+  });
+
+  it('resolveAnthropicRuntimeProfile accepts explicit preferredAccountRef override', async () => {
+    const { resolveAnthropicRuntimeProfile } = await import(
+      `../dist/config/account-resolver.js?t=${Date.now()}-hijack2`
+    );
+    await writeCatalog({
+      claude: { authType: 'oauth' },
+      'my-proxy': { authType: 'api_key', baseUrl: 'https://proxy.example.com' },
+    });
+    await writeCredentials({ 'my-proxy': { apiKey: 'sk-proxy-key' } });
+
+    // Caller can explicitly override the account — this is deterministic, not discovery
+    const profile = resolveAnthropicRuntimeProfile(projectRoot, 'my-proxy');
+    assert.equal(profile.id, 'my-proxy');
+    assert.equal(profile.mode, 'api_key');
+    assert.equal(profile.apiKey, 'sk-proxy-key');
+    assert.equal(profile.baseUrl, 'https://proxy.example.com');
+  });
+
+  it('resolveAnthropicRuntimeProfile does NOT fall back to installer when builtin_anthropic alias exists', async () => {
+    const { resolveAnthropicRuntimeProfile } = await import(
+      `../dist/config/account-resolver.js?t=${Date.now()}-builtin-alias`
+    );
+    // builtin_anthropic is a valid Anthropic builtin alias — must NOT fall through to installer
+    await writeCatalog({
+      builtin_anthropic: { authType: 'oauth' },
+      'installer-anthropic': { authType: 'api_key', displayName: 'Installer Anthropic' },
+    });
+    await writeCredentials({ 'installer-anthropic': { apiKey: 'sk-should-not-use' } });
+
+    const profile = resolveAnthropicRuntimeProfile(projectRoot);
+    assert.equal(profile.mode, 'subscription', 'builtin_anthropic alias must resolve as subscription');
+    assert.equal(profile.apiKey, undefined, 'must NOT pick up installer key when builtin alias exists');
+  });
+
+  it('resolveAnthropicRuntimeProfile falls back to installer-anthropic when no builtin claude exists', async () => {
+    const { resolveAnthropicRuntimeProfile } = await import(
+      `../dist/config/account-resolver.js?t=${Date.now()}-installer-only`
+    );
+    // Installer-only setup: no 'claude' in catalog, only installer-anthropic
+    await writeCatalog({
+      'installer-anthropic': { authType: 'api_key', displayName: 'Installer Anthropic' },
+    });
+    await writeCredentials({ 'installer-anthropic': { apiKey: 'sk-real-installer-key' } });
+
+    const profile = resolveAnthropicRuntimeProfile(projectRoot);
+    // Must find installer-anthropic via controlled fallback (not discovery chain)
+    assert.equal(profile.id, 'installer-anthropic', 'installer-only: must fall back to installer-anthropic');
+    assert.equal(profile.mode, 'api_key');
+    assert.equal(profile.apiKey, 'sk-real-installer-key');
+  });
 });

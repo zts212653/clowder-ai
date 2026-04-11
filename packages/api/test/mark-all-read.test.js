@@ -83,7 +83,8 @@ describe('POST /api/threads/read/mark-all', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/threads/read/mark-all?userId=alice',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -104,10 +105,14 @@ describe('POST /api/threads/read/mark-all', () => {
     });
 
     // First call
-    await app.inject({ method: 'POST', url: '/api/threads/read/mark-all?userId=alice' });
+    await app.inject({ method: 'POST', url: '/api/threads/read/mark-all', headers: { 'x-cat-cafe-user': 'alice' } });
 
     // Second call — should be no-op
-    const res = await app.inject({ method: 'POST', url: '/api/threads/read/mark-all?userId=alice' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
     const body = JSON.parse(res.body);
     assert.equal(body.advancedCount, 0);
   });
@@ -117,7 +122,8 @@ describe('POST /api/threads/read/mark-all', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/threads/read/mark-all?userId=alice',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -135,7 +141,8 @@ describe('POST /api/threads/read/mark-all', () => {
 
     const res = await noReadApp.inject({
       method: 'POST',
-      url: '/api/threads/read/mark-all?userId=alice',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 501);
     await noReadApp.close();

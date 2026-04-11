@@ -1079,7 +1079,7 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
 
     assert.equal(deliverCalls.length, 1, 'should have sent missed-window notification');
     assert.equal(deliverCalls[0].threadId, 'thread-abc');
-    assert.equal(deliverCalls[0].catId, 'opus');
+    assert.equal(deliverCalls[0].catId, 'system');
     assert.equal(deliverCalls[0].userId, 'user-42');
     assert.ok(deliverCalls[0].content.includes('天气查询'), 'notification should include task label');
     assert.ok(deliverCalls[0].content.includes('错过'), 'notification should mention missed window');

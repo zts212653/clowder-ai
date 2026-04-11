@@ -11,6 +11,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const log = createModuleLogger('routes/votes');
 
@@ -41,9 +42,8 @@ const castVoteSchema = z.object({
   option: z.string().min(1).max(100),
 });
 
-function resolveUserId(request: { headers: Record<string, string | string[] | undefined> }): string {
-  const header = request.headers['x-cat-cafe-user'];
-  return (Array.isArray(header) ? header[0] : header) ?? 'anonymous';
+function resolveUserId(request: import('fastify').FastifyRequest): string {
+  return resolveHeaderUserId(request) ?? 'anonymous';
 }
 
 /** Phase 2: In-memory timeout timers. Cleared on close/auto-close. Lost on restart (acceptable). */

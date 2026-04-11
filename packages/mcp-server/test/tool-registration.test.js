@@ -44,6 +44,10 @@ const EXPECTED_TOOLS = [
   // Direct evidence/reflect tools
   'cat_cafe_search_evidence',
   'cat_cafe_reflect',
+  // F152 Phase C: Distillation tools
+  'cat_cafe_mark_generalizable',
+  'cat_cafe_nominate_for_global',
+  'cat_cafe_review_distillation',
   // Signal Hunter tools (F21 S5) + F091 Study tools
   'signal_list_inbox',
   'signal_get_article',
@@ -108,6 +112,9 @@ const EXPECTED_COLLAB_TOOLS = [
 
 const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_retain_memory_callback',
+  'cat_cafe_mark_generalizable',
+  'cat_cafe_nominate_for_global',
+  'cat_cafe_review_distillation',
   'cat_cafe_search_evidence',
   'cat_cafe_reflect',
   'cat_cafe_list_session_chain',

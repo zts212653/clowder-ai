@@ -61,30 +61,35 @@ created: 2026-04-10
 2. preview-gateway 保留例外（它需要 iframe 嵌入）
 3. 零用户摩擦，纯后端 header
 
-**D-3: 前端 XSS 基线加固** (P1)
+**D-3: 前端 XSS 基线加固** (P1) ✅
 1. 严格 CSP（禁 unsafe-inline JS）
 2. HtmlWidgetBlock 加 DOMPurify sanitization（sandbox 隔离正确但应加防数据外泄）
 3. 富文本/外部 HTML 渲染放入 sandboxed iframe（已部分实现，需审计完整性）
 
-**D-4: Prompt Injection 降权** (P1)
+**D-4: Prompt Injection 降权** (P1) — 需设计讨论，暂不实现
 1. 外部内容（网页、文章、外部 repo）标记为"非可信来源"
 2. 由非可信来源触发的高危操作（命令执行、文件修改、外发消息）需额外确认
 3. 确认 UX：人性化提示（"这条操作来自外部内容"），不堆术语
 4. 研究模式 vs 执行模式分离
 
-**D-5: preview-gateway Origin 校验** (P2)
+> **设计挑战（2026-04-10 讨论）**：Cat Cafe 的猫猫通过 MCP 接入，我们不控制推理过程。
+> Prompt injection 可能在猫猫思考链内部就被执行，绕过所有工具层门禁。
+> 可行路径：MCP server 端做来源追踪（session flag）+ 高危工具分级 + AuthorizationManager 拦截。
+> 但"来源追踪"是新机制，需要单独设计；业界也无银弹。
+> **决定**：D-3/D-5/D-6 先推，D-4 待设计方案成熟后再实施。
+
+**D-5: preview-gateway Origin 校验** (P2) ✅
 1. WS upgrade 路径补 Origin 校验（复用 isOriginAllowed）
 2. 现有 loopback+port 限制保留
 
-**D-6: DNS Rebinding 防御** (P2)
-1. 校验 HTTP `Host` header，只放行 localhost:3003 / 127.0.0.1:3003
-2. 自定义 FRONTEND_URL 场景需配套调整
+**D-6: DNS Rebinding 防御** (P2) ✅
+1. 校验 HTTP `Host` header，allowlist 从 CORS origins + API base URL 动态派生
+2. 自定义 FRONTEND_URL 和 split-host 部署自动覆盖
 
-### Phase C: OfficeClaw 修复（Phase D 完成后）
+### ~~Phase C: OfficeClaw 修复~~ → 已拆出
 
-1. 分析 OfficeClaw（我们魔改的 OpenClaw）的 WebSocket 端点（端口 8357、`/ws`、JSON-RPC 协议）安全状况
-2. 参考 Phase A/B/D 的修复模式，适配 OfficeClaw 的协议差异
-3. 向上游提 PR 或在我们的 fork 中修复
+> **2026-04-10 team lead决定**：OfficeClaw 安全加固是"外出务工"，不属于我们家的 feat，拆为独立 feature/任务。
+> 参考 F156 Phase A/B/D 的修复模式适配 OfficeClaw 协议差异。
 
 ## Acceptance Criteria
 
@@ -107,33 +112,31 @@ created: 2026-04-10
 ### Phase B-3（全局 room 收口）
 - [x] AC-B3: `workspace:global` 和 `preview:global` 在多用户模式下需认证后才能加入（带文件路径、worktreeId、preview 端口等元数据）
 
-### Phase D-1（HTTP 身份加固）
-- [ ] AC-D1a: 浏览器请求通过 HttpOnly session cookie 认证，不再接受 userId query param
-- [ ] AC-D1b: 首次打开 Hub 自动完成 session 配对（零配置）
-- [ ] AC-D1c: 写操作统一走 session 校验
+### Phase D-1（HTTP 身份加固） ✅
+- [x] AC-D1a: 浏览器请求通过 HttpOnly session cookie 认证，不再接受 userId query param
+- [x] AC-D1b: 首次打开 Hub 自动完成 session 配对（零配置）
+- [x] AC-D1c: 写操作统一走 session 校验
 
-### Phase D-2（防 Clickjacking）
-- [ ] AC-D2a: API 响应包含 X-Frame-Options: DENY
-- [ ] AC-D2b: API 响应包含 CSP frame-ancestors 'none'
-- [ ] AC-D2c: preview-gateway 保留 iframe 例外
+### Phase D-2（防 Clickjacking） ✅
+- [x] AC-D2a: API 响应包含 X-Frame-Options: DENY
+- [x] AC-D2b: API 响应包含 CSP frame-ancestors 'none'
+- [x] AC-D2c: preview-gateway 保留 iframe 例外
 
-### Phase D-3（前端 XSS 基线）
-- [ ] AC-D3a: HtmlWidgetBlock 加 DOMPurify sanitization
-- [ ] AC-D3b: 严格 CSP 生效（禁 unsafe-inline JS）
+### Phase D-3（前端 XSS 基线） ✅
+- [x] AC-D3a: HtmlWidgetBlock 加 DOMPurify sanitization
+- [x] AC-D3b: CSP 加固（script-src 'self' 'unsafe-inline' + object-src 'none'；nonce-based 为 future work）
 
 ### Phase D-4（Prompt Injection 降权）
 - [ ] AC-D4a: 外部内容来源标记机制
 - [ ] AC-D4b: 高危操作由非可信来源触发时需用户确认
 
-### Phase D-5（preview-gateway Origin）
-- [ ] AC-D5: preview-gateway WS upgrade 校验 Origin header
+### Phase D-5（preview-gateway Origin） ✅
+- [x] AC-D5: preview-gateway WS upgrade + HTTP 校验 Origin header
 
-### Phase D-6（DNS Rebinding）
-- [ ] AC-D6: HTTP 请求校验 Host header，拒绝非 localhost 的 Host
+### Phase D-6（DNS Rebinding） ✅
+- [x] AC-D6: HTTP 请求校验 Host header，allowlist 从 CORS origins + API base URL 动态派生
 
-### Phase C（OfficeClaw）
-- [ ] AC-C1: OfficeClaw WebSocket 端点完成安全评估
-- [ ] AC-C2: 修复方案实施并验证
+### ~~Phase C（OfficeClaw）~~ → 已拆出为独立任务
 
 ## Dependencies
 
@@ -146,7 +149,6 @@ created: 2026-04-10
 |------|------|
 | Origin 校验过严导致合法场景被拦 | 保留 `.env` 配置口子（CORS_ALLOW_PRIVATE_NETWORK）；回归测试覆盖现有连接场景 |
 | 禁止自报 userId 影响现有前端逻辑 | 单用户模式下服务端统一赋 `default-user`，前端不需要改 userId 传递逻辑（只是服务端忽略） |
-| OfficeClaw 协议差异大 | Phase C 独立，不 block Phase A/B 的交付 |
 
 ## Key Decisions
 
@@ -155,3 +157,4 @@ created: 2026-04-10
 | KD-1 | 独立 hotfix，不并入 F077 | P0 漏洞不能等大 feature；hotfix 是 F077 的前置基础设施，不浪费 | 2026-04-10 |
 | KD-2 | 用 `allowRequest` 而非依赖 `cors` 配置 | Socket.IO 的 cors 不管 WebSocket upgrade（官方文档明确）| 2026-04-10 |
 | KD-3 | 先修自家 Hub，验证后再修 OfficeClaw | team lead拍板 | 2026-04-10 |
+| KD-4 | Phase C（OfficeClaw）从 F156 拆出 | team lead："和我们家无关是外出务工的事情"，不污染自家 feat 真相源 | 2026-04-10 |

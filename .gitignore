@@ -67,7 +67,6 @@ npm-debug.log*
 pnpm-debug.log*
 
 # Lockfiles (workspace uses pnpm only)
-package-lock.json
 packages/**/package-lock.json
 
 # Test coverage
@@ -128,12 +127,13 @@ private/
 *.mp4
 *.avi
 *.mkv
+*.wav
+
+# Large source PDFs (external storage preferred)
+docs/discussions/**/sources/*.pdf
 
 # Playwright MCP cache
 .playwright-mcp/
-
-# Local OMX runtime state
-.omx/
 
 # SQLite runtime databases (Hindsight evidence store)
 evidence.sqlite

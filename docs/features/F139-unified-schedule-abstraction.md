@@ -150,6 +150,8 @@ team experience："不建议你这个可配置是编辑到什么 Markdown 文档
 | KD-10 | 任务注册 = 对话驱动，不是 NL 输入框；面板只管展示/管理 | team lead明确指出：W1 猫是 Agent 不是 API，用户在 thread 里和猫说话注册任务。NL 输入框违背愿景 | 2026-03-27 |
 | KD-11 | 对话式注册先做模板化（受支持模板），不做任意 NL→TaskSpec 生成 | Maine Coon(gpt52) 建议：任意生成无审计线、无确认边界、重启丢失。模板化 = Draft/Confirm/Persist/Load 四步 | 2026-03-27 |
 | KD-12 | Phase 重排：3A（对话注册 + 面板最终态）→ 3B（Governance+Pack）。team lead指示：不止血，直接面向最终状态开发 | 动态注册是 Pack 的前置依赖。止血是浪费，一步到位 | 2026-03-27 |
+| KD-13 | once trigger 用 epoch ms（`fireAt`），不用 ISO 字符串 | 零时区歧义，直接 setTimeout 计算；路由层归一化 `delayMs → fireAt` 防重启漂移 | 2026-04-10 |
+| KD-14 | 生命周期通知 sender 使用服务端权威身份（`system`），不用客户端传入的 `createdBy` | Maine Coon(gpt52) P1 发现：`createdBy` 是客户端传入，用作 notification sender 会引入身份冒充路径 | 2026-04-10 |
 
 ## Review Gate
 

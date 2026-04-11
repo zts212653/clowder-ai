@@ -86,6 +86,8 @@ export interface EvidenceItem {
   };
   /** F152 Phase A: provenance tracking for scanner-produced evidence */
   provenance?: Provenance;
+  /** F152 Phase C: null = unmarked, false = project-private, true = candidate for global reflow */
+  generalizable?: boolean;
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
     passageId: string;

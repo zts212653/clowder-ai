@@ -448,6 +448,7 @@ export class ConnectorRouter {
       source,
       mentions: [targetCatId],
       timestamp: storedTimestamp,
+      ...(contentBlocks ? { contentBlocks } : {}),
     });
 
     // 4. Broadcast to WebSocket

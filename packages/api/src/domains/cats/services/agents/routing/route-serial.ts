@@ -683,6 +683,38 @@ export async function* routeSerial(
             } catch {
               /* best-effort */
             }
+            // #1062: User-visible system message when chain would break
+            // (inline action detected but no line-start @ = no routing will happen)
+            if (a2aMentions.length === 0) {
+              try {
+                const targets = inlineHits.map((h) => `@${h.catId}`).join(', ');
+                const hintSource = { connector: 'inline-mention-hint', label: 'Routing hint', icon: 'lightbulb' };
+                const stored = await deps.messageStore.append({
+                  userId: 'system',
+                  catId: null,
+                  threadId,
+                  content: `💡 ${targets} was mentioned but not routed — @ must be on its own line at the start to trigger handoff.`,
+                  mentions: [],
+                  timestamp: Date.now(),
+                  source: hintSource,
+                });
+                // Broadcast so frontend sees it in real-time (same pattern as vote result)
+                if (deps.socketManager) {
+                  deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                    threadId,
+                    message: {
+                      id: stored.id,
+                      type: 'connector',
+                      content: stored.content,
+                      source: hintSource,
+                      timestamp: stored.timestamp,
+                    },
+                  });
+                }
+              } catch {
+                /* best-effort */
+              }
+            }
           }
         }
 
