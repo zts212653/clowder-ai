@@ -214,11 +214,15 @@ There are two types of accounts:
 2. Choose a provider or add a custom one
 3. For built-in providers: select OAuth/subscription mode (no key needed if CLI is authenticated)
 4. For API key providers: enter your API key and (optionally) a custom base URL
-5. Click **Test** to verify connectivity
+5. Click **Save**
 
 **Adding Chinese / third-party providers (Kimi, GLM, MiniMax, Qwen, OpenRouter):**
 
-These providers are configured as API key accounts with a custom base URL. In the **Account Configuration** UI, add a new account, choose the provider, enter your API key, and set the base URL to the provider's OpenAI-compatible endpoint. Select the appropriate protocol and click **Test** to verify connectivity.
+These providers are configured as API key accounts with a custom base URL. In the **Account Configuration** UI, add a new account, choose the provider, enter your API key, and set the base URL to the provider's OpenAI-compatible endpoint. Select the appropriate protocol and click **Save**.
+
+**Example — Alibaba Bailian (Qwen):**
+
+![Provider account configuration for Bailian](docs/setup/setup-provider-bailian.png)
 
 > **Legacy `.env` fallback:** The system still reads `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GOOGLE_API_KEY` from `.env` as a fallback, but this path is deprecated. Use the UI for all new setups.
 
@@ -229,6 +233,8 @@ To add team members (cats) that use specific providers:
 1. Go to **Hub → Member Collaboration → Overview**
 2. Each member can be bound to a provider account from your Account Configuration
 3. Built-in providers support OAuth; third-party providers use API key accounts
+
+![Member bound to Bailian provider](docs/setup/setup-member-binding.png)
 
 ## Optional Features
 

@@ -180,7 +180,8 @@ describe('Thread isolation: messages stay in their thread', () => {
     // Query thread A → only msg from A
     const qA = await app.inject({
       method: 'GET',
-      url: `/api/messages?threadId=${threadA.id}&userId=alice`,
+      url: `/api/messages?threadId=${threadA.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const bodyA = JSON.parse(qA.body);
     assert.equal(bodyA.messages.length, 1);
@@ -189,7 +190,8 @@ describe('Thread isolation: messages stay in their thread', () => {
     // Query thread B → only msg from B
     const qB = await app.inject({
       method: 'GET',
-      url: `/api/messages?threadId=${threadB.id}&userId=alice`,
+      url: `/api/messages?threadId=${threadB.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const bodyB = JSON.parse(qB.body);
     assert.equal(bodyB.messages.length, 1);
@@ -317,7 +319,8 @@ describe('Project-scoped threads: create and list by project', () => {
     // Get all threads to find the resolved projectPath (macOS /tmp → /private/tmp)
     const resAll0 = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const allThreads0 = JSON.parse(resAll0.body).threads;
     const catCafeThread = allThreads0.find((t) => t.title === 'In cat-cafe');
@@ -327,7 +330,8 @@ describe('Project-scoped threads: create and list by project', () => {
     // Query by resolved project path
     const resCatCafe = await app.inject({
       method: 'GET',
-      url: `/api/threads?userId=alice&projectPath=${encodeURIComponent(resolvedPath)}`,
+      url: `/api/threads?projectPath=${encodeURIComponent(resolvedPath)}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const catCafeThreads = JSON.parse(resCatCafe.body).threads;
     assert.equal(catCafeThreads.length, 1);
@@ -337,7 +341,8 @@ describe('Project-scoped threads: create and list by project', () => {
     // Query all (no projectPath filter)
     const resAll = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const allThreads = JSON.parse(resAll.body).threads;
     // Should include all 3 created + default (auto-created by list())
@@ -509,7 +514,8 @@ describe('Default thread isolation: no cross-thread message leak', () => {
     // GET without threadId → server defaults to 'default' thread
     const res = await app.inject({
       method: 'GET',
-      url: '/api/messages?userId=alice',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const data = JSON.parse(res.body);
     assert.equal(data.messages.length, 1, 'Should only return default thread messages');

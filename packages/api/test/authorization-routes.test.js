@@ -300,7 +300,7 @@ describe('POST /api/authorization/respond', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/authorization/respond',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
       payload: {
         requestId: record.requestId,
         granted: true,
@@ -352,14 +352,14 @@ describe('POST /api/authorization/respond', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/authorization/respond',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
       payload: { requestId: 'nonexistent', granted: true, scope: 'once' },
     });
 
     assert.equal(res.statusCode, 404);
   });
 
-  test('returns 401 without x-user-id', async () => {
+  test('returns 401 without identity header', async () => {
     const app = await createApp();
     const res = await app.inject({
       method: 'POST',
@@ -393,7 +393,7 @@ describe('GET /api/authorization/pending', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/authorization/pending',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -422,7 +422,7 @@ describe('GET /api/authorization/pending', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/authorization/pending?threadId=t1',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -481,7 +481,7 @@ describe('Authorization Rules API', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/authorization/rules',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
       payload: {
         catId: 'codex',
         action: 'git_*',
@@ -505,7 +505,7 @@ describe('Authorization Rules API', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/authorization/rules',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -524,7 +524,7 @@ describe('Authorization Rules API', () => {
     const res = await app.inject({
       method: 'DELETE',
       url: `/api/authorization/rules/${rule.id}`,
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -535,7 +535,7 @@ describe('Authorization Rules API', () => {
     const res = await app.inject({
       method: 'DELETE',
       url: '/api/authorization/rules/nonexistent',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 404);
@@ -571,7 +571,7 @@ describe('GET /api/authorization/audit', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/authorization/audit',
-      headers: { 'x-user-id': 'user-1' },
+      headers: { 'x-cat-cafe-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 200);

@@ -2,11 +2,9 @@
  * Unified API client for Clowder AI frontend.
  *
  * - Auto-prepends NEXT_PUBLIC_API_URL
- * - Auto-injects X-Cat-Cafe-User identity header on every request
- * - Replaces scattered raw fetch() calls across hooks/components
+ * - Identity via HttpOnly session cookie (F156 D-1), not header self-reporting
+ * - First call lazily establishes session, subsequent calls reuse the cookie
  */
-
-import { getUserId } from './userId';
 
 function getBrowserLocation(): Location | null {
   if (typeof globalThis !== 'object' || globalThis === null) return null;
@@ -42,18 +40,25 @@ export function resolveApiUrl(): string {
 }
 export const API_URL = resolveApiUrl();
 
+let sessionGate: Promise<void> | null = null;
+
+function ensureSession(): Promise<void> {
+  if (sessionGate) return sessionGate;
+  sessionGate = fetch(`${API_URL}/api/session`, { credentials: 'include' })
+    .then(() => {})
+    .catch(() => {});
+  return sessionGate;
+}
+
 /**
- * Fetch wrapper that injects identity header.
+ * Fetch wrapper with session-cookie identity.
  * @param path - API path starting with '/' (e.g. '/api/messages')
  * @param init - Standard RequestInit options
  */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers);
-  headers.set('X-Cat-Cafe-User', getUserId());
+  await ensureSession();
   return fetch(`${API_URL}${path}`, {
     ...init,
-    headers,
-    // Cloudflare Access: 跨子域名请求需要 credentials 才能带 CF_Authorization cookie
-    credentials: API_URL.includes('clowder-ai.com') ? 'include' : (init?.credentials ?? 'same-origin'),
+    credentials: 'include',
   });
 }

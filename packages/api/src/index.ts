@@ -7,12 +7,13 @@ import { join } from 'node:path';
 import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
+import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
 import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
-import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
+import { resolveEffectiveAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import {
   bootstrapDefaultCatCatalog,
@@ -53,7 +54,6 @@ import {
   MemoryGovernanceStore,
   OpenCodeAgentService,
 } from './domains/cats/services/index.js';
-
 import { initPushNotificationService } from './domains/cats/services/push/PushNotificationService.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
@@ -106,6 +106,8 @@ import {
   stopGithubReviewWatcher,
 } from './infrastructure/email/index.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
+import { securityHeadersPlugin } from './infrastructure/security-headers.js';
+import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
@@ -126,6 +128,7 @@ import {
   configRoutes,
   connectorHubRoutes,
   connectorMediaRoutes,
+  distillationRoutes,
   evidenceRoutes,
   executionDigestRoutes,
   exportRoutes,
@@ -143,6 +146,7 @@ import {
   mkdirRoute,
   packsRoutes,
   projectSetupRoute,
+  projectsBootstrapRoutes,
   projectsRoutes,
   pushRoutes,
   queueRoutes,
@@ -215,6 +219,14 @@ async function main(): Promise<void> {
     origin: resolveFrontendCorsOrigins(process.env, app.log),
     credentials: true,
   });
+
+  // F156 D-2: Anti-clickjacking headers (X-Frame-Options + CSP frame-ancestors)
+  await app.register(securityHeadersPlugin);
+
+  // F156 D-1: Cookie parsing + session-based identity (replaces userId self-reporting)
+  await app.register(fastifyCookie);
+  await app.register(sessionAuthPlugin);
+  await app.register(sessionRoute);
 
   // WebSocket support (F089 terminal)
   await app.register(fastifyWebsocket);
@@ -362,8 +374,8 @@ async function main(): Promise<void> {
         }
         const catConfig = catRegistry.tryGet(catId)?.config;
         if (catConfig?.clientId === 'anthropic' || catConfig?.clientId === 'opencode') {
-          const boundAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
-          const runtime = resolveForClient(projectRoot, catConfig.clientId, boundAccountRef);
+          const effectiveAccountRef = resolveEffectiveAccountRefForCat(projectRoot, catId, catConfig);
+          const runtime = resolveForClient(projectRoot, catConfig.clientId, effectiveAccountRef);
           if (!runtime?.apiKey) return null;
           return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
         }
@@ -442,6 +454,27 @@ async function main(): Promise<void> {
     },
   });
   app.log.info('[api] F102: SQLite memory services initialized');
+
+  // F152 Phase B: Expedition Bootstrap — state manager + service
+  const { IndexStateManager } = await import('./domains/memory/IndexStateManager.js');
+  const { ExpeditionBootstrapService } = await import('./domains/memory/ExpeditionBootstrapService.js');
+  const indexStateManager = new IndexStateManager(memoryServices.store.getDb());
+  const { execFileSync } = await import('node:child_process');
+  const expeditionBootstrapService = new ExpeditionBootstrapService(indexStateManager, {
+    rebuildIndex: async (projectPath: string) => {
+      const startMs = Date.now();
+      const { buildStructuralSummary } = await import('./domains/memory/ExpeditionBootstrapService.js');
+      const summary = buildStructuralSummary(projectPath);
+      return { docsIndexed: summary.docsList.length, durationMs: Date.now() - startMs };
+    },
+    getFingerprint: (projectPath: string) => {
+      try {
+        return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectPath, encoding: 'utf-8' }).trim();
+      } catch {
+        return '';
+      }
+    },
+  });
 
   // F102 D-2: Auto-rebuild evidence index on startup (AC-D4)
   if (memoryServices.indexBuilder) {
@@ -564,9 +597,9 @@ async function main(): Promise<void> {
           if (process.env.F102_API_BASE && process.env.F102_API_KEY) {
             return { mode: 'api_key' as const, baseUrl: process.env.F102_API_BASE, apiKey: process.env.F102_API_KEY };
           }
-          // Priority 2: resolve via full discovery chain (#340: system callers use resolveForClient)
-          const profile = resolveForClient(process.cwd(), 'anthropic');
-          const apiKey = profile?.apiKey;
+          // Priority 2: deterministic binding with installer-only fallback (502 regression)
+          const runtimeProfile = resolveAnthropicRuntimeProfile(process.cwd());
+          const apiKey = runtimeProfile.apiKey;
           if (!apiKey) return null;
           const proxyPort = process.env.ANTHROPIC_PROXY_PORT || '9877';
           // Read first upstream slug from proxy-upstreams.json
@@ -1277,7 +1310,15 @@ async function main(): Promise<void> {
   await app.register(projectsRoutes);
   await app.register(mkdirRoute);
   await app.register(governanceStatusRoute);
-  await app.register(projectSetupRoute);
+  await app.register(projectSetupRoute, {
+    memoryBootstrapService: expeditionBootstrapService as { bootstrap: (p: string, o?: unknown) => Promise<unknown> },
+    socketManager: socketManager ?? undefined,
+  });
+  await app.register(projectsBootstrapRoutes, {
+    stateManager: indexStateManager,
+    bootstrapService: expeditionBootstrapService,
+    socketManager: socketManager!,
+  });
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(configRoutes);
   await app.register(configSecretsRoutes);
@@ -1349,6 +1390,17 @@ async function main(): Promise<void> {
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
   });
+
+  // F152 Phase C: Distillation routes (global lesson reflow)
+  if (memoryServices.globalStore) {
+    const { DistillationService } = await import('./domains/memory/distillation-service.js');
+    const distillationService = new DistillationService(memoryServices.store, memoryServices.globalStore);
+    await distillationService.initialize();
+    await app.register(distillationRoutes, {
+      evidenceStore: memoryServices.evidenceStore,
+      distillationService,
+    });
+  }
 
   // F129: Pack system routes (reuse shared packStore from above)
   {

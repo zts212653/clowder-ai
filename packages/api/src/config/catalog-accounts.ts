@@ -220,7 +220,7 @@ function migrateLegacyFrom(root: string, projectRoot?: string): void {
       ...(models ? { models } : {}),
     };
   }
-  const { merged } = mergeIntoGlobal(accounts, projectRoot);
+  const { merged } = mergeIntoGlobal(accounts, projectRoot, { skipConflicts: true });
   const mergedSet = new Set(merged);
   // Read global state after merge for retry-safe credential import
   const globalAfterMerge = readAllGlobal(projectRoot);
@@ -404,8 +404,6 @@ function migrateHomedirCredentials(projectRoot?: string): void {
         targetCreds = {};
       }
     }
-    // Only fill gaps: preserve user-set target credentials, don't overwrite with stale homedir.
-    // Priority is ensured by running this BEFORE legacy secrets migration in ensureMigrated().
     let imported = 0;
     for (const [ref, entry] of Object.entries(homeCreds)) {
       if (typeof entry === 'object' && entry !== null && !(ref in targetCreds)) {
@@ -434,7 +432,6 @@ function migrateHomedirCredentials(projectRoot?: string): void {
 function ensureMigrated(projectRoot: string): void {
   // Homedir credentials.json FIRST (skip-existing): fills target before legacy
   // secrets run, so legacy's `id in existing` check naturally defers to homedir.
-  // Priority: user-set target > homedir credentials.json > legacy secrets.
   migrateHomedirCredentials(projectRoot);
   migrateLegacyProviderProfiles(projectRoot);
   migrateProjectLegacyProviderProfiles(projectRoot);

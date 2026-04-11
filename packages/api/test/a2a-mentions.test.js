@@ -538,6 +538,57 @@ describe('#417: detectInlineActionMentions', () => {
     assert.ok(catIds.includes('gemini'), 'gemini should be detected from line 1');
     assert.ok(catIds.includes('codex'), 'codex should be detected from line 2 even though gemini already seen');
   });
+
+  // --- Codex review P1: line-start @ + inline @ on same line ---
+
+  it('P1-fix: "@codex and @gemini review" — codex routed, gemini should still get feedback', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '@codex and @gemini review this patch';
+    // codex is already routed via line-start, gemini is inline with action word
+    const result = detectInlineActionMentions(text, 'opus', ['codex']);
+    assert.equal(result.length, 1, 'should detect gemini as inline action mention');
+    assert.equal(result[0].catId, 'gemini');
+  });
+
+  it('P1-fix: pure line-start @codex with no other mentions — no false positive', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '@codex 请 review 一下这个 patch';
+    const result = detectInlineActionMentions(text, 'opus', ['codex']);
+    assert.deepEqual(result, [], 'codex is already routed, no other mentions');
+  });
+});
+
+describe('#1063: detectInlineActionMentions → ThreadStore integration', () => {
+  it('writes inline_action feedback to ThreadStore and consumes it one-shot', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Integration test');
+    const catId = 'opus';
+
+    // Simulate: cat wrote "Ready for @codex review" inline
+    const inlineHits = detectInlineActionMentions('Done. Ready for @codex review', catId, []);
+    assert.equal(inlineHits.length, 1);
+    assert.equal(inlineHits[0].catId, 'codex');
+
+    // Write feedback (mimics route-serial.ts wiring)
+    await store.setMentionRoutingFeedback(thread.id, catId, {
+      sourceTimestamp: Date.now(),
+      items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' })),
+    });
+
+    // Consume — should return the feedback (one-shot)
+    const feedback = await store.consumeMentionRoutingFeedback(thread.id, catId);
+    assert.ok(feedback, 'feedback should exist');
+    assert.equal(feedback.items.length, 1);
+    assert.equal(feedback.items[0].targetCatId, 'codex');
+    assert.equal(feedback.items[0].reason, 'inline_action');
+
+    // Consume again — should be empty (one-shot consumed)
+    const second = await store.consumeMentionRoutingFeedback(thread.id, catId);
+    assert.equal(second, null, 'feedback should be consumed after first read');
+  });
 });
 
 describe('SystemPromptBuilder A2A injection', () => {

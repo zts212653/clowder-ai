@@ -8,8 +8,9 @@ created: 2026-03-07
 
 # F076: Mission Hub 跨项目作战面板 + 甲方项目治理引擎
 
-> **Status**: phase-2-done | **Owner**: Ragdoll
+> **Status**: done (superseded by F152) | **Owner**: Ragdoll | **Completed**: 2026-04-10
 > **Evolved from**: F049（Mission Control MVP）+ F058（Mission Hub 增强）+ F070（Portable Governance）
+> **Superseded by**: F152（Expedition Memory — 外部项目记忆冷启动 + 经验回流）
 
 ## Why
 

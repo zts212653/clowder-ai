@@ -714,7 +714,7 @@ export async function handleBootcampEnvCheck(input: { threadId: string }): Promi
   return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId });
 }
 
-// ============ Thread Cats Discovery (TD #408) ============
+// ============ Thread Cats Discovery ============
 
 export const getThreadCatsInputSchema = {};
 

@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import { API_URL } from '@/utils/api-client';
-import { getUserId } from '@/utils/userId';
+
 import '@xterm/xterm/css/xterm.css';
 
 interface AgentPaneViewerProps {
@@ -38,9 +38,8 @@ export function AgentPaneViewer({ worktreeId, paneId, onBack }: AgentPaneViewerP
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const apiUrl = new URL(API_URL);
-    const userId = encodeURIComponent(getUserId());
     const ws = new WebSocket(
-      `${wsProtocol}//${apiUrl.host}/api/terminal/agent-panes/${paneId}/ws?worktreeId=${encodeURIComponent(worktreeId)}&userId=${userId}`,
+      `${wsProtocol}//${apiUrl.host}/api/terminal/agent-panes/${paneId}/ws?worktreeId=${encodeURIComponent(worktreeId)}`,
     );
 
     ws.onopen = () => {

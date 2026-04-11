@@ -97,8 +97,8 @@ describe('F156 Phase B-1: Terminal WS Origin Security', () => {
       'x-cat-cafe-user': 'default-user',
     });
     assert.strictEqual(result.upgraded, true, 'Legitimate origin should upgrade');
-    // Handler closes with 4004 (no session) — proves Origin was accepted
-    assert.strictEqual(result.closeCode, 4004, 'Handler should close 4004 (no session)');
+    // D-1: handler closes 4001 (no session cookie) — proves Origin was accepted
+    assert.strictEqual(result.closeCode, 4001, 'Handler should close 4001 (session required)');
   });
 
   it('AC-B1a: allows WS from 127.0.0.1 loopback', async () => {
@@ -127,14 +127,11 @@ describe('F156 Phase B-1: Terminal WS Origin Security', () => {
 
   // --- AC-B1b: Identity hardening ---
 
-  it('AC-B1b: WS succeeds without userId (server determines identity)', async () => {
-    // No X-Cat-Cafe-User header, no ?userId query param
-    // After fix: WS identity is server-determined, preHandler skips for WS
+  it('AC-B1b: WS without session cookie is rejected (D-1 trust boundary)', async () => {
     const result = await attemptWsUpgrade(port, '/api/terminal/sessions/test/ws', {
       origin: 'http://localhost:3003',
-      // No identity at all
     });
-    assert.strictEqual(result.upgraded, true, 'WS must not require client identity');
-    assert.strictEqual(result.closeCode, 4004, 'Handler uses default-user, no session found');
+    assert.strictEqual(result.upgraded, true, 'WS upgrade itself succeeds (origin OK)');
+    assert.strictEqual(result.closeCode, 4001, 'Handler rejects: session required');
   });
 });

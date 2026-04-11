@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CatConfig } from '@cat-cafe/shared';
-import { builtinAccountIdForClient, resolveBuiltinClientForProvider } from './account-resolver.js';
+import { builtinAccountIdForClient, resolveBuiltinClientForProvider, resolveForClient } from './account-resolver.js';
 import { loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 
@@ -39,4 +39,24 @@ export function resolveBoundAccountRefForCat(
   }
 
   return explicitAccountRef;
+}
+
+export function resolveEffectiveAccountRefForCat(
+  projectRoot: string,
+  catId: string,
+  catConfig: CatConfig | null | undefined,
+): string | undefined {
+  const explicitAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
+  if (explicitAccountRef !== undefined) return explicitAccountRef;
+  if (!catConfig) return undefined;
+
+  const fallbackAccountRef = trimBinding(catConfig.accountRef);
+  if (!isSeedCat(projectRoot, catId)) return fallbackAccountRef;
+
+  const builtinClient = resolveBuiltinClientForProvider(catConfig.clientId);
+  if (!builtinClient) return fallbackAccountRef;
+
+  return (
+    resolveForClient(projectRoot, builtinClient, builtinAccountIdForClient(builtinClient))?.id ?? fallbackAccountRef
+  );
 }

@@ -476,11 +476,11 @@ describe('POST /api/connector/weixin/disconnect', () => {
 });
 
 describe('GET /api/connector/hub-threads', () => {
-  it('returns 401 when only a spoofed userId query param is provided', async () => {
+  it('returns 401 without trusted identity header', async () => {
     const { app } = await buildApp();
     const res = await app.inject({
       method: 'GET',
-      url: '/api/connector/hub-threads?userId=spoofed',
+      url: '/api/connector/hub-threads',
     });
     assert.equal(res.statusCode, 401);
     assert.match(JSON.parse(res.body).error, /Identity required/i);
@@ -490,7 +490,7 @@ describe('GET /api/connector/hub-threads', () => {
     const { app, listCalls } = await buildApp();
     const res = await app.inject({
       method: 'GET',
-      url: '/api/connector/hub-threads?userId=spoofed',
+      url: '/api/connector/hub-threads',
       headers: AUTH_HEADERS,
     });
 

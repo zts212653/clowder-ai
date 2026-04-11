@@ -15,7 +15,7 @@ import type { CreateAuditInput, IAuthorizationAuditStore } from '../ports/Author
 import { generateSortableId } from '../ports/MessageStore.js';
 import { AuthAuditKeys } from '../redis-keys/authorization-keys.js';
 
-const DEFAULT_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 const DEFAULT_MAX = 5000;
 
 export class RedisAuthorizationAuditStore implements IAuthorizationAuditStore {

@@ -15,6 +15,12 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
   let redis;
   let store;
   let connected = false;
+  const threadDetailKey = (threadId) => `thread:${threadId}`;
+  const threadParticipantsKey = (threadId) => `thread:${threadId}:participants`;
+  const threadActivityKey = (threadId) => `thread:${threadId}:activity`;
+  const userListKey = (userId) => `threads:user:${userId}`;
+  const messageDetailKey = (messageId) => `msg:${messageId}`;
+  const messageThreadKey = (threadId) => `msg:thread:${threadId}`;
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'RedisThreadStore');
@@ -38,14 +44,14 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
 
   after(async () => {
     if (redis && connected) {
-      await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*']);
+      await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*', 'msg:*']);
       await redis.quit();
     }
   });
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
-    await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*']);
+    await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*', 'msg:*']);
   });
 
   it('create() stores thread and returns it', async () => {
@@ -253,6 +259,172 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
     // (no orphaned activity data should exist)
     activity = await store.getParticipantsWithActivity(threadId);
     assert.equal(activity.length, 0, 'Should not have orphaned activity data for deleted thread');
+  });
+
+  it('get() self-heals orphaned thread metadata from surviving message timeline', async () => {
+    const recoveredTitleSource = 'F100 Self-Evolution discussion kickoff';
+    const recoveredTitle =
+      recoveredTitleSource.length > 30 ? `${recoveredTitleSource.slice(0, 30)}...` : recoveredTitleSource;
+    const threadId = 'thread_recover_test';
+    const createdAt = 1710000000000;
+    const lastActiveAt = createdAt + 5000;
+    const firstMessageId = 'msg_recover_first';
+    const lastMessageId = 'msg_recover_last';
+
+    await redis.hset(threadDetailKey(threadId), {
+      id: threadId,
+      projectPath: 'default',
+      title: 'Original Title',
+      createdBy: 'user1',
+      lastActiveAt: String(lastActiveAt),
+      createdAt: String(createdAt),
+      pinned: 'false',
+      pinnedAt: '0',
+      favorited: 'false',
+      favoritedAt: '0',
+      thinkingMode: 'debug',
+    });
+    await redis.zadd(userListKey('user1'), String(lastActiveAt), threadId);
+    await redis.hset(messageDetailKey(firstMessageId), {
+      id: firstMessageId,
+      threadId,
+      userId: 'user1',
+      catId: '',
+      content: recoveredTitleSource,
+      mentions: '[]',
+      timestamp: String(createdAt),
+    });
+    await redis.hset(messageDetailKey(lastMessageId), {
+      id: lastMessageId,
+      threadId,
+      userId: 'user1',
+      catId: 'opus',
+      content: 'Final reply',
+      mentions: '[]',
+      timestamp: String(lastActiveAt),
+    });
+    await redis.zadd(messageThreadKey(threadId), String(createdAt), firstMessageId);
+    await redis.zadd(messageThreadKey(threadId), String(lastActiveAt), lastMessageId);
+    await redis.hset(threadActivityKey(threadId), {
+      'opus:lastMessageAt': String(lastActiveAt),
+      'opus:messageCount': '1',
+      'opus:healthy': '1',
+    });
+
+    await redis.del(threadDetailKey(threadId));
+    await redis.del(threadParticipantsKey(threadId));
+
+    const recovered = await store.get(threadId);
+
+    assert.ok(recovered);
+    assert.equal(recovered?.id, threadId);
+    assert.equal(recovered?.title, recoveredTitle);
+    assert.equal(recovered?.createdBy, 'user1');
+    assert.equal(recovered?.createdAt, createdAt);
+    assert.equal(recovered?.lastActiveAt, lastActiveAt);
+    assert.deepEqual(recovered?.participants, ['opus']);
+
+    const persisted = await redis.hgetall(threadDetailKey(threadId));
+    assert.equal(persisted.id, threadId);
+    assert.equal(persisted.title, recoveredTitle);
+    assert.equal(await redis.smembers(threadParticipantsKey(threadId)).then((members) => members[0]), 'opus');
+    assert.notEqual(await redis.zscore(userListKey('user1'), threadId), null);
+  });
+
+  it('delete() leaves tombstone that prevents self-healing resurrection', async () => {
+    const thread = await store.create('user1', 'Will be deleted');
+    const threadId = thread.id;
+
+    // Add a message so self-healing would have data to recover from
+    const msgId = 'msg-tombstone-test';
+    await redis.hset(messageDetailKey(msgId), {
+      id: msgId,
+      threadId,
+      userId: 'user1',
+      catId: 'opus',
+      content: 'Hello',
+      mentions: '[]',
+      timestamp: String(Date.now()),
+    });
+    await redis.zadd(messageThreadKey(threadId), String(Date.now()), msgId);
+
+    // Hard-delete the thread
+    const deleted = await store.delete(threadId);
+    assert.equal(deleted, true);
+
+    // get() should NOT resurrect the deleted thread
+    const result = await store.get(threadId);
+    assert.equal(result, null, 'Tombstone should prevent self-healing resurrection');
+
+    // Tombstone key should exist
+    assert.equal(await redis.get(`thread:${threadId}:tombstone`), '1');
+  });
+
+  it('delete() on nonexistent thread does not write tombstone (phantom ID)', async () => {
+    const phantomId = 'thread_phantom_ghost';
+
+    // delete() on a thread that never existed should return false
+    const deleted = await store.delete(phantomId);
+    assert.equal(deleted, false);
+
+    // No tombstone should exist — self-healing must remain possible
+    assert.equal(await redis.get(`thread:${phantomId}:tombstone`), null, 'Phantom delete must not write tombstone');
+
+    // Verify self-healing still works for this ID if messages appear later
+    const msgId = 'msg-phantom-test';
+    await redis.hset(messageDetailKey(msgId), {
+      id: msgId,
+      threadId: phantomId,
+      userId: 'user1',
+      catId: 'opus',
+      content: 'Post-phantom message',
+      mentions: '[]',
+      timestamp: String(Date.now()),
+    });
+    await redis.zadd(messageThreadKey(phantomId), String(Date.now()), msgId);
+
+    const recovered = await store.get(phantomId);
+    assert.ok(recovered, 'Self-healing should work after phantom delete');
+    assert.equal(recovered?.id, phantomId);
+  });
+
+  it('persistent mode clears legacy TTL from live thread keys on activity updates', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Legacy TTL');
+
+    await expiringStore.addParticipants(thread.id, ['opus']);
+    await expiringStore.updateParticipantActivity(thread.id, 'opus');
+
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+    assert.ok((await redis.ttl(userListKey('user1'))) > 0);
+    assert.ok((await redis.ttl(threadParticipantsKey(thread.id))) > 0);
+    assert.ok((await redis.ttl(threadActivityKey(thread.id))) > 0);
+
+    await persistentStore.updateLastActive(thread.id);
+    await persistentStore.updateParticipantActivity(thread.id, 'opus');
+
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+    assert.equal(await redis.ttl(userListKey('user1')), -1);
+    assert.equal(await redis.ttl(threadParticipantsKey(thread.id)), -1);
+    assert.equal(await redis.ttl(threadActivityKey(thread.id)), -1);
+  });
+
+  it('persistent mode also clears legacy TTL on detail-only mutations', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Legacy Detail TTL');
+
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateTitle(thread.id, 'Recovered Title');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+
+    await expiringStore.updateMentionActionabilityMode(thread.id, 'relaxed');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMentionActionabilityMode(thread.id, 'strict');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
   });
 });
 

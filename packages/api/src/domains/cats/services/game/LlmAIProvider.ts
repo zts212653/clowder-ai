@@ -12,7 +12,12 @@
  */
 
 import { catRegistry } from '@cat-cafe/shared';
-import { resolveForClient } from '../../../../config/account-resolver.js';
+import {
+  type BuiltinAccountClient,
+  builtinAccountIdForClient,
+  resolveForClient,
+} from '../../../../config/account-resolver.js';
+import { resolveEffectiveAccountRefForCat } from '../../../../config/cat-account-binding.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import type { AIActionResponse, AIProvider } from '../game/werewolf/WerewolfAIPlayer.js';
 
@@ -25,8 +30,10 @@ interface LlmCallResult {
 export class LlmAIProvider implements AIProvider {
   private readonly model: string;
   private readonly provider: string;
+  private readonly catId: string;
 
   constructor(catId: string) {
+    this.catId = catId;
     this.model = getCatModel(catId);
     const entry = catRegistry.tryGet(catId);
     this.provider = entry?.config.clientId ?? 'anthropic';
@@ -65,9 +72,13 @@ export class LlmAIProvider implements AIProvider {
     }
   }
 
-  /** Resolve API key via full account discovery chain (well-known → builtin_ → installer-). */
-  private resolveApiKey(client: 'anthropic' | 'openai' | 'google' | 'kimi'): string | undefined {
-    const profile = resolveForClient(process.cwd(), client);
+  /** Resolve API key via deterministic binding — never discovery chain (502 regression). */
+  private resolveApiKey(client: BuiltinAccountClient): string | undefined {
+    const entry = catRegistry.tryGet(this.catId);
+    const accountRef =
+      (entry ? resolveEffectiveAccountRefForCat(process.cwd(), this.catId, entry.config) : undefined) ??
+      builtinAccountIdForClient(client);
+    const profile = resolveForClient(process.cwd(), client, accountRef);
     return profile?.apiKey;
   }
 

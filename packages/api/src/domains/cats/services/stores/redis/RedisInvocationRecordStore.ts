@@ -21,7 +21,7 @@ import type {
 } from '../ports/InvocationRecordStore.js';
 import { InvocationKeys } from '../redis-keys/invocation-keys.js';
 
-const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 const IDEMPOTENCY_TTL_SECONDS = 300; // 5 minutes
 
 /**
@@ -42,7 +42,7 @@ redis.call('HSET', KEYS[2],
   'idempotencyKey', ARGV[6], 'status', 'queued',
   'userMessageId', '', 'error', '',
   'createdAt', ARGV[7], 'updatedAt', ARGV[7])
-redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 return {'created', ARGV[1]}
 `;
 

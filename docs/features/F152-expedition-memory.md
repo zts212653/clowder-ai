@@ -173,36 +173,44 @@ interface ScannedEvidence {
 - [x] AC-A5: 大仓库（>10k 文件）扫描完成时间 < 60 秒（只扫 authoritative + derived）
 - [x] AC-A6: 检索契约：`IEvidenceStore.search()` 支持 `provenance_tier` filter；authoritative 结果默认 boost 排序权重（三层不混成平面）
 
-### Phase B（Expedition Bootstrap Orchestrator）
-- [ ] AC-B1: 猫进入一个没有 `evidence.sqlite` 的外部项目时，自动触发 bootstrap
-- [ ] AC-B2: Bootstrap 产出"项目概况摘要"（技术栈、目录结构、核心模块、已有文档列表）
-- [ ] AC-B3: 已有 `evidence.sqlite` 的项目不重复 bootstrap（幂等性）
-- [ ] AC-B4: Bootstrap 挂载到 F070 的治理 bootstrap 链路（`projects-setup` capability orchestrator）
-- [ ] AC-B5: 幂等条件基于 repo HEAD hash + 上次扫描时间（fingerprint/freshness），不是单纯 db 存在检测
-- [ ] AC-B6: Bootstrap 摘要先走结构化提取，不强依赖 LLM 额度
+### Phase B（Expedition Bootstrap Orchestrator）✅
+- [x] AC-B1: 猫进入一个没有 `evidence.sqlite` 的外部项目时，自动触发 bootstrap
+- [x] AC-B2: Bootstrap 产出"项目概况摘要"（技术栈、目录结构、核心模块、已有文档列表）
+- [x] AC-B3: 已有 `evidence.sqlite` 的项目不重复 bootstrap（幂等性）
+- [x] AC-B4: Bootstrap 挂载到 F070 的治理 bootstrap 链路（`projects-setup` capability orchestrator）
+- [x] AC-B5: 幂等条件基于 repo HEAD hash + 上次扫描时间（fingerprint/freshness），不是单纯 db 存在检测
+- [x] AC-B6: Bootstrap 摘要先走结构化提取，不强依赖 LLM 额度
+- [x] AC-B7: **index_state 五态状态机**：missing → building → ready / stale / failed。UI 和 API 统一基于状态机判断，不用文件存在检测
+- [x] AC-B8: **老用户路径（场景 B）**：已做过治理 bootstrap 但无记忆索引的项目，猫进入时主动提示确认卡（含扫描范围、预计耗时、本地索引说明）；用户可选"稍后"并 snooze（7 天冷却，不反复打扰）
+- [x] AC-B9: **新项目路径（场景 A）**：ProjectSetupCard 治理 bootstrap 完成后，自动串联记忆 bootstrap 步骤
+- [x] AC-B10: **非阻塞扫描 + 进度可见**：扫描过程通过 WebSocket 推送阶段化进度（发现文件→解析文档→建立索引→完成），前端可折叠为悬浮药丸，不阻塞对话
+- [x] AC-B11: **摘要卡交互**：扫描完成后推结构化摘要（仓库画像 + tier 覆盖率 + 关键文档 Top N + 风险提示）+ CTA 按钮（搜索 / MemoryHub / 补文档建议）
+- [x] AC-B12: **安全护栏**：禁止 symlink 越界扫描、排除 secrets 路径和二进制大文件、大仓自动 skipSoftClues + 文件数/字节预算超时
 
-### Phase C（Global Lesson Distillation）
-- [ ] AC-C1: 外部项目的 lesson/decision 可以被标记 `generalizable: true/false`
-- [ ] AC-C2: 默认 `generalizable: false`（fail-closed）
-- [ ] AC-C3: `generalizable: true` 的 candidate 走审核流程后才能写入 `global_knowledge.sqlite`
-- [ ] AC-C4: 回流内容自动脱敏（移除项目私有标识）
+### Phase C（Global Lesson Distillation）✅
+- [x] AC-C1: 外部项目的 lesson/decision 可以被标记 `generalizable: true/false`
+- [x] AC-C2: 默认 `generalizable: false`（fail-closed）
+- [x] AC-C3: `generalizable: true` 的 candidate 走审核流程后才能写入 `global_knowledge.sqlite`
+- [x] AC-C4: 回流内容自动脱敏（移除项目私有标识）
 - [ ] AC-C5: team lead亲手体验一轮完整的"出征→冷启动→干活→经验回流"链路
 
 ## 需求点 Checklist
 
 | ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R0 | "如果对方希望学习最佳实践，先帮人家做一次文档重构" | AC-01~05 | manual: skill 指导用户完成文档骨架 | [ ] |
-| R1 | "别人的项目未必从零开始" — 能吃已有项目 | AC-A1, AC-A3 | test: 对一个普通 Git 仓库运行 scanner | [ ] |
-| R2 | 猫去外部项目能快速理解项目现状 | AC-B1, AC-B2 | manual: bootstrap 后猫能回答项目基本问题 | [ ] |
-| R3 | "用你们开发其他项目" — 不要求先搭 cat-cafe 标准目录 | AC-A1, AC-A3 | test: 无 docs/ 结构的仓库能正常扫描 | [ ] |
-| R4 | 猫踩的坑能带回来下次用 | AC-C1~C4 | manual: 一条经验从外部项目回流到全局层 | [ ] |
-| R5 | "代码仓可能和文档分开" — 猫要能识别并提醒 | AC-02 | manual: 猫检测到文档分仓场景时给出建议 | [ ] |
+| R0 | "如果对方希望学习最佳实践，先帮人家做一次文档重构" | AC-01~05 | manual: skill 指导用户完成文档骨架 | [x] |
+| R1 | "别人的项目未必从零开始" — 能吃已有项目 | AC-A1, AC-A3 | test: 对一个普通 Git 仓库运行 scanner | [x] |
+| R2 | 猫去外部项目能快速理解项目现状 | AC-B1, AC-B2 | manual: bootstrap 后猫能回答项目基本问题 | [x] |
+| R3 | "用你们开发其他项目" — 不要求先搭 cat-cafe 标准目录 | AC-A1, AC-A3 | test: 无 docs/ 结构的仓库能正常扫描 | [x] |
+| R4 | 猫踩的坑能带回来下次用 | AC-C1~C4 | manual: 一条经验从外部项目回流到全局层 | [x] |
+| R5 | "代码仓可能和文档分开" — 猫要能识别并提醒 | AC-02 | manual: 猫检测到文档分仓场景时给出建议 | [x] |
+| R6 | "打开某个外部 project 你们这能用吗？怎么提示？" — 老用户能力发现 | AC-B7, AC-B8 | manual: 已有项目打开后收到确认卡提示 | [x] |
+| R7 | "考虑和之前的 bootstrap 联动" — 新项目无缝串联 | AC-B4, AC-B9 | test: ProjectSetupCard 完成后自动触发记忆 bootstrap | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
 - [x] 每个 AC 都有验证方式
-- [ ] 前端需求已准备需求→证据映射表（若适用）
+- [x] 前端需求已准备需求→证据映射表（若适用）
 
 ## Dependencies
 
@@ -235,6 +243,12 @@ interface ScannedEvidence {
 | KD-9 | monorepo 先 detection + overview，不做 per-package 深扫 | 控制 Phase B 复杂度 | 2026-04-08 |
 | KD-10 | Phase A v1 不扫 commit messages 和 code comments | 噪音高、语言相关、性能贵，Maine Coon否决 | 2026-04-08 |
 | KD-11 | 经验回流双层路由：猫猫审核通道（四条件同时满足：provenance≥derived + 可验证 + 事实型 + 已脱敏）+ team lead审核通道（命中任一敏感条件即上升）；Phase C 初期先全量人审校准再逐步放权 | Ragdoll×Maine Coon(GPT-5.4) 讨论收敛 + team lead授权分层 | 2026-04-09 |
+| KD-12 | index_state 五态状态机（missing/stale/building/ready/failed）替代简单文件存在检测 | Maine Coon护栏：单靠 db 是否存在无法区分"过期""失败""构建中"，会导致误判和重复提示 | 2026-04-10 |
+| KD-13 | 幂等 key = projectRoot + headCommit + scannerVersion + scanMode；服务端 in-flight lock 防重复扫描 | Maine Coon提议 + Ragdoll采纳，防止多 session 并发触发重复 bootstrap | 2026-04-10 |
+| KD-14 | 摘要卡结构化优先 + LLM optional 增强（不违反 AC-B6）| Siamese提议 LLM 一句话定调 vs AC-B6 不绑 LLM 额度；折中：结构化默认，LLM 可用时润色 | 2026-04-10 |
+| KD-15 | 老用户"稍后"snooze 机制（7 天冷却）| Maine Coon护栏：不加冷却会反复打扰老用户 | 2026-04-10 |
+| KD-16 | Phase B UX 必须沿用 coral 色系（cocreator-primary #e29578），不用紫色；视觉衔接 ProjectSetupCard（PR #299）画风 | team lead审核设计稿时指出：实际 UI 是 coral 色系（Anthropic 品牌色），.pen 设计稿的紫色只是 spec，实现必须对齐已有代码 | 2026-04-10 |
+| KD-17 | Phase B review 时Maine Coon必须启动 dev 截图验证前端，不能只看代码 | team lead要求：前端改动必须实际打开浏览器验证，防止"代码对了但 UI 离谱" | 2026-04-10 |
 
 ## Review Gate
 

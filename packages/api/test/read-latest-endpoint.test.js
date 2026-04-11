@@ -60,7 +60,8 @@ describe('POST /api/threads/:id/read/latest', () => {
   it('returns 404 for non-existent thread', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/threads/nonexistent/read/latest?userId=alice',
+      url: '/api/threads/nonexistent/read/latest',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 404);
   });
@@ -70,7 +71,8 @@ describe('POST /api/threads/:id/read/latest', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: `/api/threads/${thread.id}/read/latest?userId=alice`,
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -100,7 +102,8 @@ describe('POST /api/threads/:id/read/latest', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: `/api/threads/${thread.id}/read/latest?userId=alice`,
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -122,14 +125,16 @@ describe('POST /api/threads/:id/read/latest', () => {
     // First call
     const res1 = await app.inject({
       method: 'POST',
-      url: `/api/threads/${thread.id}/read/latest?userId=alice`,
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(JSON.parse(res1.body).advanced, true);
 
     // Second call — cursor already at latest
     const res2 = await app.inject({
       method: 'POST',
-      url: `/api/threads/${thread.id}/read/latest?userId=alice`,
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(JSON.parse(res2.body).advanced, false);
   });
@@ -148,7 +153,8 @@ describe('POST /api/threads/:id/read/latest', () => {
 
     const res = await noReadApp.inject({
       method: 'POST',
-      url: `/api/threads/${thread.id}/read/latest?userId=alice`,
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 501);
     await noReadApp.close();
@@ -167,7 +173,8 @@ describe('POST /api/threads/:id/read/latest', () => {
 
     const res = await noMsgApp.inject({
       method: 'POST',
-      url: `/api/threads/${thread.id}/read/latest?userId=alice`,
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 501);
     await noMsgApp.close();

@@ -530,8 +530,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const stmt = db.prepare(`
 				INSERT OR REPLACE INTO evidence_docs
 				(anchor, kind, status, title, summary, keywords, source_path, source_hash,
-				 superseded_by, materialized_from, updated_at, pack_id, provenance_tier, provenance_source)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 superseded_by, materialized_from, updated_at, pack_id, provenance_tier, provenance_source, generalizable)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`);
 
     const tx = db.transaction((items: EvidenceItem[]) => {
@@ -551,6 +551,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           item.packId ?? null,
           item.provenance?.tier ?? null,
           item.provenance?.source ?? null,
+          item.generalizable == null ? null : item.generalizable ? 1 : 0,
         );
       }
     });
@@ -752,6 +753,7 @@ interface RowShape {
   pack_id: string | null;
   provenance_tier: string | null;
   provenance_source: string | null;
+  generalizable: number | null;
 }
 
 function rowToItem(row: RowShape): EvidenceItem {
@@ -775,5 +777,6 @@ function rowToItem(row: RowShape): EvidenceItem {
       source: row.provenance_source ?? '',
     };
   }
+  if (row.generalizable != null) item.generalizable = row.generalizable === 1;
   return item;
 }

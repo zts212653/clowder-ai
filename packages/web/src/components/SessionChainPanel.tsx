@@ -2,7 +2,6 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useEffect, useState } from 'react';
-import { useCatData } from '@/hooks/useCatData';
 import type { CatInvocationInfo, ContextHealthData } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
@@ -94,7 +93,6 @@ const CAT_SESSION_COLORS: Record<string, { border: string; badgeBg: string; badg
 const DEFAULT_SESSION_COLORS = { border: 'border-cafe/40', badgeBg: 'bg-gray-200', badgeText: 'text-cafe-secondary' };
 
 export function SessionChainPanel({ threadId, catInvocations, onViewSession }: SessionChainPanelProps) {
-  const { getCatById } = useCatData();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -212,7 +210,6 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
         const cachePct = cachePercent(usage?.cacheReadTokens, usage?.inputTokens);
 
         const colors = CAT_SESSION_COLORS[session.catId] ?? DEFAULT_SESSION_COLORS;
-        const catLabel = getCatById(session.catId)?.displayName ?? session.catId;
 
         return (
           <div key={session.id} className="mb-2">
@@ -229,7 +226,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                 <span
                   className={`text-[9px] px-1.5 py-0.5 rounded-full ${colors.badgeBg} ${colors.badgeText} font-medium`}
                 >
-                  {catLabel}
+                  {session.catId}
                 </span>
               </div>
               <div className="text-[10px] text-cafe-muted mb-1.5">
@@ -324,7 +321,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                         <button
                           type="button"
                           className="text-[10px] px-2 py-0.5 rounded border border-cafe text-cafe-secondary hover:bg-cafe-surface-elevated"
-                          onClick={() => onViewSession(session.id)}
+                          onClick={() => onViewSession(session.id, session.catId)}
                         >
                           查看
                         </button>

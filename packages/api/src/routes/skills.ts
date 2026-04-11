@@ -204,7 +204,7 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
     const repoRoot = dirname(skillsSrc);

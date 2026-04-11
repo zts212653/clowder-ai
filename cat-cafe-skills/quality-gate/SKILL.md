@@ -96,8 +96,11 @@ Step 6: RUN — 运行验证命令（必须这次真实运行）
 Step 7: READ — 完整读输出，看 exit code，数失败数
 
 Step 7.5: ARTIFACT HYGIENE CHECK — 根目录媒体垃圾闸门
-  - 执行：`git status --short | rg '^\?\? [^/]+\.(png|jpe?g|webm|mp4)$'`
-  - 若有输出 → BLOCK：说明仓库根目录出现了未跟踪媒体工件
+  - 执行（工作树）：
+    `git status --short | rg '^.. [^/]+\.(png|jpe?g|webp|gif|webm|mp4|mov|wav|pdf|pen)$'`
+  - 执行（已提交差异）：
+    `git diff --name-only origin/main...HEAD | rg '^[^/]+\.(png|jpe?g|webp|gif|webm|mp4|mov|wav|pdf|pen)$'`
+  - 任一命中 → BLOCK：说明仓库根目录出现了媒体/设计工件（含已跟踪和未跟踪）
   - 处理方式：移到 `${TMPDIR}/cat-cafe-evidence/...` 或显式归档到正式目录后再继续
   - 规则真相源：`cat-cafe-skills/refs/evidence-output-contract.md`
 
@@ -154,7 +157,7 @@ glob designs/**/*.pen 匹配结果: [列出匹配文件或"无匹配"]
 对照状态: ✅ 已对照 / ⚠️ 无设计稿（有 UI 改动）/ ➖ 无 UI 改动
 
 ### Artifact Hygiene（Step 7.5）
-仓库根目录未跟踪媒体文件: 无 ✅
+仓库根目录媒体/设计工件（工作树 + 已提交差异）: 无 ✅
 
 ### 验证命令输出（必须是这次真实运行）
 pnpm test → 34/34 pass ✅
@@ -178,7 +181,7 @@ pnpm -r --if-present run build → exit 0 ✅
 | 有 .pen 设计稿但没对照实现 | Step 5 自动 glob 检测，匹配到就强制对照，不靠记忆 |
 | 为了截图在 runtime 会话里重跑 `pnpm start` | 先探活复用现有 runtime；确需重启必须显式授权 |
 | 拿 runtime 的 `3003/3004` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3003/3004`，默认这是 runtime 证据，不是未合入改动证据 |
-| 截图顺手掉进仓库根目录 | Step 7.5 必查；先移到 `${TMPDIR}/cat-cafe-evidence/...` 或正式归档目录，再继续 |
+| 截图/录屏/设计稿顺手掉进仓库根目录 | Step 7.5 必查；先移到 `${TMPDIR}/cat-cafe-evidence/...` 或正式归档目录，再继续 |
 | Redis 改动用默认测试命令 | 必须跑 `test:redis`，禁止直连 6399 |
 | 只看 spec checkbox 就声称完成/未完成 | 核实 `git log --grep` + `gh pr list` + 实际 commit（LL-029）|
 

@@ -25,7 +25,7 @@ function matchAction(pattern: string, action: string): boolean {
   return false;
 }
 
-const DEFAULT_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 const DEFAULT_MAX_RULES = 500;
 
 export class RedisAuthorizationRuleStore implements IAuthorizationRuleStore {

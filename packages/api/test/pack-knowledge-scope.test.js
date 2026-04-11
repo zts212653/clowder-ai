@@ -186,11 +186,7 @@ describe('PackKnowledgeScope', () => {
 
   test('schema V6 migration adds pack_id column', async () => {
     const { CURRENT_SCHEMA_VERSION } = await import('../dist/domains/memory/schema.js');
-    assert.equal(
-      CURRENT_SCHEMA_VERSION,
-      10,
-      'Current schema version should be 10 (V10: provenance tier + source columns)',
-    );
+    assert.equal(CURRENT_SCHEMA_VERSION, 12, 'Current schema version should be 12');
 
     // Create a store and check schema via its exposed db
     const { store } = await createTestStore();
@@ -203,6 +199,6 @@ describe('PackKnowledgeScope', () => {
 
     // Verify migration version
     const version = db.prepare('SELECT MAX(version) as v FROM schema_version').get();
-    assert.equal(version.v, 10, 'Schema version should be 10');
+    assert.equal(version.v, 12, 'Schema version should be 12');
   });
 });

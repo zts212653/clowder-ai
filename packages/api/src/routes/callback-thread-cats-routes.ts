@@ -1,9 +1,6 @@
 /**
- * Thread Cats Callback Route — TD #408
  * GET /api/callbacks/thread-cats — discover cats in a thread via MCP callback auth.
- *
- * Delegates to shared categorizeThreadCats() — same logic as GET /api/threads/:id/cats (F142).
- * Auth: invocationId + callbackToken instead of binding-owner header.
+ * Delegates to shared categorizeThreadCats() (F142). Auth: invocationId + callbackToken.
  */
 
 import { catRegistry } from '@cat-cafe/shared';
@@ -59,6 +56,7 @@ export function registerCallbackThreadCatsRoutes(app: FastifyInstance, deps: Thr
         catId: p.catId as string,
         lastMessageAt: p.lastMessageAt,
         messageCount: p.messageCount,
+        lastResponseHealthy: p.lastResponseHealthy,
       })),
       registeredServices: agentRegistry.getAllEntries(),
       allCatIds: Object.keys(allCatConfigs),

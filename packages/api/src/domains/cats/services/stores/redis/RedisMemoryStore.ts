@@ -37,7 +37,7 @@ export class RedisMemoryStore implements IMemoryStore {
     };
 
     await this.redis.hset(key, input.key, JSON.stringify(entry));
-    await this.redis.expire(key, MEMORY_TTL_SECONDS);
+    if (MEMORY_TTL_SECONDS > 0) await this.redis.expire(key, MEMORY_TTL_SECONDS);
 
     return entry;
   }

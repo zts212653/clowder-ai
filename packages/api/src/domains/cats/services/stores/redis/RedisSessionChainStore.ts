@@ -17,7 +17,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { CreateSessionInput, ISessionChainStore, SessionRecordPatch } from '../ports/SessionChainStore.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
 
-const DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
 /**
  * Lua: atomic create session record.
@@ -34,11 +34,11 @@ redis.call('HSET', KEYS[3],
   'catId', ARGV[4], 'userId', ARGV[5], 'seq', tostring(seq),
   'status', 'active', 'messageCount', '0',
   'createdAt', ARGV[6], 'updatedAt', ARGV[6])
-redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('ZADD', KEYS[2], seq, ARGV[1])
-redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})
-redis.call('SET', KEYS[1], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})
-redis.call('SET', KEYS[4], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[1], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[1], ARGV[1])`}
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[4], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[4], ARGV[1])`}
 return seq
 `;
 
@@ -182,7 +182,11 @@ export class RedisSessionChainStore implements ISessionChainStore {
       // Update CLI index: delete old, set new
       const oldCliId = await this.redis.hget(detailKey, 'cliSessionId');
       if (oldCliId) await this.redis.del(SessionChainKeys.byCli(oldCliId));
-      await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id, 'EX', DEFAULT_TTL_SECONDS);
+      if (DEFAULT_TTL_SECONDS > 0) {
+        await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id, 'EX', DEFAULT_TTL_SECONDS);
+      } else {
+        await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id);
+      }
       pairs.push('cliSessionId', patch.cliSessionId);
     }
 

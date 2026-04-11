@@ -88,7 +88,7 @@ describe('accountStartupHook (F340 fail-fast)', () => {
     assert.throws(() => accountStartupHook(projectRoot), /LL-043/);
   });
 
-  it('LL-043: wraps migration conflict error when legacy source exists', async () => {
+  it('LL-043: conflict in legacy migration is skipped (global wins), startup succeeds', async () => {
     const { accountStartupHook } = await import(`../dist/config/account-startup.js?t=${Date.now()}-4`);
     const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
@@ -106,7 +106,9 @@ describe('accountStartupHook (F340 fail-fast)', () => {
       'utf-8',
     );
 
-    assert.throws(() => accountStartupHook(projectRoot), /LL-043/);
+    // After 1dbeb421a: conflicts are skipped (global wins), startup succeeds
+    const result = accountStartupHook(projectRoot);
+    assert.equal(result.accountCount, 1, 'pre-existing global account should survive');
   });
 
   it('fails fast when credentials.json is malformed', async () => {

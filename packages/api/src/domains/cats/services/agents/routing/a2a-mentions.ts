@@ -195,7 +195,10 @@ export function detectInlineActionMentions(
   for (const rawLine of stripped.split(/\r?\n/)) {
     const trimmed = rawLine.trimStart();
     const normalized = trimmed.toLowerCase();
-    if (normalized.startsWith('@') || normalized.startsWith('>')) continue;
+    // Skip blockquotes; do NOT skip lines starting with @ — the inner loop's
+    // routedSet handles line-start mentions, so other inline @ on the same line
+    // can still be detected (P1 fix from codex review of cat-cafe#1057).
+    if (normalized.startsWith('>')) continue;
 
     let lineMatched = false;
     for (const entry of entries) {
@@ -207,8 +210,12 @@ export function detectInlineActionMentions(
         const idx = normalized.indexOf(entry.pattern, searchFrom);
         if (idx < 0) break;
         searchFrom = idx + 1;
+        // Skip line-start mentions — those are handled by parseA2AMentions, not here.
+        // Only skip this specific occurrence, not the whole line (P1 fix: other cats
+        // on the same line may still be inline action mentions).
+        if (idx === 0) continue;
         // Left boundary: @ must not be preceded by word-like chars (avoids "foo@codex")
-        if (idx > 0 && HANDLE_CONTINUATION_RE.test(normalized[idx - 1]!)) continue;
+        if (HANDLE_CONTINUATION_RE.test(normalized[idx - 1]!)) continue;
         const charAfter = normalized[idx + entry.pattern.length];
         const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
         if (!isBoundary) continue;

@@ -10,6 +10,7 @@ import type { AuthorizationManager } from '../domains/cats/services/auth/Authori
 import type { IAuthorizationAuditStore } from '../domains/cats/services/stores/ports/AuthorizationAuditStore.js';
 import type { IAuthorizationRuleStore } from '../domains/cats/services/stores/ports/AuthorizationRuleStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface AuthorizationRoutesOptions {
   authManager: AuthorizationManager;
@@ -18,23 +19,8 @@ export interface AuthorizationRoutesOptions {
   socketManager: SocketManager;
 }
 
-function resolveAuthorizationUserId(request: {
-  headers: Record<string, string | string[] | undefined>;
-}): string | null {
-  const fromPrimary = request.headers['x-cat-cafe-user'];
-  if (typeof fromPrimary === 'string' && fromPrimary.trim().length > 0) return fromPrimary.trim();
-  if (Array.isArray(fromPrimary) && typeof fromPrimary[0] === 'string' && fromPrimary[0].trim().length > 0) {
-    return fromPrimary[0].trim();
-  }
-
-  // Legacy compatibility: old clients used x-user-id
-  const fromLegacy = request.headers['x-user-id'];
-  if (typeof fromLegacy === 'string' && fromLegacy.trim().length > 0) return fromLegacy.trim();
-  if (Array.isArray(fromLegacy) && typeof fromLegacy[0] === 'string' && fromLegacy[0].trim().length > 0) {
-    return fromLegacy[0].trim();
-  }
-
-  return null;
+function resolveAuthorizationUserId(request: import('fastify').FastifyRequest): string | null {
+  return resolveHeaderUserId(request);
 }
 
 const respondSchema = z.object({

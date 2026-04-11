@@ -1,6 +1,6 @@
 /**
- * Unified userId source for the frontend.
- * Priority: URL ?userId= > localStorage > 'default-user'
+ * Legacy userId source for POST body fields (same-origin, not an attack vector).
+ * F156 D-1: primary identity is now the HttpOnly session cookie, not this value.
  */
 
 const STORAGE_KEY = 'cat-cafe-userId';
@@ -8,14 +8,6 @@ const DEFAULT_USER = 'default-user';
 
 export function getUserId(): string {
   if (typeof window === 'undefined') return DEFAULT_USER;
-
-  const url = new URL(window.location.href);
-  const fromUrl = url.searchParams.get('userId');
-  if (fromUrl) {
-    localStorage.setItem(STORAGE_KEY, fromUrl);
-    return fromUrl;
-  }
-
   return localStorage.getItem(STORAGE_KEY) ?? DEFAULT_USER;
 }
 

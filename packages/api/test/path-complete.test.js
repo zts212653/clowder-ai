@@ -38,10 +38,10 @@ describe('GET /api/projects/complete', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('returns 401 when only a spoofed userId query param is provided', async () => {
+  it('returns 401 without trusted identity header', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&cwd=${encodeURIComponent(testDir)}&userId=spoofed`,
+      url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&cwd=${encodeURIComponent(testDir)}`,
     });
     assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);

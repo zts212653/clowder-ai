@@ -1,16 +1,31 @@
 ---
 feature_ids: [F050]
-related_features: [F002, F005, F027, F032, F041, F043, F061, F105, F126, F135, F143]
+related_features: [F002, F005, F027, F032, F041, F043, F061, F105, F126, F135, F143, F158]
 topics: [a2a, external-agent, cli-integration, interoperability, dare, system-prompt, governance]
 doc_kind: spec
 created: 2026-03-02
-updated: 2026-03-13
+updated: 2026-04-10
 ---
 
 # F050: External Agent Onboarding（A2A/CLI 接入契约）
 
-> **Status**: in-progress | **Owner**: 三猫（Phase 1 leader: Ragdoll Opus 4.6）
-> **Created**: 2026-03-02
+> **Status**: done | **Owner**: 三猫（Phase 1 leader: Ragdoll Opus 4.6）
+> **Created**: 2026-03-02 | **Closed**: 2026-04-10
+
+## Closure Summary
+
+**核心使命已完成**：EAC v1 契约定义 + L1 CLI Adapter 通道落地 + 被 4 个真实接入验证。
+
+| 接入猫 | Feature | 验证通道 |
+|--------|---------|---------|
+| 狸花猫 (DARE) | F135 | L1 CLI — 首个 proof-of-concept |
+| 金渐层 (OpenCode) | F105 | L1 CLI — Claude Code 运行时共享 |
+| 孟加拉猫 (Antigravity) | F061 | L1 CLI — CDP bridge 适配 |
+| 梵花猫 (Kimi) | F158 | L1 CLI — 社区贡献 NDJSON 流式 |
+
+**拆出的后续方向**：
+- **L2 A2A Protocol Adapter** — 远程 agent 协议对接（`A2AAgentService` 设计稿已完成 PR #519，真实验收待独立立项）
+- **Phase 1b stdin 控制面** — DARE 特有需求，`--auto-approve` 已满足当前场景，如需推进归 DARE 侧 feature
 
 ## Why
 
@@ -312,8 +327,8 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 - [x] cat-config.json 可注册 DARE 猫
 - [x] Cat Café 集成验证通过（smoke test: 真实 DARE CLI 调用）
 
-### Phase 1b: stdin 控制面（延期）
-- [ ] spawnCli 支持 stdin pipe（DARE control-stdin）— Phase 1 使用 `--auto-approve` 不需要 stdin
+### Phase 1b: stdin 控制面（deferred — DARE 特有，不阻塞 close）
+- [ ] ~~spawnCli 支持 stdin pipe（DARE control-stdin）~~ — `--auto-approve` 满足当前场景，如需推进归 DARE 侧
 
 ### Phase 2: 接入验收
 - [x] DARE CLI 兼容性测试套件完成（含 session/event/auth；`resume` 用例因 DARE #184 暂以 `test.skip` 标注）
@@ -347,12 +362,12 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 - [x] AC-P4-3: `scripts/sync-system-prompts.ts --apply` 能渲染并写入 `~/.codex/AGENTS.md` + `~/.gemini/GEMINI.md`
 - [x] AC-P4-4: ADR 记录"禁止 runtime 覆写 `~/` 配置"决策 → [ADR-017](../decisions/017-no-runtime-home-overwrite.md)
 - [x] AC-P4-5: F050 §H 配置地图与实际同步脚本一致
-- [ ] AC-P4-6: 愿景守护 — 改了 governance-l0 后跑 `--check` 能发现 Codex/Gemini 未同步（merge 后由守护猫验证）
+- [x] AC-P4-6: 愿景守护 — `--check` 能发现 drift（2026-04-10 验证：检测到 gemini drift）
 
-### Phase 3: A2A L2 Protocol Adapter
+### Phase 3: A2A L2 Protocol Adapter（拆出 — 独立方向，不阻塞 close）
 - [x] `A2AAgentService` 设计稿 + 接口定义完成（PR #519）
-- [ ] opencode CLI 兼容性测试清单完成
-- [ ] 至少 1 个 A2A agent 通过 L2 验收
+- [ ] ~~opencode CLI 兼容性测试清单完成~~ — 拆出，如需推进单独立项
+- [ ] ~~至少 1 个 A2A agent 通过 L2 验收~~ — 拆出，L2 远程协议对接是独立方向
 
 ---
 

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createGunzip, createInflate } from 'node:zlib';
 import httpProxy from 'http-proxy';
+import { isOriginAllowed, resolveFrontendCorsOrigins } from '../../config/frontend-origin.js';
 import { BRIDGE_SCRIPT } from './bridge-script.js';
 import { validatePort } from './port-validator.js';
 import { buildWsPatchScript } from './ws-patch-script.js';
@@ -11,6 +12,8 @@ export interface PreviewGatewayOptions {
   host?: string;
   /** Runtime-configured ports to exclude */
   runtimePorts?: number[];
+  /** Override allowed origins (for testing). If omitted, resolved from env. */
+  allowedOrigins?: (string | RegExp)[];
 }
 
 /**
@@ -29,12 +32,14 @@ export class PreviewGateway {
   private port: number;
   private host: string;
   private runtimePorts: number[];
+  private allowedOrigins: (string | RegExp)[];
   actualPort = 0;
 
   constructor(opts: PreviewGatewayOptions) {
     this.port = opts.port;
     this.host = opts.host ?? '127.0.0.1';
     this.runtimePorts = opts.runtimePorts ?? [];
+    this.allowedOrigins = opts.allowedOrigins ?? resolveFrontendCorsOrigins(process.env);
 
     this.proxy = httpProxy.createProxyServer({
       ws: true,
@@ -135,6 +140,9 @@ export class PreviewGateway {
     });
 
     this.server = http.createServer((req, res) => {
+      // F156 D-5: Origin validation before any proxying
+      if (!this.checkOrigin(req, res)) return;
+
       const parsed = this.parseTarget(req);
       if (!parsed) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -174,6 +182,15 @@ export class PreviewGateway {
 
     // WebSocket upgrade handler (HMR)
     this.server.on('upgrade', (req, socket, head) => {
+      // F156 D-5: Origin validation on WS upgrade
+      const origin = req.headers.origin as string | undefined;
+      if (origin && !isOriginAllowed(origin, this.allowedOrigins)) {
+        // Send HTTP 403 before destroying (so test can read status)
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
       const parsed = this.parseTarget(req);
       if (!parsed) {
         socket.destroy();
@@ -192,6 +209,18 @@ export class PreviewGateway {
       socket.on('error', () => socket.destroy()); // prevent unhandled socket error crash
       this.proxy.ws(req, socket, head, { target });
     });
+  }
+
+  /** F156 D-5: Validate Origin header. No Origin (non-browser) is allowed. */
+  private checkOrigin(req: http.IncomingMessage, res?: http.ServerResponse): boolean {
+    const origin = req.headers.origin as string | undefined;
+    if (!origin) return true; // non-browser (curl, server-to-server)
+    if (isOriginAllowed(origin, this.allowedOrigins)) return true;
+    if (res) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Origin not allowed' }));
+    }
+    return false;
   }
 
   private parseTarget(req: http.IncomingMessage): { port: number; host: string } | null {

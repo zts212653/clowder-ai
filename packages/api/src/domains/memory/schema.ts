@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 // Phase C: embedding metadata (model/dim version anchor)
 export const SCHEMA_V2 = `
@@ -327,6 +327,39 @@ export function applyMigrations(db: Database.Database): void {
     }
     db.exec('CREATE INDEX IF NOT EXISTS idx_evidence_docs_provenance ON evidence_docs(provenance_tier)');
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString());
+  }
+
+  if (currentVersion < 11) {
+    // F152 Phase B: expedition bootstrap state machine
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS index_state (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'missing'
+          CHECK(status IN ('missing', 'stale', 'building', 'ready', 'failed')),
+        fingerprint TEXT NOT NULL DEFAULT '',
+        last_scan_at TEXT,
+        snoozed_until TEXT,
+        docs_indexed INTEGER DEFAULT 0,
+        docs_total INTEGER DEFAULT 0,
+        error_message TEXT,
+        summary_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_index_state_project ON index_state(project_path);
+    `);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(11, new Date().toISOString());
+  }
+
+  if (currentVersion < 12) {
+    // F152 Phase C: generalizable flag for global lesson distillation
+    try {
+      db.exec('ALTER TABLE evidence_docs ADD COLUMN generalizable INTEGER DEFAULT NULL');
+    } catch {
+      // Column may already exist from a partial migration
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(12, new Date().toISOString());
   }
 }
 

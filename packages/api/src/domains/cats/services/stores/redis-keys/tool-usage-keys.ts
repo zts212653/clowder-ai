@@ -4,7 +4,7 @@
  * TTL: 90 days.
  */
 
-export const TOOL_USAGE_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
+export const TOOL_USAGE_TTL_SECONDS = 0; // persistent — set >0 to enable expiry
 
 /** Counter key for a single tool on a given day. */
 export function toolUsageKey(date: string, catId: string, category: string, toolName: string): string {

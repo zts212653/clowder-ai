@@ -51,6 +51,8 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 - [ ] AC-A6: Prometheus exporter 端口可通过 env 配置（不硬编码 9464）
 - [ ] AC-A7: `activeInvocations` 计数器在 generator early abort 时正确递减
 - [ ] AC-A8: yielded-error 路径（`hadError = true`）的 span 正确标记为 ERROR 并补 OTel error log
+- [ ] AC-A9: `agent.liveness` gauge 有实际调用点（或从 scope 移除，instruments 数量与 PR 描述一致）
+- [ ] AC-A10: aborted invocation（generator `.return()`）的 OTel span/log 与审计日志信号一致
 
 ## Dependencies
 
