@@ -496,6 +496,96 @@ describe('background thread socket handling', () => {
     });
   });
 
+  describe('F148: context briefing system_info', () => {
+    it('stores the briefing card message instead of a raw JSON system bubble', () => {
+      const now = Date.now();
+
+      simulateBackgroundMessage({
+        type: 'system_info',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: JSON.stringify({
+          type: 'context_briefing',
+          messageId: 'briefing-msg-1',
+          storedMessage: {
+            id: 'briefing-msg-1',
+            content: '看到 13 条 · 省略 8 条 · 锚点 3 条 · 记忆 5 sessions · 证据 3 条',
+            origin: 'briefing',
+            timestamp: now,
+            extra: {
+              rich: {
+                v: 1,
+                blocks: [
+                  {
+                    id: 'briefing-1',
+                    kind: 'card',
+                    v: 1,
+                    title: '看到 13 条 · 省略 8 条 · 锚点 3 条 · 记忆 5 sessions · 证据 3 条',
+                    tone: 'info',
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        timestamp: now,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toEqual([
+        expect.objectContaining({
+          id: 'briefing-msg-1',
+          type: 'system',
+          content: '看到 13 条 · 省略 8 条 · 锚点 3 条 · 记忆 5 sessions · 证据 3 条',
+          origin: 'briefing',
+          extra: {
+            rich: {
+              v: 1,
+              blocks: [
+                expect.objectContaining({
+                  id: 'briefing-1',
+                  kind: 'card',
+                  title: '看到 13 条 · 省略 8 条 · 锚点 3 条 · 记忆 5 sessions · 证据 3 条',
+                }),
+              ],
+            },
+          },
+        }),
+      ]);
+    });
+
+    it('falls back to the raw system message when briefing payload is incomplete', () => {
+      const now = Date.now();
+      const rawBriefing = JSON.stringify({
+        type: 'context_briefing',
+        messageId: 'briefing-msg-2',
+        storedMessage: {
+          content: 'briefing without id should not be swallowed',
+          origin: 'briefing',
+          timestamp: now,
+        },
+      });
+
+      simulateBackgroundMessage({
+        type: 'system_info',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: rawBriefing,
+        timestamp: now,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toHaveLength(1);
+      expect(ts.messages[0]).toEqual(
+        expect.objectContaining({
+          type: 'system',
+          content: rawBriefing,
+          variant: 'info',
+        }),
+      );
+    });
+  });
+
   describe('regression: background stream chunk merging', () => {
     it('merges text chunks from same cat/thread into one assistant message', () => {
       const now = Date.now();
