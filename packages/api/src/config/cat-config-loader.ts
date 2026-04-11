@@ -57,6 +57,7 @@ const colorSchema = z.object({ primary: z.string(), secondary: z.string() });
 
 const catVariantSchema = z.object({
   id: z.string().min(1),
+  source: z.enum(['seed', 'runtime']).optional(),
   catId: z.string().min(1).optional(), // F32-b: variant-level catId
   displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
@@ -418,6 +419,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         id: createCatId(catId),
         name: variant.displayName ?? breed.name,
         displayName: variant.displayName ?? breed.displayName,
+        ...(variant.source != null ? { source: variant.source } : {}),
         ...(breed.nickname != null ? { nickname: breed.nickname } : {}),
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
         color: variant.color ?? breed.color, // F32-b P4c: variant can override

@@ -17,7 +17,7 @@ import {
   builtinAccountIdForClient,
   resolveForClient,
 } from '../../../../config/account-resolver.js';
-import { resolveEffectiveAccountRefForCat } from '../../../../config/cat-account-binding.js';
+import { resolveBoundAccountRefForCat } from '../../../../config/cat-account-binding.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import type { AIActionResponse, AIProvider } from '../game/werewolf/WerewolfAIPlayer.js';
 
@@ -76,7 +76,7 @@ export class LlmAIProvider implements AIProvider {
   private resolveApiKey(client: BuiltinAccountClient): string | undefined {
     const entry = catRegistry.tryGet(this.catId);
     const accountRef =
-      (entry ? resolveEffectiveAccountRefForCat(process.cwd(), this.catId, entry.config) : undefined) ??
+      (entry ? resolveBoundAccountRefForCat(process.cwd(), this.catId, entry.config) : undefined) ??
       builtinAccountIdForClient(client);
     const profile = resolveForClient(process.cwd(), client, accountRef);
     return profile?.apiKey;

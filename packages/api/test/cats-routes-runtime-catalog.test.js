@@ -150,7 +150,13 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     });
     const runtimeCatalog = {
       ...templateConfig,
-      breeds: [...templateConfig.breeds, ...makeCatalog('runtime-cat', '运行时猫').breeds],
+      breeds: [
+        {
+          ...templateConfig.breeds[0],
+          variants: templateConfig.breeds[0].variants.map((variant) => ({ ...variant, source: 'seed' })),
+        },
+        ...makeCatalog('runtime-cat', '运行时猫').breeds,
+      ],
     };
     const projectRoot = createRuntimeCatalogProject(runtimeCatalog, templateConfig);
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -220,6 +226,45 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       ['codex', 'dare', 'antigravity', 'opencode'],
       'bootstrapped runtime catalog should preserve non-bootstrap and skipped seed clients before GET /api/cats responds',
     );
+
+    await app.close();
+  });
+
+  it('GET /api/cats uses source metadata from runtime catalog even when template is unreadable', async () => {
+    const runtimeCatalog = {
+      ...makeVersion2Config('template-cat', '模板猫'),
+      breeds: [
+        {
+          ...makeVersion2Config('template-cat', '模板猫').breeds[0],
+          variants: makeVersion2Config('template-cat', '模板猫').breeds[0].variants.map((variant) => ({
+            ...variant,
+            source: 'seed',
+          })),
+        },
+      ],
+    };
+    const projectRoot = createRuntimeCatalogProject(runtimeCatalog, '{invalid-json');
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const templateCat = body.cats.find((cat) => cat.id === 'template-cat');
+    assert.ok(templateCat, 'template-cat should be listed from runtime catalog');
+    assert.equal(templateCat.source, 'seed');
+    assert.deepEqual(templateCat.roster, {
+      family: 'maine-coon',
+      roles: ['peer-reviewer'],
+      lead: false,
+      available: true,
+      evaluation: '模板猫 evaluation',
+    });
 
     await app.close();
   });

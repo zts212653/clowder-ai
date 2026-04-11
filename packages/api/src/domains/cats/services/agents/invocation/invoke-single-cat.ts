@@ -20,7 +20,7 @@ import {
   resolveForClient,
   validateRuntimeProviderBinding,
 } from '../../../../../config/account-resolver.js';
-import { resolveEffectiveAccountRefForCat } from '../../../../../config/cat-account-binding.js';
+import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
@@ -702,7 +702,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // dev worktree pointed to by thread.projectPath) misses runtime-only accounts.
     // workingProjectRoot is still used for shared-state preflight + cat cwd.
     const projectRoot = resolveActiveProjectRoot(process.cwd());
-    const effectiveAccountRef = resolveEffectiveAccountRefForCat(projectRoot, catId, catConfig);
+    const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
     const resolveRuntimeAccount = async () => {
       if (!builtinClient) return null;
       // Yield to event loop so preflight warnings are delivered before account resolution.

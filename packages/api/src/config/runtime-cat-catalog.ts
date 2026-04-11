@@ -10,7 +10,7 @@ import type {
   CoCreatorConfig,
   ContextBudget,
 } from '@cat-cafe/shared';
-import { CAT_CONFIGS, createCatId } from '@cat-cafe/shared';
+import { createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
@@ -113,16 +113,6 @@ function readOrBootstrapCatalog(projectRoot: string): CatCafeConfig {
   return catalog;
 }
 
-function isSeedCat(projectRoot: string, catId: string): boolean {
-  try {
-    const templatePath = resolveProjectTemplatePath(projectRoot);
-    const seedCats = toAllCatConfigs(loadCatConfig(templatePath));
-    return Object.hasOwn(seedCats, catId);
-  } catch {
-    return Object.hasOwn(CAT_CONFIGS, catId);
-  }
-}
-
 function invalidateRuntimeCatalogCaches(): void {
   _resetCachedConfig();
   clearBudgetCache();
@@ -216,6 +206,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
     variants: [
       {
         id: variantId,
+        source: 'runtime',
         clientId: input.clientId,
         defaultModel: input.defaultModel,
         mcpSupport: input.mcpSupport,
@@ -493,13 +484,13 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
 }
 
 export function deleteRuntimeCat(projectRoot: string, catId: string): CatCafeConfig {
-  if (isSeedCat(projectRoot, catId)) {
-    throw new Error(`Cannot delete seed cat "${catId}" from runtime catalog`);
-  }
   const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
   const located = findBreedVariant(catalog as unknown as CatCafeConfig, catId);
   if (!located) {
     throw new Error(`Cat "${catId}" not found in runtime catalog`);
+  }
+  if (located.variant.source === 'seed') {
+    throw new Error(`Cannot delete seed cat "${catId}" from runtime catalog`);
   }
 
   const breed = catalog.breeds[located.breedIndex] as Record<string, any>;

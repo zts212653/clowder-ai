@@ -478,7 +478,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {cat && cat.source === 'runtime' ? (
+            {cat && cat.source !== 'seed' ? (
               <button
                 type="button"
                 onClick={handleDelete}

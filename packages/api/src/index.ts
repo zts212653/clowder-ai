@@ -13,7 +13,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
 import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
-import { resolveEffectiveAccountRefForCat } from './config/cat-account-binding.js';
+import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import {
   bootstrapDefaultCatCatalog,
@@ -411,7 +411,7 @@ async function main(): Promise<void> {
         }
         const catConfig = catRegistry.tryGet(catId)?.config;
         if (catConfig?.clientId === 'anthropic' || catConfig?.clientId === 'opencode') {
-          const effectiveAccountRef = resolveEffectiveAccountRefForCat(projectRoot, catId, catConfig);
+          const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
           const runtime = resolveForClient(projectRoot, catConfig.clientId, effectiveAccountRef);
           if (!runtime?.apiKey) return null;
           return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };

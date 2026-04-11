@@ -36,6 +36,7 @@ export interface CatConfig {
   readonly id: CatId;
   readonly name: string;
   readonly displayName: string;
+  readonly source?: 'seed' | 'runtime';
   /** Nickname given by 铲屎官 (e.g. 宪宪, 砚砚). See docs/stories/cat-names/ */
   readonly nickname?: string;
   readonly avatar: string;

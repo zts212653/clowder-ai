@@ -53,6 +53,8 @@ export interface CliConfig {
  */
 export interface CatVariant {
   readonly id: string; // 'opus-4.6', 'codex-default'
+  /** Persisted origin marker written at bootstrap/create time. */
+  readonly source?: 'seed' | 'runtime';
   /** Override breed-level catId to register as an independent cat (F32-b) */
   readonly catId?: string;
   /** Override breed-level displayName (F32-b) */
