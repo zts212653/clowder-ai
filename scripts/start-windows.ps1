@@ -227,6 +227,7 @@ $redisCliPath = $null
 $redisServerPath = $null
 $redisSource = $null
 $redisAuthArgs = @()
+$redisJob = $null
 $redisLogFile = Join-Path $redisLayout.Logs "redis-$RedisPort.log"
 $redisPidFile = Join-Path $redisLayout.Data "redis-$RedisPort.pid"
 $configuredRedisUrl = if ($env:REDIS_URL) { $env:REDIS_URL.Trim() } else { "" }
@@ -296,7 +297,12 @@ if ($useExternalRedis) {
                     "--pidfile", (Quote-WindowsProcessArgument -Value $redisPidFile)
                 ) + $redisServerAuthArgs
                 Write-Host "  Starting Redis on port $RedisPort ($redisSource)..."
-                Start-Process -FilePath $redisServerPath -ArgumentList $redisArgs -WindowStyle Hidden
+                $redisJob = Start-Job -Name "redis-bootstrap" -ScriptBlock {
+                    param($launcherPath, $launcherArgs)
+                    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+                    $OutputEncoding = [System.Text.Encoding]::UTF8
+                    & $launcherPath @launcherArgs 2>&1
+                } -ArgumentList $redisServerPath, $redisArgs
                 Start-Sleep -Seconds 2
                 $redisPing = & $redisCliPath -p $RedisPort @redisAuthArgs ping 2>$null
                 if ($redisPing -eq "PONG") {
@@ -550,6 +556,10 @@ try {
         } catch {
             Write-Warn "Could not stop Redis gracefully"
         }
+    }
+    if ($redisJob) {
+        Stop-Job -Job $redisJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $redisJob -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "Goodbye!" -ForegroundColor Cyan

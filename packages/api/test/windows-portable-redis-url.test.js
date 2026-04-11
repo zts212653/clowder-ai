@@ -201,6 +201,8 @@ test('Windows startup passes localhost REDIS_URL auth into redis-server auto-sta
     startWindowsScript,
     /Get-RedisServerAuthArgs -RedisUrl \$configuredRedisUrl -AclFilePath \$redisAclFile/,
   );
+  assert.match(startWindowsScript, /Start-Job -Name "redis-bootstrap"/);
+  assert.match(startWindowsScript, /& \$launcherPath @launcherArgs 2>&1/);
 
   const pingMatches = startWindowsScript.match(
     /\$redisPing = & \$redisCliPath -p \$RedisPort @redisAuthArgs ping 2>\$null/g,

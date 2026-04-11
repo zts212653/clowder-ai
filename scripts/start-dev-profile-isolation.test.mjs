@@ -204,7 +204,8 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     // Look for the pattern inside a ScriptBlock (Start-Job context)
     const jobBlocks = ps1.match(/Start-Job[\s\S]*?-ScriptBlock\s*\{([\s\S]*?)\}\s*-ArgumentList/g);
     assert.ok(jobBlocks && jobBlocks.length > 0, 'start-windows.ps1 must have Start-Job blocks');
-    const apiJobBlock = jobBlocks[0];
+    const apiJobBlock = jobBlocks.find((block) => block.includes('-Name "api"'));
+    assert.ok(apiJobBlock, 'start-windows.ps1 must define an API Start-Job block');
     assert.ok(
       apiJobBlock.includes('profileDefaults') && apiJobBlock.includes('GetEnvironmentVariable'),
       'API job must reapply profileDefaults with env-check after .env reload',
