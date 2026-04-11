@@ -249,7 +249,7 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
   });
 
   for (const entry of sorted) {
-    if (entry.name.startsWith('.') && entry.name !== '.claude') continue;
+    if (entry.name.startsWith('.') && entry.name !== '.claude' && entry.name !== '.kimi') continue;
     if (SKIP_DIRS.has(entry.name)) continue;
 
     const fullPath = join(dirPath, entry.name);

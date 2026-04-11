@@ -29,6 +29,7 @@ packages/web/public/worker-*.js
 .augment/
 .codex/
 .gemini/
+.kimi/
 .kiro/
 .trae/
 .dare/
@@ -66,6 +67,7 @@ npm-debug.log*
 pnpm-debug.log*
 
 # Lockfiles (workspace uses pnpm only)
+package-lock.json
 packages/**/package-lock.json
 
 # Test coverage
@@ -129,6 +131,9 @@ private/
 
 # Playwright MCP cache
 .playwright-mcp/
+
+# Local OMX runtime state
+.omx/
 
 # SQLite runtime databases (Hindsight evidence store)
 evidence.sqlite

@@ -363,6 +363,39 @@ describe('HubQuotaBoardTab — account pool grouping', () => {
     expect(container.textContent).toContain('账号配置加载失败 (503)');
     expect(container.textContent).toContain('额度池成员归属可能不完整');
   });
+
+  it('refreshes both official providers and Kimi, with Kimi using its own refresh endpoint', async () => {
+    const calls: string[] = [];
+    mockApiFetch.mockImplementation((path: string) => {
+      calls.push(path);
+      if (path === '/api/quota/refresh/official') {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      if (path === '/api/quota/refresh/kimi') {
+        return Promise.resolve(jsonResponse({ kimi: { status: 'ok' }, source: 'cli', fallbackUsed: false }));
+      }
+      return defaultQuotaApiFetch(path);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubQuotaBoardTab));
+    });
+    await flushEffects();
+    calls.length = 0;
+
+    const refreshButton = Array.from(container.querySelectorAll('button')).find(
+      (node) => node.textContent?.trim() === '刷新全部',
+    );
+    expect(refreshButton).toBeTruthy();
+
+    await act(async () => {
+      refreshButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(calls).toContain('/api/quota/refresh/official');
+    expect(calls).toContain('/api/quota/refresh/kimi');
+  });
 });
 
 describe('HubQuotaBoardTab — polling & notification', () => {

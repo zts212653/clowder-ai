@@ -26,6 +26,7 @@ const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】�
 // If the next char looks like part of a handle token, treat it as NOT a boundary.
 // This avoids prefix-matching `@opus-45` as `@opus`, while still allowing `@opus请看`.
 const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
+const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
 
 interface MentionPatternEntry {
   readonly catId: CatId;
@@ -104,21 +105,38 @@ export function analyzeA2AMentions(
     if (found.length >= MAX_A2A_MENTION_TARGETS) break; // 5. Safety limit
 
     const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
-    const normalized = rawLine.slice(leadingWs).toLowerCase();
+    const normalized = rawLine.slice(leadingWs).toLowerCase().replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
     if (!normalized.startsWith('@')) {
       continue;
     }
 
-    for (const entry of entries) {
-      if (!normalized.startsWith(entry.pattern)) continue;
-      const charAfter = normalized[entry.pattern.length];
-      const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
-      if (!isBoundary) continue;
-      if (!seen.has(entry.catId)) {
-        seen.add(entry.catId);
-        found.push(entry.catId);
+    let cursor = 0;
+    while (cursor < normalized.length && found.length < MAX_A2A_MENTION_TARGETS) {
+      const segment = normalized.slice(cursor);
+      let matched = false;
+
+      for (const entry of entries) {
+        if (!segment.startsWith(entry.pattern)) continue;
+        const charAfter = segment[entry.pattern.length];
+        const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
+        if (!isBoundary) continue;
+        if (!seen.has(entry.catId)) {
+          seen.add(entry.catId);
+          found.push(entry.catId);
+        }
+        cursor += entry.pattern.length;
+        matched = true;
+        break; // longest-match-first: lock one winner at current cursor
       }
-      break; // longest-match-first: lock one winner for this line
+
+      if (!matched) break;
+
+      while (cursor < normalized.length && TOKEN_BOUNDARY_RE.test(normalized[cursor]!)) {
+        cursor += 1;
+      }
+      if (normalized[cursor] !== '@') {
+        break;
+      }
     }
   }
 

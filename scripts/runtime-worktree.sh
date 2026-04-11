@@ -264,6 +264,17 @@ ensure_runtime_clean() {
   fi
 }
 
+auto_stash_runtime_lock_drift() {
+  local lock_drift
+  lock_drift=$(git -C "$RUNTIME_DIR" diff --name-only 2>/dev/null || true)
+  if [ "$lock_drift" = "pnpm-lock.yaml" ]; then
+    info "lock drift detected — resetting instead of blocking startup"
+    if ! git -C "$RUNTIME_DIR" stash push -m "lock-drift-auto-stash" -- pnpm-lock.yaml >/dev/null 2>&1; then
+      git -C "$RUNTIME_DIR" show HEAD:pnpm-lock.yaml > "$RUNTIME_DIR/pnpm-lock.yaml"
+    fi
+  fi
+}
+
 ensure_runtime_branch() {
   local branch
   branch=$(git -C "$RUNTIME_DIR" rev-parse --abbrev-ref HEAD)
@@ -317,6 +328,7 @@ sync_runtime_worktree() {
     die "API port appears active; stop dev server before sync, or re-run with --force."
   fi
 
+  auto_stash_runtime_lock_drift
   ensure_runtime_clean
   ensure_runtime_branch
 
@@ -339,12 +351,7 @@ sync_runtime_worktree() {
     # added a dep to package.json but forgot to commit the lock update).
     # If pnpm-lock.yaml is the ONLY dirty file, auto-commit the drift fix
     # so the next `start` won't be blocked by ensure_runtime_clean.
-    local lock_drift
-    lock_drift=$(git -C "$RUNTIME_DIR" diff --name-only 2>/dev/null || true)
-    if [ "$lock_drift" = "pnpm-lock.yaml" ]; then
-      info "lock drift detected — stashing instead of committing (avoids branch divergence)"
-      git -C "$RUNTIME_DIR" stash push -m "lock-drift-auto-stash" -- pnpm-lock.yaml
-    fi
+    auto_stash_runtime_lock_drift
   fi
 
   info "sync complete"

@@ -28,6 +28,7 @@ const PROVIDER_FILES: Record<Provider, string> = {
   claude: 'CLAUDE.md',
   codex: 'AGENTS.md',
   gemini: 'GEMINI.md',
+  kimi: 'KIMI.md',
 };
 
 /** Provider skills directory mapping */
@@ -35,6 +36,7 @@ const PROVIDER_SKILLS_DIRS: Record<Provider, string> = {
   claude: '.claude/skills',
   codex: '.codex/skills',
   gemini: '.gemini/skills',
+  kimi: '.kimi/skills',
 };
 
 /** Provider hooks directory mapping (F070 Phase 2) */
@@ -42,6 +44,7 @@ const PROVIDER_HOOKS_DIRS: Record<Provider, string> = {
   claude: '.claude/hooks',
   codex: '.codex/hooks',
   gemini: '.gemini/hooks',
+  kimi: '.kimi/hooks',
 };
 
 export interface BootstrapOptions {
@@ -70,7 +73,7 @@ export class GovernanceBootstrapService {
       actions.push(action);
     }
 
-    // 2. Skills symlinks for all 3 providers
+    // 2. Skills symlinks for all supported providers
     for (const [provider, skillsDir] of Object.entries(PROVIDER_SKILLS_DIRS) as [Provider, string][]) {
       const action = await this.symlinkSkills(targetProject, provider, skillsDir, opts.dryRun);
       actions.push(action);

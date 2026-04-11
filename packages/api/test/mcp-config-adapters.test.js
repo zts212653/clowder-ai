@@ -11,9 +11,11 @@ import {
   readClaudeMcpConfig,
   readCodexMcpConfig,
   readGeminiMcpConfig,
+  readKimiMcpConfig,
   writeClaudeMcpConfig,
   writeCodexMcpConfig,
   writeGeminiMcpConfig,
+  writeKimiMcpConfig,
 } from '../dist/config/capabilities/mcp-config-adapters.js';
 
 /** @param {string} prefix */
@@ -229,6 +231,44 @@ describe('readGeminiMcpConfig', () => {
   });
 });
 
+describe('readKimiMcpConfig', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('kimi-read');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('parses ~/.kimi/mcp.json compatible config', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          context7: {
+            url: 'https://mcp.context7.com/mcp',
+            headers: { CONTEXT7_API_KEY: 'test-key' },
+          },
+          filesystem: {
+            command: 'npx',
+            args: ['-y', '@mcp/fs'],
+            env: { DEBUG: '1' },
+          },
+        },
+      }),
+    );
+
+    const result = await readKimiMcpConfig(file);
+    assert.equal(result.length, 2);
+    const remote = result.find((server) => server.name === 'context7');
+    assert.equal(remote?.transport, 'streamableHttp');
+    assert.equal(remote?.url, 'https://mcp.context7.com/mcp');
+    assert.deepEqual(remote?.headers, { CONTEXT7_API_KEY: 'test-key' });
+  });
+});
+
 // ────────── Writers ──────────
 
 describe('writeClaudeMcpConfig', () => {
@@ -418,6 +458,74 @@ describe('writeGeminiMcpConfig', () => {
       args: ['--app', 'antigravity'],
     });
     assert.ok(data.mcpServers['cat-cafe'], 'cat-cafe server should still be written');
+  });
+});
+
+describe('writeKimiMcpConfig', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('kimi-write');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('writes stdio and http MCP servers in kimi format', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeKimiMcpConfig(file, [
+      {
+        name: 'context7',
+        command: '',
+        args: [],
+        enabled: true,
+        source: 'external',
+        transport: 'streamableHttp',
+        url: 'https://mcp.context7.com/mcp',
+        headers: { CONTEXT7_API_KEY: 'test-key' },
+      },
+      {
+        name: 'filesystem',
+        command: 'npx',
+        args: ['-y', '@mcp/fs'],
+        enabled: true,
+        source: 'external',
+        env: { DEBUG: '1' },
+      },
+    ]);
+
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    assert.deepEqual(raw.mcpServers.context7, {
+      url: 'https://mcp.context7.com/mcp',
+      headers: { CONTEXT7_API_KEY: 'test-key' },
+    });
+    assert.deepEqual(raw.mcpServers.filesystem, {
+      command: 'npx',
+      args: ['-y', '@mcp/fs'],
+      env: { DEBUG: '1' },
+    });
+  });
+
+  it('injects cat-cafe callback env placeholders for kimi cat-cafe servers', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeKimiMcpConfig(file, [
+      {
+        name: 'cat-cafe',
+        command: 'node',
+        args: ['index.js'],
+        enabled: true,
+        source: 'cat-cafe',
+      },
+    ]);
+
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    assert.deepEqual(raw.mcpServers['cat-cafe'].env, {
+      CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
+      CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
+      CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
+      CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
+      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
+    });
   });
 });
 

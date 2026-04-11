@@ -11,6 +11,7 @@ export interface AuditExplorerPanelProps {
   threadId: string;
   /** When set externally, auto-switch to session tab and show this session */
   externalSessionId?: string | null;
+  externalSessionCatId?: string;
   /** Called when viewer is closed, so parent can clear its state (enables reopen same session) */
   onCloseSession?: () => void;
 }
@@ -21,29 +22,34 @@ const TAB_LABELS: Record<AuditTab, string> = {
   search: '搜索',
 };
 
-export function AuditExplorerPanel({ threadId, externalSessionId, onCloseSession }: AuditExplorerPanelProps) {
+export function AuditExplorerPanel({
+  threadId,
+  externalSessionId,
+  externalSessionCatId,
+  onCloseSession,
+}: AuditExplorerPanelProps) {
   const [tab, setTab] = useState<AuditTab>('events');
   const [expanded, setExpanded] = useState(true);
-  const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
+  const [viewingSession, setViewingSession] = useState<{ id: string; catId?: string } | null>(null);
 
   // Handle external session switch (from SessionChainPanel click or thread switch)
   React.useEffect(() => {
     if (externalSessionId) {
-      setViewingSessionId(externalSessionId);
+      setViewingSession({ id: externalSessionId, catId: externalSessionCatId });
       setTab('session');
       setExpanded(true);
     } else {
-      setViewingSessionId(null);
+      setViewingSession(null);
     }
-  }, [externalSessionId]);
+  }, [externalSessionId, externalSessionCatId]);
 
-  const handleViewSession = useCallback((sessionId: string) => {
-    setViewingSessionId(sessionId);
+  const handleViewSession = useCallback((sessionId: string, catId?: string) => {
+    setViewingSession({ id: sessionId, catId });
     setTab('session');
   }, []);
 
   const handleCloseViewer = useCallback(() => {
-    setViewingSessionId(null);
+    setViewingSession(null);
     onCloseSession?.();
   }, [onCloseSession]);
 
@@ -80,8 +86,12 @@ export function AuditExplorerPanel({ threadId, externalSessionId, onCloseSession
           {tab === 'events' && <AuditEventsTab threadId={threadId} />}
 
           {tab === 'session' &&
-            (viewingSessionId ? (
-              <SessionEventsViewer sessionId={viewingSessionId} onClose={handleCloseViewer} />
+            (viewingSession ? (
+              <SessionEventsViewer
+                sessionId={viewingSession.id}
+                catId={viewingSession.catId}
+                onClose={handleCloseViewer}
+              />
             ) : (
               <div className="text-xs text-cafe-muted py-2">
                 点击左侧 Session Chain 中的封存会话，或通过搜索找到 session

@@ -48,6 +48,11 @@
   --color-gemini-dark: #3a6fa5;
   --color-gemini-bg: #eaf4fb;
 
+  --color-kimi-primary: #4b5563;
+  --color-kimi-light: #e5e7eb;
+  --color-kimi-dark: #1f2937;
+  --color-kimi-bg: #f9fafb;
+
   --color-dare-primary: #d4a76a;
   --color-dare-light: #e8c99b;
   --color-dare-dark: #8b6f47;
@@ -186,6 +191,7 @@
   --color-opus-bg: rgba(155, 126, 189, 0.15);
   --color-codex-bg: rgba(91, 140, 90, 0.15);
   --color-gemini-bg: rgba(91, 155, 213, 0.15);
+  --color-kimi-bg: rgba(75, 85, 99, 0.18);
   --color-dare-bg: rgba(212, 167, 106, 0.15);
 
   /* Connector dark mode overrides — muted translucent backgrounds, lighter text */

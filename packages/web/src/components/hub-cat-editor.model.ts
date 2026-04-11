@@ -4,7 +4,7 @@ import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
 /** F340 P5: Renamed from ClientValue → ClientId (aligned with shared type). */
-export type ClientId = 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode' | 'antigravity';
+export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode' | 'antigravity';
 /** @deprecated F340: Use {@link ClientId} instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
@@ -67,6 +67,7 @@ export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
   { value: 'anthropic', label: 'Claude' },
   { value: 'openai', label: 'Codex' },
   { value: 'google', label: 'Gemini' },
+  { value: 'kimi', label: 'Kimi' },
   { value: 'dare', label: 'Dare' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'antigravity', label: 'Antigravity' },
@@ -189,7 +190,12 @@ export function splitStrengthTags(raw: string): string[] {
 
 function isBuiltinClient(client: ClientId): client is BuiltinAccountClient {
   return (
-    client === 'anthropic' || client === 'openai' || client === 'google' || client === 'dare' || client === 'opencode'
+    client === 'anthropic' ||
+    client === 'openai' ||
+    client === 'google' ||
+    client === 'kimi' ||
+    client === 'dare' ||
+    client === 'opencode'
   );
 }
 
@@ -200,6 +206,7 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
   if (normalizedId.includes('claude')) return 'anthropic';
   if (normalizedId.includes('codex')) return 'openai';
   if (normalizedId.includes('gemini')) return 'google';
+  if (normalizedId.includes('kimi') || normalizedId.includes('moonshot')) return 'kimi';
   if (normalizedId.includes('dare')) return 'dare';
   if (normalizedId.includes('opencode')) return 'opencode';
   return undefined;
@@ -214,6 +221,8 @@ export function builtinAccountIdForClient(client: ClientId): string | null {
       return 'codex';
     case 'google':
       return 'gemini';
+    case 'kimi':
+      return 'kimi';
     case 'dare':
       return 'dare';
     case 'opencode':
@@ -228,6 +237,12 @@ export function filterAccounts(client: ClientId, profiles: ProfileItem[]): Profi
   );
   // Gemini CLI only supports builtin Google auth — no API key profiles.
   if (client === 'google') return builtinProfiles;
+  if (client === 'kimi') {
+    const kimiApiProfiles = profiles.filter(
+      (profile) => profile.authType === 'api_key' && legacyProfileClient(profile) === 'kimi',
+    );
+    return [...builtinProfiles, ...kimiApiProfiles.filter((profile) => !builtinProfiles.includes(profile))];
+  }
   const apiKeyProfiles = profiles.filter((profile) => profile.authType === 'api_key');
   return [...builtinProfiles, ...apiKeyProfiles.filter((profile) => !builtinProfiles.includes(profile))];
 }
