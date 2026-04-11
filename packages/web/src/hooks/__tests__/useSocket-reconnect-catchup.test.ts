@@ -36,6 +36,7 @@ const mockSetIntentMode = vi.fn();
 const mockClearCatStatuses = vi.fn();
 const mockSetStreaming = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
+const mockClearThreadActiveInvocation = vi.fn();
 const mockGetThreadState = vi.fn(() => ({
   messages: [],
   isLoading: false,
@@ -60,6 +61,7 @@ const mockStoreState = {
   clearCatStatuses: mockClearCatStatuses,
   setStreaming: mockSetStreaming,
   requestStreamCatchUp: mockRequestStreamCatchUp,
+  clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   getThreadState: mockGetThreadState,
   // Stubs for other store methods used during connect
   addMessageToThread: vi.fn(),
@@ -77,7 +79,6 @@ const mockStoreState = {
   setThreadIntentMode: vi.fn(),
   setThreadTargetCats: vi.fn(),
   updateThreadCatStatus: vi.fn(),
-  clearThreadActiveInvocation: vi.fn(),
   replaceThreadTargetCats: vi.fn(),
   addActiveInvocation: vi.fn(),
   addThreadActiveInvocation: vi.fn(),
@@ -191,6 +192,8 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     });
 
     // Server had no active invocations → stale state cleared → catch-up triggered
+    expect(mockClearThreadActiveInvocation).toHaveBeenCalledWith('thread-1');
+    expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
     expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
   });
 
