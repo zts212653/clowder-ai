@@ -26,11 +26,13 @@ const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
   claude: 'anthropic',
   codex: 'openai',
   gemini: 'google',
+  kimi: 'kimi',
   dare: 'dare',
   opencode: 'opencode',
   builtin_anthropic: 'anthropic',
   builtin_openai: 'openai',
   builtin_google: 'google',
+  builtin_kimi: 'kimi',
   builtin_dare: 'dare',
   builtin_opencode: 'opencode',
 };

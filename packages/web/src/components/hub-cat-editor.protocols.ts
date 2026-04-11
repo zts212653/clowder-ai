@@ -1,6 +1,6 @@
 import type { ClientId } from './hub-cat-editor.model';
 
-export function protocolForClient(client: ClientId): 'anthropic' | 'openai' | 'google' | null {
+export function protocolForClient(client: ClientId): 'anthropic' | 'openai' | 'google' | 'kimi' | null {
   switch (client) {
     case 'anthropic':
       return 'anthropic';
@@ -8,6 +8,8 @@ export function protocolForClient(client: ClientId): 'anthropic' | 'openai' | 'g
       return 'openai';
     case 'google':
       return 'google';
+    case 'kimi':
+      return 'kimi';
     case 'dare':
       return 'openai';
     case 'opencode':
@@ -18,5 +20,7 @@ export function protocolForClient(client: ClientId): 'anthropic' | 'openai' | 'g
 }
 
 export function defaultMcpSupportForClient(client: ClientId): boolean {
-  return client === 'anthropic' || client === 'openai' || client === 'google' || client === 'opencode';
+  return (
+    client === 'anthropic' || client === 'openai' || client === 'google' || client === 'kimi' || client === 'opencode'
+  );
 }

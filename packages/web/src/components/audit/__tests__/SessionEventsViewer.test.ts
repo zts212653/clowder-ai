@@ -14,6 +14,18 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
 }));
 
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    getCatById: (id: string) => {
+      const cats: Record<string, { id: string; displayName: string }> = {
+        kimi: { id: 'kimi', displayName: '梵花猫' },
+        opus: { id: 'opus', displayName: '布偶猫' },
+      };
+      return cats[id];
+    },
+  }),
+}));
+
 const chatMessages = [
   { role: 'user', content: 'hello', timestamp: 1000 },
   { role: 'assistant', content: 'hi there', timestamp: 2000 },
@@ -69,6 +81,34 @@ describe('SessionEventsViewer', () => {
     expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('/api/sessions/s1/events?view=chat'));
     expect(container.textContent).toContain('hello');
     expect(container.textContent).toContain('hi there');
+  });
+
+  it('uses kimi theme colors for assistant chat rows when catId is kimi', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ messages: chatMessages, nextCursor: null, total: 2 }),
+    });
+
+    await renderViewer({ catId: 'kimi' });
+
+    expect(container.innerHTML).toContain('bg-kimi-light');
+    expect(container.innerHTML).toContain('text-kimi-dark');
+    expect(container.textContent).toContain('梵花猫');
+    expect(container.innerHTML).not.toContain('bg-purple-50');
+    expect(container.innerHTML).not.toContain('text-purple-800');
+  });
+
+  it('falls back to neutral colors when session catId is unknown', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ messages: chatMessages, nextCursor: null, total: 2 }),
+    });
+
+    await renderViewer({ catId: 'unknown-cat' });
+
+    expect(container.innerHTML).toContain('bg-cafe-surface-elevated');
+    expect(container.innerHTML).toContain('text-cafe-secondary');
+    expect(container.innerHTML).not.toContain('bg-purple-50');
   });
 
   it('switches to handoff view and renders invocation summaries', async () => {

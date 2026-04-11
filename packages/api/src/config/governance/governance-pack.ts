@@ -2,7 +2,7 @@
  * F070: Portable Governance Pack — content definitions
  *
  * Defines the managed block content that gets injected into
- * external project CLAUDE.md/AGENTS.md/GEMINI.md files.
+ * external project CLAUDE.md/AGENTS.md/GEMINI.md/KIMI.md files.
  *
  * Port values use internal defaults (3001/6399/6398).
  * The sync-to-opensource pipeline transforms API/frontend ports
@@ -42,12 +42,12 @@ const METHODOLOGY_INTRO = `### Knowledge Engineering
 - Feature lifecycle: kickoff → discussion → implementation → review → completion
 - SOP: See docs/SOP.md for the 6-step workflow`;
 
-export type Provider = 'claude' | 'codex' | 'gemini';
+export type Provider = 'claude' | 'codex' | 'gemini' | 'kimi';
 
 /**
  * Generate the managed block content for a specific provider.
  * This block is injected into the provider's instruction file
- * (CLAUDE.md, AGENTS.md, or GEMINI.md).
+ * (CLAUDE.md, AGENTS.md, GEMINI.md, or KIMI.md).
  */
 export function getGovernanceManagedBlock(provider: Provider): string {
   return [

@@ -343,12 +343,12 @@ export function RightStatusPanel({
 
   const { getCatById } = useCatData();
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [viewSessionId, setViewSessionId] = useState<string | null>(null);
+  const [viewSession, setViewSession] = useState<{ id: string; catId?: string } | null>(null);
 
   // Clear session viewer when switching threads
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally reset on threadId change only
   React.useEffect(() => {
-    setViewSessionId(null);
+    setViewSession(null);
   }, [threadId]);
 
   const openHub = useChatStore((s) => s.openHub);
@@ -461,7 +461,11 @@ export function RightStatusPanel({
 
       <PlanBoardPanel threadId={threadId} catInvocations={catInvocations} />
 
-      <SessionChainPanel threadId={threadId} catInvocations={catInvocations} onViewSession={setViewSessionId} />
+      <SessionChainPanel
+        threadId={threadId}
+        catInvocations={catInvocations}
+        onViewSession={(id, catId) => setViewSession({ id, catId })}
+      />
 
       <section className="rounded-lg border border-cafe bg-cafe-surface-elevated/70 p-3">
         <h3 className="text-xs font-semibold text-cafe-secondary mb-2">对话信息</h3>
@@ -487,8 +491,9 @@ export function RightStatusPanel({
       <AuditExplorerPanel
         key={threadId}
         threadId={threadId}
-        externalSessionId={viewSessionId}
-        onCloseSession={() => setViewSessionId(null)}
+        externalSessionId={viewSession?.id ?? null}
+        externalSessionCatId={viewSession?.catId}
+        onCloseSession={() => setViewSession(null)}
       />
 
       {/* ── F130: Runtime logs quick-access ────────────── */}

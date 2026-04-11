@@ -9,6 +9,7 @@ const CAT_VOICE_COLORS: Record<string, { bg: string; bar: string }> = {
   opus: { bg: 'bg-[var(--color-opus-bg)]', bar: 'bg-[var(--color-opus-primary)]' },
   codex: { bg: 'bg-[var(--color-codex-bg)]', bar: 'bg-[var(--color-codex-primary)]' },
   gemini: { bg: 'bg-[var(--color-gemini-bg)]', bar: 'bg-[var(--color-gemini-primary)]' },
+  kimi: { bg: 'bg-[var(--color-kimi-bg)]', bar: 'bg-[var(--color-kimi-primary)]' },
 };
 const DEFAULT_VOICE_COLORS = { bg: 'bg-cafe-surface-elevated dark:bg-gray-800', bar: 'bg-gray-400' };
 

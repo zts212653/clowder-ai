@@ -220,6 +220,7 @@ test('Windows installer uses interactive selectors instead of typed or letter-ba
   assert.match(installScript, /Name = "Claude"; Label = "Claude"; Cmd = "claude"/);
   assert.match(installScript, /Name = "Codex"; Label = "Codex"; Cmd = "codex"/);
   assert.match(installScript, /Name = "Gemini"; Label = "Gemini"; Cmd = "gemini"/);
+  assert.match(installScript, /Name = "Kimi"; Label = "Kimi"; Cmd = "kimi"/);
   assert.match(installScript, /Select-InstallerMultiChoice -Title "Missing agent CLIs"/);
   assert.doesNotMatch(uiHelpersScript, /Label = "&All"/);
   assert.doesNotMatch(uiHelpersScript, /Label = "&Select"/);
@@ -229,6 +230,7 @@ test('Windows installer uses interactive selectors instead of typed or letter-ba
   assert.match(helpersScript, /Select-InstallerChoice -Title "Claude auth"/);
   assert.match(helpersScript, /Select-InstallerChoice -Title "Codex auth"/);
   assert.match(helpersScript, /Select-InstallerChoice -Title "Gemini auth"/);
+  assert.match(helpersScript, /Select-InstallerChoice -Title "Kimi auth"/);
   assert.doesNotMatch(helpersScript, /Read-Host " {4}Choose \[1\/2\]/);
 });
 
@@ -239,7 +241,11 @@ test('Windows installer masks provider API key prompts instead of echoing secret
   assert.match(helpersScript, /ZeroFreeBSTR/);
 
   const apiPromptMatches = helpersScript.match(/\$apiKey = Read-InstallerSecret " {4}API Key"/g) ?? [];
-  assert.equal(apiPromptMatches.length, 3, 'expected Claude, Codex, and Gemini API key prompts to use masked input');
+  assert.equal(
+    apiPromptMatches.length,
+    4,
+    'expected Claude, Codex, Gemini, and Kimi API key prompts to use masked input',
+  );
   assert.doesNotMatch(helpersScript, /\$apiKey = Read-Host " {4}API Key"/);
 });
 

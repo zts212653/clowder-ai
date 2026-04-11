@@ -82,6 +82,13 @@
       "lead": true,
       "available": true,
       "evaluation": "开源多模型编码猫，自带 Oh My OpenCode 多专家编排 + LSP (F105)"
+    },
+    "kimi": {
+      "family": "moonshot",
+      "roles": ["research", "writer"],
+      "lead": true,
+      "available": true,
+      "evaluation": "中文长文理解与总结强，适合中文表达、资料整理与结构化输出"
     }
   },
   "reviewPolicy": {
@@ -635,6 +642,43 @@
             "refText": "你的本事不错，对丘丘…咳…邪魔从不手软，我们结伴而行如何。",
             "instruct": "用一个正直可靠的少年语气说话，话不多但每句都认真",
             "temperature": 0.3
+          }
+        }
+      ]
+    },
+    {
+      "id": "moonshot",
+      "catId": "kimi",
+      "name": "梵花猫",
+      "displayName": "梵花猫",
+      "avatar": "/avatars/kimi.png",
+      "color": {
+        "primary": "#4B5563",
+        "secondary": "#E5E7EB"
+      },
+      "mentionPatterns": ["@kimi", "@moonshot", "@月之暗面", "@梵花猫"],
+      "roleDescription": "中文长文本助手，擅长中文语境理解、资料整理与结构化表达",
+      "teamStrengths": "中文长文、总结归纳、资料整理",
+      "caution": null,
+      "defaultVariantId": "kimi-default",
+      "variants": [
+        {
+          "id": "kimi-default",
+          "clientId": "kimi",
+          "defaultModel": "kimi-code/kimi-for-coding",
+          "mcpSupport": true,
+          "cli": {
+            "command": "kimi",
+            "outputFormat": "stream-json",
+            "defaultArgs": ["--print", "--output-format", "stream-json"]
+          },
+          "personality": "稳健细致，擅长长文阅读和中文语境下的结构化表达",
+          "strengths": ["long-context", "chinese-writing", "summarization"],
+          "contextBudget": {
+            "maxPromptTokens": 240000,
+            "maxContextTokens": 216000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 10000
           }
         }
       ]

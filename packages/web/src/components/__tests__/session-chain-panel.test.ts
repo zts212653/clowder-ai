@@ -35,12 +35,14 @@ vi.mock('@/hooks/useCatData', () => ({
     cats: [
       { id: 'opus', displayName: '布偶猫', color: { primary: '#7C3AED', secondary: '#EDE9FE' } },
       { id: 'codex', displayName: '缅因猫', color: { primary: '#059669', secondary: '#D1FAE5' } },
+      { id: 'kimi', displayName: '梵花猫', color: { primary: '#4B5563', secondary: '#E5E7EB' } },
     ],
     isLoading: false,
     getCatById: (id: string) => {
       const map: Record<string, unknown> = {
         opus: { id: 'opus', displayName: '布偶猫' },
         codex: { id: 'codex', displayName: '缅因猫' },
+        kimi: { id: 'kimi', displayName: '梵花猫' },
       };
       return map[id];
     },
@@ -126,7 +128,7 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     expect(container.textContent).toContain('Session #3');
-    expect(container.textContent).toContain('opus');
+    expect(container.textContent).toContain('布偶猫');
     expect(container.textContent).toContain('Active');
     expect(container.textContent).toContain('8 msgs');
     // Session ID should be visible (truncated) with copy title
@@ -225,6 +227,25 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     expect(container.textContent).toContain('sealing');
+  });
+
+  it('renders kimi family badge colors for active sessions', async () => {
+    mockSessionsResponse([
+      { id: 'kimi_s1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    const html = container.innerHTML;
+    expect(html).toContain('border-kimi-primary/40');
+  });
+
+  it('renders known cat display names in the active session badge', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.textContent).toContain('梵花猫');
   });
 
   it('shows post-compact safety alert when sessionSealed is true', async () => {
@@ -472,7 +493,7 @@ describe('F24: SessionChainPanel', () => {
     // Badge should use codex colors
     const badge = container.querySelector('.bg-codex-light.text-codex-dark');
     expect(badge).not.toBeNull();
-    expect(badge?.textContent).toContain('codex');
+    expect(badge?.textContent).toContain('缅因猫');
     // Must NOT have opus purple
     expect(container.querySelector('.border-opus-primary\\/40')).toBeNull();
     expect(container.querySelector('.bg-opus-light')).toBeNull();

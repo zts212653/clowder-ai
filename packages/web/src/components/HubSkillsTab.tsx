@@ -7,6 +7,7 @@ interface SkillMount {
   claude: boolean;
   codex: boolean;
   gemini: boolean;
+  kimi: boolean;
 }
 
 interface SkillEntry {
@@ -51,9 +52,10 @@ function CategoryGroup({ category, skills }: { category: string; skills: SkillEn
               <th className="pb-1.5 pr-3 font-semibold">Skill</th>
               <th className="pb-1.5 pr-3 font-semibold">触发条件</th>
               <th className="pb-1.5 pr-3 font-semibold">MCP 依赖</th>
-              <th className="pb-1.5 w-10 text-center font-semibold">布偶</th>
-              <th className="pb-1.5 w-10 text-center font-semibold">缅因</th>
-              <th className="pb-1.5 w-10 text-center font-semibold">暹罗</th>
+              <th className="pb-1.5 w-12 text-center font-semibold">Claude</th>
+              <th className="pb-1.5 w-12 text-center font-semibold">Codex</th>
+              <th className="pb-1.5 w-12 text-center font-semibold">Gemini</th>
+              <th className="pb-1.5 w-12 text-center font-semibold">Kimi</th>
             </tr>
           </thead>
           <tbody>
@@ -95,6 +97,9 @@ function CategoryGroup({ category, skills }: { category: string; skills: SkillEn
                 </td>
                 <td className="py-1.5 text-center">
                   <MountBadge mounted={skill.mounts.gemini} />
+                </td>
+                <td className="py-1.5 text-center">
+                  <MountBadge mounted={skill.mounts.kimi} />
                 </td>
               </tr>
             ))}

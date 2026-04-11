@@ -287,6 +287,33 @@ describe('aggregateUsageByDay', () => {
     assert.equal(result.daily[0].cats.opus.costUsd, 0);
   });
 
+  test('falls back to lastTurnInputTokens/contextUsedTokens for providers without normalized input tokens', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
+    const records = [
+      makeRecord('inv-kimi-fallback', anchor, {
+        kimi: {
+          lastTurnInputTokens: 6335,
+          contextUsedTokens: 6335,
+        },
+      }),
+      makeRecord('inv-kimi-total-fallback', anchor, {
+        kimi: {
+          totalTokens: 900,
+        },
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 7 });
+
+    assert.equal(result.daily[0].cats.kimi.inputTokens, 7235);
+    assert.equal(result.daily[0].cats.kimi.outputTokens, 0);
+    assert.equal(result.daily[0].cats.kimi.participations, 2);
+    assert.equal(result.daily[0].total.inputTokens, 7235);
+    assert.equal(result.daily[0].total.outputTokens, 0);
+    assert.equal(result.daily[0].total.invocations, 2);
+  });
+
   test('cross-midnight: usageRecordedAt on next day overrides createdAt/updatedAt', async () => {
     const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
     const anchor = todayNoon();

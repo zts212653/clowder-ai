@@ -54,6 +54,7 @@ describe('governance-pack', () => {
     assert.ok(getGovernanceManagedBlock('claude').includes('claude'));
     assert.ok(getGovernanceManagedBlock('codex').includes('codex'));
     assert.ok(getGovernanceManagedBlock('gemini').includes('gemini'));
+    assert.ok(getGovernanceManagedBlock('kimi').includes('kimi'));
   });
 
   it('pack version is semver', () => {
