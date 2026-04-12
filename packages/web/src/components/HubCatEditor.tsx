@@ -429,6 +429,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
       }
 
       await onSaved();
+      window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'member-editor.profile' } }));
       onClose();
     } catch (err) {
       await rollbackMutations();
@@ -469,6 +470,7 @@ export function HubCatEditor({ cat, draft, open, onClose, onSaved }: HubCatEdito
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={requestClose}>
       <div
         className="flex max-h-[88vh] w-full max-w-[560px] flex-col rounded-[32px] border border-[#F0DDCD] bg-[#FFF8F2] shadow-2xl"
+        data-guide-id="member-editor.profile"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-start justify-between border-b border-[#F0DDCD] px-7 py-5">

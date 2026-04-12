@@ -154,6 +154,24 @@
   --text-secondary: var(--cafe-text-secondary);
   --border-radius-base: 16px;
   --spacing-unit: 8px;
+
+  /* F155: Guide Engine Tokens */
+  --guide-overlay-bg: rgba(12, 16, 24, 0.62);
+  --guide-cutout-ring: #d4853a;
+  --guide-cutout-shadow: rgba(212, 133, 58, 0.35);
+  --guide-hud-bg: #fffdf8;
+  --guide-hud-border: #e7dac7;
+  --guide-text-primary: #2b251f;
+  --guide-text-secondary: #6f6257;
+  --guide-success: #2f9e44;
+  --guide-error: #d94848;
+  --guide-z-overlay: 1100;
+  --guide-z-hud: 1110;
+  --guide-z-pulse: 1120;
+  --guide-radius: 14px;
+  --guide-gap: 12px;
+  --guide-motion-fast: 160ms;
+  --guide-motion-normal: 260ms;
 }
 
 /* --- Dark Mode: override semantic tokens only --- */
@@ -320,6 +338,67 @@ body {
 }
 .animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* F155: Guide Engine Animations */
+@keyframes guide-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.03);
+    opacity: 0.85;
+  }
+}
+
+@keyframes guide-hud-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes guide-success-flash {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes guide-error-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+.animate-guide-hud-enter {
+  animation: guide-hud-enter 160ms ease-out;
+}
+
+.animate-guide-success {
+  animation: guide-success-flash 0.4s ease-out;
+}
+
+.animate-guide-error {
+  animation: guide-error-shake 0.3s ease-out;
 }
 
 @keyframes shake {

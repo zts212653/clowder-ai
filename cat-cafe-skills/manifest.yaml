@@ -38,6 +38,27 @@ skills:
     sop_step: null
     merged_from: ["feat-kickoff", "feat-discussion", "feat-completion"]
 
+  # ── 引导流程设计 ──
+  guide-authoring:
+    description: >
+      标准引导流程设计 SOP：场景识别 → YAML 编排 → 标签标注 → 注册发现 → 测试验证。
+      Use when: 新建引导流程、添加场景引导、维护 Guide Catalog、编写引导 YAML。
+      Not for: 使用引导（用户侧）、Guide Engine 代码实现（用 tdd）、视觉设计（用 pencil-design）。
+      Output: Flow YAML + tag-manifest 更新 + registry 注册 + CI 校验通过。
+    triggers:
+      - "新建引导"
+      - "添加场景引导"
+      - "写引导流程"
+      - "guide authoring"
+      - "引导 YAML"
+    not_for:
+      - "使用引导"
+      - "Guide Engine 实现"
+      - "出设计稿"
+    output: "Flow YAML / tag-manifest / registry entry / CI green"
+    next: ["pencil-design", "tdd"]
+    sop_step: null
+
   # ── 协作思考 ──
   collaborative-thinking:
     description: >

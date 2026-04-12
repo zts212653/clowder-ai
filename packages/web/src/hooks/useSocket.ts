@@ -113,6 +113,12 @@ export interface SocketCallbacks {
     reason: 'canceled' | 'failed';
     queue: import('../stores/chat-types').QueueEntry[];
   }) => void;
+  /** F155: Guide engine trigger */
+  onGuideStart?: (data: { guideId: string; threadId: string; timestamp: number }) => void;
+  /** F155: Guide control (next/skip/exit) */
+  onGuideControl?: (data: { action: string; guideId: string; threadId: string; timestamp: number }) => void;
+  /** F155: Guide completed in another client/session */
+  onGuideComplete?: (data: { guideId: string; threadId: string; timestamp: number }) => void;
   /** F152 Phase B: Memory bootstrap index events */
   onIndexEvent?: (event: string, data: Record<string, unknown>) => void;
 }
@@ -229,6 +235,9 @@ function reconcileInvocationStateOnReconnect(activeThreadId: string | null): voi
 export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const socketRef = useRef<Socket | null>(null);
   const joinedRoomsRef = useRef<Set<string>>(new Set());
+  const pendingGuideStartsRef = useRef<Map<string, { guideId: string; threadId: string; timestamp: number }>>(
+    new Map(),
+  );
   const bgStreamRefsRef = useRef<Map<string, { id: string; threadId: string; catId: string }>>(new Map());
   const bgReplacedInvocationsRef = useRef<Map<string, string>>(new Map());
   const bgFinalizedRefsRef = useRef<Map<string, string>>(new Map());
@@ -667,6 +676,48 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       },
     );
 
+    // F155: Guide engine trigger from MCP tool
+    socket.on('guide_start', (data: { guideId: string; threadId: string; timestamp: number }) => {
+      const routeThread = threadIdRef.current;
+      const storeThread = useChatStore.getState().currentThreadId;
+      const isActiveThread = Boolean(
+        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
+      );
+      if (!isActiveThread) {
+        pendingGuideStartsRef.current.set(data.threadId, data);
+        return;
+      }
+      pendingGuideStartsRef.current.delete(data.threadId);
+      callbacksRef.current.onGuideStart?.(data);
+    });
+
+    // F155: Guide control (next/skip/exit) from MCP tool
+    socket.on('guide_control', (data: { action: string; guideId: string; threadId: string; timestamp: number }) => {
+      // Always clear queued starts on exit — prevents stale replay even if user switched to this thread
+      if (data.action === 'exit') {
+        pendingGuideStartsRef.current.delete(data.threadId);
+      }
+      const routeThread = threadIdRef.current;
+      const storeThread = useChatStore.getState().currentThreadId;
+      const isActiveThread = Boolean(
+        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
+      );
+      if (!isActiveThread) return;
+      callbacksRef.current.onGuideControl?.(data);
+    });
+
+    socket.on('guide_complete', (data: { guideId: string; threadId: string; timestamp: number }) => {
+      // Always clear queued starts for this thread — prevents stale replay after switching back
+      pendingGuideStartsRef.current.delete(data.threadId);
+      const routeThread = threadIdRef.current;
+      const storeThread = useChatStore.getState().currentThreadId;
+      const isActiveThread = Boolean(
+        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
+      );
+      if (!isActiveThread) return;
+      callbacksRef.current.onGuideComplete?.(data);
+    });
+
     // F152 Phase B: Memory bootstrap progress events
     socket.on('index:progress', (data: Record<string, unknown>) => {
       callbacksRef.current.onIndexEvent?.('index:progress', data);
@@ -796,6 +847,16 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       joinRoom(threadId);
     }
   }, [threadId, joinRoom]);
+
+  const storeThreadId = useChatStore((s) => s.currentThreadId);
+  useEffect(() => {
+    if (!threadId) return;
+    if (storeThreadId !== threadId) return;
+    const pendingStart = pendingGuideStartsRef.current.get(threadId);
+    if (!pendingStart) return;
+    pendingGuideStartsRef.current.delete(threadId);
+    callbacksRef.current.onGuideStart?.(pendingStart);
+  }, [threadId, storeThreadId]);
 
   const cancelInvocation = useCallback((tid: string) => {
     socketRef.current?.emit('cancel_invocation', { threadId: tid });

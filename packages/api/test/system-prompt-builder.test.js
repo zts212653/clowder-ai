@@ -862,6 +862,98 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('F073'), 'Should contain feature ID');
   });
 
+  test('guide prompt emits offered transition only for a brand-new guide match', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-guide',
+      guideCandidate: {
+        id: 'add-member',
+        name: '添加成员',
+        estimatedTime: '3min',
+        status: 'offered',
+        isNewOffer: true,
+      },
+    });
+
+    assert.ok(ctx.includes('Guide Matched'), 'new match should emit offer card instructions');
+    assert.ok(ctx.includes('status="offered"'), 'new match should persist offered transition exactly once');
+  });
+
+  test('guide prompt does not re-send offered transition after the guide is already offered', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-guide',
+      guideCandidate: {
+        id: 'add-member',
+        name: '添加成员',
+        estimatedTime: '3min',
+        status: 'offered',
+        isNewOffer: false,
+      },
+    });
+
+    assert.ok(ctx.includes('Guide Pending'), 'existing offered guide should become a stable pending reminder');
+    assert.ok(!ctx.includes('status="offered"'), 'existing offered guide must not re-send offered transition');
+    assert.ok(!ctx.includes('cat_cafe_create_rich_block'), 'existing offered guide must not repeat the offer card');
+  });
+
+  test('guide preview from offered state advances to awaiting_choice once', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-guide',
+      guideCandidate: {
+        id: 'add-member',
+        name: '添加成员',
+        estimatedTime: '3min',
+        status: 'offered',
+        userSelection: '步骤概览',
+      },
+    });
+
+    assert.ok(ctx.includes('Guide Selection'), 'preview branch should still activate from offered state');
+    assert.ok(
+      ctx.includes('status="awaiting_choice"'),
+      'first preview should advance the guide to awaiting_choice before resolving steps',
+    );
+  });
+
+  test('guide preview from awaiting_choice does not re-send awaiting_choice transition', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-guide',
+      guideCandidate: {
+        id: 'add-member',
+        name: '添加成员',
+        estimatedTime: '3min',
+        status: 'awaiting_choice',
+        userSelection: '步骤概览',
+      },
+    });
+
+    assert.ok(ctx.includes('Guide Selection'), 'preview branch should remain available after awaiting_choice');
+    assert.ok(ctx.includes('步骤概览回复用户'), 'repeated preview should still present inline step tips');
+    assert.ok(
+      !ctx.includes('status="awaiting_choice"'),
+      'repeated preview must not emit an awaiting_choice -> awaiting_choice self-transition',
+    );
+  });
+
   test('buildInvocationContext omits SOP hint when sopStageHint absent', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({

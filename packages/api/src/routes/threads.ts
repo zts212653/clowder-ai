@@ -24,8 +24,10 @@ import type { IThreadReadStateStore } from '../domains/cats/services/stores/port
 import type {
   BootcampStateV1,
   IThreadStore,
+  Thread,
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { canAccessGuideState } from '../domains/guides/guide-state-access.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -121,6 +123,13 @@ function parseOptionalBooleanQuery(value: string | boolean | undefined): boolean
   if (normalized === 'true' || normalized === '1') return true;
   if (normalized === 'false' || normalized === '0') return false;
   return undefined;
+}
+
+function sanitizeThreadForResponse(thread: Thread, userId: string): Thread {
+  if (!thread.guideState) return thread;
+  if (canAccessGuideState(thread, thread.guideState, userId)) return thread;
+  const { guideState: _guideState, ...rest } = thread;
+  return rest;
 }
 
 const threadRoutingRuleSchema = z
@@ -279,11 +288,14 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     // F095 Phase D: Return soft-deleted threads when deleted=true
     if (showDeleted) {
-      const deletedThreads = await threadStore.listDeleted(userId);
+      const deletedThreads = (await threadStore.listDeleted(userId)).map((thread) =>
+        sanitizeThreadForResponse(thread, userId),
+      );
       return { threads: deletedThreads };
     }
 
     let threads = projectPath ? await threadStore.listByProject(userId, projectPath) : await threadStore.list(userId);
+    threads = threads.map((thread) => sanitizeThreadForResponse(thread, userId));
 
     // F058 Phase G: Match threads by feature IDs in titles
     if (featureIds) {
@@ -390,7 +402,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    return thread;
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
+    return sanitizeThreadForResponse(thread, userId);
   });
 
   // PATCH /api/threads/:id - 更新标题/置顶/收藏

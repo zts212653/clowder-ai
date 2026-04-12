@@ -33,11 +33,30 @@ community_pr: "clowder-ai#398"
 9. **Esc Guard** — 引导期间阻止误关 Hub
 10. **Guide Authoring Skill** — 编写新引导流程的 SOP
 
-### Phase B（社区规划，未实现）
+### Phase A 收尾（merge 后立即处理）
 
-- 更多平台内场景（Provider 配置、Hub 设置等）
-- Guide Catalog UI
-- 进度持久化
+- [x] 移除 `retreatStep` 死代码（与 KD-9 forward-only 矛盾）
+- [ ] 添加 `schemaVersion` 到 YAML flow 格式 + loader 启动校验
+- [ ] 无障碍：exit 按钮 `tabIndex` + `Enter`/`Space`、ARIA live regions、`prefers-reduced-motion`
+- [ ] 遥测埋点：`guide_offered` / `guide_started` / `guide_step_advanced` / `guide_completed` / `guide_dismissed(reason)` + 服务端 kill switch per flow ID
+- [ ] 明确文档化 state authority 层级：Redis guideState (authority) → Socket.io (sync) → Zustand session (projection)
+
+### Phase B（架构重构 + 产品扩展）
+
+**架构重构**（来自 Design Review 2026-04-10）
+
+- [ ] **路由解耦**：将 guide candidate resolution、offered/completed injection、completionAcked write-back 从 `route-serial`/`route-parallel` 提取到 `GuideRoutingInterceptor`，路由核心保持 guide-agnostic
+- [ ] **SystemPromptBuilder 解耦**：108 行 guide 注入提取为 `GuidePromptSection` builder，由主 builder compose
+- [ ] **CustomEvent 迁移**：移除 `window.addEventListener('guide:start')` 桥接层，改用 Socket.io（server→client）+ Zustand actions（client-side）
+- [ ] **GuideSession 领域对象**：从 thread-scoped `guideState` 迁移到独立 `GuideSession` store `{ threadId, userId, guideId, sessionId, state }`
+- [ ] **文件拆分**：`callback-guide-routes.ts` 状态机迁移到 domain service；`GuideOverlay.tsx` 继续向 `guide-overlay-parts.tsx` 分解
+- [ ] **关键词触发策略层**：confidence threshold + 用户 dismiss-rate tracking + explicit action triggers（slash command / button），防止 hijack 正常对话
+
+**产品扩展**
+
+- [ ] 更多平台内场景（Provider 配置、Hub 设置等）
+- [ ] Guide Catalog UI
+- [ ] 进度持久化
 
 ## Key Decisions（社区侧）
 

@@ -346,7 +346,136 @@ describe('HubCatEditor', () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks creating opencode+api_key member without provider', async () => {
+  it('dispatches guide:confirm only after a successful member save', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    const onGuideConfirm = vi.fn();
+    window.addEventListener('guide:confirm', onGuideConfirm as EventListener);
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
+      }
+      return Promise.resolve(jsonResponse({ config: {} }));
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onGuideConfirm).toHaveBeenCalledTimes(1);
+    expect((onGuideConfirm.mock.calls[0]?.[0] as CustomEvent<{ target: string }>).detail).toEqual({
+      target: 'member-editor.profile',
+    });
+
+    window.removeEventListener('guide:confirm', onGuideConfirm as EventListener);
+  });
+
+  it('does not dispatch guide:confirm when member save fails', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    const onGuideConfirm = vi.fn();
+    window.addEventListener('guide:confirm', onGuideConfirm as EventListener);
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                builtin: false,
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ error: '保存失败' }, 500));
+      }
+      return Promise.resolve(jsonResponse({ config: {} }));
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onGuideConfirm).not.toHaveBeenCalled();
+
+    window.removeEventListener('guide:confirm', onGuideConfirm as EventListener);
+  });
+
+  it('blocks creating opencode+api_key member without ocProviderName', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/accounts') {

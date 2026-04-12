@@ -91,12 +91,14 @@ export function registerCallbackDocumentRoutes(
 
     const isNew = getRichBlockBuffer().add(record.threadId, record.catId as string, fileBlock, invocationId);
 
+    // #454: include invocationId so frontend can exact-match callback to stream bubble
     if (isNew) {
       deps.socketManager.broadcastAgentMessage(
         {
           type: 'system_info' as const,
           catId: record.catId,
           content: JSON.stringify({ type: 'rich_block', block: fileBlock }),
+          invocationId,
           timestamp: Date.now(),
         },
         record.threadId,

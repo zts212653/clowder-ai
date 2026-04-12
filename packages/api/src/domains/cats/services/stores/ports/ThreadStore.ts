@@ -130,6 +130,8 @@ export interface Thread {
   deletedAt?: number | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
+  /** F155: Scene-based bidirectional guide state. */
+  guideState?: GuideStateV1;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
 }
@@ -172,6 +174,26 @@ export interface BootcampStateV1 {
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
   completedAt?: number;
+}
+
+/** F155: Guide session status */
+export type GuideStatus = 'offered' | 'awaiting_choice' | 'active' | 'completed' | 'cancelled';
+
+/** F155: Scene-based bidirectional guide state — thread-level authority */
+export interface GuideStateV1 {
+  v: 1;
+  guideId: string;
+  status: GuideStatus;
+  /** Owning user for default-thread guide state. */
+  userId?: string;
+  currentStep?: number;
+  offeredAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  /** True after the first agent turn has seen the completion (one-shot consumption). */
+  completionAcked?: boolean;
+  /** catId that offered this guide (prevents multi-cat duplicate offers). */
+  offeredBy?: string;
 }
 
 /** F079: Voting state stored in thread metadata */
@@ -246,6 +268,8 @@ export interface IThreadStore {
   updateVoiceMode(threadId: string, voiceMode: boolean): void | Promise<void>;
   /** F087: Get/update bootcamp state. */
   updateBootcampState(threadId: string, state: BootcampStateV1 | null): void | Promise<void>;
+  /** F155: Get/update guide state. */
+  updateGuideState(threadId: string, state: GuideStateV1 | null): void | Promise<void>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
   updateLastActive(threadId: string): void | Promise<void>;
@@ -552,6 +576,16 @@ export class ThreadStore implements IThreadStore {
       delete thread.bootcampState;
     } else {
       thread.bootcampState = state;
+    }
+  }
+
+  updateGuideState(threadId: string, state: GuideStateV1 | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (state === null) {
+      delete thread.guideState;
+    } else {
+      thread.guideState = state;
     }
   }
 
