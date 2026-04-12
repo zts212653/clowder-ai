@@ -176,9 +176,8 @@ export function resolveForClient(
   }
 
   // F340: Walk the full discovery chain; prefer accounts with credentials.
-  // This path is ONLY reached by system callers (e.g. resolveAnthropicRuntimeProfile)
-  // that have no explicit preferredAccountRef. Member invocations always pass their
-  // bound accountRef, which short-circuits above.
+  // This ensures installer-${client} (which holds API keys) is chosen over
+  // an OAuth builtin that has no stored credential.
   const normalizedClient = normalizeToClient(client);
   if (normalizedClient) {
     const wellKnownId = LEGACY_BUILTIN_IDS[normalizedClient];

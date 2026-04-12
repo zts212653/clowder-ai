@@ -7,6 +7,9 @@
 ```markdown
 # Review Request: {标题}
 
+Review-Target-ID: {id}
+Branch: {branch-name}
+
 ## What
 {改了什么、核心变更}
 
@@ -26,6 +29,11 @@
 
 ## Next Action
 {希望 reviewer 做什么}
+
+## Review Sandbox（必填）
+- Path: `/tmp/cat-cafe-review/{review-target-id}/{reviewer-handle}`
+- Start Command: `pnpm review:start`（或等价命令）
+- Ports: `web={port}`, `api={port}`（禁止 3003/3004/3011/3012/4111）
 
 ## 自检证据
 
@@ -52,3 +60,4 @@ pnpm -r --if-present run build         # 成功
 - **附原始需求摘录（≤5 行）**，否则 reviewer 不审
 - 自检报告必须附上（从 quality-gate skill 输出）
 - 前端功能附截图证据
+- 前端 review 需要起 dev 时，**必须附 review 沙盒 Path + Start Command + 实际端口**

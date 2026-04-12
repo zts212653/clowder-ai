@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-04-10
+> 维护者：三猫 | 最后更新：2026-04-11
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -56,4 +56,4 @@ created: 2026-02-26
 | F154 | Cat Routing Personalization — 全局默认猫 + 首选猫入口 + 单次定向 | spec | Ragdoll | community [#385](https://github.com/zts212653/clowder-ai/issues/385) [#391](https://github.com/zts212653/clowder-ai/pull/391) | [F154](features/F154-cat-routing-personalization.md) |
 | F155 | Scene-Based Guidance Engine — 场景式交互引导 | needs-discussion | 待定 | internal | [F155](features/F155-scene-guidance-engine.md) |
 | F156 | WebSocket Security Hardening — 实时通道安全加固 | in-progress | Ragdoll | internal | [F156](features/F156-websocket-security-hardening.md) |
-
+| F159 | CatAgent Native Provider — Opt-in API Path | spec | 社区 + Ragdoll + Maine Coon | community [#434](https://github.com/zts212653/clowder-ai/issues/434) | [F159](features/F159-catagent-native-provider.md) |

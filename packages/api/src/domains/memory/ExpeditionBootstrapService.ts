@@ -38,6 +38,8 @@ export interface BootstrapOptions {
 interface BootstrapDeps {
   rebuildIndex: (projectPath: string) => Promise<{ docsIndexed: number; durationMs: number }>;
   getFingerprint: (projectPath: string) => string;
+  /** Query evidence store for real tier stats (architectural alignment with F102). Falls back to structural summary classification when absent. */
+  getTierCoverage?: (projectPath: string) => Promise<Record<string, number>>;
 }
 
 const SECRETS_PATTERNS = [/^\.env/, /\.key$/, /\.pem$/, /^credentials/i, /^secrets$/];
@@ -78,10 +80,21 @@ export class ExpeditionBootstrapService {
       emit('indexing', 2, 0, summary.docsList.length);
       const { docsIndexed } = await this.deps.rebuildIndex(projectPath);
 
-      emit('summarizing', 3, docsIndexed, summary.docsList.length);
-      this.stateManager.markReady(projectPath, docsIndexed, JSON.stringify(summary));
+      // Overlay real tier stats from evidence store when available (F102 alignment)
+      // Both tierCoverage and docsIndexed must come from the same source to stay consistent
+      let finalDocsIndexed = docsIndexed;
+      if (this.deps.getTierCoverage) {
+        const storeTiers = await this.deps.getTierCoverage(projectPath);
+        if (Object.keys(storeTiers).length > 0) {
+          summary.tierCoverage = storeTiers;
+          finalDocsIndexed = Object.values(storeTiers).reduce((a, b) => a + b, 0);
+        }
+      }
 
-      return { status: 'ready', summary, docsIndexed, durationMs: elapsed() };
+      emit('summarizing', 3, finalDocsIndexed, summary.docsList.length);
+      this.stateManager.markReady(projectPath, finalDocsIndexed, JSON.stringify(summary));
+
+      return { status: 'ready', summary, docsIndexed: finalDocsIndexed, durationMs: elapsed() };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       this.stateManager.markFailed(projectPath, errorMsg);
@@ -103,10 +116,11 @@ const TECH_DETECTORS: Array<{ file: string; tech: string }> = [
 ];
 
 const DOC_PATTERNS: Array<{ pattern: RegExp; tier: 'authoritative' | 'derived' | 'soft_clue' }> = [
-  { pattern: /^README/i, tier: 'authoritative' },
-  { pattern: /^ARCHITECTURE/i, tier: 'authoritative' },
-  { pattern: /^CONTRIBUTING/i, tier: 'authoritative' },
-  { pattern: /^CHANGELOG/i, tier: 'soft_clue' },
+  { pattern: /(?:^|\/)README/i, tier: 'authoritative' },
+  { pattern: /(?:^|\/)ARCHITECTURE/i, tier: 'authoritative' },
+  { pattern: /(?:^|\/)CONTRIBUTING/i, tier: 'authoritative' },
+  { pattern: /^docs\/.*\.md$/i, tier: 'authoritative' },
+  { pattern: /(?:^|\/)CHANGELOG/i, tier: 'soft_clue' },
   { pattern: /\.md$/i, tier: 'derived' },
 ];
 
@@ -124,9 +138,9 @@ function isInsideProject(filePath: string, projectRoot: string): boolean {
   }
 }
 
-function classifyDoc(fileName: string): 'authoritative' | 'derived' | 'soft_clue' | null {
+function classifyDoc(relativePath: string): 'authoritative' | 'derived' | 'soft_clue' | null {
   for (const { pattern, tier } of DOC_PATTERNS) {
-    if (pattern.test(fileName)) return tier;
+    if (pattern.test(relativePath)) return tier;
   }
   return null;
 }
@@ -165,9 +179,10 @@ function walkDocs(
     if (stat.isDirectory()) {
       results.push(...walkDocs(full, projectRoot, budget, depth + 1));
     } else if (stat.isFile()) {
-      const tier = classifyDoc(entry);
+      const relPath = relative(projectRoot, full);
+      const tier = classifyDoc(relPath);
       if (tier) {
-        results.push({ path: relative(projectRoot, full), tier });
+        results.push({ path: relPath, tier });
         budget.remaining--;
       }
     }

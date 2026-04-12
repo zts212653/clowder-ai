@@ -423,6 +423,68 @@ port_listen_pids() {
     return 1
 }
 
+pid_cwd() {
+    local pid=$1
+    local cwd=""
+
+    if [ -L "/proc/$pid/cwd" ]; then
+        cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+    fi
+
+    if [ -z "$cwd" ] && command -v lsof >/dev/null 2>&1; then
+        cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | awk '/^n/ {print substr($0, 2); exit }')
+    fi
+
+    [ -n "$cwd" ] || return 1
+    printf '%s\n' "$cwd"
+}
+
+path_is_within_project() {
+    local path="$1"
+    case "$path" in
+        "$PROJECT_DIR"|"$PROJECT_DIR"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+guard_port_kill_ownership() {
+    local port="$1"
+    local name="$2"
+    local pids="$3"
+    local pid cwd
+    local foreign=()
+    local entry
+
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        cwd=$(pid_cwd "$pid" || true)
+        if [ -n "$cwd" ] && path_is_within_project "$cwd"; then
+            continue
+        fi
+
+        if [ -n "$cwd" ]; then
+            foreign+=("${pid}:${cwd}")
+        else
+            foreign+=("${pid}:<unknown-cwd>")
+        fi
+    done <<< "$pids"
+
+    [ "${#foreign[@]}" -eq 0 ] && return 0
+
+    if [ "${CAT_CAFE_RUNTIME_RESTART_OK:-0}" = "1" ]; then
+        echo -e "${YELLOW}  ⚠ 端口 $port ($name) 存在跨 worktree 占用；CAT_CAFE_RUNTIME_RESTART_OK=1，继续强制释放。${NC}"
+        return 0
+    fi
+
+    echo -e "${RED}  ✗ 端口 $port ($name) 被跨 worktree 进程占用，已拒绝终止：${NC}"
+    for entry in "${foreign[@]}"; do
+        echo "    - $entry"
+    done
+    echo "  为避免误杀 runtime/alpha，请改用隔离端口（例如 3201/3202）或显式授权："
+    echo "    CAT_CAFE_RUNTIME_RESTART_OK=1 pnpm dev:direct"
+    return 1
+}
+
 port_is_listening() {
     local port=$1
 
@@ -485,6 +547,7 @@ kill_port() {
     local pids
     pids=$(port_listen_pids "$port" || true)
     if [ -n "$pids" ]; then
+        guard_port_kill_ownership "$port" "$name" "$pids" || return 1
         echo -e "${YELLOW}  端口 $port ($name) 被占用，正在终止进程...${NC}"
         echo "$pids" | xargs kill 2>/dev/null || true
         sleep 1

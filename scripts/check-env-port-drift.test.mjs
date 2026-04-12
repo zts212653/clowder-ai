@@ -39,6 +39,47 @@ function readEnvFile(relPath) {
   return vars;
 }
 
+function readEnvTemplateKeys(relPath) {
+  const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
+  const keys = new Set();
+
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const activeMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+    if (activeMatch) {
+      keys.add(activeMatch[1]);
+      continue;
+    }
+
+    const commentedMatch = trimmed.match(/^#\s*([A-Za-z_][A-Za-z0-9_]*)=/);
+    if (commentedMatch) {
+      keys.add(commentedMatch[1]);
+    }
+  }
+
+  return keys;
+}
+
+function loadExampleRecommendedRegistryNames() {
+  const src = readFileSync(resolve(ROOT, 'packages/api/src/config/env-registry.ts'), 'utf-8');
+  const recommended = new Set();
+
+  const objPattern = /\{([^}]+)\}/gs;
+  for (const block of src.matchAll(objPattern)) {
+    const body = block[1];
+    const nameMatch = body.match(/name:\s*['"]([A-Z_][A-Z0-9_]*)['"]/);
+    if (!nameMatch) continue;
+
+    if (/exampleRecommended:\s*true/.test(body)) {
+      recommended.add(nameMatch[1]);
+    }
+  }
+
+  return recommended;
+}
+
 function readScriptFallback(relPath, varName) {
   const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
   // Match pattern: VAR=${ENV_NAME:-DEFAULT}
@@ -122,6 +163,8 @@ describe(
   { skip: !hasEnvExampleOpensource && '.env.example.opensource not present (open-source repo uses .env.example)' },
   () => {
     const env = readEnvFile('.env.example.opensource');
+    const envTemplateKeys = readEnvTemplateKeys('.env.example.opensource');
+    const recommendedRegistryNames = loadExampleRecommendedRegistryNames();
 
     it('API_SERVER_PORT matches sync convention (3004)', () => {
       assert.equal(
@@ -165,6 +208,23 @@ describe(
       assert.ok(
         content.includes('3004') && content.includes('3003'),
         'Comment header should mention both 3003 and 3004',
+      );
+    });
+
+    it('includes every exampleRecommended env var from env-registry', () => {
+      const missing = [...recommendedRegistryNames].filter((name) => !envTemplateKeys.has(name));
+      assert.deepEqual(
+        missing,
+        [],
+        `Missing exampleRecommended env vars in .env.example.opensource: ${missing.join(', ')}`,
+      );
+    });
+
+    it('documents the private-network access pair for LAN / Tailscale setups', () => {
+      assert.ok(envTemplateKeys.has('API_SERVER_HOST'), 'Expected .env.example.opensource to document API_SERVER_HOST');
+      assert.ok(
+        envTemplateKeys.has('CORS_ALLOW_PRIVATE_NETWORK'),
+        'Expected .env.example.opensource to document CORS_ALLOW_PRIVATE_NETWORK',
       );
     });
   },

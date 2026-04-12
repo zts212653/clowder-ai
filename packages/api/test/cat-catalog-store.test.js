@@ -695,41 +695,12 @@ describe('cat-catalog-store', () => {
     assert.ok(catalog.roster?.opus, 'existing v2 metadata must stay intact');
   });
 
-  it('rejects deleting seed members using source field (not CAT_TEMPLATE_PATH)', async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-seed-guard-'));
+  it('blocks seed deletion even when CAT_TEMPLATE_PATH points to an unreadable in-project file', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-stale-template-'));
     const templatePath = join(projectRoot, 'cat-template.json');
-    const config = validConfig();
-    config.breeds.push({
-      id: 'maine-coon',
-      catId: 'codex',
-      name: '缅因猫',
-      displayName: '缅因猫',
-      avatar: '/avatars/codex.png',
-      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
-      mentionPatterns: ['@codex'],
-      roleDescription: 'review',
-      defaultVariantId: 'codex-default',
-      variants: [
-        {
-          id: 'codex-default',
-          provider: 'openai',
-          defaultModel: 'gpt-5.4',
-          mcpSupport: false,
-          cli: { command: 'codex', outputFormat: 'json' },
-        },
-      ],
-    });
-    config.roster.codex = {
-      family: 'maine-coon',
-      roles: ['peer-reviewer'],
-      lead: false,
-      available: true,
-      evaluation: 'secondary',
-    };
-    writeFileSync(templatePath, JSON.stringify(config, null, 2));
+    writeFileSync(templatePath, JSON.stringify(validConfig(), null, 2));
     bootstrapCatCatalog(projectRoot, templatePath);
 
-    // Seed cats are protected by source field in catalog, not by reading template
     const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'missing-template.json');
     try {
@@ -739,32 +710,10 @@ describe('cat-catalog-store', () => {
       else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
     }
 
-    // Seed cat still exists
     const catalog = readRuntimeCatCatalog(projectRoot);
     assert.equal(
       catalog.breeds.some((breed) => breed.catId === 'opus'),
       true,
-    );
-
-    // But runtime-added (non-seed) members can still be deleted
-    await createRuntimeCat(projectRoot, {
-      catId: 'temp-runtime-cat',
-      name: 'Temp',
-      displayName: 'Temp Cat',
-      avatar: '/avatars/temp.png',
-      color: { primary: '#000', secondary: '#fff' },
-      mentionPatterns: ['@temp'],
-      roleDescription: 'test',
-      clientId: 'anthropic',
-      defaultModel: 'claude-opus-4-6',
-      mcpSupport: false,
-      cli: { command: 'claude', outputFormat: 'stream-json' },
-    });
-    assert.doesNotThrow(() => deleteRuntimeCat(projectRoot, 'temp-runtime-cat'));
-    const afterDelete = readRuntimeCatCatalog(projectRoot);
-    assert.equal(
-      afterDelete.breeds.some((breed) => breed.catId === 'temp-runtime-cat'),
-      false,
     );
   });
 

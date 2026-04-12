@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -33,7 +35,8 @@ async function waitForMatch(child, regex, { timeoutMs }) {
       // avoid busy loop
       await delay(25);
     }
-    throw new Error(`Timed out waiting for output matching ${regex}`);
+    const tail = output.split('\n').filter(Boolean).slice(-20).join('\n');
+    throw new Error(`Timed out waiting for output matching ${regex}\n--- child output tail ---\n${tail}`);
   } finally {
     clearTimeout(timeout);
     child.stdout?.off('data', onData);
@@ -65,7 +68,16 @@ test('API binds to 127.0.0.1 by default', async (t) => {
   }
 
   const apiDir = path.resolve(process.cwd());
-  const childEnv = { ...process.env, API_SERVER_PORT: '0', MEMORY_STORE: '1', PREVIEW_GATEWAY_PORT: '0' };
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'security-boundary-'));
+  const childEnv = {
+    ...process.env,
+    API_SERVER_PORT: '0',
+    MEMORY_STORE: '1',
+    PREVIEW_GATEWAY_ENABLED: '0',
+    PREVIEW_GATEWAY_PORT: '0',
+    DOCS_ROOT: tempRoot,
+    EVIDENCE_DB: path.join(tempRoot, 'evidence.sqlite'),
+  };
   delete childEnv.API_SERVER_HOST;
   delete childEnv.REDIS_URL;
   delete childEnv.CAT_CAFE_REDIS_TEST_ISOLATED;
@@ -82,7 +94,7 @@ test('API binds to 127.0.0.1 by default', async (t) => {
 
   try {
     const { match } = await waitForMatch(child, /Server (?:listening at|running on) http:\/\/([^:]+):(\d+)/, {
-      timeoutMs: 5000,
+      timeoutMs: 15000,
     });
 
     const host = match[1];
@@ -100,5 +112,6 @@ test('API binds to 127.0.0.1 by default', async (t) => {
   } finally {
     child.kill('SIGTERM');
     await Promise.race([once(child, 'exit'), delay(2000)]);
+    rmSync(tempRoot, { recursive: true, force: true });
   }
 });

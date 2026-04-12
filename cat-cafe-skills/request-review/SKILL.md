@@ -99,6 +99,14 @@ Branch: {branch-name}
 ```
 例：`/tmp/cat-cafe-review/f113/codex`
 
+**Reviewer 启动命令（统一入口）：**
+```
+pnpm review:start
+```
+说明：
+- 该入口默认在 review 沙盒内运行，自动分配隔离端口（起点 3201/3202）
+- review 请求信里必须记录实际启动端口（web/api）
+
 沙盒必须是 detached HEAD / read-only。要改代码 = TAKEOVER，开正式 worktree。
 
 ## Block 场景
