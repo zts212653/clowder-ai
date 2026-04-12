@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { BrakeModal } from '@/components/BrakeModal';
+import { GuideOverlay } from '@/components/GuideOverlay';
 import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <ConfirmProvider>{children}</ConfirmProvider>
           <BrakeModal />
+          <GuideOverlay />
           <ToastContainer />
         </ThemeProvider>
       </body>

@@ -200,7 +200,10 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-7 py-6">
-          <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+          <section
+            className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]"
+            data-guide-id="add-member.client"
+          >
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 1: 选择 Client</h4>
               <p className="mt-1 text-sm leading-6 text-[#7F7168]">
@@ -221,7 +224,10 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
             ))}
           </section>
 
-          <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+          <section
+            className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]"
+            data-guide-id="add-member.provider-profile"
+          >
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 2: 选择 Provider / 配置 CLI</h4>
             </div>
@@ -263,7 +269,10 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
             )}
           </section>
 
-          <section className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]">
+          <section
+            className="space-y-4 rounded-[20px] border border-[#F1E7DF] bg-[#FFFDFC] p-[18px]"
+            data-guide-id="add-member.model"
+          >
             <div>
               <h4 className="text-[17px] font-bold text-[#2D2118]">Step 3: 选择模型</h4>
             </div>
@@ -322,6 +331,7 @@ export function HubAddMemberWizard({ open, onClose, onComplete }: HubAddMemberWi
             onClick={handleComplete}
             disabled={!canFinish}
             className="rounded-xl bg-[#D49266] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#C88254] disabled:opacity-50"
+            data-guide-id="add-member.submit"
           >
             创建后继续编辑
           </button>

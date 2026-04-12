@@ -106,6 +106,26 @@ export function useChatSocketCallbacks({
           onNavigateToThread?.(data.gameThreadId);
         }
       },
+      // F155: Guide engine — relay Socket.io events to CustomEvents for useGuideEngine
+      onGuideStart: (data) => {
+        window.dispatchEvent(
+          new CustomEvent('guide:start', { detail: { flowId: data.guideId, threadId: data.threadId } }),
+        );
+      },
+      onGuideControl: (data) => {
+        window.dispatchEvent(
+          new CustomEvent('guide:control', {
+            detail: { action: data.action, guideId: data.guideId, threadId: data.threadId },
+          }),
+        );
+      },
+      onGuideComplete: (data) => {
+        window.dispatchEvent(
+          new CustomEvent('guide:complete', {
+            detail: { guideId: data.guideId, threadId: data.threadId },
+          }),
+        );
+      },
       onIndexEvent,
     }),
     [
