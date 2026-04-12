@@ -289,4 +289,88 @@ describe('useChatHistory scroll memory (#27)', () => {
     expect(endEl.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth' });
     expect(scrollTop.get()).toBe(500);
   });
+
+  it('keeps bottom anchor on layout-change events when the user is pinned to bottom', async () => {
+    const threadId = 'thread-layout-bottom';
+    const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
+
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadId]: makeThreadState(messages),
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId }));
+    });
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 400);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn(() => {
+      scrollTop.set(460);
+    });
+
+    rafCallbacks.clear();
+
+    act(() => {
+      capturedHook?.handleScroll();
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event('catcafe:chat-layout-changed'));
+      flushAnimationFrames();
+    });
+
+    expect(endEl.scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto' });
+    expect(scrollTop.get()).toBe(460);
+  });
+
+  it('does not hijack scroll on layout-change events when the user is reading above the bottom', async () => {
+    const threadId = 'thread-layout-offset';
+    const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
+
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadId]: makeThreadState(messages),
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId }));
+    });
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 200);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn(() => {
+      scrollTop.set(460);
+    });
+
+    rafCallbacks.clear();
+
+    act(() => {
+      capturedHook?.handleScroll();
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event('catcafe:chat-layout-changed'));
+      flushAnimationFrames();
+    });
+
+    expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollTop.get()).toBe(200);
+  });
 });

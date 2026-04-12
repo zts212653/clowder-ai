@@ -100,9 +100,19 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'API_SERVER_HOST',
     defaultValue: '127.0.0.1',
-    description: 'API 监听地址',
+    description: 'API 监听地址（改为 0.0.0.0 可让手机/平板通过局域网或 Tailscale 访问）',
     category: 'server',
     sensitive: false,
+  },
+  {
+    name: 'CORS_ALLOW_PRIVATE_NETWORK',
+    defaultValue: 'false',
+    description:
+      '允许局域网/Tailscale 设备访问（手机、平板等）。开启后，来自 192.168.x.x / 10.x.x.x / Tailscale 100.x.x.x 的浏览器可以正常连接。注意：会信任整个私网内的所有设备。修改后需重启服务生效',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+    exampleRecommended: true,
   },
   { name: 'UPLOAD_DIR', defaultValue: './uploads', description: '文件上传目录', category: 'server', sensitive: false },
   {
@@ -131,14 +141,15 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'FRONTEND_URL',
     defaultValue: '(自动检测)',
-    description: '前端 URL（导出长图用）',
+    description:
+      '前端固定地址（有反向代理或固定域名时设置，如 https://cafe.example.com）。本机和局域网直连通常不需要改',
     category: 'server',
     sensitive: false,
   },
   {
     name: 'FRONTEND_PORT',
     defaultValue: '3003',
-    description: '前端端口（导出长图用）',
+    description: '前端端口',
     category: 'server',
     sensitive: false,
   },

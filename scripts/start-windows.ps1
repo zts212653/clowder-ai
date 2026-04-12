@@ -53,7 +53,7 @@ if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
 
 # -- Clear inherited profile env (mirrors start-dev.sh clear_inherited_profile_env) --
 # When strict mode is on, clear ambient profile-controlled vars before loading .env,
-# so only .env overrides and profile defaults take effect — not leaked shell exports.
+# so only .env overrides and profile defaults take effect -- not leaked shell exports.
 $profileControlledVars = @(
     'ANTHROPIC_PROXY_ENABLED', 'ASR_ENABLED', 'TTS_ENABLED',
     'LLM_POSTPROCESS_ENABLED', 'EMBED_ENABLED',
@@ -115,6 +115,12 @@ switch ($Profile_) {
             MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
             TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
             REDIS_PROFILE = 'dev'
+        }
+    }
+    default {
+        if ($Profile_) {
+            Write-Err "Unknown profile '$Profile_'. Valid: dev, production, opensource"
+            exit 1
         }
     }
 }
@@ -443,7 +449,7 @@ try {
             }
         }
         # Reapply profile defaults after .env reload (mirrors start-dev.sh resolve_config:
-        # env override > profile default — only apply if current value is empty/null)
+        # env override > profile default -- only apply if current value is empty/null)
         if ($profileDefaults) {
             foreach ($entry in $profileDefaults.GetEnumerator()) {
                 $current = [System.Environment]::GetEnvironmentVariable($entry.Key, "Process")

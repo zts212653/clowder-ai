@@ -744,6 +744,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               });
           }
 
+          // F118 D2: Broadcast spawn_started immediately — fills the intent_mode blind spot.
+          // intent_mode only fires after the first CLI NDJSON event (0–2 min delay).
+          // spawn_started fires here, before routeExecution, so the UI can show
+          // per-cat "spawning" indicators without waiting for CLI to come alive.
+          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'spawn_started', {
+            threadId: resolvedThreadId,
+            targetCats,
+            invocationId: createResult.invocationId,
+          });
+
           for await (const msg of router.routeExecution(
             userId,
             content,

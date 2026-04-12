@@ -570,11 +570,16 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://your-llm-host:9878
 
 The API automatically accepts requests from:
 - `localhost` / `127.0.0.1` (any port)
-- RFC 1918 private networks (`10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`)
-- Tailscale IPs (`100.x.x.x`)
 - The `FRONTEND_URL` you set
 
-No additional CORS configuration is needed for most LAN / VPN setups.
+If you open Cat Cafe directly from a LAN / Tailscale IP (for example `http://192.168.x.x:3003` or `http://100.x.x.x:3003`), also set:
+
+```bash
+API_SERVER_HOST=0.0.0.0
+CORS_ALLOW_PRIVATE_NETWORK=true
+```
+
+This opt-in trusts browsers from RFC 1918 private networks (`10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`) and Tailscale IPs (`100.x.x.x`). If you use a reverse proxy or a fixed `FRONTEND_URL`, you usually do not need the extra flag.
 
 ## Troubleshooting
 
@@ -597,4 +602,3 @@ No additional CORS configuration is needed for most LAN / VPN setups.
 - For local dev, `NEXT_PUBLIC_API_URL=http://localhost:3004` should be in `.env`
 - Behind a reverse proxy, the frontend auto-detects the API at the same origin — make sure Nginx proxies `/api/` and `/socket.io/` to port 3004
 - API must be running before frontend loads
-

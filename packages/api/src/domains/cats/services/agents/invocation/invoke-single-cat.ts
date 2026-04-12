@@ -1106,12 +1106,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   // Only create new active record if old one was successfully sealed.
                   // Otherwise we'd have two active records — a dirty state.
                   if (sealAccepted || !deps.sessionSealer) {
-                    await deps.sessionChainStore.create({
+                    // F118 D1: Inherit failure count from the replaced session.
+                    // create() doesn't accept consecutiveRestoreFailures, so use immediate update().
+                    const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
+                    const newRec = await deps.sessionChainStore.create({
                       cliSessionId: msg.sessionId,
                       threadId,
                       catId,
                       userId,
                     });
+                    if (inheritedFailures > 0) {
+                      await deps.sessionChainStore.update(newRec.id, {
+                        consecutiveRestoreFailures: inheritedFailures,
+                      });
+                    }
                   }
                 }
               }

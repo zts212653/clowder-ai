@@ -10,13 +10,11 @@
  * - Cat family grouping metadata for frontend
  */
 
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import type {
   CapabilityBoardItem,
   CapabilityBoardResponse,
@@ -42,8 +40,13 @@ import {
   toCapabilityEntry,
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
-import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
+import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import {
+  buildProviderSkillDirCandidates,
+  isSkillMountedForProvider,
+  resolveMainRepoPath,
+} from '../utils/skill-mount.js';
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
 
 // ────────── Helpers ──────────
@@ -85,82 +88,6 @@ async function listSkillSubdirs(dir: string, exclude?: string[]): Promise<string
     }
   }
   return names;
-}
-
-/** Accept symlink target when it points to expected path OR main-repo cat-cafe-skills/{skillName}. */
-async function isCorrectSymlink(
-  linkPath: string,
-  expectedTarget: string,
-  skillName?: string,
-  fallbackSkillsRoot?: string,
-): Promise<boolean> {
-  try {
-    const stat = await lstat(linkPath);
-    if (!stat.isSymbolicLink()) return false;
-    const dest = await readlink(linkPath);
-    const absDest = isAbsolute(dest) ? dest : resolve(dirname(linkPath), dest);
-    const [realDest, realExpected] = await Promise.all([
-      realpath(absDest).catch(() => absDest),
-      realpath(expectedTarget).catch(() => expectedTarget),
-    ]);
-    const normalizedDest = realDest.replace(/[/\\]$/, '');
-    const normalizedExpected = realExpected.replace(/[/\\]$/, '');
-    if (pathsEqual(normalizedDest, normalizedExpected)) return true;
-
-    if (skillName && fallbackSkillsRoot) {
-      const parentDir = dirname(normalizedDest);
-      const nameMatches = normalizedDest.endsWith(`${sep}${skillName}`);
-      const isCatCafeSkillsDir = basename(parentDir) === 'cat-cafe-skills';
-      const resolvedFallbackRoot = (await realpath(fallbackSkillsRoot).catch(() => fallbackSkillsRoot)).replace(
-        /[/\\]$/,
-        '',
-      );
-      const inFallbackRoot = pathsEqual(parentDir, resolvedFallbackRoot);
-      if (
-        isCatCafeSkillsDir &&
-        inFallbackRoot &&
-        nameMatches &&
-        existsSync(join(parentDir, 'manifest.yaml')) &&
-        existsSync(join(normalizedDest, 'SKILL.md'))
-      ) {
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-const execFileAsync = promisify(execFile);
-
-/**
- * Resolve canonical main repo path (not worktree path).
- * Symlinks point to the main repo, so mount checks must use main repo path.
- */
-let cachedMainRepoPath: string | null = null;
-let cachedMainRepoPathPromise: Promise<string> | null = null;
-async function resolveMainRepoPath(): Promise<string> {
-  if (cachedMainRepoPath) return cachedMainRepoPath;
-  if (cachedMainRepoPathPromise) return cachedMainRepoPathPromise;
-  cachedMainRepoPathPromise = (async () => {
-    try {
-      const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain']);
-      const firstLine = stdout.split('\n')[0] ?? '';
-      return firstLine.replace(/^worktree\s+/, '').trim();
-    } catch {
-      try {
-        const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel']);
-        return stdout.trim();
-      } catch {
-        return resolve(process.cwd(), '../..');
-      }
-    }
-  })().then((p) => {
-    cachedMainRepoPath = p;
-    return p;
-  });
-  return cachedMainRepoPathPromise;
 }
 
 /** Walk up from CWD to find pnpm-workspace.yaml — the monorepo root. */
@@ -524,13 +451,17 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const skillScanPlans: SkillScanPlan[] = [
       { key: 'claude-project', provider: 'anthropic', path: projectSkillsDir },
       { key: 'claude-user', provider: 'anthropic', path: join(home, '.claude', 'skills') },
+      { key: 'codex-project', provider: 'openai', path: join(projectRoot, '.codex', 'skills'), exclude: ['.system'] },
       { key: 'codex-user', provider: 'openai', path: join(home, '.codex', 'skills'), exclude: ['.system'] },
+      { key: 'gemini-project', provider: 'google', path: join(projectRoot, '.gemini', 'skills') },
       { key: 'gemini-user', provider: 'google', path: join(home, '.gemini', 'skills') },
       { key: 'kimi-project', provider: 'kimi', path: join(projectRoot, '.kimi', 'skills') },
       { key: 'kimi-user', provider: 'kimi', path: join(home, '.kimi', 'skills') },
     ];
     const { providerSkills, scanResults, scansOk: allScansOk } = await scanProviderSkillDirs(skillScanPlans);
     const claudeProjectSkills = scanResults['claude-project'];
+    const codexProjectSkills = scanResults['codex-project'];
+    const geminiProjectSkills = scanResults['gemini-project'];
     const projectKimiSkills = scanResults['kimi-project'];
 
     // F041 bug fix: Also scan cat-cafe-skills/ for project-level skill detection.
@@ -543,6 +474,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
     const projectSkillNames = new Set([
       ...(claudeProjectSkills ?? []),
+      ...(codexProjectSkills ?? []),
+      ...(geminiProjectSkills ?? []),
       ...(projectKimiSkills ?? []),
       ...(catCafeOwnSkills ?? []),
     ]);
@@ -587,6 +520,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         cap.source === 'cat-cafe' &&
         catCafeOwnSkills !== null &&
         claudeProjectSkills !== null &&
+        codexProjectSkills !== null &&
+        geminiProjectSkills !== null &&
         projectKimiSkills !== null
       ) {
         cap.source = 'external';
@@ -647,6 +582,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const skillDirCandidates: { name: string; dir: string }[] = [];
     for (const name of allSkillNames) {
       skillDirCandidates.push({ name, dir: join(projectSkillsDir, name) });
+      skillDirCandidates.push({ name, dir: join(projectRoot, '.codex', 'skills', name) });
+      skillDirCandidates.push({ name, dir: join(projectRoot, '.gemini', 'skills', name) });
       skillDirCandidates.push({ name, dir: join(home, '.claude', 'skills', name) });
       skillDirCandidates.push({ name, dir: join(home, '.codex', 'skills', name) });
       skillDirCandidates.push({ name, dir: join(home, '.gemini', 'skills', name) });
@@ -768,20 +705,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       mountSkillsSrc === catCafeSkillsDir ? (catCafeOwnSkills ?? []) : ((await listSkillSubdirs(mountSkillsSrc)) ?? []),
     );
     const catCafeSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe');
-    const providerDirs = {
-      claude: join(home, '.claude', 'skills'),
-      codex: join(home, '.codex', 'skills'),
-      gemini: join(home, '.gemini', 'skills'),
-      kimi: join(home, '.kimi', 'skills'),
-    };
+    const providerDirCandidates = buildProviderSkillDirCandidates(projectRoot, home);
     await Promise.all(
       catCafeSkillItems.map(async (item) => {
-        const expectedTarget = join(mountSkillsSrc, item.id);
         const [claude, codex, gemini, kimi] = await Promise.all([
-          isCorrectSymlink(join(providerDirs.claude, item.id), expectedTarget, item.id, mainSkillsSrc),
-          isCorrectSymlink(join(providerDirs.codex, item.id), expectedTarget, item.id, mainSkillsSrc),
-          isCorrectSymlink(join(providerDirs.gemini, item.id), expectedTarget, item.id, mainSkillsSrc),
-          isCorrectSymlink(join(providerDirs.kimi, item.id), expectedTarget, item.id, mainSkillsSrc),
+          isSkillMountedForProvider(providerDirCandidates.claude, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedForProvider(providerDirCandidates.codex, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedForProvider(providerDirCandidates.gemini, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedForProvider(providerDirCandidates.kimi, mountSkillsSrc, item.id, mainSkillsSrc),
         ]);
         item.mounts = { claude, codex, gemini, kimi };
       }),

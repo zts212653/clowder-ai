@@ -12,20 +12,12 @@ interface BootstrapSummaryCardProps {
 }
 
 const TIER_LABELS: Record<string, string> = {
-  specs: 'Specs',
-  adrs: 'ADRs',
-  plans: 'Plans',
-  lessons: 'Lessons',
   authoritative: 'Specs',
   derived: 'Plans',
   soft_clue: 'Lessons',
 };
 
 const TIER_COLORS: Record<string, string> = {
-  specs: 'bg-cocreator-primary/10 text-cocreator-dark',
-  adrs: 'bg-orange-100 text-orange-700',
-  plans: 'bg-blue-100 text-blue-700',
-  lessons: 'bg-green-100 text-green-700',
   authoritative: 'bg-cocreator-primary/10 text-cocreator-dark',
   derived: 'bg-blue-100 text-blue-700',
   soft_clue: 'bg-green-100 text-green-700',
