@@ -1751,6 +1751,41 @@ describe('Callback Routes', () => {
     assert.equal(msgs[0].invocationId, invocationId, 'create-rich-block broadcast must include invocationId');
   });
 
+  test('#454: generate-document broadcast includes invocationId', async () => {
+    const { tmpdir } = await import('node:os');
+    const { rm } = await import('node:fs/promises');
+    const uploadDir = `${tmpdir()}/cat-cafe-test-uploads-454`;
+    process.env.UPLOAD_DIR = uploadDir;
+    try {
+      const app = await createApp();
+      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-454-doc');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/generate-document',
+        payload: {
+          invocationId,
+          callbackToken,
+          markdown: '# Test Doc\nHello from #454',
+          format: 'md',
+          baseName: 'test-454',
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.equal(body.status, 'ok');
+
+      const msgs = socketManager.getMessages();
+      const docMsg = msgs.find((m) => m.type === 'system_info' && JSON.parse(m.content).type === 'rich_block');
+      assert.ok(docMsg, 'generate-document should broadcast system_info with rich_block');
+      assert.equal(docMsg.invocationId, invocationId, 'generate-document broadcast must include invocationId');
+    } finally {
+      delete process.env.UPLOAD_DIR;
+      await rm(uploadDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   test('POST post-message without cc_rich blocks stores content as-is (no extra.rich)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-rb3');
