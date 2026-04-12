@@ -3,7 +3,7 @@
 <EXTREMELY_IMPORTANT>
 你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（27 个）
+## Skills 列表（30 个）
 
 ### 开发流程链
 ```
@@ -27,9 +27,11 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `merge-gate` | 门禁→PR→云端 review→merge→清理 | ④⑤⑥ |
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `deep-research` | 多源深度调研 | — |
+| `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
 | `writing-skills` | 写新 skill | — |
 | `pencil-design` | 设计 UI / .pen 文件 | — |
 | `rich-messaging` | 发语音/发图/发卡片/富媒体 | — |
+| `schedule-tasks` | 定时任务/周期提醒/延迟执行 | — |
 | `hyperfocus-brake` | 铲屎官健康提醒/三猫撒娇打断 | — |
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |
 | `image-generation` | 生成图片/画头像/AI 画图 | — |
@@ -40,6 +42,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `browser-automation` | 外部网站浏览/登录态流程/浏览器工具路由 | — |
 | `workspace-navigator` | 铲屎官说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
 | `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
+| `video-forge` | 做视频/showcase/教程视频/视频审查 | — |
 
 ### 参考文件（refs/，按需读取）
 
@@ -76,7 +79,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 
 1. 在 `cat-cafe-skills/{name}/` 创建 SKILL.md
 2. 在 `manifest.yaml` 添加路由条目
-3. 创建 symlink：`ln -s .../cat-cafe-skills/{name} ~/.{claude,codex,gemini}/skills/{name}`（OpenCode 读 `~/.claude/`，自动覆盖）
+3. 创建 symlink：`ln -s .../cat-cafe-skills/{name} ~/.{claude,codex,gemini,kimi}/skills/{name}`（OpenCode 读 `~/.claude/`，自动覆盖）
 4. 运行 `pnpm check:skills` 验证
 
 IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.

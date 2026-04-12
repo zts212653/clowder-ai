@@ -9,7 +9,7 @@ community_issue: "zts212653/clowder-ai#388"
 
 # F153: Observability Infrastructure — 运行时可观测基础设施
 
-> **Status**: spec | **Owner**: Community (PR author) + Ragdoll | **Priority**: P2
+> **Status**: in-progress | **Owner**: Community + Ragdoll | **Priority**: P2
 
 ## Why
 
@@ -42,17 +42,17 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 
 ## Acceptance Criteria
 
-### Phase A（OTel SDK + Metrics + Health Check）
-- [ ] AC-A1: TelemetryRedactor 四级分类正确脱敏（Class A/B/C/D 各有测试）
-- [ ] AC-A2: Prometheus `/metrics` 端点可用，5 个 instruments 有数据
-- [ ] AC-A3: `/ready` 端点返回 Redis 健康状态
-- [ ] AC-A4: cli-spawn debug 日志不含 prompt 明文（回归测试）
-- [ ] AC-A5: HMAC salt 缺失时启动阶段校验并 graceful degradation（禁用 OTel + warning log，服务继续运行）
-- [ ] AC-A6: Prometheus exporter 端口可通过 env 配置（不硬编码 9464）
-- [ ] AC-A7: `activeInvocations` 计数器在 generator early abort 时正确递减
-- [ ] AC-A8: yielded-error 路径（`hadError = true`）的 span 正确标记为 ERROR 并补 OTel error log
-- [ ] AC-A9: `agent.liveness` gauge 有实际调用点（或从 scope 移除，instruments 数量与 PR 描述一致）
-- [ ] AC-A10: aborted invocation（generator `.return()`）的 OTel span/log 与审计日志信号一致
+### Phase A（OTel SDK + Metrics + Health Check）✅
+- [x] AC-A1: TelemetryRedactor 四级分类正确脱敏（Class A/B/C/D 各有测试）
+- [x] AC-A2: Prometheus `/metrics` 端点可用，5 个 instruments 有数据
+- [x] AC-A3: `/ready` 端点返回 Redis 健康状态
+- [x] AC-A4: cli-spawn debug 日志不含 prompt 明文（回归测试）
+- [x] AC-A5: HMAC salt 缺失时启动阶段校验并 graceful degradation（禁用 OTel + warning log，服务继续运行）
+- [x] AC-A6: Prometheus exporter 端口可通过 env 配置（不硬编码 9464）
+- [x] AC-A7: `activeInvocations` 计数器在 generator early abort 时正确递减
+- [x] AC-A8: yielded-error 路径（`hadError = true`）的 span 正确标记为 ERROR 并补 OTel error log
+- [x] AC-A9: `agent.liveness` gauge 有实际调用点（或从 scope 移除，instruments 数量与 PR 描述一致）
+- [x] AC-A10: aborted invocation（generator `.return()`）的 OTel span/log 与审计日志信号一致
 
 ## Dependencies
 
@@ -64,7 +64,7 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 
 | 风险 | 缓解 |
 |------|------|
-| 社区 PR 有 2 个 P1（counter 泄漏 + 端口硬编码）| AC-A6/A7 明确要求修复，intake 前必须验证 |
+| 社区 PR 有 2 个 P1（counter 泄漏 + 端口硬编码）| ✅ 已修复（4 轮 review 后全部 P1 绿灯）|
 | OTel SDK 增加启动依赖和包体积 | Phase A 保持可选（env 开关），不强制 |
 | Prometheus 端口与 alpha/runtime 端口冲突 | 必须走 env 配置，不允许硬编码 |
 
@@ -74,3 +74,6 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 |---|------|------|------|
 | KD-1 | 社区 PR 先不放行，P1 修完再 intake | Maine Coon review 发现 counter 泄漏 + 端口硬编码 | 2026-04-09 |
 | KD-2 | 分配 F153（cat-cafe F152 = Expedition Memory 已占） | team lead确认 | 2026-04-09 |
+| KD-3 | AC-A5 改为 graceful degradation（缺 salt → 禁用 OTel，不崩溃）| 生产稳定性优先 | 2026-04-11 |
+| KD-4 | Pane registry abort 状态不一致接受为 known limitation，不阻塞 intake | pre-existing 行为，属 F089 terminal 域 | 2026-04-13 |
+| KD-5 | 4 轮 review 后放行 intake | 所有 P1 已修，核心 P2 已修，剩余 P2 non-blocking | 2026-04-13 |

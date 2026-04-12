@@ -63,6 +63,13 @@ export function useChatSocketCallbacks({
         setIntentMode(data.mode as 'ideate' | 'execute');
         setTargetCats((data as { targetCats?: string[] }).targetCats ?? []);
       },
+      onSpawnStarted: (data) => {
+        // F118 D2: Earliest signal — fires before intent_mode.
+        // Per-cat setCatStatus('spawning') is handled by the socket layer.
+        setLoading(true);
+        setHasActiveInvocation(true);
+        setTargetCats(data.targetCats ?? []);
+      },
       onTaskCreated: (task) => {
         const t = task as Record<string, unknown>;
         if (t.threadId !== threadId || t.kind === 'pr_tracking') return;

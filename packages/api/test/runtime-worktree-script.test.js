@@ -389,4 +389,53 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     const dirty = execFileSync('git', ['diff', '--name-only'], { cwd: normalizedRuntimeDir, encoding: 'utf8' }).trim();
     assert.equal(dirty, '');
   });
+
+  it('rejects staged dirty files even when unstaged lock drift is present', () => {
+    const projectDir = createTempProject('runtime-staged-plus-lock');
+    const runtimeDir = mkdtempSync(join(tmpdir(), 'runtime-staged-lock-worktree-'));
+    const remoteDir = mkdtempSync(join(tmpdir(), 'runtime-staged-lock-remote-'));
+    tempDirs.push(runtimeDir, remoteDir);
+
+    writeFileSync(join(projectDir, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n', 'utf8');
+    writeFileSync(join(projectDir, 'src.js'), 'original\n', 'utf8');
+    execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['add', '.'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: projectDir, stdio: 'ignore' });
+
+    execFileSync('git', ['init', '--bare', remoteDir], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['fetch', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['worktree', 'add', runtimeDir, '-b', 'runtime/main-sync', 'origin/main'], {
+      cwd: projectDir,
+      stdio: 'ignore',
+    });
+    const normalizedRuntimeDir = realpathSync(runtimeDir);
+
+    // Staged non-lock change + unstaged lock drift
+    writeFileSync(join(normalizedRuntimeDir, 'src.js'), 'modified\n', 'utf8');
+    execFileSync('git', ['add', 'src.js'], { cwd: normalizedRuntimeDir, stdio: 'ignore' });
+    writeFileSync(join(normalizedRuntimeDir, 'pnpm-lock.yaml'), 'lockfileVersion: 8\n', 'utf8');
+
+    const env = withStubbedPnpmEnv(normalizedRuntimeDir);
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--daemon'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: {
+        ...env,
+        CAT_CAFE_RUNTIME_RESTART_OK: '1',
+        CAT_CAFE_RUNTIME_DIR: normalizedRuntimeDir,
+        API_SERVER_PORT: '19899',
+      },
+    });
+
+    assert.notEqual(
+      result.status,
+      0,
+      `should reject but exited 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    assert.match(result.stderr, /runtime worktree has local changes/);
+  });
 });

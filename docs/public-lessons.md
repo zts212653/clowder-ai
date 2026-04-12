@@ -968,6 +968,38 @@ created: 2026-02-26
 
 ---
 
+### LL-049: `pnpm dev:direct` 无差别杀端口——review 踢翻 runtime
+- 状态：draft
+- 更新时间：2026-04-11
+
+- 坑：2026-04-10，Maine Coon在 review F152 PR (#1070) 时，在主仓库执行 `pnpm dev:direct`。`start-dev.sh` 的 `kill_managed_ports()` 无条件杀掉 3003/3004 端口上的进程——正在运行的 runtime 被踢掉，铲屎官被动中断。
+- 根因：
+  1. **`kill_port()` 不检查进程归属**：谁占着端口就杀谁，不区分是本 worktree 残留还是 runtime/alpha 等其他实例
+  2. **护栏分裂**：`runtime-worktree.sh` 有 `CAT_CAFE_RUNTIME_RESTART_OK` 授权门，但 `dev:direct` 走 `start-dev.sh`，绕过了这道门
+  3. **`guard_main_branch_start()` 盲区**：只拦 `main` 分支 + `cat-cafe` 仓库名，主仓库切到 feature branch 照样触发事故
+  4. **review 沙盒规范有文档无工具**：request-review skill 写了"在沙盒操作"，但缺少统一入口和强制机制
+- 触发条件：任何猫在非隔离环境（主仓库、错误 worktree）执行 `pnpm dev:direct` / `pnpm start`，且 runtime 正在使用相同端口
+- 修复（PR #1077，已合入 `807536df5`）：
+  1. 新增 `pid_cwd()` + `path_is_within_project()` + `guard_port_kill_ownership()`：`kill_port()` 前检查占用进程的工作目录是否属于当前 `$PROJECT_DIR`，跨 worktree 默认拒绝 kill
+  2. `CAT_CAFE_RUNTIME_RESTART_OK=1` 显式授权才放行
+  3. 新增 `scripts/review-start.sh`（`pnpm review:start`）：review 验证统一入口，自动分配 3201/3202 端口、内存 Redis、review 沙盒路径
+  4. review 模板新增"沙盒路径 + 启动命令 + 实际端口"必填字段
+- 防护：
+  1. `start-dev.sh` 端口归属 guard（基于进程 cwd，不硬编码端口号）——任何端口冲突都能防
+  2. 回归测试覆盖"默认拒绝跨 worktree kill"和"显式授权放行"两条路径
+  3. `pnpm review:start` 统一入口消除"在哪启动、用什么端口"的歧义
+  4. request-review 模板强制证据字段（reviewer 必须填沙盒路径和端口）
+- 来源锚点：
+  - 事故报告：`docs/bug-report/2026-04-10-review-dev-direct-runtime-interruption/bug-report.md`
+  - 修复 PR：zts212653/cat-cafe#1077
+  - 端口归属 guard：`scripts/start-dev.sh:450`（`guard_port_kill_ownership`）
+  - review 入口：`scripts/review-start.sh`
+- 原理：**"默认安全"优于"靠人记得"**。LL-045 证明纪律文档拦不住猫——写了"不要动 runtime"但多个 session 仍然直接操作。端口保护和 Redis production Redis (sacred)一样，必须在工具层面做到"默认不可能发生"，而非"读了文档就不会发生"。
+
+- 关联：LL-045（runtime worktree 反复被猫污染）| PR #1077 | `feedback_no_touch_runtime.md` | CLAUDE.md 铁律 #4
+
+---
+
 ## 8) 维护约定
 
 - 本文件是入口，不替代 ADR/bug-report 原文。

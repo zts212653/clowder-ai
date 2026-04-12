@@ -7,15 +7,20 @@
  */
 
 import { existsSync } from 'node:fs';
-import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
 import { parse as parseYaml } from 'yaml';
 import { readCapabilitiesConfig, resolveRequiredMcpStatus } from '../config/capabilities/capability-orchestrator.js';
-import { pathsEqual } from '../utils/project-path.js';
+import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import {
+  buildProviderSkillDirCandidates,
+  isSkillMountedForProvider,
+  resolveMainRepoPath,
+} from '../utils/skill-mount.js';
 
 interface SkillMount {
   claude: boolean;
@@ -60,25 +65,6 @@ function resolveCatCafeSkillsSourceDir(): string {
 }
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
-
-/** Check if a path is a symlink pointing to the expected target. */
-async function isCorrectSymlink(linkPath: string, expectedTarget: string): Promise<boolean> {
-  try {
-    const stat = await lstat(linkPath);
-    if (!stat.isSymbolicLink()) return false;
-    const dest = await readlink(linkPath);
-    const absDest = isAbsolute(dest) ? dest : resolve(dirname(linkPath), dest);
-    const [realDest, realExpected] = await Promise.all([
-      realpath(absDest).catch(() => absDest),
-      realpath(expectedTarget).catch(() => expectedTarget),
-    ]);
-    const normalizedDest = realDest.replace(/[/\\]$/, '');
-    const normalizedExpected = realExpected.replace(/[/\\]$/, '');
-    return pathsEqual(normalizedDest, normalizedExpected);
-  } catch {
-    return false;
-  }
-}
 
 /** List subdirs that contain SKILL.md */
 async function listSkillDirs(skillsSrc: string): Promise<string[]> {
@@ -181,10 +167,10 @@ async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string,
 }
 
 async function resolveSkillMcpStatuses(
-  repoRoot: string,
+  projectRoot: string,
   manifestMeta: Map<string, SkillMeta>,
 ): Promise<Map<string, SkillMcpDependency>> {
-  const capabilities = await readCapabilitiesConfig(repoRoot);
+  const capabilities = await readCapabilitiesConfig(projectRoot);
   const requiredIds = new Set<string>();
   for (const meta of manifestMeta.values()) {
     for (const id of meta.requiresMcp ?? []) requiredIds.add(id);
@@ -209,33 +195,38 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
     const repoRoot = dirname(skillsSrc);
     const bootstrapPath = join(skillsSrc, 'BOOTSTRAP.md');
+    const query = request.query as { projectPath?: string };
+    let projectRoot = repoRoot;
+    if (query.projectPath) {
+      const validated = await validateProjectPath(query.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path: must be an existing directory under allowed roots' };
+      }
+      projectRoot = validated;
+    }
     const home = homedir();
-
-    const catDirs = {
-      claude: join(home, '.claude', 'skills'),
-      codex: join(home, '.codex', 'skills'),
-      gemini: join(home, '.gemini', 'skills'),
-      kimi: join(home, '.kimi', 'skills'),
-    };
+    const providerDirCandidates = buildProviderSkillDirCandidates(projectRoot, home);
+    const mainRepo = await resolveMainRepoPath();
+    const mainSkillsSrc = join(mainRepo, 'cat-cafe-skills');
 
     const [sourceSkills, bootstrapEntries, manifestMeta] = await Promise.all([
       listSkillDirs(skillsSrc),
       parseBootstrap(bootstrapPath),
       parseManifestSkillMeta(skillsSrc),
     ]);
-    const mcpStatuses = await resolveSkillMcpStatuses(repoRoot, manifestMeta);
+    const mcpStatuses = await resolveSkillMcpStatuses(projectRoot, manifestMeta);
 
     // Build mount status lookup for each source skill
     const sourceSet = new Set(sourceSkills);
     const mountLookup = new Map<string, SkillEntry>();
     await Promise.all(
       sourceSkills.map(async (name) => {
-        const expectedTarget = join(skillsSrc, name);
         const [claude, codex, gemini, kimi] = await Promise.all([
-          isCorrectSymlink(join(catDirs.claude, name), expectedTarget),
-          isCorrectSymlink(join(catDirs.codex, name), expectedTarget),
-          isCorrectSymlink(join(catDirs.gemini, name), expectedTarget),
-          isCorrectSymlink(join(catDirs.kimi, name), expectedTarget),
+          isSkillMountedForProvider(providerDirCandidates.claude, skillsSrc, name, mainSkillsSrc),
+          isSkillMountedForProvider(providerDirCandidates.codex, skillsSrc, name, mainSkillsSrc),
+          isSkillMountedForProvider(providerDirCandidates.gemini, skillsSrc, name, mainSkillsSrc),
+          isSkillMountedForProvider(providerDirCandidates.kimi, skillsSrc, name, mainSkillsSrc),
         ]);
         const entry = bootstrapEntries.get(name);
         const meta = manifestMeta.get(name);

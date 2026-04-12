@@ -11,7 +11,7 @@ function aggregateStatus(ts: ThreadState): 'idle' | 'working' | 'done' | 'error'
   const statuses = Object.values(ts.catStatuses);
   if (statuses.length === 0) return 'idle';
   if (statuses.some((s) => s === 'error')) return 'error';
-  if (statuses.some((s) => s === 'streaming' || s === 'pending')) return 'working';
+  if (statuses.some((s) => s === 'streaming' || s === 'pending' || s === 'spawning')) return 'working';
   if (statuses.some((s) => s === 'done')) return 'done';
   return 'idle';
 }
@@ -67,7 +67,7 @@ export function getCatStatusType(catStatuses: Record<string, CatStatusType>): 'i
   const statuses = Object.values(catStatuses);
   if (statuses.length === 0) return 'idle';
   if (statuses.some((s) => s === 'error')) return 'error';
-  if (statuses.some((s) => s === 'streaming' || s === 'pending')) return 'working';
+  if (statuses.some((s) => s === 'streaming' || s === 'pending' || s === 'spawning')) return 'working';
   if (statuses.some((s) => s === 'done')) return 'done';
   return 'idle';
 }

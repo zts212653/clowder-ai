@@ -330,6 +330,77 @@ describe('useChatHistory replace hydration', () => {
     );
   });
 
+  it('preserves local CLI payload when hydration returns the same callback id without tool metadata', async () => {
+    const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 1_000;
+    const now = Date.now();
+    mountReplaceHydrationThread({
+      messages: [
+        {
+          id: 'server-callback-tools-1',
+          type: 'assistant',
+          catId: 'opus',
+          content: 'final callback answer',
+          origin: 'callback',
+          timestamp: now - 2_000,
+          isStreaming: false,
+          thinking: 'local thinking that should not disappear',
+          toolEvents: [{ id: 'te-local-1', type: 'tool_use', label: 'Read file', timestamp: now - 1_800 }],
+          extra: { stream: { invocationId: 'inv-tools-1' } },
+        },
+      ],
+      isLoading: false,
+      isLoadingHistory: false,
+      hasMore: true,
+      hasActiveInvocation: false,
+      activeInvocations: {},
+      intentMode: null,
+      targetCats: [],
+      catStatuses: {},
+      catInvocations: {},
+      currentGame: null,
+      unreadCount: 1,
+      hasUserMention: false,
+      lastActivity: cachedAssistantTs,
+      queue: [],
+      queuePaused: false,
+      queuePauseReason: undefined,
+      queueFull: false,
+      queueFullSource: undefined,
+      workspaceWorktreeId: null,
+      workspaceOpenTabs: [],
+      workspaceOpenFilePath: null,
+      workspaceOpenFileLine: null,
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    await history.resolve({
+      messages: [
+        {
+          id: 'server-callback-tools-1',
+          catId: 'opus',
+          content: 'final callback answer',
+          origin: 'callback',
+          timestamp: now,
+        },
+      ],
+      hasMore: false,
+    });
+
+    expect(useChatStore.getState().messages).toEqual([
+      expect.objectContaining({
+        id: 'server-callback-tools-1',
+        origin: 'callback',
+        content: 'final callback answer',
+        thinking: 'local thinking that should not disappear',
+        extra: { stream: { invocationId: 'inv-tools-1' } },
+        toolEvents: [expect.objectContaining({ id: 'te-local-1', type: 'tool_use', label: 'Read file' })],
+      }),
+    ]);
+  });
+
   it('thread switch rehydrates a cached duplicate invocation pair down to one formal callback bubble', async () => {
     const history = installDeferredHistoryResponse();
     const now = Date.now();

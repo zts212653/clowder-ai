@@ -365,9 +365,9 @@ skills:
   # ── 定时任务 ──
   schedule-tasks:
     description: >
-      定时任务注册、管理、能力指南。
-      Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容。
-      Not for: 一次性即时操作、已有 builtin 任务的手动触发。
+      定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。
+      Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。
+      Not for: 已有 builtin 任务的手动触发。
       Output: 注册/管理定时任务，任务到点唤醒猫执行。
     triggers:
       - "定时"
@@ -381,10 +381,38 @@ skills:
       - "定期"
       - "周期"
       - "定时任务"
+      - "分钟后"
+      - "小时后"
+      - "之后"
+      - "later"
+      - "in 5 minutes"
+      - "once"
     not_for:
-      - "一次性即时操作"
       - "builtin 任务手动触发"
     output: "Registered/managed scheduled task"
+    next: ["rich-messaging"]
+    sop_step: null
+    merged_from: null
+
+  # ── 视频制作 ──
+  video-forge:
+    description: >
+      视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。
+      Use when: 做视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。
+      Not for: 纯代码开发（用 worktree/tdd）、纯文档写作（直接写）、PPT（用 ppt-forge）。
+      Output: schema 驱动的视频成片 + 多猫审查通过 + 可发布。
+    triggers:
+      - "做视频"
+      - "showcase 视频"
+      - "教程视频"
+      - "录屏剪辑"
+      - "video review"
+      - "节奏审查"
+    not_for:
+      - "纯代码开发"
+      - "纯文档写作"
+      - "PPT"
+    output: "Schema-driven video production pipeline"
     next: ["rich-messaging"]
     sop_step: null
     merged_from: null

@@ -254,16 +254,17 @@ export class AcpClient {
     text: string,
     options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
   ): AsyncGenerator<AcpSessionUpdate, AcpStopReason> {
-    // KD-12: Turn budget — resource cap, NOT health detection.
-    // Gemini CLI doesn't emit tool_call for MCP tools (upstream #21783), so
-    // long MCP chains are invisible to the event stream. Idle stall (90s) catches
-    // true hangs; this budget is the last-resort guard against runaway sessions.
-    // Upstream #24029 (MCP channel notifications) will provide proper L2 signals.
+    // KD-12: Activity-based turn budget — resets on each event.
+    // If agent produces events continuously, budget never fires. Only triggers
+    // after timeoutMs of SILENCE (no events). Idle stall (90s) catches true hangs
+    // faster; this is the wider safety net for slow-but-alive sessions.
+    // sendRequest gets a hard ceiling (1h) as absolute last-resort guard.
     const timeoutMs = options?.timeoutMs ?? 900_000;
     const idleWarningMs = options?.idleWarningMs ?? 20_000;
     // Idle stall catches true hangs. Gemini CLI doesn't emit tool_call for MCP
     // tools, so pendingTool never activates. 90s covers most MCP calls (10-30s).
     const idleStallMs = options?.idleStallMs ?? 90_000;
+    const HARD_CEILING_MS = 3_600_000; // 1h — absolute last-resort for sendRequest promise
     const queue: AcpSessionUpdate[] = [];
     let waitResolve: (() => void) | null = null;
     let done = false;
@@ -276,6 +277,26 @@ export class AcpClient {
     let idleWarningFired = false;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingTool = false; // true while Gemini is waiting for MCP tool result
+    let budgetTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** Reset (or start) the activity-based turn budget timer.
+     *  Called once at prompt start and again on every incoming event. */
+    const resetBudget = () => {
+      if (budgetTimer) clearTimeout(budgetTimer);
+      if (done) return;
+      budgetTimer = setTimeout(() => {
+        if (done) return;
+        log.error({ sessionId, eventCount, timeoutMs }, 'Turn budget exceeded — no activity for %dms', timeoutMs);
+        this.cancelSession(sessionId);
+        promptError = new AcpTimeoutError('session/prompt', timeoutMs);
+        done = true;
+        if (waitResolve) {
+          const r = waitResolve;
+          waitResolve = null;
+          r();
+        }
+      }, timeoutMs);
+    };
 
     /** Inject a synthetic event and wake the consumer loop. */
     const injectSynthetic = (update: Record<string, unknown>) => {
@@ -373,6 +394,7 @@ export class AcpClient {
         pendingTool = false; // Real output event → tool execution completed
       }
       scheduleIdleCheck();
+      resetBudget(); // Activity-based: any event resets the turn budget
       if (waitResolve) {
         const r = waitResolve;
         waitResolve = null;
@@ -393,8 +415,12 @@ export class AcpClient {
     };
     this.capacityListeners.add(capacityInjector);
 
-    // Fire prompt request — don't await, we'll drain the queue concurrently
-    this.sendRequest(ACP_METHODS.sessionPrompt, { sessionId, prompt: [{ type: 'text', text }] }, timeoutMs)
+    // Start activity-based budget timer — resets on each event from listener
+    resetBudget();
+
+    // Fire prompt request — don't await, we'll drain the queue concurrently.
+    // sendRequest uses hard ceiling (1h); actual budget is managed by resetBudget().
+    this.sendRequest(ACP_METHODS.sessionPrompt, { sessionId, prompt: [{ type: 'text', text }] }, HARD_CEILING_MS)
       .then((resp) => {
         const result = resp.result as unknown as AcpPromptResult;
         stopReason = result.stopReason;
@@ -430,6 +456,7 @@ export class AcpClient {
       return stopReason;
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
+      if (budgetTimer) clearTimeout(budgetTimer);
       this.capacityListeners.delete(capacityInjector);
       const idx = this.notificationListeners.indexOf(listener);
       if (idx >= 0) this.notificationListeners.splice(idx, 1);

@@ -158,3 +158,10 @@ created: 2026-04-10
 | KD-2 | 用 `allowRequest` 而非依赖 `cors` 配置 | Socket.IO 的 cors 不管 WebSocket upgrade（官方文档明确）| 2026-04-10 |
 | KD-3 | 先修自家 Hub，验证后再修 OfficeClaw | team lead拍板 | 2026-04-10 |
 | KD-4 | Phase C（OfficeClaw）从 F156 拆出 | team lead："和我们家无关是外出务工的事情"，不污染自家 feat 真相源 | 2026-04-10 |
+
+## Follow-up（team lead拍板 2026-04-11）
+
+| # | 内容 | 来源 |
+|---|------|------|
+| FU-1 | **精确 IP/域名 allowlist** — 替代粗放的 `CORS_ALLOW_PRIVATE_NETWORK=true`（放开整个私网段），支持用户指定精确的 Tailscale IP 或 MagicDNS 域名 | Maine Coon R3 建议 + team lead确认 |
+| FU-2 | **开源社区 setup 文档** — 在手机/平板猫猫章节写清 Tailscale/局域网访问的场景、配置指南、安全注意事项 | team lead："开源社区的 setup 用手机猫猫的章节也写上" |

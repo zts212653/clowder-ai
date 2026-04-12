@@ -20,6 +20,8 @@ import {
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
+  builtinAccountIdForClient,
+  resolveBuiltinClientForProvider,
   resolveByAccountRef,
   validateModelFormatForProvider,
   validateRuntimeProviderBinding,
@@ -565,10 +567,25 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
     }
     const effectiveClient = body.clientId ?? currentCat.clientId;
     const currentEffectiveAccountRef = await resolveEffectiveAccountRef(currentCat);
-    const targetAccountRef = resolveAccountRef(body);
-    const effectiveAccountRef =
+    let targetAccountRef = resolveAccountRef(body);
+    let effectiveAccountRef =
       targetAccountRef !== undefined ? (targetAccountRef ?? undefined) : currentEffectiveAccountRef;
     const effectiveDefaultModel = body.defaultModel !== undefined ? body.defaultModel : currentCat.defaultModel;
+
+    // Auto-rebase builtin binding when switching client families.
+    // When the editor sends the old client's builtin accountRef during a provider switch,
+    // rebase to the new client's builtin so validation doesn't reject the stale ref.
+    const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
+    if (isClientSwitch && effectiveAccountRef) {
+      const oldBuiltin = resolveBuiltinClientForProvider(currentCat.clientId);
+      if (oldBuiltin && builtinAccountIdForClient(oldBuiltin) === effectiveAccountRef) {
+        const newBuiltin = resolveBuiltinClientForProvider(effectiveClient);
+        if (newBuiltin) {
+          effectiveAccountRef = builtinAccountIdForClient(newBuiltin);
+          targetAccountRef = effectiveAccountRef;
+        }
+      }
+    }
     const providerConfigTouched =
       body.clientId !== undefined ||
       body.defaultModel !== undefined ||

@@ -15,6 +15,7 @@ import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { deleteCatalogAccount, readCatalogAccounts, writeCatalogAccount } from '../config/catalog-accounts.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
+
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';

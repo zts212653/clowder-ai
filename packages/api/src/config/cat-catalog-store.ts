@@ -148,6 +148,34 @@ function applyBootstrapDefaultAccountRefs(catalog: CatCafeConfig, seedCatIds: Re
   return next;
 }
 
+/** One-time migration: stamp `source` on variants written before #441. Idempotent.
+ *  Only stamps source — does NOT touch accountRef (existing unbound variants stay unbound). */
+function backfillVariantSource(catalogPath: string, templatePath: string): void {
+  let raw: string;
+  try {
+    raw = readFileSync(catalogPath, 'utf-8');
+  } catch {
+    return;
+  }
+  const catalog = JSON.parse(raw) as CatCafeConfig;
+  const next = structuredClone(catalog) as CatCafeConfig;
+  let dirty = false;
+  const seedCatIds = readSeedCatIds(templatePath);
+  for (const breed of next.breeds as unknown as Record<string, unknown>[]) {
+    const breedCatId = typeof breed.catId === 'string' ? breed.catId : '';
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+    for (const variant of variants) {
+      if (variant.source !== 'seed' && variant.source !== 'runtime') {
+        const catId = typeof variant.catId === 'string' ? variant.catId : breedCatId;
+        variant.source = catId && seedCatIds.has(catId) ? 'seed' : 'runtime';
+        dirty = true;
+      }
+    }
+  }
+  if (!dirty) return;
+  writeFileAtomic(catalogPath, `${JSON.stringify(next, null, 2)}\n`);
+}
+
 export function resolveCatCatalogPath(projectRoot: string): string {
   return safePath(projectRoot, CONFIG_SUBDIR, CAT_CATALOG_FILENAME);
 }
@@ -192,6 +220,8 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
   const catalogPath = resolveCatCatalogPath(projectRoot);
   if (existsSync(catalogPath)) {
     readCatCatalogRaw(projectRoot);
+    // Backfill source on existing catalogs written before #441.
+    backfillVariantSource(catalogPath, templatePath);
     return catalogPath;
   }
 
