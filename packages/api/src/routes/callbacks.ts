@@ -514,7 +514,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         content: storedContent,
         origin: 'callback',
         messageId: storedMsg.id,
-        ...(invocationId ? { invocationId } : {}),
+        invocationId, // #454: always propagate — required by callback auth
         // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
         ...(isCrossThread || validExplicitTargets.length
           ? {
@@ -536,12 +536,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // #83: Broadcast each extracted rich block as SSE event for live rendering
     // P2 cloud-review: include messageId for frontend correlation
+    // #454: include invocationId so frontend can exact-match callback to stream bubble
     for (const block of richBlocks) {
       socketManager.broadcastAgentMessage(
         {
           type: 'system_info' as const,
           catId: record.catId,
           content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
+          invocationId,
           timestamp: Date.now(),
         },
         effectiveThreadId,
@@ -1126,12 +1128,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const isNew = getRichBlockBuffer().add(record.threadId, record.catId as string, resolvedBlock, invocationId);
 
     // Only broadcast new blocks (dedup retries at server to prevent frontend duplicates)
+    // #454: include invocationId so frontend can exact-match callback to stream bubble
     if (isNew) {
       socketManager.broadcastAgentMessage(
         {
           type: 'system_info' as const,
           catId: record.catId,
           content: JSON.stringify({ type: 'rich_block', block: resolvedBlock }),
+          invocationId,
           timestamp: Date.now(),
         },
         record.threadId,
