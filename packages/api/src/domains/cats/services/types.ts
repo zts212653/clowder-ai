@@ -4,6 +4,7 @@
  */
 
 import type { CatId, MessageContent } from '@cat-cafe/shared';
+import type { Span } from '@opentelemetry/api';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
 
 /** F8: Unified token usage type across all three cats.
@@ -193,6 +194,8 @@ export interface AgentServiceOptions {
   };
   /** F127: Extra --config key=value pairs to pass to the CLI. */
   cliConfigArgs?: readonly string[];
+  /** F153 Phase B: Parent OTel span for creating CLI session child span */
+  parentSpan?: Span;
 }
 
 /**

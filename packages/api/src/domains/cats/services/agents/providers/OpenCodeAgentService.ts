@@ -150,6 +150,7 @@ export class OpenCodeAgentService implements AgentService {
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
+        ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
       };
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)

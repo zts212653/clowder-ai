@@ -5,6 +5,7 @@
 
 import type { Readable } from 'node:stream';
 import type { CatId } from '@cat-cafe/shared';
+import type { Span } from '@opentelemetry/api';
 import type { AgentMessage } from '../domains/cats/services/types.js';
 
 /**
@@ -43,6 +44,8 @@ export interface CliSpawnOptions {
    * When aborted, spawnCli skips `await exitPromise` — decouples done from process exit.
    */
   semanticCompletionSignal?: AbortSignal;
+  /** F153 Phase B: Parent OTel span for creating CLI session child span */
+  parentSpan?: Span;
 }
 
 /**
