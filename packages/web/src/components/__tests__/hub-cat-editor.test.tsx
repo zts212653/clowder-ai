@@ -1483,7 +1483,7 @@ describe('HubCatEditor', () => {
     mockConfirm.mockResolvedValue(true);
   });
 
-  it('shows delete action for bootstrapped members too', async () => {
+  it('hides delete action for seed members', async () => {
     const existingCat: CatData = {
       id: 'codex',
       name: '缅因猫',
@@ -1518,7 +1518,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('button[aria-label="删除成员"]')).toBeTruthy();
+    expect(container.querySelector('button[aria-label="删除成员"]')).toBeNull();
   });
 
   it('loads runtime controls for an existing member and saves strategy separately', async () => {

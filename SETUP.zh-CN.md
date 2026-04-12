@@ -570,11 +570,16 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://your-llm-host:9878
 
 API 自动接受以下来源的请求：
 - `localhost` / `127.0.0.1`（任意端口）
-- RFC 1918 内网地址（`10.x.x.x`、`172.16-31.x.x`、`192.168.x.x`）
-- Tailscale IP（`100.x.x.x`）
 - 你设置的 `FRONTEND_URL`
 
-大多数局域网 / VPN 场景不需要额外的 CORS 配置。
+如果你是直接通过局域网 / Tailscale IP 打开 Cat Cafe（例如 `http://192.168.x.x:3003` 或 `http://100.x.x.x:3003`），还需要在 `.env` 里加上：
+
+```bash
+API_SERVER_HOST=0.0.0.0
+CORS_ALLOW_PRIVATE_NETWORK=true
+```
+
+这个显式开关会信任 RFC 1918 内网地址（`10.x.x.x`、`172.16-31.x.x`、`192.168.x.x`）和 Tailscale IP（`100.x.x.x`）上的浏览器。如果你走反向代理或固定 `FRONTEND_URL`，通常不需要额外打开这个选项。
 
 ## 常见问题
 

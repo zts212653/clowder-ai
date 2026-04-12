@@ -263,7 +263,7 @@ ensure_runtime_clean() {
     # Auto-stash isolated pnpm-lock.yaml drift (common after pnpm install on
     # a previous run). Only the lock file dirty → safe to stash and proceed.
     local drift_files
-    drift_files=$(git -C "$RUNTIME_DIR" diff --name-only 2>/dev/null || true)
+    drift_files=$(git -C "$RUNTIME_DIR" diff HEAD --name-only 2>/dev/null || true)
     if [ "$drift_files" = "pnpm-lock.yaml" ]; then
       info "lock drift detected — stashing before sync"
       git -C "$RUNTIME_DIR" stash push -m "lock-drift-pre-sync-stash" -- pnpm-lock.yaml

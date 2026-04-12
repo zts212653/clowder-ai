@@ -129,6 +129,93 @@ describe('start-dev strict profile isolation', () => {
   });
 });
 
+describe('cross-platform pnpm-start profile propagation (#421)', () => {
+  it('package.json scripts.start routes through start-entry.mjs', () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+    assert.match(pkg.scripts.start, /start-entry\.mjs start\b/, 'pnpm start must route through start-entry.mjs');
+  });
+
+  it('start-entry.mjs sets CAT_CAFE_PROFILE and CAT_CAFE_STRICT_PROFILE_DEFAULTS for Windows when --profile is present', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-entry.mjs'), 'utf8');
+
+    assert.ok(
+      source.includes('childEnv.CAT_CAFE_PROFILE = profileName'),
+      'Windows path must set CAT_CAFE_PROFILE from --profile arg',
+    );
+    assert.ok(
+      source.includes("childEnv.CAT_CAFE_STRICT_PROFILE_DEFAULTS = '1'"),
+      'Windows path must set CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 when profile is present',
+    );
+
+    assert.ok(source.includes('env: childEnv'), 'Windows spawn must use childEnv (which contains profile env vars)');
+  });
+
+  it('start-windows.ps1 clears inherited profile vars when strict mode is on', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.ok(
+      ps1.includes('CAT_CAFE_STRICT_PROFILE_DEFAULTS'),
+      'start-windows.ps1 must check CAT_CAFE_STRICT_PROFILE_DEFAULTS for strict mode',
+    );
+
+    for (const v of [
+      'ANTHROPIC_PROXY_ENABLED',
+      'ASR_ENABLED',
+      'TTS_ENABLED',
+      'LLM_POSTPROCESS_ENABLED',
+      'REDIS_PROFILE',
+    ]) {
+      assert.ok(ps1.includes(v), `start-windows.ps1 must reference profile var ${v}`);
+    }
+  });
+
+  it('start-windows.ps1 applies profile defaults matching start-dev.sh opensource profile', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(ps1, /'opensource'/, 'start-windows.ps1 must define opensource profile');
+    assert.match(ps1, /'production'/, 'start-windows.ps1 must define production profile');
+    assert.match(ps1, /'dev'/, 'start-windows.ps1 must define dev profile');
+
+    assert.ok(
+      ps1.includes('GetEnvironmentVariable'),
+      'start-windows.ps1 must check existing env before applying profile default',
+    );
+  });
+
+  it('start-windows.ps1 reapplies profile defaults inside Start-Job after .env reload', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.ok(ps1.includes('$profileDefaults'), 'start-windows.ps1 must pass $profileDefaults to Start-Job');
+
+    const jobBlocks = ps1.match(/Start-Job[\s\S]*?-ScriptBlock\s*\{([\s\S]*?)\}\s*-ArgumentList/g);
+    assert.ok(jobBlocks && jobBlocks.length > 0, 'start-windows.ps1 must have Start-Job blocks');
+    const apiJobBlock = jobBlocks.find((b) => b.includes('-Name "api"'));
+    assert.ok(apiJobBlock, 'start-windows.ps1 must have an API Start-Job block');
+    assert.ok(
+      apiJobBlock.includes('profileDefaults') && apiJobBlock.includes('GetEnvironmentVariable'),
+      'API job must reapply profileDefaults with env-check after .env reload',
+    );
+  });
+
+  it('start-windows.ps1 runtimeEnvOverrides does not clobber profile vars', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    const overridesMatch = ps1.match(/\$runtimeEnvOverrides\s*=\s*@\{([^}]+)\}/s);
+    assert.ok(overridesMatch, 'start-windows.ps1 must define $runtimeEnvOverrides');
+    const overridesBlock = overridesMatch[1];
+    assert.ok(
+      !overridesBlock.includes('CAT_CAFE_PROFILE'),
+      'runtimeEnvOverrides must not override CAT_CAFE_PROFILE (it flows via env inheritance)',
+    );
+    assert.ok(
+      !overridesBlock.includes('CAT_CAFE_STRICT_PROFILE'),
+      'runtimeEnvOverrides must not override CAT_CAFE_STRICT_PROFILE_DEFAULTS (it flows via env inheritance)',
+    );
+
+    assert.ok(ps1.includes('Start-Job'), 'start-windows.ps1 must use Start-Job (which inherits parent process env)');
+  });
+});
+
 describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC_SCRIPT) }, () => {
   it('exports opensource-pinned direct launch wrappers and runtime startup', () => {
     const result = spawnSync('bash', [SYNC_SCRIPT, '--dry-run', '--yes'], {

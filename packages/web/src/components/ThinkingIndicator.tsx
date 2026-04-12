@@ -94,6 +94,20 @@ export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
   const name = catData?.displayName ?? catId;
   const warning: LivenessWarningSnapshot | undefined = catInvocations?.[catId]?.livenessWarning;
 
+  // F118 D2: spawning — CLI not yet connected, earliest signal
+  if (status === 'spawning') {
+    return (
+      <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
+        <div className="flex items-center gap-2">
+          <span className="text-base leading-none animate-pulse" role="img" aria-label="paw">
+            🐾
+          </span>
+          <span className="text-sm text-cafe-secondary">{name} 启动中...</span>
+        </div>
+      </div>
+    );
+  }
+
   // F118: alive_but_silent — amber warning banner
   if (status === 'alive_but_silent' && warning) {
     const elapsed = formatDuration(warning.silenceDurationMs);

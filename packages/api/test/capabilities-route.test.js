@@ -593,6 +593,112 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
+  it('treats directory-level project skills symlinks as mounted for all providers', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join('/tmp', `cap-route-test-dir-symlink-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-home-${Date.now()}`);
+    const sourceSkillsDir = join(process.cwd(), '..', '..', 'cat-cafe-skills');
+    const prevHome = process.env.HOME;
+
+    await Promise.all([
+      mkdir(join(projectDir, '.claude'), { recursive: true }),
+      mkdir(join(projectDir, '.codex'), { recursive: true }),
+      mkdir(join(projectDir, '.gemini'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi'), { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+    ]);
+    await Promise.all([
+      symlink(sourceSkillsDir, join(projectDir, '.claude', 'skills')),
+      symlink(sourceSkillsDir, join(projectDir, '.codex', 'skills')),
+      symlink(sourceSkillsDir, join(projectDir, '.gemini', 'skills')),
+      symlink(sourceSkillsDir, join(projectDir, '.kimi', 'skills')),
+    ]);
+    await writeCapabilitiesConfig(projectDir, { version: 1, capabilities: [] });
+
+    process.env.HOME = homeDir;
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.equal(body.skillHealth?.allMounted, true, 'project-level directory symlinks should count as mounted');
+
+      const debugging = (body.items ?? []).find((item) => item.type === 'skill' && item.id === 'debugging');
+      assert.ok(debugging, 'debugging skill should be present');
+      assert.deepEqual(debugging.mounts, { claude: true, codex: true, gemini: true, kimi: true });
+      assert.equal(debugging.cats.codex, true, 'project-level codex skills dir should enable OpenAI-family skills');
+      assert.equal(debugging.cats.gemini, true, 'project-level gemini skills dir should enable Gemini-family skills');
+      assert.equal(debugging.cats.kimi, true, 'project-level kimi skills dir should enable Kimi skills');
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not downgrade cat-cafe source when codex project scan fails', async () => {
+    const Fastify = (await import('fastify')).default;
+
+    const projectDir = join('/tmp', `cap-route-test-source-guard-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-source-guard-home-${Date.now()}`);
+    const codexSkillsDir = join(projectDir, '.codex', 'skills');
+    const prevHome = process.env.HOME;
+
+    await mkdir(join(projectDir, '.codex'), { recursive: true });
+    await Promise.all([
+      mkdir(homeDir, { recursive: true }),
+      writeFile(codexSkillsDir, 'not-a-directory'),
+      writeCapabilitiesConfig(projectDir, {
+        version: 1,
+        capabilities: [{ id: 'custom-skill', type: 'skill', enabled: true, source: 'cat-cafe' }],
+      }),
+    ]);
+
+    process.env.HOME = homeDir;
+
+    const { capabilitiesRoutes } = await import(`../dist/routes/capabilities.js?t=${Date.now()}`);
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      const customSkill = (body.items ?? []).find((item) => item.type === 'skill' && item.id === 'custom-skill');
+      assert.ok(customSkill, 'custom skill should remain in the payload');
+      assert.equal(
+        customSkill.source,
+        'cat-cafe',
+        'failed codex project scan must not downgrade an existing cat-cafe skill to external',
+      );
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it('does not treat cat-cafe-skills/refs as a skill', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');

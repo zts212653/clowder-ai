@@ -72,6 +72,8 @@ export interface SocketCallbacks {
   onMessage: (msg: AgentMessage) => void;
   onThreadUpdated?: (data: { threadId: string; title?: string; participants?: string[] }) => void;
   onIntentMode?: (data: { threadId: string; mode: string; targetCats: string[] }) => void;
+  /** F118 D2: Earliest signal that cats are being spawned (before intent_mode) */
+  onSpawnStarted?: (data: { threadId: string; targetCats: string[]; invocationId: string }) => void;
   onTaskCreated?: (task: Record<string, unknown>) => void;
   onTaskUpdated?: (task: Record<string, unknown>) => void;
   onHeartbeat?: (data: { threadId: string; timestamp: number }) => void;
@@ -465,6 +467,34 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         }
       },
     );
+
+    // F118 D2: spawn_started — earliest per-cat spawning signal (fires before intent_mode).
+    socket.on('spawn_started', (data: { threadId: string; targetCats: string[]; invocationId: string }) => {
+      const routeThread = threadIdRef.current;
+      const storeThread = useChatStore.getState().currentThreadId;
+
+      const isActiveThread = Boolean(
+        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
+      );
+
+      if (isActiveThread) {
+        callbacksRef.current.onSpawnStarted?.(data);
+        // Set per-cat spawning status for ThinkingIndicator
+        const cats = data.targetCats ?? [];
+        for (const catId of cats) {
+          useChatStore.getState().setCatStatus(catId, 'spawning');
+        }
+        return;
+      }
+
+      // Background thread (split-pane): write thread-scoped state
+      if (data.threadId) {
+        const store = useChatStore.getState();
+        store.setThreadLoading(data.threadId, true);
+        store.setThreadHasActiveInvocation(data.threadId, true);
+        store.setThreadTargetCats(data.threadId, data.targetCats ?? []);
+      }
+    });
 
     socket.on('task_created', (task: Record<string, unknown>) => {
       callbacksRef.current.onTaskCreated?.(task);

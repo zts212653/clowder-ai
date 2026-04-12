@@ -199,6 +199,70 @@ describe('buildStructuralSummary', () => {
     assert.equal(total, summary.docsList.length);
   });
 
+  it('classifies docs/ subdirectory files as authoritative, not derived', () => {
+    mkdirSync(join(tmpRoot, 'docs', 'features'), { recursive: true });
+    writeFileSync(join(tmpRoot, 'docs', 'features', 'F152.md'), '# Feature');
+    writeFileSync(join(tmpRoot, 'docs', 'plan.md'), '# Plan');
+    const summary = buildStructuralSummary(tmpRoot);
+    const docsUnderDocsDir = summary.docsList.filter(
+      (d) => d.path.startsWith('docs/') && d.path !== 'docs/README.md' && d.path !== 'docs/ARCHITECTURE.md',
+    );
+    assert.ok(docsUnderDocsDir.length > 0, 'should find docs under docs/');
+    for (const doc of docsUnderDocsDir) {
+      assert.equal(doc.tier, 'authoritative', `${doc.path} should be authoritative, got ${doc.tier}`);
+    }
+  });
+
+  it('classifies top-level non-special .md files as derived', () => {
+    writeFileSync(join(tmpRoot, 'NOTES.md'), '# Notes');
+    const summary = buildStructuralSummary(tmpRoot);
+    const notes = summary.docsList.find((d) => d.path === 'NOTES.md');
+    assert.ok(notes, 'should find NOTES.md');
+    assert.equal(notes.tier, 'derived');
+  });
+
+  it('classifies top-level CHANGELOG as soft_clue but docs/CHANGELOG as authoritative', () => {
+    writeFileSync(join(tmpRoot, 'CHANGELOG.md'), '# Changes');
+    writeFileSync(join(tmpRoot, 'docs', 'CHANGELOG.md'), '# Doc Changes');
+    const summary = buildStructuralSummary(tmpRoot);
+    const topChangelog = summary.docsList.find((d) => d.path === 'CHANGELOG.md');
+    assert.ok(topChangelog, 'should find top-level CHANGELOG');
+    assert.equal(topChangelog.tier, 'soft_clue', 'top-level CHANGELOG should be soft_clue');
+    const docsChangelog = summary.docsList.find((d) => d.path === 'docs/CHANGELOG.md');
+    assert.ok(docsChangelog, 'should find docs/CHANGELOG');
+    assert.equal(docsChangelog.tier, 'authoritative', 'docs/CHANGELOG should be authoritative (docs/ takes priority)');
+  });
+
+  it('bootstrap uses getTierCoverage from deps when available and syncs docsIndexed', async () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    const stateManager = new IndexStateManager(db);
+    const storeTierCoverage = { authoritative: 42, derived: 8, soft_clue: 3 };
+    const svc = new ExpeditionBootstrapService(stateManager, {
+      rebuildIndex: async () => ({ docsIndexed: 999, durationMs: 100 }),
+      getFingerprint: () => 'test:1.0:full',
+      getTierCoverage: async (_projectPath) => storeTierCoverage,
+    });
+    const result = await svc.bootstrap(tmpRoot);
+    assert.equal(result.status, 'ready');
+    assert.deepEqual(result.summary.tierCoverage, storeTierCoverage);
+    // P1-1 fix: docsIndexed must equal sum of tier counts
+    assert.equal(result.docsIndexed, 42 + 8 + 3, 'docsIndexed should match tier coverage total');
+  });
+
+  it('bootstrap falls back to structural summary tiers when getTierCoverage is absent', async () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    const stateManager = new IndexStateManager(db);
+    const svc = new ExpeditionBootstrapService(stateManager, {
+      rebuildIndex: async () => ({ docsIndexed: 5, durationMs: 100 }),
+      getFingerprint: () => 'test:2.0:full',
+    });
+    const result = await svc.bootstrap(tmpRoot);
+    assert.equal(result.status, 'ready');
+    assert.ok(Object.keys(result.summary.tierCoverage).length > 0, 'should have fallback tierCoverage');
+  });
+
   it('detects rust from Cargo.toml', () => {
     writeFileSync(join(tmpRoot, 'Cargo.toml'), '[package]\nname = "test"');
     const summary = buildStructuralSummary(tmpRoot);
