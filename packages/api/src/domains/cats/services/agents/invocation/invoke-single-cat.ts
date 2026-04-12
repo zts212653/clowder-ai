@@ -1263,6 +1263,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // F153 Phase B: Retrospective LLM call span (created after-the-fact from done event)
           // Only create when durationApiMs is available — providers without timing data
           // (Codex, Gemini, Kimi) would produce misleading 0-duration spans.
+          // NOTE: startTime is approximate — computed as (now - durationApiMs). Message queue
+          // latency between CLI event emission and API processing introduces drift, so span
+          // boundaries may shift by tens of ms. Acceptable for observability; not for SLA math.
           if (invocationSpan && msg.metadata.usage.durationApiMs) {
             const parentCtx = trace.setSpan(context.active(), invocationSpan);
             const durationApiMs = msg.metadata.usage.durationApiMs;
@@ -1458,22 +1461,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       } else {
         outputs.push(attachInvocationIdToTaskProgress(msg));
 
-        // F153 Phase B: Create tool_use span under invocation span
+        // F153 Phase B: Record tool_use as span event (not a span — no duration data available)
+        // Real tool duration spans require tool_use→tool_result pairing at the provider layer.
         if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
-          const parentCtx = trace.setSpan(context.active(), invocationSpan);
-          const toolSpan = tracer.startSpan(
-            'cat_cafe.tool_use',
-            {
-              attributes: {
-                [AGENT_ID]: catId,
-                'tool.name': msg.toolName,
-                ...(msg.toolInput ? { 'tool.input_keys': Object.keys(msg.toolInput as object).join(',') } : {}),
-              },
-            },
-            parentCtx,
-          );
-          toolSpan.setStatus({ code: SpanStatusCode.OK });
-          toolSpan.end();
+          invocationSpan.addEvent('tool_use', {
+            [AGENT_ID]: catId,
+            'tool.name': msg.toolName,
+            ...(msg.toolInput ? { 'tool.input_keys': Object.keys(msg.toolInput as object).join(',') } : {}),
+          });
         }
 
         // F26: Detect task management tools and emit task_progress for frontend

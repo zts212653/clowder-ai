@@ -44,6 +44,21 @@ test('F153 Phase B: cli_session span creation in cli-spawn.ts', async (t) => {
     assert.ok(src.includes("'cli.pid'"), 'Should set cli.pid attribute');
   });
 
+  await t.test('uses redactor-safe keys for system identifiers', () => {
+    // Must use camelCase keys that TelemetryRedactor CLASS_C handles,
+    // not dotted snake_case which would bypass redaction.
+    assert.ok(
+      !src.includes("'cat_cafe.invocation_id'"),
+      'Must not use dotted cat_cafe.invocation_id — bypasses redactor',
+    );
+    assert.ok(
+      !src.includes("'cat_cafe.cli_session_id'"),
+      'Must not use dotted cat_cafe.cli_session_id — bypasses redactor',
+    );
+    assert.ok(src.includes('invocationId: options.invocationId'), 'Should use camelCase invocationId');
+    assert.ok(src.includes('sessionId: options.cliSessionId'), 'Should use camelCase sessionId');
+  });
+
   await t.test('sets ERROR status on timeout', () => {
     assert.ok(
       src.includes('timedOut') && src.includes('SpanStatusCode.ERROR'),
@@ -150,24 +165,16 @@ test('F153 Phase B: llm_call retrospective span in invoke-single-cat.ts', async 
   });
 });
 
-test('F153 Phase B: tool_use span in invoke-single-cat.ts', async (t) => {
+test('F153 Phase B: tool_use event in invoke-single-cat.ts', async (t) => {
   const src = readFileSync(INVOKE_SRC, 'utf8');
 
-  await t.test('creates cat_cafe.tool_use span on tool_use messages', () => {
-    assert.ok(src.includes("'cat_cafe.tool_use'"), 'Should create cat_cafe.tool_use span');
+  await t.test('records tool_use as span event, not a zero-duration span', () => {
+    // OTel best practice: point-in-time markers use addEvent, not startSpan→end.
+    assert.ok(src.includes("addEvent('tool_use'"), 'Should use invocationSpan.addEvent for tool_use');
+    assert.ok(!src.includes("startSpan('cat_cafe.tool_use'"), 'Must NOT create a zero-duration tool_use span');
   });
 
-  await t.test('sets tool.name attribute', () => {
-    assert.ok(src.includes("'tool.name': msg.toolName"), 'Should set tool.name from message');
-  });
-
-  await t.test('tool_use span is child of invocationSpan', () => {
-    // Both llm_call and tool_use use invocationSpan as parent
-    const re = /trace\.setSpan\(context\.active\(\), invocationSpan\)/g;
-    const parentCtxCount = (src.match(re) || []).length;
-    assert.ok(
-      parentCtxCount >= 2,
-      `Should create at least 2 child span contexts under invocationSpan (found ${parentCtxCount})`,
-    );
+  await t.test('sets tool.name attribute on event', () => {
+    assert.ok(src.includes("'tool.name': msg.toolName"), 'Should set tool.name on event');
   });
 });
