@@ -51,7 +51,7 @@ interface ConnectorMessageEvent {
     type: 'connector';
     content: string;
     source?: import('../stores/chat-types').ConnectorSourceData;
-    extra?: Record<string, unknown>;
+    extra?: import('../stores/chat-types').ChatMessage['extra'];
     timestamp: number;
   };
 }
@@ -630,6 +630,17 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('connector_message', (data: ConnectorMessageEvent) => {
       if (!data?.threadId || !data?.message?.id) return;
+      const toast = data.message.extra?.scheduler?.toast;
+      if (data.message.source?.connector === 'scheduler' && toast) {
+        useToastStore.getState().addToast({
+          type: toast.type,
+          title: toast.title,
+          message: toast.message,
+          threadId: data.threadId,
+          duration: toast.duration,
+        });
+        return;
+      }
       const store = useChatStore.getState();
       store.addMessageToThread(data.threadId, {
         id: data.message.id,

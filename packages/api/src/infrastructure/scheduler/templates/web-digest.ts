@@ -1,3 +1,4 @@
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import type { TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
@@ -46,13 +47,12 @@ export const webDigestTemplate: TaskTemplate = {
             const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
             const topicLine = topic ? `\n重点关注：${topic}` : '';
             const triggerContent =
-              `[定时任务] 请使用 browser-automation 抓取并汇总网页内容\n` +
+              `${SCHEDULER_TRIGGER_PREFIX} 请使用 browser-automation 抓取并汇总网页内容\n` +
               `URL: ${url}${topicLine}\n` +
               `要求：使用真实浏览器处理 JS 重站点，输出今天/当前值得关注的摘要，附标题、简述、来源链接与明确日期。`;
             const messageId = await ctx.deliver({
               threadId: tid,
               content: triggerContent,
-              catId: 'system',
               userId: 'scheduler',
             });
             ctx.invokeTrigger.trigger(tid, catId, triggerUserId, triggerContent, messageId, undefined, {
@@ -68,7 +68,6 @@ export const webDigestTemplate: TaskTemplate = {
           await ctx.deliver({
             threadId: tid,
             content,
-            catId: ctx.assignedCatId ?? 'system',
             userId: 'scheduler',
           });
         },

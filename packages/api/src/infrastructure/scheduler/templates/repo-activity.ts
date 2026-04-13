@@ -78,7 +78,6 @@ export const repoActivityTemplate: TaskTemplate = {
           await ctx.deliver({
             threadId: tid,
             content,
-            catId: ctx.assignedCatId ?? 'system',
             userId: 'scheduler',
           });
         },

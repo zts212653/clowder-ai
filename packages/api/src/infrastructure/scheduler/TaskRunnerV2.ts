@@ -11,6 +11,7 @@ import type {
   FetchResult,
   RunLedgerRow,
   ScheduleInvokeTrigger,
+  ScheduleLifecycleNotifier,
   ScheduleTaskSummary,
   SubjectKind,
   TaskSource,
@@ -32,6 +33,8 @@ export interface TaskRunnerV2Options {
   fetchContent?: (url: string) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
   invokeTrigger?: ScheduleInvokeTrigger;
+  /** Ephemeral lifecycle notifications (toast-only, not persisted in thread history) */
+  notifyLifecycle?: ScheduleLifecycleNotifier;
   /** #415: dynamic task store — needed for once-trigger auto-retirement */
   dynamicTaskStore?: DynamicTaskStore;
 }
@@ -95,6 +98,7 @@ export class TaskRunnerV2 {
   private deliver: TaskRunnerV2Options['deliver'];
   private fetchContent: TaskRunnerV2Options['fetchContent'];
   private invokeTrigger: TaskRunnerV2Options['invokeTrigger'];
+  private notifyLifecycle: TaskRunnerV2Options['notifyLifecycle'];
   private dynamicTaskStore: TaskRunnerV2Options['dynamicTaskStore'];
 
   constructor(opts: TaskRunnerV2Options) {
@@ -106,6 +110,7 @@ export class TaskRunnerV2 {
     this.deliver = opts.deliver;
     this.fetchContent = opts.fetchContent;
     this.invokeTrigger = opts.invokeTrigger;
+    this.notifyLifecycle = opts.notifyLifecycle;
     this.dynamicTaskStore = opts.dynamicTaskStore;
   }
 
@@ -324,18 +329,19 @@ export class TaskRunnerV2 {
       error_summary: null,
     });
 
-    // Notify user via delivery thread (fire-and-forget)
-    if (def.deliveryThreadId && this.deliver) {
+    // Notify user ephemerally so admin receipts don't pollute thread history.
+    if (def.deliveryThreadId && this.notifyLifecycle) {
       const label = def.display?.label ?? def.templateId;
-      const content =
-        `⏰ 定时任务「${label}」的执行时间窗已错过（原定 ${fireAtIso}），` + '服务在该时间段未运行。任务已自动取消。';
-      this.deliver({
+      this.notifyLifecycle({
         threadId: def.deliveryThreadId,
-        content,
-        catId: 'system',
         userId: ((def.params as Record<string, unknown>).triggerUserId as string) ?? 'system',
-      }).catch((err) => {
-        this.logger.error(`[scheduler] ${def.id}: failed to send missed-window notification`, err);
+        toast: {
+          type: 'error',
+          title: '定时任务错过执行窗口',
+          message: `「${label}」原定 ${fireAtIso} 执行，服务当时未运行，任务已自动取消。`,
+          duration: 6000,
+          lifecycleEvent: 'missed_window',
+        },
       });
     }
 
@@ -431,8 +437,8 @@ export class TaskRunnerV2 {
     if (dynDefId && this.dynamicTaskStore) {
       const def = this.dynamicTaskStore.getById(dynDefId);
       if (def) {
-        if (lastError) notifyTaskFailed(this.deliver, def, lastError);
-        else if (hasDelivered) notifyTaskSucceeded(this.deliver, def);
+        if (lastError) notifyTaskFailed(this.notifyLifecycle, def, lastError);
+        else if (hasDelivered) notifyTaskSucceeded(this.notifyLifecycle, def);
       }
     }
   }

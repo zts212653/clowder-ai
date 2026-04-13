@@ -10,6 +10,9 @@
 
 // ── Connector Source (附加到 StoredMessage) ──
 
+/** Shared prefix for scheduler trigger messages that act as reply anchors. */
+export const SCHEDULER_TRIGGER_PREFIX = '[定时任务]';
+
 /** Source metadata attached to messages from external connectors. */
 export interface ConnectorSource {
   /** Stable connector identifier (used for routing + styling) */

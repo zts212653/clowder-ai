@@ -1,3 +1,4 @@
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import type { TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
@@ -35,10 +36,15 @@ export const reminderTemplate: TaskTemplate = {
           if (!ctx.deliver) throw new Error('deliver not available');
           const tid = subjectKey.startsWith('thread-') ? subjectKey.slice(7) : subjectKey;
           const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
-          const content = `[定时任务] ${message}`;
+          const content = `${SCHEDULER_TRIGGER_PREFIX} ${message}`;
 
           // Store trigger message first → real messageId for InvocationRecord + retry
-          const messageId = await ctx.deliver({ threadId: tid, content, catId: 'system', userId: 'scheduler' });
+          const messageId = await ctx.deliver({
+            threadId: tid,
+            content,
+            userId: 'scheduler',
+            ...(ctx.invokeTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
+          });
 
           // Wake a cat to act on the trigger message
           if (ctx.invokeTrigger) {

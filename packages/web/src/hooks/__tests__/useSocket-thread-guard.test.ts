@@ -51,6 +51,7 @@ const mockSetThreadIntentMode = vi.fn();
 const mockSetThreadTargetCats = vi.fn();
 const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
+const mockAddToast = vi.fn();
 const mockGetThreadState = vi.fn(() => ({
   messages: [],
   isLoading: false,
@@ -101,7 +102,7 @@ vi.mock('@/stores/chatStore', () => {
 vi.mock('@/stores/toastStore', () => ({
   useToastStore: {
     getState: () => ({
-      addToast: vi.fn(),
+      addToast: mockAddToast,
     }),
   },
 }));
@@ -183,6 +184,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockSetThreadTargetCats.mockClear();
     mockUpdateThreadCatStatus.mockClear();
     mockClearThreadActiveInvocation.mockClear();
+    mockAddToast.mockClear();
     mockGetThreadState.mockClear();
     // Clear all socket listeners from previous tests
     mockSocket.removeAllListeners();
@@ -799,6 +801,49 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockAddMessageToThread).toHaveBeenCalledWith(
       'thread-A',
       expect.objectContaining({ id: 'conn-bg-1', type: 'connector' }),
+    );
+  });
+
+  it('scheduler lifecycle connector_message shows toast instead of appending a thread message', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'scheduler-toast-1',
+          type: 'connector',
+          content: '「喝水提醒」下次执行时间：2026-04-13 09:00:00',
+          source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
+          extra: {
+            scheduler: {
+              toast: {
+                type: 'info',
+                title: '定时任务已创建',
+                message: '「喝水提醒」下次执行时间：2026-04-13 09:00:00',
+                duration: 3200,
+                lifecycleEvent: 'registered',
+              },
+            },
+          },
+          timestamp: Date.now(),
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+    expect(mockAddToast).toHaveBeenCalledTimes(1);
+    expect(mockAddToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'info',
+        title: '定时任务已创建',
+        threadId: 'thread-B',
+      }),
     );
   });
 });

@@ -1,3 +1,4 @@
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -120,5 +121,51 @@ describe('ChatMessage author precedence', () => {
     expect(container.textContent).not.toContain('铲屎官');
     const avatar = container.querySelector('img[alt="始皇帝"]') as HTMLImageElement | null;
     expect(avatar?.getAttribute('src')).toBe('/uploads/qin-owner.png');
+  });
+
+  it('hides raw scheduler trigger preview and shows scheduler accent on first reply', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const getCatById = vi.fn((id: string) => {
+      if (id !== 'gpt52') return undefined;
+      return {
+        id: 'gpt52',
+        displayName: '缅因猫',
+        nickname: '砚砚',
+        variantLabel: 'GPT-5.4',
+        color: { primary: '#5B8C5A', secondary: '#E6F2E6' },
+        mentionPatterns: [],
+        breedId: 'maine-coon',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.4',
+        avatar: '/avatars/gpt52.png',
+        roleDescription: '',
+        personality: '',
+      };
+    });
+
+    const msg = {
+      id: 'm-scheduler-reply',
+      type: 'assistant' as const,
+      catId: 'gpt52',
+      content: '该喝水了，去接一杯温水。',
+      timestamp: Date.now(),
+      contentBlocks: [],
+      replyTo: 'scheduler-trigger-1',
+      replyPreview: { senderCatId: 'system', content: `${SCHEDULER_TRIGGER_PREFIX} 喝水提醒` },
+    };
+
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          message: msg as never,
+          getCatById: getCatById as never,
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('⏰');
+    expect(container.textContent).toContain('定时提醒');
+    expect(container.textContent).toContain('该喝水了，去接一杯温水。');
+    expect(container.textContent).not.toContain(`${SCHEDULER_TRIGGER_PREFIX} 喝水提醒`);
   });
 });
