@@ -1,0 +1,508 @@
+'use client';
+
+import React, { Component, useEffect, useRef, useState } from 'react';
+import { useGuideEngine } from '@/hooks/useGuideEngine';
+import type { OrchestrationStep } from '@/stores/guideStore';
+import { useGuideStore } from '@/stores/guideStore';
+import { apiFetch } from '@/utils/api-client';
+
+/** Error boundary — prevents guide overlay crash from taking down the whole app. */
+class GuideErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: Error) {
+    console.error('[GuideOverlay] Caught error, auto-recovering:', error);
+    useGuideStore.getState().exitGuide();
+  }
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
+
+/** Wrapped export with error boundary. Key on sessionId forces remount after error recovery. */
+export function GuideOverlay() {
+  const sessionId = useGuideStore((s) => s.session?.sessionId);
+  return (
+    <GuideErrorBoundary key={sessionId ?? 'idle'}>
+      <GuideOverlayInner />
+    </GuideErrorBoundary>
+  );
+}
+
+/**
+ * F155: Guide Overlay (v2 — tag-based engine)
+ *
+ * - Mask + spotlight on target element (found by data-guide-id)
+ * - Tips from flow definition (not hardcoded)
+ * - Auto-advance: listen for user interaction with target (click/input/etc.)
+ * - HUD: only "退出" + tips + progress dots
+ */
+function GuideOverlayInner() {
+  useGuideEngine();
+  const session = useGuideStore((s) => s.session);
+  const advanceStep = useGuideStore((s) => s.advanceStep);
+  const exitGuide = useGuideStore((s) => s.exitGuide);
+  const setPhase = useGuideStore((s) => s.setPhase);
+  const completionPersisted = useGuideStore((s) => s.completionPersisted);
+  const completionFailed = useGuideStore((s) => s.completionFailed);
+
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const rafRef = useRef<number>(0);
+  const lastRectRef = useRef<{ t: number; l: number; w: number; h: number } | null>(null);
+
+  const currentStep =
+    session && session.currentStepIndex < session.flow.steps.length
+      ? session.flow.steps[session.currentStepIndex]
+      : null;
+  const isComplete = session ? session.phase === 'complete' : false;
+  const handleExit = async () => {
+    if (session?.threadId) {
+      try {
+        const response = await apiFetch('/api/guide-actions/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threadId: session.threadId, guideId: session.flow.id }),
+        });
+        if (!response.ok) {
+          console.error('[GuideOverlay] Failed to persist guide cancellation:', response.status);
+          return;
+        }
+      } catch (error) {
+        console.error('[GuideOverlay] Failed to persist guide cancellation:', error);
+        return;
+      }
+    }
+    exitGuide();
+  };
+
+  // rAF loop: track target element position
+  useEffect(() => {
+    if (!session || !currentStep || isComplete) return;
+    lastRectRef.current = null;
+    let cancelled = false;
+    const selector = buildGuideTargetSelector(currentStep.target);
+
+    const updateRect = () => {
+      if (cancelled) return;
+      const el = document.querySelector(selector);
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const prev = lastRectRef.current;
+        if (!prev || prev.t !== r.top || prev.l !== r.left || prev.w !== r.width || prev.h !== r.height) {
+          lastRectRef.current = { t: r.top, l: r.left, w: r.width, h: r.height };
+          setTargetRect(r);
+        }
+        if (session.phase === 'locating') setPhase('active');
+      } else {
+        // Target not found yet — keep locating
+        if (session.phase !== 'locating') setPhase('locating');
+        setTargetRect(null);
+      }
+      rafRef.current = requestAnimationFrame(updateRect);
+    };
+
+    rafRef.current = requestAnimationFrame(updateRect);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [session, currentStep, isComplete, session?.phase, setPhase]);
+
+  // Auto-advance: listen for interaction with target element
+  useAutoAdvance(currentStep, advanceStep, session?.phase === 'active');
+
+  // Keyboard: Escape disabled during guide to prevent accidental exit (KD-14).
+  // Users must click the explicit "退出" button in the HUD.
+  useEffect(() => {
+    if (!session) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') e.preventDefault();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [session]);
+
+  // Reconciliation dismiss: when completion failed, cancel server-side active state before local cleanup
+  const dismissWithReconciliation = () => {
+    if (session?.threadId && session?.flow.id) {
+      apiFetch('/api/guide-actions/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId: session.threadId, guideId: session.flow.id }),
+      }).catch(() => {}); // best-effort — don't block dismiss
+    }
+    exitGuide();
+  };
+
+  if (!session) return null;
+
+  // Completion screen — dismiss blocked until backend confirms persistence
+  if (isComplete) {
+    const handleDismiss = completionFailed ? dismissWithReconciliation : exitGuide;
+    return (
+      <div className="fixed inset-0 z-[var(--guide-z-overlay)] flex items-center justify-center">
+        <div
+          className="fixed inset-0 bg-black/20"
+          onClick={completionPersisted || completionFailed ? handleDismiss : undefined}
+        />
+        <div className="relative z-10 rounded-2xl border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-8 text-center shadow-2xl">
+          <div className="mb-4 text-4xl">{completionFailed ? '⚠️' : '🐾'}</div>
+          <h3 className="mb-2 text-lg font-bold text-[var(--guide-text-primary)]">
+            {completionFailed ? '保存失败' : '引导完成!'}
+          </h3>
+          <p className="mb-4 text-sm text-[var(--guide-text-secondary)]">
+            {completionFailed
+              ? '引导已完成但保存失败，下次打开时可能需要重新引导。'
+              : `你已经完成了「${session.flow.name}」的全部步骤。`}
+          </p>
+          <button
+            type="button"
+            onClick={handleDismiss}
+            disabled={!completionPersisted && !completionFailed}
+            className="rounded-xl bg-[var(--guide-success)] px-6 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+          >
+            {completionPersisted ? '太好了!' : completionFailed ? '知道了' : '保存中…'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentStep) return null;
+
+  const pad = 8;
+  const cutoutStyle: React.CSSProperties = targetRect
+    ? {
+        position: 'fixed',
+        top: targetRect.top - pad,
+        left: targetRect.left - pad,
+        width: targetRect.width + pad * 2,
+        height: targetRect.height + pad * 2,
+        borderRadius: 'var(--guide-radius)',
+        boxShadow: '0 0 0 9999px var(--guide-overlay-bg)',
+        transition: 'all var(--guide-motion-normal) ease-out',
+        zIndex: 'var(--guide-z-overlay)' as unknown as number,
+        pointerEvents: 'none' as const,
+      }
+    : {
+        position: 'fixed' as const,
+        inset: 0,
+        backgroundColor: 'var(--guide-overlay-bg)',
+        zIndex: 'var(--guide-z-overlay)' as unknown as number,
+        pointerEvents: 'none' as const,
+      };
+
+  const ringStyle: React.CSSProperties = targetRect
+    ? {
+        position: 'fixed',
+        top: targetRect.top - pad - 2,
+        left: targetRect.left - pad - 2,
+        width: targetRect.width + pad * 2 + 4,
+        height: targetRect.height + pad * 2 + 4,
+        borderRadius: 'var(--guide-radius)',
+        border: '2px solid var(--guide-cutout-ring)',
+        boxShadow: '0 0 12px var(--guide-cutout-shadow), inset 0 0 8px var(--guide-cutout-shadow)',
+        transition: 'all var(--guide-motion-normal) ease-out',
+        zIndex: 1105,
+        pointerEvents: 'none' as const,
+        animation: 'guide-breathe 1.8s ease-in-out infinite',
+      }
+    : {};
+
+  const shieldZ = 1101;
+  const panels = targetRect ? computeShieldPanels(targetRect, pad) : null;
+
+  return (
+    <>
+      <div style={cutoutStyle} aria-hidden="true" />
+      {targetRect && <div style={ringStyle} aria-hidden="true" />}
+
+      {/* Four-panel click shield with genuine hole over target */}
+      {panels ? (
+        <>
+          <div
+            data-guide-click-shield="panel"
+            className="fixed top-0 left-0 right-0"
+            style={{ height: panels.top.height, zIndex: shieldZ, pointerEvents: 'auto' }}
+            aria-hidden="true"
+          />
+          <div
+            data-guide-click-shield="panel"
+            className="fixed bottom-0 left-0 right-0"
+            style={{ top: panels.bottom.top, zIndex: shieldZ, pointerEvents: 'auto' }}
+            aria-hidden="true"
+          />
+          <div
+            data-guide-click-shield="panel"
+            className="fixed"
+            style={{
+              top: panels.left.top,
+              left: 0,
+              width: panels.left.width,
+              height: panels.left.height,
+              zIndex: shieldZ,
+              pointerEvents: 'auto',
+            }}
+            aria-hidden="true"
+          />
+          <div
+            data-guide-click-shield="panel"
+            className="fixed"
+            style={{
+              top: panels.right.top,
+              left: panels.right.left,
+              right: 0,
+              height: panels.right.height,
+              zIndex: shieldZ,
+              pointerEvents: 'auto',
+            }}
+            aria-hidden="true"
+          />
+        </>
+      ) : (
+        <div
+          data-guide-click-shield="fallback"
+          className="fixed inset-0"
+          style={{ zIndex: shieldZ, pointerEvents: 'none' }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* HUD: tips + exit only */}
+      <GuideHUD
+        step={currentStep}
+        stepIndex={session.currentStepIndex}
+        totalSteps={session.flow.steps.length}
+        phase={session.phase}
+        targetRect={targetRect}
+        onExit={handleExit}
+      />
+    </>
+  );
+}
+
+/* ── Auto-advance hook ── */
+
+function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isActive: boolean) {
+  const advanceRef = useRef(advance);
+  const listenerCleanupRef = useRef<(() => void) | null>(null);
+  const delayedAdvanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bindingKeyRef = useRef<string | null>(null);
+  advanceRef.current = advance;
+
+  useEffect(() => {
+    listenerCleanupRef.current?.();
+    listenerCleanupRef.current = null;
+    if (delayedAdvanceRef.current) {
+      clearTimeout(delayedAdvanceRef.current);
+      delayedAdvanceRef.current = null;
+    }
+    bindingKeyRef.current = null;
+
+    if (!step || !isActive) return;
+
+    const target = step.target;
+    const advanceType = step.advance;
+    const selector = buildGuideTargetSelector(target);
+    const bindingKey = `${step.id}:${target}:${advanceType}`;
+    bindingKeyRef.current = bindingKey;
+    let cancelled = false;
+    let attachTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleAdvance = (delayMs: number) => {
+      if (delayedAdvanceRef.current) {
+        clearTimeout(delayedAdvanceRef.current);
+      }
+      delayedAdvanceRef.current = setTimeout(() => {
+        if (bindingKeyRef.current === bindingKey) {
+          advanceRef.current();
+        }
+      }, delayMs);
+    };
+
+    // Small delay after step transition to let UI settle
+    const attachListener = () => {
+      if (cancelled) return;
+      const el = document.querySelector(selector);
+      if (!el) {
+        attachTimer = setTimeout(attachListener, 100);
+        return;
+      }
+
+      if (advanceType === 'click') {
+        const handler = () => {
+          // Delay advance to let the click action complete (e.g., open panel)
+          scheduleAdvance(300);
+        };
+        el.addEventListener('click', handler, { once: true, capture: true });
+        listenerCleanupRef.current = () => el.removeEventListener('click', handler, { capture: true });
+        return;
+      }
+
+      if (advanceType === 'input') {
+        const handler = () => {
+          const val = (el as HTMLInputElement).value;
+          if (val && val.trim()) {
+            scheduleAdvance(500);
+          }
+        };
+        el.addEventListener('input', handler);
+        listenerCleanupRef.current = () => el.removeEventListener('input', handler);
+        return;
+      }
+
+      if (advanceType === 'confirm') {
+        const handler = (event: Event) => {
+          const detail = (event as CustomEvent<{ target?: string }>).detail;
+          if (detail?.target !== target) return;
+          if (bindingKeyRef.current === bindingKey) {
+            advanceRef.current();
+          }
+        };
+        window.addEventListener('guide:confirm', handler);
+        listenerCleanupRef.current = () => window.removeEventListener('guide:confirm', handler);
+        return;
+      }
+
+      // 'visible' and 'confirm' auto-advance immediately when target found
+      if (advanceType === 'visible') {
+        advanceRef.current();
+      }
+    };
+    attachTimer = setTimeout(attachListener, 100);
+
+    return () => {
+      cancelled = true;
+      if (attachTimer) clearTimeout(attachTimer);
+      if (delayedAdvanceRef.current) {
+        clearTimeout(delayedAdvanceRef.current);
+        delayedAdvanceRef.current = null;
+      }
+      listenerCleanupRef.current?.();
+      listenerCleanupRef.current = null;
+      if (bindingKeyRef.current === bindingKey) {
+        bindingKeyRef.current = null;
+      }
+    };
+  }, [step?.id, step?.target, step?.advance, isActive]);
+}
+
+/* ── Minimal HUD: tips + exit + progress ── */
+
+function GuideHUD({
+  step,
+  stepIndex,
+  totalSteps,
+  phase,
+  targetRect,
+  onExit,
+}: {
+  step: OrchestrationStep;
+  stepIndex: number;
+  totalSteps: number;
+  phase: string;
+  targetRect: DOMRect | null;
+  onExit: () => void;
+}) {
+  const style = computeHUDPosition(targetRect);
+
+  return (
+    <div
+      className="fixed z-[var(--guide-z-hud)] w-[280px] animate-guide-hud-enter rounded-[var(--guide-radius)] border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-xl"
+      style={style}
+      role="dialog"
+      aria-label="引导面板"
+      aria-live="polite"
+    >
+      {/* Progress dots */}
+      <div className="mb-3 flex gap-1">
+        {Array.from({ length: totalSteps }, (_, i) => (
+          <div
+            key={i}
+            className="h-1.5 flex-1 rounded-full transition-colors"
+            style={{
+              backgroundColor:
+                i < stepIndex
+                  ? 'var(--guide-success)'
+                  : i === stepIndex
+                    ? 'var(--guide-cutout-ring)'
+                    : 'var(--guide-hud-border)',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Tips from flow definition */}
+      <p className="mb-3 text-sm leading-relaxed text-[var(--guide-text-primary)]">{step.tips}</p>
+
+      {/* Locating indicator */}
+      {phase === 'locating' && (
+        <p className="mb-3 text-xs text-[var(--guide-text-secondary)] animate-pulse">正在定位目标元素...</p>
+      )}
+
+      {/* Exit only */}
+      <div className="flex items-center border-t border-[var(--guide-hud-border)] pt-3">
+        <button
+          type="button"
+          onClick={onExit}
+          className="rounded-lg px-3 py-1.5 text-xs text-[var(--guide-text-secondary)] transition hover:bg-black/5"
+          aria-label="退出引导"
+        >
+          退出
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Position helpers ── */
+
+function computeHUDPosition(targetRect: DOMRect | null): React.CSSProperties {
+  if (!targetRect) {
+    return { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
+  }
+  const hudWidth = 280;
+  const hudHeight = 160;
+  const gap = 16;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  let top = targetRect.bottom + gap;
+  let left = targetRect.left + targetRect.width / 2 - hudWidth / 2;
+
+  if (top + hudHeight > vh - gap) {
+    top = targetRect.top - hudHeight - gap;
+  }
+  left = Math.max(gap, Math.min(left, vw - hudWidth - gap));
+  top = Math.max(gap, top);
+  return { top, left };
+}
+
+/* ── Pure helpers (exported for testing) ── */
+
+export interface ShieldPanels {
+  top: { height: number };
+  bottom: { top: number };
+  left: { top: number; width: number; height: number };
+  right: { top: number; left: number; height: number };
+}
+
+export function computeShieldPanels(
+  rect: { top: number; bottom: number; left: number; right: number; width: number; height: number },
+  pad: number,
+): ShieldPanels {
+  const h = rect.height + pad * 2;
+  return {
+    top: { height: Math.max(0, rect.top - pad) },
+    bottom: { top: rect.bottom + pad },
+    left: { top: rect.top - pad, width: Math.max(0, rect.left - pad), height: h },
+    right: { top: rect.top - pad, left: rect.right + pad, height: h },
+  };
+}
+
+export function buildGuideTargetSelector(target: string): string {
+  const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(target) : target;
+  return `[data-guide-id="${escaped}"]`;
+}

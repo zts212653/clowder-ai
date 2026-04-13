@@ -51,6 +51,7 @@ const mockSetThreadIntentMode = vi.fn();
 const mockSetThreadTargetCats = vi.fn();
 const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
+const mockAddToast = vi.fn();
 const mockGetThreadState = vi.fn(() => ({
   messages: [],
   isLoading: false,
@@ -69,35 +70,39 @@ const mockGetThreadState = vi.fn(() => ({
 let mockStoreCurrentThreadId = 'thread-B';
 
 vi.mock('@/stores/chatStore', () => {
-  const store = {
-    getState: () => ({
-      currentThreadId: mockStoreCurrentThreadId,
-      addMessageToThread: mockAddMessageToThread,
-      appendToThreadMessage: mockAppendToThreadMessage,
-      appendToolEventToThread: mockAppendToolEventToThread,
-      setThreadCatInvocation: mockSetThreadCatInvocation,
-      setThreadMessageMetadata: mockSetThreadMessageMetadata,
-      setThreadMessageUsage: mockSetThreadMessageUsage,
-      setThreadMessageStreaming: mockSetThreadMessageStreaming,
-      setThreadLoading: mockSetThreadLoading,
-      setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
-      setQueue: mockSetQueue,
-      setQueuePaused: mockSetQueuePaused,
-      setQueueFull: mockSetQueueFull,
-      setThreadIntentMode: mockSetThreadIntentMode,
-      setThreadTargetCats: mockSetThreadTargetCats,
-      updateThreadCatStatus: mockUpdateThreadCatStatus,
-      clearThreadActiveInvocation: mockClearThreadActiveInvocation,
-      getThreadState: mockGetThreadState,
-    }),
+  const getState = () => ({
+    currentThreadId: mockStoreCurrentThreadId,
+    addMessageToThread: mockAddMessageToThread,
+    appendToThreadMessage: mockAppendToThreadMessage,
+    appendToolEventToThread: mockAppendToolEventToThread,
+    setThreadCatInvocation: mockSetThreadCatInvocation,
+    setThreadMessageMetadata: mockSetThreadMessageMetadata,
+    setThreadMessageUsage: mockSetThreadMessageUsage,
+    setThreadMessageStreaming: mockSetThreadMessageStreaming,
+    setThreadLoading: mockSetThreadLoading,
+    setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
+    setQueue: mockSetQueue,
+    setQueuePaused: mockSetQueuePaused,
+    setQueueFull: mockSetQueueFull,
+    setThreadIntentMode: mockSetThreadIntentMode,
+    setThreadTargetCats: mockSetThreadTargetCats,
+    updateThreadCatStatus: mockUpdateThreadCatStatus,
+    clearThreadActiveInvocation: mockClearThreadActiveInvocation,
+    getThreadState: mockGetThreadState,
+  });
+  const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
+    selector ? selector(getState()) : getState()) as {
+    (selector?: (state: ReturnType<typeof getState>) => unknown): unknown;
+    getState: typeof getState;
   };
-  return { useChatStore: store };
+  useChatStore.getState = getState;
+  return { useChatStore };
 });
 
 vi.mock('@/stores/toastStore', () => ({
   useToastStore: {
     getState: () => ({
-      addToast: vi.fn(),
+      addToast: mockAddToast,
     }),
   },
 }));
@@ -179,6 +184,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockSetThreadTargetCats.mockClear();
     mockUpdateThreadCatStatus.mockClear();
     mockClearThreadActiveInvocation.mockClear();
+    mockAddToast.mockClear();
     mockGetThreadState.mockClear();
     // Clear all socket listeners from previous tests
     mockSocket.removeAllListeners();
@@ -252,6 +258,108 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-A', true);
     expect(mockSetThreadIntentMode).toHaveBeenCalledWith('thread-A', 'execute');
     expect(mockSetThreadTargetCats).toHaveBeenCalledWith('thread-A', ['opus']);
+  });
+
+  it('guide_complete from active thread is forwarded to callback', () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    const onGuideComplete = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onGuideComplete,
+    };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('guide_complete', {
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: Date.now(),
+      });
+    });
+
+    expect(onGuideComplete).toHaveBeenCalledTimes(1);
+    expect(onGuideComplete).toHaveBeenCalledWith({
+      guideId: 'add-member',
+      threadId: 'thread-A',
+      timestamp: expect.any(Number),
+    });
+  });
+
+  it('replays a dropped guide_start when that thread becomes active again', () => {
+    const onGuideStart = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onGuideStart,
+    };
+
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('guide_start', {
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: 123,
+      });
+    });
+
+    expect(onGuideStart).not.toHaveBeenCalled();
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    expect(onGuideStart).toHaveBeenCalledTimes(1);
+    expect(onGuideStart).toHaveBeenCalledWith({
+      guideId: 'add-member',
+      threadId: 'thread-A',
+      timestamp: 123,
+    });
+  });
+
+  it('does not replay a queued guide_start after off-thread exit control clears it', () => {
+    const onGuideStart = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onGuideStart,
+    };
+
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('guide_start', {
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: 123,
+      });
+    });
+
+    expect(onGuideStart).not.toHaveBeenCalled();
+
+    act(() => {
+      simulateServerEvent('guide_control', {
+        action: 'exit',
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: 124,
+      });
+    });
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    expect(onGuideStart).not.toHaveBeenCalled();
   });
 
   it('intent_mode for switched-away thread routes to background after thread change', () => {
@@ -693,6 +801,49 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockAddMessageToThread).toHaveBeenCalledWith(
       'thread-A',
       expect.objectContaining({ id: 'conn-bg-1', type: 'connector' }),
+    );
+  });
+
+  it('scheduler lifecycle connector_message shows toast instead of appending a thread message', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'scheduler-toast-1',
+          type: 'connector',
+          content: '「喝水提醒」下次执行时间：2026-04-13 09:00:00',
+          source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
+          extra: {
+            scheduler: {
+              toast: {
+                type: 'info',
+                title: '定时任务已创建',
+                message: '「喝水提醒」下次执行时间：2026-04-13 09:00:00',
+                duration: 3200,
+                lifecycleEvent: 'registered',
+              },
+            },
+          },
+          timestamp: Date.now(),
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+    expect(mockAddToast).toHaveBeenCalledTimes(1);
+    expect(mockAddToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'info',
+        title: '定时任务已创建',
+        threadId: 'thread-B',
+      }),
     );
   });
 });

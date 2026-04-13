@@ -130,6 +130,13 @@ export interface RichAudioBlock {
   mimeType?: string;
 }
 
+/** F155: Direct action for interactive options that bypass the chat message pipeline */
+export interface OptionAction {
+  type: 'callback';
+  endpoint: string;
+  payload?: Record<string, unknown>;
+}
+
 /** F096: Interactive block option */
 export interface InteractiveOption {
   id: string;
@@ -144,6 +151,8 @@ export interface InteractiveOption {
   customInput?: boolean;
   /** Placeholder text for the custom input field */
   customInputPlaceholder?: string;
+  /** F155: When present, clicking calls the endpoint directly instead of sending a chat message */
+  action?: OptionAction;
 }
 
 /** F096: Interactive rich block — user can select/confirm within the block */
@@ -242,6 +251,17 @@ export interface ChatMessage {
     stream?: { invocationId?: string };
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
+    /** Scheduler presentation metadata (hidden trigger / ephemeral lifecycle toast) */
+    scheduler?: {
+      hiddenTrigger?: boolean;
+      toast?: {
+        type: 'success' | 'error' | 'info';
+        title: string;
+        message: string;
+        duration: number;
+        lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
+      };
+    };
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
     /** F070: Governance blocked data for actionable bootstrap card */

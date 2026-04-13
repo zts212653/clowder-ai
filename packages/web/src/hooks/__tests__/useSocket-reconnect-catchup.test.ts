@@ -85,10 +85,11 @@ const mockStoreState = {
 };
 
 vi.mock('@/stores/chatStore', () => {
-  const store = {
-    getState: () => mockStoreState,
-  };
-  return { useChatStore: store };
+  const getState = () => mockStoreState;
+  const useChatStore = ((selector?: (state: typeof mockStoreState) => unknown) =>
+    selector ? selector(getState()) : getState()) as typeof import('@/stores/chatStore').useChatStore;
+  useChatStore.getState = getState;
+  return { useChatStore };
 });
 
 vi.mock('@/stores/toastStore', () => ({

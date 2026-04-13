@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { reminderTemplate } from '../dist/infrastructure/scheduler/templates/reminder.js';
 
 describe('reminderTemplate', () => {
@@ -27,6 +28,7 @@ describe('reminderTemplate', () => {
 
   it('execute calls deliver with message content and threadId', async () => {
     const deliverMock = mock.fn(async () => 'msg-1');
+    const triggerMock = { trigger: mock.fn() };
     const spec = reminderTemplate.createSpec('rem-3', {
       trigger: { type: 'cron', expression: '0 9 * * *' },
       params: { message: '喝水提醒' },
@@ -35,15 +37,17 @@ describe('reminderTemplate', () => {
     await spec.run.execute('喝水提醒', 'thread-th-abc', {
       assignedCatId: 'opus',
       deliver: deliverMock,
+      invokeTrigger: triggerMock,
     });
     assert.equal(deliverMock.mock.calls.length, 1);
     const arg = deliverMock.mock.calls[0].arguments[0];
-    assert.equal(arg.content, '[定时任务] 喝水提醒');
+    assert.equal(arg.content, `${SCHEDULER_TRIGGER_PREFIX} 喝水提醒`);
     assert.equal(arg.threadId, 'th-abc');
-    assert.equal(arg.catId, 'system');
+    assert.equal(arg.catId, undefined);
+    assert.equal(arg.extra.scheduler.hiddenTrigger, true);
   });
 
-  it('execute uses "system" catId when assignedCatId is null', async () => {
+  it('deliver payload stays cat-agnostic when assignedCatId is null', async () => {
     const deliverMock = mock.fn(async () => 'msg-2');
     const spec = reminderTemplate.createSpec('rem-4', {
       trigger: { type: 'cron', expression: '0 9 * * *' },
@@ -54,7 +58,21 @@ describe('reminderTemplate', () => {
       assignedCatId: null,
       deliver: deliverMock,
     });
-    assert.equal(deliverMock.mock.calls[0].arguments[0].catId, 'system'); // trigger message stored as system
+    assert.equal(deliverMock.mock.calls[0].arguments[0].catId, undefined);
+  });
+
+  it('keeps trigger visible when invokeTrigger is unavailable', async () => {
+    const deliverMock = mock.fn(async () => 'msg-visible');
+    const spec = reminderTemplate.createSpec('rem-visible', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: '看得见的提醒' },
+      deliveryThreadId: 'th-visible',
+    });
+    await spec.run.execute('看得见的提醒', 'thread-th-visible', {
+      assignedCatId: 'opus',
+      deliver: deliverMock,
+    });
+    assert.equal(deliverMock.mock.calls[0].arguments[0].extra, undefined);
   });
 
   it('execute throws when deliver is not available', async () => {
@@ -117,6 +135,6 @@ describe('reminderTemplate', () => {
       assignedCatId: 'opus',
       deliver: deliverMock,
     });
-    assert.equal(deliverMock.mock.calls[0].arguments[0].content, '[定时任务] 定时提醒');
+    assert.equal(deliverMock.mock.calls[0].arguments[0].content, `${SCHEDULER_TRIGGER_PREFIX} 定时提醒`);
   });
 });

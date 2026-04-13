@@ -944,9 +944,27 @@
     },
     {
       "id": "F155",
+      "name": "Add-Member Internal Guide UI Spec (Phase A)",
+      "status": "unknown",
+      "file": "F155-add-member-guide-ui-spec.md"
+    },
+    {
+      "id": "F155",
+      "name": "引导场景清单",
+      "status": "unknown",
+      "file": "F155-scene-catalog.md"
+    },
+    {
+      "id": "F155",
       "name": "Scene-Based Guidance Engine — 场景式交互引导",
       "status": "needs-discussion | **Source**: Community (mindfn) | **Priority**: TBD",
       "file": "F155-scene-guidance-engine.md"
+    },
+    {
+      "id": "F155",
+      "name": "Scene-Based Bidirectional Guidance Engine",
+      "status": "Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: 布偶猫/宪宪 | **Priority**: P1",
+      "file": "F155-scene-guidance-phase-a-spec.md"
     },
     {
       "id": "F156",

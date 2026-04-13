@@ -101,6 +101,31 @@ describe('ConnectorBubble theme', () => {
     expect(html).toContain('50%');
   });
 
+  it('suppresses hidden scheduler trigger bubbles', () => {
+    const message: ChatMessage = {
+      id: 'm-scheduler-hidden',
+      type: 'connector',
+      content: '[定时任务] 喝水提醒',
+      timestamp: Date.now(),
+      source: {
+        connector: 'scheduler',
+        label: '定时任务',
+        icon: 'scheduler',
+      },
+      extra: {
+        scheduler: {
+          hiddenTrigger: true,
+        },
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    expect(container.innerHTML).toBe('');
+  });
+
   it('uses slate theme for github-review connector', () => {
     const message: ChatMessage = {
       id: 'm1',

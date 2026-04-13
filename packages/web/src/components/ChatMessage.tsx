@@ -1,5 +1,6 @@
 'use client';
 
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -48,6 +49,10 @@ function formatDualTime(timestamp: number, deliveredAt?: number): string {
   return `发送 ${formatTime(timestamp)} · 收到 ${formatTime(deliveredAt)}`;
 }
 
+function isSchedulerReplyPreview(replyPreview?: ChatMessageType['replyPreview']): boolean {
+  return replyPreview?.senderCatId === 'system' && replyPreview.content.startsWith(SCHEDULER_TRIGGER_PREFIX);
+}
+
 interface ChatMessageProps {
   message: ChatMessageType;
   getCatById: (id: string) => CatData | undefined;
@@ -58,6 +63,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const router = useRouter();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const threads = useChatStore((s) => s.threads);
+  const threadMessages = useChatStore((s) => s.messages);
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
   const isUser = message.type === 'user' && !message.catId;
   const isSystem = message.type === 'system';
@@ -87,6 +93,19 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   const hasTextContent = message.content.trim().length > 0;
   const isWhisper = message.visibility === 'whisper';
   const isRevealed = isWhisper && !!message.revealedAt;
+  const isSchedulerReply = isSchedulerReplyPreview(message.replyPreview);
+  const showSchedulerAccent =
+    isSchedulerReply &&
+    !threadMessages.some((candidate) => {
+      if (candidate.id === message.id) return false;
+      if (candidate.replyTo !== message.replyTo) return false;
+      if (candidate.catId !== message.catId) return false;
+      if (!isSchedulerReplyPreview(candidate.replyPreview)) return false;
+      if (candidate.timestamp !== message.timestamp) {
+        return candidate.timestamp < message.timestamp;
+      }
+      return candidate.id < message.id;
+    });
 
   const direction = catData ? parseDirection(message, () => ({ toCat: getMentionToCat(), re: getMentionRe() })) : null;
 
@@ -188,7 +207,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 {isRevealed ? '已揭秘' : `悄悄话 → ${message.whisperTo?.join(', ') ?? ''}`}
               </span>
             )}
-            {message.replyTo && message.replyPreview && (
+            {message.replyTo && message.replyPreview && !isSchedulerReply && (
               <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
             )}
             <span className="text-xs text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
@@ -283,7 +302,7 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 </span>
               )}
               {!isWhisper && direction && <DirectionPill direction={direction} getCatById={getCatById} />}
-              {message.replyTo && message.replyPreview && (
+              {message.replyTo && message.replyPreview && !isSchedulerReply && (
                 <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
               )}
               {hasTextContent && !message.isStreaming && (
@@ -297,6 +316,12 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
                 />
               )}
             </div>
+            {showSchedulerAccent && (
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-[#E9C56B] bg-[#FFF7D6] px-2.5 py-1 text-[11px] font-semibold text-[#8B5E00] shadow-sm w-fit">
+                <span aria-hidden>⏰</span>
+                <span>定时提醒</span>
+              </div>
+            )}
             {message.extra?.crossPost &&
               (() => {
                 const sourceId = message.extra.crossPost?.sourceThreadId;
@@ -335,9 +360,24 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
             catStyle
               ? {
                   backgroundColor: catStyle.bgColor,
-                  borderColor: catStyle.borderColor,
+                  borderColor: showSchedulerAccent ? '#E9C56B' : catStyle.borderColor,
+                  ...(showSchedulerAccent
+                    ? {
+                        boxShadow: 'inset 0 0 0 1px rgba(233, 197, 107, 0.95), 0 10px 24px rgba(233, 197, 107, 0.16)',
+                        backgroundImage:
+                          'linear-gradient(180deg, rgba(255, 247, 214, 0.58) 0%, rgba(255, 247, 214, 0) 56%)',
+                      }
+                    : {}),
                 }
-              : undefined
+              : showSchedulerAccent
+                ? {
+                    backgroundColor: '#FFFDF7',
+                    borderColor: '#E9C56B',
+                    boxShadow: 'inset 0 0 0 1px rgba(233, 197, 107, 0.95), 0 10px 24px rgba(233, 197, 107, 0.16)',
+                    backgroundImage:
+                      'linear-gradient(180deg, rgba(255, 247, 214, 0.58) 0%, rgba(255, 247, 214, 0) 56%)',
+                  }
+                : undefined
           }
         >
           {hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
+import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { BrakeSettingsPanel } from './BrakeSettingsPanel';
 import {
@@ -36,6 +37,7 @@ export { findGroupForTab, resolveRequestedHubTab } from './cat-cafe-hub.navigati
 export function CatCafeHub() {
   const hubState = useChatStore((s) => s.hubState);
   const closeHub = useChatStore((s) => s.closeHub);
+  const guideActive = useGuideStore((s) => s.session !== null);
   const { cats, getCatById, refresh } = useCatData();
 
   const open = hubState?.open ?? false;
@@ -167,11 +169,12 @@ export function CatCafeHub() {
   useEffect(() => {
     if (!open) return;
     const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeHub();
+      // Skip Escape when guide overlay is active to prevent accidental exit (KD-14)
+      if (e.key === 'Escape' && !guideActive) closeHub();
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [open, closeHub]);
+  }, [open, closeHub, guideActive]);
 
   if (!open) return null;
 

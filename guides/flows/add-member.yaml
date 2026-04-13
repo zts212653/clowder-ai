@@ -1,0 +1,28 @@
+# F150 Guide Flow: 添加成员
+# P0 验证场景 — 引导到添加成员入口
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+id: add-member
+name: 添加成员
+description: 引导你完成新成员创建并补充成员信息
+
+steps:
+  - id: open-hub
+    target: hub.trigger
+    tips: 点击这里打开 Hub 控制台
+    advance: click
+
+  - id: go-to-cats
+    target: cats.overview
+    tips: 进入成员管理页面
+    advance: click
+
+  - id: click-add-member
+    target: cats.add-member
+    tips: 点击这里开始添加新成员
+    advance: click
+
+  - id: edit-member-profile
+    target: member-editor.profile
+    tips: 补充成员信息并点击保存；保存成功后会自动完成本次引导
+    advance: confirm

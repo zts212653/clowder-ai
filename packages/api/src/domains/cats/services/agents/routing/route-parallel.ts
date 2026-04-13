@@ -9,6 +9,7 @@ import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import { canAccessGuideState, hasHiddenForeignNonTerminalGuideState } from '../../../../guides/guide-state-access.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -33,6 +34,7 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  createLeakedToolCallStreamStripper,
   detectContextDegradation,
   getService,
   isUserFacingSystemInfoContent,
@@ -44,6 +46,34 @@ import {
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-parallel');
+
+function shouldHandleCompletedGuide(
+  guideCompletionOwner: string | undefined,
+  targetCatIds: ReadonlySet<string>,
+  fallbackCatId: string | undefined,
+  catId: string,
+): boolean {
+  if (!guideCompletionOwner) return true;
+  if (guideCompletionOwner === catId) return true;
+  if (!targetCatIds.has(guideCompletionOwner)) return fallbackCatId === catId;
+  return false;
+}
+
+function shouldHandleOfferedGuide(
+  guideOfferOwner: string | undefined,
+  targetCatIds: ReadonlySet<string>,
+  fallbackCatId: string | undefined,
+  catId: string,
+  hasUserSelection: boolean,
+  allowOwnerMissingFallback = false,
+): boolean {
+  if (!guideOfferOwner) return true;
+  if (guideOfferOwner === catId) return true;
+  if ((hasUserSelection || allowOwnerMissingFallback) && !targetCatIds.has(guideOfferOwner)) {
+    return fallbackCatId === catId;
+  }
+  return false;
+}
 
 export async function* routeParallel(
   deps: RouteStrategyDeps,
@@ -89,12 +119,73 @@ export async function* routeParallel(
   let voiceMode: boolean | undefined;
   // F087: Bootcamp state for CVO onboarding
   let bootcampState: InvocationContext['bootcampState'];
+  // F155: Guide candidate from keyword matching against raw user message
+  let guideCandidate: InvocationContext['guideCandidate'];
+  /** catId that owns an offered guide prompt, to avoid duplicate offered→offered writes. */
+  let guideOfferOwner: string | undefined;
+  /** catId that should receive offered-guide selection when owner is absent. */
+  let guideOfferSelectionFallbackCatId: string | undefined;
+  /** catId that should receive the one-shot completion notice (offeredBy). */
+  let guideCompletionOwner: string | undefined;
+  const targetCatIds = new Set<string>(targetCats);
+  let guideCompletionFallbackCatId: string | undefined;
+  let hiddenForeignNonTerminalGuideState = false;
   if (deps.invocationDeps.threadStore) {
     try {
       const thread = await deps.invocationDeps.threadStore.get(threadId);
       routingPolicy = thread?.routingPolicy;
       voiceMode = thread?.voiceMode;
       bootcampState = thread?.bootcampState;
+      const threadGuideState = thread?.guideState;
+      hiddenForeignNonTerminalGuideState = hasHiddenForeignNonTerminalGuideState(thread, threadGuideState, userId);
+      const guideState = canAccessGuideState(thread, threadGuideState, userId) ? threadGuideState : undefined;
+      // F155: Read existing guide state from thread (authority source)
+      if (guideState) {
+        const gs = guideState;
+        // cancelled: fully terminal, skip
+        // completed: one-shot inject if not yet acked, then mark acked
+        const justCompleted = gs.status === 'completed' && !gs.completionAcked;
+        const shouldInject = (gs.status !== 'completed' && gs.status !== 'cancelled') || justCompleted;
+        if (shouldInject) {
+          let name = gs.guideId;
+          let estimatedTime = '';
+          try {
+            const { getRegistryEntries } = await import('../../../../guides/guide-registry-loader.js');
+            const entry = getRegistryEntries().find((e) => e.id === gs.guideId);
+            if (entry) {
+              name = entry.name;
+              estimatedTime = entry.estimated_time;
+            }
+          } catch {
+            /* best-effort */
+          }
+          const selectionMatch = message.match(/^引导流程：(.+)$/);
+          guideCandidate = {
+            id: gs.guideId,
+            name,
+            estimatedTime,
+            status: gs.status as 'offered' | 'awaiting_choice' | 'active' | 'completed',
+            ...(gs.status === 'offered' ? { isNewOffer: false } : {}),
+            ...(selectionMatch ? { userSelection: selectionMatch[1] } : {}),
+          };
+          if (gs.status === 'offered' || gs.status === 'awaiting_choice') {
+            guideOfferOwner = gs.offeredBy;
+            if (
+              (selectionMatch || gs.status === 'awaiting_choice') &&
+              gs.offeredBy &&
+              !targetCatIds.has(gs.offeredBy)
+            ) {
+              guideOfferSelectionFallbackCatId = targetCats[0];
+            }
+          }
+          if (justCompleted) {
+            guideCompletionOwner = gs.offeredBy;
+            if (gs.offeredBy && !targetCatIds.has(gs.offeredBy)) {
+              guideCompletionFallbackCatId = targetCats[0];
+            }
+          }
+        }
+      }
       // F073 P4: Read workflow-sop if thread is linked to a backlog item
       if (thread?.backlogItemId && deps.invocationDeps.workflowSopStore) {
         try {
@@ -120,6 +211,27 @@ export async function* routeParallel(
   // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
   const catToolNames = new Map<string, string[]>();
   const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
+
+  // F155: Match raw user message against guide registry (only if no existing guide state)
+  if (!guideCandidate && !hiddenForeignNonTerminalGuideState) {
+    try {
+      const { resolveGuideForIntent } = await import('../../../../guides/guide-registry-loader.js');
+      const guideMatches = resolveGuideForIntent(message);
+      if (guideMatches.length > 0) {
+        const top = guideMatches[0];
+        guideCandidate = {
+          id: top.id,
+          name: top.name,
+          estimatedTime: top.estimatedTime,
+          status: 'offered',
+          isNewOffer: true,
+        };
+        guideOfferOwner = targetCats[0];
+      }
+    } catch {
+      /* best-effort: guide matching failure does not block invocation */
+    }
+  }
 
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
@@ -175,6 +287,21 @@ export async function* routeParallel(
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         ...(bootcampState ? { bootcampState, threadId } : {}),
+        ...(guideCandidate &&
+        (guideCandidate.status === 'completed'
+          ? shouldHandleCompletedGuide(guideCompletionOwner, targetCatIds, guideCompletionFallbackCatId, catId)
+          : guideCandidate.status === 'offered' || guideCandidate.status === 'awaiting_choice'
+            ? shouldHandleOfferedGuide(
+                guideOfferOwner,
+                targetCatIds,
+                guideOfferSelectionFallbackCatId,
+                catId,
+                Boolean(guideCandidate.userSelection),
+                guideCandidate.status === 'awaiting_choice',
+              )
+            : true)
+          ? { guideCandidate, threadId }
+          : {}),
       });
 
       const targetContentBlocks = routeContentBlocksForCat(catId, contentBlocks);
@@ -358,6 +485,7 @@ export async function* routeParallel(
   const catHadProviderError = new Set<string>();
   // F22 R2 P1-1: Capture own invocationId per cat from stream
   const catInvocationId = new Map<string, string>();
+  const catPayloadStrippers = new Map<string, ReturnType<typeof createLeakedToolCallStreamStripper>>();
   let completedCount = 0;
   let yieldedFinalDone = false;
 
@@ -375,156 +503,195 @@ export async function* routeParallel(
   // Track which cats have had their keepalive started
   let keepaliveStarted = false;
 
+  function getPayloadStripper(catId: string) {
+    let stripper = catPayloadStrippers.get(catId);
+    if (!stripper) {
+      stripper = createLeakedToolCallStreamStripper();
+      catPayloadStrippers.set(catId, stripper);
+    }
+    return stripper;
+  }
+
   for await (const msg of mergeStreams(streams, (idx, err) => {
     log.error({ streamIndex: idx, err }, 'Parallel stream error');
   })) {
-    // F22 R2 P1-1: Capture invocationId from the initial system_info per cat.
-    // Keep forwarding this boundary event so frontend can reset stale task progress.
-    if (msg.type === 'system_info' && msg.content && msg.catId && !catInvocationId.has(msg.catId)) {
-      try {
-        const parsed = JSON.parse(msg.content);
-        if (parsed.type === 'invocation_created') {
-          catInvocationId.set(msg.catId, parsed.invocationId);
-          // #80 fix: seed flush baseline so interval triggers after FLUSH_INTERVAL_MS
-          catFlushTime.set(msg.catId, Date.now());
-          // Issue #83: Start a single keepalive timer that touches all active drafts.
-          if (deps.draftStore && !keepaliveStarted) {
-            keepaliveStarted = true;
-            keepaliveTimer = setInterval(() => {
-              for (const [, invId] of catInvocationId) {
-                deps.draftStore!.touch(userId, threadId, invId)?.catch?.(noop);
-              }
-            }, KEEPALIVE_INTERVAL_MS);
-          }
-        }
-      } catch {
-        /* ignore parse errors */
-      }
-    }
+    const effectiveMsgs: AgentMessage[] = [];
     if (msg.type === 'text' && msg.content && msg.catId) {
-      catText.set(msg.catId, (catText.get(msg.catId) ?? '') + msg.content);
-    }
-    // F045: Accumulate thinking blocks per cat for persistence (F5 recovery)
-    if (msg.type === 'system_info' && msg.content && msg.catId) {
-      if (isUserFacingSystemInfoContent(msg.content)) {
-        catSawUserFacingSystemInfo.set(msg.catId, true);
+      effectiveMsgs.push({ ...msg, content: getPayloadStripper(msg.catId).push(msg.content) });
+    } else if (msg.type === 'done' && msg.catId) {
+      if (msg.metadata && !catMeta.has(msg.catId)) {
+        catMeta.set(msg.catId, msg.metadata);
       }
-      try {
-        const parsed = JSON.parse(msg.content);
-        if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
-          const prev = catThinking.get(msg.catId) ?? '';
-          catThinking.set(msg.catId, prev ? `${prev}\n\n---\n\n${parsed.text}` : parsed.text);
-        }
-        // F060: Collect inline rich_block for persistence (P1 fix)
-        if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
-          const arr = catStreamRichBlocks.get(msg.catId) ?? [];
-          arr.push(parsed.block);
-          catStreamRichBlocks.set(msg.catId, arr);
-        }
-      } catch {
-        /* ignore parse errors */
+      const flushedText = getPayloadStripper(msg.catId).flush();
+      if (flushedText) {
+        effectiveMsgs.push({
+          type: 'text',
+          catId: msg.catId,
+          content: flushedText,
+          timestamp: msg.timestamp,
+        });
       }
-    }
-    if (msg.type === 'error' && msg.catId) {
-      catHadError.add(msg.catId);
-      // #267: errors before abort are real provider failures; errors after abort are cleanup
-      if (!signal?.aborted) catHadProviderError.add(msg.catId);
-      if (msg.error) {
-        const prev = catErrorText.get(msg.catId) ?? '';
-        catErrorText.set(msg.catId, `${prev}${prev ? '\n' : ''}${msg.error}`);
-      }
-    }
-    // Accumulate tool events per cat
-    const toolEvt = toStoredToolEvent(msg);
-    if (toolEvt && msg.catId) {
-      const arr = catToolEvents.get(msg.catId) ?? [];
-      arr.push(toolEvt);
-      catToolEvents.set(msg.catId, arr);
+    } else {
+      effectiveMsgs.push(msg);
     }
 
-    // F148 OQ-2: Collect tool names for context eval
-    if (msg.type === 'tool_use' && msg.toolName && msg.catId) {
-      const names = catToolNames.get(msg.catId) ?? [];
-      names.push(msg.toolName);
-      catToolNames.set(msg.catId, names);
-    }
-
-    // F150: Fire-and-forget tool usage counter
-    if (msg.type === 'tool_use' && deps.toolUsageCounter && msg.catId) {
-      deps.toolUsageCounter.recordToolUse(
-        msg.catId as string,
-        msg.toolName ?? 'unknown',
-        msg.toolInput as Record<string, unknown> | undefined,
-      );
-    }
-    if (msg.metadata && msg.catId && !catMeta.has(msg.catId)) {
-      catMeta.set(msg.catId, msg.metadata);
-    }
-
-    // #80: Draft flush — fire-and-forget periodic persistence per cat
-    if (deps.draftStore && msg.catId && catInvocationId.has(msg.catId)) {
-      const invId = catInvocationId.get(msg.catId)!;
-      const now = Date.now();
-      const lastFlush = catFlushTime.get(msg.catId) ?? now;
-      const lastLen = catFlushLen.get(msg.catId) ?? 0;
-      const curText = catText.get(msg.catId) ?? '';
-      const charDelta = curText.length - lastLen;
-
-      const lastToolLen = catFlushToolLen.get(msg.catId) ?? 0;
-      const curTools = catToolEvents.get(msg.catId);
-      const curToolLen = curTools?.length ?? 0;
-
-      const neverFlushedCat = lastLen === 0 && lastToolLen === 0;
+    for (const effectiveMsg of effectiveMsgs) {
+      // F22 R2 P1-1: Capture invocationId from the initial system_info per cat.
+      // Keep forwarding this boundary event so frontend can reset stale task progress.
       if (
-        msg.type === 'text' &&
-        charDelta > 0 &&
-        (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
+        effectiveMsg.type === 'system_info' &&
+        effectiveMsg.content &&
+        effectiveMsg.catId &&
+        !catInvocationId.has(effectiveMsg.catId)
       ) {
-        const curThinking = catThinking.get(msg.catId);
-        deps.draftStore
-          .upsert({
-            userId,
-            threadId,
-            invocationId: invId,
-            catId: msg.catId as CatId,
-            content: curText,
-            ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
-            ...(curThinking ? { thinking: curThinking } : {}),
-            updatedAt: now,
-          })
-          ?.catch?.(noop);
-        catFlushTime.set(msg.catId, now);
-        catFlushLen.set(msg.catId, curText.length);
-        catFlushToolLen.set(msg.catId, curToolLen);
-      } else if (
-        (msg.type === 'tool_use' || msg.type === 'tool_result') &&
-        // Cloud R7 P1: bypass interval for the very first flush — tool-first invocations
-        // must create a draft immediately, not wait 2s for the interval gate.
-        (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS)
-      ) {
-        // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
-        // tool-first invocations (no text yet) must still create a draft record.
-        if (curText.length > lastLen || curToolLen > lastToolLen) {
-          const curThinkingTool = catThinking.get(msg.catId);
+        try {
+          const parsed = JSON.parse(effectiveMsg.content);
+          if (parsed.type === 'invocation_created') {
+            catInvocationId.set(effectiveMsg.catId, parsed.invocationId);
+            // #80 fix: seed flush baseline so interval triggers after FLUSH_INTERVAL_MS
+            catFlushTime.set(effectiveMsg.catId, Date.now());
+            // Issue #83: Start a single keepalive timer that touches all active drafts.
+            if (deps.draftStore && !keepaliveStarted) {
+              keepaliveStarted = true;
+              keepaliveTimer = setInterval(() => {
+                for (const [, invId] of catInvocationId) {
+                  deps.draftStore!.touch(userId, threadId, invId)?.catch?.(noop);
+                }
+              }, KEEPALIVE_INTERVAL_MS);
+            }
+          }
+        } catch {
+          /* ignore parse errors */
+        }
+      }
+      if (effectiveMsg.type === 'text' && effectiveMsg.content && effectiveMsg.catId) {
+        catText.set(effectiveMsg.catId, (catText.get(effectiveMsg.catId) ?? '') + effectiveMsg.content);
+      }
+      // F045: Accumulate thinking blocks per cat for persistence (F5 recovery)
+      if (effectiveMsg.type === 'system_info' && effectiveMsg.content && effectiveMsg.catId) {
+        if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
+          catSawUserFacingSystemInfo.set(effectiveMsg.catId, true);
+        }
+        try {
+          const parsed = JSON.parse(effectiveMsg.content);
+          if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
+            const prev = catThinking.get(effectiveMsg.catId) ?? '';
+            catThinking.set(effectiveMsg.catId, prev ? `${prev}\n\n---\n\n${parsed.text}` : parsed.text);
+          }
+          // F060: Collect inline rich_block for persistence (P1 fix)
+          if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
+            const arr = catStreamRichBlocks.get(effectiveMsg.catId) ?? [];
+            arr.push(parsed.block);
+            catStreamRichBlocks.set(effectiveMsg.catId, arr);
+          }
+        } catch {
+          /* ignore parse errors */
+        }
+      }
+      if (effectiveMsg.type === 'error' && effectiveMsg.catId) {
+        catHadError.add(effectiveMsg.catId);
+        // #267: errors before abort are real provider failures; errors after abort are cleanup
+        if (!signal?.aborted) catHadProviderError.add(effectiveMsg.catId);
+        if (effectiveMsg.error) {
+          const prev = catErrorText.get(effectiveMsg.catId) ?? '';
+          catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
+        }
+      }
+      // Accumulate tool events per cat
+      const toolEvt = toStoredToolEvent(effectiveMsg);
+      if (toolEvt && effectiveMsg.catId) {
+        const arr = catToolEvents.get(effectiveMsg.catId) ?? [];
+        arr.push(toolEvt);
+        catToolEvents.set(effectiveMsg.catId, arr);
+      }
+
+      // F148 OQ-2: Collect tool names for context eval
+      if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName && effectiveMsg.catId) {
+        const names = catToolNames.get(effectiveMsg.catId) ?? [];
+        names.push(effectiveMsg.toolName);
+        catToolNames.set(effectiveMsg.catId, names);
+      }
+
+      // F150: Fire-and-forget tool usage counter
+      if (effectiveMsg.type === 'tool_use' && deps.toolUsageCounter && effectiveMsg.catId) {
+        deps.toolUsageCounter.recordToolUse(
+          effectiveMsg.catId as string,
+          effectiveMsg.toolName ?? 'unknown',
+          effectiveMsg.toolInput as Record<string, unknown> | undefined,
+        );
+      }
+      if (effectiveMsg.metadata && effectiveMsg.catId && !catMeta.has(effectiveMsg.catId)) {
+        catMeta.set(effectiveMsg.catId, effectiveMsg.metadata);
+      }
+
+      // #80: Draft flush — fire-and-forget periodic persistence per cat
+      if (deps.draftStore && effectiveMsg.catId && catInvocationId.has(effectiveMsg.catId)) {
+        const invId = catInvocationId.get(effectiveMsg.catId)!;
+        const now = Date.now();
+        const lastFlush = catFlushTime.get(effectiveMsg.catId) ?? now;
+        const lastLen = catFlushLen.get(effectiveMsg.catId) ?? 0;
+        const curText = catText.get(effectiveMsg.catId) ?? '';
+        const charDelta = curText.length - lastLen;
+
+        const lastToolLen = catFlushToolLen.get(effectiveMsg.catId) ?? 0;
+        const curTools = catToolEvents.get(effectiveMsg.catId);
+        const curToolLen = curTools?.length ?? 0;
+
+        const neverFlushedCat = lastLen === 0 && lastToolLen === 0;
+        if (
+          effectiveMsg.type === 'text' &&
+          charDelta > 0 &&
+          (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
+        ) {
+          const curThinking = catThinking.get(effectiveMsg.catId);
           deps.draftStore
             .upsert({
               userId,
               threadId,
               invocationId: invId,
-              catId: msg.catId as CatId,
+              catId: effectiveMsg.catId as CatId,
               content: curText,
               ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
-              ...(curThinkingTool ? { thinking: curThinkingTool } : {}),
+              ...(curThinking ? { thinking: curThinking } : {}),
               updatedAt: now,
             })
             ?.catch?.(noop);
-          catFlushLen.set(msg.catId, curText.length);
-          catFlushToolLen.set(msg.catId, curToolLen);
-        } else {
-          deps.draftStore.touch(userId, threadId, invId)?.catch?.(noop);
+          catFlushTime.set(effectiveMsg.catId, now);
+          catFlushLen.set(effectiveMsg.catId, curText.length);
+          catFlushToolLen.set(effectiveMsg.catId, curToolLen);
+        } else if (
+          (effectiveMsg.type === 'tool_use' || effectiveMsg.type === 'tool_result') &&
+          // Cloud R7 P1: bypass interval for the very first flush — tool-first invocations
+          // must create a draft immediately, not wait 2s for the interval gate.
+          (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS)
+        ) {
+          // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
+          // tool-first invocations (no text yet) must still create a draft record.
+          if (curText.length > lastLen || curToolLen > lastToolLen) {
+            const curThinkingTool = catThinking.get(effectiveMsg.catId);
+            deps.draftStore
+              .upsert({
+                userId,
+                threadId,
+                invocationId: invId,
+                catId: effectiveMsg.catId as CatId,
+                content: curText,
+                ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
+                ...(curThinkingTool ? { thinking: curThinkingTool } : {}),
+                updatedAt: now,
+              })
+              ?.catch?.(noop);
+            catFlushLen.set(effectiveMsg.catId, curText.length);
+            catFlushToolLen.set(effectiveMsg.catId, curToolLen);
+          } else {
+            deps.draftStore.touch(userId, threadId, invId)?.catch?.(noop);
+          }
+          catFlushTime.set(effectiveMsg.catId, now);
         }
-        catFlushTime.set(msg.catId, now);
       }
+
+      if (effectiveMsg.type === 'text' && !effectiveMsg.content) continue;
+      yield effectiveMsg;
     }
 
     if (msg.type === 'done' && msg.catId) {
@@ -561,8 +728,10 @@ export async function* routeParallel(
       // recreating an orphan Redis hash key via HSET.
       catInvocationId.delete(msg.catId);
       const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
+      let catProducedOutput = false;
       const text = catText.get(msg.catId);
       if (text) {
+        catProducedOutput = true;
         const meta = catMeta.get(msg.catId);
         const sanitized = sanitizeInjectedContent(text);
         // F22: Extract cc_rich blocks from text + merge with buffered
@@ -729,20 +898,25 @@ export async function* routeParallel(
         const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
         const shouldPersistNoTextMessage =
           hasRichBlocks || (catTools?.length ?? 0) > 0 || Boolean(thinking?.trim().length ?? 0);
+        const shouldEmitSilentCompletion = (catTools?.length ?? 0) > 0 && !hasRichBlocks && !sawUserFacingSystemInfo;
 
         // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
         // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
-        if (catTools && catTools.length > 0 && !hasRichBlocks && !sawUserFacingSystemInfo) {
+        if (shouldEmitSilentCompletion) {
           yield {
             type: 'system_info' as AgentMessageType,
             catId: msg.catId,
             content: JSON.stringify({
               type: 'silent_completion',
               detail: `${msg.catId} completed with tool calls but no text response.`,
-              toolCount: catTools.length,
+              toolCount: catTools?.length ?? 0,
             }),
             timestamp: Date.now(),
           } as AgentMessage;
+        }
+
+        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldEmitSilentCompletion) {
+          catProducedOutput = true;
         }
 
         if (shouldPersistNoTextMessage) {
@@ -905,6 +1079,37 @@ export async function* routeParallel(
         }
       }
 
+      // F155: Ack guide completion only after cat produced visible output.
+      // Skip ack on error-only turns so next turn retries delivery.
+      if (
+        catProducedOutput &&
+        guideCandidate?.status === 'completed' &&
+        shouldHandleCompletedGuide(
+          guideCompletionOwner,
+          targetCatIds,
+          guideCompletionFallbackCatId,
+          msg.catId as string,
+        ) &&
+        deps.invocationDeps.threadStore
+      ) {
+        try {
+          const thread = await deps.invocationDeps.threadStore.get(threadId);
+          const gs = thread?.guideState;
+          if (
+            thread &&
+            gs &&
+            canAccessGuideState(thread, gs, userId) &&
+            gs.guideId === guideCandidate.id &&
+            gs.status === 'completed' &&
+            !gs.completionAcked
+          ) {
+            await deps.invocationDeps.threadStore.updateGuideState(threadId, { ...gs, completionAcked: true });
+          }
+        } catch {
+          /* best-effort: ack failure means next turn re-injects, which is acceptable */
+        }
+      }
+
       const isFinal = completedCount === targetCats.length;
 
       // F5: When all parallel cats are done, emit follow-up hints for A2A mentions
@@ -931,8 +1136,6 @@ export async function* routeParallel(
 
       yield { ...msg, isFinal };
       if (isFinal) yieldedFinalDone = true;
-    } else {
-      yield msg;
     }
   }
 

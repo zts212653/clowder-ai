@@ -143,6 +143,7 @@ export type {
 export {
   getAllConnectorDefinitions,
   getConnectorDefinition,
+  SCHEDULER_TRIGGER_PREFIX,
 } from './connector.js';
 // Deliberate types (4-E 两轮制 - 类型预埋)
 export type {

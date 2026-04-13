@@ -228,6 +228,135 @@ export function isUserFacingSystemInfoContent(content: string): boolean {
   }
 }
 
+function looksLikeLeakedToolCallPayload(candidate: string): boolean {
+  const trimmed = candidate.trim();
+  if (!trimmed.startsWith('{')) return false;
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      tool_uses?: Array<{ recipient_name?: unknown }>;
+      recipient_name?: unknown;
+    };
+    if (Array.isArray(parsed.tool_uses)) {
+      return parsed.tool_uses.some(
+        (item) =>
+          typeof item?.recipient_name === 'string' &&
+          (item.recipient_name.startsWith('functions.') ||
+            item.recipient_name.startsWith('mcp__') ||
+            item.recipient_name.startsWith('multi_tool_use.')),
+      );
+    }
+    return (
+      typeof parsed.recipient_name === 'string' &&
+      (parsed.recipient_name.startsWith('functions.') ||
+        parsed.recipient_name.startsWith('mcp__') ||
+        parsed.recipient_name.startsWith('multi_tool_use.'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+const LEAKED_TOOL_CALL_SIGNATURES = [
+  '{"tool_uses":[{"recipient_name":"functions.',
+  '{"tool_uses":[{"recipient_name":"mcp__',
+  '{"tool_uses":[{"recipient_name":"multi_tool_use.',
+  '{"recipient_name":"functions.',
+  '{"recipient_name":"mcp__',
+  '{"recipient_name":"multi_tool_use.',
+];
+
+function looksLikePotentialLeakedToolCallPayloadPrefix(candidate: string): boolean {
+  const trimmed = candidate.trim();
+  if (!trimmed.startsWith('{')) return false;
+
+  const compact = trimmed.replace(/\s+/g, '');
+  return LEAKED_TOOL_CALL_SIGNATURES.some((signature) => signature.startsWith(compact));
+}
+
+function findLineStartPayloadIndex(
+  content: string,
+  predicate: (candidate: string) => boolean,
+): { index: number; candidate: string } | null {
+  const lines = content.split('\n');
+  let offset = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith('{')) {
+      offset += line.length + 1;
+      continue;
+    }
+
+    const leadingWhitespace = line.length - trimmed.length;
+    const candidate = lines.slice(i).join('\n');
+    if (predicate(candidate)) {
+      return { index: offset + leadingWhitespace, candidate };
+    }
+    offset += line.length + 1;
+  }
+
+  return null;
+}
+
+/**
+ * Strip internal tool-call argument payloads that occasionally leak into stream text.
+ * Per-chunk stripping is best-effort; final sanitize on the complete text catches leftovers.
+ */
+export function stripLeakedToolCallPayload(content: string): string {
+  if (!content) return content;
+
+  const match = findLineStartPayloadIndex(content, looksLikeLeakedToolCallPayload);
+  if (match) {
+    return content.slice(0, match.index).replace(/\s+$/, '');
+  }
+
+  return content;
+}
+
+export interface LeakedToolCallStreamStripper {
+  push(content: string): string;
+  flush(): string;
+}
+
+/**
+ * Track suspicious line-start `{...}` fragments across stream chunks so leaked tool-call
+ * payloads can be suppressed before they become user-visible text.
+ */
+export function createLeakedToolCallStreamStripper(): LeakedToolCallStreamStripper {
+  let pending = '';
+
+  return {
+    push(content: string): string {
+      if (!content) return content;
+
+      const combined = pending + content;
+      pending = '';
+
+      const stripped = stripLeakedToolCallPayload(combined);
+      if (stripped !== combined) {
+        return stripped;
+      }
+
+      const match = findLineStartPayloadIndex(combined, looksLikePotentialLeakedToolCallPayloadPrefix);
+      if (!match) {
+        return combined;
+      }
+
+      pending = match.candidate;
+      return combined.slice(0, match.index).replace(/\s+$/, '');
+    },
+    flush(): string {
+      if (!pending) return '';
+
+      const remaining = pending;
+      pending = '';
+      return stripLeakedToolCallPayload(remaining);
+    },
+  };
+}
+
 export function sanitizeInjectedContent(content: string): string {
   const lines = content.split('\n');
   const kept: string[] = [];
@@ -257,7 +386,7 @@ export function sanitizeInjectedContent(content: string): string {
     kept.push(line);
   }
 
-  return kept.join('\n').trim();
+  return stripLeakedToolCallPayload(kept.join('\n')).trim();
 }
 
 /**

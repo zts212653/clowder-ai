@@ -86,7 +86,7 @@ describe('webDigestTemplate', () => {
     assert.equal(deliverMock.mock.calls.length, 1);
     const delivered = deliverMock.mock.calls[0].arguments[0];
     assert.equal(delivered.threadId, 'th-2');
-    assert.equal(delivered.catId, 'system');
+    assert.equal(delivered.userId, 'scheduler');
     assert.ok(delivered.content.includes('browser-automation'));
     assert.ok(delivered.content.includes('https://x.com/user'));
     assert.ok(delivered.content.includes('AI'));

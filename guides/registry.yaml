@@ -1,0 +1,23 @@
+# F150 Guide Registry
+# Maps guide IDs to flow files, keywords, and discovery metadata.
+# MCP resolve tool matches user intent against keywords to suggest guides.
+
+guides:
+  - id: add-member
+    name: 添加成员
+    description: 引导你完成新成员的创建和配置
+    flow_file: flows/add-member.yaml
+    keywords:
+      - 添加成员
+      - 加成员
+      - 新成员
+      - 加猫
+      - 新猫
+      - 新建成员
+      - add member
+      - add cat
+      - create member
+    category: member-config
+    priority: P0
+    cross_system: false
+    estimated_time: 3min

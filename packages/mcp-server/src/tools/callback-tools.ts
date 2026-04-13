@@ -722,6 +722,42 @@ export async function handleGetThreadCats(): Promise<ToolResult> {
   return callbackGet('/api/callbacks/thread-cats');
 }
 
+// F155: Guide Engine
+
+export const updateGuideStateInputSchema = {
+  threadId: z.string().min(1).describe('Thread ID where the guide is being offered/active'),
+  guideId: z.string().min(1).describe('Guide ID (e.g. "add-member")'),
+  status: z
+    .enum(['offered', 'awaiting_choice', 'completed', 'cancelled'])
+    .describe(
+      'Target guide status. Valid transitions: offered→awaiting_choice/cancelled, awaiting_choice→cancelled, active→completed/cancelled. Use cat_cafe_start_guide for →active.',
+    ),
+  currentStep: z.number().int().min(0).optional().describe('Current step index (only when status=active)'),
+};
+
+export async function handleUpdateGuideState(input: {
+  threadId: string;
+  guideId: string;
+  status: string;
+  currentStep?: number | undefined;
+}): Promise<ToolResult> {
+  const body: Record<string, unknown> = { threadId: input.threadId, guideId: input.guideId, status: input.status };
+  if (input.currentStep !== undefined) body['currentStep'] = input.currentStep;
+  return callbackPost('/api/callbacks/update-guide-state', body);
+}
+
+export async function handleStartGuide(input: { guideId: string }): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/start-guide', { guideId: input.guideId });
+}
+
+export async function handleGuideResolve(input: { intent: string }): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/guide-resolve', { intent: input.intent });
+}
+
+export async function handleGuideControl(input: { action: string }): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/guide-control', { action: input.action });
+}
+
 export const callbackTools = [
   {
     name: 'cat_cafe_post_message',
@@ -918,5 +954,51 @@ export const callbackTools = [
       'Returns the full check results for display to the user. Only use during bootcamp phase-2-env-check.',
     inputSchema: bootcampEnvCheckInputSchema,
     handler: handleBootcampEnvCheck,
+  },
+  // ============ F155: Guide Engine ============
+  {
+    name: 'cat_cafe_update_guide_state',
+    description:
+      'Update the guide session state for a thread. Must be called to persist state transitions. ' +
+      'First call creates state (status must be "offered"). Subsequent calls must follow valid non-start transitions: ' +
+      'offered→awaiting_choice/cancelled, awaiting_choice→cancelled, active→completed/cancelled. ' +
+      'Do not use this tool to enter "active" — call cat_cafe_start_guide for offered/awaiting_choice→active so frontend start side effects run. ' +
+      'One active guide per thread — complete or cancel before offering a new one.',
+    inputSchema: updateGuideStateInputSchema,
+    handler: handleUpdateGuideState,
+  },
+  {
+    name: 'cat_cafe_guide_resolve',
+    description:
+      'Match user intent to available guided flows. ' +
+      'Call this when a user asks how to do something (e.g. "怎么添加成员", "how to add a member"). ' +
+      'Returns a ranked list of matching guide flows with IDs, names, and descriptions. ' +
+      'If matches are found, suggest the top match to the user and ask if they want to start the guide. ' +
+      'On confirmation, call cat_cafe_start_guide with the matched guideId.',
+    inputSchema: {
+      intent: z.string().min(1).describe('User intent text (e.g. "添加成员", "配置飞书")'),
+    },
+    handler: handleGuideResolve,
+  },
+  {
+    name: 'cat_cafe_start_guide',
+    description:
+      'Start an interactive guided flow on the Console frontend. ' +
+      'Requires the guide to be in "offered" or "awaiting_choice" state (call cat_cafe_update_guide_state first). ' +
+      'Transitions guide to "active" and emits socket event for frontend overlay.',
+    inputSchema: {
+      guideId: z.string().min(1).describe('Guide flow ID (e.g. "add-member")'),
+    },
+    handler: handleStartGuide,
+  },
+  {
+    name: 'cat_cafe_guide_control',
+    description:
+      'Control an active guide session. Requires guide to be in "active" state. ' +
+      'Actions: "next" (advance), "skip" (skip step), "exit" (cancel guide). Forward-only — no back.',
+    inputSchema: {
+      action: z.enum(['next', 'skip', 'exit']).describe('Guide control action'),
+    },
+    handler: handleGuideControl,
   },
 ] as const;

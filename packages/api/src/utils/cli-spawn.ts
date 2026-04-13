@@ -4,8 +4,11 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import type { Span } from '@opentelemetry/api';
+import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
+import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
 import { escapeBashArg, escapeCmdArg, findGitBashPath, resolveWindowsShimSpawn } from './cli-spawn-win.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
@@ -91,6 +94,26 @@ export async function* spawnCli(
   });
 
   log.debug({ pid: child.pid, command: options.command }, 'CLI process spawned');
+
+  // F153 Phase B: Create CLI session child span under invocation span
+  let cliSpan: Span | undefined;
+  if (options.parentSpan) {
+    const tracer = trace.getTracer('cat-cafe-api');
+    const parentCtx = trace.setSpan(context.active(), options.parentSpan);
+    cliSpan = tracer.startSpan(
+      'cat_cafe.cli_session',
+      {
+        attributes: {
+          'cli.command': options.command,
+          'cli.arg_count': options.args.length,
+          ...(child.pid ? { 'cli.pid': child.pid } : {}),
+          ...(options.invocationId ? { invocationId: options.invocationId } : {}),
+          ...(options.cliSessionId ? { sessionId: options.cliSessionId } : {}),
+        },
+      },
+      parentCtx,
+    );
+  }
 
   // Buffer stderr for error reporting (handler attached after resetTimeout is defined)
   let stderrBuffer = '';
@@ -394,6 +417,25 @@ export async function* spawnCli(
     // F152: Unregister probe from OTel gauge
     if (options.invocationId) unregisterLivenessProbe(options.invocationId);
     killChild();
+
+    // F153 Phase B: End CLI session span with appropriate status
+    if (cliSpan) {
+      if (timedOut) {
+        cliSpan.setStatus({ code: SpanStatusCode.ERROR, message: 'CLI timeout' });
+        emitOtelLog('ERROR', 'cli_session_timeout', { 'cli.timeout_ms': timeoutMs }, cliSpan);
+      } else if (exitCode !== null && exitCode !== 0) {
+        cliSpan.setStatus({ code: SpanStatusCode.ERROR, message: `CLI exit code ${exitCode}` });
+        emitOtelLog('ERROR', 'cli_session_error', { 'cli.exit_code': exitCode }, cliSpan);
+      } else if (exitSignal) {
+        cliSpan.setStatus({ code: SpanStatusCode.ERROR, message: `CLI killed by ${exitSignal}` });
+        emitOtelLog('WARN', 'cli_session_killed', { 'cli.signal': exitSignal }, cliSpan);
+      } else {
+        cliSpan.setStatus({ code: SpanStatusCode.OK });
+      }
+      cliSpan.setAttribute('cli.exit_code', exitCode ?? -1);
+      if (exitSignal) cliSpan.setAttribute('cli.exit_signal', exitSignal);
+      cliSpan.end();
+    }
   }
 }
 

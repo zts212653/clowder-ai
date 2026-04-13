@@ -54,6 +54,53 @@ function dispatchInteractiveSend(text: string) {
   window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text } }));
 }
 
+const GUIDE_START_CALLBACK_PATH = '/api/guide-actions/start';
+const GUIDE_CANCEL_CALLBACK_PATH = '/api/guide-actions/cancel';
+const GUIDE_PREVIEW_CALLBACK_PATH = '/api/guide-actions/preview';
+const GUIDE_ACTIONS_CALLBACK_ALLOWLIST = new Set([
+  GUIDE_START_CALLBACK_PATH,
+  GUIDE_CANCEL_CALLBACK_PATH,
+  GUIDE_PREVIEW_CALLBACK_PATH,
+]);
+
+function resolveSafeInteractiveCallbackEndpoint(endpoint: string): string | null {
+  try {
+    const url = new URL(endpoint, window.location.origin);
+    if (url.origin !== window.location.origin) return null;
+    if (!GUIDE_ACTIONS_CALLBACK_ALLOWLIST.has(url.pathname)) return null;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function shouldKeepGuideOfferInteractive(
+  block: RichInteractiveBlock,
+  selectedOption: InteractiveOption | undefined,
+): boolean {
+  if (!selectedOption || selectedOption.id !== 'preview') return false;
+  if (block.messageTemplate !== '引导流程：{selection}') return false;
+
+  const callbackEndpoints = new Set(
+    block.options
+      .map((option) =>
+        option.action?.type === 'callback' ? resolveSafeInteractiveCallbackEndpoint(option.action.endpoint) : null,
+      )
+      .filter((endpoint): endpoint is string => Boolean(endpoint)),
+  );
+
+  return callbackEndpoints.has(GUIDE_START_CALLBACK_PATH) || callbackEndpoints.has(GUIDE_CANCEL_CALLBACK_PATH);
+}
+
+function shouldDispatchLocalGuideStart(
+  payload: Record<string, unknown>,
+): payload is { guideId: string; threadId: string } {
+  const { currentThreadId } = useChatStore.getState();
+  return (
+    typeof payload.guideId === 'string' && typeof payload.threadId === 'string' && payload.threadId === currentThreadId
+  );
+}
+
 /** Render option icon: prefer SVG icon over emoji */
 function OptionIcon({ opt, className = 'w-5 h-5' }: { opt: InteractiveOption; className?: string }) {
   if (opt.icon)
@@ -547,27 +594,87 @@ export function InteractiveBlock({
         return;
       }
 
-      setLocalDisabled(true);
+      const selectedOption = block.options.find((o) => optionIds.includes(o.id));
+      const shouldDisable = !shouldKeepGuideOfferInteractive(block, selectedOption);
       setLocalSelectedIds(optionIds);
+      setLocalDisabled(shouldDisable);
 
-      // Read from ref to avoid stale closure — child calls setCustomText then onSelect
-      // in the same event loop, so state hasn't re-rendered yet
-      const ct = customTextRef.current;
-      const text = buildSelectionMessage(
-        block.interactiveType,
-        block.options,
-        optionIds,
-        block.messageTemplate,
-        block.title,
-        ct || undefined,
-      );
-      dispatchInteractiveSend(text);
+      // F155: Check if the selected option has a direct action (bypasses chat message pipeline)
+      if (selectedOption?.action?.type === 'callback') {
+        const { endpoint, payload } = selectedOption.action;
+        const safeEndpoint = resolveSafeInteractiveCallbackEndpoint(endpoint);
+        if (!safeEndpoint) {
+          console.error('[InteractiveBlock] callback action blocked by endpoint allowlist:', endpoint);
+          setLocalDisabled(false);
+          setLocalSelectedIds([]);
+          return;
+        }
+        try {
+          const response = await apiFetch(safeEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload ?? {}),
+          });
+          if (!response.ok) {
+            console.error('[InteractiveBlock] callback action rejected:', response.status, safeEndpoint);
+            setLocalDisabled(false);
+            setLocalSelectedIds([]);
+            return;
+          }
+
+          // F155: Trigger guide overlay directly — don't rely on socket round-trip
+          if (safeEndpoint === GUIDE_START_CALLBACK_PATH && payload && 'guideId' in payload) {
+            const p = payload as Record<string, unknown>;
+            if (shouldDispatchLocalGuideStart(p)) {
+              window.dispatchEvent(
+                new CustomEvent('guide:start', {
+                  detail: { flowId: p.guideId, threadId: p.threadId },
+                }),
+              );
+            }
+          }
+
+          // F155: Preview callback self-heals state, then sends chat message
+          // so the routing layer (now with awaiting_choice state) triggers the cat
+          // to respond with a formatted step list.
+          if (safeEndpoint === GUIDE_PREVIEW_CALLBACK_PATH) {
+            const text = buildSelectionMessage(
+              block.interactiveType,
+              block.options,
+              optionIds,
+              block.messageTemplate,
+              block.title,
+            );
+            dispatchInteractiveSend(text);
+          }
+        } catch (err) {
+          console.error('[InteractiveBlock] callback action failed:', err);
+          setLocalDisabled(false);
+          setLocalSelectedIds([]);
+          return;
+        }
+      } else {
+        // Default: send selection as a chat message
+        const ct = customTextRef.current;
+        const text = buildSelectionMessage(
+          block.interactiveType,
+          block.options,
+          optionIds,
+          block.messageTemplate,
+          block.title,
+          ct || undefined,
+        );
+        dispatchInteractiveSend(text);
+      }
 
       // P2-1 fix: write back to store so re-mount/thread-switch preserves state
       if (messageId) {
-        useChatStore.getState().updateRichBlock(messageId, block.id, { disabled: true, selectedIds: optionIds });
+        useChatStore.getState().updateRichBlock(messageId, block.id, {
+          disabled: shouldDisable,
+          selectedIds: optionIds,
+        });
         // Persist to backend
-        patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds }).catch(() => {
+        patchBlockState(messageId, block.id, { disabled: shouldDisable, selectedIds: optionIds }).catch(() => {
           // Persistence failure is non-critical — local + store state already updated
         });
       }
