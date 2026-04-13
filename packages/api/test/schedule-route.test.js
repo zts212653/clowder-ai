@@ -385,7 +385,9 @@ describe('Schedule Routes', () => {
       const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
       const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
-      const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+      const { InvocationRegistry } = await import(
+        '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+      );
       const store = new DynamicTaskStore(db);
       registry = new InvocationRegistry();
       appDyn = Fastify({ logger: false });
@@ -445,6 +447,26 @@ describe('Schedule Routes', () => {
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.payload);
       assert.equal(body.draft.deliveryThreadId, 'thread-from-callback');
+    });
+
+    it('returns stale_ignored for stale callback auth invocation', async () => {
+      const stale = registry.create('user-1', 'opus', 'thread-from-callback');
+      registry.create('user-1', 'opus', 'thread-from-callback');
+
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks/preview',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'stale-preview' },
+          invocationId: stale.invocationId,
+          callbackToken: stale.callbackToken,
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json().status, 'stale_ignored');
     });
   });
 
@@ -604,7 +626,9 @@ describe('Schedule Routes', () => {
       const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
       const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
-      const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+      const { InvocationRegistry } = await import(
+        '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+      );
       store = new DynamicTaskStore(db);
       registry = new InvocationRegistry();
       appDyn = Fastify({ logger: false });
@@ -678,6 +702,28 @@ describe('Schedule Routes', () => {
       const stored = store.getAll().find((d) => d.params?.message === 'explicit-thread-wins');
       assert.ok(stored, 'task should be persisted');
       assert.equal(stored.deliveryThreadId, 'thread-explicit');
+    });
+
+    it('returns stale_ignored and does not persist for stale callback auth invocation', async () => {
+      const stale = registry.create('user-1', 'opus', 'thread-stale');
+      registry.create('user-1', 'opus', 'thread-stale');
+
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'stale-create' },
+          invocationId: stale.invocationId,
+          callbackToken: stale.callbackToken,
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json().status, 'stale_ignored');
+      const stored = store.getAll().find((d) => d.params?.message === 'stale-create');
+      assert.equal(stored, undefined);
     });
   });
 

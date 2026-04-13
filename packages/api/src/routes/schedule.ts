@@ -91,15 +91,18 @@ function resolveDeliveryThreadId(
   request: { headers: Record<string, string | string[] | undefined> },
   body: { deliveryThreadId?: string; invocationId?: string; callbackToken?: string },
   registry?: InvocationRegistry,
-): string | null {
-  if (body.deliveryThreadId) return body.deliveryThreadId;
-  if (!registry) return null;
+): { deliveryThreadId: string | null; staleIgnored: boolean } {
+  if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, staleIgnored: false };
+  if (!registry) return { deliveryThreadId: null, staleIgnored: false };
 
   const invocationId = body.invocationId ?? firstHeaderValue(request.headers['x-invocation-id']);
   const callbackToken = body.callbackToken ?? firstHeaderValue(request.headers['x-callback-token']);
-  if (!invocationId || !callbackToken) return null;
+  if (!invocationId || !callbackToken) return { deliveryThreadId: null, staleIgnored: false };
 
-  return registry.verify(invocationId, callbackToken)?.threadId ?? null;
+  const record = registry.verify(invocationId, callbackToken);
+  if (!record) return { deliveryThreadId: null, staleIgnored: false };
+  if (!registry.isLatest(invocationId)) return { deliveryThreadId: null, staleIgnored: true };
+  return { deliveryThreadId: record.threadId, staleIgnored: false };
 }
 
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
@@ -285,6 +288,11 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
+    const resolution = resolveDeliveryThreadId(request, body, registry);
+    if (resolution.staleIgnored) {
+      return { status: 'stale_ignored' };
+    }
+
     return {
       draft: {
         templateId: body.templateId,
@@ -292,7 +300,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         trigger,
         params,
         display,
-        deliveryThreadId: resolveDeliveryThreadId(request, body, registry),
+        deliveryThreadId: resolution.deliveryThreadId,
         paramSchema: template.paramSchema,
       },
     };
@@ -359,13 +367,18 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
+    const resolution = resolveDeliveryThreadId(request, body, registry);
+    if (resolution.staleIgnored) {
+      return { status: 'stale_ignored' };
+    }
+
     const def = {
       id,
       templateId: body.templateId,
       trigger,
       params,
       display,
-      deliveryThreadId: resolveDeliveryThreadId(request, body, registry),
+      deliveryThreadId: resolution.deliveryThreadId,
       enabled: true,
       createdBy: body.createdBy ?? 'unknown',
       createdAt: new Date().toISOString(),
