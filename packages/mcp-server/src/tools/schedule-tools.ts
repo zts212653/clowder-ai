@@ -66,7 +66,9 @@ export const registerScheduledTaskInputSchema = {
   deliveryThreadId: z
     .string()
     .optional()
-    .describe('Thread ID to deliver results to. If omitted on callback-origin requests, the current invocation thread is used'),
+    .describe(
+      'Thread ID to deliver results to. If omitted on callback-origin requests, the current invocation thread is used',
+    ),
   label: z.string().optional().describe('Human-readable task label (defaults to template label)'),
   category: z.string().optional().describe('Display category: pr | repo | thread | system | external'),
   description: z.string().optional().describe('Short description of this task instance'),
@@ -136,7 +138,9 @@ export const previewScheduledTaskInputSchema = {
   deliveryThreadId: z
     .string()
     .optional()
-    .describe('Thread ID to deliver results to. If omitted on callback-origin requests, the current invocation thread is used'),
+    .describe(
+      'Thread ID to deliver results to. If omitted on callback-origin requests, the current invocation thread is used',
+    ),
 };
 
 export async function handlePreviewScheduledTask(input: {
