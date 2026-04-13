@@ -256,8 +256,9 @@ export function validateRuntimeProviderBinding(
   profile: RuntimeProviderProfile,
   _defaultModel?: string | null,
 ): string | null {
-  if (clientId === 'google' && profile.kind !== 'builtin') {
-    return 'client "google" only supports builtin Gemini auth';
+  // Allow api_key accounts for google when using a third-party baseUrl
+  if (clientId === 'google' && profile.kind !== 'builtin' && !profile.baseUrl) {
+    return 'client "google" only supports builtin Gemini auth (or third-party with baseUrl)';
   }
   const expectedClient = resolveBuiltinClientForProvider(clientId);
   if (expectedClient && profile.kind === 'builtin' && profile.client && profile.client !== expectedClient) {
