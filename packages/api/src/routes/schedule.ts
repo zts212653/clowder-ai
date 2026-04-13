@@ -94,18 +94,19 @@ function resolveDeliveryThreadId(
   body: { deliveryThreadId?: string; invocationId?: string; callbackToken?: string },
   registry?: InvocationRegistry,
 ): { deliveryThreadId: string | null; code: DeliveryThreadResolutionCode | null } {
-  if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, code: null };
-  if (!registry) return { deliveryThreadId: null, code: null };
-
   const invocationId = body.invocationId ?? firstHeaderValue(request.headers['x-invocation-id']);
   const callbackToken = body.callbackToken ?? firstHeaderValue(request.headers['x-callback-token']);
   const hasAnyCallbackCredential = Boolean(invocationId || callbackToken);
-  if (!hasAnyCallbackCredential) return { deliveryThreadId: null, code: null };
+  if (!hasAnyCallbackCredential) {
+    return { deliveryThreadId: body.deliveryThreadId ?? null, code: null };
+  }
+  if (!registry) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
   if (!invocationId || !callbackToken) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
 
   const record = registry.verify(invocationId, callbackToken);
   if (!record) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
   if (!registry.isLatest(invocationId)) return { deliveryThreadId: null, code: 'STALE_INVOCATION' };
+  if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, code: null };
   return { deliveryThreadId: record.threadId, code: null };
 }
 
