@@ -642,6 +642,7 @@ async function main(): Promise<void> {
     packTemplateStore,
     taskStore,
     notifyLifecycle: schedulerLifecycleToast,
+    registry,
   });
 
   // ── Phase G: Summary Compaction (registers into unified scheduler) ──

@@ -15,6 +15,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { GlobalControlStore } from '../infrastructure/scheduler/GlobalControlStore.js';
@@ -65,6 +66,8 @@ export interface ScheduleRoutesOptions {
   taskStore?: ITaskStore;
   /** Ephemeral lifecycle notifications for scheduler management actions */
   notifyLifecycle?: ScheduleLifecycleNotifier;
+  /** Optional callback registry for inferring current thread from callback auth. */
+  registry?: InvocationRegistry;
 }
 
 /** Extract threadId from subjectKey — handles both thread-xxx (real tasks) and thread:xxx formats */
@@ -80,6 +83,25 @@ function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void
   if (subjectKey.startsWith('pr-')) target.add(`pr:${subjectKey.slice(3)}`);
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveDeliveryThreadId(
+  request: { headers: Record<string, string | string[] | undefined> },
+  body: { deliveryThreadId?: string; invocationId?: string; callbackToken?: string },
+  registry?: InvocationRegistry,
+): string | null {
+  if (body.deliveryThreadId) return body.deliveryThreadId;
+  if (!registry) return null;
+
+  const invocationId = body.invocationId ?? firstHeaderValue(request.headers['x-invocation-id']);
+  const callbackToken = body.callbackToken ?? firstHeaderValue(request.headers['x-callback-token']);
+  if (!invocationId || !callbackToken) return null;
+
+  return registry.verify(invocationId, callbackToken)?.threadId ?? null;
+}
+
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
   const {
     taskRunner,
@@ -89,6 +111,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     packTemplateStore,
     taskStore,
     notifyLifecycle,
+    registry,
   } = opts;
 
   // GET /api/schedule/tasks
@@ -226,6 +249,8 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       params?: Record<string, unknown>;
       display?: { label: string; category: string; description?: string };
       deliveryThreadId?: string;
+      invocationId?: string;
+      callbackToken?: string;
     };
 
     if (!body.templateId) {
@@ -267,7 +292,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         trigger,
         params,
         display,
-        deliveryThreadId: body.deliveryThreadId ?? null,
+        deliveryThreadId: resolveDeliveryThreadId(request, body, registry),
         paramSchema: template.paramSchema,
       },
     };
@@ -287,6 +312,8 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       display?: { label: string; category: string; description?: string };
       deliveryThreadId?: string;
       createdBy?: string;
+      invocationId?: string;
+      callbackToken?: string;
     };
 
     if (!body.templateId) {
@@ -338,7 +365,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       trigger,
       params,
       display,
-      deliveryThreadId: body.deliveryThreadId ?? null,
+      deliveryThreadId: resolveDeliveryThreadId(request, body, registry),
       enabled: true,
       createdBy: body.createdBy ?? 'unknown',
       createdAt: new Date().toISOString(),

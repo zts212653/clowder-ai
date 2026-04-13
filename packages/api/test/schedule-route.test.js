@@ -379,14 +379,17 @@ describe('Schedule Routes', () => {
 
   describe('POST /api/schedule/tasks/preview (P1-1: draft step)', () => {
     let appDyn;
+    let registry;
 
     beforeEach(async () => {
       const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
       const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
       const store = new DynamicTaskStore(db);
+      registry = new InvocationRegistry();
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry });
+      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry, registry });
       await appDyn.ready();
     });
 
@@ -424,6 +427,24 @@ describe('Schedule Routes', () => {
         payload: { templateId: 'nonexistent' },
       });
       assert.equal(res.statusCode, 400);
+    });
+
+    it('infers deliveryThreadId from callback auth in request body', async () => {
+      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-from-callback');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks/preview',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'hello' },
+          invocationId,
+          callbackToken,
+        },
+      });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.draft.deliveryThreadId, 'thread-from-callback');
     });
   });
 
@@ -573,6 +594,90 @@ describe('Schedule Routes', () => {
       });
       assert.equal(res.statusCode, 400);
       assert.match(res.json().error, /plain object/);
+    });
+  });
+
+  describe('POST /api/schedule/tasks — callback auth infers deliveryThreadId', () => {
+    let appDyn, store, registry;
+
+    beforeEach(async () => {
+      const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+      store = new DynamicTaskStore(db);
+      registry = new InvocationRegistry();
+      appDyn = Fastify({ logger: false });
+      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry, registry });
+      await appDyn.ready();
+    });
+
+    afterEach(async () => {
+      runner.stop();
+      await appDyn.close();
+    });
+
+    it('uses callback-auth thread from request body when deliveryThreadId is omitted', async () => {
+      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-body-auth');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'body-auth-thread' },
+          invocationId,
+          callbackToken,
+        },
+      });
+      assert.equal(res.statusCode, 200);
+
+      const stored = store.getAll().find((d) => d.params?.message === 'body-auth-thread');
+      assert.ok(stored, 'task should be persisted');
+      assert.equal(stored.deliveryThreadId, 'thread-body-auth');
+    });
+
+    it('falls back to callback-auth headers when body credentials are absent', async () => {
+      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-header-auth');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        headers: {
+          'x-invocation-id': invocationId,
+          'x-callback-token': callbackToken,
+        },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'header-auth-thread' },
+        },
+      });
+      assert.equal(res.statusCode, 200);
+
+      const stored = store.getAll().find((d) => d.params?.message === 'header-auth-thread');
+      assert.ok(stored, 'task should be persisted');
+      assert.equal(stored.deliveryThreadId, 'thread-header-auth');
+    });
+
+    it('prefers explicit deliveryThreadId over callback-auth inferred thread', async () => {
+      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-from-callback');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'explicit-thread-wins' },
+          deliveryThreadId: 'thread-explicit',
+          invocationId,
+          callbackToken,
+        },
+      });
+      assert.equal(res.statusCode, 200);
+
+      const stored = store.getAll().find((d) => d.params?.message === 'explicit-thread-wins');
+      assert.ok(stored, 'task should be persisted');
+      assert.equal(stored.deliveryThreadId, 'thread-explicit');
     });
   });
 
