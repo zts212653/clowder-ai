@@ -449,7 +449,7 @@ describe('Schedule Routes', () => {
       assert.equal(body.draft.deliveryThreadId, 'thread-from-callback');
     });
 
-    it('returns stale_ignored for stale callback auth invocation', async () => {
+    it('returns 409 stale invocation error for stale callback auth invocation', async () => {
       const stale = registry.create('user-1', 'opus', 'thread-from-callback');
       registry.create('user-1', 'opus', 'thread-from-callback');
 
@@ -465,8 +465,9 @@ describe('Schedule Routes', () => {
         },
       });
 
-      assert.equal(res.statusCode, 200);
-      assert.equal(res.json().status, 'stale_ignored');
+      assert.equal(res.statusCode, 409);
+      const body = res.json();
+      assert.equal(body.code, 'STALE_INVOCATION');
     });
   });
 
@@ -704,7 +705,7 @@ describe('Schedule Routes', () => {
       assert.equal(stored.deliveryThreadId, 'thread-explicit');
     });
 
-    it('returns stale_ignored and does not persist for stale callback auth invocation', async () => {
+    it('returns 409 stale invocation error and does not persist for stale callback auth invocation', async () => {
       const stale = registry.create('user-1', 'opus', 'thread-stale');
       registry.create('user-1', 'opus', 'thread-stale');
 
@@ -720,8 +721,9 @@ describe('Schedule Routes', () => {
         },
       });
 
-      assert.equal(res.statusCode, 200);
-      assert.equal(res.json().status, 'stale_ignored');
+      assert.equal(res.statusCode, 409);
+      const body = res.json();
+      assert.equal(body.code, 'STALE_INVOCATION');
       const stored = store.getAll().find((d) => d.params?.message === 'stale-create');
       assert.equal(stored, undefined);
     });

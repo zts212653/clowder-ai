@@ -290,7 +290,11 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
 
     const resolution = resolveDeliveryThreadId(request, body, registry);
     if (resolution.staleIgnored) {
-      return { status: 'stale_ignored' };
+      reply.status(409);
+      return {
+        error: 'Stale callback invocation superseded by a newer invocation',
+        code: 'STALE_INVOCATION',
+      };
     }
 
     return {
@@ -369,7 +373,11 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
 
     const resolution = resolveDeliveryThreadId(request, body, registry);
     if (resolution.staleIgnored) {
-      return { status: 'stale_ignored' };
+      reply.status(409);
+      return {
+        error: 'Stale callback invocation superseded by a newer invocation',
+        code: 'STALE_INVOCATION',
+      };
     }
 
     const def = {
