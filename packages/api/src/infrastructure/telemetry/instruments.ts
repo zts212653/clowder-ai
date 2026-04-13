@@ -40,6 +40,11 @@ export const tokenUsage = meter.createCounter('cat_cafe.token.usage', {
   unit: 'tokens',
 });
 
+/** Counter: guide lifecycle transitions (A-4). */
+export const guideTransitions = meter.createCounter('cat_cafe.guide.transitions', {
+  description: 'Guide lifecycle state transitions',
+});
+
 /** Liveness state type. */
 export type LivenessState = 'dead' | 'idle-silent' | 'busy-silent' | 'active';
 

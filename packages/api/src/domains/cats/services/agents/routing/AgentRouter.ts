@@ -168,6 +168,10 @@ export interface AgentRouterOptions {
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150: Tool usage counter */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F155 B-4: Independent guide session store */
+  guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
+  /** F155 B-6: Dismiss tracker for guide offer suppression */
+  dismissTracker?: import('../../../../guides/GuideDismissTracker.js').IGuideDismissTracker;
 }
 
 /**
@@ -210,6 +214,10 @@ export class AgentRouter {
   private evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150 */
   private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F155 B-4 */
+  private guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
+  /** F155 B-6 */
+  private dismissTracker?: import('../../../../guides/GuideDismissTracker.js').IGuideDismissTracker;
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
@@ -248,6 +256,8 @@ export class AgentRouter {
     this.packStore = options.packStore;
     this.evidenceStore = options.evidenceStore;
     this.toolUsageCounter = options.toolUsageCounter;
+    this.guideSessionStore = options.guideSessionStore;
+    this.dismissTracker = options.dismissTracker;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -666,6 +676,8 @@ export class AgentRouter {
         ...(this.tmuxGateway ? { tmuxGateway: this.tmuxGateway } : {}),
         ...(this.agentPaneRegistry ? { agentPaneRegistry: this.agentPaneRegistry } : {}),
         ...(this.signalArticleLookup ? { signalArticleLookup: this.signalArticleLookup } : {}),
+        ...(this.guideSessionStore ? { guideSessionStore: this.guideSessionStore } : {}),
+        ...(this.dismissTracker ? { dismissTracker: this.dismissTracker } : {}),
       },
       messageStore: this.messageStore,
       deliveryCursorStore: this.deliveryCursorStore,

@@ -182,28 +182,7 @@ describe('Thread API', () => {
     assert.ok(!titles.includes('Thread C'));
   });
 
-  it('GET /api/threads redacts foreign guideState from the shared default thread', async () => {
-    threadStore.get('default').guideState = {
-      v: 1,
-      guideId: 'add-member',
-      status: 'active',
-      userId: 'bob',
-      offeredAt: 1000,
-      startedAt: 2000,
-    };
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/threads',
-      headers: { 'x-cat-cafe-user': 'alice' },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    const defaultThread = body.threads.find((thread) => thread.id === 'default');
-    assert.ok(defaultThread, 'default thread should be listed');
-    assert.equal('guideState' in defaultThread, false);
-  });
+  // [F155 Phase B] guideState removed from Thread — redaction test no longer applicable
 
   it('GET /api/threads supports case-insensitive title search via q', async () => {
     threadStore.create('alice', 'Frontend polish');
@@ -399,35 +378,7 @@ describe('Thread API', () => {
     assert.equal(body.title, 'Details Test');
   });
 
-  it('GET /api/threads/:id redacts foreign guideState from shared default thread but keeps it for the owner', async () => {
-    threadStore.get('default').guideState = {
-      v: 1,
-      guideId: 'add-member',
-      status: 'active',
-      userId: 'bob',
-      offeredAt: 1000,
-      startedAt: 2000,
-    };
-
-    const foreignRes = await app.inject({
-      method: 'GET',
-      url: '/api/threads/default',
-      headers: { 'x-cat-cafe-user': 'alice' },
-    });
-    assert.equal(foreignRes.statusCode, 200);
-    const foreignBody = JSON.parse(foreignRes.body);
-    assert.equal('guideState' in foreignBody, false);
-
-    const ownerRes = await app.inject({
-      method: 'GET',
-      url: '/api/threads/default',
-      headers: { 'x-cat-cafe-user': 'bob' },
-    });
-    assert.equal(ownerRes.statusCode, 200);
-    const ownerBody = JSON.parse(ownerRes.body);
-    assert.equal(ownerBody.guideState?.guideId, 'add-member');
-    assert.equal(ownerBody.guideState?.userId, 'bob');
-  });
+  // [F155 Phase B] guideState removed from Thread — redaction test no longer applicable
 
   it('GET /api/threads/:id returns 404 for nonexistent', async () => {
     const res = await app.inject({

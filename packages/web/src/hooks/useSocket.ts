@@ -10,6 +10,7 @@ import {
 } from '@/debug/invocationEventDebug';
 import { useBrakeStore } from '@/stores/brakeStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useGuideStore } from '@/stores/guideStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
@@ -113,12 +114,7 @@ export interface SocketCallbacks {
     reason: 'canceled' | 'failed';
     queue: import('../stores/chat-types').QueueEntry[];
   }) => void;
-  /** F155: Guide engine trigger */
-  onGuideStart?: (data: { guideId: string; threadId: string; timestamp: number }) => void;
-  /** F155: Guide control (next/skip/exit) */
-  onGuideControl?: (data: { action: string; guideId: string; threadId: string; timestamp: number }) => void;
-  /** F155: Guide completed in another client/session */
-  onGuideComplete?: (data: { guideId: string; threadId: string; timestamp: number }) => void;
+  // B-5: Guide events removed from callbacks — now go directly to guideStore.reduceServerEvent
   /** F152 Phase B: Memory bootstrap index events */
   onIndexEvent?: (event: string, data: Record<string, unknown>) => void;
 }
@@ -687,7 +683,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       },
     );
 
-    // F155: Guide engine trigger from MCP tool
+    // F155/B-5: Guide events → Zustand reducer (no CustomEvent bridge)
     socket.on('guide_start', (data: { guideId: string; threadId: string; timestamp: number }) => {
       const routeThread = threadIdRef.current;
       const storeThread = useChatStore.getState().currentThreadId;
@@ -699,12 +695,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         return;
       }
       pendingGuideStartsRef.current.delete(data.threadId);
-      callbacksRef.current.onGuideStart?.(data);
+      useGuideStore.getState().reduceServerEvent({ action: 'start', guideId: data.guideId, threadId: data.threadId });
     });
 
-    // F155: Guide control (next/skip/exit) from MCP tool
     socket.on('guide_control', (data: { action: string; guideId: string; threadId: string; timestamp: number }) => {
-      // Always clear queued starts on exit — prevents stale replay even if user switched to this thread
       if (data.action === 'exit') {
         pendingGuideStartsRef.current.delete(data.threadId);
       }
@@ -714,11 +708,20 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
       );
       if (!isActiveThread) return;
-      callbacksRef.current.onGuideControl?.(data);
+      const action =
+        data.action === 'exit'
+          ? 'control_exit'
+          : data.action === 'skip'
+            ? 'control_skip'
+            : data.action === 'next'
+              ? 'control_next'
+              : undefined;
+      if (action) {
+        useGuideStore.getState().reduceServerEvent({ action, guideId: data.guideId, threadId: data.threadId });
+      }
     });
 
     socket.on('guide_complete', (data: { guideId: string; threadId: string; timestamp: number }) => {
-      // Always clear queued starts for this thread — prevents stale replay after switching back
       pendingGuideStartsRef.current.delete(data.threadId);
       const routeThread = threadIdRef.current;
       const storeThread = useChatStore.getState().currentThreadId;
@@ -726,7 +729,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
       );
       if (!isActiveThread) return;
-      callbacksRef.current.onGuideComplete?.(data);
+      useGuideStore
+        .getState()
+        .reduceServerEvent({ action: 'complete', guideId: data.guideId, threadId: data.threadId });
     });
 
     // F152 Phase B: Memory bootstrap progress events
@@ -866,7 +871,11 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     const pendingStart = pendingGuideStartsRef.current.get(threadId);
     if (!pendingStart) return;
     pendingGuideStartsRef.current.delete(threadId);
-    callbacksRef.current.onGuideStart?.(pendingStart);
+    useGuideStore.getState().reduceServerEvent({
+      action: 'start',
+      guideId: pendingStart.guideId,
+      threadId: pendingStart.threadId,
+    });
   }, [threadId, storeThreadId]);
 
   const cancelInvocation = useCallback((tid: string) => {

@@ -2,6 +2,7 @@
 # P0 验证场景 — 引导到添加成员入口
 # Schema: OrchestrationFlow v2 (tag-based engine)
 
+schemaVersion: 1
 id: add-member
 name: 添加成员
 description: 引导你完成新成员创建并补充成员信息

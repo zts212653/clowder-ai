@@ -351,6 +351,11 @@ async function main(): Promise<void> {
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
   const threadStore = createThreadStore(redis);
+  // F155 B-4/B-6: Guide state is runtime-only (in-memory, resets on restart)
+  const { InMemoryGuideSessionStore } = await import('./domains/guides/GuideSessionRepository.js');
+  const guideSessionStore = new InMemoryGuideSessionStore();
+  const { InMemoryGuideDismissTracker } = await import('./domains/guides/GuideDismissTracker.js');
+  const dismissTracker = new InMemoryGuideDismissTracker();
   const taskStore = createTaskStore(redis);
   if (redis) {
     const { RedisPrTrackingStore } = await import('./infrastructure/email/RedisPrTrackingStore.js');
@@ -1062,6 +1067,8 @@ async function main(): Promise<void> {
     packStore,
     evidenceStore: memoryServices.evidenceStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
+    guideSessionStore,
+    dismissTracker,
   });
 
   // F39: Message queue delivery
@@ -1162,7 +1169,12 @@ async function main(): Promise<void> {
   });
   // F155: Frontend-facing guide actions (no MCP auth, uses userId header)
   if (threadStore) {
-    await app.register(guideActionRoutes, { threadStore, socketManager });
+    await app.register(guideActionRoutes, {
+      threadStore,
+      socketManager,
+      guideSessionStore,
+      dismissTracker,
+    });
   }
   await app.register(catsRoutes);
 
@@ -1284,6 +1296,7 @@ async function main(): Promise<void> {
     reflectionService: memoryServices.reflectionService,
     limbRegistry,
     limbPairingStore,
+    guideSessionStore,
   } as Parameters<typeof callbacksRoutes>[1];
   await app.register(callbacksRoutes, callbackOpts);
 
@@ -1315,6 +1328,7 @@ async function main(): Promise<void> {
     taskProgressStore,
     backlogStore,
     ...(readStateStore ? { readStateStore } : {}),
+    guideSessionStore,
   });
   await app.register(threadBranchRoutes, {
     threadStore,

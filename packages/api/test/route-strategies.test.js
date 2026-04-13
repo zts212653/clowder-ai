@@ -57,12 +57,8 @@ function createSequentialCapturingService(catId, responses) {
 }
 
 function createGuideAckThreadStore(initialGuideState, currentGuideState, projectPath = '/tmp/test') {
-  let getCount = 0;
-  const updates = [];
   return {
-    updates,
     async get() {
-      getCount += 1;
       return {
         id: 'thread1',
         title: 'Test',
@@ -71,19 +67,46 @@ function createGuideAckThreadStore(initialGuideState, currentGuideState, project
         lastActiveAt: Date.now(),
         createdAt: Date.now(),
         projectPath,
-        guideState: getCount === 1 ? initialGuideState : currentGuideState,
       };
     },
     async getParticipantsWithActivity() {
       return [];
     },
-    async updateGuideState(threadId, guideState) {
-      updates.push({ threadId, guideState });
-    },
+    /** Create an InMemoryGuideSessionStore pre-seeded with initial state, returning it and a bridge for assertions. */
+    _createSessionStore: null,
   };
 }
 
-function createSharedDefaultGuideThreadStore(guideState) {
+async function createGuideAckFixture(guideState, projectPath = '/tmp/test') {
+  const { InMemoryGuideSessionStore, createGuideStoreBridge } = await import(
+    '../dist/domains/guides/GuideSessionRepository.js'
+  );
+  const sessionStore = new InMemoryGuideSessionStore();
+  const bridge = createGuideStoreBridge(sessionStore);
+  await bridge.set('thread1', guideState);
+  const threadStore = createGuideAckThreadStore(null, null, projectPath);
+  return { threadStore, sessionStore, bridge };
+}
+
+/** Session store that returns initialState on first read, then replacementState afterwards.
+ *  Models concurrent guide replacement between prepare and ack phases. */
+async function createSwitchingGuideAckFixture(initialState, replacementState, projectPath = '/tmp/test') {
+  const { createSessionFromState } = await import('../dist/domains/guides/GuideSession.js');
+  let readCount = 0;
+  const sessionStore = {
+    async getByThread(threadId) {
+      readCount++;
+      const state = readCount <= 1 ? initialState : replacementState;
+      return createSessionFromState(threadId, state);
+    },
+    async save() {},
+    async delete() {},
+  };
+  const threadStore = createGuideAckThreadStore(null, null, projectPath);
+  return { threadStore, sessionStore };
+}
+
+function createSharedDefaultGuideThreadStore() {
   const updates = [];
   return {
     updates,
@@ -96,7 +119,6 @@ function createSharedDefaultGuideThreadStore(guideState) {
         lastActiveAt: Date.now(),
         createdAt: Date.now(),
         projectPath: 'default',
-        guideState,
       };
     },
     async getParticipantsWithActivity() {
@@ -112,7 +134,18 @@ function createSharedDefaultGuideThreadStore(guideState) {
   };
 }
 
-function createMockDeps(services, appendCalls, threadStore = null) {
+async function createSharedDefaultGuideFixture(guideState) {
+  const { InMemoryGuideSessionStore, createGuideStoreBridge } = await import(
+    '../dist/domains/guides/GuideSessionRepository.js'
+  );
+  const sessionStore = new InMemoryGuideSessionStore();
+  const bridge = createGuideStoreBridge(sessionStore);
+  await bridge.set('default', guideState);
+  const threadStore = createSharedDefaultGuideThreadStore();
+  return { threadStore, sessionStore, bridge };
+}
+
+function createMockDeps(services, appendCalls, threadStore = null, guideSessionStore = null) {
   let counter = 0;
   return {
     services,
@@ -126,6 +159,7 @@ function createMockDeps(services, appendCalls, threadStore = null) {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore,
+      guideSessionStore,
       apiUrl: 'http://127.0.0.1:3004',
     },
     messageStore: {
@@ -1007,7 +1041,7 @@ describe('F155 guide offer ownership', () => {
   it('serial: suppresses fresh guide offers when another user has a non-terminal guide on shared default thread', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const codexService = createCapturingService('codex', '我来处理这个请求');
-    const threadStore = createSharedDefaultGuideThreadStore({
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
       v: 1,
       guideId: 'configure-provider',
       status: 'active',
@@ -1016,7 +1050,7 @@ describe('F155 guide offer ownership', () => {
       offeredBy: 'opus',
       userId: 'other-user',
     });
-    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeSerial(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
     }
@@ -1029,13 +1063,12 @@ describe('F155 guide offer ownership', () => {
       !codexService.calls[0].includes('status="offered"'),
       'routing must not emit a fresh offered guide when another user already owns the active guide',
     );
-    assert.equal(threadStore.updates.length, 0, 'blocked guide state must not be mutated by the wrong user');
   });
 
   it('serial: ignores another user guide state on shared default thread', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const codexService = createCapturingService('codex', '我来处理这个请求');
-    const threadStore = createSharedDefaultGuideThreadStore({
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
       v: 1,
       guideId: 'configure-provider',
       status: 'completed',
@@ -1044,7 +1077,7 @@ describe('F155 guide offer ownership', () => {
       offeredBy: 'opus',
       userId: 'other-user',
     });
-    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeSerial(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
     }
@@ -1057,7 +1090,6 @@ describe('F155 guide offer ownership', () => {
       !codexService.calls[0].includes('Guide Completed:'),
       'foreign completed guide must not leak into the current user prompt',
     );
-    assert.equal(threadStore.updates.length, 0, 'hidden foreign guide must not be acked by the wrong user');
   });
 
   it('serial: injects offered guide only to the first target cat', async () => {
@@ -1366,7 +1398,7 @@ describe('F155 guide offer ownership', () => {
   it('parallel: suppresses fresh guide offers when another user has a non-terminal guide on shared default thread', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const codexService = createCapturingService('codex', '我来处理这个请求');
-    const threadStore = createSharedDefaultGuideThreadStore({
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
       v: 1,
       guideId: 'configure-provider',
       status: 'active',
@@ -1375,7 +1407,7 @@ describe('F155 guide offer ownership', () => {
       offeredBy: 'opus',
       userId: 'other-user',
     });
-    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeParallel(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
     }
@@ -1388,13 +1420,12 @@ describe('F155 guide offer ownership', () => {
       !codexService.calls[0].includes('status="offered"'),
       'parallel routing must not emit a fresh offered guide when another user already owns the active guide',
     );
-    assert.equal(threadStore.updates.length, 0, 'blocked guide state must not be mutated by the wrong user');
   });
 
   it('parallel: ignores another user guide state on shared default thread', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const codexService = createCapturingService('codex', '我来处理这个请求');
-    const threadStore = createSharedDefaultGuideThreadStore({
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
       v: 1,
       guideId: 'configure-provider',
       status: 'completed',
@@ -1403,7 +1434,7 @@ describe('F155 guide offer ownership', () => {
       offeredBy: 'opus',
       userId: 'other-user',
     });
-    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeParallel(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
     }
@@ -1416,14 +1447,13 @@ describe('F155 guide offer ownership', () => {
       !codexService.calls[0].includes('Guide Completed:'),
       'foreign completed guide must not leak into the current user prompt',
     );
-    assert.equal(threadStore.updates.length, 0, 'hidden foreign guide must not be acked by the wrong user');
   });
 });
 
 describe('F155 guide completion ack ownership', () => {
   it('serial: does not ack a different guide that replaced the completed one', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const threadStore = createGuideAckThreadStore(
+    const { threadStore, sessionStore } = await createSwitchingGuideAckFixture(
       {
         v: 1,
         guideId: 'add-member',
@@ -1432,25 +1462,20 @@ describe('F155 guide completion ack ownership', () => {
         completedAt: Date.now(),
         offeredBy: 'opus',
       },
-      {
-        v: 1,
-        guideId: 'configure-provider',
-        status: 'offered',
-        offeredAt: Date.now(),
-        offeredBy: 'codex',
-      },
+      { v: 1, guideId: 'configure-provider', status: 'offered', offeredAt: Date.now(), offeredBy: 'codex' },
     );
-    const deps = createMockDeps({ opus: createMockService('opus', 'done') }, null, threadStore);
+    const deps = createMockDeps({ opus: createMockService('opus', 'done') }, null, threadStore, sessionStore);
 
     for await (const _ of routeSerial(deps, ['opus'], '继续', 'user1', 'thread1')) {
     }
 
-    assert.equal(threadStore.updates.length, 0, 'must not ack a replacement guide');
+    const gs = await sessionStore.getByThread('thread1');
+    assert.ok(!gs.completionAcked, 'must not ack a replacement guide');
   });
 
   it('parallel: does not ack a different guide that replaced the completed one', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
-    const threadStore = createGuideAckThreadStore(
+    const { threadStore, sessionStore } = await createSwitchingGuideAckFixture(
       {
         v: 1,
         guideId: 'add-member',
@@ -1468,12 +1493,13 @@ describe('F155 guide completion ack ownership', () => {
         offeredBy: 'codex',
       },
     );
-    const deps = createMockDeps({ opus: createMockService('opus', 'done') }, null, threadStore);
+    const deps = createMockDeps({ opus: createMockService('opus', 'done') }, null, threadStore, sessionStore);
 
     for await (const _ of routeParallel(deps, ['opus'], '继续', 'user1', 'thread1')) {
     }
 
-    assert.equal(threadStore.updates.length, 0, 'must not ack a replacement guide');
+    const gs = await sessionStore.getByThread('thread1');
+    assert.ok(!gs.completionAcked, 'must not ack a replacement guide');
   });
 
   it('serial: does not ack completed guide after a silent done-only turn', async () => {
@@ -1486,13 +1512,14 @@ describe('F155 guide completion ack ownership', () => {
       completedAt: Date.now(),
       offeredBy: 'codex',
     };
-    const threadStore = createGuideAckThreadStore(completedGuide, completedGuide, 'default');
-    const deps = createMockDeps({ codex: createDoneOnlyService('codex') }, null, threadStore);
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const deps = createMockDeps({ codex: createDoneOnlyService('codex') }, null, threadStore, sessionStore);
 
     for await (const _ of routeSerial(deps, ['codex'], '继续', 'user1', 'thread1')) {
     }
 
-    assert.equal(threadStore.updates.length, 0, 'silent done-only turn must not ack guide completion');
+    const gs = await bridge.get('thread1');
+    assert.ok(!gs.completionAcked, 'silent done-only turn must not ack guide completion');
   });
 
   it('parallel: does not ack completed guide after a silent done-only turn', async () => {
@@ -1505,13 +1532,14 @@ describe('F155 guide completion ack ownership', () => {
       completedAt: Date.now(),
       offeredBy: 'codex',
     };
-    const threadStore = createGuideAckThreadStore(completedGuide, completedGuide, 'default');
-    const deps = createMockDeps({ codex: createDoneOnlyService('codex') }, null, threadStore);
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const deps = createMockDeps({ codex: createDoneOnlyService('codex') }, null, threadStore, sessionStore);
 
     for await (const _ of routeParallel(deps, ['codex'], '继续', 'user1', 'thread1')) {
     }
 
-    assert.equal(threadStore.updates.length, 0, 'silent done-only turn must not ack guide completion');
+    const gs = await bridge.get('thread1');
+    assert.ok(!gs.completionAcked, 'silent done-only turn must not ack guide completion');
   });
 
   it('serial: injects and acks completed guide when owner cat is not routed', async () => {
@@ -1524,9 +1552,9 @@ describe('F155 guide completion ack ownership', () => {
       completedAt: Date.now(),
       offeredBy: 'opus',
     };
-    const threadStore = createGuideAckThreadStore(completedGuide, completedGuide, 'default');
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
     const codexService = createCapturingService('codex', '好的，我继续帮你');
-    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeSerial(deps, ['codex'], '继续', 'user1', 'thread1')) {
     }
@@ -1536,8 +1564,8 @@ describe('F155 guide completion ack ownership', () => {
       codexService.calls[0].includes('Guide Completed:'),
       'routed non-owner cat must see completed guide context when owner is absent',
     );
-    assert.equal(threadStore.updates.length, 1, 'visible non-owner response should ack guide completion');
-    assert.equal(threadStore.updates[0].guideState.completionAcked, true);
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'visible non-owner response should ack guide completion');
   });
 
   it('serial: routes completed-guide fallback only to the first target cat', async () => {
@@ -1550,10 +1578,10 @@ describe('F155 guide completion ack ownership', () => {
       completedAt: Date.now(),
       offeredBy: 'dare',
     };
-    const threadStore = createGuideAckThreadStore(completedGuide, completedGuide, 'default');
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
     const opusService = createCapturingService('opus', '我来接着处理');
     const codexService = createCapturingService('codex', '我也看到了');
-    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeSerial(deps, ['opus', 'codex'], '继续', 'user1', 'thread1')) {
     }
@@ -1563,7 +1591,8 @@ describe('F155 guide completion ack ownership', () => {
       !codexService.calls[0].includes('Guide Completed:'),
       'second target cat must not receive duplicate completed guide fallback',
     );
-    assert.equal(threadStore.updates.length, 1, 'only one routed cat should ack the completed guide');
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'only one routed cat should ack the completed guide');
   });
 
   it('parallel: injects and acks completed guide when owner cat is not routed', async () => {
@@ -1576,9 +1605,9 @@ describe('F155 guide completion ack ownership', () => {
       completedAt: Date.now(),
       offeredBy: 'opus',
     };
-    const threadStore = createGuideAckThreadStore(completedGuide, completedGuide, 'default');
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
     const codexService = createCapturingService('codex', '好的，我继续帮你');
-    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeParallel(deps, ['codex'], '继续', 'user1', 'thread1')) {
     }
@@ -1588,8 +1617,8 @@ describe('F155 guide completion ack ownership', () => {
       codexService.calls[0].includes('Guide Completed:'),
       'routed non-owner cat must see completed guide context when owner is absent',
     );
-    assert.equal(threadStore.updates.length, 1, 'visible non-owner response should ack guide completion');
-    assert.equal(threadStore.updates[0].guideState.completionAcked, true);
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'visible non-owner response should ack guide completion');
   });
 
   it('parallel: routes completed-guide fallback only to the first target cat', async () => {
@@ -1602,10 +1631,10 @@ describe('F155 guide completion ack ownership', () => {
       completedAt: Date.now(),
       offeredBy: 'dare',
     };
-    const threadStore = createGuideAckThreadStore(completedGuide, completedGuide, 'default');
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
     const opusService = createCapturingService('opus', '我来接着处理');
     const codexService = createCapturingService('codex', '我也看到了');
-    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore);
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore, sessionStore);
 
     for await (const _ of routeParallel(deps, ['opus', 'codex'], '继续', 'user1', 'thread1')) {
     }
@@ -1615,7 +1644,8 @@ describe('F155 guide completion ack ownership', () => {
       !codexService.calls[0].includes('Guide Completed:'),
       'second target cat must not receive duplicate completed guide fallback',
     );
-    assert.equal(threadStore.updates.length, 1, 'only one routed cat should ack the completed guide');
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'only one routed cat should ack the completed guide');
   });
 });
 

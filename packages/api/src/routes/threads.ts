@@ -27,7 +27,6 @@ import type {
   Thread,
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { canAccessGuideState } from '../domains/guides/guide-state-access.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -55,6 +54,8 @@ export interface ThreadsRoutesOptions {
   readStateStore?: IThreadReadStateStore;
   /** F095 Phase C: validate backlogItemId on thread creation */
   backlogStore?: IBacklogStore;
+  /** B-4: Cascade delete guide session when thread is deleted */
+  guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
 }
 
 /** F087: Bootcamp state Zod schema */
@@ -125,11 +126,8 @@ function parseOptionalBooleanQuery(value: string | boolean | undefined): boolean
   return undefined;
 }
 
-function sanitizeThreadForResponse(thread: Thread, userId: string): Thread {
-  if (!thread.guideState) return thread;
-  if (canAccessGuideState(thread, thread.guideState, userId)) return thread;
-  const { guideState: _guideState, ...rest } = thread;
-  return rest;
+function sanitizeThreadForResponse(thread: Thread, _userId: string): Thread {
+  return thread;
 }
 
 const threadRoutingRuleSchema = z
@@ -500,6 +498,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         reply.status(400);
         return { error: 'Cannot delete this thread' };
       }
+
+      // B-4: Cascade delete guide session to prevent stale sessions on deleted threads
+      void opts.guideSessionStore?.delete(id).catch(() => {});
 
       // I-2: Audit thread deletion for traceability (best-effort, don't block response)
       const userId = resolveUserId(request, {});

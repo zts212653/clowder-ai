@@ -18,7 +18,11 @@ import { getCatVoice } from '../../../../../config/cat-voices.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
-import { canAccessGuideState, hasHiddenForeignNonTerminalGuideState } from '../../../../guides/guide-state-access.js';
+import {
+  ackGuideCompletion,
+  guideContextForCat,
+  prepareGuideContext,
+} from '../../../../guides/GuideRoutingInterceptor.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -29,7 +33,7 @@ import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import { hydrateReplyPreview, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
-import type { ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
@@ -57,34 +61,6 @@ import {
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-serial');
-
-function shouldHandleCompletedGuide(
-  guideCompletionOwner: string | undefined,
-  targetCatIds: ReadonlySet<string>,
-  fallbackCatId: string | undefined,
-  catId: string,
-): boolean {
-  if (!guideCompletionOwner) return true;
-  if (guideCompletionOwner === catId) return true;
-  if (!targetCatIds.has(guideCompletionOwner)) return fallbackCatId === catId;
-  return false;
-}
-
-function shouldHandleOfferedGuide(
-  guideOfferOwner: string | undefined,
-  targetCatIds: ReadonlySet<string>,
-  fallbackCatId: string | undefined,
-  catId: string,
-  hasUserSelection: boolean,
-  allowOwnerMissingFallback = false,
-): boolean {
-  if (!guideOfferOwner) return true;
-  if (guideOfferOwner === catId) return true;
-  if ((hasUserSelection || allowOwnerMissingFallback) && !targetCatIds.has(guideOfferOwner)) {
-    return fallbackCatId === catId;
-  }
-  return false;
-}
 
 export async function* routeSerial(
   deps: RouteStrategyDeps,
@@ -143,79 +119,19 @@ export async function* routeSerial(
   let voiceMode: boolean | undefined;
   // F087: Bootcamp state for CVO onboarding
   let bootcampState: InvocationContext['bootcampState'];
-  // F155: Guide candidate from keyword matching against raw user message
-  let guideCandidate: InvocationContext['guideCandidate'];
-  /** catId that owns an offered guide prompt, to avoid duplicate offered→offered writes. */
-  let guideOfferOwner: string | undefined;
-  /** catId that should receive offered-guide selection when owner is absent. */
-  let guideOfferSelectionFallbackCatId: string | undefined;
-  /** catId that should receive the one-shot completion notice (offeredBy). */
-  let guideCompletionOwner: string | undefined;
-  let guideCompletionFallbackCatId: string | undefined;
-  let hiddenForeignNonTerminalGuideState = false;
   const targetCatIds = new Set<string>(targetCats);
+  // Thread read: shared across routingPolicy, voiceMode, bootcamp, SOP, and guide interceptor
+  let routeThread: Thread | null = null;
   if (deps.invocationDeps.threadStore) {
     try {
-      const thread = await deps.invocationDeps.threadStore.get(threadId);
-      routingPolicy = thread?.routingPolicy;
-      voiceMode = thread?.voiceMode;
-      bootcampState = thread?.bootcampState;
-      const threadGuideState = thread?.guideState;
-      hiddenForeignNonTerminalGuideState = hasHiddenForeignNonTerminalGuideState(thread, threadGuideState, userId);
-      const guideState = canAccessGuideState(thread, threadGuideState, userId) ? threadGuideState : undefined;
-      // F155: Read existing guide state from thread (authority source)
-      if (guideState) {
-        const gs = guideState;
-        // cancelled: fully terminal, skip
-        // completed: one-shot inject if not yet acked, then mark acked
-        const justCompleted = gs.status === 'completed' && !gs.completionAcked;
-        const shouldInject = (gs.status !== 'completed' && gs.status !== 'cancelled') || justCompleted;
-        if (shouldInject) {
-          // Back-fill display metadata from registry so prompt gets real name/time
-          let name = gs.guideId;
-          let estimatedTime = '';
-          try {
-            const { getRegistryEntries } = await import('../../../../guides/guide-registry-loader.js');
-            const entry = getRegistryEntries().find((e) => e.id === gs.guideId);
-            if (entry) {
-              name = entry.name;
-              estimatedTime = entry.estimated_time;
-            }
-          } catch {
-            /* best-effort */
-          }
-          // Detect selection response: "引导流程：{label}"
-          const selectionMatch = message.match(/^引导流程：(.+)$/);
-          guideCandidate = {
-            id: gs.guideId,
-            name,
-            estimatedTime,
-            status: gs.status as 'offered' | 'awaiting_choice' | 'active' | 'completed',
-            ...(gs.status === 'offered' ? { isNewOffer: false } : {}),
-            ...(selectionMatch ? { userSelection: selectionMatch[1] } : {}),
-          };
-          if (gs.status === 'offered' || gs.status === 'awaiting_choice') {
-            guideOfferOwner = gs.offeredBy;
-            if (
-              (selectionMatch || gs.status === 'awaiting_choice') &&
-              gs.offeredBy &&
-              !targetCatIds.has(gs.offeredBy)
-            ) {
-              guideOfferSelectionFallbackCatId = targetCats[0];
-            }
-          }
-          if (justCompleted) {
-            guideCompletionOwner = gs.offeredBy;
-            if (gs.offeredBy && !targetCatIds.has(gs.offeredBy)) {
-              guideCompletionFallbackCatId = targetCats[0];
-            }
-          }
-        }
-      }
+      routeThread = (await deps.invocationDeps.threadStore.get(threadId)) ?? null;
+      routingPolicy = routeThread?.routingPolicy;
+      voiceMode = routeThread?.voiceMode;
+      bootcampState = routeThread?.bootcampState;
       // F073 P4: Read workflow-sop if thread is linked to a backlog item
-      if (thread?.backlogItemId && deps.invocationDeps.workflowSopStore) {
+      if (routeThread?.backlogItemId && deps.invocationDeps.workflowSopStore) {
         try {
-          const sop = await deps.invocationDeps.workflowSopStore.get(thread.backlogItemId);
+          const sop = await deps.invocationDeps.workflowSopStore.get(routeThread.backlogItemId);
           if (sop) {
             sopStageHint = {
               stage: sop.stage,
@@ -232,30 +148,17 @@ export async function* routeSerial(
     }
   }
 
-  // F155: Match raw user message against guide registry (only if no existing guide state)
-  if (!guideCandidate && !hiddenForeignNonTerminalGuideState) {
-    try {
-      const { resolveGuideForIntent } = await import('../../../../guides/guide-registry-loader.js');
-      const guideMatches = resolveGuideForIntent(message);
-      if (guideMatches.length > 0) {
-        const top = guideMatches[0];
-        guideCandidate = {
-          id: top.id,
-          name: top.name,
-          estimatedTime: top.estimatedTime,
-          status: 'offered',
-          isNewOffer: true,
-        };
-        guideOfferOwner = targetCats[0];
-        log.info(
-          { guideId: top.id, guideName: top.name, score: top.score },
-          '[F155] guide candidate matched at routing layer',
-        );
-      }
-    } catch {
-      /* best-effort: guide matching failure does not block invocation */
-    }
-  }
+  // F155: Guide interceptor — resolve existing state + match new candidates
+  const guideCtx = await prepareGuideContext({
+    thread: routeThread,
+    guideSessionStore: deps.invocationDeps.guideSessionStore,
+    targetCats,
+    message,
+    userId,
+    threadId,
+    log,
+    dismissTracker: deps.invocationDeps.dismissTracker,
+  });
 
   try {
     while (index < worklist.length) {
@@ -348,21 +251,7 @@ export async function* routeSerial(
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         ...(bootcampState ? { bootcampState, threadId } : {}),
-        ...(guideCandidate &&
-        (guideCandidate.status === 'completed'
-          ? shouldHandleCompletedGuide(guideCompletionOwner, targetCatIds, guideCompletionFallbackCatId, catId)
-          : guideCandidate.status === 'offered' || guideCandidate.status === 'awaiting_choice'
-            ? shouldHandleOfferedGuide(
-                guideOfferOwner,
-                targetCatIds,
-                guideOfferSelectionFallbackCatId,
-                catId,
-                Boolean(guideCandidate.userSelection),
-                guideCandidate.status === 'awaiting_choice',
-              )
-            : true)
-          ? { guideCandidate, threadId }
-          : {}),
+        ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
       });
 
       // F24 Phase E: Bootstrap context for Session #2+
@@ -1341,29 +1230,19 @@ export async function* routeSerial(
       }
 
       // F155: Ack guide completion only after cat produced visible output.
-      // Skip ack on error-only turns so next turn retries delivery.
-      if (
-        catProducedOutput &&
-        guideCandidate?.status === 'completed' &&
-        shouldHandleCompletedGuide(guideCompletionOwner, targetCatIds, guideCompletionFallbackCatId, catId) &&
-        deps.invocationDeps.threadStore
-      ) {
-        try {
-          const thread = await deps.invocationDeps.threadStore.get(threadId);
-          const gs = thread?.guideState;
-          if (
-            thread &&
-            gs &&
-            canAccessGuideState(thread, gs, userId) &&
-            gs.guideId === guideCandidate.id &&
-            gs.status === 'completed' &&
-            !gs.completionAcked
-          ) {
-            await deps.invocationDeps.threadStore.updateGuideState(threadId, { ...gs, completionAcked: true });
-          }
-        } catch {
-          /* best-effort: ack failure means next turn re-injects, which is acceptable */
-        }
+      if (deps.invocationDeps.threadStore) {
+        const { createGuideStoreBridge } = await import('../../../../guides/GuideSessionRepository.js');
+        const sessionStore = deps.invocationDeps.guideSessionStore!;
+        await ackGuideCompletion({
+          ctx: guideCtx,
+          catId,
+          catProducedOutput,
+          targetCatIds,
+          threadId,
+          userId,
+          guideStore: createGuideStoreBridge(sessionStore),
+          threadStore: deps.invocationDeps.threadStore!,
+        });
       }
 
       // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)

@@ -7,136 +7,89 @@ import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 
 /**
- * F155: Guide Engine hook (v2 — tag-based engine)
+ * F155/B-5: Guide Engine hook — Zustand-driven (no CustomEvent bridge).
  *
- * - Listens for guide:start CustomEvent (from InteractiveBlock callback)
- * - Fetches flow definition from API at runtime (no build-time catalog)
- * - On completion, notifies backend to transition guideState active → completed
- * - Exposes window.__startGuide for dev testing
+ * Subscribes to guideStore.pendingStart (set by Socket.io → reduceServerEvent).
+ * Fetches flow definition from API, then calls startGuide().
+ * On completion, notifies backend to transition guideState active → completed.
  */
 export function useGuideEngine() {
   const startGuide = useGuideStore((s) => s.startGuide);
-  const advanceStep = useGuideStore((s) => s.advanceStep);
-  const exitGuide = useGuideStore((s) => s.exitGuide);
+  const clearPendingStart = useGuideStore((s) => s.clearPendingStart);
   const startInFlightRef = useRef<string | null>(null);
   const pendingRetryRef = useRef<string | null>(null);
-  const setPhase = useGuideStore((s) => s.setPhase);
 
-  // Start listener: fetch flow + trigger overlay
+  // React to pendingStart changes from Zustand (set by Socket.io or InteractiveBlock)
+  const pendingStart = useGuideStore((s) => s.pendingStart);
   useEffect(() => {
-    const isActiveThread = (threadId?: string) => !threadId || useChatStore.getState().currentThreadId === threadId;
+    if (!pendingStart) return;
+    const { guideId, threadId } = pendingStart;
 
-    const hasActiveSession = (flowId: string, threadId?: string) => {
+    const isActiveThread = () => useChatStore.getState().currentThreadId === threadId;
+    // Check thread BEFORE clearing to prevent race-drop during thread switch
+    if (!isActiveThread()) return;
+    clearPendingStart();
+
+    const hasActiveSession = () => {
       const session = useGuideStore.getState().session;
-      return (
-        !!session &&
-        session.flow.id === flowId &&
-        session.threadId === (threadId ?? null) &&
-        session.phase !== 'complete'
-      );
+      return !!session && session.flow.id === guideId && session.threadId === threadId && session.phase !== 'complete';
     };
 
-    const trigger = async (flowId: string, threadId?: string) => {
-      const startKey = `${threadId ?? 'no-thread'}::${flowId}`;
-      if (!isActiveThread(threadId)) {
-        return;
-      }
-      if (hasActiveSession(flowId, threadId)) {
-        return;
-      }
+    const trigger = async () => {
+      const startKey = `${threadId}::${guideId}`;
+      if (!isActiveThread() || hasActiveSession()) return;
       if (startInFlightRef.current === startKey) {
         pendingRetryRef.current = startKey;
         return;
       }
       startInFlightRef.current = startKey;
       try {
-        const res = await apiFetch(`/api/guide-flows/${encodeURIComponent(flowId)}`);
+        const res = await apiFetch(`/api/guide-flows/${encodeURIComponent(guideId)}`);
         if (!res.ok) {
-          // Don't set pendingRetryRef — that would trigger immediate self-loop via finally.
-          // startInFlightRef clears in finally; next guide_start event (socket replay) can retry.
           console.error(`[Guide] Flow fetch failed (${res.status}), awaiting next guide_start event`);
           return;
         }
         const flow = (await res.json()) as OrchestrationFlow;
         if (!flow?.steps?.length) {
-          console.warn(`[Guide] Empty flow: ${flowId}`);
+          console.warn(`[Guide] Empty flow: ${guideId}`);
           return;
         }
-        if (!isActiveThread(threadId)) return;
-        if (hasActiveSession(flowId, threadId)) return;
+        if (!isActiveThread() || hasActiveSession()) return;
         startGuide(flow, threadId);
       } catch (err) {
-        console.error(`[Guide] Failed to fetch flow "${flowId}":`, err);
+        console.error(`[Guide] Failed to fetch flow "${guideId}":`, err);
       } finally {
         if (startInFlightRef.current === startKey) {
           startInFlightRef.current = null;
         }
-        if (pendingRetryRef.current === startKey && isActiveThread(threadId) && !hasActiveSession(flowId, threadId)) {
+        if (pendingRetryRef.current === startKey && isActiveThread() && !hasActiveSession()) {
           pendingRetryRef.current = null;
           queueMicrotask(() => {
-            void trigger(flowId, threadId);
+            void trigger();
           });
         }
       }
     };
+    trigger();
+  }, [pendingStart, startGuide, clearPendingStart]);
 
+  // Dev testing helper
+  useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__startGuide = trigger;
-
-    const handleGuideStart = (e: Event) => {
-      const detail = (e as CustomEvent<{ flowId: string; threadId?: string }>).detail;
-      if (detail?.flowId) trigger(detail.flowId, detail.threadId);
+    (window as any).__startGuide = (flowId: string, threadId?: string) => {
+      useGuideStore.getState().reduceServerEvent({
+        action: 'start',
+        guideId: flowId,
+        threadId: threadId ?? useChatStore.getState().currentThreadId ?? '',
+      });
     };
-
-    const handleGuideControl = (e: Event) => {
-      const detail = (
-        e as CustomEvent<{
-          action: 'next' | 'skip' | 'exit';
-          guideId?: string;
-          threadId?: string;
-        }>
-      ).detail;
-      if (!detail?.action) return;
-
-      const session = useGuideStore.getState().session;
-      if (!session) return;
-      if (detail.guideId && detail.guideId !== session.flow.id) return;
-      if (detail.threadId && detail.threadId !== session.threadId) return;
-
-      switch (detail.action) {
-        case 'next':
-        case 'skip':
-          advanceStep();
-          break;
-        case 'exit':
-          exitGuide();
-          break;
-      }
-    };
-
-    const handleGuideComplete = (e: Event) => {
-      const detail = (e as CustomEvent<{ guideId?: string; threadId?: string }>).detail;
-      const session = useGuideStore.getState().session;
-      if (!session) return;
-      if (detail?.guideId && detail.guideId !== session.flow.id) return;
-      if (detail?.threadId && detail.threadId !== session.threadId) return;
-      setPhase('complete');
-    };
-
-    window.addEventListener('guide:start', handleGuideStart);
-    window.addEventListener('guide:control', handleGuideControl);
-    window.addEventListener('guide:complete', handleGuideComplete);
     return () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (window as any).__startGuide;
-      window.removeEventListener('guide:start', handleGuideStart);
-      window.removeEventListener('guide:control', handleGuideControl);
-      window.removeEventListener('guide:complete', handleGuideComplete);
     };
-  }, [advanceStep, exitGuide, setPhase, startGuide]);
+  }, []);
 
   // Completion callback: when phase becomes 'complete', notify backend.
-  // The overlay blocks dismiss until markCompletionPersisted() is called.
   const session = useGuideStore((s) => s.session);
   const markCompletionPersisted = useGuideStore((s) => s.markCompletionPersisted);
   const markCompletionFailed = useGuideStore((s) => s.markCompletionFailed);
