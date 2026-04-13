@@ -87,22 +87,26 @@ function firstHeaderValue(value: string | string[] | undefined): string | undefi
   return Array.isArray(value) ? value[0] : value;
 }
 
+type DeliveryThreadResolutionCode = 'STALE_INVOCATION' | 'INVALID_CALLBACK_CREDENTIALS';
+
 function resolveDeliveryThreadId(
   request: { headers: Record<string, string | string[] | undefined> },
   body: { deliveryThreadId?: string; invocationId?: string; callbackToken?: string },
   registry?: InvocationRegistry,
-): { deliveryThreadId: string | null; staleIgnored: boolean } {
-  if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, staleIgnored: false };
-  if (!registry) return { deliveryThreadId: null, staleIgnored: false };
+): { deliveryThreadId: string | null; code: DeliveryThreadResolutionCode | null } {
+  if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, code: null };
+  if (!registry) return { deliveryThreadId: null, code: null };
 
   const invocationId = body.invocationId ?? firstHeaderValue(request.headers['x-invocation-id']);
   const callbackToken = body.callbackToken ?? firstHeaderValue(request.headers['x-callback-token']);
-  if (!invocationId || !callbackToken) return { deliveryThreadId: null, staleIgnored: false };
+  const hasAnyCallbackCredential = Boolean(invocationId || callbackToken);
+  if (!hasAnyCallbackCredential) return { deliveryThreadId: null, code: null };
+  if (!invocationId || !callbackToken) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
 
   const record = registry.verify(invocationId, callbackToken);
-  if (!record) return { deliveryThreadId: null, staleIgnored: false };
-  if (!registry.isLatest(invocationId)) return { deliveryThreadId: null, staleIgnored: true };
-  return { deliveryThreadId: record.threadId, staleIgnored: false };
+  if (!record) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
+  if (!registry.isLatest(invocationId)) return { deliveryThreadId: null, code: 'STALE_INVOCATION' };
+  return { deliveryThreadId: record.threadId, code: null };
 }
 
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
@@ -289,11 +293,18 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       : { label: template.label, category: template.category, description: template.description };
 
     const resolution = resolveDeliveryThreadId(request, body, registry);
-    if (resolution.staleIgnored) {
+    if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {
         error: 'Stale callback invocation superseded by a newer invocation',
         code: 'STALE_INVOCATION',
+      };
+    }
+    if (resolution.code === 'INVALID_CALLBACK_CREDENTIALS') {
+      reply.status(401);
+      return {
+        error: 'Invalid callback credentials',
+        code: 'INVALID_CALLBACK_CREDENTIALS',
       };
     }
 
@@ -372,11 +383,18 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       : { label: template.label, category: template.category, description: template.description };
 
     const resolution = resolveDeliveryThreadId(request, body, registry);
-    if (resolution.staleIgnored) {
+    if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {
         error: 'Stale callback invocation superseded by a newer invocation',
         code: 'STALE_INVOCATION',
+      };
+    }
+    if (resolution.code === 'INVALID_CALLBACK_CREDENTIALS') {
+      reply.status(401);
+      return {
+        error: 'Invalid callback credentials',
+        code: 'INVALID_CALLBACK_CREDENTIALS',
       };
     }
 

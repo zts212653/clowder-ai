@@ -469,6 +469,25 @@ describe('Schedule Routes', () => {
       const body = res.json();
       assert.equal(body.code, 'STALE_INVOCATION');
     });
+
+    it('returns 401 for invalid callback credentials in preview', async () => {
+      const { invocationId } = registry.create('user-1', 'opus', 'thread-preview-invalid');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks/preview',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'invalid-preview' },
+          invocationId,
+          callbackToken: 'invalid-token',
+        },
+      });
+
+      assert.equal(res.statusCode, 401);
+      const body = res.json();
+      assert.equal(body.code, 'INVALID_CALLBACK_CREDENTIALS');
+    });
   });
 
   describe('POST /api/schedule/tasks — targetCatId flows through to reminder execute', () => {
@@ -725,6 +744,27 @@ describe('Schedule Routes', () => {
       const body = res.json();
       assert.equal(body.code, 'STALE_INVOCATION');
       const stored = store.getAll().find((d) => d.params?.message === 'stale-create');
+      assert.equal(stored, undefined);
+    });
+
+    it('returns 401 and does not persist for invalid callback credentials', async () => {
+      const { invocationId } = registry.create('user-1', 'opus', 'thread-create-invalid');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'invalid-create' },
+          invocationId,
+          callbackToken: 'invalid-token',
+        },
+      });
+
+      assert.equal(res.statusCode, 401);
+      const body = res.json();
+      assert.equal(body.code, 'INVALID_CALLBACK_CREDENTIALS');
+      const stored = store.getAll().find((d) => d.params?.message === 'invalid-create');
       assert.equal(stored, undefined);
     });
   });
