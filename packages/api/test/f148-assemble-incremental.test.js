@@ -499,6 +499,17 @@ After text`;
     assert.ok(cleaned.includes('After text'), 'text after envelope preserved');
   });
 
+  test('P2-2: sanitizeInjectedContent strips leaked tool-call payload suffix', async () => {
+    const { sanitizeInjectedContent } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+
+    const injected = `继续落到实现。先补链路和测试。
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"sed -n '1,220p' foo.ts"}}]}`;
+
+    const cleaned = sanitizeInjectedContent(injected);
+    assert.equal(cleaned, '继续落到实现。先补链路和测试。');
+  });
+
   // --- Phase D: Coverage Map + Thread Memory injection ---
 
   test('AC-D2: smart window includes coverage map JSON', async () => {
