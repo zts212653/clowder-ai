@@ -68,4 +68,3 @@ describe('callback thread scope resolver', () => {
     assert.match(result.body.error, /cross-thread scope checks/);
   });
 });
-

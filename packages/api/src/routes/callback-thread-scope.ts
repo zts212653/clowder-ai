@@ -66,4 +66,3 @@ export async function resolveCallbackThreadScope(opts: ResolveCallbackThreadScop
 
   return { ok: true, threadId: requestedThreadId };
 }
-

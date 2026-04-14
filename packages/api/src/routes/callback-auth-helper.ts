@@ -1,5 +1,8 @@
 import type { FastifyRequest } from 'fastify';
-import type { InvocationRecord, InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type {
+  InvocationRecord,
+  InvocationRegistry,
+} from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { callbackAuthSchema } from './callback-auth-schema.js';
 import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
 

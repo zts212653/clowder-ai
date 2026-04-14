@@ -15,12 +15,15 @@
  */
 
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type {
+  InvocationRecord,
+  InvocationRegistry,
+} from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { GlobalControlStore } from '../infrastructure/scheduler/GlobalControlStore.js';
 import type { PackTemplateStore } from '../infrastructure/scheduler/PackTemplateStore.js';
-import type { InvocationRecord, InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   notifyTaskDeleted,
   notifyTaskPaused,
@@ -28,7 +31,7 @@ import {
   notifyTaskResumed,
 } from '../infrastructure/scheduler/schedule-notify.js';
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
-import type { DeliverOpts, TriggerSpec } from '../infrastructure/scheduler/types.js';
+import type { ScheduleLifecycleNotifier, TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { resolveOptionalCallbackAuth } from './callback-auth-helper.js';
 import { resolveCallbackThreadScope } from './callback-thread-scope.js';
@@ -71,8 +74,8 @@ export interface ScheduleRoutesOptions {
   taskStore?: ITaskStore;
   /** Optional thread store for callback cross-thread delivery scope checks */
   threadStore?: IThreadStore;
-  /** #415: deliver function for lifecycle notifications */
-  deliver?: (opts: DeliverOpts) => Promise<string>;
+  /** #415: toast notifier for lifecycle notifications */
+  notifyLifecycle?: ScheduleLifecycleNotifier;
 }
 
 /** Extract threadId from subjectKey — handles both thread-xxx (real tasks) and thread:xxx formats */
@@ -100,7 +103,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     packTemplateStore,
     taskStore,
     threadStore,
-    deliver,
+    notifyLifecycle,
   } = opts;
 
   app.addHook('preHandler', async (request, reply) => {
@@ -417,7 +420,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     taskRunner.registerDynamic(spec, id);
 
     // #415: lifecycle notification — task registered
-    notifyTaskRegistered(deliver, def);
+    notifyTaskRegistered(notifyLifecycle, def);
 
     return { success: true, task: { id, ...display, trigger } };
   });
@@ -441,7 +444,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     taskRunner.unregister(id);
 
     // #415: lifecycle notification — task deleted
-    if (defForNotify) notifyTaskDeleted(deliver, defForNotify);
+    if (defForNotify) notifyTaskDeleted(notifyLifecycle, defForNotify);
 
     return { success: true };
   });
@@ -471,7 +474,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     if (!body.enabled) {
       // Pause: unregister from runtime
       taskRunner.unregister(id);
-      if (def) notifyTaskPaused(deliver, def);
+      if (def) notifyTaskPaused(notifyLifecycle, def);
     } else {
       // Resume: re-register in runtime
       if (def) {
@@ -488,7 +491,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
           } catch {
             // Already registered — ignore
           }
-          notifyTaskResumed(deliver, def);
+          notifyTaskResumed(notifyLifecycle, def);
         } else {
           dynamicTaskStore.setEnabled(id, false); // roll back — resume failed
           reply.status(500);

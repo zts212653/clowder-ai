@@ -601,7 +601,9 @@ describe('Schedule Routes', () => {
       const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
       const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
-      const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+      const { InvocationRegistry } = await import(
+        '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+      );
 
       invocationRegistry = new InvocationRegistry();
       callbackCreds = invocationRegistry.create('callback-user-7', 'codex', 'thread-callback-7');

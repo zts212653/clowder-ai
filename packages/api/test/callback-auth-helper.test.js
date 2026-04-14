@@ -4,14 +4,12 @@ import { describe, test } from 'node:test';
 describe('callback auth helper', () => {
   test('returns panel mode when callback credentials are absent', async () => {
     const { resolveOptionalCallbackAuth } = await import('../dist/routes/callback-auth-helper.js');
-    const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
     const registry = new InvocationRegistry();
 
-    const result = resolveOptionalCallbackAuth(
-      { body: {}, query: {}, headers: {} },
-      registry,
-      { requireLatest: true },
-    );
+    const result = resolveOptionalCallbackAuth({ body: {}, query: {}, headers: {} }, registry, { requireLatest: true });
 
     assert.equal(result.ok, true);
     assert.equal(result.record, null);
@@ -20,7 +18,9 @@ describe('callback auth helper', () => {
 
   test('returns INVALID_CALLBACK_CREDENTIALS when callback pair is incomplete', async () => {
     const { resolveOptionalCallbackAuth } = await import('../dist/routes/callback-auth-helper.js');
-    const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
     const registry = new InvocationRegistry();
 
     const result = resolveOptionalCallbackAuth(
@@ -40,7 +40,9 @@ describe('callback auth helper', () => {
 
   test('returns STALE_INVOCATION when invocation is no longer latest', async () => {
     const { resolveOptionalCallbackAuth } = await import('../dist/routes/callback-auth-helper.js');
-    const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
     const registry = new InvocationRegistry();
     const stale = registry.create('user-1', 'codex', 'thread-1');
     registry.create('user-1', 'codex', 'thread-1'); // supersede stale
