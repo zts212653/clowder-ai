@@ -379,19 +379,14 @@ describe('Schedule Routes', () => {
 
   describe('POST /api/schedule/tasks/preview (P1-1: draft step)', () => {
     let appDyn;
-    let registry;
 
     beforeEach(async () => {
       const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
       const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
-      const { InvocationRegistry } = await import(
-        '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
-      );
       const store = new DynamicTaskStore(db);
-      registry = new InvocationRegistry();
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry, registry });
+      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry });
       await appDyn.ready();
     });
 
@@ -407,6 +402,7 @@ describe('Schedule Routes', () => {
           templateId: 'reminder',
           trigger: { type: 'cron', expression: '0 9 * * *' },
           params: { message: 'hello' },
+          deliveryThreadId: 'thread-preview-1',
         },
       });
       assert.equal(res.statusCode, 200);
@@ -431,64 +427,18 @@ describe('Schedule Routes', () => {
       assert.equal(res.statusCode, 400);
     });
 
-    it('infers deliveryThreadId from callback auth in request body', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-from-callback');
+    it('rejects preview without deliveryThreadId when callback credentials are absent', async () => {
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks/preview',
         payload: {
           templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'hello' },
-          invocationId,
-          callbackToken,
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'missing-thread-preview' },
         },
       });
-      assert.equal(res.statusCode, 200);
-      const body = JSON.parse(res.payload);
-      assert.equal(body.draft.deliveryThreadId, 'thread-from-callback');
-    });
-
-    it('returns 409 stale invocation error for stale callback auth invocation', async () => {
-      const stale = registry.create('user-1', 'opus', 'thread-from-callback');
-      registry.create('user-1', 'opus', 'thread-from-callback');
-
-      const res = await appDyn.inject({
-        method: 'POST',
-        url: '/api/schedule/tasks/preview',
-        payload: {
-          templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'stale-preview' },
-          deliveryThreadId: 'thread-explicit-preview',
-          invocationId: stale.invocationId,
-          callbackToken: stale.callbackToken,
-        },
-      });
-
-      assert.equal(res.statusCode, 409);
-      const body = res.json();
-      assert.equal(body.code, 'STALE_INVOCATION');
-    });
-
-    it('returns 401 for invalid callback credentials in preview', async () => {
-      const { invocationId } = registry.create('user-1', 'opus', 'thread-preview-invalid');
-      const res = await appDyn.inject({
-        method: 'POST',
-        url: '/api/schedule/tasks/preview',
-        payload: {
-          templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'invalid-preview' },
-          deliveryThreadId: 'thread-explicit-preview',
-          invocationId,
-          callbackToken: 'invalid-token',
-        },
-      });
-
-      assert.equal(res.statusCode, 401);
-      const body = res.json();
-      assert.equal(body.code, 'INVALID_CALLBACK_CREDENTIALS');
+      assert.equal(res.statusCode, 400);
+      assert.match(res.json().error, /Missing deliveryThreadId/);
     });
   });
 
@@ -600,6 +550,7 @@ describe('Schedule Routes', () => {
           templateId: 'reminder',
           trigger: { type: 'interval', ms: 60000 },
           params: { message: 'forge-test', triggerUserId: 'evil-forged-user' },
+          deliveryThreadId: 'thread-trigger-1',
         },
       });
       assert.equal(createRes.statusCode, 200);
@@ -617,6 +568,7 @@ describe('Schedule Routes', () => {
           templateId: 'reminder',
           trigger: { type: 'interval', ms: 60000 },
           params: { message: 'query-forge-test' },
+          deliveryThreadId: 'thread-trigger-2',
         },
       });
       assert.equal(createRes.statusCode, 200);
@@ -634,6 +586,7 @@ describe('Schedule Routes', () => {
           templateId: 'reminder',
           trigger: { type: 'interval', ms: 60000 },
           params: 'oops-string',
+          deliveryThreadId: 'thread-trigger-3',
         },
       });
       assert.equal(res.statusCode, 400);
@@ -641,8 +594,8 @@ describe('Schedule Routes', () => {
     });
   });
 
-  describe('POST /api/schedule/tasks — callback auth infers deliveryThreadId', () => {
-    let appDyn, store, registry;
+  describe('POST /api/schedule/tasks — callback identity parity', () => {
+    let appDyn, store, invocationRegistry, callbackCreds;
 
     beforeEach(async () => {
       const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
@@ -651,10 +604,18 @@ describe('Schedule Routes', () => {
       const { InvocationRegistry } = await import(
         '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
       );
+
+      invocationRegistry = new InvocationRegistry();
+      callbackCreds = invocationRegistry.create('callback-user-7', 'codex', 'thread-callback-7');
+
       store = new DynamicTaskStore(db);
-      registry = new InvocationRegistry();
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry, registry });
+      await appDyn.register(sr, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        invocationRegistry,
+      });
       await appDyn.ready();
     });
 
@@ -663,113 +624,124 @@ describe('Schedule Routes', () => {
       await appDyn.close();
     });
 
-    it('uses callback-auth thread from request body when deliveryThreadId is omitted', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-body-auth');
-      const res = await appDyn.inject({
+    it('P1: callback-authenticated create defaults deliveryThreadId and triggerUserId from invocation record', async () => {
+      const createRes = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
         payload: {
+          invocationId: callbackCreds.invocationId,
+          callbackToken: callbackCreds.callbackToken,
           templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'body-auth-thread' },
-          invocationId,
-          callbackToken,
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'callback-create', triggerUserId: 'forged-user' },
+          createdBy: 'forged-cat',
         },
       });
-      assert.equal(res.statusCode, 200);
+      assert.equal(createRes.statusCode, 200);
 
-      const stored = store.getAll().find((d) => d.params?.message === 'body-auth-thread');
+      const stored = store.getAll().find((d) => d.params?.message === 'callback-create');
       assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.deliveryThreadId, 'thread-body-auth');
+      assert.equal(stored.params.triggerUserId, 'callback-user-7', 'must use callback invocation user identity');
+      assert.equal(stored.deliveryThreadId, 'thread-callback-7', 'must default to current invocation thread');
+      assert.equal(stored.createdBy, 'codex', 'must use callback invocation cat identity');
     });
 
-    it('falls back to callback-auth headers when body credentials are absent', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-header-auth');
-      const res = await appDyn.inject({
-        method: 'POST',
-        url: '/api/schedule/tasks',
-        headers: {
-          'x-invocation-id': invocationId,
-          'x-callback-token': callbackToken,
-        },
-        payload: {
-          templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'header-auth-thread' },
-        },
-      });
-      assert.equal(res.statusCode, 200);
-
-      const stored = store.getAll().find((d) => d.params?.message === 'header-auth-thread');
-      assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.deliveryThreadId, 'thread-header-auth');
-    });
-
-    it('prefers explicit deliveryThreadId over callback-auth inferred thread', async () => {
-      const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-from-callback');
-      const res = await appDyn.inject({
+    it('P1: callback-authenticated create rejects invalid credentials', async () => {
+      const createRes = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
         payload: {
-          templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'explicit-thread-wins' },
-          deliveryThreadId: 'thread-explicit',
-          invocationId,
-          callbackToken,
-        },
-      });
-      assert.equal(res.statusCode, 200);
-
-      const stored = store.getAll().find((d) => d.params?.message === 'explicit-thread-wins');
-      assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.deliveryThreadId, 'thread-explicit');
-    });
-
-    it('returns 409 stale invocation error and does not persist for stale callback auth invocation', async () => {
-      const stale = registry.create('user-1', 'opus', 'thread-stale');
-      registry.create('user-1', 'opus', 'thread-stale');
-
-      const res = await appDyn.inject({
-        method: 'POST',
-        url: '/api/schedule/tasks',
-        payload: {
-          templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'stale-create' },
-          deliveryThreadId: 'thread-explicit-create',
-          invocationId: stale.invocationId,
-          callbackToken: stale.callbackToken,
-        },
-      });
-
-      assert.equal(res.statusCode, 409);
-      const body = res.json();
-      assert.equal(body.code, 'STALE_INVOCATION');
-      const stored = store.getAll().find((d) => d.params?.message === 'stale-create');
-      assert.equal(stored, undefined);
-    });
-
-    it('returns 401 and does not persist for invalid callback credentials', async () => {
-      const { invocationId } = registry.create('user-1', 'opus', 'thread-create-invalid');
-      const res = await appDyn.inject({
-        method: 'POST',
-        url: '/api/schedule/tasks',
-        payload: {
-          templateId: 'reminder',
-          trigger: { type: 'once', delayMs: 1000 },
-          params: { message: 'invalid-create' },
-          deliveryThreadId: 'thread-explicit-create',
-          invocationId,
+          invocationId: callbackCreds.invocationId,
           callbackToken: 'invalid-token',
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'callback-invalid' },
         },
       });
+      assert.equal(createRes.statusCode, 401);
+    });
 
-      assert.equal(res.statusCode, 401);
-      const body = res.json();
-      assert.equal(body.code, 'INVALID_CALLBACK_CREDENTIALS');
-      const stored = store.getAll().find((d) => d.params?.message === 'invalid-create');
-      assert.equal(stored, undefined);
+    it('P1: callback-authenticated preview defaults deliveryThreadId from invocation record', async () => {
+      const previewRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks/preview',
+        payload: {
+          invocationId: callbackCreds.invocationId,
+          callbackToken: callbackCreds.callbackToken,
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'callback-preview' },
+        },
+      });
+      assert.equal(previewRes.statusCode, 200);
+
+      const draft = previewRes.json().draft;
+      assert.equal(draft.deliveryThreadId, 'thread-callback-7', 'preview must default to current invocation thread');
+    });
+
+    it('P1: callback-authenticated create rejects partial credentials with INVALID_CALLBACK_CREDENTIALS', async () => {
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          invocationId: callbackCreds.invocationId,
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'callback-partial' },
+        },
+      });
+      assert.equal(createRes.statusCode, 401);
+      assert.equal(createRes.json().error, 'INVALID_CALLBACK_CREDENTIALS');
+    });
+
+    it('P1: callback-authenticated create rejects stale invocation credentials', async () => {
+      const staleCreds = invocationRegistry.create('callback-user-7', 'codex', 'thread-callback-7');
+      invocationRegistry.create('callback-user-7', 'codex', 'thread-callback-7'); // supersedes staleCreds
+
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          invocationId: staleCreds.invocationId,
+          callbackToken: staleCreds.callbackToken,
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'callback-stale' },
+        },
+      });
+      assert.equal(createRes.statusCode, 409);
+      assert.equal(createRes.json().error, 'STALE_INVOCATION');
+    });
+
+    it('P1: callback-authenticated create rejects cross-thread delivery without threadStore', async () => {
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          invocationId: callbackCreds.invocationId,
+          callbackToken: callbackCreds.callbackToken,
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'callback-cross-thread-no-store' },
+          deliveryThreadId: 'thread-foreign',
+        },
+      });
+      assert.equal(createRes.statusCode, 503);
+      assert.match(createRes.json().error, /cross-thread scheduler delivery/);
+    });
+
+    it('P1: non-callback create rejects missing deliveryThreadId', async () => {
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'missing-thread-create' },
+        },
+      });
+      assert.equal(createRes.statusCode, 400);
+      assert.match(createRes.json().error, /Missing deliveryThreadId/);
     });
   });
 
@@ -793,6 +765,7 @@ describe('Schedule Routes', () => {
           templateId: 'reminder',
           trigger: { type: 'interval', ms: 60000 },
           params: { message: 'test' },
+          deliveryThreadId: 'thread-patch-1',
         },
       });
     });
