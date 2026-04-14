@@ -7,6 +7,12 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { CafeIcon } from './CafeIcons';
+import {
+  dispatchGuideStartIfNeeded,
+  GUIDE_PREVIEW_CALLBACK_PATH,
+  resolveSafeInteractiveCallbackEndpoint,
+  shouldKeepGuideOfferInteractive,
+} from './guideClientActions';
 
 // ── Pure function (exported for testing) ────────────────────
 
@@ -52,53 +58,6 @@ function patchBlockState(messageId: string, blockId: string, patch: { disabled?:
 
 function dispatchInteractiveSend(text: string) {
   window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text } }));
-}
-
-const GUIDE_START_CALLBACK_PATH = '/api/guide-actions/start';
-const GUIDE_CANCEL_CALLBACK_PATH = '/api/guide-actions/cancel';
-const GUIDE_PREVIEW_CALLBACK_PATH = '/api/guide-actions/preview';
-const GUIDE_ACTIONS_CALLBACK_ALLOWLIST = new Set([
-  GUIDE_START_CALLBACK_PATH,
-  GUIDE_CANCEL_CALLBACK_PATH,
-  GUIDE_PREVIEW_CALLBACK_PATH,
-]);
-
-function resolveSafeInteractiveCallbackEndpoint(endpoint: string): string | null {
-  try {
-    const url = new URL(endpoint, window.location.origin);
-    if (url.origin !== window.location.origin) return null;
-    if (!GUIDE_ACTIONS_CALLBACK_ALLOWLIST.has(url.pathname)) return null;
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return null;
-  }
-}
-
-function shouldKeepGuideOfferInteractive(
-  block: RichInteractiveBlock,
-  selectedOption: InteractiveOption | undefined,
-): boolean {
-  if (!selectedOption || selectedOption.id !== 'preview') return false;
-  if (block.messageTemplate !== '引导流程：{selection}') return false;
-
-  const callbackEndpoints = new Set(
-    block.options
-      .map((option) =>
-        option.action?.type === 'callback' ? resolveSafeInteractiveCallbackEndpoint(option.action.endpoint) : null,
-      )
-      .filter((endpoint): endpoint is string => Boolean(endpoint)),
-  );
-
-  return callbackEndpoints.has(GUIDE_START_CALLBACK_PATH) || callbackEndpoints.has(GUIDE_CANCEL_CALLBACK_PATH);
-}
-
-function shouldDispatchLocalGuideStart(
-  payload: Record<string, unknown>,
-): payload is { guideId: string; threadId: string } {
-  const { currentThreadId } = useChatStore.getState();
-  return (
-    typeof payload.guideId === 'string' && typeof payload.threadId === 'string' && payload.threadId === currentThreadId
-  );
 }
 
 /** Render option icon: prefer SVG icon over emoji */
@@ -622,17 +581,8 @@ export function InteractiveBlock({
             return;
           }
 
-          // F155: Trigger guide overlay directly — don't rely on socket round-trip
-          if (safeEndpoint === GUIDE_START_CALLBACK_PATH && payload && 'guideId' in payload) {
-            const p = payload as Record<string, unknown>;
-            if (shouldDispatchLocalGuideStart(p)) {
-              window.dispatchEvent(
-                new CustomEvent('guide:start', {
-                  detail: { flowId: p.guideId, threadId: p.threadId },
-                }),
-              );
-            }
-          }
+          // B-5: Trigger guide start via Zustand reducer (no CustomEvent bridge)
+          await dispatchGuideStartIfNeeded(safeEndpoint, payload as Record<string, unknown> | undefined);
 
           // F155: Preview callback self-heals state, then sends chat message
           // so the routing layer (now with awaiting_choice state) triggers the cat

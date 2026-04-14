@@ -216,6 +216,10 @@ export interface InvocationDeps {
   readonly tmuxGateway?: TmuxGateway;
   /** F089 Phase 2: agent pane registry for observability */
   readonly agentPaneRegistry?: AgentPaneRegistry;
+  /** F155 B-4: Independent guide session store (optional, fallback to threadStore-backed bridge) */
+  readonly guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
+  /** F155 B-6: Dismiss tracker for guide offer suppression */
+  readonly dismissTracker?: import('../../../../guides/GuideDismissTracker.js').IGuideDismissTracker;
   /** F091: Lookup signal articles linked to a thread for context injection */
   readonly signalArticleLookup?: (threadId: string) => Promise<
     readonly {

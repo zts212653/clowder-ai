@@ -52,6 +52,27 @@ function GuideOverlayInner() {
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const rafRef = useRef<number>(0);
   const lastRectRef = useRef<{ t: number; l: number; w: number; h: number } | null>(null);
+  const previousFocusRef = useRef<Element | null>(null);
+  const hudRef = useRef<HTMLDivElement>(null);
+
+  // A-3: Save focus on mount, restore on unmount, move focus into HUD
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement;
+    // Move focus into HUD on next frame (after initial render)
+    requestAnimationFrame(() => {
+      const hud = hudRef.current;
+      if (hud) {
+        const firstFocusable = hud.querySelector<HTMLElement>('button, [tabindex]:not([tabindex="-1"])');
+        firstFocusable?.focus();
+      }
+    });
+    return () => {
+      const prev = previousFocusRef.current;
+      if (prev && prev instanceof HTMLElement) {
+        prev.focus();
+      }
+    };
+  }, []);
 
   const currentStep =
     session && session.currentStepIndex < session.flow.steps.length
@@ -114,16 +135,63 @@ function GuideOverlayInner() {
   // Auto-advance: listen for interaction with target element
   useAutoAdvance(currentStep, advanceStep, session?.phase === 'active');
 
-  // Keyboard: Escape disabled during guide to prevent accidental exit (KD-14).
-  // Users must click the explicit "退出" button in the HUD.
+  // A-3: Focus trap — Tab cycles between HUD and target element (passthrough).
+  // Escape disabled (KD-14): users must click "退出" button.
   useEffect(() => {
     if (!session) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') e.preventDefault();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'Tab' && currentStep) {
+        const targetEl = document.querySelector(buildGuideTargetSelector(currentStep.target));
+        const hud = hudRef.current;
+        if (!hud) return;
+
+        const focusableInHud = hud.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])');
+        const lastHudFocusable = focusableInHud[focusableInHud.length - 1];
+        const firstHudFocusable = focusableInHud[0];
+        const isInHud = hud.contains(document.activeElement);
+        const isOnTarget = targetEl && document.activeElement === targetEl;
+
+        // If focus escaped the trap (neither in HUD nor on target), pull it back
+        if (!isInHud && !isOnTarget) {
+          e.preventDefault();
+          firstHudFocusable?.focus();
+          return;
+        }
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstHudFocusable && targetEl) {
+            e.preventDefault();
+            (targetEl as HTMLElement).focus();
+          } else if (isOnTarget) {
+            e.preventDefault();
+            lastHudFocusable?.focus();
+          } else if (document.activeElement === firstHudFocusable) {
+            // No target element available — wrap within HUD
+            e.preventDefault();
+            lastHudFocusable?.focus();
+          }
+        } else {
+          if (document.activeElement === lastHudFocusable && targetEl) {
+            e.preventDefault();
+            (targetEl as HTMLElement).focus();
+          } else if (isOnTarget) {
+            e.preventDefault();
+            firstHudFocusable?.focus();
+          } else if (document.activeElement === lastHudFocusable) {
+            // No target element available — wrap within HUD
+            e.preventDefault();
+            firstHudFocusable?.focus();
+          }
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [session]);
+  }, [session, currentStep]);
 
   // Reconciliation dismiss: when completion failed, cancel server-side active state before local cleanup
   const dismissWithReconciliation = () => {
@@ -136,6 +204,20 @@ function GuideOverlayInner() {
     }
     exitGuide();
   };
+
+  // A-3: Throttled aria-live announcements — separate from HUD to avoid
+  // rapid-fire screen reader noise during fast auto-advance transitions.
+  const [liveAnnouncement, setLiveAnnouncement] = useState('');
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!currentStep) return;
+    const text = `步骤 ${(session?.currentStepIndex ?? 0) + 1}/${session?.flow.steps.length ?? 0}: ${currentStep.tips}`;
+    if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    liveTimerRef.current = setTimeout(() => setLiveAnnouncement(text), 500);
+    return () => {
+      if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    };
+  }, [currentStep, session?.currentStepIndex, session?.flow.steps.length]);
 
   if (!session) return null;
 
@@ -183,7 +265,7 @@ function GuideOverlayInner() {
         height: targetRect.height + pad * 2,
         borderRadius: 'var(--guide-radius)',
         boxShadow: '0 0 0 9999px var(--guide-overlay-bg)',
-        transition: 'all var(--guide-motion-normal) ease-out',
+        transition: 'all var(--guide-transition-duration) ease-out',
         zIndex: 'var(--guide-z-overlay)' as unknown as number,
         pointerEvents: 'none' as const,
       }
@@ -205,10 +287,10 @@ function GuideOverlayInner() {
         borderRadius: 'var(--guide-radius)',
         border: '2px solid var(--guide-cutout-ring)',
         boxShadow: '0 0 12px var(--guide-cutout-shadow), inset 0 0 8px var(--guide-cutout-shadow)',
-        transition: 'all var(--guide-motion-normal) ease-out',
+        transition: 'all var(--guide-transition-duration) ease-out',
         zIndex: 1105,
         pointerEvents: 'none' as const,
-        animation: 'guide-breathe 1.8s ease-in-out infinite',
+        animation: 'var(--guide-breathe-animation)',
       }
     : {};
 
@@ -217,6 +299,10 @@ function GuideOverlayInner() {
 
   return (
     <>
+      {/* A-3: Throttled screen reader announcement */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </div>
       <div style={cutoutStyle} aria-hidden="true" />
       {targetRect && <div style={ringStyle} aria-hidden="true" />}
 
@@ -273,6 +359,7 @@ function GuideOverlayInner() {
 
       {/* HUD: tips + exit only */}
       <GuideHUD
+        ref={hudRef}
         step={currentStep}
         stepIndex={session.currentStepIndex}
         totalSteps={session.flow.steps.length}
@@ -391,30 +478,28 @@ function useAutoAdvance(step: OrchestrationStep | null, advance: () => void, isA
 
 /* ── Minimal HUD: tips + exit + progress ── */
 
-function GuideHUD({
-  step,
-  stepIndex,
-  totalSteps,
-  phase,
-  targetRect,
-  onExit,
-}: {
+interface GuideHUDProps {
   step: OrchestrationStep;
   stepIndex: number;
   totalSteps: number;
   phase: string;
   targetRect: DOMRect | null;
   onExit: () => void;
-}) {
+}
+
+const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideHUD(
+  { step, stepIndex, totalSteps, phase, targetRect, onExit },
+  ref,
+) {
   const style = computeHUDPosition(targetRect);
 
   return (
     <div
+      ref={ref}
       className="fixed z-[var(--guide-z-hud)] w-[280px] animate-guide-hud-enter rounded-[var(--guide-radius)] border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-xl"
       style={style}
       role="dialog"
       aria-label="引导面板"
-      aria-live="polite"
     >
       {/* Progress dots */}
       <div className="mb-3 flex gap-1">
@@ -455,7 +540,7 @@ function GuideHUD({
       </div>
     </div>
   );
-}
+});
 
 /* ── Position helpers ── */
 

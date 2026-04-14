@@ -26,7 +26,7 @@ import {
   notifyTaskResumed,
 } from '../infrastructure/scheduler/schedule-notify.js';
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
-import type { DeliverOpts, TriggerSpec } from '../infrastructure/scheduler/types.js';
+import type { ScheduleLifecycleNotifier, TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { governanceRoutes } from './schedule-governance.js';
 
@@ -63,8 +63,8 @@ export interface ScheduleRoutesOptions {
   packTemplateStore?: PackTemplateStore;
   /** #320: Unified task store for thread→subjectKey resolution */
   taskStore?: ITaskStore;
-  /** #415: deliver function for lifecycle notifications */
-  deliver?: (opts: DeliverOpts) => Promise<string>;
+  /** Ephemeral lifecycle notifications for scheduler management actions */
+  notifyLifecycle?: ScheduleLifecycleNotifier;
 }
 
 /** Extract threadId from subjectKey — handles both thread-xxx (real tasks) and thread:xxx formats */
@@ -81,8 +81,15 @@ function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void
 }
 
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
-  const { taskRunner, dynamicTaskStore, templateRegistry, globalControlStore, packTemplateStore, taskStore, deliver } =
-    opts;
+  const {
+    taskRunner,
+    dynamicTaskStore,
+    templateRegistry,
+    globalControlStore,
+    packTemplateStore,
+    taskStore,
+    notifyLifecycle,
+  } = opts;
 
   // GET /api/schedule/tasks
   // #320: Optional ?threadId= filter — resolves thread's task subjectKeys for cross-match
@@ -345,7 +352,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     taskRunner.registerDynamic(spec, id);
 
     // #415: lifecycle notification — task registered
-    notifyTaskRegistered(deliver, def);
+    notifyTaskRegistered(notifyLifecycle, def);
 
     return { success: true, task: { id, ...display, trigger } };
   });
@@ -369,7 +376,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     taskRunner.unregister(id);
 
     // #415: lifecycle notification — task deleted
-    if (defForNotify) notifyTaskDeleted(deliver, defForNotify);
+    if (defForNotify) notifyTaskDeleted(notifyLifecycle, defForNotify);
 
     return { success: true };
   });
@@ -399,7 +406,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     if (!body.enabled) {
       // Pause: unregister from runtime
       taskRunner.unregister(id);
-      if (def) notifyTaskPaused(deliver, def);
+      if (def) notifyTaskPaused(notifyLifecycle, def);
     } else {
       // Resume: re-register in runtime
       if (def) {
@@ -416,7 +423,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
           } catch {
             // Already registered — ignore
           }
-          notifyTaskResumed(deliver, def);
+          notifyTaskResumed(notifyLifecycle, def);
         } else {
           dynamicTaskStore.setEnabled(id, false); // roll back — resume failed
           reply.status(500);

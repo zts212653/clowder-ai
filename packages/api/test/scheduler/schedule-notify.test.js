@@ -40,76 +40,60 @@ describe('schedule-notify: notification functions', () => {
   it('notifyTaskRegistered sends to deliveryThreadId with label and time', async () => {
     const { notifyTaskRegistered } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     const calls = [];
-    const mockDeliver = async (opts) => {
-      calls.push(opts);
-      return 'msg-1';
-    };
-    notifyTaskRegistered(mockDeliver, makeDef());
-    await new Promise((r) => setTimeout(r, 20));
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskRegistered(mockNotify, makeDef());
     assert.equal(calls.length, 1);
     assert.equal(calls[0].threadId, 'thread-xyz');
-    assert.equal(calls[0].catId, 'system');
     assert.equal(calls[0].userId, 'user-42');
-    assert.ok(calls[0].content.includes('测试提醒'));
-    assert.ok(calls[0].content.includes('已创建'));
-    assert.ok(calls[0].content.includes('一次性'), 'should mention once for once-trigger');
+    assert.equal(calls[0].toast.type, 'info');
+    assert.equal(calls[0].toast.title, '定时任务已创建');
+    assert.ok(calls[0].toast.message.includes('测试提醒'));
+    assert.ok(calls[0].toast.message.includes('一次性'), 'should mention once for once-trigger');
+    assert.equal(calls[0].toast.lifecycleEvent, 'registered');
   });
 
   it('notifyTaskPaused sends pause message', async () => {
     const { notifyTaskPaused } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     const calls = [];
-    const mockDeliver = async (opts) => {
-      calls.push(opts);
-      return 'msg-1';
-    };
-    notifyTaskPaused(mockDeliver, makeDef());
-    await new Promise((r) => setTimeout(r, 20));
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskPaused(mockNotify, makeDef());
     assert.equal(calls.length, 1);
-    assert.ok(calls[0].content.includes('已暂停'));
+    assert.equal(calls[0].toast.title, '定时任务已暂停');
+    assert.ok(calls[0].toast.message.includes('已暂停'));
   });
 
   it('notifyTaskResumed sends resume message with next time', async () => {
     const { notifyTaskResumed } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     const calls = [];
-    const mockDeliver = async (opts) => {
-      calls.push(opts);
-      return 'msg-1';
-    };
-    notifyTaskResumed(mockDeliver, makeDef());
-    await new Promise((r) => setTimeout(r, 20));
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskResumed(mockNotify, makeDef());
     assert.equal(calls.length, 1);
-    assert.ok(calls[0].content.includes('已恢复'));
-    assert.ok(calls[0].content.includes('下次执行时间'));
+    assert.equal(calls[0].toast.title, '定时任务已恢复');
+    assert.ok(calls[0].toast.message.includes('下次执行时间'));
   });
 
   it('notifyTaskDeleted sends delete message', async () => {
     const { notifyTaskDeleted } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     const calls = [];
-    const mockDeliver = async (opts) => {
-      calls.push(opts);
-      return 'msg-1';
-    };
-    notifyTaskDeleted(mockDeliver, makeDef());
-    await new Promise((r) => setTimeout(r, 20));
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskDeleted(mockNotify, makeDef());
     assert.equal(calls.length, 1);
-    assert.ok(calls[0].content.includes('已删除'));
+    assert.equal(calls[0].toast.title, '定时任务已删除');
+    assert.ok(calls[0].toast.message.includes('已删除'));
   });
 
   it('notifyTaskFailed sends failure message with error', async () => {
     const { notifyTaskFailed } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     const calls = [];
-    const mockDeliver = async (opts) => {
-      calls.push(opts);
-      return 'msg-1';
-    };
-    notifyTaskFailed(mockDeliver, makeDef(), 'connection timeout');
-    await new Promise((r) => setTimeout(r, 20));
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskFailed(mockNotify, makeDef(), 'connection timeout');
     assert.equal(calls.length, 1);
-    assert.ok(calls[0].content.includes('执行失败'));
-    assert.ok(calls[0].content.includes('connection timeout'));
+    assert.equal(calls[0].toast.type, 'error');
+    assert.equal(calls[0].toast.title, '定时任务执行失败');
+    assert.ok(calls[0].toast.message.includes('connection timeout'));
   });
 
-  it('no-op when deliver is undefined', async () => {
+  it('no-op when notifier is undefined', async () => {
     const { notifyTaskRegistered } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     // Should not throw
     notifyTaskRegistered(undefined, makeDef());
@@ -118,13 +102,11 @@ describe('schedule-notify: notification functions', () => {
   it('no-op when deliveryThreadId is null', async () => {
     const { notifyTaskRegistered } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     let called = false;
-    const mockDeliver = async () => {
+    const mockNotify = () => {
       called = true;
-      return 'msg-1';
     };
-    notifyTaskRegistered(mockDeliver, makeDef({ deliveryThreadId: null }));
-    await new Promise((r) => setTimeout(r, 20));
-    assert.ok(!called, 'should not deliver when deliveryThreadId is null');
+    notifyTaskRegistered(mockNotify, makeDef({ deliveryThreadId: null }));
+    assert.ok(!called, 'should not notify when deliveryThreadId is null');
   });
 });
 
@@ -139,17 +121,14 @@ describe('TaskRunnerV2 — execution failure notification (#415)', () => {
     applyMigrations(db);
     const ledger = new RunLedger(db);
     const dynamicTaskStore = new DynamicTaskStore(db);
-    const deliverCalls = [];
-    const mockDeliver = async (opts) => {
-      deliverCalls.push(opts);
-      return 'msg-1';
-    };
+    const lifecycleCalls = [];
+    const mockNotifyLifecycle = (opts) => lifecycleCalls.push(opts);
     const noop = () => {};
     const runner = new TaskRunnerV2({
       logger: { info: noop, error: noop },
       ledger,
       dynamicTaskStore,
-      deliver: mockDeliver,
+      notifyLifecycle: mockNotifyLifecycle,
     });
 
     // Seed dynamic store
@@ -191,15 +170,15 @@ describe('TaskRunnerV2 — execution failure notification (#415)', () => {
     // Allow fire-and-forget to settle
     await new Promise((r) => setTimeout(r, 50));
 
-    assert.ok(deliverCalls.length >= 1, 'should have sent failure notification');
-    const failMsg = deliverCalls.find((c) => c.content.includes('执行失败'));
+    assert.ok(lifecycleCalls.length >= 1, 'should have sent failure notification');
+    const failMsg = lifecycleCalls.find((c) => c.toast.title.includes('执行失败'));
     assert.ok(failMsg, 'should contain failure notification');
     assert.equal(failMsg.threadId, 'thread-fail');
-    assert.ok(failMsg.content.includes('kaboom'));
+    assert.ok(failMsg.toast.message.includes('kaboom'));
     runner.stop();
   });
 
-  it('RUN_DELIVERED triggers notifyTaskSucceeded via onItemOutcome', async () => {
+  it('RUN_DELIVERED skips lifecycle toast for reminder tasks', async () => {
     const Database = (await import('better-sqlite3')).default;
     const db = new Database(':memory:');
     const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
@@ -209,17 +188,14 @@ describe('TaskRunnerV2 — execution failure notification (#415)', () => {
     applyMigrations(db);
     const ledger = new RunLedger(db);
     const dynamicTaskStore = new DynamicTaskStore(db);
-    const deliverCalls = [];
-    const mockDeliver = async (opts) => {
-      deliverCalls.push(opts);
-      return 'msg-1';
-    };
+    const lifecycleCalls = [];
+    const mockNotifyLifecycle = (opts) => lifecycleCalls.push(opts);
     const noop = () => {};
     const runner = new TaskRunnerV2({
       logger: { info: noop, error: noop },
       ledger,
       dynamicTaskStore,
-      deliver: mockDeliver,
+      notifyLifecycle: mockNotifyLifecycle,
     });
 
     dynamicTaskStore.insert({
@@ -257,10 +233,7 @@ describe('TaskRunnerV2 — execution failure notification (#415)', () => {
     await runner.triggerNow('dyn-ok-1');
     await new Promise((r) => setTimeout(r, 50));
 
-    const successMsg = deliverCalls.find((c) => c.content.includes('执行完成'));
-    assert.ok(successMsg, 'should contain success notification');
-    assert.equal(successMsg.threadId, 'thread-ok');
-    assert.ok(successMsg.content.includes('下次执行时间'), 'recurring task should include next fire time');
+    assert.equal(lifecycleCalls.length, 0, 'reminder runs should not emit redundant success lifecycle toasts');
     runner.stop();
   });
 });
@@ -282,28 +255,31 @@ describe('schedule-notify: notifyTaskSucceeded', () => {
   it('recurring task includes next fire time', async () => {
     const { notifyTaskSucceeded } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     const calls = [];
-    const mockDeliver = async (opts) => {
-      calls.push(opts);
-      return 'msg-1';
-    };
-    notifyTaskSucceeded(mockDeliver, makeDef2({ trigger: { type: 'interval', ms: 60000 } }));
-    await new Promise((r) => setTimeout(r, 20));
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskSucceeded(mockNotify, makeDef2({ templateId: 'web-digest', trigger: { type: 'interval', ms: 60000 } }));
     assert.equal(calls.length, 1);
-    assert.ok(calls[0].content.includes('本次执行完成'));
-    assert.ok(calls[0].content.includes('下次执行时间'));
+    assert.equal(calls[0].toast.title, '定时任务执行完成');
+    assert.ok(calls[0].toast.message.includes('下次执行时间'));
   });
 
   it('once task says task has ended', async () => {
     const { notifyTaskSucceeded } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
     const calls = [];
-    const mockDeliver = async (opts) => {
-      calls.push(opts);
-      return 'msg-1';
-    };
-    notifyTaskSucceeded(mockDeliver, makeDef2({ trigger: { type: 'once', fireAt: Date.now() } }));
-    await new Promise((r) => setTimeout(r, 20));
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskSucceeded(
+      mockNotify,
+      makeDef2({ templateId: 'web-digest', trigger: { type: 'once', fireAt: Date.now() } }),
+    );
     assert.equal(calls.length, 1);
-    assert.ok(calls[0].content.includes('已执行完成'));
-    assert.ok(calls[0].content.includes('自动结束'));
+    assert.ok(calls[0].toast.message.includes('已执行完成'));
+    assert.ok(calls[0].toast.message.includes('自动结束'));
+  });
+
+  it('reminder task success is intentionally silent', async () => {
+    const { notifyTaskSucceeded } = await import('../../dist/infrastructure/scheduler/schedule-notify.js');
+    const calls = [];
+    const mockNotify = (opts) => calls.push(opts);
+    notifyTaskSucceeded(mockNotify, makeDef2({ templateId: 'reminder', trigger: { type: 'interval', ms: 60000 } }));
+    assert.equal(calls.length, 0);
   });
 });

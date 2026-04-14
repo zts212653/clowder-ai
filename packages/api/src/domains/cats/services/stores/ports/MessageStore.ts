@@ -56,6 +56,16 @@ export interface StoredMessage {
     stream?: { invocationId: string };
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     targetCats?: string[];
+    scheduler?: {
+      hiddenTrigger?: boolean;
+      toast?: {
+        type: 'success' | 'error' | 'info';
+        title: string;
+        message: string;
+        duration: number;
+        lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
+      };
+    };
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];

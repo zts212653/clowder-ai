@@ -1046,16 +1046,12 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
 
   it('hydrated once trigger with past fireAt sends missed-window notification', async () => {
     const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
-    const deliverCalls = [];
-    const mockDeliver = async (opts) => {
-      deliverCalls.push(opts);
-      return 'msg-id';
-    };
+    const notifyCalls = [];
     const runner = new TaskRunnerV2({
       logger: silentLogger,
       ledger,
       dynamicTaskStore,
-      deliver: mockDeliver,
+      notifyLifecycle: (notice) => notifyCalls.push(notice),
     });
 
     const pastFireAt = Date.now() - 120_000;
@@ -1074,15 +1070,13 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
     const templateGetter = { get: () => null };
     runner.hydrateDynamic(dynamicTaskStore, templateGetter);
 
-    // Allow fire-and-forget deliver to complete
-    await new Promise((r) => setTimeout(r, 50));
-
-    assert.equal(deliverCalls.length, 1, 'should have sent missed-window notification');
-    assert.equal(deliverCalls[0].threadId, 'thread-abc');
-    assert.equal(deliverCalls[0].catId, 'system');
-    assert.equal(deliverCalls[0].userId, 'user-42');
-    assert.ok(deliverCalls[0].content.includes('天气查询'), 'notification should include task label');
-    assert.ok(deliverCalls[0].content.includes('错过'), 'notification should mention missed window');
+    assert.equal(notifyCalls.length, 1, 'should have sent missed-window notification');
+    assert.equal(notifyCalls[0].threadId, 'thread-abc');
+    assert.equal(notifyCalls[0].userId, 'user-42');
+    assert.equal(notifyCalls[0].toast.lifecycleEvent, 'missed_window');
+    assert.ok(notifyCalls[0].toast.title.includes('错过执行窗口'), 'notification title should mention missed window');
+    assert.ok(notifyCalls[0].toast.message.includes('天气查询'), 'notification should include task label');
+    assert.ok(notifyCalls[0].toast.message.includes('自动取消'), 'notification should explain auto-cancel');
     runner.stop();
   });
 

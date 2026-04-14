@@ -12,6 +12,8 @@ describe('F155 Guide callback routes', () => {
   let registry;
   let messageStore;
   let threadStore;
+  let guideSessionStore;
+  let guideBridge;
   let socketManager;
   let broadcasts;
   let emits;
@@ -22,10 +24,15 @@ describe('F155 Guide callback routes', () => {
     );
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { InMemoryGuideSessionStore, createGuideStoreBridge } = await import(
+      '../dist/domains/guides/GuideSessionRepository.js'
+    );
 
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
     threadStore = new ThreadStore();
+    guideSessionStore = new InMemoryGuideSessionStore();
+    guideBridge = createGuideStoreBridge(guideSessionStore);
     broadcasts = [];
     emits = [];
 
@@ -48,6 +55,7 @@ describe('F155 Guide callback routes', () => {
       messageStore,
       socketManager,
       threadStore,
+      guideSessionStore,
       ...overrides,
     });
     return app;
@@ -60,7 +68,7 @@ describe('F155 Guide callback routes', () => {
   }
 
   async function seedGuideState(threadId, guideId, status) {
-    await threadStore.updateGuideState(threadId, {
+    await guideBridge.set(threadId, {
       v: 1,
       guideId,
       status,
@@ -168,7 +176,7 @@ describe('F155 Guide callback routes', () => {
       const body = JSON.parse(res.body);
       assert.equal(body.error, 'guide_flow_invalid');
       assert.equal(body.message, 'broken flow yaml');
-      assert.equal((await threadStore.get(threadId)).guideState.status, 'offered');
+      assert.equal((await guideBridge.get(threadId)).status, 'offered');
       assert.equal(broadcasts.length, 0);
     });
   });

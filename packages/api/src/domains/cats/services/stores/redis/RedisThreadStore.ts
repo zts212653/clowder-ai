@@ -16,7 +16,6 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   BootcampStateV1,
   ConnectorHubStateV1,
-  GuideStateV1,
   IThreadStore,
   MentionActionabilityMode,
   Thread,
@@ -444,15 +443,6 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  async updateGuideState(threadId: string, state: GuideStateV1 | null): Promise<void> {
-    const key = ThreadKeys.detail(threadId);
-    if (state === null) {
-      await this.redis.hdel(key, 'guideState');
-    } else {
-      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'guideState', JSON.stringify(state));
-    }
-  }
-
   async updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (state === null) {
@@ -758,9 +748,6 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.connectorHubState) {
       result.connectorHubState = JSON.stringify(thread.connectorHubState);
     }
-    if (thread.guideState) {
-      result.guideState = JSON.stringify(thread.guideState);
-    }
     return result;
   }
 
@@ -846,16 +833,6 @@ export class RedisThreadStore implements IThreadStore {
         const parsed = JSON.parse(data.connectorHubState);
         if (parsed && typeof parsed === 'object' && parsed.v === 1) {
           result.connectorHubState = parsed as ConnectorHubStateV1;
-        }
-      } catch {
-        /* ignore malformed JSON */
-      }
-    }
-    if (data.guideState) {
-      try {
-        const parsed = JSON.parse(data.guideState);
-        if (parsed && typeof parsed === 'object' && parsed.v === 1) {
-          result.guideState = parsed as GuideStateV1;
         }
       } catch {
         /* ignore malformed JSON */

@@ -27,6 +27,11 @@ const EXPECTED_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
+  // Guide tools
+  'cat_cafe_update_guide_state',
+  'cat_cafe_guide_resolve',
+  'cat_cafe_start_guide',
+  'cat_cafe_guide_control',
   // Workflow SOP tools (F073 P1)
   'cat_cafe_update_workflow',
   // Multi-mention orchestration (F086 M1)
@@ -73,6 +78,11 @@ const EXPECTED_TOOLS = [
   'limb_pair_approve',
   // F101 Phase I: Game action tool
   'cat_cafe_submit_game_action',
+  // F155: Guide lifecycle tools
+  'cat_cafe_update_guide_state',
+  'cat_cafe_start_guide',
+  'cat_cafe_guide_resolve',
+  'cat_cafe_guide_control',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
@@ -97,12 +107,21 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
   'cat_cafe_register_pr_tracking',
+  'cat_cafe_update_guide_state',
+  'cat_cafe_guide_resolve',
+  'cat_cafe_start_guide',
+  'cat_cafe_guide_control',
   'cat_cafe_update_workflow',
   'cat_cafe_multi_mention',
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
   'cat_cafe_submit_game_action',
+  // F155: Guide lifecycle tools
+  'cat_cafe_update_guide_state',
+  'cat_cafe_start_guide',
+  'cat_cafe_guide_resolve',
+  'cat_cafe_guide_control',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',

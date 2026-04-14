@@ -172,6 +172,15 @@
   --guide-gap: 12px;
   --guide-motion-fast: 160ms;
   --guide-motion-normal: 260ms;
+  --guide-breathe-animation: guide-breathe 1.8s ease-in-out infinite;
+  --guide-transition-duration: var(--guide-motion-normal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --guide-breathe-animation: none;
+    --guide-transition-duration: 0ms;
+  }
 }
 
 /* --- Dark Mode: override semantic tokens only --- */
@@ -340,7 +349,7 @@ body {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
 
-/* F155: Guide Engine Animations */
+/* F155: Guide Engine Animations — wrapped for reduced-motion (A-3) */
 @keyframes guide-breathe {
   0%,
   100% {
@@ -389,12 +398,29 @@ body {
   }
 }
 
-.animate-guide-hud-enter {
-  animation: guide-hud-enter 160ms ease-out;
+@media (prefers-reduced-motion: no-preference) {
+  .animate-guide-hud-enter {
+    animation: guide-hud-enter 160ms ease-out;
+  }
+
+  .animate-guide-success {
+    animation: guide-success-flash 0.4s ease-out;
+  }
 }
 
-.animate-guide-success {
-  animation: guide-success-flash 0.4s ease-out;
+@media (prefers-reduced-motion: reduce) {
+  .animate-guide-hud-enter {
+    animation: none;
+  }
+
+  .animate-guide-success {
+    animation: none;
+  }
+
+  /* Disable breathe ring and transitions on guide overlay elements */
+  [style*="guide-breathe"] {
+    animation: none !important;
+  }
 }
 
 .animate-guide-error {

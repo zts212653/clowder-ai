@@ -251,6 +251,17 @@ export interface ChatMessage {
     stream?: { invocationId?: string };
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
+    /** Scheduler presentation metadata (hidden trigger / ephemeral lifecycle toast) */
+    scheduler?: {
+      hiddenTrigger?: boolean;
+      toast?: {
+        type: 'success' | 'error' | 'info';
+        title: string;
+        message: string;
+        duration: number;
+        lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
+      };
+    };
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
     /** F070: Governance blocked data for actionable bootstrap card */

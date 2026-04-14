@@ -125,14 +125,18 @@ function mergeMessageExtra(
   const crossPost = preferred?.crossPost ?? fallback?.crossPost;
   const stream = preferred?.stream ?? fallback?.stream;
   const targetCats = preferred?.targetCats ?? fallback?.targetCats;
+  const scheduler = preferred?.scheduler ?? fallback?.scheduler;
   const timeoutDiagnostics = preferred?.timeoutDiagnostics ?? fallback?.timeoutDiagnostics;
   const governanceBlocked = preferred?.governanceBlocked ?? fallback?.governanceBlocked;
-  if (!rich && !crossPost && !stream && !targetCats && !timeoutDiagnostics && !governanceBlocked) return undefined;
+  if (!rich && !crossPost && !stream && !targetCats && !scheduler && !timeoutDiagnostics && !governanceBlocked) {
+    return undefined;
+  }
   return {
     ...(rich ? { rich } : {}),
     ...(crossPost ? { crossPost } : {}),
     ...(stream ? { stream } : {}),
     ...(targetCats ? { targetCats } : {}),
+    ...(scheduler ? { scheduler } : {}),
     ...(timeoutDiagnostics ? { timeoutDiagnostics } : {}),
     ...(governanceBlocked ? { governanceBlocked } : {}),
   };
@@ -423,6 +427,23 @@ export function useChatHistory(threadId: string) {
               rich?: { v: number; blocks: unknown[] };
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
+              scheduler?: {
+                hiddenTrigger?: boolean;
+                toast?: {
+                  type: 'success' | 'error' | 'info';
+                  title: string;
+                  message: string;
+                  duration: number;
+                  lifecycleEvent:
+                    | 'registered'
+                    | 'paused'
+                    | 'resumed'
+                    | 'deleted'
+                    | 'succeeded'
+                    | 'failed'
+                    | 'missed_window';
+                };
+              };
             };
             timestamp: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
@@ -454,12 +475,13 @@ export function useChatHistory(threadId: string) {
               ...(m.metadata ? { metadata: m.metadata } : {}),
               ...(m.origin ? { origin: m.origin } : {}),
               ...(m.thinking ? { thinking: m.thinking } : {}),
-              ...(m.extra?.rich || m.extra?.crossPost || m.extra?.stream
+              ...(m.extra?.rich || m.extra?.crossPost || m.extra?.stream || m.extra?.scheduler
                 ? {
                     extra: {
                       ...(m.extra.rich ? { rich: m.extra.rich } : {}),
                       ...(m.extra.crossPost ? { crossPost: m.extra.crossPost } : {}),
                       ...(m.extra.stream ? { stream: m.extra.stream } : {}),
+                      ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
                     },
                   }
                 : {}),

@@ -109,6 +109,7 @@ function getConnectorTheme(connector: string | undefined): ConnectorTailwindThem
 export function ConnectorBubble({ message }: ConnectorBubbleProps) {
   const source = message.source;
   if (!source) return null;
+  if (message.extra?.scheduler?.hiddenTrigger) return null;
 
   const theme = getConnectorTheme(source.connector);
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;

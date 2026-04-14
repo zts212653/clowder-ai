@@ -57,6 +57,8 @@ export interface CallbackRoutesOptions {
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
+  /** F155 B-4: Independent guide session store */
+  guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** AgentRegistry for thread-cats MCP callback */
   agentRegistry?: { getAllEntries(): Map<string, unknown> };
   /** For post_message @mention → invocation triggering */
@@ -1370,6 +1372,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       registry,
       threadStore: opts.threadStore,
       socketManager,
+      ...(opts.guideSessionStore ? { guideSessionStore: opts.guideSessionStore } : {}),
       ...(opts.loadGuideFlow ? { loadGuideFlow: opts.loadGuideFlow } : {}),
     });
   }

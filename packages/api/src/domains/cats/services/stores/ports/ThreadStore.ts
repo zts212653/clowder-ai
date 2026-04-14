@@ -130,8 +130,6 @@ export interface Thread {
   deletedAt?: number | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
-  /** F155: Scene-based bidirectional guide state. */
-  guideState?: GuideStateV1;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
 }
@@ -268,8 +266,6 @@ export interface IThreadStore {
   updateVoiceMode(threadId: string, voiceMode: boolean): void | Promise<void>;
   /** F087: Get/update bootcamp state. */
   updateBootcampState(threadId: string, state: BootcampStateV1 | null): void | Promise<void>;
-  /** F155: Get/update guide state. */
-  updateGuideState(threadId: string, state: GuideStateV1 | null): void | Promise<void>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
   updateLastActive(threadId: string): void | Promise<void>;
@@ -576,16 +572,6 @@ export class ThreadStore implements IThreadStore {
       delete thread.bootcampState;
     } else {
       thread.bootcampState = state;
-    }
-  }
-
-  updateGuideState(threadId: string, state: GuideStateV1 | null): void {
-    const thread = this.get(threadId);
-    if (!thread) return;
-    if (state === null) {
-      delete thread.guideState;
-    } else {
-      thread.guideState = state;
     }
   }
 

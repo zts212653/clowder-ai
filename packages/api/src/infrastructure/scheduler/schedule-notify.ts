@@ -7,9 +7,12 @@
 
 import { getNextCronMs } from './cron-utils.js';
 import type { DynamicTaskDef } from './DynamicTaskStore.js';
-import type { DeliverOpts, TriggerSpec } from './types.js';
-
-type DeliverFn = (opts: DeliverOpts) => Promise<string>;
+import type {
+  ScheduleLifecycleNotifier,
+  SchedulerLifecycleEvent,
+  SchedulerToastPayload,
+  TriggerSpec,
+} from './types.js';
 
 /** Compute epoch ms of next fire time for a trigger */
 export function computeNextFireTime(trigger: TriggerSpec): number | null {
@@ -31,47 +34,93 @@ function label(def: DynamicTaskDef): string {
   return def.display?.label ?? def.templateId;
 }
 
-function fire(deliver: DeliverFn | undefined, def: DynamicTaskDef, content: string): void {
-  if (!deliver || !def.deliveryThreadId) return;
-  deliver({ threadId: def.deliveryThreadId, content, catId: 'system', userId: resolveUserId(def) }).catch(() => {});
+function fire(
+  notify: ScheduleLifecycleNotifier | undefined,
+  def: DynamicTaskDef,
+  event: SchedulerLifecycleEvent,
+  toast: Omit<SchedulerToastPayload, 'lifecycleEvent'>,
+): void {
+  if (!notify || !def.deliveryThreadId) return;
+  notify({
+    threadId: def.deliveryThreadId,
+    userId: resolveUserId(def),
+    toast: { ...toast, lifecycleEvent: event },
+  });
 }
 
-export function notifyTaskRegistered(deliver: DeliverFn | undefined, def: DynamicTaskDef): void {
+export function notifyTaskRegistered(notify: ScheduleLifecycleNotifier | undefined, def: DynamicTaskDef): void {
   const nextFire = computeNextFireTime(def.trigger);
   const timeStr = nextFire ? formatTime(nextFire) : '未知';
   const once = def.trigger.type === 'once' ? '（一次性，执行后自动退役）' : '';
-  fire(deliver, def, `✅ 定时任务「${label(def)}」已创建，下次执行时间：${timeStr}${once}`);
+  fire(notify, def, 'registered', {
+    type: 'info',
+    title: '定时任务已创建',
+    message: `「${label(def)}」下次执行时间：${timeStr}${once}`,
+    duration: 3200,
+  });
 }
 
-export function notifyTaskPaused(deliver: DeliverFn | undefined, def: DynamicTaskDef): void {
-  fire(deliver, def, `⏸️ 定时任务「${label(def)}」已暂停`);
+export function notifyTaskPaused(notify: ScheduleLifecycleNotifier | undefined, def: DynamicTaskDef): void {
+  fire(notify, def, 'paused', {
+    type: 'info',
+    title: '定时任务已暂停',
+    message: `「${label(def)}」已暂停`,
+    duration: 3000,
+  });
 }
 
-export function notifyTaskResumed(deliver: DeliverFn | undefined, def: DynamicTaskDef): void {
+export function notifyTaskResumed(notify: ScheduleLifecycleNotifier | undefined, def: DynamicTaskDef): void {
   const nextFire = computeNextFireTime(def.trigger);
   const timeStr = nextFire ? formatTime(nextFire) : '未知';
-  fire(deliver, def, `▶️ 定时任务「${label(def)}」已恢复，下次执行时间：${timeStr}`);
+  fire(notify, def, 'resumed', {
+    type: 'info',
+    title: '定时任务已恢复',
+    message: `「${label(def)}」下次执行时间：${timeStr}`,
+    duration: 3200,
+  });
 }
 
-export function notifyTaskDeleted(deliver: DeliverFn | undefined, def: DynamicTaskDef): void {
-  fire(deliver, def, `🗑️ 定时任务「${label(def)}」已删除`);
+export function notifyTaskDeleted(notify: ScheduleLifecycleNotifier | undefined, def: DynamicTaskDef): void {
+  fire(notify, def, 'deleted', {
+    type: 'info',
+    title: '定时任务已删除',
+    message: `「${label(def)}」已删除`,
+    duration: 3000,
+  });
 }
 
-export function notifyTaskSucceeded(deliver: DeliverFn | undefined, def: DynamicTaskDef): void {
+export function notifyTaskSucceeded(notify: ScheduleLifecycleNotifier | undefined, def: DynamicTaskDef): void {
+  // Reminder runs already create a hidden trigger + accented cat reply. Adding a success toast
+  // would reintroduce the management-state noise that this hierarchy is meant to remove.
+  if (def.templateId === 'reminder') return;
   if (def.trigger.type === 'once') {
-    fire(deliver, def, `✅ 定时任务「${label(def)}」已执行完成，任务已自动结束`);
-  } else {
-    const nextFire = computeNextFireTime(def.trigger);
-    const timeStr = nextFire ? formatTime(nextFire) : '未知';
-    fire(deliver, def, `✅ 定时任务「${label(def)}」本次执行完成，下次执行时间：${timeStr}`);
+    fire(notify, def, 'succeeded', {
+      type: 'success',
+      title: '定时任务已完成',
+      message: `「${label(def)}」已执行完成，任务已自动结束`,
+      duration: 3200,
+    });
+    return;
   }
+  const nextFire = computeNextFireTime(def.trigger);
+  const timeStr = nextFire ? formatTime(nextFire) : '未知';
+  fire(notify, def, 'succeeded', {
+    type: 'success',
+    title: '定时任务执行完成',
+    message: `「${label(def)}」下次执行时间：${timeStr}`,
+    duration: 3200,
+  });
 }
 
 export function notifyTaskFailed(
-  deliver: DeliverFn | undefined,
+  notify: ScheduleLifecycleNotifier | undefined,
   def: DynamicTaskDef,
   errorSummary: string | null,
 ): void {
-  const reason = errorSummary ? `：${errorSummary.slice(0, 200)}` : '';
-  fire(deliver, def, `❌ 定时任务「${label(def)}」执行失败${reason}`);
+  fire(notify, def, 'failed', {
+    type: 'error',
+    title: '定时任务执行失败',
+    message: `「${label(def)}」${errorSummary ? `：${errorSummary.slice(0, 200)}` : ''}`,
+    duration: 6000,
+  });
 }

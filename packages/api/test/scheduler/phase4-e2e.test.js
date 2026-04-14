@@ -36,7 +36,8 @@ describe('F139 Phase 4 E2E', () => {
       append: mock.fn((msg) => ({ id: `msg-${Date.now()}`, threadId: msg.threadId })),
     };
     const mockSocketManager = {
-      broadcastAgentMessage: mock.fn(),
+      broadcastToRoom: mock.fn(),
+      emitToUser: mock.fn(),
     };
     deliverMock = createDeliverFn({
       messageStore: mockMessageStore,
@@ -134,8 +135,8 @@ describe('F139 Phase 4 E2E', () => {
     assert.equal(deliverCalls.length, 1);
     assert.equal(deliverCalls[0].threadId, 'thread-news-123');
     assert.ok(deliverCalls[0].content.includes('搜三天内 Anthropic 新闻'));
-    assert.equal(deliverCalls[0].catId, 'system');
     assert.equal(deliverCalls[0].userId, 'scheduler');
+    assert.equal(deliverCalls[0].extra?.scheduler?.hiddenTrigger, true);
 
     // 2. invokeTrigger was called with the REAL messageId from deliver
     assert.equal(triggerCalls.length, 1);
@@ -303,7 +304,7 @@ describe('F139 Phase 4 E2E', () => {
     assert.equal(fetchMock.mock.calls.length, 1);
     assert.equal(deliverCalls.length, 1);
     assert.equal(deliverCalls[0].threadId, 'thread-browser');
-    assert.equal(deliverCalls[0].catId, 'system');
+    assert.equal(deliverCalls[0].userId, 'scheduler');
     assert.ok(deliverCalls[0].content.includes('browser-automation'));
     assert.ok(deliverCalls[0].content.includes('https://x.com/anthropic'));
     assert.ok(deliverCalls[0].content.includes('今天 AI 新闻'));
