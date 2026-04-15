@@ -25,7 +25,7 @@ import { POLL_RESPONSE_JS } from '../dist/domains/cats/services/agents/providers
  */
 function runPollInDom(assistantHtml, userMsg = 'User question') {
   const html = `
-		<div class="group">
+		<div class="group pt-4">
 			<div class="whitespace-pre-wrap">${userMsg}</div>
 		</div>
 		${assistantHtml}
@@ -135,6 +135,53 @@ describe('F061: POLL_RESPONSE_JS behavioral DOM fixtures', () => {
   });
 });
 
+// ── Regression tests (code review P1 items) ────────────────────────────
+
+describe('F061: POLL_RESPONSE_JS regression tests (code review)', () => {
+  it('concatenated icon text is stripped from responseText', () => {
+    // Simulates the toolbar icon leak: content_copythumb_upthumb_down
+    const result = runPollInDom(`
+			<div>
+				<div class="leading-relaxed select-text">
+					<p>Actual response content here.</p>
+				</div>
+				<div class="flex justify-between cursor-default">
+					<span>content_copy</span><span>thumb_up</span><span>thumb_down</span>
+				</div>
+			</div>
+		`);
+    assert.ok(result.responseText.includes('Actual response content'), 'responseText has real content');
+    assert.ok(!result.responseText.includes('content_copy'), 'icon text stripped individually');
+    assert.ok(!result.responseText.includes('thumb_up'), 'icon text stripped');
+    assert.ok(!result.responseText.includes('content_copythumb_upthumb_down'), 'concatenated icon text stripped');
+  });
+
+  it('icon-only blocks should not trigger response completion', () => {
+    // When thinking leaks and only toolbar icons remain, responseText should be empty
+    const result = runPollInDom(`
+			<div>
+				<button>Thought for 12s</button>
+				<div class="max-h-0 opacity-0">
+					<p>Internal thinking about the problem...</p>
+				</div>
+			</div>
+		`);
+    // Only thinking content exists — responseText must be empty
+    assert.ok(!result.responseText.includes('Internal thinking'), 'thinking text must not leak to responseText');
+    assert.ok(result.thinkingText.includes('Internal thinking'), 'thinkingText should contain thinking');
+  });
+
+  it('uses getComputedStyle-based isVisiblyHidden helper', () => {
+    assert.ok(POLL_RESPONSE_JS.includes('getComputedStyle'), 'script should use getComputedStyle for visibility');
+    assert.ok(POLL_RESPONSE_JS.includes('isVisiblyHidden'), 'script should define isVisiblyHidden helper');
+  });
+
+  it('has icon concatenation regex cleanup', () => {
+    assert.ok(POLL_RESPONSE_JS.includes('ICON_CONCAT_RE'), 'script should have ICON_CONCAT_RE pattern');
+    assert.ok(POLL_RESPONSE_JS.includes('stripIconArtifacts'), 'script should have stripIconArtifacts function');
+  });
+});
+
 // ── Smoke tests (script structure validation) ──────────────────────────
 
 describe('F061: POLL_RESPONSE_JS structure smoke tests', () => {
@@ -156,5 +203,88 @@ describe('F061: POLL_RESPONSE_JS structure smoke tests', () => {
 
   it('strips buttons in extractBlockText', () => {
     assert.ok(POLL_RESPONSE_JS.includes("clone.querySelectorAll('button')"), 'buttons stripped from clone');
+  });
+});
+
+// ── P2 behavioral tests: isVisiblyHidden JSDOM/browser gap ─────────────
+// Requested by codex re-review of commit 4ae89c68
+
+describe('F061: isVisiblyHidden JSDOM/browser behavioral consistency', () => {
+  it('ancestor aria-hidden/inert hides child even if child has visible classes', () => {
+    // Risk: isVisiblyHidden only checks the direct element, not ancestors.
+    // The ancestor-walk in assistantBlocks extraction (lines 186-190) should catch this.
+    const result = runPollInDom(`
+			<div>
+				<div class="leading-relaxed select-text">
+					<div aria-hidden="true">
+						<p class="text-base font-normal">Should be hidden despite visible classes</p>
+					</div>
+					<div inert>
+						<p>Also hidden via inert</p>
+					</div>
+					<p>Visible answer alongside hidden ancestors.</p>
+				</div>
+			</div>
+		`);
+    assert.ok(!result.responseText.includes('Should be hidden'), 'aria-hidden ancestor must suppress child text');
+    assert.ok(!result.responseText.includes('Also hidden via inert'), 'inert ancestor must suppress child text');
+    assert.ok(result.responseText.includes('Visible answer'), 'text outside hidden subtrees must survive');
+  });
+
+  it('animation-class opacity-0 on wrapper does not leak into response', () => {
+    // Scenario: element has Tailwind opacity-0 class (enter-animation or collapsed).
+    // In JSDOM, getComputedStyle returns '' for opacity → parseFloat('') = NaN,
+    // NaN < 0.01 is false → isVisiblyHidden returns false.
+    // BUT extractBlockText's class-name regex guard (line 86-88) strips opacity-0 subtrees.
+    // Both paths converge: opacity-0 content removed from final text. Correct behavior.
+    const result = runPollInDom(`
+			<div>
+				<div class="opacity-0 transition-opacity">
+					<p>Animated content that should be stripped by class-name guard</p>
+				</div>
+				<div class="leading-relaxed select-text">
+					<p>The real visible answer.</p>
+				</div>
+			</div>
+		`);
+    assert.ok(!result.responseText.includes('Animated content'), 'opacity-0 class elements stripped from text extraction');
+    assert.ok(result.responseText.includes('real visible answer'), 'non-opacity-0 response text preserved');
+  });
+
+  it('JSDOM geometry-all-zero does not false-positive hide normal replies', () => {
+    // JSDOM quirk: clientHeight=0 and scrollHeight=0 for ALL elements.
+    // isVisiblyHidden check: el.clientHeight === 0 && el.scrollHeight > 0 → 0===0 && 0>0 → false
+    // Geometry heuristic is effectively disabled in JSDOM — safer direction (no false kills).
+    const result = runPollInDom(`
+			<div>
+				<div class="leading-relaxed select-text">
+					<p>Normal paragraph one.</p>
+					<p>Normal paragraph two.</p>
+					<pre>Code block content</pre>
+				</div>
+			</div>
+		`);
+    assert.ok(result.responseText.includes('Normal paragraph one'), 'first paragraph survives JSDOM geometry quirk');
+    assert.ok(result.responseText.includes('Normal paragraph two'), 'second paragraph survives');
+    assert.ok(result.responseText.includes('Code block content'), 'pre block survives');
+    assert.equal(result.userMsgCount, 1, 'exactly one user message detected');
+  });
+
+  it('icon concat mixed with real text: only icons stripped, prose preserved', () => {
+    // Risk: ICON_CONCAT_RE or stripIconArtifacts might eat surrounding text.
+    const result = runPollInDom(`
+			<div>
+				<div class="leading-relaxed select-text">
+					<p>Here is the answer to your question.</p>
+					<p>content_copythumb_upthumb_down</p>
+					<p>And here is additional context.</p>
+				</div>
+			</div>
+		`);
+    assert.ok(result.responseText.includes('answer to your question'), 'prose before icons preserved');
+    assert.ok(result.responseText.includes('additional context'), 'prose after icons preserved');
+    assert.ok(!result.responseText.includes('content_copy'), 'individual icon stripped');
+    assert.ok(!result.responseText.includes('thumb_up'), 'individual icon stripped');
+    assert.ok(!result.responseText.includes('content_copythumb_upthumb_down'), 'concatenated icon run stripped');
   });
 });

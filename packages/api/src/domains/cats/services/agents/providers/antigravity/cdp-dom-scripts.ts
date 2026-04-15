@@ -6,98 +6,275 @@
  */
 
 /** Extract assistant response state from the DOM after a user message.
- *  Returns JSON: { userMsgCount, responseText, hasInlineLoading } */
+ *  Returns JSON: { userMsgCount, responseText, thinkingText, hasInlineLoading, hasStopButton }
+ *
+ *  Antigravity IDE DOM structure (as of 2026-04):
+ *    .antigravity-agent-side-panel
+ *      └ .overflow-y-auto
+ *          └ .mx-auto.w-full > div
+ *              └ .flex.min-w-0.grow.flex-col          ← turn container
+ *                  ├ div.group.pt-4                   ← user turn (contains .whitespace-pre-wrap in .max-h-[20vh])
+ *                  ├ div (relative)                   ← assistant: "Worked for Xs" + response blocks
+ *                  │   ├ .group "Worked for Xs"
+ *                  │   ├ .relative > .group "Thought for Xs" + collapsed thinking
+ *                  │   ├ .leading-relaxed.select-text  ← main response text
+ *                  │   └ ...tool-use, terminal, file-diff blocks
+ *                  ├ div.group.pt-4                   ← next user turn
+ *                  └ ...
+ */
 export const POLL_RESPONSE_JS = `(() => {
-  const userMsgs = [...document.querySelectorAll('.whitespace-pre-wrap')];
+  // --- 0. Visibility helpers ---
+  // Check if an element is visually hidden using computed styles (reliable),
+  // not class names alone (fragile — e.g. opacity-0 can be overridden by state classes).
+  const isVisiblyHidden = (el) => {
+    if (!el || !el.ownerDocument || !el.ownerDocument.defaultView) return false;
+    try {
+      const cs = el.ownerDocument.defaultView.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+      if (parseFloat(cs.opacity) < 0.01) return true;
+      if (parseInt(cs.maxHeight, 10) === 0 && cs.overflow !== 'visible') return true;
+      if (el.getAttribute('aria-hidden') === 'true') return true;
+      if (el.hasAttribute('inert')) return true;
+      if (el.clientHeight === 0 && el.scrollHeight > 0) return true;
+    } catch(e) { /* detached node or cross-origin — fall through */ }
+    return false;
+  };
+
+  // Icon names used by Material Symbols — matched individually OR as concatenated runs
+  const ICON_NAMES = ['content_copy','thumb_up','thumb_down','check','close','chevron_right','chevron_left','undo','keyboard_arrow_up','expand_more','expand_less','more_vert','more_horiz','edit','delete','share','download','play_arrow','stop','send','arrow_upward','arrow_downward','refresh','settings','info','warning','error','help','search','menu','add','remove','visibility','visibility_off','lock','lock_open','star','star_border','favorite','favorite_border'];
+  const ICON_CONCAT_RE = new RegExp('(' + ICON_NAMES.join('|') + '){2,}', 'gi');
+
+  // --- 1. Identify user messages ---
+  // User messages are DIV.whitespace-pre-wrap inside DIV.max-h-[20vh] inside DIV.group.pt-4
+  // Must filter out: PRE (terminal output), CODE (inline code), system context blocks
+  const userMsgs = [...document.querySelectorAll('.whitespace-pre-wrap')].filter((el) => {
+    // Skip terminal output (PRE tags) and code blocks (CODE tags)
+    if (el.tagName === 'PRE' || el.tagName === 'CODE') return false;
+    // Skip context-injected system prompt blocks — but NOT legitimate user messages.
+    // Cat-cafe prompts may contain 'Identity:' in the user message body, so we cannot
+    // simply reject long text with that keyword. Instead: if the element is inside a
+    // recognised user-turn group (.group.pt-4), keep it regardless of length/content.
+    // Only reject if it matches ALL of: very long, has system-prompt markers, AND is
+    // NOT inside a user-turn group.
+    const text = el.textContent || '';
+    const group = el.closest('.group');
+    const inUserTurnGroup = group && group.classList.contains('pt-4');
+    if (!inUserTurnGroup && text.length > 2000 && text.includes('Identity:')) return false;
+    // Skip elements inside opacity-70 (thinking blocks)
+    if (el.closest('.opacity-70')) return false;
+    // Must be inside a user turn group (.group with .pt-4) to be a real user message
+    if (group && !group.classList.contains('pt-4')) return false;
+    return true;
+  });
   const lastUserMsg = userMsgs[userMsgs.length - 1];
-  const extractBlockText = (block) => {
+
+  // --- 2. Text extraction helper ---
+  const extractBlockText = (block, skipRootGuard) => {
     const clone = block.cloneNode(true);
-    // Strip hidden subtrees: collapsed thought containers, invisible elements
-    clone.querySelectorAll('style, script, [aria-hidden="true"]').forEach((el) => el.remove());
+    // Guard: if root element itself is hidden/invisible, return empty
+    // (skipped for thinking containers which are intentionally collapsed)
+    if (!skipRootGuard) {
+      const rootCls = (typeof clone.className === 'string') ? clone.className : '';
+      if (/\\bopacity-0\\b/.test(rootCls) || /\\bmax-h-0\\b/.test(rootCls) || /\\bhidden\\b/.test(rootCls) || /\\bpointer-events-none\\b/.test(rootCls)) {
+        return '';
+      }
+    }
+    // Strip hidden subtrees, icons, scripts, styles
+    clone.querySelectorAll('style, script, [aria-hidden="true"], [inert], .google-symbols, [class*="symbol"], [class*="material-symbols"]').forEach((el) => el.remove());
     for (const el of clone.querySelectorAll('*')) {
       const cls = el.className || '';
       if (typeof cls === 'string' && (/\\bmax-h-0\\b/.test(cls) || /\\bopacity-0\\b/.test(cls) || /\\bhidden\\b/.test(cls))) {
         el.remove();
       }
+      // Strip UI icon text (Material Symbols icon labels rendered as text)
+      const txt = (el.textContent || '').trim();
+      if (['content_copy','thumb_up','thumb_down','check','close','chevron_right','chevron_left','undo','keyboard_arrow_up','expand_more','expand_less','more_vert','more_horiz','edit','delete','share','download','play_arrow','stop','send'].includes(txt)) {
+        el.remove();
+      }
     }
-    // Also strip buttons (e.g. "Thought for Xs" toggle) from text extraction
+    // Strip buttons (e.g. "Thought for Xs" toggle, action buttons)
     clone.querySelectorAll('button').forEach((el) => el.remove());
+    // Strip toolbar/action-bar containers (copy/vote buttons area)
+    clone.querySelectorAll('[class*="justify-between"][class*="cursor-default"]').forEach((el) => el.remove());
     const structured = [...clone.querySelectorAll('p, li, pre, code, h1, h2, h3, h4, h5, h6')]
       .map((el) => el.textContent?.trim()).filter(Boolean);
     if (structured.length > 0) return structured.join('\\n');
     return clone.textContent?.trim() || '';
   };
+
+  // --- 3. Find assistant response blocks ---
+  // DOM structure per conversation turn:
+  //   div.flex.flex-col.gap-0.5  (turn wrapper)
+  //     sticky header -> flex-row -> min-w-0 -> group.pt-4 (user message)
+  //     div (assistant: "Worked for Xs", .leading-relaxed blocks, tool-use)
+  //     div.whitespace-nowrap (status indicator, opacity-0)
+  // Multiple turn wrappers are children of:
+  //   div.relative.flex.flex-col.gap-y-3.px-4 (conversation container)
+  // Strategy: walk up from userTurnGroup to find the level where assistant blocks are siblings.
   const assistantBlocks = (() => {
     if (!lastUserMsg) return [];
-    const thread = lastUserMsg.closest('.relative.flex.flex-col.gap-y-3.px-4');
-    if (thread) {
-      const wrapper = [...thread.children].find((c) => c.contains(lastUserMsg)) || thread.firstElementChild;
-      if (wrapper) {
-        const blocks = [...wrapper.children].filter((c) => {
-          return (c.textContent?.trim() || '').length > 0 && !c.classList.contains('hidden');
+    const userTurnGroup = lastUserMsg.closest('.group.pt-4')
+      || lastUserMsg.closest('.group')
+      || lastUserMsg.parentElement;
+    if (!userTurnGroup) return [];
+
+    // Walk up ancestor levels until we find siblings with .leading-relaxed
+    let current = userTurnGroup;
+    for (let depth = 0; depth < 6; depth++) {
+      const parent = current.parentElement;
+      if (!parent) break;
+      const siblings = [...parent.children];
+      const myIdx = siblings.indexOf(current);
+      const afterMe = siblings.slice(myIdx + 1);
+      // Check if any sibling has a .leading-relaxed response block
+      const hasSibWithResponse = afterMe.some(s =>
+        s.querySelector && s.querySelector('.leading-relaxed')
+      );
+      if (hasSibWithResponse) {
+        return afterMe.filter(s => {
+          if (!s.textContent?.trim()) return false;
+          // Skip invisible status indicators using computed styles
+          if (isVisiblyHidden(s)) return false;
+          return true;
         });
-        const idx = blocks.findIndex((c) => c.contains(lastUserMsg));
-        if (idx >= 0) return blocks.slice(idx + 1).filter((c) => !c.contains(lastUserMsg));
+      }
+      // Also check if parent is the per-turn conversation container (gap-y-3)
+      const parentCls = parent.className || '';
+      if (parentCls.includes('gap-y-3')) {
+        const turnIdx = siblings.indexOf(current);
+        const blocks = [];
+        for (let j = turnIdx + 1; j < siblings.length; j++) {
+          const turn = siblings[j];
+          const nextUserGroup = turn.querySelector('.group.pt-4 .whitespace-pre-wrap');
+          if (nextUserGroup) break;
+          if (turn.textContent?.trim() && !isVisiblyHidden(turn)) {
+              blocks.push(turn);
+          }
+        }
+        return blocks;
+      }
+      current = parent;
+    }
+    // Fallback: sibling-walk from userTurnGroup parent
+    const fp = userTurnGroup.parentElement;
+    if (!fp) return [];
+    const allTurns = [...fp.children];
+    const ui = allTurns.indexOf(userTurnGroup);
+    if (ui < 0) return [];
+    const blocks = [];
+    for (let i = ui + 1; i < allTurns.length; i++) {
+      const turn = allTurns[i];
+      if (turn.classList.contains('group') && turn.classList.contains('pt-4')
+          && turn.querySelector('.whitespace-pre-wrap')) break;
+      if (turn.textContent?.trim() && !isVisiblyHidden(turn)) {
+          blocks.push(turn);
       }
     }
-    const userGroup = lastUserMsg.closest('.group') || lastUserMsg.parentElement;
-    if (!userGroup) return [];
-    const blocks = [];
-    let sib = userGroup.nextElementSibling;
-    while (sib) { blocks.push(sib); sib = sib.nextElementSibling; }
     return blocks;
   })();
+
+  // --- 4. Extract thinking and response text ---
   const thinkingParts = [];
   const responseParts = [];
   for (const b of assistantBlocks) {
+    // Check for .leading-relaxed.select-text — this is the main response text block
+    // Filter out any that are inside collapsed thinking containers (max-h-0/opacity-0)
+    const responseEls = [...b.querySelectorAll('.leading-relaxed.select-text')].filter(el => {
+      // Primary: check computed visibility on original DOM element (handles class overrides)
+      if (isVisiblyHidden(el)) return false;
+      // Walk ancestors up to block boundary — if any ancestor is hidden, exclude
+      let ancestor = el.parentElement;
+      while (ancestor && ancestor !== b) {
+        if (isVisiblyHidden(ancestor)) return false;
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    });
     // Detect thinking: <details>, [class*="thinking"], [class*="thought"],
-    // or Antigravity-style: button("Thought for Xs") + adjacent collapsed container
+    // or "Thought for Xs" button + adjacent collapsed container, or opacity-70 blocks
     const thinkEls = b.querySelectorAll('details, [class*="thinking"], [class*="thought"]');
     const thoughtBtn = [...b.querySelectorAll('button')].find((btn) =>
       /^Thought\\s+for\\s/i.test((btn.textContent || '').trim())
     );
-    const hasThinking = thinkEls.length > 0 || !!thoughtBtn;
+    const isOpacityThinking = b.classList.contains('opacity-70') || !!b.querySelector('.opacity-70');
+    const hasThinking = thinkEls.length > 0 || !!thoughtBtn || isOpacityThinking;
+
     if (hasThinking) {
-      // Collect thinking text from all recognized thinking elements
-      for (const el of thinkEls) thinkingParts.push((el.textContent || '').trim());
-      if (thoughtBtn) {
-        // Antigravity thought: collect text from collapsed sibling containers
-        let sib = thoughtBtn.nextElementSibling;
-        while (sib) {
-          const cls = sib.className || '';
-          if (typeof cls === 'string' && (/\\bmax-h-0\\b/.test(cls) || /\\bopacity-0\\b/.test(cls))) {
-            thinkingParts.push(extractBlockText(sib));
-          } else { break; }
-          sib = sib.nextElementSibling;
-        }
-      }
-      // Extract remaining visible text as response (strip thinking elements)
-      const clone = b.cloneNode(true);
-      clone.querySelectorAll('details, [class*="thinking"], [class*="thought"]').forEach((el) => el.remove());
-      // Also strip "Thought for" buttons and their collapsed containers
-      for (const btn of [...clone.querySelectorAll('button')]) {
-        if (/^Thought\\s+for\\s/i.test((btn.textContent || '').trim())) {
-          let ns = btn.nextElementSibling;
-          while (ns) {
-            const c = ns.className || '';
-            if (typeof c === 'string' && (/\\bmax-h-0\\b/.test(c) || /\\bopacity-0\\b/.test(c))) {
-              const next = ns.nextElementSibling; ns.remove(); ns = next;
+      if (isOpacityThinking && responseEls.length === 0) {
+        // Pure thinking block (opacity-70 only, no response text)
+        thinkingParts.push(extractBlockText(b, true));
+      } else {
+        // Collect thinking text from recognized thinking elements
+        for (const el of thinkEls) thinkingParts.push((el.textContent || '').trim());
+        if (thoughtBtn) {
+          // Antigravity thought: collect from collapsed sibling containers
+          let sib = thoughtBtn.nextElementSibling;
+          while (sib) {
+            const cls = sib.className || '';
+            if (typeof cls === 'string' && (/\\bmax-h-0\\b/.test(cls) || /\\bopacity-0\\b/.test(cls))) {
+              thinkingParts.push(extractBlockText(sib, true));
             } else { break; }
+            sib = sib.nextElementSibling;
           }
-          btn.remove();
         }
       }
-      const remaining = extractBlockText(clone).trim();
-      if (remaining) responseParts.push(remaining);
+
+      // Extract response text from .leading-relaxed blocks if present
+      if (responseEls.length > 0) {
+        for (const rel of responseEls) {
+          // Skip if inside a collapsed/hidden thinking container
+          const parentCls = rel.parentElement?.className || '';
+          if (/\\bmax-h-0\\b/.test(parentCls) || /\\bopacity-0\\b/.test(parentCls)) continue;
+          const txt = extractBlockText(rel).trim();
+          if (txt) responseParts.push(txt);
+        }
+      } else if (!isOpacityThinking) {
+        // Fallback: clone block, strip thinking elements, extract remainder
+        const clone = b.cloneNode(true);
+        clone.querySelectorAll('details, [class*="thinking"], [class*="thought"]').forEach((el) => el.remove());
+        for (const btn of [...clone.querySelectorAll('button')]) {
+          if (/^Thought\\s+for\\s/i.test((btn.textContent || '').trim())) {
+            let ns = btn.nextElementSibling;
+            while (ns) {
+              const c = ns.className || '';
+              if (typeof c === 'string' && (/\\bmax-h-0\\b/.test(c) || /\\bopacity-0\\b/.test(c))) {
+                const next = ns.nextElementSibling; ns.remove(); ns = next;
+              } else { break; }
+            }
+            btn.remove();
+          }
+        }
+        const remaining = extractBlockText(clone).trim();
+        if (remaining) responseParts.push(remaining);
+      }
+    } else if (responseEls.length > 0) {
+      // No thinking, but has .leading-relaxed response blocks
+      for (const rel of responseEls) {
+        const txt = extractBlockText(rel).trim();
+        if (txt) responseParts.push(txt);
+      }
     } else {
+      // Generic block — extract all text
       const txt = extractBlockText(b).trim();
       if (txt) responseParts.push(txt);
     }
   }
-  const responseText = responseParts.join('\\n').trim();
+  // --- Final text normalization: strip icon text artifacts ---
+  const stripIconArtifacts = (text) => {
+    let cleaned = text;
+    // Remove concatenated icon runs (e.g. 'content_copythumb_upthumb_down')
+    cleaned = cleaned.replace(ICON_CONCAT_RE, '');
+    // Collapse multiple blank lines left by removals
+    cleaned = cleaned.replace(/\\n{3,}/g, '\\n\\n').trim();
+    return cleaned;
+  };
+  const responseText = stripIconArtifacts(responseParts.join('\\n').trim());
   const thinkingText = thinkingParts.filter(Boolean).join('\\n').trim();
+
+  // --- 5. Detect loading / stop button ---
   const hasInlineLoading = assistantBlocks.some((b) => !!b.querySelector('.codicon-loading, [aria-busy="true"]'));
-  const chatScope = document.querySelector('[role="textbox"]')?.closest('.overflow-y-auto, [class*="chat"], [class*="conversation"]')?.parentElement;
+  const panel = document.querySelector('.antigravity-agent-side-panel');
+  const chatScope = panel || document.querySelector('[role="textbox"]')?.closest('.overflow-y-auto, [class*="chat"], [class*="conversation"]')?.parentElement;
   let hasStopButton = false;
   if (chatScope) {
     const stopBtn = chatScope.querySelector('button[aria-label*="stop" i]:not([disabled]), button[aria-label*="cancel" i]:not([disabled]), button[title*="stop" i]:not([disabled])');
