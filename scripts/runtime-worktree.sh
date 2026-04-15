@@ -194,6 +194,26 @@ install_runtime_dependencies() {
   pnpm -C "$RUNTIME_DIR" install --frozen-lockfile
 }
 
+seed_runtime_config_from_project() {
+  local source_config="$PROJECT_DIR/.cat-cafe"
+  local target_config="$RUNTIME_DIR/.cat-cafe"
+  local file
+
+  [ "$RUNTIME_DIR" != "$PROJECT_DIR" ] || return 0
+  [ -d "$source_config" ] || return 0
+
+  for file in cat-catalog.json accounts.json credentials.json; do
+    [ -f "$source_config/$file" ] || continue
+    [ ! -e "$target_config/$file" ] || continue
+    mkdir -p "$target_config"
+    cp "$source_config/$file" "$target_config/$file"
+    if [ "$file" = "credentials.json" ]; then
+      chmod 600 "$target_config/$file" || true
+    fi
+    info "seeded runtime config: .cat-cafe/$file"
+  done
+}
+
 ensure_runtime_dependencies() {
   local missing=()
 
@@ -314,6 +334,8 @@ init_runtime_worktree() {
     pnpm -C "$RUNTIME_DIR" install
   fi
 
+  seed_runtime_config_from_project
+
   info "runtime worktree ready at $RUNTIME_DIR"
 }
 
@@ -355,6 +377,8 @@ sync_runtime_worktree() {
       git -C "$RUNTIME_DIR" stash push -m "lock-drift-auto-stash" -- pnpm-lock.yaml
     fi
   fi
+
+  seed_runtime_config_from_project
 
   info "sync complete"
 }
@@ -413,6 +437,7 @@ start_runtime_worktree() {
     fi
   fi
 
+  seed_runtime_config_from_project
   ensure_runtime_start_prereqs
 
   info "starting production stack from runtime worktree: $RUNTIME_DIR"

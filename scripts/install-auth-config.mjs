@@ -20,6 +20,7 @@ const BUILTIN_ACCOUNT_SPECS = [
   },
   { id: 'codex', displayName: 'Codex', client: 'openai', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'] },
   { id: 'gemini', displayName: 'Gemini', client: 'google', models: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'] },
+  { id: 'kimi', displayName: 'Kimi', client: 'kimi', models: ['kimi-code/kimi-for-coding'] },
   { id: 'dare', displayName: 'Dare', client: 'dare', models: ['z-ai/glm-4.7'] },
   { id: 'opencode', displayName: 'OpenCode', client: 'opencode', models: ['claude-opus-4-6', 'claude-sonnet-4-5'] },
 ];
@@ -174,6 +175,7 @@ function normalizeClient(rawClient) {
   if (trimmed === 'anthropic' || trimmed === 'claude') return 'anthropic';
   if (trimmed === 'openai' || trimmed === 'codex') return 'openai';
   if (trimmed === 'google' || trimmed === 'gemini') return 'google';
+  if (trimmed === 'kimi' || trimmed === 'moonshot') return 'kimi';
   if (trimmed === 'dare') return 'dare';
   if (trimmed === 'opencode') return 'opencode';
   return null;
@@ -363,6 +365,7 @@ function setClientAuth(client, mode, options) {
     accounts[accountRef] = {
       authType: 'oauth',
       displayName: BUILTIN_ACCOUNT_SPECS.find((s) => s.client === client)?.displayName ?? accountRef,
+      models: normalizeModels(BUILTIN_ACCOUNT_SPECS.find((s) => s.client === client)?.models) ?? [],
     };
     // Warn about stale installer account that the resolver will prefer (has API key).
     // We intentionally do NOT auto-delete it here: installer accounts are global,
