@@ -361,11 +361,12 @@ function setClientAuth(client, mode, options) {
   const accounts = readAccounts();
 
   if (mode === 'oauth') {
+    const spec = BUILTIN_ACCOUNT_SPECS.find((s) => s.client === client);
     // F340: protocol not persisted on new accounts — derived from well-known ID at runtime.
     accounts[accountRef] = {
       authType: 'oauth',
-      displayName: BUILTIN_ACCOUNT_SPECS.find((s) => s.client === client)?.displayName ?? accountRef,
-      models: normalizeModels(BUILTIN_ACCOUNT_SPECS.find((s) => s.client === client)?.models) ?? [],
+      displayName: spec?.displayName ?? accountRef,
+      models: normalizeModels(spec?.models) ?? [],
     };
     // Warn about stale installer account that the resolver will prefer (has API key).
     // We intentionally do NOT auto-delete it here: installer accounts are global,
