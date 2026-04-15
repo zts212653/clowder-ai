@@ -235,14 +235,12 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
 
     assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     const normalizedRuntimeDir = realpathSync(runtimeDir);
-    assert.deepEqual(
-      JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'accounts.json'), 'utf8')),
-      { codex: { authType: 'oauth', models: ['gpt-5.4'] } },
-    );
-    assert.deepEqual(
-      JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'credentials.json'), 'utf8')),
-      { 'installer-openai': { apiKey: 'sk-runtime' } },
-    );
+    assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'accounts.json'), 'utf8')), {
+      codex: { authType: 'oauth', models: ['gpt-5.4'] },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'credentials.json'), 'utf8')), {
+      'installer-openai': { apiKey: 'sk-runtime' },
+    });
   });
 
   it('auto-installs missing runtime dependencies before in-place start', () => {
