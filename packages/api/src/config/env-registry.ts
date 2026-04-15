@@ -1290,6 +1290,13 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'telemetry',
     sensitive: false,
   },
+  {
+    name: 'TELEMETRY_DEBUG',
+    defaultValue: '(未设置 → 关闭)',
+    description: '设为 true 将 span 输出到终端（ConsoleSpanExporter，未脱敏，仅限本地调试）',
+    category: 'telemetry',
+    sensitive: false,
+  },
 ];
 
 /** Mask credentials in a URL while preserving host/port/db for debugging. */

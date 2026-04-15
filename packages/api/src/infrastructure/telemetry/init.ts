@@ -17,7 +17,7 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-node';
+import { BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-node';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { createModuleLogger } from '../logger.js';
 import { validateSalt } from './hmac.js';
@@ -33,6 +33,8 @@ export interface TelemetryConfig {
   prometheusPort?: number;
   /** Set true to also export via OTLP (requires OTEL_EXPORTER_OTLP_ENDPOINT). */
   otlpEnabled?: boolean;
+  /** Set true to print spans to console (TELEMETRY_DEBUG=true). Unredacted. */
+  debugMode?: boolean;
 }
 
 const DEFAULT_CONFIG: Required<TelemetryConfig> = {
@@ -40,6 +42,7 @@ const DEFAULT_CONFIG: Required<TelemetryConfig> = {
   serviceVersion: '0.1.0',
   prometheusPort: process.env.PROMETHEUS_PORT ? Number(process.env.PROMETHEUS_PORT) : 9464,
   otlpEnabled: !!process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+  debugMode: process.env.TELEMETRY_DEBUG === 'true',
 };
 
 let sdk: NodeSDK | null = null;
@@ -56,14 +59,16 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
 
   const cfg = { ...DEFAULT_CONFIG, ...config };
 
-  // P2 fix: validate HMAC salt at startup, not on first redaction call.
-  // If salt is missing in non-dev environments, disable OTel gracefully
-  // rather than crashing the server — telemetry should never be a crash source.
-  try {
-    validateSalt();
-  } catch (err) {
-    log.error({ err }, 'OTel SDK disabled: HMAC salt validation failed');
-    return async () => {};
+  // HMAC salt is only needed when OTLP export is active (RedactingSpanProcessor
+  // and RedactingLogProcessor use HMAC to pseudonymize IDs before export).
+  // Debug-only mode (ConsoleSpanExporter) outputs unredacted — no salt needed.
+  if (cfg.otlpEnabled) {
+    try {
+      validateSalt();
+    } catch (err) {
+      log.error({ err }, 'OTel SDK disabled: HMAC salt validation failed');
+      return async () => {};
+    }
   }
 
   const resource = resourceFromAttributes({
@@ -71,10 +76,17 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
     [ATTR_SERVICE_VERSION]: cfg.serviceVersion,
   });
 
-  // --- Traces: Redacting processor wraps OTLP exporter ---
-  const spanProcessor = cfg.otlpEnabled
-    ? new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter()))
-    : undefined;
+  // --- Traces: console debug (unredacted) MUST come before OTLP (redacted).
+  // RedactingSpanProcessor.onEnd() mutates span.attributes in-place;
+  // OTel passes the same span object to each processor in order.
+  // Debug first → sees raw attributes. OTLP second → redacts then exports.
+  const spanProcessors: import('@opentelemetry/sdk-trace-node').SpanProcessor[] = [];
+  if (cfg.debugMode) {
+    spanProcessors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+  }
+  if (cfg.otlpEnabled) {
+    spanProcessors.push(new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter())));
+  }
 
   // --- Metrics: Prometheus scrape + optional OTLP push ---
   const prometheusExporter = new PrometheusExporter({
@@ -102,7 +114,7 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
 
   sdk = new NodeSDK({
     resource,
-    spanProcessors: spanProcessor ? [spanProcessor] : [],
+    spanProcessors,
     metricReaders,
     logRecordProcessors: logProcessor ? [logProcessor] : [],
     views,
@@ -113,6 +125,7 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
     {
       prometheus: cfg.prometheusPort,
       otlp: cfg.otlpEnabled,
+      debug: cfg.debugMode,
     },
     'OTel SDK initialized',
   );
