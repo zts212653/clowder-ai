@@ -35,6 +35,16 @@ fi
   assert.equal(output, '0,2,none');
 });
 
+test('tty_select honors a configured default index when no tty is available', () => {
+  const output = runSourceOnlySnippet(`
+HAS_TTY=false
+TTY_SELECT_DEFAULT_INDEX=2 tty_select SELECTED "Pick one:" "OAuth" "API Key" "Skip"
+printf '%s' "$SELECTED"
+`);
+
+  assert.equal(output, '2');
+});
+
 test('tty_read returns empty string when /dev/tty is unavailable (no blocking)', () => {
   const result = spawnSync(
     'bash',

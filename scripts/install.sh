@@ -153,9 +153,14 @@ tty_select() {
     local result_var="$1" prompt="$2"; shift 2
     local -a options=("$@")
     local count=${#options[@]} cur=0
+    local default_index="${TTY_SELECT_DEFAULT_INDEX:-0}"
+    if [[ "$default_index" =~ ^[0-9]+$ ]]; then
+        local parsed_default=$((10#$default_index))
+        (( parsed_default >= 0 && parsed_default < count )) && cur="$parsed_default"
+    fi
 
     if [[ "$HAS_TTY" != true || $count -eq 0 ]]; then
-        printf -v "$result_var" '%s' '0'; return
+        printf -v "$result_var" '%s' "$cur"; return
     fi
 
     # Save terminal state and switch to raw mode
@@ -976,9 +981,11 @@ configure_agent_auth() {
         "OAuth / Subscription (recommended / 推荐)" \
         "API Key"
     )
-    [[ "$allow_skip" == true ]] && auth_options+=("Skip auth setup (configure later / 稍后配置)")
-    tty_select auth_sel "  $name ($cmd) — auth mode:" "${auth_options[@]}"
+    [[ "$allow_skip" == true ]] && auth_options+=("Skip auth setup (default / configure later / 稍后配置)")
     local skip_index=2
+    local default_auth_sel=0
+    [[ "$allow_skip" == true ]] && default_auth_sel="$skip_index"
+    TTY_SELECT_DEFAULT_INDEX="$default_auth_sel" tty_select auth_sel "  $name ($cmd) — auth mode:" "${auth_options[@]}"
     if [[ "$allow_skip" == true && "$auth_sel" == "$skip_index" ]]; then
         warn "$name: auth setup skipped"
         return 0
