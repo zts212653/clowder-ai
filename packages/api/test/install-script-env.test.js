@@ -133,6 +133,21 @@ test('empty API key fallback to OAuth does not force-remove global installer acc
   assert.doesNotMatch(emptyKeyBranch, /--force true/);
 });
 
+test('Kimi auth setup offers an explicit skip option instead of forcing OAuth', () => {
+  const installScriptText = readFileSync(installScript, 'utf8');
+  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
+
+  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
+  assert.match(configureAuthBody, /allow_skip/, 'configure_agent_auth should accept a skip flag');
+  assert.match(configureAuthBody, /Skip auth setup/, 'skip-enabled auth menus should include Skip');
+  assert.match(configureAuthBody, /auth setup skipped/, 'skip branch should return without writing OAuth');
+  assert.match(
+    installScriptText,
+    /configure_agent_auth "Kimi \(月之暗面\)" "kimi" true/,
+    'Kimi should opt into the skip-enabled auth menu',
+  );
+});
+
 test('npm_global_install succeeds when a custom registry is configured', () => {
   const output = runSourceOnlySnippet(`
 SUDO=""

@@ -131,6 +131,21 @@ tty_read_secret() {
 # These provide a TUI-style menu: ↑↓ to move, space to toggle, enter to confirm.
 # Falls back to plain tty_read when HAS_TTY is false.
 
+tty_arrow_delta() {
+    case "$1" in
+        '[A'|'OA') printf '%s' '-1'; return 0 ;;
+        '[B'|'OB') printf '%s' '1'; return 0 ;;
+    esac
+    return 1
+}
+tty_numeric_index() {
+    local key="$1" count="$2"
+    [[ "$key" =~ ^[1-9]$ ]] || return 1
+    local idx=$((10#$key - 1))
+    (( idx >= 0 && idx < count )) || return 1
+    printf '%s' "$idx"
+}
+
 # tty_select: Single-select with arrow keys.
 #   Usage: tty_select RESULT_VAR "prompt" "option1" "option2" ...
 #   Sets RESULT_VAR to the 0-based index of the chosen option (default 0).
@@ -146,14 +161,14 @@ tty_select() {
     # Save terminal state and switch to raw mode
     local saved_tty; saved_tty="$(stty -g </dev/tty 2>/dev/null)"
     printf '\n%s\n' "$prompt" >/dev/tty
-    printf '  Use ↑↓ arrows to move, Enter to select\n\n' >/dev/tty
+    printf '  Use ↑↓ arrows or number keys to move, Enter to select\n\n' >/dev/tty
 
     local i
     for ((i=0; i<count; i++)); do
         if ((i == cur)); then
-            printf '  \033[36m❯ %s\033[0m\n' "${options[$i]}" >/dev/tty
+            printf '  %d. \033[36m❯ %s\033[0m\n' "$((i+1))" "${options[$i]}" >/dev/tty
         else
-            printf '    %s\n' "${options[$i]}" >/dev/tty
+            printf '  %d.   %s\n' "$((i+1))" "${options[$i]}" >/dev/tty
         fi
     done
 
@@ -166,10 +181,16 @@ tty_select() {
         local need_redraw=false
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
-            case "$key" in
-                '[A') ((cur > 0)) && ((cur--)) || true; need_redraw=true ;;
-                '[B') ((cur < count-1)) && ((cur++)) || true; need_redraw=true ;;
-            esac
+            local delta
+            if delta="$(tty_arrow_delta "$key")"; then
+                if ((delta < 0)); then ((cur > 0)) && ((cur--)) || true
+                elif ((delta > 0)); then ((cur < count-1)) && ((cur++)) || true
+                fi
+                need_redraw=true
+            fi
+        elif tty_numeric_index "$key" "$count" >/dev/null; then
+            cur="$(tty_numeric_index "$key" "$count")"
+            need_redraw=true
         elif [[ "$key" == '' ]]; then
             break
         fi
@@ -178,9 +199,9 @@ tty_select() {
         for ((i=0; i<count; i++)); do
             printf '\r\033[K' >/dev/tty
             if ((i == cur)); then
-                printf '  \033[36m❯ %s\033[0m\n' "${options[$i]}" >/dev/tty
+                printf '  %d. \033[36m❯ %s\033[0m\n' "$((i+1))" "${options[$i]}" >/dev/tty
             else
-                printf '    %s\n' "${options[$i]}" >/dev/tty
+                printf '  %d.   %s\n' "$((i+1))" "${options[$i]}" >/dev/tty
             fi
         done
     done
@@ -214,14 +235,14 @@ tty_multiselect() {
 
     local saved_tty; saved_tty="$(stty -g </dev/tty 2>/dev/null)"
     printf '\n%s\n' "$prompt" >/dev/tty
-    printf '  Use ↑↓ to move, Space to toggle, Enter to confirm\n\n' >/dev/tty
+    printf '  Use ↑↓ to move, number keys to jump, Space to toggle, Enter to confirm\n\n' >/dev/tty
 
     for ((i=0; i<count; i++)); do
         local marker="◉"; [[ "${selected[$i]}" != "1" ]] && marker="○"
         if ((i == cur)); then
-            printf '  \033[36m❯ %s %s\033[0m\n' "$marker" "${options[$i]}" >/dev/tty
+            printf '  %d. \033[36m❯ %s %s\033[0m\n' "$((i+1))" "$marker" "${options[$i]}" >/dev/tty
         else
-            printf '    %s %s\n' "$marker" "${options[$i]}" >/dev/tty
+            printf '  %d.   %s %s\n' "$((i+1))" "$marker" "${options[$i]}" >/dev/tty
         fi
     done
 
@@ -234,10 +255,16 @@ tty_multiselect() {
         local need_redraw=false
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 key </dev/tty 2>/dev/null || true
-            case "$key" in
-                '[A') ((cur > 0)) && ((cur--)) || true; need_redraw=true ;;
-                '[B') ((cur < count-1)) && ((cur++)) || true; need_redraw=true ;;
-            esac
+            local delta
+            if delta="$(tty_arrow_delta "$key")"; then
+                if ((delta < 0)); then ((cur > 0)) && ((cur--)) || true
+                elif ((delta > 0)); then ((cur < count-1)) && ((cur++)) || true
+                fi
+                need_redraw=true
+            fi
+        elif tty_numeric_index "$key" "$count" >/dev/null; then
+            cur="$(tty_numeric_index "$key" "$count")"
+            need_redraw=true
         elif [[ "$key" == ' ' ]]; then
             if [[ "${selected[$cur]}" == "1" ]]; then selected[$cur]="0"; else selected[$cur]="1"; fi
             need_redraw=true
@@ -250,9 +277,9 @@ tty_multiselect() {
             local marker="◉"; [[ "${selected[$i]}" != "1" ]] && marker="○"
             printf '\r\033[K' >/dev/tty
             if ((i == cur)); then
-                printf '  \033[36m❯ %s %s\033[0m\n' "$marker" "${options[$i]}" >/dev/tty
+                printf '  %d. \033[36m❯ %s %s\033[0m\n' "$((i+1))" "$marker" "${options[$i]}" >/dev/tty
             else
-                printf '    %s %s\n' "$marker" "${options[$i]}" >/dev/tty
+                printf '  %d.   %s %s\n' "$((i+1))" "$marker" "${options[$i]}" >/dev/tty
             fi
         done
     done
@@ -931,6 +958,7 @@ fi
 step "[7/9] Authentication setup / 认证配置..."
 configure_agent_auth() {
     local name="$1" cmd="$2"
+    local allow_skip="${3:-false}"
     command -v "$cmd" &>/dev/null || return 0
 
     # Gemini CLI doesn't support custom API endpoints — always use OAuth
@@ -944,9 +972,17 @@ configure_agent_auth() {
     fi
 
     local auth_sel
-    tty_select auth_sel "  $name ($cmd) — auth mode:" \
+    local -a auth_options=(
         "OAuth / Subscription (recommended / 推荐)" \
         "API Key"
+    )
+    [[ "$allow_skip" == true ]] && auth_options+=("Skip auth setup (configure later / 稍后配置)")
+    tty_select auth_sel "  $name ($cmd) — auth mode:" "${auth_options[@]}"
+    local skip_index=2
+    if [[ "$allow_skip" == true && "$auth_sel" == "$skip_index" ]]; then
+        warn "$name: auth setup skipped"
+        return 0
+    fi
     if [[ "$auth_sel" != "1" ]]; then
         # Do not auto-delete installer API-key profiles here: accounts are global
         # and we cannot prove other projects are not still bound to installer refs.
@@ -989,7 +1025,7 @@ configure_agent_auth() {
 if [[ "$HAS_TTY" == true ]]; then
     info "  Configure each agent / 逐个配置每只猫的认证方式："
     configure_agent_auth "Claude (布偶猫)" "claude"; configure_agent_auth "Codex (缅因猫)" "codex"
-    configure_agent_auth "Gemini (暹罗猫)" "gemini"; configure_agent_auth "Kimi (月之暗面)" "kimi"
+    configure_agent_auth "Gemini (暹罗猫)" "gemini"; configure_agent_auth "Kimi (月之暗面)" "kimi" true
 else
     info "  Non-interactive — skipping auth. Run each CLI to log in: claude / codex / gemini / kimi"
 fi
