@@ -64,6 +64,57 @@ cat .env
   }
 });
 
+test('installer auth config root follows an existing runtime worktree', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-runtime-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, runtimeRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth config root falls back to project root before runtime exists', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-project-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth setup calls install-auth-config through runtime-aware wrapper', () => {
+  const installScriptText = readFileSync(installScript, 'utf8');
+  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
+
+  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
+  assert.match(configureAuthBody, /run_install_auth_config client-auth set/, 'auth writes should use wrapper');
+  assert.doesNotMatch(
+    configureAuthBody,
+    /node scripts\/install-auth-config\.mjs/,
+    'auth writes must not bypass runtime-aware config root resolution',
+  );
+});
+
 test('Claude empty API key removes stale installer-managed profile', () => {
   const envRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-empty-'));
   const catCafeDir = join(envRoot, '.cat-cafe');

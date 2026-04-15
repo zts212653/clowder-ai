@@ -519,6 +519,29 @@ collect_env() { ENV_KEYS+=("$1"); ENV_VALUES+=("$2"); }
 clear_env() { ENV_DELETE_KEYS+=("$1"); }
 # #340 P6: Dead .env auth wrappers removed — all auth now uses
 # install-auth-config.mjs client-auth set → accounts.json + credentials.json
+default_runtime_dir() {
+    local parent
+    parent="$(cd "$PROJECT_DIR/.." && pwd)"
+    printf '%s/cat-cafe-runtime\n' "$parent"
+}
+resolve_installer_auth_config_root() {
+    if [[ -n "${CAT_CAFE_GLOBAL_CONFIG_ROOT:-}" ]]; then
+        printf '%s\n' "$CAT_CAFE_GLOBAL_CONFIG_ROOT"
+        return 0
+    fi
+    local runtime_dir="${CAT_CAFE_RUNTIME_DIR:-}"
+    [[ -n "$runtime_dir" ]] || runtime_dir="$(default_runtime_dir)"
+    if [[ -d "$runtime_dir" ]]; then
+        (cd "$runtime_dir" && pwd)
+        return 0
+    fi
+    printf '%s\n' "$PROJECT_DIR"
+}
+run_install_auth_config() {
+    local auth_root
+    auth_root="$(resolve_installer_auth_config_root)"
+    CAT_CAFE_GLOBAL_CONFIG_ROOT="$auth_root" node scripts/install-auth-config.mjs "$@"
+}
 
 
 PLATFORM="$(uname -s)"
@@ -968,7 +991,7 @@ configure_agent_auth() {
 
     # Gemini CLI doesn't support custom API endpoints — always use OAuth
     if [[ "$cmd" == "gemini" ]]; then
-        node scripts/install-auth-config.mjs client-auth set \
+        run_install_auth_config client-auth set \
             --project-dir "$PROJECT_DIR" \
             --client "$cmd" \
             --mode oauth
@@ -993,7 +1016,7 @@ configure_agent_auth() {
     if [[ "$auth_sel" != "1" ]]; then
         # Do not auto-delete installer API-key profiles here: accounts are global
         # and we cannot prove other projects are not still bound to installer refs.
-        node scripts/install-auth-config.mjs client-auth set \
+        run_install_auth_config client-auth set \
             --project-dir "$PROJECT_DIR" \
             --client "$cmd" \
             --mode oauth
@@ -1008,7 +1031,7 @@ configure_agent_auth() {
     if [[ -n "$key" ]]; then
         # All clients use the same install-auth-config.mjs to create provider profiles
         local install_args=(
-            node scripts/install-auth-config.mjs client-auth set
+            run_install_auth_config client-auth set
             --project-dir "$PROJECT_DIR"
             --client "$cmd"
             --mode api_key
@@ -1021,7 +1044,7 @@ configure_agent_auth() {
         # No key provided — set OAuth mode via unified path
         # Do not auto-delete installer API-key profiles here: accounts are global
         # and we cannot prove other projects are not still bound to installer refs.
-        node scripts/install-auth-config.mjs client-auth set \
+        run_install_auth_config client-auth set \
             --project-dir "$PROJECT_DIR" \
             --client "$cmd" \
             --mode oauth
