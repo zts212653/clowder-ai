@@ -143,8 +143,10 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   if (queue.length === 0) return null;
 
   // Only show queued entries — processing entries are already executing and visible in chat
-  // #484: hide scheduler hiddenTrigger entries (they fire-and-forget, not user-facing)
-  const visibleEntries = queue.filter((e) => e.status === 'queued' && !e.content.startsWith(SCHEDULER_TRIGGER_PREFIX));
+  // #484: hide scheduler trigger entries — source='connector' + prefix guards against false positives
+  const visibleEntries = queue.filter(
+    (e) => e.status === 'queued' && !(e.source === 'connector' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
+  );
   if (visibleEntries.length === 0 && !queuePaused) return null;
 
   const pauseLabel = queuePauseReason === 'canceled' ? '当前调用已取消' : '当前调用失败';
