@@ -41,6 +41,22 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(editStep.advance, 'confirm');
   });
 
+  test('loaded add-account-auth flow expands settings before targeting the accounts tab', () => {
+    const flow = loadGuideFlow('add-account-auth');
+    const expandSettingsIndex = flow.steps.findIndex((step) => step.id === 'expand-settings');
+    const accountsIndex = flow.steps.findIndex((step) => step.id === 'go-to-accounts');
+    const expandSettingsStep = flow.steps[expandSettingsIndex];
+    const accountsStep = flow.steps[accountsIndex];
+
+    assert.ok(expandSettingsIndex >= 0, 'expand-settings step should exist');
+    assert.ok(accountsIndex > expandSettingsIndex, 'go-to-accounts should happen after expand-settings');
+    assert.ok(expandSettingsStep, 'expand-settings step should exist');
+    assert.ok(accountsStep, 'go-to-accounts step should exist');
+    assert.equal(expandSettingsStep.target, 'settings.group');
+    assert.equal(expandSettingsStep.advance, 'click');
+    assert.equal(accountsStep.target, 'settings.accounts');
+  });
+
   test('loaded connect-wechat flow uses the rendered weixin target ids', () => {
     const flow = loadGuideFlow('connect-wechat');
     const expandStep = flow.steps.find((step) => step.id === 'expand-wechat');

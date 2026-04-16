@@ -94,8 +94,10 @@ export function AccordionSection({
   return (
     <div className="rounded-xl bg-cafe-surface shadow-[0_1px_8px_rgba(0,0,0,0.03)]">
       <button
+        type="button"
         onClick={onToggle}
         className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-cafe-surface-elevated/50"
+        data-guide-id={group.id === 'settings' ? 'settings.group' : undefined}
       >
         <span className="flex-shrink-0" style={{ color: group.color }}>
           <HubIcon name={group.icon} className="h-5 w-5" />

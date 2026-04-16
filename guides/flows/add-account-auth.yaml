@@ -13,6 +13,11 @@ steps:
     tips: 点击这里打开 Hub 控制台
     advance: click
 
+  - id: expand-settings
+    target: settings.group
+    tips: 展开系统配置分组
+    advance: click
+
   - id: go-to-accounts
     target: settings.accounts
     tips: 进入账号配置页面
