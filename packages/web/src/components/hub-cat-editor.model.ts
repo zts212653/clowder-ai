@@ -189,6 +189,11 @@ export function splitStrengthTags(raw: string): string[] {
     .filter(Boolean);
 }
 
+/** Resolve the account-family client. catagent shares anthropic credentials. */
+function accountFamilyClient(client: ClientId): ClientId {
+  return client === 'catagent' ? 'anthropic' : client;
+}
+
 function isBuiltinClient(client: ClientId): client is BuiltinAccountClient {
   return (
     client === 'anthropic' ||
@@ -214,8 +219,9 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
 }
 
 export function builtinAccountIdForClient(client: ClientId): string | null {
-  if (!isBuiltinClient(client)) return null;
-  switch (client) {
+  const effective = accountFamilyClient(client);
+  if (!isBuiltinClient(effective)) return null;
+  switch (effective) {
     case 'anthropic':
       return 'claude';
     case 'openai':
@@ -232,13 +238,14 @@ export function builtinAccountIdForClient(client: ClientId): string | null {
 }
 
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
-  if (!isBuiltinClient(client)) return [];
+  const effective = accountFamilyClient(client);
+  if (!isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(
-    (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === client,
+    (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === effective,
   );
   // Gemini CLI only supports builtin Google auth — no API key profiles.
-  if (client === 'google') return builtinProfiles;
-  if (client === 'kimi') {
+  if (effective === 'google') return builtinProfiles;
+  if (effective === 'kimi') {
     const kimiApiProfiles = profiles.filter(
       (profile) => profile.authType === 'api_key' && legacyProfileClient(profile) === 'kimi',
     );
