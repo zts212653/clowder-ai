@@ -2,6 +2,7 @@ import type { ClientId } from './cat.js';
 import type { AccountProtocol } from './cat-breed.js';
 
 export type BuiltinAccountClient = Extract<ClientId, 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode'>;
+export type BuiltinAccountProtocol = Extract<AccountProtocol, 'anthropic' | 'openai' | 'google' | 'kimi'>;
 
 const BUILTIN_ACCOUNT_IDS: Record<BuiltinAccountClient, string> = {
   anthropic: 'claude',
@@ -33,7 +34,7 @@ export function builtinAccountIdForClient(client: ClientId): string | null {
   return family ? BUILTIN_ACCOUNT_IDS[family] : null;
 }
 
-export function protocolForClient(client: ClientId): AccountProtocol | null {
+export function protocolForClient(client: ClientId): BuiltinAccountProtocol | null {
   switch (client) {
     case 'anthropic':
     case 'catagent':
