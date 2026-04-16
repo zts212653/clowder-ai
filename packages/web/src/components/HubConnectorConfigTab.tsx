@@ -211,7 +211,7 @@ export function HubConnectorConfigTab() {
                     </div>
                     {idx === 0 && (
                       <div className="ml-[26px]">
-                        <div data-guide-id="connector.wechat.qr-panel">
+                        <div data-guide-id="connector.weixin.qr-panel">
                           <WeixinQrPanel configured={platform.configured} />
                         </div>
                       </div>

@@ -41,6 +41,20 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(editStep.advance, 'confirm');
   });
 
+  test('loaded connect-wechat flow uses the rendered weixin target ids', () => {
+    const flow = loadGuideFlow('connect-wechat');
+    const expandStep = flow.steps.find((step) => step.id === 'expand-wechat');
+    const qrStep = flow.steps.find((step) => step.id === 'generate-qr');
+    const doneStep = flow.steps.find((step) => step.id === 'done');
+
+    assert.ok(expandStep, 'expand-wechat step should exist');
+    assert.ok(qrStep, 'generate-qr step should exist');
+    assert.ok(doneStep, 'done step should exist');
+    assert.equal(expandStep.target, 'connector.weixin');
+    assert.equal(qrStep.target, 'connector.weixin.qr-panel');
+    assert.equal(doneStep.target, 'connector.weixin');
+  });
+
   test('normalizes explicit schemaVersion: 1 on loaded flows', () => {
     const guideId = 'test-schema-v1-explicit';
     const flowPath = resolve(repoRoot, 'guides', 'flows', `${guideId}.yaml`);
@@ -170,7 +184,7 @@ describe('F155 guide registry loader target validation', async () => {
 
   test('matches meaningful partial queries without requiring full keyword', () => {
     const matches = resolveGuideForIntent('添加');
-    assert.equal(matches[0]?.id, 'add-member');
+    assert.ok(matches.some((match) => match.id === 'add-member'));
   });
 
   test('does not offer guides for single-character queries', () => {

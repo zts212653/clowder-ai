@@ -491,10 +491,10 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
   { step, stepIndex, totalSteps, phase, targetRect, onExit },
   ref,
 ) {
-  const style = computeHUDPosition(targetRect);
   const hasMedia = !!step.tipsMetadata;
   const isHorizontal = step.tipsMetadata?.layout === 'horizontal';
   const widthClass = hasMedia && isHorizontal ? 'w-[480px]' : 'w-[280px]';
+  const style = computeHUDPosition(targetRect, { width: hasMedia && isHorizontal ? 480 : 280, height: 160 });
 
   const handleConfirm = () => {
     window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: step.target } }));
@@ -611,12 +611,15 @@ function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: str
 
 /* ── Position helpers ── */
 
-function computeHUDPosition(targetRect: DOMRect | null): React.CSSProperties {
+export function computeHUDPosition(
+  targetRect: DOMRect | null,
+  hudSize: { width?: number; height?: number } = {},
+): React.CSSProperties {
   if (!targetRect) {
     return { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
   }
-  const hudWidth = 280;
-  const hudHeight = 160;
+  const hudWidth = hudSize.width ?? 280;
+  const hudHeight = hudSize.height ?? 160;
   const gap = 16;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
