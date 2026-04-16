@@ -524,6 +524,16 @@ default_runtime_dir() {
     parent="$(cd "$PROJECT_DIR/.." && pwd)"
     printf '%s/cat-cafe-runtime\n' "$parent"
 }
+runtime_worktree_initialized() {
+    local runtime_dir="$1"
+    [[ -d "$runtime_dir" ]] || return 1
+    [[ -e "$runtime_dir/.git" ]] || return 1
+    git -C "$runtime_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+    local resolved_runtime resolved_toplevel
+    resolved_runtime="$(cd "$runtime_dir" && pwd -P)"
+    resolved_toplevel="$(git -C "$runtime_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+    [[ -n "$resolved_toplevel" && "$resolved_runtime" == "$resolved_toplevel" ]]
+}
 resolve_installer_auth_config_root() {
     if [[ -n "${CAT_CAFE_GLOBAL_CONFIG_ROOT:-}" ]]; then
         printf '%s\n' "$CAT_CAFE_GLOBAL_CONFIG_ROOT"
@@ -531,7 +541,7 @@ resolve_installer_auth_config_root() {
     fi
     local runtime_dir="${CAT_CAFE_RUNTIME_DIR:-}"
     [[ -n "$runtime_dir" ]] || runtime_dir="$(default_runtime_dir)"
-    if [[ -d "$runtime_dir" ]]; then
+    if runtime_worktree_initialized "$runtime_dir"; then
         (cd "$runtime_dir" && pwd)
         return 0
     fi

@@ -1,8 +1,10 @@
 import test from 'node:test';
 
 import {
+  addWorktree,
   assert,
   existsSync,
+  initGitRepo,
   installScript,
   join,
   mkdirSync,
@@ -71,7 +73,8 @@ test('installer auth config root follows an existing runtime worktree', () => {
 
   try {
     mkdirSync(projectRoot, { recursive: true });
-    mkdirSync(runtimeRoot, { recursive: true });
+    initGitRepo(projectRoot);
+    addWorktree(projectRoot, runtimeRoot, 'runtime/main-sync');
 
     const output = runSourceOnlySnippet(`
 PROJECT_DIR="${projectRoot}"
@@ -79,6 +82,26 @@ printf '%s' "$(resolve_installer_auth_config_root)"
 `);
 
     assert.equal(output, runtimeRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth config root falls back to project root when runtime dir is not an initialized worktree', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-uninit-runtime-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
   } finally {
     rmSync(parentRoot, { recursive: true, force: true });
   }
