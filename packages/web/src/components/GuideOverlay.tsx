@@ -50,6 +50,7 @@ function GuideOverlayInner() {
   const completionFailed = useGuideStore((s) => s.completionFailed);
 
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const [hudSize, setHudSize] = useState<{ width: number; height: number }>({ width: 280, height: 160 });
   const rafRef = useRef<number>(0);
   const lastRectRef = useRef<{ t: number; l: number; w: number; h: number } | null>(null);
   const previousFocusRef = useRef<Element | null>(null);
@@ -79,6 +80,7 @@ function GuideOverlayInner() {
       ? session.flow.steps[session.currentStepIndex]
       : null;
   const isComplete = session ? session.phase === 'complete' : false;
+  const usesHorizontalMedia = !!currentStep?.tipsMetadata && currentStep.tipsMetadata.layout === 'horizontal';
   const handleExit = async () => {
     if (session?.threadId) {
       try {
@@ -131,6 +133,45 @@ function GuideOverlayInner() {
       cancelAnimationFrame(rafRef.current);
     };
   }, [session, currentStep, isComplete, session?.phase, setPhase]);
+
+  // Measure the rendered HUD so viewport clamping uses real media height/width.
+  useEffect(() => {
+    const hud = hudRef.current;
+    if (!hud || !currentStep || isComplete) return;
+
+    const measure = () => {
+      const rect = hud.getBoundingClientRect();
+      const nextWidth = Math.round(rect.width) || (usesHorizontalMedia ? 480 : 280);
+      const nextHeight = Math.round(rect.height) || 160;
+      setHudSize((prev) => {
+        if (prev.width === nextWidth && prev.height === nextHeight) return prev;
+        return { width: nextWidth, height: nextHeight };
+      });
+    };
+
+    measure();
+    const rafId = requestAnimationFrame(measure);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(hud);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, [
+    currentStep?.id,
+    currentStep?.advance,
+    currentStep?.tipsMetadata?.layout,
+    currentStep?.tipsMetadata?.src,
+    currentStep?.tipsMetadata?.target,
+    currentStep?.tipsMetadata?.type,
+    isComplete,
+    usesHorizontalMedia,
+  ]);
 
   // Auto-advance: listen for interaction with target element
   useAutoAdvance(currentStep, advanceStep, session?.phase === 'active');
@@ -365,6 +406,7 @@ function GuideOverlayInner() {
         totalSteps={session.flow.steps.length}
         phase={session.phase}
         targetRect={targetRect}
+        hudSize={hudSize}
         onExit={handleExit}
       />
     </>
@@ -484,17 +526,18 @@ interface GuideHUDProps {
   totalSteps: number;
   phase: string;
   targetRect: DOMRect | null;
+  hudSize: { width: number; height: number };
   onExit: () => void;
 }
 
 const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideHUD(
-  { step, stepIndex, totalSteps, phase, targetRect, onExit },
+  { step, stepIndex, totalSteps, phase, targetRect, hudSize, onExit },
   ref,
 ) {
   const hasMedia = !!step.tipsMetadata;
   const isHorizontal = step.tipsMetadata?.layout === 'horizontal';
   const widthClass = hasMedia && isHorizontal ? 'w-[480px]' : 'w-[280px]';
-  const style = computeHUDPosition(targetRect, { width: hasMedia && isHorizontal ? 480 : 280, height: 160 });
+  const style = computeHUDPosition(targetRect, hudSize);
 
   const handleConfirm = () => {
     window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: step.target } }));

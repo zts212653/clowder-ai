@@ -66,6 +66,16 @@ describe('computeHUDPosition', () => {
     expect(style.left).toBe(144);
     expect(style.top).toBe(196);
   });
+
+  it('keeps a tall media HUD inside the viewport near the bottom edge', () => {
+    vi.stubGlobal('innerWidth', 640);
+    vi.stubGlobal('innerHeight', 360);
+    const rect = { top: 300, bottom: 340, left: 200, right: 260, width: 60, height: 40 } as DOMRect;
+    const style = computeHUDPosition(rect, { width: 280, height: 280 });
+
+    expect(style.left).toBe(90);
+    expect(style.top).toBe(16);
+  });
 });
 
 /* ── Phase state machine scenario tests ── */
