@@ -161,7 +161,9 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
     await flushEffects();
 
     const card = container.querySelector('[data-guide-id="connector.weixin"]');
-    const expand = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('微信'));
+    const expand = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('微信'),
+    );
     expect(card).toBeTruthy();
     expect(expand).toBeTruthy();
 

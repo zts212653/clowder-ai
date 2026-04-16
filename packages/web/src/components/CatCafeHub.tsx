@@ -85,14 +85,17 @@ export function CatCafeHub() {
     if (!isValid) setTab('cats');
   }, [open, tab]);
 
-  const toggleGroup = useCallback((groupId: string) => {
-    setExpandedGroup((prev) => {
-      const isGuideLockedToggle =
-        prev === groupId && activeGuideStep?.advance === 'click' && activeGuideStep.target === `${groupId}.group`;
-      if (isGuideLockedToggle) return prev;
-      return prev === groupId ? null : groupId;
-    });
-  }, [activeGuideStep]);
+  const toggleGroup = useCallback(
+    (groupId: string) => {
+      setExpandedGroup((prev) => {
+        const isGuideLockedToggle =
+          prev === groupId && activeGuideStep?.advance === 'click' && activeGuideStep.target === `${groupId}.group`;
+        if (isGuideLockedToggle) return prev;
+        return prev === groupId ? null : groupId;
+      });
+    },
+    [activeGuideStep],
+  );
 
   const selectTab = useCallback((tabId: HubTabId) => {
     setTab(tabId);
