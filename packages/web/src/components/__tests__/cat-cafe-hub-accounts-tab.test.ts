@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 
 const storeState = {
@@ -87,6 +88,12 @@ function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
+const SETTINGS_GUIDE_FLOW = {
+  id: 'add-account-auth',
+  name: '添加账户认证',
+  steps: [{ id: 'expand-settings', target: 'settings.group', tips: '展开系统配置分组', advance: 'click' as const }],
+};
+
 describe('CatCafeHub provider profiles tab', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -111,6 +118,9 @@ describe('CatCafeHub provider profiles tab', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    act(() => {
+      useGuideStore.getState().exitGuide();
+    });
     vi.clearAllMocks();
   });
 
@@ -498,6 +508,55 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(expandButton).toBeTruthy();
     expect(guideTarget).toBe(expandButton);
     expect(guideTarget?.tagName).toBe('BUTTON');
+  });
+
+  it('keeps settings expanded when the current guide step targets settings.group', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config') {
+        return Promise.resolve(
+          jsonResponse({ config: { cats: {}, perCatBudgets: {}, a2a: {}, memory: {}, hindsight: {}, governance: {} } }),
+        );
+      }
+      if (path.startsWith('/api/accounts')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(CatCafeHub));
+    });
+    await flushEffects();
+
+    const settingsToggle = container.querySelector('[data-guide-id="settings.group"]') as HTMLButtonElement | null;
+    expect(settingsToggle).toBeTruthy();
+
+    if (!container.querySelector('[data-guide-id="settings.accounts"]')) {
+      await act(async () => {
+        settingsToggle?.click();
+      });
+      await flushEffects();
+    }
+
+    expect(container.querySelector('[data-guide-id="settings.accounts"]')).toBeTruthy();
+
+    await act(async () => {
+      useGuideStore.getState().startGuide(SETTINGS_GUIDE_FLOW);
+      useGuideStore.getState().setPhase('active');
+    });
+
+    await act(async () => {
+      settingsToggle?.click();
+    });
+    await flushEffects();
+
+    expect(container.querySelector('[data-guide-id="settings.accounts"]')).toBeTruthy();
   });
 
   it('creates api-key profile from name, url, api key, and supported models only', async () => {

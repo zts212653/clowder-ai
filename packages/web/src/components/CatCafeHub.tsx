@@ -39,6 +39,11 @@ export function CatCafeHub() {
   const hubState = useChatStore((s) => s.hubState);
   const closeHub = useChatStore((s) => s.closeHub);
   const guideActive = useGuideStore((s) => s.session !== null);
+  const activeGuideStep = useGuideStore((s) => {
+    const session = s.session;
+    if (!session || session.currentStepIndex >= session.flow.steps.length) return null;
+    return session.flow.steps[session.currentStepIndex];
+  });
   const { cats, getCatById, refresh } = useCatData();
 
   const open = hubState?.open ?? false;
@@ -81,8 +86,13 @@ export function CatCafeHub() {
   }, [open, tab]);
 
   const toggleGroup = useCallback((groupId: string) => {
-    setExpandedGroup((prev) => (prev === groupId ? null : groupId));
-  }, []);
+    setExpandedGroup((prev) => {
+      const isGuideLockedToggle =
+        prev === groupId && activeGuideStep?.advance === 'click' && activeGuideStep.target === `${groupId}.group`;
+      if (isGuideLockedToggle) return prev;
+      return prev === groupId ? null : groupId;
+    });
+  }, [activeGuideStep]);
 
   const selectTab = useCallback((tabId: HubTabId) => {
     setTab(tabId);

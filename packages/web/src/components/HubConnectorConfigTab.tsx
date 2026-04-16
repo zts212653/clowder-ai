@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
 import {
@@ -41,6 +42,11 @@ interface PlatformStatus {
 }
 
 export function HubConnectorConfigTab() {
+  const activeGuideStep = useGuideStore((s) => {
+    const session = s.session;
+    if (!session || session.currentStepIndex >= session.flow.steps.length) return null;
+    return session.flow.steps[session.currentStepIndex];
+  });
   const [platforms, setPlatforms] = useState<PlatformStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -67,7 +73,11 @@ export function HubConnectorConfigTab() {
   }, [fetchStatus]);
 
   const handleExpand = (platformId: string) => {
+    const guideToggleTarget = `connector.${platformId}`;
     if (expandedId === platformId) {
+      if (activeGuideStep?.advance === 'click' && activeGuideStep.target === guideToggleTarget) {
+        return;
+      }
       setExpandedId(null);
       setFieldValues({});
       setSaveResult(null);
