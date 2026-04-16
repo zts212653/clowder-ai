@@ -41,11 +41,12 @@ export function CreateApiKeyAccountSection({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-[20px] border border-[#E8C9AF] bg-[#F7EEE6] p-[18px]" data-guide-id="accounts.create-form">
+    <div className="rounded-[20px] border border-[#E8C9AF] bg-[#F7EEE6] p-[18px]">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-center justify-between text-left"
+        data-guide-id="accounts.create-form"
       >
         <h4 className="text-base font-bold text-[#D49266]">+ 新建 API Key 账号</h4>
         <span className="text-sm text-[#C8946B]">{expanded ? '▾ 收起' : '▸ 展开'}</span>

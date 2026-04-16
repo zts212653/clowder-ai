@@ -470,6 +470,36 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).not.toContain('测试');
   });
 
+  it('anchors the create-form guide target on the expand button itself', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/api/accounts')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-oauth',
+            providers: [],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubAccountsTab));
+    });
+    await flushEffects();
+
+    const guideTarget = container.querySelector('[data-guide-id="accounts.create-form"]');
+    const expandButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('新建 API Key 账号'),
+    );
+
+    expect(guideTarget).toBeTruthy();
+    expect(expandButton).toBeTruthy();
+    expect(guideTarget).toBe(expandButton);
+    expect(guideTarget?.tagName).toBe('BUTTON');
+  });
+
   it('creates api-key profile from name, url, api key, and supported models only', async () => {
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/accounts' && init?.method === 'POST') {

@@ -148,6 +148,28 @@ describe('CatOverviewTab', () => {
     expect(html).not.toContain('Lead');
     expect(html).not.toContain('npx antigravity --bridge');
   });
+
+  it('anchors the first-member guide target to the member edit body, not the availability toggle', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CatOverviewTab, {
+        config: CONFIG,
+        cats: CATS,
+        onEditMember: () => {},
+      }),
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    const guideTarget = root.querySelector('[data-guide-id="cats.first-member"]');
+    const availabilityToggle = Array.from(root.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('已启用'),
+    );
+
+    expect(guideTarget).toBeTruthy();
+    expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
+    expect(availabilityToggle).toBeTruthy();
+    expect(guideTarget?.contains(availabilityToggle ?? null)).toBe(false);
+  });
 });
 
 describe('SystemTab', () => {

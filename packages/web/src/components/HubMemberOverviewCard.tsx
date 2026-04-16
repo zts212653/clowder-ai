@@ -163,6 +163,7 @@ export function HubMemberOverviewCard({
   onDrop,
   onDragEnd,
   isDragging = false,
+  guideTargetId,
 }: {
   cat: CatData;
   configCat?: CatConfig;
@@ -175,6 +176,7 @@ export function HubMemberOverviewCard({
   onDrop?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
   onDragEnd?: (cat: CatData, event: ReactDragEvent<HTMLElement>) => void;
   isDragging?: boolean;
+  guideTargetId?: string;
 }) {
   const status = getStatusBadge(cat);
   const title = [cat.breedDisplayName ?? cat.displayName, cat.nickname].filter(Boolean).join(' · ');
@@ -197,6 +199,7 @@ export function HubMemberOverviewCard({
           onEdit(cat);
         }
       }}
+      data-guide-id={guideTargetId}
       className={`rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md ${isDragging ? 'opacity-40' : ''}`}
       style={{ backgroundColor: '#FFFDFC', border: `1px solid ${cat.source === 'runtime' ? '#D9C7EA' : '#F1E7DF'}` }}
     >
@@ -211,6 +214,7 @@ export function HubMemberOverviewCard({
               ⠿
             </span>
           ) : null}
+          <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
             {cat.source === 'runtime' ? (
@@ -219,6 +223,21 @@ export function HubMemberOverviewCard({
               </span>
             ) : null}
           </div>
+          <p className="mt-2.5 text-[13px] text-[#8A776B]">
+            {getMetaSummary(cat, configCat)}
+            {cat.adapterMode ? (
+              <span
+                className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                  cat.adapterMode === 'acp' ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                {cat.adapterMode.toUpperCase()}
+              </span>
+            ) : null}
+          </p>
+
+          <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
+        </div>
         </div>
         <button
           type="button"
@@ -233,21 +252,6 @@ export function HubMemberOverviewCard({
           {togglingAvailability ? '切换中...' : status.label}
         </button>
       </div>
-
-      <p className="mt-2.5 text-[13px] text-[#8A776B]">
-        {getMetaSummary(cat, configCat)}
-        {cat.adapterMode ? (
-          <span
-            className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-              cat.adapterMode === 'acp' ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-500'
-            }`}
-          >
-            {cat.adapterMode.toUpperCase()}
-          </span>
-        ) : null}
-      </p>
-
-      <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
     </section>
   );
 }
