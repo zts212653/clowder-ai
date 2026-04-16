@@ -253,6 +253,19 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     expect(useGuideStore.getState().session?.phase).toBe('complete');
   });
 
+  it('renders valid Chinese aria labels for the HUD dialog and confirm action', () => {
+    act(() => {
+      useGuideStore.getState().startGuide(CONFIRM_FLOW);
+      useGuideStore.getState().setPhase('active');
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    expect(container.querySelector('[aria-label="引导面板"]')).toBeInstanceOf(HTMLDivElement);
+    expect(container.querySelector('[aria-label="已完成该步骤"]')).toBeInstanceOf(HTMLButtonElement);
+  });
+
   it('does not block UI interaction while target is still unresolved', () => {
     act(() => {
       confirmTarget.remove();

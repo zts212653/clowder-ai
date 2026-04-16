@@ -506,7 +506,7 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
       className={`fixed z-[var(--guide-z-hud)] ${widthClass} animate-guide-hud-enter rounded-[var(--guide-radius)] border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-xl`}
       style={style}
       role="dialog"
-      aria-label="引导���板"
+      aria-label="引导面板"
     >
       {/* Progress dots */}
       <div className="mb-3 flex gap-1">
@@ -554,7 +554,7 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
             type="button"
             onClick={handleConfirm}
             className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
-            aria-label="已完��该步骤"
+            aria-label="已完成该步骤"
           >
             已完成该步骤
           </button>
