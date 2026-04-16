@@ -105,6 +105,16 @@ export interface GuideMatch {
  */
 /* ── OrchestrationFlow v2 — runtime flow loader ── */
 
+export interface TipsMetadata {
+  /** data-guide-id of a pre-composed card div (type: 'card') */
+  target?: string;
+  type: 'card' | 'png';
+  /** Static image path (type: 'png') */
+  src?: string;
+  layout?: 'horizontal' | 'vertical';
+  alt?: string;
+}
+
 export interface OrchestrationStep {
   id: string;
   target: string;
@@ -112,6 +122,7 @@ export interface OrchestrationStep {
   advance: 'click' | 'visible' | 'input' | 'confirm';
   page?: string;
   timeoutSec?: number;
+  tipsMetadata?: TipsMetadata;
 }
 
 export interface OrchestrationFlow {
@@ -134,6 +145,13 @@ interface RawFlowFile {
     advance: string;
     page?: string;
     timeoutSec?: number;
+    tipsMetadata?: {
+      target?: string;
+      type?: string;
+      src?: string;
+      layout?: string;
+      alt?: string;
+    };
   }>;
 }
 
@@ -204,7 +222,7 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
       if (!isValidGuideTarget(s.target)) {
         throw new Error(`[F155] Invalid target "${s.target}" in step "${s.id}"`);
       }
-      return {
+      const step: OrchestrationStep = {
         id: s.id,
         target: s.target,
         tips: s.tips,
@@ -212,6 +230,16 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
         ...(s.page && { page: s.page }),
         ...(s.timeoutSec && { timeoutSec: s.timeoutSec }),
       };
+      if (s.tipsMetadata?.type === 'card' || s.tipsMetadata?.type === 'png') {
+        step.tipsMetadata = {
+          type: s.tipsMetadata.type,
+          ...(s.tipsMetadata.target && { target: s.tipsMetadata.target }),
+          ...(s.tipsMetadata.src && { src: s.tipsMetadata.src }),
+          ...(s.tipsMetadata.layout && { layout: s.tipsMetadata.layout as 'horizontal' | 'vertical' }),
+          ...(s.tipsMetadata.alt && { alt: s.tipsMetadata.alt }),
+        };
+      }
+      return step;
     }),
   };
 

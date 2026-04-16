@@ -492,14 +492,21 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
   ref,
 ) {
   const style = computeHUDPosition(targetRect);
+  const hasMedia = !!step.tipsMetadata;
+  const isHorizontal = step.tipsMetadata?.layout === 'horizontal';
+  const widthClass = hasMedia && isHorizontal ? 'w-[480px]' : 'w-[280px]';
+
+  const handleConfirm = () => {
+    window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: step.target } }));
+  };
 
   return (
     <div
       ref={ref}
-      className="fixed z-[var(--guide-z-hud)] w-[280px] animate-guide-hud-enter rounded-[var(--guide-radius)] border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-xl"
+      className={`fixed z-[var(--guide-z-hud)] ${widthClass} animate-guide-hud-enter rounded-[var(--guide-radius)] border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-4 shadow-xl`}
       style={style}
       role="dialog"
-      aria-label="引导面板"
+      aria-label="引导���板"
     >
       {/* Progress dots */}
       <div className="mb-3 flex gap-1">
@@ -519,16 +526,21 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
         ))}
       </div>
 
-      {/* Tips from flow definition */}
-      <p className="mb-3 text-sm leading-relaxed text-[var(--guide-text-primary)]">{step.tips}</p>
+      {/* Tips content — plain text or with media */}
+      <div className={hasMedia && isHorizontal ? 'mb-3 flex gap-4' : 'mb-3'}>
+        <div className={hasMedia && isHorizontal ? 'flex-1' : ''}>
+          <p className="text-sm leading-relaxed text-[var(--guide-text-primary)]">{step.tips}</p>
+        </div>
+        {hasMedia && <TipsMediaBlock metadata={step.tipsMetadata!} />}
+      </div>
 
       {/* Locating indicator */}
       {phase === 'locating' && (
         <p className="mb-3 text-xs text-[var(--guide-text-secondary)] animate-pulse">正在定位目标元素...</p>
       )}
 
-      {/* Exit only */}
-      <div className="flex items-center border-t border-[var(--guide-hud-border)] pt-3">
+      {/* Actions: confirm button (when advance=confirm) + exit */}
+      <div className="flex items-center justify-between border-t border-[var(--guide-hud-border)] pt-3">
         <button
           type="button"
           onClick={onExit}
@@ -537,10 +549,65 @@ const GuideHUD = React.forwardRef<HTMLDivElement, GuideHUDProps>(function GuideH
         >
           退出
         </button>
+        {step.advance === 'confirm' && (
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="rounded-lg bg-[var(--guide-cutout-ring)] px-4 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+            aria-label="已完��该步骤"
+          >
+            已完成该步骤
+          </button>
+        )}
       </div>
     </div>
   );
 });
+
+/* ── Tips Media Block: renders card div or static image ── */
+
+function TipsMediaBlock({ metadata }: { metadata: import('@/stores/guideStore').TipsMetadata }) {
+  if (metadata.type === 'png' && metadata.src) {
+    return (
+      <div className="flex-shrink-0">
+        <img
+          src={metadata.src}
+          alt={metadata.alt ?? ''}
+          className="max-h-[200px] max-w-[200px] rounded-lg border border-[var(--guide-hud-border)] object-contain"
+        />
+      </div>
+    );
+  }
+
+  if (metadata.type === 'card' && metadata.target) {
+    return <CardCaptureBlock guideTarget={metadata.target} alt={metadata.alt} />;
+  }
+
+  return null;
+}
+
+function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: string }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const source = document.querySelector(`[data-guide-id="${CSS.escape(guideTarget)}"]`);
+    if (!source || !containerRef.current) return;
+    const clone = source.cloneNode(true) as HTMLElement;
+    clone.removeAttribute('data-guide-id');
+    clone.style.pointerEvents = 'none';
+    containerRef.current.innerHTML = '';
+    containerRef.current.appendChild(clone);
+  }, [guideTarget]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-shrink-0 max-w-[200px] overflow-hidden rounded-lg border border-[var(--guide-hud-border)]"
+      role="img"
+      aria-label={alt ?? '引导卡片'}
+    />
+  );
+}
 
 /* ── Position helpers ── */
 

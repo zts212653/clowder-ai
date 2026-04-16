@@ -1,0 +1,34 @@
+# F155 Guide Flow: 修改成员认证与模型
+# 引导用户修改成员的认证信息、Client 和默认模型
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+schemaVersion: 1
+id: edit-member-auth
+name: 修改成员认证与模型
+description: 引导你为成员配置认证信息和默认模型
+
+steps:
+  - id: open-hub
+    target: hub.trigger
+    tips: 点击这里打开 Hub 控制台
+    advance: click
+
+  - id: go-to-cats
+    target: cats.overview
+    tips: 进入成员管理页面
+    advance: click
+
+  - id: select-member
+    target: cats.first-member
+    tips: 选择要配置的成员（点击编辑按钮）
+    advance: click
+
+  - id: config-auth
+    target: member-editor.auth-config
+    tips: 在认证与模型区域选择 Client、认证信息和模型，然后点击保存
+    advance: confirm
+
+  - id: done
+    target: member-editor.profile
+    tips: 配置完成，该成员现在使用新的模型了
+    advance: confirm

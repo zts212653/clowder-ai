@@ -41,7 +41,7 @@ export function CreateApiKeyAccountSection({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-[20px] border border-[#E8C9AF] bg-[#F7EEE6] p-[18px]">
+    <div className="rounded-[20px] border border-[#E8C9AF] bg-[#F7EEE6] p-[18px]" data-guide-id="accounts.create-form">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -71,6 +71,7 @@ export function CreateApiKeyAccountSection({
             onChange={(e) => onApiKeyChange(e.target.value)}
             placeholder="sk-xxxxxxxxxxxxxxxx"
             className="w-full rounded border border-[#E8DCCF] bg-cafe-surface px-3 py-2 text-sm placeholder:text-[#C4B5A8]"
+            data-guide-id="accounts.api-key"
           />
           <div className="space-y-2">
             <p className="text-xs font-semibold text-[#8A776B]">可用模型 *</p>

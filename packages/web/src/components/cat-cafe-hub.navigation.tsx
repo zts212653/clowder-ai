@@ -124,7 +124,9 @@ export function AccordionSection({
                 onClick={() => onSelectTab(tab.id)}
                 className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-left text-sm transition-colors"
                 style={isActive ? { backgroundColor: `${group.color}10`, color: group.color } : {}}
-                data-guide-id={tab.id === 'cats' ? 'cats.overview' : undefined}
+                data-guide-id={
+                  tab.id === 'cats' ? 'cats.overview' : tab.id === 'accounts' ? 'settings.accounts' : undefined
+                }
               >
                 <span style={isActive ? { color: group.color } : { color: '#9ca3af' }}>
                   <HubIcon name={tab.icon} className="h-4 w-4" />

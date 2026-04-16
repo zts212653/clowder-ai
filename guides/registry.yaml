@@ -21,3 +21,60 @@ guides:
     priority: P0
     cross_system: false
     estimated_time: 3min
+
+  - id: add-account-auth
+    name: 添加账户认证
+    description: 引导你完成 API Key 认证账号的创建和配置
+    flow_file: flows/add-account-auth.yaml
+    keywords:
+      - 添加账户
+      - 添加认证
+      - 添加apikey
+      - 新增apikey
+      - 配置apikey
+      - 添加api key
+      - 添加模型
+      - add account
+      - add api key
+      - add apikey
+    category: account-config
+    priority: P1
+    cross_system: false
+    estimated_time: 3min
+
+  - id: edit-member-auth
+    name: 修改成员认证与模型
+    description: 引导你为成员配置认证信息和默认模型
+    flow_file: flows/edit-member-auth.yaml
+    keywords:
+      - 修改成员
+      - 修改认证
+      - 修改模型
+      - 配置模型
+      - 配置认证
+      - 修改provider
+      - 修改client
+      - edit member auth
+      - change model
+      - configure provider
+    category: member-config
+    priority: P1
+    cross_system: false
+    estimated_time: 3min
+
+  - id: connect-wechat
+    name: 对接微信
+    description: 引导你完成微信渠道的接入和扫码配置
+    flow_file: flows/connect-wechat.yaml
+    keywords:
+      - 对接微信
+      - 连接微信
+      - 微信接入
+      - 配置微信
+      - 微信扫码
+      - connect wechat
+      - wechat setup
+    category: connector-config
+    priority: P1
+    cross_system: true
+    estimated_time: 5min

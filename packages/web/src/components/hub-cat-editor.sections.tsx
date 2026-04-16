@@ -361,7 +361,7 @@ export function AccountSection({
   );
 
   return (
-    <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'}>
+    <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'} data-guide-id="member-editor.auth-config">
       <div className="space-y-2">
         <SelectField
           label="Client"

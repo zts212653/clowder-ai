@@ -138,6 +138,7 @@ export function HubConnectorConfigTab() {
             key={platform.id}
             className="border border-cafe rounded-2xl overflow-hidden"
             data-testid={`platform-card-${platform.id}`}
+            data-guide-id={`connector.${platform.id}`}
           >
             <button
               type="button"
@@ -210,7 +211,9 @@ export function HubConnectorConfigTab() {
                     </div>
                     {idx === 0 && (
                       <div className="ml-[26px]">
-                        <WeixinQrPanel configured={platform.configured} />
+                        <div data-guide-id="connector.wechat.qr-panel">
+                          <WeixinQrPanel configured={platform.configured} />
+                        </div>
                       </div>
                     )}
                   </div>
