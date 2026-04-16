@@ -159,6 +159,20 @@ test('client-auth set oauth supports kimi and stores its default models', () => 
   }
 });
 
+test('client-auth set oauth sanitizes malformed builtin default models before writing state', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-claude-oauth-models-'));
+
+  try {
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'anthropic', '--mode', 'oauth']);
+
+    const { accounts } = readInstallerState(projectRoot);
+    assert.equal(accounts.claude?.authType, 'oauth');
+    assert.deepEqual(accounts.claude?.models, ['claude-opus-4-5-20251101', 'claude-opus-4-6', 'claude-sonnet-4-6']);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test('claude-profile create and remove keeps installer-managed account in sync', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-profile-'));
 

@@ -16,7 +16,7 @@ const BUILTIN_ACCOUNT_SPECS = [
     id: 'claude',
     displayName: 'Claude',
     client: 'anthropic',
-    models: ['claude-opus-4-6[1m]', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'],
+    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'],
   },
   { id: 'codex', displayName: 'Codex', client: 'openai', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'] },
   { id: 'gemini', displayName: 'Gemini', client: 'google', models: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'] },
@@ -191,9 +191,18 @@ function normalizeDisplayName(displayName) {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeModelValue(value) {
+  const trimmed = String(value ?? '')
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .trim()
+    .replace(/(?:\[[0-9;]*m)+$/g, '')
+    .trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function normalizeModels(models) {
   if (!Array.isArray(models)) return undefined;
-  const normalized = Array.from(new Set(models.map((v) => String(v).trim()).filter((v) => v.length > 0)));
+  const normalized = Array.from(new Set(models.map(normalizeModelValue).filter((v) => v && v.length > 0)));
   return normalized.length > 0 ? normalized.sort() : undefined;
 }
 
