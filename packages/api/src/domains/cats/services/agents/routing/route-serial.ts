@@ -16,6 +16,17 @@ import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import {
+  inlineActionChecked,
+  inlineActionDetected,
+  inlineActionFeedbackWriteFailed,
+  inlineActionFeedbackWritten,
+  inlineActionHintEmitFailed,
+  inlineActionHintEmitted,
+  inlineActionRoutedSetSkip,
+  inlineActionShadowMiss,
+  lineStartDetected,
+} from '../../../../../infrastructure/telemetry/instruments.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import {
@@ -41,7 +52,7 @@ import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { detectInlineActionMentions, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
+import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
@@ -717,21 +728,38 @@ export async function* routeSerial(
         // Line-start @mention = always actionable (no keyword gate)
         a2aMentions = parseA2AMentions(storedContent, catId);
 
+        // F479: baseline counter — line-start mentions
+        if (a2aMentions.length > 0) {
+          lineStartDetected.add(a2aMentions.length, { 'agent.id': catId as string });
+        }
+
         // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
+        // F479: counters for detection, shadow, feedback, hint
         if (deps.invocationDeps.threadStore) {
-          const inlineHits = detectInlineActionMentions(storedContent, catId, a2aMentions);
+          const {
+            strictHits: inlineHits,
+            shadowMisses,
+            routedSetSkips,
+          } = detectInlineActionMentionsWithShadow(storedContent, catId, a2aMentions);
+          const agentAttr = { 'agent.id': catId as string };
+          inlineActionChecked.add(1, agentAttr);
+          if (inlineHits.length > 0) inlineActionDetected.add(inlineHits.length, agentAttr);
+          if (shadowMisses.length > 0) inlineActionShadowMiss.add(shadowMisses.length, agentAttr);
+          if (routedSetSkips > 0) inlineActionRoutedSetSkip.add(routedSetSkips, agentAttr);
+
           if (inlineHits.length > 0) {
             try {
               await deps.invocationDeps.threadStore.setMentionRoutingFeedback(threadId, catId, {
                 sourceTimestamp: Date.now(),
                 items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
               });
+              inlineActionFeedbackWritten.add(1, agentAttr);
               log.info(
                 { catId: catId as string, threadId, targets: inlineHits.map((h) => h.catId) },
                 'Inline action @mention detected — wrote routing feedback',
               );
             } catch {
-              /* best-effort */
+              inlineActionFeedbackWriteFailed.add(1, agentAttr);
             }
             // #1062: User-visible system message when chain would break
             // (inline action detected but no line-start @ = no routing will happen)
@@ -748,6 +776,7 @@ export async function* routeSerial(
                   timestamp: Date.now(),
                   source: hintSource,
                 });
+                inlineActionHintEmitted.add(1, agentAttr);
                 // Broadcast so frontend sees it in real-time (same pattern as vote result)
                 if (deps.socketManager) {
                   deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
@@ -762,7 +791,7 @@ export async function* routeSerial(
                   });
                 }
               } catch {
-                /* best-effort */
+                inlineActionHintEmitFailed.add(1, agentAttr);
               }
             }
           }

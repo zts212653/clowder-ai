@@ -45,6 +45,53 @@ export const guideTransitions = meter.createCounter('cat_cafe.guide.transitions'
   description: 'Guide lifecycle state transitions',
 });
 
+// --- F479: Inline @mention detection observability ---
+
+/** Counter: total inline action mention detection runs. */
+export const inlineActionChecked = meter.createCounter('cat_cafe.a2a.inline_action.checked', {
+  description: 'Total inline action @mention detection invocations',
+});
+
+/** Counter: inline action mention detected (strict match). */
+export const inlineActionDetected = meter.createCounter('cat_cafe.a2a.inline_action.detected', {
+  description: 'Inline action @mention strict detection hits',
+});
+
+/** Counter: shadow miss — relaxed match found but strict missed. */
+export const inlineActionShadowMiss = meter.createCounter('cat_cafe.a2a.inline_action.shadow_miss', {
+  description: 'Shadow detection: inline @ found but no action keyword (potential vocab gap)',
+});
+
+/** Counter: routing feedback written successfully. */
+export const inlineActionFeedbackWritten = meter.createCounter('cat_cafe.a2a.inline_action.feedback_written', {
+  description: 'Inline action mention routing feedback persisted',
+});
+
+/** Counter: routing feedback write failed. */
+export const inlineActionFeedbackWriteFailed = meter.createCounter('cat_cafe.a2a.inline_action.feedback_write_failed', {
+  description: 'Inline action mention routing feedback write failure',
+});
+
+/** Counter: hint system message emitted. */
+export const inlineActionHintEmitted = meter.createCounter('cat_cafe.a2a.inline_action.hint_emitted', {
+  description: 'Inline action hint system message sent to user',
+});
+
+/** Counter: hint emit failed. */
+export const inlineActionHintEmitFailed = meter.createCounter('cat_cafe.a2a.inline_action.hint_emit_failed', {
+  description: 'Inline action hint system message send failure',
+});
+
+/** Counter: routedSet already covered the mention — skipped. */
+export const inlineActionRoutedSetSkip = meter.createCounter('cat_cafe.a2a.inline_action.routed_set_skip', {
+  description: 'Inline action @mention skipped because already routed via line-start',
+});
+
+/** Counter: baseline — line-start @mention detected (model compliance). */
+export const lineStartDetected = meter.createCounter('cat_cafe.a2a.line_start.detected', {
+  description: 'Line-start @mention detected (baseline for model format compliance)',
+});
+
 /** Liveness state type. */
 export type LivenessState = 'dead' | 'idle-silent' | 'busy-silent' | 'active';
 
