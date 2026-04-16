@@ -41,6 +41,8 @@ export function resolveBuiltinClientForProvider(provider: ClientId): BuiltinAcco
     case 'dare':
     case 'opencode':
       return provider;
+    case 'catagent':
+      return 'anthropic'; // CatAgent uses Anthropic API directly — share credential family
     default:
       return null;
   }

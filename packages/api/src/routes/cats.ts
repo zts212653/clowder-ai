@@ -56,7 +56,7 @@ const cliSchema = z.object({
   effort: cliEffortSchema.nullable().optional(),
 });
 
-const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode']);
+const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'catagent']);
 const catIdSchema = z
   .string()
   .min(1)

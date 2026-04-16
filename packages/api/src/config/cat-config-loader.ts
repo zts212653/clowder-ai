@@ -63,7 +63,7 @@ const catVariantSchema = z.object({
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   source: z.enum(['seed', 'runtime']).optional(), // #441: bootstrap-stamped origin
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
-  clientId: z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'a2a']),
+  clientId: z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'a2a', 'catagent']),
 
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),

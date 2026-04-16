@@ -324,3 +324,75 @@ test('all messages have timestamp and catId', async () => {
     assert.ok(msg.catId, `catId present for ${msg.type}`);
   }
 });
+
+// ── P3 regression: real invoke() → callApi() path ──
+
+test('P3: real invoke() → callApi() with credential fixture (no test override)', async () => {
+  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+
+  // Set up temp credential fixture
+  const tmpDir = join(tmpdir(), `catagent-p3-${Date.now()}`);
+  const catCafeDir = join(tmpDir, '.cat-cafe');
+  mkdirSync(catCafeDir, { recursive: true });
+  writeFileSync(join(catCafeDir, 'accounts.json'), JSON.stringify({ 'test-ant': { authType: 'api_key' } }));
+  writeFileSync(join(catCafeDir, 'credentials.json'), JSON.stringify({ 'test-ant': { apiKey: 'sk-real-path' } }));
+
+  // Point credential resolver to temp dir
+  const prevEnv = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = tmpDir;
+  resetMigrationState();
+
+  // Real CatAgentService — NOT TestCatAgentService
+  const svc = new CatAgentService({
+    catId: 'opus',
+    projectRoot: tmpDir,
+    catConfig: { accountRef: 'test-ant' },
+  });
+
+  let capturedHeaders = null;
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    capturedHeaders = init?.headers;
+    return {
+      ok: true,
+      json: async () => ({
+        id: 'msg_real',
+        model: 'claude-sonnet-4-5-20250929',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'Real path' }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    };
+  };
+
+  try {
+    const msgs = await collect(svc.invoke('hello'));
+
+    // Verify real callApi() was reached
+    assert.ok(capturedHeaders, 'real callApi() was reached — fetch was called');
+    assert.equal(capturedHeaders['x-api-key'], 'sk-real-path', 'API key from credential fixture');
+
+    // Verify full event flow through production code
+    assert.equal(msgs[0].type, 'session_init');
+    assert.ok(msgs[0].sessionId.startsWith('catagent-'), 'sessionId from real invoke');
+    const text = msgs.find((m) => m.type === 'text');
+    assert.equal(text.content, 'Real path');
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done.metadata.usage, 'done has usage via real metadata merge');
+    assert.equal(done.metadata.usage.inputTokens, 10);
+    assert.equal(done.metadata.sessionId, msgs[0].sessionId, 'sessionId preserved through metadata merge');
+  } finally {
+    globalThis.fetch = prevFetch;
+    if (prevEnv !== undefined) process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevEnv;
+    else delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    resetMigrationState();
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  }
+});
