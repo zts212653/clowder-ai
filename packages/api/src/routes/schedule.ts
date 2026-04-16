@@ -332,13 +332,22 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
+    const deliveryThreadId = body.deliveryThreadId ?? null;
+
+    // Fail fast: reminder template requires deliveryThreadId (#333)
+    if (template.templateId === 'reminder' && !deliveryThreadId) {
+      return reply.status(400).send({
+        error: 'deliveryThreadId is required for reminder template — without it the task will never execute',
+      });
+    }
+
     const def = {
       id,
       templateId: body.templateId,
       trigger,
       params,
       display,
-      deliveryThreadId: body.deliveryThreadId ?? null,
+      deliveryThreadId,
       enabled: true,
       createdBy: body.createdBy ?? 'unknown',
       createdAt: new Date().toISOString(),

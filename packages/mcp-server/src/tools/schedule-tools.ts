@@ -113,7 +113,7 @@ export async function handleRegisterScheduledTask(input: {
     params,
   };
 
-  if (input.deliveryThreadId) body.deliveryThreadId = input.deliveryThreadId;
+  body.deliveryThreadId = input.deliveryThreadId ?? null;
   if (currentCatId) body.createdBy = currentCatId;
 
   if (input.label || input.category || input.description) {
@@ -163,7 +163,7 @@ export async function handlePreviewScheduledTask(input: {
     trigger,
     params,
   };
-  if (input.deliveryThreadId) body.deliveryThreadId = input.deliveryThreadId;
+  body.deliveryThreadId = input.deliveryThreadId ?? null;
 
   return callbackPost('/api/schedule/tasks/preview', body);
 }

@@ -25,7 +25,10 @@ export const reminderTemplate: TaskTemplate = {
       trigger: p.trigger,
       admission: {
         async gate() {
-          if (!threadId) return { run: false, reason: 'no deliveryThreadId' };
+          if (!threadId) {
+            console.warn(`[reminder:${instanceId}] skipped — no deliveryThreadId configured`);
+            return { run: false, reason: 'no deliveryThreadId' };
+          }
           return { run: true, workItems: [{ signal: message, subjectKey: `thread-${threadId}` }] };
         },
       },
