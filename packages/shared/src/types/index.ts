@@ -125,6 +125,12 @@ export type {
   Roster,
   RosterEntry,
 } from './cat-breed.js';
+export type { BuiltinAccountClient } from './client-routing.js';
+export {
+  builtinAccountFamilyForClient,
+  builtinAccountIdForClient,
+  protocolForClient,
+} from './client-routing.js';
 // Command types (F142 Phase B — slash command framework)
 export type {
   CommandSource,

@@ -581,7 +581,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
       if (oldBuiltin && builtinAccountIdForClient(oldBuiltin) === effectiveAccountRef) {
         const newBuiltin = resolveBuiltinClientForProvider(effectiveClient);
         if (newBuiltin) {
-          effectiveAccountRef = builtinAccountIdForClient(newBuiltin);
+          effectiveAccountRef = builtinAccountIdForClient(newBuiltin) ?? undefined;
           targetAccountRef = effectiveAccountRef;
         }
       }

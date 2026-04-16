@@ -1,4 +1,10 @@
-import { CLI_EFFORT_VALUES, type CliEffortValue, getCliEffortOptionsForProvider } from '@cat-cafe/shared';
+import {
+  builtinAccountFamilyForClient,
+  CLI_EFFORT_VALUES,
+  type CliEffortValue,
+  getCliEffortOptionsForProvider,
+  builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
+} from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
@@ -189,11 +195,6 @@ export function splitStrengthTags(raw: string): string[] {
     .filter(Boolean);
 }
 
-/** Resolve the account-family client. catagent shares anthropic credentials. */
-function accountFamilyClient(client: ClientId): ClientId {
-  return client === 'catagent' ? 'anthropic' : client;
-}
-
 function isBuiltinClient(client: ClientId): client is BuiltinAccountClient {
   return (
     client === 'anthropic' ||
@@ -219,27 +220,12 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
 }
 
 export function builtinAccountIdForClient(client: ClientId): string | null {
-  const effective = accountFamilyClient(client);
-  if (!isBuiltinClient(effective)) return null;
-  switch (effective) {
-    case 'anthropic':
-      return 'claude';
-    case 'openai':
-      return 'codex';
-    case 'google':
-      return 'gemini';
-    case 'kimi':
-      return 'kimi';
-    case 'dare':
-      return 'dare';
-    case 'opencode':
-      return 'opencode';
-  }
+  return sharedBuiltinAccountIdForClient(client);
 }
 
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
-  const effective = accountFamilyClient(client);
-  if (!isBuiltinClient(effective)) return [];
+  const effective = builtinAccountFamilyForClient(client);
+  if (!effective || !isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(
     (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === effective,
   );
