@@ -100,9 +100,10 @@ export function transformAcpEvent(
     }
 
     case 'tool_call_update': {
+      // #483: emit as tool_result (not tool_use) to avoid duplicate tool count in UI
       const toolName = resolveToolName(inner);
       return {
-        type: 'tool_use',
+        type: 'tool_result',
         catId,
         toolName,
         content: content?.text,

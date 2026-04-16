@@ -40,7 +40,7 @@ const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
 /** Synthesize a ProviderProfileView-compatible object from AccountConfig (backward compat for Hub UI). */
 function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolean) {
   const isBuiltin = account.authType === 'oauth';
-  const builtinClient = BUILTIN_CLIENT_FOR_ID[id] ?? id;
+  const builtinClient = BUILTIN_CLIENT_FOR_ID[id];
   return {
     id,
     name: account.displayName ?? id,
@@ -48,7 +48,7 @@ function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolea
     kind: isBuiltin ? 'builtin' : ('api_key' as const),
     authType: account.authType,
     builtin: isBuiltin,
-    ...(isBuiltin ? { clientId: builtinClient } : {}),
+    ...(builtinClient ? { clientId: builtinClient } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     models: account.models ? [...account.models] : [],
     hasApiKey: apiKeyPresent,

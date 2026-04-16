@@ -1,5 +1,6 @@
 'use client';
 
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { useCallback, useMemo, useState } from 'react';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { type QueueEntry, useChatStore } from '@/stores/chatStore';
@@ -142,7 +143,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   if (queue.length === 0) return null;
 
   // Only show queued entries — processing entries are already executing and visible in chat
-  const visibleEntries = queue.filter((e) => e.status === 'queued');
+  // #484: hide scheduler hiddenTrigger entries (they fire-and-forget, not user-facing)
+  const visibleEntries = queue.filter((e) => e.status === 'queued' && !e.content.startsWith(SCHEDULER_TRIGGER_PREFIX));
   if (visibleEntries.length === 0 && !queuePaused) return null;
 
   const pauseLabel = queuePauseReason === 'canceled' ? '当前调用已取消' : '当前调用失败';
