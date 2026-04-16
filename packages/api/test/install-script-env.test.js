@@ -129,6 +129,33 @@ printf '%s' "$(resolve_installer_auth_config_root)"
   }
 });
 
+test('installer auth config root ignores parent repo worktrees when project dir has no local git metadata', () => {
+  const parentRepoRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-parent-repo-'));
+  const projectRoot = join(parentRepoRoot, 'deployments', 'clowder-ai');
+  const runtimeRoot = join(tmpdir(), `clowder-parent-runtime-${Date.now()}`);
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(projectRoot, 'scripts'), { recursive: true });
+    mkdirSync(join(projectRoot, 'packages', 'api'), { recursive: true });
+    writeFileSync(join(projectRoot, 'package.json'), '{"name":"clowder-ai"}\n', 'utf8');
+
+    initGitRepo(parentRepoRoot);
+    addWorktree(parentRepoRoot, runtimeRoot, 'runtime/main-sync');
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+CAT_CAFE_RUNTIME_DIR="${runtimeRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
+  } finally {
+    rmSync(parentRepoRoot, { recursive: true, force: true });
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
 test('installer auth config root falls back to project root before runtime exists', () => {
   const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-project-root-'));
   const projectRoot = join(parentRoot, 'clowder-ai');

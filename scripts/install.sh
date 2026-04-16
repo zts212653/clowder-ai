@@ -529,16 +529,20 @@ runtime_worktree_initialized() {
     [[ -d "$runtime_dir" ]] || return 1
     [[ -e "$runtime_dir/.git" ]] || return 1
     git -C "$runtime_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
-    local resolved_runtime resolved_toplevel project_toplevel worktree_line resolved_worktree
+    local resolved_runtime resolved_toplevel resolved_project project_toplevel worktree_line resolved_worktree
     resolved_runtime="$(cd "$runtime_dir" && pwd -P)"
     resolved_toplevel="$(git -C "$runtime_dir" rev-parse --show-toplevel 2>/dev/null || true)"
     [[ -n "$resolved_toplevel" ]] || return 1
     resolved_toplevel="$(cd "$resolved_toplevel" && pwd -P)"
     [[ "$resolved_runtime" == "$resolved_toplevel" ]] || return 1
 
+    [[ -d "$PROJECT_DIR" ]] || return 1
+    [[ -e "$PROJECT_DIR/.git" ]] || return 1
+    resolved_project="$(cd "$PROJECT_DIR" && pwd -P)"
     project_toplevel="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
     [[ -n "$project_toplevel" ]] || return 1
     project_toplevel="$(cd "$project_toplevel" && pwd -P)"
+    [[ "$resolved_project" == "$project_toplevel" ]] || return 1
 
     while IFS= read -r worktree_line; do
         [[ "$worktree_line" == worktree\ * ]] || continue
