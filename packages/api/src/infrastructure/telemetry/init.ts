@@ -17,7 +17,7 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-node';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-node';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { createModuleLogger } from '../logger.js';
 import { validateSalt } from './hmac.js';
@@ -33,8 +33,6 @@ export interface TelemetryConfig {
   prometheusPort?: number;
   /** Set true to also export via OTLP (requires OTEL_EXPORTER_OTLP_ENDPOINT). */
   otlpEnabled?: boolean;
-  /** TELEMETRY_DEBUG=true → unredacted ConsoleSpanExporter for local debugging. */
-  debugMode?: boolean;
 }
 
 const DEFAULT_CONFIG: Required<TelemetryConfig> = {
@@ -42,7 +40,6 @@ const DEFAULT_CONFIG: Required<TelemetryConfig> = {
   serviceVersion: '0.1.0',
   prometheusPort: process.env.PROMETHEUS_PORT ? Number(process.env.PROMETHEUS_PORT) : 9464,
   otlpEnabled: !!process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-  debugMode: process.env.TELEMETRY_DEBUG === 'true',
 };
 
 let sdk: NodeSDK | null = null;
@@ -74,14 +71,10 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
     [ATTR_SERVICE_VERSION]: cfg.serviceVersion,
   });
 
-  // --- Traces: Redacting processor wraps OTLP exporter; debug goes unredacted ---
-  const spanProcessors: import('@opentelemetry/sdk-trace-node').SpanProcessor[] = [];
-  if (cfg.otlpEnabled) {
-    spanProcessors.push(new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter())));
-  }
-  if (cfg.debugMode) {
-    spanProcessors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-  }
+  // --- Traces: Redacting processor wraps OTLP exporter ---
+  const spanProcessor = cfg.otlpEnabled
+    ? new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter()))
+    : undefined;
 
   // --- Metrics: Prometheus scrape + optional OTLP push ---
   const prometheusExporter = new PrometheusExporter({
@@ -109,7 +102,7 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
 
   sdk = new NodeSDK({
     resource,
-    spanProcessors,
+    spanProcessors: spanProcessor ? [spanProcessor] : [],
     metricReaders,
     logRecordProcessors: logProcessor ? [logProcessor] : [],
     views,
@@ -120,7 +113,6 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
     {
       prometheus: cfg.prometheusPort,
       otlp: cfg.otlpEnabled,
-      debug: cfg.debugMode,
     },
     'OTel SDK initialized',
   );

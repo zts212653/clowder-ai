@@ -2,6 +2,9 @@
  * F153 Phase B: Runtime tracing tests for llm_call spans, tool_use events,
  * and RedactingSpanProcessor end-to-end.
  *
+ * Tests call the actual instrumentation helpers (recordLlmCallSpan,
+ * recordToolUseEvent) and RedactingSpanProcessor — not raw OTel API.
+ *
  * Complements otel-tracing-runtime.test.js (cli_session spans).
  * Requires dist/ build — run `pnpm build` in packages/api first.
  */
@@ -12,10 +15,12 @@ if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { trace, SpanStatusCode, context } = await import('@opentelemetry/api');
+const { trace, SpanStatusCode } = await import('@opentelemetry/api');
 const { InMemorySpanExporter, SimpleSpanProcessor } = await import('@opentelemetry/sdk-trace-node');
 const { NodeTracerProvider } = await import('@opentelemetry/sdk-trace-node');
 
+// Module under test — actual instrumentation helpers used by invoke-single-cat.ts
+const { recordLlmCallSpan, recordToolUseEvent } = await import('../../dist/infrastructure/telemetry/span-helpers.js');
 const { RedactingSpanProcessor } = await import('../../dist/infrastructure/telemetry/redactor.js');
 
 // --- Primary provider: unredacted spans ---
@@ -31,27 +36,19 @@ const redactedProvider = new NodeTracerProvider({
   spanProcessors: [new RedactingSpanProcessor(new SimpleSpanProcessor(redactedExporter))],
 });
 
-// ── llm_call span tests ─────────────────────────────────────────────
+// ── recordLlmCallSpan tests ─────────────────────────────────────────
 
-test('F153 runtime: llm_call span is child of invocation span', async () => {
+test('F153 runtime: recordLlmCallSpan produces child of invocation span', async () => {
   exporter.reset();
-  const tracer = trace.getTracer('cat-cafe-llm-test');
+  const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
 
-  const parentCtx = trace.setSpan(context.active(), invocationSpan);
-  const llmSpan = tracer.startSpan(
-    'cat_cafe.llm_call',
-    {
-      attributes: {
-        'agent.id': 'opus',
-        'gen_ai.system': 'anthropic',
-        'gen_ai.request.model': 'claude-sonnet-4-20250514',
-      },
-    },
-    parentCtx,
-  );
-  llmSpan.setStatus({ code: SpanStatusCode.OK });
-  llmSpan.end();
+  recordLlmCallSpan(invocationSpan, 'opus', 'anthropic', 'claude-sonnet-4-20250514', {
+    durationApiMs: 1500,
+    inputTokens: 1000,
+    outputTokens: 200,
+  });
+
   invocationSpan.end();
 
   const spans = exporter.getFinishedSpans();
@@ -64,28 +61,18 @@ test('F153 runtime: llm_call span is child of invocation span', async () => {
   );
 });
 
-test('F153 runtime: llm_call span carries GenAI semantic attributes', async () => {
+test('F153 runtime: recordLlmCallSpan sets GenAI semantic attributes', async () => {
   exporter.reset();
-  const tracer = trace.getTracer('cat-cafe-llm-test');
+  const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
-  const parentCtx = trace.setSpan(context.active(), invocationSpan);
 
-  const llmSpan = tracer.startSpan(
-    'cat_cafe.llm_call',
-    {
-      attributes: {
-        'agent.id': 'opus',
-        'gen_ai.system': 'anthropic',
-        'gen_ai.request.model': 'claude-sonnet-4-20250514',
-        'gen_ai.usage.input_tokens': 1500,
-        'gen_ai.usage.output_tokens': 350,
-        'gen_ai.usage.cache_read_tokens': 800,
-      },
-    },
-    parentCtx,
-  );
-  llmSpan.setStatus({ code: SpanStatusCode.OK });
-  llmSpan.end();
+  recordLlmCallSpan(invocationSpan, 'opus', 'anthropic', 'claude-sonnet-4-20250514', {
+    durationApiMs: 2000,
+    inputTokens: 1500,
+    outputTokens: 350,
+    cacheReadTokens: 800,
+  });
+
   invocationSpan.end();
 
   const spans = exporter.getFinishedSpans();
@@ -101,47 +88,56 @@ test('F153 runtime: llm_call span carries GenAI semantic attributes', async () =
   assert.equal(a['gen_ai.usage.cache_read_tokens'], 800);
 });
 
-test('F153 runtime: llm_call span respects retrospective startTime', async () => {
+test('F153 runtime: recordLlmCallSpan omits zero-value token attrs', async () => {
   exporter.reset();
-  const tracer = trace.getTracer('cat-cafe-llm-test');
+  const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
-  const parentCtx = trace.setSpan(context.active(), invocationSpan);
 
-  const durationMs = 2000;
-  const spanStartTime = new Date(Date.now() - durationMs);
+  recordLlmCallSpan(invocationSpan, 'opus', 'anthropic', 'claude-sonnet-4-20250514', {
+    durationApiMs: 500,
+  });
 
-  const llmSpan = tracer.startSpan(
-    'cat_cafe.llm_call',
-    {
-      attributes: { 'agent.id': 'opus', 'gen_ai.system': 'anthropic' },
-      startTime: spanStartTime,
-    },
-    parentCtx,
-  );
-  llmSpan.setStatus({ code: SpanStatusCode.OK });
-  llmSpan.end();
   invocationSpan.end();
 
   const spans = exporter.getFinishedSpans();
   const llm = spans.find((s) => s.name === 'cat_cafe.llm_call');
   assert.ok(llm);
-  const startHr = llm.startTime;
-  const startMs = startHr[0] * 1000 + startHr[1] / 1e6;
-  const expectedMs = spanStartTime.getTime();
-  assert.ok(Math.abs(startMs - expectedMs) < 50, 'Retrospective startTime should be within 50ms');
+  const attrKeys = Object.keys(llm.attributes);
+  assert.ok(!attrKeys.includes('gen_ai.usage.input_tokens'), 'Should omit missing inputTokens');
+  assert.ok(!attrKeys.includes('gen_ai.usage.output_tokens'), 'Should omit missing outputTokens');
+  assert.ok(!attrKeys.includes('gen_ai.usage.cache_read_tokens'), 'Should omit missing cacheReadTokens');
 });
 
-// ── tool_use event tests ─────────────────────────────────────────────
-
-test('F153 runtime: tool_use recorded as span event with correct attrs', async () => {
+test('F153 runtime: recordLlmCallSpan sets retrospective startTime', async () => {
   exporter.reset();
-  const tracer = trace.getTracer('cat-cafe-llm-test');
+  const tracer = trace.getTracer('cat-cafe-api-test');
+  const invocationSpan = tracer.startSpan('cat_cafe.invocation');
+  const before = Date.now();
+
+  recordLlmCallSpan(invocationSpan, 'opus', 'anthropic', 'claude-sonnet-4-20250514', {
+    durationApiMs: 2000,
+  });
+
+  invocationSpan.end();
+
+  const spans = exporter.getFinishedSpans();
+  const llm = spans.find((s) => s.name === 'cat_cafe.llm_call');
+  assert.ok(llm);
+  const startMs = llm.startTime[0] * 1000 + llm.startTime[1] / 1e6;
+  const expectedMs = before - 2000;
+  assert.ok(Math.abs(startMs - expectedMs) < 100, 'Retrospective startTime should be ~2s before now');
+});
+
+// ── recordToolUseEvent tests ────────────────────────────────────────
+
+test('F153 runtime: recordToolUseEvent adds event with correct attrs', async () => {
+  exporter.reset();
+  const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
 
-  invocationSpan.addEvent('tool_use', {
-    'agent.id': 'opus',
-    'tool.name': 'cat_cafe_post_message',
-    'tool.input_keys': 'threadId,content',
+  recordToolUseEvent(invocationSpan, 'opus', 'cat_cafe_post_message', {
+    threadId: 'thread_abc',
+    content: 'hello',
   });
 
   invocationSpan.end();
@@ -149,7 +145,7 @@ test('F153 runtime: tool_use recorded as span event with correct attrs', async (
   const spans = exporter.getFinishedSpans();
   const inv = spans.find((s) => s.name === 'cat_cafe.invocation');
   assert.ok(inv);
-  assert.equal(inv.events.length, 1, 'Should have exactly one event');
+  assert.equal(inv.events.length, 1);
 
   const evt = inv.events[0];
   assert.equal(evt.name, 'tool_use');
@@ -158,20 +154,37 @@ test('F153 runtime: tool_use recorded as span event with correct attrs', async (
   assert.equal(evt.attributes['tool.input_keys'], 'threadId,content');
 });
 
-test('F153 runtime: multiple tool_use events accumulate on span', async () => {
+test('F153 runtime: recordToolUseEvent omits input_keys when no input', async () => {
   exporter.reset();
-  const tracer = trace.getTracer('cat-cafe-llm-test');
+  const tracer = trace.getTracer('cat-cafe-api-test');
   const invocationSpan = tracer.startSpan('cat_cafe.invocation');
 
-  invocationSpan.addEvent('tool_use', { 'tool.name': 'Read' });
-  invocationSpan.addEvent('tool_use', { 'tool.name': 'Edit' });
-  invocationSpan.addEvent('tool_use', { 'tool.name': 'Bash' });
+  recordToolUseEvent(invocationSpan, 'opus', 'Bash');
+
   invocationSpan.end();
 
   const spans = exporter.getFinishedSpans();
   const inv = spans.find((s) => s.name === 'cat_cafe.invocation');
   assert.ok(inv);
-  assert.equal(inv.events.length, 3, 'Should have three tool_use events');
+  const evt = inv.events[0];
+  assert.equal(evt.attributes['tool.name'], 'Bash');
+  assert.equal(evt.attributes['tool.input_keys'], undefined, 'Should omit input_keys without toolInput');
+});
+
+test('F153 runtime: multiple recordToolUseEvent calls accumulate', async () => {
+  exporter.reset();
+  const tracer = trace.getTracer('cat-cafe-api-test');
+  const invocationSpan = tracer.startSpan('cat_cafe.invocation');
+
+  recordToolUseEvent(invocationSpan, 'opus', 'Read');
+  recordToolUseEvent(invocationSpan, 'opus', 'Edit');
+  recordToolUseEvent(invocationSpan, 'opus', 'Bash');
+  invocationSpan.end();
+
+  const spans = exporter.getFinishedSpans();
+  const inv = spans.find((s) => s.name === 'cat_cafe.invocation');
+  assert.ok(inv);
+  assert.equal(inv.events.length, 3);
   assert.deepEqual(
     inv.events.map((e) => e.attributes['tool.name']),
     ['Read', 'Edit', 'Bash'],

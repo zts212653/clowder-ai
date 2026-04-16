@@ -40,6 +40,7 @@ import {
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { normalizeModel } from '../../../../../infrastructure/telemetry/model-normalizer.js';
 import { emitOtelLog } from '../../../../../infrastructure/telemetry/otel-logger.js';
+import { recordLlmCallSpan, recordToolUseEvent } from '../../../../../infrastructure/telemetry/span-helpers.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
@@ -1268,36 +1269,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // F153 Phase B: Retrospective LLM call span (created after-the-fact from done event)
           // Only create when durationApiMs is available — providers without timing data
           // (Codex, Gemini, Kimi) would produce misleading 0-duration spans.
-          // NOTE: startTime is approximate — computed as (now - durationApiMs). Message queue
-          // latency between CLI event emission and API processing introduces drift, so span
-          // boundaries may shift by tens of ms. Acceptable for observability; not for SLA math.
           if (invocationSpan && msg.metadata.usage.durationApiMs) {
-            const parentCtx = trace.setSpan(context.active(), invocationSpan);
-            const durationApiMs = msg.metadata.usage.durationApiMs;
-            const spanStartTime = new Date(Date.now() - durationApiMs);
-            const llmSpan = tracer.startSpan(
-              'cat_cafe.llm_call',
-              {
-                attributes: {
-                  [AGENT_ID]: catId,
-                  [GENAI_SYSTEM]: providerSystem,
-                  [GENAI_MODEL]: modelBucket,
-                  ...(msg.metadata.usage.inputTokens
-                    ? { 'gen_ai.usage.input_tokens': msg.metadata.usage.inputTokens }
-                    : {}),
-                  ...(msg.metadata.usage.outputTokens
-                    ? { 'gen_ai.usage.output_tokens': msg.metadata.usage.outputTokens }
-                    : {}),
-                  ...(msg.metadata.usage.cacheReadTokens
-                    ? { 'gen_ai.usage.cache_read_tokens': msg.metadata.usage.cacheReadTokens }
-                    : {}),
-                },
-                startTime: spanStartTime,
-              },
-              parentCtx,
-            );
-            llmSpan.setStatus({ code: SpanStatusCode.OK });
-            llmSpan.end();
+            recordLlmCallSpan(invocationSpan, catId, providerSystem, modelBucket, {
+              durationApiMs: msg.metadata.usage.durationApiMs,
+              inputTokens: msg.metadata.usage.inputTokens,
+              outputTokens: msg.metadata.usage.outputTokens,
+              cacheReadTokens: msg.metadata.usage.cacheReadTokens,
+            });
           }
 
           outputs.push({
@@ -1467,13 +1445,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         outputs.push(attachInvocationIdToTaskProgress(msg));
 
         // F153 Phase B: Record tool_use as span event (not a span — no duration data available)
-        // Real tool duration spans require tool_use→tool_result pairing at the provider layer.
         if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
-          invocationSpan.addEvent('tool_use', {
-            [AGENT_ID]: catId,
-            'tool.name': msg.toolName,
-            ...(msg.toolInput ? { 'tool.input_keys': Object.keys(msg.toolInput as object).join(',') } : {}),
-          });
+          recordToolUseEvent(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
         }
 
         // F26: Detect task management tools and emit task_progress for frontend
