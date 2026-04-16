@@ -13,6 +13,7 @@ export function protocolForClient(client: ClientId): 'anthropic' | 'openai' | 'g
     case 'dare':
       return 'openai';
     case 'opencode':
+    case 'catagent':
       return 'anthropic';
     default:
       return null;
