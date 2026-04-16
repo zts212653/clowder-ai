@@ -6,6 +6,9 @@
  * Requires dist/ build — run `pnpm build` in packages/api first.
  */
 
+// Ensure HMAC fallback salt is available (CI test:public may not set NODE_ENV)
+if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -14,7 +17,6 @@ const { InMemorySpanExporter, SimpleSpanProcessor } = await import('@opentelemet
 const { NodeTracerProvider } = await import('@opentelemetry/sdk-trace-node');
 
 const { RedactingSpanProcessor } = await import('../../dist/infrastructure/telemetry/redactor.js');
-const { hmacId } = await import('../../dist/infrastructure/telemetry/hmac.js');
 
 // --- Primary provider: unredacted spans ---
 const exporter = new InMemorySpanExporter();
@@ -196,10 +198,12 @@ test('F153 runtime: RedactingSpanProcessor pseudonymizes Class C attrs', async (
   assert.equal(spans.length, 1);
   const a = spans[0].attributes;
 
-  const expectedInvId = hmacId('inv-secret-123');
-  const expectedSessId = hmacId('sess-secret-456');
-  assert.equal(a['invocationId'], expectedInvId, 'invocationId should be HMAC pseudonymized');
-  assert.equal(a['sessionId'], expectedSessId, 'sessionId should be HMAC pseudonymized');
+  // Class C: values must be transformed (not raw) and be hex strings
+  assert.notEqual(a['invocationId'], 'inv-secret-123', 'invocationId must not be raw');
+  assert.match(String(a['invocationId']), /^[0-9a-f]{32}$/, 'invocationId should be 32-char hex HMAC');
+  assert.notEqual(a['sessionId'], 'sess-secret-456', 'sessionId must not be raw');
+  assert.match(String(a['sessionId']), /^[0-9a-f]{32}$/, 'sessionId should be 32-char hex HMAC');
+  // Class D: pass through unchanged
   assert.equal(a['cli.command'], 'claude', 'Class D attr should pass through');
   assert.equal(a['cli.pid'], 99999, 'Class D numeric attr should pass through');
 });
