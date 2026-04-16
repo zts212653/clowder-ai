@@ -2,7 +2,7 @@
  * B-2: Guide Routing Interceptor — decouples guide logic from routing core.
  *
  * Three phases, called at well-defined points by route-serial / route-parallel:
- * 1. prepareGuideContext()  — resolve existing state + match new candidates (before loop)
+ * 1. prepareGuideContext()  — resolve existing guide state only (before loop)
  * 2. guideContextForCat()   — decide per-cat injection (inside loop)
  * 3. ackGuideCompletion()   — write completionAcked (after cat output)
  *
@@ -10,12 +10,9 @@
  */
 
 import type { GuideStateV1 } from '../cats/services/stores/ports/ThreadStore.js';
-import { matchGuideOfferCandidate } from './GuideMatchingEngine.js';
 import type { GuideStateBridge, IGuideSessionStore } from './GuideSessionRepository.js';
 import { sessionToLegacyState } from './GuideSessionRepository.js';
 import { canAccessGuideState, hasHiddenForeignNonTerminalGuideState } from './guide-state-access.js';
-
-export { isExplicitGuideRequest, stripExplicitPrefix } from './GuideMatchingEngine.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -153,7 +150,7 @@ async function resolveExistingCandidate(
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve existing guide state from thread + match new candidates from message.
+ * Resolve existing guide state from thread.
  * Called once before the routing loop. Accepts the already-fetched thread record
  * so the routing core doesn't re-read.
  */
@@ -165,10 +162,8 @@ export async function prepareGuideContext(params: {
   userId: string;
   threadId: string;
   log?: { info: (...args: unknown[]) => void };
-  /** B-6: Optional dismiss tracker for offer policy. */
-  dismissTracker?: import('./GuideDismissTracker.js').IGuideDismissTracker;
 }): Promise<GuideRoutingContext> {
-  const { thread, guideSessionStore, targetCats, message, userId, threadId, log, dismissTracker } = params;
+  const { thread, guideSessionStore, targetCats, message, userId, threadId } = params;
   const targetCatIds = new Set(targetCats);
   const ctx: GuideRoutingContext = { hiddenForeign: false };
 
@@ -189,18 +184,6 @@ export async function prepareGuideContext(params: {
 
   if (guideState) {
     await resolveExistingCandidate(guideState, message, targetCats, targetCatIds, ctx);
-  }
-
-  if (!ctx.candidate && !ctx.hiddenForeign) {
-    const match = await matchGuideOfferCandidate({ message, userId, dismissTracker });
-    if (match) {
-      ctx.candidate = match.candidate;
-      ctx.offerOwner = targetCats[0];
-      log?.info(
-        { guideId: match.candidate.id, guideName: match.candidate.name, confidence: match.confidence },
-        '[F155] guide candidate accepted by offer policy',
-      );
-    }
   }
 
   return ctx;

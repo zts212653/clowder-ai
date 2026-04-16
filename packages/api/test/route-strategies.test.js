@@ -1215,7 +1215,7 @@ describe('F155 guide offer ownership', () => {
     });
     const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
-    for await (const _ of routeSerial(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    for await (const _ of routeSerial(deps, ['codex'], '/guide 添加成员', 'user1', 'default')) {
     }
 
     assert.ok(
@@ -1242,7 +1242,7 @@ describe('F155 guide offer ownership', () => {
     });
     const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
-    for await (const _ of routeSerial(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    for await (const _ of routeSerial(deps, ['codex'], '/guide 添加成员', 'user1', 'default')) {
     }
 
     assert.ok(
@@ -1261,7 +1261,7 @@ describe('F155 guide offer ownership', () => {
     const codexService = createCapturingService('codex', '不该收到引导 offer');
     const deps = createMockDeps({ opus: opusService, codex: codexService });
 
-    for await (const _ of routeSerial(deps, ['opus', 'codex'], '请帮我添加成员', 'user1', 'thread1')) {
+    for await (const _ of routeSerial(deps, ['opus', 'codex'], '/guide 添加成员', 'user1', 'thread1')) {
     }
 
     assert.equal(opusService.calls.length, 1, 'first cat should be invoked');
@@ -1546,7 +1546,7 @@ describe('F155 guide offer ownership', () => {
     const codexService = createCapturingService('codex', '不该收到引导 offer');
     const deps = createMockDeps({ opus: opusService, codex: codexService });
 
-    for await (const _ of routeParallel(deps, ['opus', 'codex'], '请帮我添加成员', 'user1', 'thread1')) {
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '/guide 添加成员', 'user1', 'thread1')) {
     }
 
     assert.equal(opusService.calls.length, 1, 'first cat should be invoked');
@@ -1572,7 +1572,7 @@ describe('F155 guide offer ownership', () => {
     });
     const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
-    for await (const _ of routeParallel(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    for await (const _ of routeParallel(deps, ['codex'], '/guide 添加成员', 'user1', 'default')) {
     }
 
     assert.ok(
@@ -1599,7 +1599,7 @@ describe('F155 guide offer ownership', () => {
     });
     const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
 
-    for await (const _ of routeParallel(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    for await (const _ of routeParallel(deps, ['codex'], '/guide 添加成员', 'user1', 'default')) {
     }
 
     assert.ok(

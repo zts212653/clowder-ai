@@ -243,6 +243,17 @@ describe('Explicit trigger detection', async () => {
 describe('Explicit trigger end-to-end: /guide resolves by ID', async () => {
   const { prepareGuideContext } = await import('../dist/domains/guides/GuideRoutingInterceptor.js');
 
+  test('plain keyword-containing message does not auto-resolve a guide candidate', async () => {
+    const ctx = await prepareGuideContext({
+      thread: null,
+      targetCats: ['opus'],
+      message: '请帮我添加成员',
+      userId: 'test-user',
+      threadId: 'test-thread',
+    });
+    assert.equal(ctx.candidate, undefined);
+  });
+
   test('/guide add-member resolves via direct ID lookup (not keyword match)', async () => {
     const ctx = await prepareGuideContext({
       thread: null,

@@ -101,7 +101,7 @@ export interface GuideMatch {
 /**
  * Match user intent against guide registry keywords.
  * Returns matched guides sorted by score (highest first), or empty array.
- * Used by both the MCP callback endpoint and the pre-invocation routing hook.
+ * Used by the MCP callback endpoint and explicit `/guide` routing requests.
  */
 /* ── OrchestrationFlow v2 — runtime flow loader ── */
 
