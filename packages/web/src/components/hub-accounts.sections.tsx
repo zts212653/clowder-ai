@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useGuideStore } from '@/stores/guideStore';
 import { TagEditor } from './hub-tag-editor';
 
 export function AccountsSummaryCard() {
@@ -37,6 +38,11 @@ export function CreateApiKeyAccountSection({
   onModelsChange: (models: string[]) => void;
   onCreate: () => void;
 }) {
+  const activeGuideStep = useGuideStore((s) => {
+    const session = s.session;
+    if (!session || session.currentStepIndex >= session.flow.steps.length) return null;
+    return session.flow.steps[session.currentStepIndex];
+  });
   const canCreate = displayName.trim() && baseUrl.trim() && apiKey.trim() && models.length > 0;
   const [expanded, setExpanded] = useState(false);
 
@@ -44,7 +50,14 @@ export function CreateApiKeyAccountSection({
     <div className="rounded-[20px] border border-[#E8C9AF] bg-[#F7EEE6] p-[18px]">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() =>
+          setExpanded((prev) => {
+            const isGuideLockedToggle =
+              prev && activeGuideStep?.advance === 'click' && activeGuideStep.target === 'accounts.create-form';
+            if (isGuideLockedToggle) return prev;
+            return !prev;
+          })
+        }
         className="flex w-full items-center justify-between text-left"
         data-guide-id="accounts.create-form"
       >

@@ -94,6 +94,19 @@ const SETTINGS_GUIDE_FLOW = {
   steps: [{ id: 'expand-settings', target: 'settings.group', tips: '展开系统配置分组', advance: 'click' as const }],
 };
 
+const CREATE_FORM_GUIDE_FLOW = {
+  id: 'add-api-key-account',
+  name: '新建 API Key 账号',
+  steps: [
+    {
+      id: 'open-create-form',
+      target: 'accounts.create-form',
+      tips: '展开新建 API Key 账号表单',
+      advance: 'click' as const,
+    },
+  ],
+};
+
 describe('CatCafeHub provider profiles tab', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -557,6 +570,48 @@ describe('CatCafeHub provider profiles tab', () => {
     await flushEffects();
 
     expect(container.querySelector('[data-guide-id="settings.accounts"]')).toBeTruthy();
+  });
+
+  it('keeps the create-form expanded when the current guide step targets accounts.create-form', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/api/accounts')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubAccountsTab));
+    });
+    await flushEffects();
+
+    const expandButton = container.querySelector('[data-guide-id="accounts.create-form"]') as HTMLButtonElement | null;
+    expect(expandButton).toBeTruthy();
+
+    await act(async () => {
+      expandButton?.click();
+    });
+    await flushEffects();
+
+    expect(container.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
+
+    await act(async () => {
+      useGuideStore.getState().startGuide(CREATE_FORM_GUIDE_FLOW);
+      useGuideStore.getState().setPhase('active');
+    });
+
+    await act(async () => {
+      expandButton?.click();
+    });
+    await flushEffects();
+
+    expect(container.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
   });
 
   it('creates api-key profile from name, url, api key, and supported models only', async () => {
