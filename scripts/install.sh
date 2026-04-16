@@ -529,10 +529,24 @@ runtime_worktree_initialized() {
     [[ -d "$runtime_dir" ]] || return 1
     [[ -e "$runtime_dir/.git" ]] || return 1
     git -C "$runtime_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
-    local resolved_runtime resolved_toplevel
+    local resolved_runtime resolved_toplevel project_toplevel worktree_line resolved_worktree
     resolved_runtime="$(cd "$runtime_dir" && pwd -P)"
     resolved_toplevel="$(git -C "$runtime_dir" rev-parse --show-toplevel 2>/dev/null || true)"
-    [[ -n "$resolved_toplevel" && "$resolved_runtime" == "$resolved_toplevel" ]]
+    [[ -n "$resolved_toplevel" ]] || return 1
+    resolved_toplevel="$(cd "$resolved_toplevel" && pwd -P)"
+    [[ "$resolved_runtime" == "$resolved_toplevel" ]] || return 1
+
+    project_toplevel="$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+    [[ -n "$project_toplevel" ]] || return 1
+    project_toplevel="$(cd "$project_toplevel" && pwd -P)"
+
+    while IFS= read -r worktree_line; do
+        [[ "$worktree_line" == worktree\ * ]] || continue
+        resolved_worktree="$(cd "${worktree_line#worktree }" 2>/dev/null && pwd -P)" || continue
+        [[ "$resolved_worktree" == "$resolved_runtime" ]] && return 0
+    done < <(git -C "$project_toplevel" worktree list --porcelain 2>/dev/null)
+
+    return 1
 }
 resolve_installer_auth_config_root() {
     if [[ -n "${CAT_CAFE_GLOBAL_CONFIG_ROOT:-}" ]]; then

@@ -107,6 +107,28 @@ printf '%s' "$(resolve_installer_auth_config_root)"
   }
 });
 
+test('installer auth config root ignores initialized sibling repos that are not this project worktrees', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-foreign-runtime-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+    initGitRepo(projectRoot);
+    initGitRepo(runtimeRoot, 'foreign runtime\n');
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
 test('installer auth config root falls back to project root before runtime exists', () => {
   const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-project-root-'));
   const projectRoot = join(parentRoot, 'clowder-ai');
