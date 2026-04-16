@@ -2,9 +2,9 @@
  * F099: Hub accordion navigation regression tests
  * Tests entry-point routing, group lookup, and resolveRequestedHubTab.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
 
 // Mock heavy deps so CatCafeHub can be imported without full React tree
