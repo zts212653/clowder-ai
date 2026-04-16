@@ -122,7 +122,7 @@ describe('transformAcpEvent', () => {
     assert.equal(result.toolName, undefined);
   });
 
-  it('tool_call_update → null (#483: skip to avoid duplicate tool count)', () => {
+  it('tool_call_update → tool_use (incremental)', () => {
     const update = {
       sessionId: 's1',
       update: {
@@ -132,10 +132,12 @@ describe('transformAcpEvent', () => {
       },
     };
     const result = transformAcpEvent(update, catId, metadata);
-    assert.equal(result, null);
+    assert.equal(result.type, 'tool_use');
+    assert.equal(result.toolName, 'read_file');
+    assert.equal(result.content, 'file contents here');
   });
 
-  it('tool_call_update with "name" field (Gemini CLI compat) → null', () => {
+  it('tool_call_update with "name" field (Gemini CLI compat) → tool_use', () => {
     const update = {
       sessionId: 's1',
       update: {
@@ -145,7 +147,9 @@ describe('transformAcpEvent', () => {
       },
     };
     const result = transformAcpEvent(update, catId, metadata);
-    assert.equal(result, null);
+    assert.equal(result.type, 'tool_use');
+    assert.equal(result.toolName, 'write_file');
+    assert.equal(result.content, 'wrote 42 bytes');
   });
 
   it('plan → system_info with type=plan', () => {

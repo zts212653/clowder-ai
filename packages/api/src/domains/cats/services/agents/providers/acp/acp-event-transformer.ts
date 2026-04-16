@@ -99,11 +99,17 @@ export function transformAcpEvent(
       };
     }
 
-    case 'tool_call_update':
-      // #483: skip — tool_call already registered the tool_use event.
-      // Emitting another tool_use here causes duplicate counts in the UI.
-      // tool_result is also wrong (it means "tool completed", not "incremental update").
-      return null;
+    case 'tool_call_update': {
+      const toolName = resolveToolName(inner);
+      return {
+        type: 'tool_use',
+        catId,
+        toolName,
+        content: content?.text,
+        metadata,
+        timestamp: now,
+      };
+    }
 
     case 'plan':
       return {
