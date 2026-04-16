@@ -1284,6 +1284,13 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'TELEMETRY_DEBUG',
+    defaultValue: '(未设置 → 关闭)',
+    description: '设为 true 将 span 输出到终端（ConsoleSpanExporter，未脱敏，仅限本地调试）',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
     name: 'OTEL_SDK_DISABLED',
     defaultValue: '(未设置 → 启用)',
     description: '设为 true 完全禁用 OTel SDK',
