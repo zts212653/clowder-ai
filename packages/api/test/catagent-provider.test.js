@@ -12,9 +12,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 
-const { CatAgentService } = await import(
-  '../dist/domains/cats/services/agents/providers/catagent/CatAgentService.js'
-);
+const { CatAgentService } = await import('../dist/domains/cats/services/agents/providers/catagent/CatAgentService.js');
 
 // ── Helpers ──
 
@@ -69,7 +67,10 @@ function mockFetchAbortable() {
         reject(new DOMException('The operation was aborted.', 'AbortError'));
       });
     });
-    return { ok: true, json: async () => ({ id: 'msg', model: 'test', stop_reason: 'end_turn', content: [], usage: {} }) };
+    return {
+      ok: true,
+      json: async () => ({ id: 'msg', model: 'test', stop_reason: 'end_turn', content: [], usage: {} }),
+    };
   };
 }
 
@@ -140,7 +141,12 @@ class TestCatAgentService extends CatAgentService {
         const { mapAnthropicError } = await import(
           '../dist/domains/cats/services/agents/providers/catagent/catagent-event-bridge.js'
         );
-        for (const msg of mapAnthropicError({ status: response.status, message: errText }, this.catId, 'catagent', model)) {
+        for (const msg of mapAnthropicError(
+          { status: response.status, message: errText },
+          this.catId,
+          'catagent',
+          model,
+        )) {
           yield { ...msg, metadata: { ...metadata, ...msg.metadata } };
         }
         return;
