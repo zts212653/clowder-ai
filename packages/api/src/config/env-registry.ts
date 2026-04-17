@@ -1256,6 +1256,14 @@ export const ENV_VARS: EnvDefinition[] = [
 
   // --- telemetry (F153) ---
   {
+    name: 'TELEMETRY_DEBUG',
+    defaultValue: '(未设置 → 关闭)',
+    description:
+      '设为 true 启用 ConsoleSpanExporter（UNREDACTED）。生产环境默认忽略，需额外设 TELEMETRY_DEBUG_FORCE=true',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
     name: 'TELEMETRY_HMAC_SALT',
     defaultValue: '(dev/test 自动 fallback)',
     description: 'HMAC salt — 遥测系统 ID 伪名化用。生产环境必设，缺失则禁用 OTel',
