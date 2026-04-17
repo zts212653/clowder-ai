@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import YAML from 'yaml';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,15 +66,21 @@ function referencedArtifactExists(args) {
 }
 
 function normalizePencilApp(raw) {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (value === 'antigravity') return 'antigravity';
   if (['vscode', 'cursor', 'vscode-insiders', 'visual_studio_code'].includes(value)) return 'vscode';
   return undefined;
 }
 
 function inferPencilApp(command, envApp) {
-  return normalizePencilApp(envApp) ??
-    (command.includes(`${path.sep}.vscode${path.sep}`) || command.includes(`${path.sep}.cursor${path.sep}`) ? 'vscode' : 'antigravity');
+  return (
+    normalizePencilApp(envApp) ??
+    (command.includes(`${path.sep}.vscode${path.sep}`) || command.includes(`${path.sep}.cursor${path.sep}`)
+      ? 'vscode'
+      : 'antigravity')
+  );
 }
 
 function findLatestPencilBinary() {
@@ -106,7 +112,9 @@ function findLatestPencilBinary() {
   }
 
   const filtered = preferredApp ? candidates.filter((candidate) => candidate.app === preferredApp) : candidates;
-  const ordered = (filtered.length > 0 ? filtered : candidates).sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }));
+  const ordered = (filtered.length > 0 ? filtered : candidates).sort((a, b) =>
+    a.version.localeCompare(b.version, undefined, { numeric: true }),
+  );
   const latest = ordered.at(-1);
   return latest ? { command: latest.command, app: latest.app } : null;
 }
@@ -114,7 +122,10 @@ function findLatestPencilBinary() {
 function statusForCapability(id, capability) {
   const builtInArtifact = CORE_SERVER_ARTIFACTS.get(id);
   if (!capability || capability.enabled === false || !capability.mcpServer) {
-    const reasonBase = capability?.enabled === false ? 'declared but disabled in capabilities.json' : 'not declared in capabilities.json';
+    const reasonBase =
+      capability?.enabled === false
+        ? 'declared but disabled in capabilities.json'
+        : 'not declared in capabilities.json';
     if (builtInArtifact && existsSync(builtInArtifact)) {
       return { id, status: 'missing', reason: `${reasonBase}; build artifact is present` };
     }
@@ -124,7 +135,11 @@ function statusForCapability(id, capability) {
   if (builtInArtifact) {
     return existsSync(builtInArtifact)
       ? { id, status: 'ready', reason: `built from ${path.relative(repoRoot, builtInArtifact)}` }
-      : { id, status: 'unresolved', reason: `expected build artifact missing: ${path.relative(repoRoot, builtInArtifact)}` };
+      : {
+          id,
+          status: 'unresolved',
+          reason: `expected build artifact missing: ${path.relative(repoRoot, builtInArtifact)}`,
+        };
   }
 
   const server = capability.mcpServer;

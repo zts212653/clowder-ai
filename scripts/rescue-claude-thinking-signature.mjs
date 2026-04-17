@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -55,6 +55,7 @@ function parseArgs(argv) {
       case '-h':
         usage();
         process.exit(0);
+        return;
       default:
         throw new Error(`Unknown option: ${arg}`);
     }
@@ -98,10 +99,16 @@ function isPureThinkingAssistantTurn(entry) {
 }
 
 function isThinkingSignatureApiErrorEntry(entry) {
-  if (!entry || typeof entry !== 'object' || entry.type !== 'assistant' || entry.isApiErrorMessage !== true) return false;
+  if (!entry || typeof entry !== 'object' || entry.type !== 'assistant' || entry.isApiErrorMessage !== true)
+    return false;
   if (!entry.message || entry.message.role !== 'assistant' || !Array.isArray(entry.message.content)) return false;
   return entry.message.content.some(
-    (item) => item && typeof item === 'object' && item.type === 'text' && typeof item.text === 'string' && INVALID_THINKING_SIGNATURE_RE.test(item.text),
+    (item) =>
+      item &&
+      typeof item === 'object' &&
+      item.type === 'text' &&
+      typeof item.text === 'string' &&
+      INVALID_THINKING_SIGNATURE_RE.test(item.text),
   );
 }
 
@@ -204,7 +211,13 @@ async function repairTranscript(target, options) {
   try {
     original = await fs.readFile(target.transcriptPath, 'utf8');
   } catch {
-    return { sessionId: target.sessionId, status: 'missing', removedTurns: 0, backupPath: null, reason: 'transcript_unreadable' };
+    return {
+      sessionId: target.sessionId,
+      status: 'missing',
+      removedTurns: 0,
+      backupPath: null,
+      reason: 'transcript_unreadable',
+    };
   }
 
   const stripped = stripPureThinkingAssistantTurns(original);
@@ -236,9 +249,7 @@ try {
   }
 
   const scan = await findBrokenSessions(options.rootDir);
-  const selected = options.allBroken
-    ? scan
-    : scan.filter((item) => options.sessionIds.includes(item.sessionId));
+  const selected = options.allBroken ? scan : scan.filter((item) => options.sessionIds.includes(item.sessionId));
 
   if (selected.length === 0) {
     console.log('No matching broken Claude sessions found.');
@@ -252,7 +263,9 @@ try {
 
   const results = [];
   for (const target of selected) {
-    results.push(await repairTranscript(target, { backupDir: options.backupDir, dryRun: options.dryRun, now: Date.now() }));
+    results.push(
+      await repairTranscript(target, { backupDir: options.backupDir, dryRun: options.dryRun, now: Date.now() }),
+    );
   }
 
   const rescuedCount = results.filter((item) => item.status === 'repaired').length;

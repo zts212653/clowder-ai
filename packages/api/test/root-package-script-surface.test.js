@@ -15,7 +15,9 @@ function readRootScripts() {
 
 function extractScriptRefs(command) {
   const refs = new Set();
-  const matches = command.matchAll(/(?:^|\s)(?:bash|node)\s+((?:\.\/)?scripts\/[^\s'"]+)|(?:^|\s)((?:\.\/)?scripts\/[^\s'"]+)/g);
+  const matches = command.matchAll(
+    /(?:^|\s)(?:bash|node)\s+((?:\.\/)?scripts\/[^\s'"]+)|(?:^|\s)((?:\.\/)?scripts\/[^\s'"]+)/g,
+  );
   for (const match of matches) {
     const ref = match[1] ?? match[2];
     if (ref) refs.add(ref.replace(/^\.\//, ''));
