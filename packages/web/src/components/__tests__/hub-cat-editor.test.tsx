@@ -867,6 +867,155 @@ describe('HubCatEditor', () => {
     expect(builtinAccountIdForClient('catagent')).toEqual('claude');
   });
 
+  it('allows google to use builtin auth plus third-party gateway accounts only', () => {
+    const profiles: ProfileItem[] = [
+      {
+        id: 'gemini',
+        provider: 'gemini',
+        displayName: 'Gemini (OAuth)',
+        name: 'Gemini (OAuth)',
+        authType: 'oauth',
+        kind: 'builtin',
+        builtin: true,
+        mode: 'subscription',
+        clientId: 'google',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: false,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+      {
+        id: 'gemini-proxy',
+        provider: 'gemini-proxy',
+        displayName: 'Gemini Proxy',
+        name: 'Gemini Proxy',
+        authType: 'api_key',
+        kind: 'api_key',
+        builtin: false,
+        mode: 'api_key',
+        baseUrl: 'https://gateway.example/google',
+        models: ['openrouter/google/gemini-3-flash-preview'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+      {
+        id: 'google-official',
+        provider: 'google-official',
+        displayName: 'Google Official API',
+        name: 'Google Official API',
+        authType: 'api_key',
+        kind: 'api_key',
+        builtin: false,
+        mode: 'api_key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+      {
+        id: 'broken-proxy',
+        provider: 'broken-proxy',
+        displayName: 'Broken Proxy',
+        name: 'Broken Proxy',
+        authType: 'api_key',
+        kind: 'api_key',
+        builtin: false,
+        mode: 'api_key',
+        baseUrl: 'not-a-valid-url',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+    ];
+
+    expect(filterProfiles('google', profiles).map((profile) => profile.id)).toEqual(['gemini', 'gemini-proxy']);
+  });
+
+  it('shows third-party google gateways in the account selector while hiding official Google api_key accounts', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [
+              {
+                id: 'gemini',
+                provider: 'gemini',
+                displayName: 'Gemini (OAuth)',
+                name: 'Gemini (OAuth)',
+                authType: 'oauth',
+                kind: 'builtin',
+                builtin: true,
+                clientId: 'google',
+                mode: 'subscription',
+                models: ['gemini-2.5-pro'],
+                hasApiKey: false,
+                createdAt: '',
+                updatedAt: '',
+              },
+              {
+                id: 'gemini-proxy',
+                provider: 'gemini-proxy',
+                displayName: 'Gemini Proxy',
+                name: 'Gemini Proxy',
+                authType: 'api_key',
+                kind: 'api_key',
+                builtin: false,
+                mode: 'api_key',
+                baseUrl: 'https://gateway.example/google',
+                models: ['openrouter/google/gemini-3-flash-preview'],
+                hasApiKey: true,
+                createdAt: '',
+                updatedAt: '',
+              },
+              {
+                id: 'google-official',
+                provider: 'google-official',
+                displayName: 'Google Official API',
+                name: 'Google Official API',
+                authType: 'api_key',
+                kind: 'api_key',
+                builtin: false,
+                mode: 'api_key',
+                baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+                models: ['gemini-2.5-pro'],
+                hasApiKey: true,
+                createdAt: '',
+                updatedAt: '',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'google', accountRef: 'gemini', defaultModel: 'gemini-2.5-pro' },
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]');
+    const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
+    expect(optionLabels).toContain('Gemini (OAuth)（内置）');
+    expect(optionLabels).toContain('Gemini Proxy（API Key）');
+    expect(optionLabels).not.toContain('Google Official API（API Key）');
+  });
+
   it('preserves existing model when it is not listed in provider defaults', async () => {
     const existingCat = {
       id: 'runtime-codex',
