@@ -1,22 +1,8 @@
+import { protocolForClient as sharedProtocolForClient } from '@cat-cafe/shared';
 import type { ClientId } from './hub-cat-editor.model';
 
 export function protocolForClient(client: ClientId): 'anthropic' | 'openai' | 'google' | 'kimi' | null {
-  switch (client) {
-    case 'anthropic':
-      return 'anthropic';
-    case 'openai':
-      return 'openai';
-    case 'google':
-      return 'google';
-    case 'kimi':
-      return 'kimi';
-    case 'dare':
-      return 'openai';
-    case 'opencode':
-      return 'anthropic';
-    default:
-      return null;
-  }
+  return sharedProtocolForClient(client);
 }
 
 export function defaultMcpSupportForClient(client: ClientId): boolean {

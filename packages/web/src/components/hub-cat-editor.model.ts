@@ -1,10 +1,16 @@
-import { CLI_EFFORT_VALUES, type CliEffortValue, getCliEffortOptionsForProvider } from '@cat-cafe/shared';
+import {
+  builtinAccountFamilyForClient,
+  CLI_EFFORT_VALUES,
+  type CliEffortValue,
+  getCliEffortOptionsForProvider,
+  builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
+} from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
 /** F340 P5: Renamed from ClientValue → ClientId (aligned with shared type). */
-export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode' | 'antigravity';
+export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode' | 'antigravity' | 'catagent';
 /** @deprecated F340: Use {@link ClientId} instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
@@ -71,6 +77,7 @@ export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
   { value: 'dare', label: 'Dare' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'antigravity', label: 'Antigravity' },
+  { value: 'catagent', label: 'CatAgent' },
 ];
 
 export const SESSION_CHAIN_OPTIONS: Array<{ value: SessionChainValue; label: string }> = [
@@ -213,31 +220,18 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
 }
 
 export function builtinAccountIdForClient(client: ClientId): string | null {
-  if (!isBuiltinClient(client)) return null;
-  switch (client) {
-    case 'anthropic':
-      return 'claude';
-    case 'openai':
-      return 'codex';
-    case 'google':
-      return 'gemini';
-    case 'kimi':
-      return 'kimi';
-    case 'dare':
-      return 'dare';
-    case 'opencode':
-      return 'opencode';
-  }
+  return sharedBuiltinAccountIdForClient(client);
 }
 
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
-  if (!isBuiltinClient(client)) return [];
+  const effective = builtinAccountFamilyForClient(client);
+  if (!effective || !isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(
-    (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === client,
+    (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === effective,
   );
   // Gemini CLI only supports builtin Google auth — no API key profiles.
-  if (client === 'google') return builtinProfiles;
-  if (client === 'kimi') {
+  if (effective === 'google') return builtinProfiles;
+  if (effective === 'kimi') {
     const kimiApiProfiles = profiles.filter(
       (profile) => profile.authType === 'api_key' && legacyProfileClient(profile) === 'kimi',
     );

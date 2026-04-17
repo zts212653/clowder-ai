@@ -4,13 +4,20 @@
  * Single resolution path: accounts (cat-catalog.json) + credentials (credentials.json).
  * Outputs RuntimeProviderProfile for backward-compatible consumption.
  */
-import type { AccountConfig, AccountProtocol, ClientId } from '@cat-cafe/shared';
+import {
+  type AccountConfig,
+  type AccountProtocol,
+  type BuiltinAccountClient,
+  builtinAccountFamilyForClient,
+  builtinAccountIdForClient,
+  type ClientId,
+  protocolForClient,
+} from '@cat-cafe/shared';
 import { readCatalogAccounts } from './catalog-accounts.js';
 import { readCredential } from './credentials.js';
 
 // ── Types surviving from provider-profiles.types.ts (F136 Phase 4d) ──
-
-export type BuiltinAccountClient = Extract<ClientId, 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode'>;
+export { type BuiltinAccountClient, builtinAccountIdForClient } from '@cat-cafe/shared';
 export type ProviderProfileKind = 'builtin' | 'api_key';
 
 export interface RuntimeProviderProfile {
@@ -33,32 +40,7 @@ export interface AnthropicRuntimeProfile {
 
 /** Map ClientId to BuiltinAccountClient (null for clients without builtin accounts). */
 export function resolveBuiltinClientForProvider(provider: ClientId): BuiltinAccountClient | null {
-  switch (provider) {
-    case 'anthropic':
-    case 'openai':
-    case 'google':
-    case 'kimi':
-    case 'dare':
-    case 'opencode':
-      return provider;
-    default:
-      return null;
-  }
-}
-
-// Legacy builtin account IDs — must match the IDs originally defined in provider-profiles.ts
-// BUILTIN_ACCOUNT_SPECS so that existing catalogs, seeds, and migration logic continue to work.
-const LEGACY_BUILTIN_IDS: Record<BuiltinAccountClient, string> = {
-  anthropic: 'claude',
-  openai: 'codex',
-  google: 'gemini',
-  kimi: 'kimi',
-  dare: 'dare',
-  opencode: 'opencode',
-};
-
-export function builtinAccountIdForClient(client: BuiltinAccountClient): string {
-  return LEGACY_BUILTIN_IDS[client];
+  return builtinAccountFamilyForClient(provider);
 }
 
 export function resolveAnthropicRuntimeProfile(
@@ -67,7 +49,7 @@ export function resolveAnthropicRuntimeProfile(
 ): AnthropicRuntimeProfile {
   // Deterministic binding: use explicit ref or well-known builtin.
   // Never walk the discovery chain — prevents installer-* credential hijack (502 regression).
-  const accountRef = preferredAccountRef ?? builtinAccountIdForClient('anthropic');
+  const accountRef = preferredAccountRef ?? builtinAccountIdForClient('anthropic') ?? 'claude';
   const runtime = resolveForClient(projectRoot, 'anthropic', accountRef);
   if (runtime?.apiKey) {
     return {
@@ -84,7 +66,7 @@ export function resolveAnthropicRuntimeProfile(
   if (!preferredAccountRef) {
     const accounts = readCatalogAccounts(projectRoot);
     const hasRealAnthropicBuiltin = Object.entries(BUILTIN_ACCOUNT_MAP).some(
-      ([id, info]) => info.client === 'anthropic' && id in accounts,
+      ([id, info]) => info === 'anthropic' && id in accounts,
     );
     if (!hasRealAnthropicBuiltin) {
       const installer = resolveForClient(projectRoot, 'anthropic', 'installer-anthropic');
@@ -103,19 +85,19 @@ export function resolveAnthropicRuntimeProfile(
 
 // Known builtin OAuth account refs — both legacy names and new naming convention.
 // F340: protocol is derived from client identity, no longer stored on accounts.
-const BUILTIN_ACCOUNT_MAP: Record<string, { client: BuiltinAccountClient; protocol: AccountProtocol }> = {
-  claude: { client: 'anthropic', protocol: 'anthropic' },
-  builtin_anthropic: { client: 'anthropic', protocol: 'anthropic' },
-  codex: { client: 'openai', protocol: 'openai' },
-  builtin_openai: { client: 'openai', protocol: 'openai' },
-  gemini: { client: 'google', protocol: 'google' },
-  builtin_google: { client: 'google', protocol: 'google' },
-  kimi: { client: 'kimi', protocol: 'kimi' },
-  builtin_kimi: { client: 'kimi', protocol: 'kimi' },
-  dare: { client: 'dare', protocol: 'openai' },
-  builtin_dare: { client: 'dare', protocol: 'openai' },
-  opencode: { client: 'opencode', protocol: 'anthropic' },
-  builtin_opencode: { client: 'opencode', protocol: 'anthropic' },
+const BUILTIN_ACCOUNT_MAP: Record<string, BuiltinAccountClient> = {
+  claude: 'anthropic',
+  builtin_anthropic: 'anthropic',
+  codex: 'openai',
+  builtin_openai: 'openai',
+  gemini: 'google',
+  builtin_google: 'google',
+  kimi: 'kimi',
+  builtin_kimi: 'kimi',
+  dare: 'dare',
+  builtin_dare: 'dare',
+  opencode: 'opencode',
+  builtin_opencode: 'opencode',
 };
 
 /**
@@ -129,14 +111,15 @@ export function resolveByAccountRef(projectRoot: string, accountRef: string): Ru
   if (account) return accountToRuntimeProfile(accountRef, account, projectRoot);
 
   // Synthetic builtin profile for known OAuth refs
-  const builtin = BUILTIN_ACCOUNT_MAP[accountRef];
-  if (builtin) {
+  const builtinClient = BUILTIN_ACCOUNT_MAP[accountRef];
+  const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
+  if (builtinClient) {
     return {
       id: accountRef,
       authType: 'oauth',
       kind: 'builtin',
-      client: builtin.client,
-      protocol: builtin.protocol,
+      client: builtinClient,
+      ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
     };
   }
   return null;
@@ -162,14 +145,15 @@ export function resolveForClient(
     const preferred = accounts[preferredAccountRef];
     if (preferred) return accountToRuntimeProfile(preferredAccountRef, preferred, projectRoot);
     // Not in accounts — only allow synthetic builtin (fresh install with empty accounts).
-    const builtin = BUILTIN_ACCOUNT_MAP[preferredAccountRef];
-    if (builtin) {
+    const builtinClient = BUILTIN_ACCOUNT_MAP[preferredAccountRef];
+    const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
+    if (builtinClient) {
       return {
         id: preferredAccountRef,
         authType: 'oauth',
         kind: 'builtin',
-        client: builtin.client,
-        protocol: builtin.protocol,
+        client: builtinClient,
+        ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
       };
     }
     return null;
@@ -180,7 +164,8 @@ export function resolveForClient(
   // an OAuth builtin that has no stored credential.
   const normalizedClient = normalizeToClient(client);
   if (normalizedClient) {
-    const wellKnownId = LEGACY_BUILTIN_IDS[normalizedClient];
+    const wellKnownId = builtinAccountIdForClient(normalizedClient);
+    if (!wellKnownId) return null;
     const candidateIds = [wellKnownId, `builtin_${normalizedClient}`, `installer-${normalizedClient}`];
     let firstMatch: RuntimeProviderProfile | null = null;
     for (const id of candidateIds) {
@@ -196,15 +181,16 @@ export function resolveForClient(
   // Synthetic builtin fallback: only when no real accounts matched at all
   // (fresh install, test env with empty accounts)
   if (normalizedClient) {
-    const wellKnownRef = LEGACY_BUILTIN_IDS[normalizedClient];
-    const builtin = wellKnownRef ? BUILTIN_ACCOUNT_MAP[wellKnownRef] : undefined;
-    if (builtin) {
+    const wellKnownRef = builtinAccountIdForClient(normalizedClient);
+    const builtinClient = wellKnownRef ? BUILTIN_ACCOUNT_MAP[wellKnownRef] : undefined;
+    const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
+    if (builtinClient && wellKnownRef) {
       return {
         id: wellKnownRef,
         authType: 'oauth',
         kind: 'builtin',
-        client: builtin.client,
-        protocol: builtin.protocol,
+        client: builtinClient,
+        ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
       };
     }
   }
@@ -236,13 +222,14 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
   const isBuiltin = account.authType === 'oauth';
   // F340: Derive client and protocol solely from well-known account ID map.
   // account.protocol is retired — not read, not written.
-  const builtinInfo = BUILTIN_ACCOUNT_MAP[ref];
+  const builtinClient = BUILTIN_ACCOUNT_MAP[ref];
+  const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
   return {
     id: ref,
     authType: account.authType,
     kind: isBuiltin ? 'builtin' : 'api_key',
-    ...(isBuiltin && builtinInfo ? { client: builtinInfo.client } : {}),
-    ...(builtinInfo?.protocol ? { protocol: builtinInfo.protocol } : {}),
+    ...(isBuiltin && builtinClient ? { client: builtinClient } : {}),
+    ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(apiKey ? { apiKey } : {}),
     ...(account.models && account.models.length > 0 ? { models: [...account.models] } : {}),
