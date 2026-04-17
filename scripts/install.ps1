@@ -34,6 +34,58 @@ function Refresh-Path {
 
 function Resolve-PnpmCommand { Resolve-ToolCommand -Name "pnpm" }
 function Invoke-Pnpm { param([string[]]$CommandArgs) Invoke-ToolCommand -Name "pnpm" -CommandArgs $CommandArgs }
+function Get-CommandOutputText {
+    param([object[]]$OutputLines)
+    return (@($OutputLines) | ForEach-Object { "$_" }) -join "`n"
+}
+function Test-PuppeteerBrowserDownloadFailure {
+    param([string]$OutputText)
+    return $OutputText -match "puppeteer" -and
+        ($OutputText -match "Failed to set up chrome" -or $OutputText -match "PUPPETEER_SKIP_DOWNLOAD")
+}
+function Write-PuppeteerSkipWarning {
+    Write-Warn "Bundled Chrome download failed - skipped"
+    Write-Warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
+}
+function Invoke-PnpmInstallWithCapturedOutput {
+    param(
+        [string[]]$CommandArgs,
+        [switch]$SkipPuppeteerDownload
+    )
+
+    $capturedOutput = @()
+    $hadPreviousSkip = Test-Path Env:PUPPETEER_SKIP_DOWNLOAD
+    $previousSkipValue = if ($hadPreviousSkip) { $env:PUPPETEER_SKIP_DOWNLOAD } else { $null }
+
+    try {
+        if ($SkipPuppeteerDownload) {
+            $env:PUPPETEER_SKIP_DOWNLOAD = "1"
+        } elseif (-not $hadPreviousSkip) {
+            Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
+        }
+
+        try {
+            Invoke-Pnpm -CommandArgs $CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
+            return [pscustomobject]@{
+                Ok = $LASTEXITCODE -eq 0
+                ErrorRecord = $null
+                OutputText = Get-CommandOutputText -OutputLines $capturedOutput
+            }
+        } catch {
+            return [pscustomobject]@{
+                Ok = $false
+                ErrorRecord = $_
+                OutputText = Get-CommandOutputText -OutputLines ($capturedOutput + @($_))
+            }
+        }
+    } finally {
+        if ($hadPreviousSkip) {
+            $env:PUPPETEER_SKIP_DOWNLOAD = $previousSkipValue
+        } else {
+            Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
+        }
+    }
+}
 function Test-InstallerCancellation {
     param($ErrorRecord)
     if (-not $ErrorRecord -or -not $ErrorRecord.Exception) {
@@ -301,19 +353,24 @@ if (Test-Path $envFile) {
 Write-Step "Step 5/9 - Install dependencies and build"
 
 Write-Host "  Running pnpm install..."
-$frozenInstallOk = $false
-$frozenInstallError = $null
-try {
-    Invoke-Pnpm -CommandArgs @("install", "--frozen-lockfile") 2>$null
-    $frozenInstallOk = $LASTEXITCODE -eq 0
-} catch {
-    $frozenInstallError = $_
+$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile")
+if (-not $frozenInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $frozenInstallResult.OutputText)) {
+    Write-PuppeteerSkipWarning
+    $frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile") -SkipPuppeteerDownload
 }
-if (-not $frozenInstallOk) {
-    Exit-InstallerIfCancelled -ErrorRecord $frozenInstallError -Context "pnpm install"
+if (-not $frozenInstallResult.Ok) {
+    Exit-InstallerIfCancelled -ErrorRecord $frozenInstallResult.ErrorRecord -Context "pnpm install"
     Write-Warn "Frozen lockfile failed, retrying..."
-    Invoke-Pnpm -CommandArgs @("install")
-    if ($LASTEXITCODE -ne 0) { Write-Err "pnpm install failed"; exit 1 }
+    $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install")
+    if (-not $plainInstallResult.Ok -and (Test-PuppeteerBrowserDownloadFailure -OutputText $plainInstallResult.OutputText)) {
+        Write-PuppeteerSkipWarning
+        $plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install") -SkipPuppeteerDownload
+    }
+    if (-not $plainInstallResult.Ok) {
+        Exit-InstallerIfCancelled -ErrorRecord $plainInstallResult.ErrorRecord -Context "pnpm install"
+        Write-Err "pnpm install failed"
+        exit 1
+    }
 }
 Write-Ok "Dependencies installed"
 
@@ -353,6 +410,7 @@ if (-not $SkipCli) {
     $toolsToInstall = if ($missingTools.Count -gt 0 -and [Environment]::UserInteractive -and -not $env:CI) {
         Select-InstallerMultiChoice -Title "Missing agent CLIs" -Prompt "Choose which agent CLIs to install" -Options $missingTools
     } else { $missingTools }
+    $selectedCliCommands = @($toolsToInstall | ForEach-Object { $_.Cmd })
     $npmInstallCommand = Resolve-ToolCommand -Name "npm"
     foreach ($tool in $cliTools) {
         $installed = $null -ne (Resolve-ToolCommand -Name $tool.Cmd)
@@ -391,10 +449,11 @@ if (-not $SkipCli) {
     }
 } else {
     Write-Warn "CLI tools install skipped (-SkipCli)"
+    $selectedCliCommands = @()
 }
 
 Write-Step "Step 8/9 - Auth config"
-Configure-InstallerAuth -ProjectRoot $ProjectRoot -State $authState
+Configure-InstallerAuth -ProjectRoot $ProjectRoot -State $authState -SelectedCliCommands $selectedCliCommands
 
 Apply-InstallerAuthEnv -State $authState -EnvFile $envFile
 
