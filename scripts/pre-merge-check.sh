@@ -52,15 +52,15 @@ if ! $NO_REBASE && [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-if ! $SKIP_INSTALL; then
-  pnpm install --frozen-lockfile
-fi
-
 REBASE_SUMMARY="skipped (--no-rebase)"
 if ! $NO_REBASE; then
   git fetch origin
   git rebase origin/main
   REBASE_SUMMARY="rebased onto origin/main"
+fi
+
+if ! $SKIP_INSTALL; then
+  pnpm install --frozen-lockfile
 fi
 
 run_step() {
