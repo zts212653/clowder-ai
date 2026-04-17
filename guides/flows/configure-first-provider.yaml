@@ -1,0 +1,49 @@
+# F155 Guide Flow: 配置第一个 Provider
+# 引导用户完成首个成员的 Client / Provider / Model 绑定
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+schemaVersion: 1
+id: configure-first-provider
+name: 配置第一个 Provider
+description: 引导你完成第一个成员的 Client、认证账号与模型配置
+
+steps:
+  - id: open-hub
+    target: hub.trigger
+    tips: 点击这里打开 Hub 控制台
+    advance: click
+
+  - id: go-to-cats
+    target: cats.overview
+    tips: 进入成员管理页面，准备给第一个成员配置运行 Provider
+    advance: click
+
+  - id: click-add-member
+    target: cats.add-member
+    tips: 先创建一个成员，Provider / 账号 / 模型配置都会挂在成员身上
+    advance: click
+
+  - id: choose-client
+    target: add-member.client
+    tips: 先选择这个成员要使用的 Client（如 Codex、OpenCode、Claude）
+    advance: click
+
+  - id: choose-provider-account
+    target: add-member.provider-profile
+    tips: 选择刚才准备好的认证账号；这里决定该成员实际走哪套 Provider 凭证
+    advance: click
+
+  - id: choose-model
+    target: add-member.model
+    tips: 选择默认模型，完成 Client → Provider 账号 → Model 的绑定
+    advance: click
+
+  - id: create-member
+    target: add-member.submit
+    tips: 点击创建成员并进入详情编辑页
+    advance: click
+
+  - id: done
+    target: member-editor.profile
+    tips: 第一个 Provider 路径已经打通。后续如果要微调认证与模型，可继续在这里编辑后点“已完成该步骤”
+    advance: confirm

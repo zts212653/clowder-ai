@@ -71,6 +71,40 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(doneStep.target, 'connector.weixin');
   });
 
+  test('loaded configure-first-provider flow covers the client → provider → model path', () => {
+    const flow = loadGuideFlow('configure-first-provider');
+    const clientStep = flow.steps.find((step) => step.id === 'choose-client');
+    const providerStep = flow.steps.find((step) => step.id === 'choose-provider-account');
+    const modelStep = flow.steps.find((step) => step.id === 'choose-model');
+    const submitStep = flow.steps.find((step) => step.id === 'create-member');
+    const doneStep = flow.steps.find((step) => step.id === 'done');
+
+    assert.ok(clientStep, 'choose-client step should exist');
+    assert.ok(providerStep, 'choose-provider-account step should exist');
+    assert.ok(modelStep, 'choose-model step should exist');
+    assert.ok(submitStep, 'create-member step should exist');
+    assert.ok(doneStep, 'done step should exist');
+    assert.equal(clientStep.target, 'add-member.client');
+    assert.equal(providerStep.target, 'add-member.provider-profile');
+    assert.equal(modelStep.target, 'add-member.model');
+    assert.equal(submitStep.target, 'add-member.submit');
+    assert.equal(doneStep.target, 'member-editor.profile');
+    assert.equal(doneStep.advance, 'confirm');
+  });
+
+  test('loaded connect-feishu flow reuses the rendered feishu connector card target', () => {
+    const flow = loadGuideFlow('connect-feishu');
+    const expandStep = flow.steps.find((step) => step.id === 'expand-feishu');
+    const finishStep = flow.steps.find((step) => step.id === 'finish-feishu-setup');
+
+    assert.ok(expandStep, 'expand-feishu step should exist');
+    assert.ok(finishStep, 'finish-feishu-setup step should exist');
+    assert.equal(expandStep.target, 'connector.feishu');
+    assert.equal(expandStep.advance, 'click');
+    assert.equal(finishStep.target, 'connector.feishu');
+    assert.equal(finishStep.advance, 'confirm');
+  });
+
   test('normalizes explicit schemaVersion: 1 on loaded flows', () => {
     const guideId = 'test-schema-v1-explicit';
     const flowPath = resolve(repoRoot, 'guides', 'flows', `${guideId}.yaml`);
@@ -211,6 +245,16 @@ describe('F155 guide registry loader target validation', async () => {
   test('matches exact keyword queries regardless of reverse-match threshold', () => {
     const matches = resolveGuideForIntent('加成员');
     assert.equal(matches[0]?.id, 'add-member');
+  });
+
+  test('matches provider onboarding intent to configure-first-provider', () => {
+    const matches = resolveGuideForIntent('first provider');
+    assert.equal(matches[0]?.id, 'configure-first-provider');
+  });
+
+  test('matches feishu setup intent to connect-feishu', () => {
+    const matches = resolveGuideForIntent('配置飞书');
+    assert.equal(matches[0]?.id, 'connect-feishu');
   });
 
   test('rejects a flow file whose internal id does not match the requested guide id', () => {
