@@ -35,20 +35,29 @@ export interface TelemetryConfig {
   otlpEnabled?: boolean;
   /**
    * TELEMETRY_DEBUG: emit UNREDACTED spans to console via ConsoleSpanExporter.
-   * Blocked in production unless TELEMETRY_DEBUG_FORCE=true.
+   * Default-deny: only allowed in NODE_ENV=development|test.
+   * All other environments (including unset NODE_ENV from profile-driven
+   * startup) require TELEMETRY_DEBUG_FORCE=true.
    */
   debugMode?: boolean;
 }
 
-/** True when TELEMETRY_DEBUG=true AND env is non-production (or force-override set). */
-function resolveDebugMode(): boolean {
-  if (process.env.TELEMETRY_DEBUG !== 'true') return false;
-  const isProd = process.env.NODE_ENV === 'production';
-  if (isProd && process.env.TELEMETRY_DEBUG_FORCE !== 'true') {
-    log.warn('TELEMETRY_DEBUG ignored in production (set TELEMETRY_DEBUG_FORCE=true to override)');
-    return false;
-  }
-  return true;
+/**
+ * Default-deny guardrail for TELEMETRY_DEBUG.
+ *
+ * Returns true only when debug is requested AND the environment is safe:
+ * - NODE_ENV=development or NODE_ENV=test → allowed
+ * - Any other NODE_ENV (including unset, which is the normal state for
+ *   profile-driven startup via start-dev.sh --profile=production/opensource)
+ *   → blocked unless TELEMETRY_DEBUG_FORCE=true
+ *
+ * Exported for direct testing of guardrail logic.
+ */
+export function shouldEnableDebugMode(requested: boolean): boolean {
+  if (!requested) return false;
+  const env = process.env.NODE_ENV;
+  if (env === 'development' || env === 'test') return true;
+  return process.env.TELEMETRY_DEBUG_FORCE === 'true';
 }
 
 const DEFAULT_CONFIG: Required<TelemetryConfig> = {
@@ -56,7 +65,7 @@ const DEFAULT_CONFIG: Required<TelemetryConfig> = {
   serviceVersion: '0.1.0',
   prometheusPort: process.env.PROMETHEUS_PORT ? Number(process.env.PROMETHEUS_PORT) : 9464,
   otlpEnabled: !!process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-  debugMode: resolveDebugMode(),
+  debugMode: process.env.TELEMETRY_DEBUG === 'true',
 };
 
 let sdk: NodeSDK | null = null;
@@ -73,14 +82,11 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
 
   const cfg = { ...DEFAULT_CONFIG, ...config };
 
-  // Enforce production guardrail on debugMode regardless of source (env or config param).
-  // Without this, initTelemetry({ debugMode: true }) could bypass resolveDebugMode().
-  if (cfg.debugMode) {
-    const isProd = process.env.NODE_ENV === 'production';
-    if (isProd && process.env.TELEMETRY_DEBUG_FORCE !== 'true') {
-      log.warn('debugMode blocked in production (set TELEMETRY_DEBUG_FORCE=true to override)');
-      cfg.debugMode = false;
-    }
+  // Apply default-deny guardrail to debugMode regardless of source (env or config param).
+  const debugRequested = cfg.debugMode;
+  cfg.debugMode = shouldEnableDebugMode(cfg.debugMode ?? false);
+  if (debugRequested && !cfg.debugMode) {
+    log.warn('TELEMETRY_DEBUG blocked — NODE_ENV is not development/test (set TELEMETRY_DEBUG_FORCE=true to override)');
   }
 
   // P2 fix: validate HMAC salt at startup, not on first redaction call.

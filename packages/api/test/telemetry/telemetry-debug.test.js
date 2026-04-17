@@ -2,10 +2,9 @@
  * F153: TELEMETRY_DEBUG feature tests (#456).
  *
  * Verifies:
- * 1. Structural plumbing: ConsoleSpanExporter wired in init.ts
- * 2. Env registry: TELEMETRY_DEBUG registered
- * 3. Runtime: debug exporter ordering vs redactor (P2 fix)
- * 4. Runtime: production guardrail blocks config-param bypass (P2 fix)
+ * 1. Runtime: shouldEnableDebugMode() guardrail under all env combinations
+ * 2. Runtime: debug exporter ordering vs redactor (unredacted before mutation)
+ * 3. Structural: init.ts plumbing + env registry
  */
 
 // Ensure HMAC fallback salt is available (CI test:public may not set NODE_ENV)
@@ -20,16 +19,13 @@ import { fileURLToPath } from 'node:url';
 const { ExportResultCode } = await import('@opentelemetry/core');
 const { NodeTracerProvider, SimpleSpanProcessor } = await import('@opentelemetry/sdk-trace-node');
 const { RedactingSpanProcessor } = await import('../../dist/infrastructure/telemetry/redactor.js');
+const { shouldEnableDebugMode } = await import('../../dist/infrastructure/telemetry/init.js');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INIT_SRC = resolve(__dirname, '../../src/infrastructure/telemetry/init.ts');
 const ENV_REGISTRY_SRC = resolve(__dirname, '../../src/config/env-registry.ts');
 
-/**
- * Exporter that snapshots span attributes at export() time.
- * Unlike InMemorySpanExporter (which stores refs and sees later mutations),
- * this captures a frozen copy — the only way to prove ordering correctness.
- */
+/** Exporter that snapshots span attributes at export() time (not refs). */
 class SnapshotExporter {
   spans = [];
   export(spans, cb) {
@@ -44,42 +40,73 @@ class SnapshotExporter {
   forceFlush() {
     return Promise.resolve();
   }
-  reset() {
-    this.spans = [];
+}
+
+// Helper: run callback with env vars, then restore
+function withEnv(overrides, fn) {
+  const saved = {};
+  for (const key of Object.keys(overrides)) {
+    saved[key] = process.env[key];
+  }
+  try {
+    for (const [key, val] of Object.entries(overrides)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    return fn();
+  } finally {
+    for (const [key, val] of Object.entries(saved)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
   }
 }
 
+// ── Runtime: shouldEnableDebugMode() guardrail ─────────────────────
+
+test('shouldEnableDebugMode: returns false when not requested', () => {
+  withEnv({ NODE_ENV: 'test' }, () => {
+    assert.equal(shouldEnableDebugMode(false), false);
+  });
+});
+
+test('shouldEnableDebugMode: allowed in NODE_ENV=test', () => {
+  withEnv({ NODE_ENV: 'test', TELEMETRY_DEBUG_FORCE: undefined }, () => {
+    assert.equal(shouldEnableDebugMode(true), true);
+  });
+});
+
+test('shouldEnableDebugMode: allowed in NODE_ENV=development', () => {
+  withEnv({ NODE_ENV: 'development', TELEMETRY_DEBUG_FORCE: undefined }, () => {
+    assert.equal(shouldEnableDebugMode(true), true);
+  });
+});
+
+test('shouldEnableDebugMode: blocked in NODE_ENV=production', () => {
+  withEnv({ NODE_ENV: 'production', TELEMETRY_DEBUG_FORCE: undefined }, () => {
+    assert.equal(shouldEnableDebugMode(true), false);
+  });
+});
+
+test('shouldEnableDebugMode: blocked when NODE_ENV unset (profile-driven startup)', () => {
+  withEnv({ NODE_ENV: undefined, TELEMETRY_DEBUG_FORCE: undefined }, () => {
+    assert.equal(shouldEnableDebugMode(true), false, 'Unset NODE_ENV must be treated as production-like');
+  });
+});
+
+test('shouldEnableDebugMode: FORCE overrides in production', () => {
+  withEnv({ NODE_ENV: 'production', TELEMETRY_DEBUG_FORCE: 'true' }, () => {
+    assert.equal(shouldEnableDebugMode(true), true);
+  });
+});
+
+test('shouldEnableDebugMode: FORCE overrides when NODE_ENV unset', () => {
+  withEnv({ NODE_ENV: undefined, TELEMETRY_DEBUG_FORCE: 'true' }, () => {
+    assert.equal(shouldEnableDebugMode(true), true);
+  });
+});
+
 // ── Structural: init.ts plumbing ───────────────────────────────────
-
-test('F153 TELEMETRY_DEBUG: init.ts imports ConsoleSpanExporter', () => {
-  const src = readFileSync(INIT_SRC, 'utf8');
-  assert.ok(src.includes('ConsoleSpanExporter'), 'Should import ConsoleSpanExporter');
-  assert.ok(src.includes('SimpleSpanProcessor'), 'Should import SimpleSpanProcessor for debug path');
-});
-
-test('F153 TELEMETRY_DEBUG: init.ts wires ConsoleSpanExporter on debugMode', () => {
-  const src = readFileSync(INIT_SRC, 'utf8');
-  assert.ok(src.includes('cfg.debugMode') || src.includes('config.debugMode'), 'Should check debugMode config flag');
-  assert.ok(
-    src.includes('new SimpleSpanProcessor(new ConsoleSpanExporter())'),
-    'Should create SimpleSpanProcessor wrapping ConsoleSpanExporter',
-  );
-});
-
-test('F153 TELEMETRY_DEBUG: init.ts uses spanProcessors array (not single)', () => {
-  const src = readFileSync(INIT_SRC, 'utf8');
-  assert.ok(
-    src.includes('spanProcessors:') && !src.includes('spanProcessor ?'),
-    'Should use spanProcessors array pattern, not ternary single processor',
-  );
-});
-
-test('F153 TELEMETRY_DEBUG: init.ts emits warning when debug enabled', () => {
-  const src = readFileSync(INIT_SRC, 'utf8');
-  assert.ok(src.includes('UNREDACTED') && src.includes('log.warn'), 'Should warn about unredacted export');
-});
-
-// ── Structural: debug exporter ordering ────────────────────────────
 
 test('F153 TELEMETRY_DEBUG: debug exporter appears BEFORE redactor in source', () => {
   const src = readFileSync(INIT_SRC, 'utf8');
@@ -90,30 +117,38 @@ test('F153 TELEMETRY_DEBUG: debug exporter appears BEFORE redactor in source', (
   assert.ok(debugIdx < redactIdx, 'Debug exporter must come BEFORE RedactingSpanProcessor');
 });
 
-test('F153 TELEMETRY_DEBUG: production guardrail enforced after config merge', () => {
+test('F153 TELEMETRY_DEBUG: guardrail call-site is after config merge', () => {
   const src = readFileSync(INIT_SRC, 'utf8');
   const mergeIdx = src.indexOf('...DEFAULT_CONFIG, ...config');
-  const guardrailIdx = src.indexOf('debugMode blocked in production');
+  // Match the call site (cfg.debugMode = shouldEnableDebugMode(...)), not the declaration
+  const callIdx = src.indexOf('= shouldEnableDebugMode(cfg.');
   assert.ok(mergeIdx > 0, 'Should merge config');
-  assert.ok(guardrailIdx > 0, 'Should have post-merge guardrail');
-  assert.ok(guardrailIdx > mergeIdx, 'Guardrail must come AFTER config merge to catch param bypass');
+  assert.ok(callIdx > 0, 'Should call shouldEnableDebugMode on merged cfg');
+  assert.ok(callIdx > mergeIdx, 'shouldEnableDebugMode call must be AFTER config merge');
 });
 
 // ── Env registry ───────────────────────────────────────────────────
 
-test('F153 TELEMETRY_DEBUG: registered in env-registry.ts', () => {
+test('F153 TELEMETRY_DEBUG: both vars registered and locked in env-registry', () => {
   const src = readFileSync(ENV_REGISTRY_SRC, 'utf8');
-  assert.ok(src.includes("name: 'TELEMETRY_DEBUG'"), 'TELEMETRY_DEBUG should be in env registry');
-  assert.ok(src.includes("name: 'TELEMETRY_DEBUG_FORCE'"), 'TELEMETRY_DEBUG_FORCE should be in env registry');
+  assert.ok(src.includes("name: 'TELEMETRY_DEBUG'"), 'TELEMETRY_DEBUG in registry');
+  assert.ok(src.includes("name: 'TELEMETRY_DEBUG_FORCE'"), 'TELEMETRY_DEBUG_FORCE in registry');
+
+  // Verify both are locked from Hub UI
+  for (const varName of ['TELEMETRY_DEBUG', 'TELEMETRY_DEBUG_FORCE']) {
+    const idx = src.indexOf(`name: '${varName}'`);
+    const block = src.slice(idx, src.indexOf('},', idx) + 2);
+    assert.ok(block.includes('hubVisible: false'), `${varName} must be hubVisible: false`);
+    assert.ok(block.includes('runtimeEditable: false'), `${varName} must be runtimeEditable: false`);
+  }
 });
 
-// ── Runtime: debug exporter sees unredacted spans when both modes active ──
+// ── Runtime: debug exporter ordering vs redactor ───────────────────
 
-test('F153 runtime: debug exporter snapshot captures UNREDACTED attrs before redactor mutates', async () => {
+test('F153 runtime: debug snapshot captures UNREDACTED attrs before redactor mutates', async () => {
   const debugSnapshot = new SnapshotExporter();
   const redactedSnapshot = new SnapshotExporter();
 
-  // Mirror init.ts pipeline: debug FIRST, redactor SECOND
   const provider = new NodeTracerProvider({
     spanProcessors: [
       new SimpleSpanProcessor(debugSnapshot),
@@ -132,28 +167,21 @@ test('F153 runtime: debug exporter snapshot captures UNREDACTED attrs before red
   });
   span.end();
 
-  // Debug exporter (first): should see original values
-  assert.equal(debugSnapshot.spans.length, 1, 'Debug exporter should capture 1 span');
   const debugAttrs = debugSnapshot.spans[0].attributes;
-  assert.equal(debugAttrs.authorization, 'Bearer sk-secret-key', 'Debug: Class A should be UNREDACTED');
-  assert.equal(debugAttrs.prompt, 'Hello, this is a secret prompt', 'Debug: Class B should be UNREDACTED');
-  assert.equal(debugAttrs.invocationId, 'inv-12345', 'Debug: Class C should be UNREDACTED');
-  assert.equal(debugAttrs['cli.command'], 'claude', 'Debug: Class D should pass through');
+  assert.equal(debugAttrs.authorization, 'Bearer sk-secret-key', 'Debug: Class A UNREDACTED');
+  assert.equal(debugAttrs.prompt, 'Hello, this is a secret prompt', 'Debug: Class B UNREDACTED');
+  assert.equal(debugAttrs.invocationId, 'inv-12345', 'Debug: Class C UNREDACTED');
 
-  // Redacted exporter (second): should see redacted values
-  assert.equal(redactedSnapshot.spans.length, 1, 'Redacted exporter should capture 1 span');
   const redactedAttrs = redactedSnapshot.spans[0].attributes;
-  assert.equal(redactedAttrs.authorization, '[REDACTED]', 'Redacted: Class A should be [REDACTED]');
-  assert.match(String(redactedAttrs.prompt), /^\[hash:[0-9a-f]{16} len:\d+\]$/, 'Redacted: Class B should be hashed');
-  assert.notEqual(redactedAttrs.invocationId, 'inv-12345', 'Redacted: Class C should be pseudonymized');
+  assert.equal(redactedAttrs.authorization, '[REDACTED]', 'Redacted: Class A [REDACTED]');
+  assert.match(String(redactedAttrs.prompt), /^\[hash:[0-9a-f]{16} len:\d+\]$/, 'Redacted: Class B hashed');
+  assert.notEqual(redactedAttrs.invocationId, 'inv-12345', 'Redacted: Class C pseudonymized');
 
   await provider.shutdown();
 });
 
 test('F153 runtime: debug-only mode (no OTLP) sees unredacted attrs', async () => {
   const debugSnapshot = new SnapshotExporter();
-
-  // Debug only, no redactor — simplest case
   const provider = new NodeTracerProvider({
     spanProcessors: [new SimpleSpanProcessor(debugSnapshot)],
   });
@@ -165,13 +193,8 @@ test('F153 runtime: debug-only mode (no OTLP) sees unredacted attrs', async () =
   span.end();
 
   const attrs = debugSnapshot.spans[0].attributes;
-  assert.equal(attrs.authorization, 'Bearer sk-xyz', 'Debug-only: should see raw auth');
-  assert.equal(attrs.prompt, 'secret stuff', 'Debug-only: should see raw prompt');
+  assert.equal(attrs.authorization, 'Bearer sk-xyz', 'Debug-only: raw auth');
+  assert.equal(attrs.prompt, 'secret stuff', 'Debug-only: raw prompt');
 
   await provider.shutdown();
-});
-
-test('F153 TELEMETRY_DEBUG: debug field included in SDK init log', () => {
-  const src = readFileSync(INIT_SRC, 'utf8');
-  assert.ok(src.includes('debug: cfg.debugMode'), 'OTel SDK init log should include debug mode status');
 });

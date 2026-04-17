@@ -1259,9 +1259,11 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'TELEMETRY_DEBUG',
     defaultValue: '(未设置 → 关闭)',
     description:
-      '设为 true 启用 ConsoleSpanExporter（UNREDACTED）。生产环境默认忽略，需额外设 TELEMETRY_DEBUG_FORCE=true',
+      '设为 true 启用 ConsoleSpanExporter（UNREDACTED）。仅 NODE_ENV=development/test 生效，其他环境需额外设 TELEMETRY_DEBUG_FORCE=true',
     category: 'telemetry',
     sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
   },
   {
     name: 'TELEMETRY_DEBUG_FORCE',
