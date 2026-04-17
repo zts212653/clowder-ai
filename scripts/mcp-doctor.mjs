@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,12 +44,51 @@ function buildRequiredBy(skills) {
 
 function commandExists(command) {
   if (!command || typeof command !== 'string') return false;
-  if (command.includes(path.sep) || command.startsWith('.')) {
+  if (command.includes('/') || command.includes('\\') || command.startsWith('.')) {
     const resolved = path.isAbsolute(command) ? command : path.resolve(repoRoot, command);
-    return existsSync(resolved);
+    return isExecutableCommandPath(resolved);
   }
-  const result = spawnSync('which', [command], { stdio: 'ignore' });
-  return result.status === 0;
+  return resolveCommandOnPath(command) !== null;
+}
+
+function isExecutableCommandPath(filePath) {
+  if (!existsSync(filePath)) return false;
+
+  try {
+    const stats = statSync(filePath);
+    if (!stats.isFile()) return false;
+    if (process.platform === 'win32') return true;
+    return (stats.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+function resolveCommandOnPath(command) {
+  const pathEntries = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+
+  if (pathEntries.length === 0) return null;
+
+  const suffixes =
+    process.platform === 'win32'
+      ? path.extname(command)
+        ? ['']
+        : (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+            .split(';')
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+      : [''];
+
+  for (const dir of pathEntries) {
+    for (const suffix of suffixes) {
+      const candidate = path.join(dir, `${command}${suffix}`);
+      if (isExecutableCommandPath(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
 }
 
 function referencedArtifactExists(args) {

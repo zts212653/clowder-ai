@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,11 @@ function extractScriptRefs(command) {
     if (ref) refs.add(ref.replace(/^\.\//, ''));
   }
   return [...refs];
+}
+
+function extractDirectScriptRef(command) {
+  const match = command.match(/^\s*((?:\.\/)?scripts\/[^\s'"]+)/);
+  return match ? match[1].replace(/^\.\//, '') : null;
 }
 
 test('root package scripts do not reference missing script files', () => {
@@ -53,4 +58,23 @@ test('alpha worktree scripts expose help output', () => {
     encoding: 'utf8',
   });
   assert.match(alphaTestHelp, /Smoke-check a running alpha environment/);
+});
+
+test('directly invoked root scripts keep executable bit', () => {
+  if (process.platform === 'win32') return;
+
+  const scripts = readRootScripts();
+  const nonExecutable = [];
+
+  for (const [scriptName, command] of Object.entries(scripts)) {
+    const ref = extractDirectScriptRef(String(command));
+    if (!ref) continue;
+
+    const scriptPath = path.join(repoRoot, ref);
+    if ((statSync(scriptPath).mode & 0o111) === 0) {
+      nonExecutable.push(`${scriptName} -> ${ref}`);
+    }
+  }
+
+  assert.deepEqual(nonExecutable, [], `Scripts missing executable bit:\n${nonExecutable.join('\n')}`);
 });

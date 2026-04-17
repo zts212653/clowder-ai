@@ -8,7 +8,21 @@ cd "$PROJECT_DIR"
 
 port_in_use() {
   local port="$1"
-  lsof -ti "tcp:${port}" >/dev/null 2>&1
+
+  if command -v lsof >/dev/null 2>&1 && lsof -ti "tcp:${port}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$port )" 2>/dev/null | awk 'NR > 1 { found = 1; exit } END { exit found ? 0 : 1 }'; then
+    return 0
+  fi
+
+  if command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || nc -z localhost "$port" >/dev/null 2>&1
+    return $?
+  fi
+
+  (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1 || (exec 3<>"/dev/tcp/localhost/$port") >/dev/null 2>&1
 }
 
 pick_review_ports() {
