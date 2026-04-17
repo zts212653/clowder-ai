@@ -112,6 +112,8 @@ export const CODEX_AUTH_MODE_OPTIONS: Array<{ value: CodexAuthMode; label: strin
 
 export const DEFAULT_ANTIGRAVITY_COMMAND_ARGS = '. --remote-debugging-port=9000';
 
+const GOOGLE_OWNED_DOMAINS = ['generativelanguage.googleapis.com', 'googleapis.com'];
+
 function isCliEffortValue(value: string | undefined): value is CliEffortValue {
   return value !== undefined && CLI_EFFORT_VALUES.includes(value as CliEffortValue);
 }
@@ -219,18 +221,49 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
   return undefined;
 }
 
+function parseHostname(baseUrl: string | undefined): string | null {
+  if (!baseUrl) return null;
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isOfficialGoogleHostname(hostname: string): boolean {
+  return GOOGLE_OWNED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+}
+
+function isAllowedGoogleGatewayProfile(profile: ProfileItem): boolean {
+  if (profile.authType !== 'api_key') return false;
+  const hostname = parseHostname(profile.baseUrl);
+  return hostname !== null && !isOfficialGoogleHostname(hostname);
+}
+
+function resolveBuiltinClientFamily(client: ClientId): BuiltinAccountClient | null {
+  if (typeof builtinAccountFamilyForClient === 'function') {
+    const family = builtinAccountFamilyForClient(client);
+    if (family) return family;
+  }
+  if (isBuiltinClient(client)) return client;
+  if (client === 'catagent') return 'anthropic';
+  return null;
+}
+
 export function builtinAccountIdForClient(client: ClientId): string | null {
   return sharedBuiltinAccountIdForClient(client);
 }
 
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
-  const effective = builtinAccountFamilyForClient(client);
+  const effective = resolveBuiltinClientFamily(client);
   if (!effective || !isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(
     (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === effective,
   );
-  // Gemini CLI only supports builtin Google auth — no API key profiles.
-  if (effective === 'google') return builtinProfiles;
+  if (effective === 'google') {
+    const gatewayProfiles = profiles.filter(isAllowedGoogleGatewayProfile);
+    return [...builtinProfiles, ...gatewayProfiles.filter((profile) => !builtinProfiles.includes(profile))];
+  }
   if (effective === 'kimi') {
     const kimiApiProfiles = profiles.filter(
       (profile) => profile.authType === 'api_key' && legacyProfileClient(profile) === 'kimi',

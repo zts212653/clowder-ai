@@ -100,6 +100,20 @@ const BUILTIN_ACCOUNT_MAP: Record<string, BuiltinAccountClient> = {
   builtin_opencode: 'opencode',
 };
 
+const GOOGLE_OWNED_DOMAINS = ['generativelanguage.googleapis.com', 'googleapis.com'];
+
+function isOfficialGoogleHostname(hostname: string): boolean {
+  return GOOGLE_OWNED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+}
+
+function parseHostname(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Resolve a single accountRef to RuntimeProviderProfile.
  * Falls back to a synthetic builtin profile for known OAuth refs
@@ -243,8 +257,22 @@ export function validateRuntimeProviderBinding(
   profile: RuntimeProviderProfile,
   _defaultModel?: string | null,
 ): string | null {
+  // Allow api_key accounts for google only when using third-party gateways
+  // (explicitly block Google-owned domains to preserve OAuth-only protection)
   if (clientId === 'google' && profile.kind !== 'builtin') {
-    return 'client "google" only supports builtin Gemini auth';
+    const trimmedBaseUrl = profile.baseUrl?.trim();
+    if (!trimmedBaseUrl) {
+      return 'client "google" only supports builtin Gemini auth (or third-party with baseUrl)';
+    }
+    const hostname = parseHostname(trimmedBaseUrl);
+    if (!hostname) {
+      return 'client "google" third-party gateway requires a valid baseUrl';
+    }
+    if (isOfficialGoogleHostname(hostname)) {
+      return 'client "google" requires builtin OAuth for official Google endpoints (api_key only allowed for third-party gateways)';
+    }
+    // Third-party gateway with api_key is allowed
+    return null;
   }
   const expectedClient = resolveBuiltinClientForProvider(clientId);
   if (expectedClient && profile.kind === 'builtin' && profile.client && profile.client !== expectedClient) {
