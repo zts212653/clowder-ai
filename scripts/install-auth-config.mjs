@@ -200,10 +200,15 @@ function normalizeModelValue(value) {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function normalizeModels(models) {
+function sanitizeModels(models) {
   if (!Array.isArray(models)) return undefined;
   const normalized = Array.from(new Set(models.map(normalizeModelValue).filter((v) => v && v.length > 0)));
-  return normalized.length > 0 ? normalized.sort() : undefined;
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeModels(models) {
+  const normalized = sanitizeModels(models);
+  return normalized ? [...normalized].sort() : undefined;
 }
 
 function canonicalizeAccount(account) {
@@ -375,7 +380,7 @@ function setClientAuth(client, mode, options) {
     accounts[accountRef] = {
       authType: 'oauth',
       displayName: spec?.displayName ?? accountRef,
-      models: normalizeModels(spec?.models) ?? [],
+      models: sanitizeModels(spec?.models) ?? [],
     };
     // Warn about stale installer account that the resolver will prefer (has API key).
     // We intentionally do NOT auto-delete it here: installer accounts are global,

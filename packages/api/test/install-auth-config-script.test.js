@@ -138,7 +138,7 @@ test('client-auth set oauth stores builtin default models for the selected clien
 
     const { accounts } = readInstallerState(projectRoot);
     assert.equal(accounts.codex?.authType, 'oauth');
-    assert.deepEqual(accounts.codex?.models, ['gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.4']);
+    assert.deepEqual(accounts.codex?.models, ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark']);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -167,7 +167,7 @@ test('client-auth set oauth sanitizes malformed builtin default models before wr
 
     const { accounts } = readInstallerState(projectRoot);
     assert.equal(accounts.claude?.authType, 'oauth');
-    assert.deepEqual(accounts.claude?.models, ['claude-opus-4-5-20251101', 'claude-opus-4-6', 'claude-sonnet-4-6']);
+    assert.deepEqual(accounts.claude?.models, ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101']);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
