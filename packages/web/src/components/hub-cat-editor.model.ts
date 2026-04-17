@@ -240,12 +240,22 @@ function isAllowedGoogleGatewayProfile(profile: ProfileItem): boolean {
   return hostname !== null && !isOfficialGoogleHostname(hostname);
 }
 
+function resolveBuiltinClientFamily(client: ClientId): BuiltinAccountClient | null {
+  if (typeof builtinAccountFamilyForClient === 'function') {
+    const family = builtinAccountFamilyForClient(client);
+    if (family) return family;
+  }
+  if (isBuiltinClient(client)) return client;
+  if (client === 'catagent') return 'anthropic';
+  return null;
+}
+
 export function builtinAccountIdForClient(client: ClientId): string | null {
   return sharedBuiltinAccountIdForClient(client);
 }
 
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
-  const effective = builtinAccountFamilyForClient(client);
+  const effective = resolveBuiltinClientFamily(client);
   if (!effective || !isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(
     (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === effective,
