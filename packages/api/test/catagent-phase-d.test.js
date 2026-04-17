@@ -492,4 +492,30 @@ describe('D2: agentic loop', () => {
     assert.ok(error, 'has error event');
     assert.ok(done, 'has done event (no dangle)');
   });
+
+  test('loop overflow fires after exactly MAX_TOOL_TURNS (P3 off-by-one regression)', async () => {
+    // Every call returns tool_use — loop should overflow at exactly 15 turns
+    let callCount = 0;
+    globalThis.fetch = async (_url, _init) => {
+      callCount++;
+      return {
+        ok: true,
+        json: async () => ({
+          id: `msg${callCount}`,
+          model: 'claude-sonnet-4-5-20250929',
+          stop_reason: 'tool_use',
+          content: [{ type: 'tool_use', id: `tu${callCount}`, name: 'read_file', input: { path: 'hello.txt' } }],
+          usage: { input_tokens: 5, output_tokens: 3 },
+        }),
+      };
+    };
+
+    const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
+    const msgs = await collect(svc.invoke('test', { workingDirectory: tmpDir }));
+
+    const error = msgs.find((m) => m.type === 'error' && m.error.includes('loop exceeded'));
+    assert.ok(error, 'overflow error emitted');
+    // MAX_TOOL_TURNS = 15, so exactly 15 API calls (turns 0..14)
+    assert.equal(callCount, 15, `expected 15 API calls, got ${callCount}`);
+  });
 });

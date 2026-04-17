@@ -87,7 +87,7 @@ export class CatAgentService implements AgentService {
 
     let totalUsage: TokenUsage | undefined;
 
-    for (let turn = 0; turn <= MAX_TOOL_TURNS; turn++) {
+    for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
       let response: AnthropicMessageResponse;
       try {
         response = await this.callApiOnce(messages, toolSchemas, model, credentials, options);
