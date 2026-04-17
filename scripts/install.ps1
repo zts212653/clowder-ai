@@ -410,6 +410,7 @@ if (-not $SkipCli) {
     $toolsToInstall = if ($missingTools.Count -gt 0 -and [Environment]::UserInteractive -and -not $env:CI) {
         Select-InstallerMultiChoice -Title "Missing agent CLIs" -Prompt "Choose which agent CLIs to install" -Options $missingTools
     } else { $missingTools }
+    $selectedCliCommands = @($toolsToInstall | ForEach-Object { $_.Cmd })
     $npmInstallCommand = Resolve-ToolCommand -Name "npm"
     foreach ($tool in $cliTools) {
         $installed = $null -ne (Resolve-ToolCommand -Name $tool.Cmd)
@@ -448,10 +449,11 @@ if (-not $SkipCli) {
     }
 } else {
     Write-Warn "CLI tools install skipped (-SkipCli)"
+    $selectedCliCommands = @()
 }
 
 Write-Step "Step 8/9 - Auth config"
-Configure-InstallerAuth -ProjectRoot $ProjectRoot -State $authState
+Configure-InstallerAuth -ProjectRoot $ProjectRoot -State $authState -SelectedCliCommands $selectedCliCommands
 
 Apply-InstallerAuthEnv -State $authState -EnvFile $envFile
 
