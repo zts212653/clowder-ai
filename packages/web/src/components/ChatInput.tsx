@@ -22,7 +22,7 @@ import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
-import { threadDrafts, threadImageDrafts } from './thread-drafts';
+import { hasPendingThreadDraft, threadDrafts, threadImageDrafts } from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
@@ -506,7 +506,10 @@ export function ChatInput({
       // LRU eviction: keep only the most recent N threads with image drafts
       while (threadImageDrafts.size > MAX_IMAGE_DRAFT_THREADS) {
         const oldest = threadImageDrafts.keys().next().value;
-        if (oldest !== undefined) threadImageDrafts.delete(oldest);
+        if (oldest !== undefined) {
+          threadImageDrafts.delete(oldest);
+          setThreadHasDraft(oldest, hasPendingThreadDraft(oldest));
+        }
       }
     } else {
       threadImageDrafts.delete(threadId);
