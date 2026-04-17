@@ -48,7 +48,7 @@ function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolea
     kind: isBuiltin ? 'builtin' : ('api_key' as const),
     authType: account.authType,
     builtin: isBuiltin,
-    ...(builtinClient ? { clientId: builtinClient } : {}),
+    ...(isBuiltin && builtinClient ? { clientId: builtinClient } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     models: account.models ? [...account.models] : [],
     hasApiKey: apiKeyPresent,
