@@ -56,6 +56,7 @@ function snapshotActive(s: ChatState): ThreadState {
     isLoading: s.isLoading,
     isLoadingHistory: s.isLoadingHistory,
     hasMore: s.hasMore,
+    hasDraft: s.hasDraft,
     hasActiveInvocation: s.hasActiveInvocation,
     activeInvocations: s.activeInvocations,
     intentMode: s.intentMode,
@@ -113,6 +114,7 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     isLoading: ts.isLoading,
     isLoadingHistory: ts.isLoadingHistory,
     hasMore: ts.hasMore,
+    hasDraft: ts.hasDraft ?? false,
     hasActiveInvocation: ts.hasActiveInvocation,
     activeInvocations: ts.activeInvocations,
     intentMode: ts.intentMode,
@@ -459,6 +461,7 @@ interface ChatState {
   isLoading: boolean;
   isLoadingHistory: boolean;
   hasMore: boolean;
+  hasDraft: boolean;
   /** Whether the thread has an active invocation (broader than isLoading — stays true during A2A chains) */
   hasActiveInvocation: boolean;
   /** F108: Per-invocation slot tracking — key=invocationId, value=slot info */
@@ -520,6 +523,7 @@ interface ChatState {
   updateRichBlock: (messageId: string, blockId: string, patch: Record<string, unknown>) => void;
   setStreaming: (id: string, streaming: boolean) => void;
   setLoading: (loading: boolean) => void;
+  setThreadHasDraft: (threadId: string, hasDraft: boolean) => void;
   setHasActiveInvocation: (v: boolean) => void;
   /** F108: Register a new active invocation slot */
   addActiveInvocation: (invocationId: string, catId: string, mode: string, startedAt?: number) => void;
@@ -702,6 +706,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoading: false,
   isLoadingHistory: false,
   hasMore: true,
+  hasDraft: false,
   hasActiveInvocation: false,
   activeInvocations: {},
   intentMode: null,
@@ -1120,6 +1125,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })),
 
   setLoading: (loading) => set({ isLoading: loading }),
+  setThreadHasDraft: (threadId, hasDraft) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        if (state.hasDraft === hasDraft) return state;
+        return { hasDraft };
+      }
+
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      if ((existing.hasDraft ?? false) === hasDraft) return state;
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
+            hasDraft,
+          },
+        },
+      };
+    }),
   setHasActiveInvocation: (v) =>
     set((state) => {
       // Stamp completion time when transitioning active → inactive on the current thread,
