@@ -374,8 +374,8 @@ pnpm_install_needs_puppeteer_skip() {
         && grep -Eqi 'Failed to set up chrome|PUPPETEER_SKIP_DOWNLOAD' "$log_file"
 }
 warn_puppeteer_skip_fallback() {
-    warn "Puppeteer browser download failed — retrying install without bundled Chrome"
-    warn "Thread export / screenshot features will stay unavailable until you run: npx puppeteer browsers install chrome"
+    warn "Bundled Chrome download failed — skipped"
+    warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
 }
 build_step() { local label="$1"; shift; info "  Building $label..."
     "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }

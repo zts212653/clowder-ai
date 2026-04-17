@@ -517,10 +517,18 @@ test('install script retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer bro
     installScriptText,
     /grep -Eqi 'puppeteer' "\$log_file"\s+\\\s*\n\s*&& grep -Eqi 'Failed to set up chrome\|PUPPETEER_SKIP_DOWNLOAD' "\$log_file"/,
   );
-  assert.match(installScriptText, /warn "Puppeteer browser download failed — retrying install without bundled Chrome"/);
+  assert.match(installScriptText, /warn "Bundled Chrome download failed — skipped"/);
   assert.match(
     installScriptText,
-    /warn "Thread export \/ screenshot features will stay unavailable until you run: npx puppeteer browsers install chrome"/,
+    /warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
   );
   assert.match(installScriptText, /env PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --frozen-lockfile/);
+});
+
+test('.env.example leaves REDIS_URL unset by default', () => {
+  const envExamplePath = new URL('../../../.env.example', import.meta.url);
+  const envExampleText = readFileSync(envExamplePath, 'utf8');
+
+  assert.doesNotMatch(envExampleText, /^REDIS_URL=/m);
+  assert.match(envExampleText, /^# REDIS_URL=$/m);
 });

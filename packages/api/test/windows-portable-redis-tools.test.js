@@ -109,13 +109,10 @@ test('Windows installer retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer 
     /return \$OutputText -match "puppeteer" -and\s+\(\$OutputText -match "Failed to set up chrome" -or \$OutputText -match "PUPPETEER_SKIP_DOWNLOAD"\)/,
   );
   assert.match(installScript, /function Write-PuppeteerSkipWarning/);
+  assert.match(installScript, /Write-Warn "Bundled Chrome download failed - skipped"/);
   assert.match(
     installScript,
-    /Write-Warn "Puppeteer browser download failed - retrying install without bundled Chrome"/,
-  );
-  assert.match(
-    installScript,
-    /Write-Warn "Thread export \/ screenshot features will stay unavailable until you run: npx puppeteer browsers install chrome"/,
+    /Write-Warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
   );
   assert.match(
     installScript,

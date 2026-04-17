@@ -44,8 +44,8 @@ function Test-PuppeteerBrowserDownloadFailure {
         ($OutputText -match "Failed to set up chrome" -or $OutputText -match "PUPPETEER_SKIP_DOWNLOAD")
 }
 function Write-PuppeteerSkipWarning {
-    Write-Warn "Puppeteer browser download failed - retrying install without bundled Chrome"
-    Write-Warn "Thread export / screenshot features will stay unavailable until you run: npx puppeteer browsers install chrome"
+    Write-Warn "Bundled Chrome download failed - skipped"
+    Write-Warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
 }
 function Invoke-PnpmInstallWithCapturedOutput {
     param(
