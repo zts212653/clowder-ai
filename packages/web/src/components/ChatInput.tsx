@@ -27,6 +27,7 @@ import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
 export { threadDrafts, threadImageDrafts } from './thread-drafts';
+
 const MAX_IMAGE_DRAFT_THREADS = 5;
 
 interface ChatInputProps {

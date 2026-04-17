@@ -3,9 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput, threadDrafts, threadImageDrafts } from '@/components/ChatInput';
 import { ThreadItem } from '@/components/ThreadSidebar/ThreadItem';
+import type { WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode, Thread } from '@/stores/chat-types';
 import { DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
-import type { WhisperOptions } from '@/hooks/useSendMessage';
 
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
