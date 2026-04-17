@@ -17,6 +17,7 @@ import { HubCatEditor } from '@/components/HubCatEditor';
 import type { ProfileItem } from '@/components/hub-accounts.types';
 import {
   buildCatPayload,
+  builtinAccountIdForClient,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
   getCliEffortOptionsForClient,
@@ -858,6 +859,12 @@ describe('HubCatEditor', () => {
       'claude-sponsor',
       'codex-sponsor',
     ]);
+
+    // F159: catagent shares anthropic credential family
+    expect(filterProfiles('catagent', profiles).map((profile) => profile.id)).toEqual(
+      filterProfiles('anthropic', profiles).map((profile) => profile.id),
+    );
+    expect(builtinAccountIdForClient('catagent')).toEqual('claude');
   });
 
   it('preserves existing model when it is not listed in provider defaults', async () => {

@@ -56,7 +56,7 @@ const cliSchema = z.object({
   effort: cliEffortSchema.nullable().optional(),
 });
 
-const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode']);
+const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'catagent']);
 const catIdSchema = z
   .string()
   .min(1)
@@ -581,7 +581,7 @@ export const catsRoutes: FastifyPluginAsync = async (app) => {
       if (oldBuiltin && builtinAccountIdForClient(oldBuiltin) === effectiveAccountRef) {
         const newBuiltin = resolveBuiltinClientForProvider(effectiveClient);
         if (newBuiltin) {
-          effectiveAccountRef = builtinAccountIdForClient(newBuiltin);
+          effectiveAccountRef = builtinAccountIdForClient(newBuiltin) ?? undefined;
           targetAccountRef = effectiveAccountRef;
         }
       }

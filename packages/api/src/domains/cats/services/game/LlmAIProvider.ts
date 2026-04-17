@@ -77,7 +77,8 @@ export class LlmAIProvider implements AIProvider {
     const entry = catRegistry.tryGet(this.catId);
     const accountRef =
       (entry ? resolveBoundAccountRefForCat(process.cwd(), this.catId, entry.config) : undefined) ??
-      builtinAccountIdForClient(client);
+      builtinAccountIdForClient(client) ??
+      undefined;
     const profile = resolveForClient(process.cwd(), client, accountRef);
     return profile?.apiKey;
   }
