@@ -633,13 +633,29 @@ function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: str
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    const source = document.querySelector(`[data-guide-id="${CSS.escape(guideTarget)}"]`);
-    if (!source || !containerRef.current) return;
-    const clone = source.cloneNode(true) as HTMLElement;
-    clone.removeAttribute('data-guide-id');
-    clone.style.pointerEvents = 'none';
-    containerRef.current.innerHTML = '';
-    containerRef.current.appendChild(clone);
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const selector = buildGuideTargetSelector(guideTarget);
+
+    const syncCapture = () => {
+      if (cancelled || !containerRef.current) return;
+      const source = document.querySelector(selector);
+      if (!source) {
+        retryTimer = setTimeout(syncCapture, 100);
+        return;
+      }
+      const clone = source.cloneNode(true) as HTMLElement;
+      clone.removeAttribute('data-guide-id');
+      clone.style.pointerEvents = 'none';
+      containerRef.current.innerHTML = '';
+      containerRef.current.appendChild(clone);
+    };
+
+    syncCapture();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [guideTarget]);
 
   return (

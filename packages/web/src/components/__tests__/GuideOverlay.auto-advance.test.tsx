@@ -37,12 +37,31 @@ const INPUT_FLOW: OrchestrationFlow = {
   steps: [{ id: 'step-input', target: 'member-editor.name', tips: 'type name', advance: 'input' }],
 };
 
+const CARD_FLOW: OrchestrationFlow = {
+  id: 'card-flow',
+  name: 'Card Flow',
+  steps: [
+    {
+      id: 'step-card',
+      target: 'hub.trigger',
+      tips: 'preview async card',
+      advance: 'click',
+      tipsMetadata: {
+        type: 'card',
+        target: 'async.card',
+        alt: '异步卡片预览',
+      },
+    },
+  ],
+};
+
 describe('GuideOverlay auto-advance lifecycle', () => {
   let container: HTMLDivElement;
   let root: Root;
   let target: HTMLButtonElement;
   let confirmTarget: HTMLDivElement;
   let inputTarget: HTMLInputElement;
+  let delayedCardTarget: HTMLDivElement;
   let rafId = 0;
   const rafHandles = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -91,6 +110,10 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     inputTarget.setAttribute('data-guide-id', 'member-editor.name');
     document.body.appendChild(inputTarget);
 
+    delayedCardTarget = document.createElement('div');
+    delayedCardTarget.setAttribute('data-guide-id', 'async.card');
+    delayedCardTarget.textContent = 'Delayed Card Content';
+
     act(() => {
       root.render(React.createElement(GuideOverlay));
     });
@@ -104,6 +127,7 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     target.remove();
     confirmTarget.remove();
     inputTarget.remove();
+    delayedCardTarget.remove();
     act(() => {
       useGuideStore.getState().exitGuide();
     });
@@ -331,5 +355,26 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     });
 
     expect(useGuideStore.getState().session?.phase).toBe('complete');
+  });
+
+  it('captures card media after the source target appears asynchronously', () => {
+    act(() => {
+      useGuideStore.getState().startGuide(CARD_FLOW);
+      useGuideStore.getState().setPhase('active');
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    expect(container.textContent).toContain('preview async card');
+    expect(container.textContent).not.toContain('Delayed Card Content');
+
+    act(() => {
+      document.body.appendChild(delayedCardTarget);
+      vi.advanceTimersByTime(120);
+    });
+
+    expect(container.textContent).toContain('Delayed Card Content');
+    expect(container.querySelector('[aria-label="异步卡片预览"]')).toBeTruthy();
   });
 });
