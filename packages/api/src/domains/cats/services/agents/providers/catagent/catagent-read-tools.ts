@@ -10,7 +10,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readdir, readFile } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -24,6 +24,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MAX_LINES = 300;
 const HARD_MAX_LINES = 500;
 const HARD_MAX_BYTES = 32_768;
+/** Max bytes buffered per read_file call — enforced BEFORE line splitting to prevent OOM. */
+const READ_BUDGET_BYTES = 1_048_576; // 1 MiB
 const MAX_SEARCH_RESULTS = 50;
 
 /** Denylist globs for rg pre-filtering (isDenylisted is the authoritative filter) */
@@ -48,7 +50,25 @@ const readFileSchema: ToolSchema = {
 
 async function executeReadFile(input: Record<string, unknown>, workDir: string): Promise<string> {
   const resolved = await resolveSecurePath(workDir, input.path as string);
-  const raw = await readFile(resolved, 'utf-8');
+
+  // Enforce read budget BEFORE line splitting to prevent OOM on large files.
+  const fh = await open(resolved, 'r');
+  let raw: string;
+  let oversized = false;
+  try {
+    const st = await fh.stat();
+    if (st.size > READ_BUDGET_BYTES) {
+      const buf = Buffer.alloc(READ_BUDGET_BYTES);
+      const { bytesRead } = await fh.read(buf, 0, READ_BUDGET_BYTES, 0);
+      raw = buf.subarray(0, bytesRead).toString('utf-8');
+      oversized = true;
+    } else {
+      raw = await fh.readFile('utf-8');
+    }
+  } finally {
+    await fh.close();
+  }
+
   const allLines = raw.split('\n');
 
   const hasRange = typeof input.start_line === 'number' || typeof input.end_line === 'number';
@@ -57,7 +77,7 @@ async function executeReadFile(input: Record<string, unknown>, workDir: string):
   let lines = allLines.slice(start - 1, end);
 
   const maxLines = hasRange ? HARD_MAX_LINES : DEFAULT_MAX_LINES;
-  let truncated = false;
+  let truncated = oversized;
 
   if (lines.length > maxLines) {
     lines = lines.slice(0, maxLines);
@@ -71,7 +91,8 @@ async function executeReadFile(input: Record<string, unknown>, workDir: string):
   }
 
   if (truncated) {
-    return `${content}\n\n[Truncated at ${lines.length} lines. Total: ${allLines.length} lines. Use start_line/end_line for targeted reads.]`;
+    const total = oversized ? 'file exceeds 1 MiB read budget' : `${allLines.length} lines`;
+    return `${content}\n\n[Truncated at ${lines.length} lines. Total: ${total}. Use start_line/end_line for targeted reads.]`;
   }
   return content;
 }

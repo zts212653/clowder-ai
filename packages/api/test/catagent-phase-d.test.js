@@ -39,6 +39,8 @@ before(() => {
   // Create workspace files
   writeFileSync(join(tmpDir, 'hello.txt'), 'line1\nline2\nline3\nline4\nline5\n');
   writeFileSync(join(tmpDir, 'big.txt'), Array.from({ length: 400 }, (_, i) => `line ${i + 1}`).join('\n'));
+  // Oversized file (>1 MiB) for bounded-read test — each line ~100 bytes × 12000 ≈ 1.2 MB
+  writeFileSync(join(tmpDir, 'huge.log'), Array.from({ length: 12_000 }, (_, i) => `[LOG] entry ${String(i + 1).padStart(5, '0')} ${'x'.repeat(80)}`).join('\n'));
   mkdirSync(join(tmpDir, 'src'), { recursive: true });
   writeFileSync(join(tmpDir, 'src', 'index.ts'), 'export const VERSION = "1.0";\nconsole.log(VERSION);\n');
   writeFileSync(join(tmpDir, 'src', 'config.ts'), 'export const PORT = 3000;\n');
@@ -144,6 +146,17 @@ describe('D1: read_file', () => {
     const tools = await buildToolRegistry(tmpDir);
     const tool = findTool(tools, 'read_file');
     await assert.rejects(() => tool.execute({ path: 'safe-alias' }), /denied/i);
+  });
+
+  test('oversized file is bounded-read without OOM (P1 read budget)', async () => {
+    const tools = await buildToolRegistry(tmpDir);
+    const tool = findTool(tools, 'read_file');
+    const result = await tool.execute({ path: 'huge.log' });
+    assert.ok(result.includes('[Truncated'), 'truncated');
+    assert.ok(result.includes('1 MiB read budget'), 'mentions read budget');
+    assert.ok(result.includes('[LOG] entry 00001'), 'contains first line');
+    // Content should be bounded — well under 1 MiB after line/byte truncation
+    assert.ok(Buffer.byteLength(result) < 100_000, 'output is bounded');
   });
 });
 
