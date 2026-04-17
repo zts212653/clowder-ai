@@ -1269,6 +1269,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '生产环境强制启用 TELEMETRY_DEBUG 的安全覆写开关。仅限紧急排障',
     category: 'telemetry',
     sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
   },
   {
     name: 'TELEMETRY_HMAC_SALT',
