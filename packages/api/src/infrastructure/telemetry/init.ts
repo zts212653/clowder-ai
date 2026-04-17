@@ -73,6 +73,16 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
 
   const cfg = { ...DEFAULT_CONFIG, ...config };
 
+  // Enforce production guardrail on debugMode regardless of source (env or config param).
+  // Without this, initTelemetry({ debugMode: true }) could bypass resolveDebugMode().
+  if (cfg.debugMode) {
+    const isProd = process.env.NODE_ENV === 'production';
+    if (isProd && process.env.TELEMETRY_DEBUG_FORCE !== 'true') {
+      log.warn('debugMode blocked in production (set TELEMETRY_DEBUG_FORCE=true to override)');
+      cfg.debugMode = false;
+    }
+  }
+
   // P2 fix: validate HMAC salt at startup, not on first redaction call.
   // If salt is missing in non-dev environments, disable OTel gracefully
   // rather than crashing the server — telemetry should never be a crash source.
@@ -89,13 +99,17 @@ export function initTelemetry(config?: TelemetryConfig): () => Promise<void> {
   });
 
   // --- Traces: build span processor pipeline ---
+  // ORDERING MATTERS: debug exporter must come BEFORE RedactingSpanProcessor.
+  // RedactingSpanProcessor.onEnd() mutates shared span.attributes in-place;
+  // SimpleSpanProcessor.onEnd() calls export() synchronously, so the debug
+  // exporter captures unredacted values before the redactor runs.
   const spanProcessors: import('@opentelemetry/sdk-trace-node').SpanProcessor[] = [];
-  if (cfg.otlpEnabled) {
-    spanProcessors.push(new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter())));
-  }
   if (cfg.debugMode) {
     log.warn('TELEMETRY_DEBUG enabled — spans exported UNREDACTED to console. Do NOT use in production.');
     spanProcessors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+  }
+  if (cfg.otlpEnabled) {
+    spanProcessors.push(new RedactingSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter())));
   }
 
   // --- Metrics: Prometheus scrape + optional OTLP push ---
