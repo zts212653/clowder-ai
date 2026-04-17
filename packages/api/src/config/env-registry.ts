@@ -1264,6 +1264,13 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'TELEMETRY_DEBUG_FORCE',
+    defaultValue: '(未设置 → 关闭)',
+    description: '生产环境强制启用 TELEMETRY_DEBUG 的安全覆写开关。仅限紧急排障',
+    category: 'telemetry',
+    sensitive: false,
+  },
+  {
     name: 'TELEMETRY_HMAC_SALT',
     defaultValue: '(dev/test 自动 fallback)',
     description: 'HMAC salt — 遥测系统 ID 伪名化用。生产环境必设，缺失则禁用 OTel',
