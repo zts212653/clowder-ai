@@ -11,7 +11,7 @@ import { RichBlocks } from './rich/RichBlocks';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function renderContentBlocks(blocks: MessageContent[]) {

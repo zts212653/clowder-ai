@@ -10,7 +10,7 @@ function formatDate(iso: string): string {
 function formatTime(iso: string): string {
   const d = Date.parse(iso);
   if (Number.isNaN(d)) return '';
-  return new Date(d).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return new Date(d).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function groupByDate(entries: readonly TimelineEntry[]): Map<string, TimelineEntry[]> {

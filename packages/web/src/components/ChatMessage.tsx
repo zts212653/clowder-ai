@@ -37,7 +37,7 @@ const DEFAULT_BREED_STYLE = { radius: 'rounded-2xl' };
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
