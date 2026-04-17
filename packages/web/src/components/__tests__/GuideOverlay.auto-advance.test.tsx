@@ -55,6 +55,24 @@ const CARD_FLOW: OrchestrationFlow = {
   ],
 };
 
+const INTERACTIVE_CARD_FLOW: OrchestrationFlow = {
+  id: 'interactive-card-flow',
+  name: 'Interactive Card Flow',
+  steps: [
+    {
+      id: 'step-card',
+      target: 'hub.trigger',
+      tips: 'preview interactive card',
+      advance: 'click',
+      tipsMetadata: {
+        type: 'card',
+        target: 'interactive.card',
+        alt: '交互卡片预览',
+      },
+    },
+  ],
+};
+
 describe('GuideOverlay auto-advance lifecycle', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -62,6 +80,7 @@ describe('GuideOverlay auto-advance lifecycle', () => {
   let confirmTarget: HTMLDivElement;
   let inputTarget: HTMLInputElement;
   let delayedCardTarget: HTMLDivElement;
+  let interactiveCardTarget: HTMLDivElement;
   let rafId = 0;
   const rafHandles = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -114,6 +133,16 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     delayedCardTarget.setAttribute('data-guide-id', 'async.card');
     delayedCardTarget.textContent = 'Delayed Card Content';
 
+    interactiveCardTarget = document.createElement('div');
+    interactiveCardTarget.setAttribute('data-guide-id', 'interactive.card');
+    interactiveCardTarget.innerHTML = `
+      <div class="rounded-xl border p-3">
+        <p>Interactive Card Content</p>
+        <button type="button" tabindex="0">Do thing</button>
+        <a href="https://example.com">Open docs</a>
+      </div>
+    `;
+
     act(() => {
       root.render(React.createElement(GuideOverlay));
     });
@@ -128,6 +157,7 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     confirmTarget.remove();
     inputTarget.remove();
     delayedCardTarget.remove();
+    interactiveCardTarget.remove();
     act(() => {
       useGuideStore.getState().exitGuide();
     });
@@ -376,5 +406,25 @@ describe('GuideOverlay auto-advance lifecycle', () => {
 
     expect(container.textContent).toContain('Delayed Card Content');
     expect(container.querySelector('[aria-label="异步卡片预览"]')).toBeTruthy();
+  });
+
+  it('strips interactive descendants from captured card previews', () => {
+    act(() => {
+      document.body.appendChild(interactiveCardTarget);
+      useGuideStore.getState().startGuide(INTERACTIVE_CARD_FLOW);
+      useGuideStore.getState().setPhase('active');
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    const preview = container.querySelector('[aria-label="交互卡片预览"]');
+    expect(preview).toBeTruthy();
+    expect(preview?.textContent).toContain('Interactive Card Content');
+    expect(preview?.textContent).toContain('Do thing');
+    expect(preview?.textContent).toContain('Open docs');
+    expect(preview?.querySelector('button')).toBeNull();
+    expect(preview?.querySelector('a')).toBeNull();
+    expect(preview?.querySelector('[tabindex]')).toBeNull();
   });
 });

@@ -646,6 +646,7 @@ function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: str
       }
       const clone = source.cloneNode(true) as HTMLElement;
       clone.removeAttribute('data-guide-id');
+      sanitizeCardClone(clone);
       clone.style.pointerEvents = 'none';
       containerRef.current.innerHTML = '';
       containerRef.current.appendChild(clone);
@@ -666,6 +667,39 @@ function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: str
       aria-label={alt ?? '引导卡片'}
     />
   );
+}
+
+function sanitizeCardClone(clone: HTMLElement) {
+  clone.setAttribute('inert', '');
+
+  for (const el of Array.from(clone.querySelectorAll<HTMLElement>('button, a, summary, details')).reverse()) {
+    const replacement = document.createElement('span');
+    replacement.className = el.className;
+    replacement.style.cssText = el.style.cssText;
+    replacement.innerHTML = el.innerHTML;
+    el.replaceWith(replacement);
+  }
+
+  for (const el of Array.from(clone.querySelectorAll<HTMLElement>('input, textarea, select')).reverse()) {
+    const replacement = document.createElement('span');
+    replacement.className = el.className;
+    replacement.style.cssText = el.style.cssText;
+
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      replacement.textContent = el.value || el.placeholder || '';
+    } else if (el instanceof HTMLSelectElement) {
+      replacement.textContent = el.selectedOptions[0]?.textContent ?? '';
+    }
+
+    el.replaceWith(replacement);
+  }
+
+  for (const el of clone.querySelectorAll<HTMLElement>(
+    '[tabindex], [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]',
+  )) {
+    el.removeAttribute('tabindex');
+    el.setAttribute('contenteditable', 'false');
+  }
 }
 
 /* ── Position helpers ── */
