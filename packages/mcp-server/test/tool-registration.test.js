@@ -150,7 +150,18 @@ const EXPECTED_SIGNAL_TOOLS = [
   'signal_link_thread',
 ];
 
+function assertUnique(values, label) {
+  assert.equal(new Set(values).size, values.length, `${label} must not contain duplicate tool names`);
+}
+
 describe('MCP Server Tool Registration', () => {
+  test('expected tool lists stay duplicate-free', () => {
+    assertUnique(EXPECTED_TOOLS, 'EXPECTED_TOOLS');
+    assertUnique(EXPECTED_COLLAB_TOOLS, 'EXPECTED_COLLAB_TOOLS');
+    assertUnique(EXPECTED_MEMORY_TOOLS, 'EXPECTED_MEMORY_TOOLS');
+    assertUnique(EXPECTED_SIGNAL_TOOLS, 'EXPECTED_SIGNAL_TOOLS');
+  });
+
   test('all expected tools are registered via createServer()', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();

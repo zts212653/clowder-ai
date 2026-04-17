@@ -1,0 +1,49 @@
+#!/bin/bash
+# .githooks/pre-commit — Worktree isolation guard + shared-state guard
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+
+if [[ -z "$BRANCH" ]]; then
+  exit 0
+fi
+
+if [[ -d "$REPO_ROOT/.git" ]]; then
+  IS_PRIMARY=true
+else
+  IS_PRIMARY=false
+fi
+
+ALLOWED_PRIMARY_PATTERN='^(main|runtime/.*)$'
+
+if $IS_PRIMARY && ! echo "$BRANCH" | grep -qE "$ALLOWED_PRIMARY_PATTERN"; then
+  if [[ -z "${SKIP_WORKTREE_CHECK:-}" ]]; then
+    echo "" >&2
+    echo "🚫 WORKTREE GUARD: Committing on feature branch in primary repo directory!" >&2
+    echo "   Branch: $BRANCH" >&2
+    echo "   Repo:   $REPO_ROOT" >&2
+    echo "" >&2
+    echo "   Use an isolated worktree for feature work." >&2
+    echo "   Override only with an explicit reason:" >&2
+    echo "     SKIP_WORKTREE_CHECK=1 git commit ..." >&2
+    echo "" >&2
+    exit 1
+  fi
+  echo "⚠️  WORKTREE GUARD: override active (SKIP_WORKTREE_CHECK=1)" >&2
+fi
+
+SHARED_PATTERNS='^(docs/BACKLOG\.md|BACKLOG\.md|cat-template\.json)$'
+STAGED_SHARED=$(git diff --cached --name-only 2>/dev/null | grep -E "$SHARED_PATTERNS" || true)
+
+if [[ -n "$STAGED_SHARED" ]] && [[ "$BRANCH" != "main" ]]; then
+  echo "" >&2
+  echo "🚫 SHARED-STATE GUARD: shared-state files may only be committed on main." >&2
+  echo "   Branch: $BRANCH" >&2
+  echo "$STAGED_SHARED" | sed 's/^/   - /' >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0
