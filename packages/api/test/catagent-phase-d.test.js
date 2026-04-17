@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -131,6 +131,19 @@ describe('D1: read_file', () => {
     await assert.rejects(() => tool.execute({ path: '.env.local' }), /denied/i);
     await assert.rejects(() => tool.execute({ path: 'secrets/key.json' }), /denied/i);
     await assert.rejects(() => tool.execute({ path: '.git/config' }), /denied/i);
+  });
+
+  test('rejects symlink aliasing a denylisted target (P1 regression)', async () => {
+    // Create symlink: safe-alias -> .env (inside workspace, passes name check but target is denied)
+    const symlinkPath = join(tmpDir, 'safe-alias');
+    try {
+      symlinkSync(join(tmpDir, '.env'), symlinkPath);
+    } catch {
+      // symlink already exists from prior run — fine
+    }
+    const tools = await buildToolRegistry(tmpDir);
+    const tool = findTool(tools, 'read_file');
+    await assert.rejects(() => tool.execute({ path: 'safe-alias' }), /denied/i);
   });
 });
 
@@ -425,6 +438,30 @@ describe('D2: agentic loop', () => {
 
     const doneCount = msgs.filter((m) => m.type === 'done').length;
     assert.equal(doneCount, 1, 'exactly one done event');
+  });
+
+  test('non-terminal stop_reason with no tool blocks emits distinct error (P2 regression)', async () => {
+    globalThis.fetch = mockAnthropicApi([
+      {
+        id: 'msg1',
+        model: 'claude-sonnet-4-5-20250929',
+        stop_reason: 'pause_turn',
+        content: [{ type: 'text', text: 'Pausing...' }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    ]);
+
+    const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
+    const msgs = await collect(svc.invoke('test', { workingDirectory: tmpDir }));
+
+    const error = msgs.find((m) => m.type === 'error');
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(error, 'has error event');
+    assert.ok(done, 'has done event');
+    // Must NOT say "loop exceeded" — should mention the actual stop_reason
+    assert.ok(!error.error.includes('loop exceeded'), 'not a loop overflow error');
+    assert.ok(error.error.includes('pause_turn'), 'mentions the actual stop_reason');
+    assert.ok(error.error.includes('non-terminal'), 'describes it as non-terminal');
   });
 
   test('API error during tool loop still produces error + done', async () => {
