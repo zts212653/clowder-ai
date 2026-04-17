@@ -332,8 +332,7 @@ function buildCallHint(
   const fullUrl = `${effectiveBase}${info.pathSuffix}`;
   let warning = '';
   if (client === 'google') {
-    warning =
-      '\n注意: Gemini CLI 不支持自定义 API 端点，只能调用 Google 官方 API。如需使用第三方代理（如 OpenRouter），请改用 OpenCode 或 Claude 作为 Client';
+    warning = '\n注意: Google 官方 endpoint 仍要求 builtin OAuth；第三方 gateway 会走这里展示的 baseUrl。';
   }
   return { label: `${info.cli} CLI 实际调用: `, url: fullUrl, warning };
 }
@@ -398,16 +397,10 @@ export function AccountSection({
               value={form.accountRef}
               options={[
                 { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
-                ...accountOptions
-                  .filter((profile) => {
-                    // Gemini CLI doesn't support custom API endpoints — only show builtin
-                    if (form.clientId === 'google' && !profile.builtin) return false;
-                    return true;
-                  })
-                  .map((profile) => ({
-                    value: profile.id,
-                    label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
-                  })),
+                ...accountOptions.map((profile) => ({
+                  value: profile.id,
+                  label: profile.builtin ? `${profile.displayName}（内置）` : `${profile.displayName}（API Key）`,
+                })),
               ]}
               onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
               disabled={loadingProfiles}
