@@ -1320,7 +1320,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
-  it('POST /api/cats rejects non-builtin provider bindings for google client', async () => {
+  it('POST /api/cats allows third-party gateway bindings for google client', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -1361,9 +1361,99 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       }),
     });
 
+    assert.equal(createRes.statusCode, 201);
+  });
+
+  it('POST /api/cats rejects official Google endpoints for google api_key bindings', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const apiKeyProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Gemini Official API',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      apiKey: 'sk-google-official',
+      models: ['gemini-2.5-pro'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-gemini-official-api',
+        name: 'runtime-gemini-official-api',
+        displayName: 'runtime-gemini-official-api',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@runtime-gemini-official-api'],
+        roleDescription: '审查',
+        clientId: 'google',
+        accountRef: apiKeyProfile.id,
+        defaultModel: 'gemini-2.5-pro',
+      }),
+    });
+
     assert.equal(createRes.statusCode, 400);
     const createBody = JSON.parse(createRes.body);
-    assert.match(createBody.error, /only supports builtin Gemini auth/i);
+    assert.match(createBody.error, /requires builtin OAuth for official Google endpoints/i);
+  });
+
+  it('POST /api/cats rejects malformed third-party gateway baseUrl for google client', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const apiKeyProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Gemini Broken Proxy',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'not-a-valid-url',
+      apiKey: 'sk-broken-proxy',
+      models: ['openrouter/google/gemini-3-flash-preview'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-gemini-broken-proxy',
+        name: 'runtime-gemini-broken-proxy',
+        displayName: 'runtime-gemini-broken-proxy',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@runtime-gemini-broken-proxy'],
+        roleDescription: '审查',
+        clientId: 'google',
+        accountRef: apiKeyProfile.id,
+        defaultModel: 'openrouter/google/gemini-3-flash-preview',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400);
+    const createBody = JSON.parse(createRes.body);
+    assert.match(createBody.error, /requires a valid baseUrl/i);
   });
 
   it('PATCH /api/cats/:id validates seed model edits against the active bootstrap account', async () => {
