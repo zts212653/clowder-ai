@@ -94,7 +94,7 @@ export function ThreadItem({
 
   // Build hover tooltip: full title + participants + time (clowder-ai#29)
   const displayTitle = title ?? (id === 'default' ? '大厅' : '未命名对话');
-  const hasDraft = threadState?.hasDraft ?? false;
+  const hasDraft = !isActive && (threadState?.hasDraft ?? false);
   const participantNames = participants.map((catId) => getCatById(catId)?.displayName ?? catId).join(', ');
   const tooltipLines = [displayTitle];
   if (participantNames) tooltipLines.push(`参与: ${participantNames}`);

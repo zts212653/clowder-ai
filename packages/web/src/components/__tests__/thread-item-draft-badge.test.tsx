@@ -188,7 +188,7 @@ describe('ThreadItem draft badge', () => {
     expect(container.textContent).toContain('[草稿]');
   });
 
-  it('updates badge live while typing and clears after send', () => {
+  it('does not show badge on the active thread while typing', () => {
     const onSend = vi.fn<OnSend>();
 
     act(() => {
@@ -201,7 +201,7 @@ describe('ThreadItem draft badge', () => {
       typeInto(getTextarea(), 'half typed message');
     });
 
-    expect(getThreadRow('thread-1').textContent).toContain('[草稿]');
+    expect(getThreadRow('thread-1').textContent).not.toContain('[草稿]');
 
     act(() => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -221,7 +221,7 @@ describe('ThreadItem draft badge', () => {
     act(() => {
       typeInto(getTextarea(), 'draft A');
     });
-    expect(getThreadRow('thread-1').textContent).toContain('[草稿]');
+    expect(getThreadRow('thread-1').textContent).not.toContain('[草稿]');
 
     act(() => {
       getThreadRow('thread-2').click();
