@@ -614,6 +614,9 @@ run_install_auth_config() {
     local auth_root
     auth_root="$(resolve_installer_auth_config_root)"
     CAT_CAFE_GLOBAL_CONFIG_ROOT="$auth_root" node scripts/install-auth-config.mjs "$@"
+    if [[ -z "${CAT_CAFE_GLOBAL_CONFIG_ROOT:-}" && "$auth_root" != "$PROJECT_DIR" ]]; then
+        CAT_CAFE_GLOBAL_CONFIG_ROOT="$PROJECT_DIR" node scripts/install-auth-config.mjs "$@"
+    fi
 }
 
 

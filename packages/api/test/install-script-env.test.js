@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   addWorktree,
@@ -185,6 +186,34 @@ test('installer auth setup calls install-auth-config through runtime-aware wrapp
     /node scripts\/install-auth-config\.mjs/,
     'auth writes must not bypass runtime-aware config root resolution',
   );
+});
+
+test('runtime-aware auth wrapper also updates project-local state for direct start modes', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-direct-mode-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+  const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    initGitRepo(projectRoot);
+    addWorktree(projectRoot, runtimeRoot, 'runtime/main-sync');
+
+    runSourceOnlySnippet(`
+cd "${repoRoot}"
+PROJECT_DIR="${projectRoot}"
+CAT_CAFE_RUNTIME_DIR="${runtimeRoot}"
+run_install_auth_config client-auth set --project-dir "${projectRoot}" --client codex --mode oauth
+`);
+
+    const runtimeAccounts = JSON.parse(readFileSync(join(runtimeRoot, '.cat-cafe', 'accounts.json'), 'utf8'));
+    const projectAccounts = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'accounts.json'), 'utf8'));
+
+    assert.equal(runtimeAccounts.codex?.authType, 'oauth');
+    assert.equal(projectAccounts.codex?.authType, 'oauth');
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
 });
 
 test('Claude empty API key removes stale installer-managed profile', () => {
