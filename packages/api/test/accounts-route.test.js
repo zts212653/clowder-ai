@@ -408,6 +408,60 @@ describe('accounts routes', () => {
     }
   });
 
+  it('#499: unmapped oauth accounts omit clientId so frontend heuristic can categorize them', async () => {
+    const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('unmapped-clientid');
+    setGlobalRoot(projectDir);
+    try {
+      const catCafeDir = join(projectDir, '.cat-cafe');
+      mkdirSync(catCafeDir, { recursive: true });
+      writeFileSync(
+        join(catCafeDir, 'cat-catalog.json'),
+        JSON.stringify({ version: 2, breeds: [], roster: {}, reviewPolicy: {}, accounts: {} }),
+      );
+
+      // 'claude' is in BUILTIN_CLIENT_FOR_ID → should get clientId
+      writeCatalogAccount(projectDir, 'claude', { authType: 'oauth', models: ['m1'] });
+      // 'claude-2' is NOT in the map → should NOT get clientId
+      writeCatalogAccount(projectDir, 'claude-2', { authType: 'oauth', displayName: 'Claude-2', models: ['m2'] });
+      // 'glm' is NOT in the map → should NOT get clientId
+      writeCatalogAccount(projectDir, 'glm', { authType: 'oauth', displayName: 'GLM', models: ['glm-5'] });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/accounts?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res.statusCode, 200);
+      const providers = res.json().providers;
+
+      const claude = providers.find((p) => p.id === 'claude');
+      assert.equal(claude.clientId, 'anthropic', 'mapped account should have correct clientId');
+
+      const claude2 = providers.find((p) => p.id === 'claude-2');
+      assert.equal(
+        claude2.clientId,
+        undefined,
+        'unmapped oauth account must not have clientId (let frontend heuristic work)',
+      );
+      assert.equal(claude2.builtin, true, 'unmapped oauth account should still be builtin');
+
+      const glm = providers.find((p) => p.id === 'glm');
+      assert.equal(glm.clientId, undefined, 'unmapped oauth account must not have clientId');
+      assert.equal(glm.builtin, true, 'unmapped oauth account should still be builtin');
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
   // Skip DELETE tests that create arbitrary temp dirs — they fall outside PROJECT_ALLOWED_ROOTS
   const skipRoots = !!process.env.PROJECT_ALLOWED_ROOTS;
 
