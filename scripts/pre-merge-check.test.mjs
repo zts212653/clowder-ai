@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -84,10 +84,7 @@ function runGate(args = []) {
       },
     });
 
-    const logLines = readFileSync(logPath, 'utf8')
-      .trim()
-      .split('\n')
-      .filter(Boolean);
+    const logLines = readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
 
     return { ...result, logLines };
   } finally {
@@ -107,13 +104,7 @@ describe('pre-merge-check dependency refresh order', () => {
     assert.notEqual(rebaseIndex, -1, 'expected rebase to run');
     assert.notEqual(installIndex, -1, 'expected pnpm install to run');
     assert.notEqual(buildIndex, -1, 'expected pnpm build to run');
-    assert.ok(
-      rebaseIndex < installIndex,
-      `expected install after rebase, got:\n${result.logLines.join('\n')}`,
-    );
-    assert.ok(
-      installIndex < buildIndex,
-      `expected build after install, got:\n${result.logLines.join('\n')}`,
-    );
+    assert.ok(rebaseIndex < installIndex, `expected install after rebase, got:\n${result.logLines.join('\n')}`);
+    assert.ok(installIndex < buildIndex, `expected build after install, got:\n${result.logLines.join('\n')}`);
   });
 });
