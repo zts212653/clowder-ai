@@ -130,6 +130,49 @@ test('client-auth set oauth creates builtin accounts for dare and opencode', () 
   }
 });
 
+test('client-auth set oauth stores builtin default models for the selected client', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-oauth-models-'));
+
+  try {
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'codex', '--mode', 'oauth']);
+
+    const { accounts } = readInstallerState(projectRoot);
+    assert.equal(accounts.codex?.authType, 'oauth');
+    assert.deepEqual(accounts.codex?.models, ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark']);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set oauth supports kimi and stores its default models', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-kimi-oauth-'));
+
+  try {
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'kimi', '--mode', 'oauth']);
+
+    const { accounts } = readInstallerState(projectRoot);
+    assert.equal(accounts.kimi?.authType, 'oauth');
+    assert.equal(accounts.kimi?.displayName, 'Kimi');
+    assert.deepEqual(accounts.kimi?.models, ['kimi-code/kimi-for-coding']);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('client-auth set oauth sanitizes malformed builtin default models before writing state', () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-claude-oauth-models-'));
+
+  try {
+    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'anthropic', '--mode', 'oauth']);
+
+    const { accounts } = readInstallerState(projectRoot);
+    assert.equal(accounts.claude?.authType, 'oauth');
+    assert.deepEqual(accounts.claude?.models, ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101']);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test('claude-profile create and remove keeps installer-managed account in sync', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-claude-profile-'));
 

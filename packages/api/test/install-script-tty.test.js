@@ -14,6 +14,37 @@ type tty_multiselect
   assert.match(multiselectSource, /read\s+-rsn1\s+-t\s+\d+/, 'tty_multiselect must have -t timeout on primary read');
 });
 
+test('tty arrow parser accepts normal and application cursor key sequences', () => {
+  const output = runSourceOnlySnippet(`
+printf '%s' "$(tty_arrow_delta '[A'),$(tty_arrow_delta 'OA'),$(tty_arrow_delta '[B'),$(tty_arrow_delta 'OB')"
+`);
+
+  assert.equal(output, '-1,-1,1,1');
+});
+
+test('tty numeric shortcut parser maps visible menu numbers to zero-based indices', () => {
+  const output = runSourceOnlySnippet(`
+printf '%s' "$(tty_numeric_index 1 3),$(tty_numeric_index 3 3),"
+if tty_numeric_index 4 3 >/dev/null; then
+  printf 'unexpected'
+else
+  printf 'none'
+fi
+`);
+
+  assert.equal(output, '0,2,none');
+});
+
+test('tty_select honors a configured default index when no tty is available', () => {
+  const output = runSourceOnlySnippet(`
+HAS_TTY=false
+TTY_SELECT_DEFAULT_INDEX=2 tty_select SELECTED "Pick one:" "OAuth" "API Key" "Skip"
+printf '%s' "$SELECTED"
+`);
+
+  assert.equal(output, '2');
+});
+
 test('tty_read returns empty string when /dev/tty is unavailable (no blocking)', () => {
   const result = spawnSync(
     'bash',

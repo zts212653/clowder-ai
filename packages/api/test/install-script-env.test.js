@@ -1,8 +1,11 @@
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
+  addWorktree,
   assert,
   existsSync,
+  initGitRepo,
   installScript,
   join,
   mkdirSync,
@@ -61,6 +64,155 @@ cat .env
     assert.doesNotMatch(output, /^STALE_KEY=/m);
   } finally {
     rmSync(envRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth config root follows an existing runtime worktree', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-runtime-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    initGitRepo(projectRoot);
+    addWorktree(projectRoot, runtimeRoot, 'runtime/main-sync');
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, runtimeRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth config root falls back to project root when runtime dir is not an initialized worktree', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-uninit-runtime-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth config root ignores initialized sibling repos that are not this project worktrees', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-foreign-runtime-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+    initGitRepo(projectRoot);
+    initGitRepo(runtimeRoot, 'foreign runtime\n');
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth config root ignores parent repo worktrees when project dir has no local git metadata', () => {
+  const parentRepoRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-parent-repo-'));
+  const projectRoot = join(parentRepoRoot, 'deployments', 'clowder-ai');
+  const runtimeRoot = join(tmpdir(), `clowder-parent-runtime-${Date.now()}`);
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(projectRoot, 'scripts'), { recursive: true });
+    mkdirSync(join(projectRoot, 'packages', 'api'), { recursive: true });
+    writeFileSync(join(projectRoot, 'package.json'), '{"name":"clowder-ai"}\n', 'utf8');
+
+    initGitRepo(parentRepoRoot);
+    addWorktree(parentRepoRoot, runtimeRoot, 'runtime/main-sync');
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+CAT_CAFE_RUNTIME_DIR="${runtimeRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
+  } finally {
+    rmSync(parentRepoRoot, { recursive: true, force: true });
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth config root falls back to project root before runtime exists', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-project-root-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+
+    const output = runSourceOnlySnippet(`
+PROJECT_DIR="${projectRoot}"
+printf '%s' "$(resolve_installer_auth_config_root)"
+`);
+
+    assert.equal(output, projectRoot);
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test('installer auth setup calls install-auth-config through runtime-aware wrapper', () => {
+  const installScriptText = readFileSync(installScript, 'utf8');
+  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
+
+  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
+  assert.match(configureAuthBody, /run_install_auth_config client-auth set/, 'auth writes should use wrapper');
+  assert.doesNotMatch(
+    configureAuthBody,
+    /node scripts\/install-auth-config\.mjs/,
+    'auth writes must not bypass runtime-aware config root resolution',
+  );
+});
+
+test('runtime-aware auth wrapper also updates project-local state for direct start modes', () => {
+  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-direct-mode-'));
+  const projectRoot = join(parentRoot, 'clowder-ai');
+  const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
+  const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+
+  try {
+    mkdirSync(projectRoot, { recursive: true });
+    initGitRepo(projectRoot);
+    addWorktree(projectRoot, runtimeRoot, 'runtime/main-sync');
+
+    runSourceOnlySnippet(`
+cd "${repoRoot}"
+PROJECT_DIR="${projectRoot}"
+CAT_CAFE_RUNTIME_DIR="${runtimeRoot}"
+run_install_auth_config client-auth set --project-dir "${projectRoot}" --client codex --mode oauth
+`);
+
+    const runtimeAccounts = JSON.parse(readFileSync(join(runtimeRoot, '.cat-cafe', 'accounts.json'), 'utf8'));
+    const projectAccounts = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'accounts.json'), 'utf8'));
+
+    assert.equal(runtimeAccounts.codex?.authType, 'oauth');
+    assert.equal(projectAccounts.codex?.authType, 'oauth');
+  } finally {
+    rmSync(parentRoot, { recursive: true, force: true });
   }
 });
 
@@ -131,6 +283,39 @@ test('empty API key fallback to OAuth does not force-remove global installer acc
   assert.match(emptyKeyBranch, /--mode oauth/);
   assert.doesNotMatch(emptyKeyBranch, /client-auth remove/);
   assert.doesNotMatch(emptyKeyBranch, /--force true/);
+});
+
+test('Kimi auth setup offers an explicit skip option instead of forcing OAuth', () => {
+  const installScriptText = readFileSync(installScript, 'utf8');
+  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
+
+  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
+  assert.match(configureAuthBody, /allow_skip/, 'configure_agent_auth should accept a skip flag');
+  assert.match(configureAuthBody, /Skip auth setup/, 'skip-enabled auth menus should include Skip');
+  assert.match(configureAuthBody, /auth setup skipped/, 'skip branch should return without writing OAuth');
+  assert.match(
+    installScriptText,
+    /configure_agent_auth "Kimi \(月之暗面\)" "kimi" true/,
+    'Kimi should opt into the skip-enabled auth menu',
+  );
+});
+
+test('Kimi auth setup defaults to skip so Enter does not choose OAuth when arrows fail', () => {
+  const installScriptText = readFileSync(installScript, 'utf8');
+  const configureAuthBody = installScriptText.match(/configure_agent_auth\(\) \{([\s\S]*?)^}\n/m)?.[1] ?? '';
+
+  assert.notEqual(configureAuthBody, '', 'expected configure_agent_auth body');
+  assert.match(configureAuthBody, /local skip_index=2/, 'skip option should remain the third menu entry');
+  assert.match(
+    configureAuthBody,
+    /\[\[ "\$allow_skip" == true \]\] && default_auth_sel="\$skip_index"/,
+    'skip-enabled auth menus should select Skip by default',
+  );
+  assert.match(
+    configureAuthBody,
+    /TTY_SELECT_DEFAULT_INDEX="\$default_auth_sel"\s+tty_select auth_sel/,
+    'auth selector should pass the computed default index into tty_select',
+  );
 });
 
 test('npm_global_install succeeds when a custom registry is configured', () => {
@@ -350,4 +535,29 @@ printf '%s' "$(default_frontend_url)"
   } finally {
     rmSync(envRoot, { recursive: true, force: true });
   }
+});
+
+test('install script retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer browser download failures', () => {
+  const installScriptText = readFileSync(installScript, 'utf8');
+
+  assert.match(installScriptText, /run_pnpm_install_capture\(\)/);
+  assert.match(installScriptText, /pnpm_install_needs_puppeteer_skip\(\)/);
+  assert.match(
+    installScriptText,
+    /grep -Eqi 'puppeteer' "\$log_file"\s+\\\s*\n\s*&& grep -Eqi 'Failed to set up chrome\|PUPPETEER_SKIP_DOWNLOAD' "\$log_file"/,
+  );
+  assert.match(installScriptText, /warn "Bundled Chrome download failed — skipped"/);
+  assert.match(
+    installScriptText,
+    /warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
+  );
+  assert.match(installScriptText, /env PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --frozen-lockfile/);
+});
+
+test('.env.example leaves REDIS_URL unset by default', () => {
+  const envExamplePath = new URL('../../../.env.example', import.meta.url);
+  const envExampleText = readFileSync(envExamplePath, 'utf8');
+
+  assert.doesNotMatch(envExampleText, /^REDIS_URL=/m);
+  assert.match(envExampleText, /^# REDIS_URL=$/m);
 });
