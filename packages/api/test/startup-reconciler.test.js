@@ -384,10 +384,10 @@ describe('StartupReconciler', () => {
       },
     };
 
-    const broadcastedMessages = [];
+    const broadcastedEvents = [];
     const socketManager = {
-      broadcastAgentMessage(msg, threadId) {
-        broadcastedMessages.push({ msg, threadId });
+      broadcastToRoom(room, event, payload) {
+        broadcastedEvents.push({ room, event, payload });
       },
     };
 
@@ -403,13 +403,15 @@ describe('StartupReconciler', () => {
 
     assert.equal(result.notifiedThreads, 2, 'should notify 2 threads');
     assert.equal(appendedMessages.length, 2, 'should append 2 messages');
-    assert.equal(broadcastedMessages.length, 2, 'should broadcast 2 messages');
+    assert.equal(broadcastedEvents.length, 2, 'should broadcast 2 messages');
 
     // AC-A+2: Verify message uses source field (not catId: null)
     const msgA = appendedMessages.find((m) => m.threadId === 'thread-a');
     assert.ok(msgA, 'thread-a should have a message');
     assert.ok(msgA.source, 'message must have source field (not catId: null)');
     assert.equal(msgA.source.connector, 'startup-reconciler', 'source.connector must be startup-reconciler');
+    assert.equal(msgA.source.meta.presentation, 'system_notice');
+    assert.equal(msgA.source.meta.noticeTone, 'warning');
     assert.equal(msgA.catId, null, 'catId should be null (connector message)');
     assert.ok(msgA.content.includes('opus'), 'message should mention affected cat');
     assert.ok(
@@ -423,11 +425,15 @@ describe('StartupReconciler', () => {
     assert.ok(msgB, 'thread-b should have a message');
     assert.equal(msgB.userId, 'user-1', 'thread-b notification also uses record userId');
 
-    // Verify broadcast sends error type for real-time UX
-    const bcA = broadcastedMessages.find((b) => b.threadId === 'thread-a');
+    // Verify real-time broadcast uses the same connector notice protocol as persistence
+    const bcA = broadcastedEvents.find((b) => b.payload.threadId === 'thread-a');
     assert.ok(bcA);
-    assert.equal(bcA.msg.type, 'error');
-    assert.equal(bcA.msg.isFinal, true);
+    assert.equal(bcA.room, 'thread:thread-a');
+    assert.equal(bcA.event, 'connector_message');
+    assert.equal(bcA.payload.message.type, 'connector');
+    assert.equal(bcA.payload.message.source.connector, 'startup-reconciler');
+    assert.equal(bcA.payload.message.source.meta.presentation, 'system_notice');
+    assert.equal(bcA.payload.message.source.meta.noticeTone, 'warning');
   });
 
   test('AC-A+3: deduplicates notifications per thread (multiple invocations → one message)', async () => {
@@ -595,10 +601,10 @@ describe('StartupReconciler', () => {
       },
     };
 
-    const broadcastedMessages = [];
+    const broadcastedEvents = [];
     const socketManager = {
-      broadcastAgentMessage(msg, threadId) {
-        broadcastedMessages.push({ msg, threadId });
+      broadcastToRoom(room, event, payload) {
+        broadcastedEvents.push({ room, event, payload });
       },
     };
 
@@ -612,8 +618,11 @@ describe('StartupReconciler', () => {
 
     const result = await reconciler.reconcileOrphans();
 
-    assert.equal(broadcastedMessages.length, 1, 'broadcast must fire even when append throws');
-    assert.equal(broadcastedMessages[0].threadId, 'thread-p2');
+    assert.equal(broadcastedEvents.length, 1, 'broadcast must fire even when append throws');
+    assert.equal(broadcastedEvents[0].room, 'thread:thread-p2');
+    assert.equal(broadcastedEvents[0].event, 'connector_message');
+    assert.equal(broadcastedEvents[0].payload.message.type, 'connector');
+    assert.equal(broadcastedEvents[0].payload.message.source.connector, 'startup-reconciler');
     assert.equal(result.notifiedThreads, 1, 'notified=1 because broadcast succeeded despite persist failure');
     assert.ok(
       log.messages.some((m) => m.level === 'warn' && m.msg.includes('persist')),
@@ -632,7 +641,7 @@ describe('StartupReconciler', () => {
     );
 
     const socketManager = {
-      broadcastAgentMessage() {
+      broadcastToRoom() {
         throw new Error('simulated broadcast failure');
       },
     };

@@ -23,6 +23,7 @@ import { ReplyPill } from './ReplyPill';
 import { BriefingCard } from './rich/BriefingCard';
 import { RichBlocks } from './rich/RichBlocks';
 import { SummaryCard } from './SummaryCard';
+import { SystemNoticeBar } from './SystemNoticeBar';
 import { ThinkingContent } from './ThinkingContent';
 import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
 import { TtsPlayButton } from './TtsPlayButton';
@@ -51,6 +52,11 @@ function formatDualTime(timestamp: number, deliveredAt?: number): string {
 
 function isSchedulerReplyPreview(replyPreview?: ChatMessageType['replyPreview']): boolean {
   return replyPreview?.senderCatId === 'system' && replyPreview.content.startsWith(SCHEDULER_TRIGGER_PREFIX);
+}
+
+function isConnectorSystemNotice(message: ChatMessageType): boolean {
+  if (message.type !== 'connector' || !message.source?.meta) return false;
+  return (message.source.meta as Record<string, unknown>).presentation === 'system_notice';
 }
 
 interface ChatMessageProps {
@@ -190,6 +196,9 @@ export function ChatMessage({ message, getCatById }: ChatMessageProps) {
   }
 
   if (isConnector && message.source) {
+    if (isConnectorSystemNotice(message)) {
+      return <SystemNoticeBar message={message} />;
+    }
     return <ConnectorBubble message={message} />;
   }
 
