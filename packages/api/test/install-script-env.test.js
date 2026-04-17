@@ -507,3 +507,26 @@ printf '%s' "$(default_frontend_url)"
     rmSync(envRoot, { recursive: true, force: true });
   }
 });
+
+test('install script retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer browser download failures', () => {
+  const installScriptText = readFileSync(installScript, 'utf8');
+
+  assert.match(installScriptText, /run_pnpm_install_capture\(\)/);
+  assert.match(installScriptText, /pnpm_install_needs_puppeteer_skip\(\)/);
+  assert.match(
+    installScriptText,
+    /grep -Eqi 'puppeteer' "\$log_file"\s+\\\s*\n\s*&& grep -Eqi 'Failed to set up chrome\|PUPPETEER_SKIP_DOWNLOAD' "\$log_file"/,
+  );
+  assert.match(
+    installScriptText,
+    /warn "Puppeteer browser download failed — retrying install without bundled Chrome"/,
+  );
+  assert.match(
+    installScriptText,
+    /warn "Thread export \/ screenshot features will stay unavailable until you run: npx puppeteer browsers install chrome"/,
+  );
+  assert.match(
+    installScriptText,
+    /env PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --frozen-lockfile/,
+  );
+});

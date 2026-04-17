@@ -328,9 +328,54 @@ read_env_key() {
     printf '%s\n' "$value"
 }
 pnpm_install_with_fallback() {
-    pnpm install --frozen-lockfile && return 0; [[ -n "$NPM_REGISTRY" ]] && return 1
+    local log_file; log_file="$(mktemp)"
+    if run_pnpm_install_capture "$log_file" pnpm install --frozen-lockfile; then
+        rm -f "$log_file"
+        return 0
+    fi
+    if pnpm_install_needs_puppeteer_skip "$log_file"; then
+        warn_puppeteer_skip_fallback
+        if run_pnpm_install_capture "$log_file" env PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --frozen-lockfile; then
+            rm -f "$log_file"
+            return 0
+        fi
+    fi
+    if [[ -n "$NPM_REGISTRY" ]]; then
+        rm -f "$log_file"
+        return 1
+    fi
     warn "pnpm install failed — retrying with npmmirror"; use_registry "https://registry.npmmirror.com"
-    pnpm install --frozen-lockfile
+    if run_pnpm_install_capture "$log_file" pnpm install --frozen-lockfile; then
+        rm -f "$log_file"
+        return 0
+    fi
+    if pnpm_install_needs_puppeteer_skip "$log_file"; then
+        warn_puppeteer_skip_fallback
+        if run_pnpm_install_capture "$log_file" env PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --frozen-lockfile; then
+            rm -f "$log_file"
+            return 0
+        fi
+    fi
+    rm -f "$log_file"
+    return 1
+}
+run_pnpm_install_capture() {
+    local log_file="$1"; shift
+    local status=0
+    set +e
+    "$@" 2>&1 | tee "$log_file"
+    status=${PIPESTATUS[0]}
+    set -e
+    return "$status"
+}
+pnpm_install_needs_puppeteer_skip() {
+    local log_file="$1"
+    grep -Eqi 'puppeteer' "$log_file" \
+        && grep -Eqi 'Failed to set up chrome|PUPPETEER_SKIP_DOWNLOAD' "$log_file"
+}
+warn_puppeteer_skip_fallback() {
+    warn "Puppeteer browser download failed — retrying install without bundled Chrome"
+    warn "Thread export / screenshot features will stay unavailable until you run: npx puppeteer browsers install chrome"
 }
 build_step() { local label="$1"; shift; info "  Building $label..."
     "$@" || { fail "$label build failed in $PROJECT_DIR"; exit 1; }; ok "$label done"; }
