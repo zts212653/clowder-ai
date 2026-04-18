@@ -77,32 +77,55 @@ test('Windows installer revalidates Node major version after winget install', ()
   assert.match(installScript, /Write-Warn "Node\.js \$nodeRaw still too old after winget install"/);
 });
 
-test('Windows installer retries plain pnpm install when frozen lockfile mode hits a native command error', () => {
+test('Windows installer retries plain pnpm install when frozen lockfile mode still fails after protected retries', () => {
+  const helperIndex = installScript.indexOf('function Invoke-PnpmInstallWithCapturedOutput');
   const frozenInstallIndex = installScript.indexOf(
-    'Invoke-Pnpm -CommandArgs @("install", "--frozen-lockfile") 2>$null',
+    '$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install", "--frozen-lockfile")',
   );
-  const tryIndex = installScript.lastIndexOf('try {', frozenInstallIndex);
-  const catchIndex = installScript.indexOf('} catch {', frozenInstallIndex);
-  const capturedErrorIndex = installScript.indexOf('$frozenInstallError = $_', catchIndex);
   const cancelExitIndex = installScript.indexOf(
-    'Exit-InstallerIfCancelled -ErrorRecord $frozenInstallError -Context "pnpm install"',
+    'Exit-InstallerIfCancelled -ErrorRecord $frozenInstallResult.ErrorRecord -Context "pnpm install"',
   );
   const retryWarnIndex = installScript.indexOf('Write-Warn "Frozen lockfile failed, retrying..."');
-  const retryInstallIndex = installScript.indexOf('Invoke-Pnpm -CommandArgs @("install")', retryWarnIndex);
+  const retryInstallIndex = installScript.indexOf(
+    '$plainInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @("install")',
+    retryWarnIndex,
+  );
 
-  assert.notEqual(frozenInstallIndex, -1, 'expected frozen lockfile install attempt');
-  assert.notEqual(tryIndex, -1, 'expected frozen lockfile attempt to be wrapped in try/catch');
-  assert.notEqual(catchIndex, -1, 'expected frozen lockfile attempt catch block');
-  assert.notEqual(capturedErrorIndex, -1, 'expected frozen lockfile catch to capture the error record');
+  assert.notEqual(helperIndex, -1, 'expected captured install helper');
+  assert.notEqual(frozenInstallIndex, -1, 'expected frozen lockfile install attempt via helper');
   assert.notEqual(cancelExitIndex, -1, 'expected retry path to abort on user cancellation');
-  assert.notEqual(retryWarnIndex, -1, 'expected retry warning after frozen lockfile failure');
-  assert.notEqual(retryInstallIndex, -1, 'expected plain pnpm install retry after frozen lockfile failure');
-  assert.ok(tryIndex < frozenInstallIndex, 'expected try block before frozen lockfile install');
-  assert.ok(frozenInstallIndex < catchIndex, 'expected catch block after frozen lockfile install');
-  assert.ok(catchIndex < capturedErrorIndex, 'expected frozen lockfile catch to save the error record');
-  assert.ok(capturedErrorIndex < cancelExitIndex, 'expected cancellation check before retry warning');
-  assert.ok(cancelExitIndex < retryWarnIndex, 'expected retry warning after protected frozen lockfile path');
+  assert.notEqual(retryWarnIndex, -1, 'expected retry warning after protected frozen lockfile path');
+  assert.notEqual(retryInstallIndex, -1, 'expected plain pnpm install retry after warning');
+  assert.ok(helperIndex < frozenInstallIndex, 'expected helper declaration before frozen install use');
+  assert.ok(frozenInstallIndex < cancelExitIndex, 'expected cancellation check after frozen install result');
+  assert.ok(cancelExitIndex < retryWarnIndex, 'expected retry warning after cancellation guard');
   assert.ok(retryWarnIndex < retryInstallIndex, 'expected plain install retry after warning');
+});
+
+test('Windows installer retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer browser download failures', () => {
+  assert.match(installScript, /function Test-PuppeteerBrowserDownloadFailure/);
+  assert.match(
+    installScript,
+    /return \$OutputText -match "puppeteer" -and\s+\(\$OutputText -match "Failed to set up chrome" -or \$OutputText -match "PUPPETEER_SKIP_DOWNLOAD"\)/,
+  );
+  assert.match(installScript, /function Write-PuppeteerSkipWarning/);
+  assert.match(installScript, /Write-Warn "Bundled Chrome download failed - skipped"/);
+  assert.match(
+    installScript,
+    /Write-Warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
+  );
+  assert.match(
+    installScript,
+    /\$frozenInstallResult = Invoke-PnpmInstallWithCapturedOutput -CommandArgs @\("install", "--frozen-lockfile"\)/,
+  );
+  assert.match(
+    installScript,
+    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs @\("install", "--frozen-lockfile"\) -SkipPuppeteerDownload/,
+  );
+  assert.match(
+    installScript,
+    /Invoke-PnpmInstallWithCapturedOutput -CommandArgs @\("install"\) -SkipPuppeteerDownload/,
+  );
 });
 
 test('Windows command forwarding helpers avoid PowerShell automatic $args collisions', () => {

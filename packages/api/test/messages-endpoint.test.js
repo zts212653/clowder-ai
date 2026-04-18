@@ -113,6 +113,35 @@ describe('GET /api/messages', () => {
     assert.match(body.messages[1].content, /^Error: stream_idle_stall/);
   });
 
+  it('keeps persisted source-backed notices on the connector path even when userId=system', async () => {
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: '想交接给 @codex？把它单独放到新起一行开头，才能触发交接。',
+      mentions: [],
+      timestamp: 2500,
+      threadId: 'thread-connector-notice',
+      source: {
+        connector: 'inline-mention-hint',
+        label: '路由提示',
+        icon: '💡',
+        meta: { presentation: 'system_notice', noticeTone: 'info' },
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-connector-notice',
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'connector');
+    assert.equal(body.messages[0].catId, null);
+    assert.equal(body.messages[0].source.connector, 'inline-mention-hint');
+    assert.equal(body.messages[0].source.meta.presentation, 'system_notice');
+  });
+
   it('respects limit parameter', async () => {
     for (let i = 0; i < 10; i++) {
       messageStore.append({

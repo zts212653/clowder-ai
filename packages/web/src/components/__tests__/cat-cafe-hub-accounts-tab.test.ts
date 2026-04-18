@@ -231,8 +231,8 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(container.textContent).toContain('Codex Sponsor');
     expect(container.textContent).not.toContain('【');
     expect(container.textContent).not.toContain('非 UI 直出');
-    expect(container.textContent).toContain('OpenCode (client-auth)');
-    expect(container.textContent).toContain('Dare (client-auth)');
+    expect(container.textContent).not.toContain('OpenCode (client-auth)');
+    expect(container.textContent).not.toContain('Dare (client-auth)');
     expect(container.textContent).not.toContain('OAuth-like');
     expect(container.textContent).not.toContain('内置认证');
     expect(container.textContent).toContain('新建 API Key 账号');
@@ -639,7 +639,7 @@ describe('CatCafeHub provider profiles tab', () => {
     expect((createPayload as unknown as Record<string, unknown>)?.projectPath).toBeUndefined();
   });
 
-  it('shows built-in and custom provider cards together without the old filter tabs', async () => {
+  it('shows only configured provider cards without synthesizing unconfigured builtins', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path.startsWith('/api/accounts')) {
         return Promise.resolve(
@@ -721,8 +721,9 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(profileList?.textContent).toContain('Codex (OAuth)');
     expect(profileList?.textContent).toContain('Gemini (OAuth)');
     expect(profileList?.textContent).toContain('Codex Sponsor');
-    expect(profileList?.textContent).toContain('OpenCode (client-auth)');
-    expect(profileList?.textContent).toContain('Dare (client-auth)');
+    expect(profileList?.textContent).not.toContain('Kimi (OAuth)');
+    expect(profileList?.textContent).not.toContain('OpenCode (client-auth)');
+    expect(profileList?.textContent).not.toContain('Dare (client-auth)');
     expect(container.textContent).not.toContain('全部');
     expect(container.textContent).not.toContain('内置认证');
     expect(

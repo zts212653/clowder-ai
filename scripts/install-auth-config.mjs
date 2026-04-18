@@ -16,10 +16,11 @@ const BUILTIN_ACCOUNT_SPECS = [
     id: 'claude',
     displayName: 'Claude',
     client: 'anthropic',
-    models: ['claude-opus-4-6[1m]', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'],
+    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101'],
   },
   { id: 'codex', displayName: 'Codex', client: 'openai', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'] },
   { id: 'gemini', displayName: 'Gemini', client: 'google', models: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'] },
+  { id: 'kimi', displayName: 'Kimi', client: 'kimi', models: ['kimi-code/kimi-for-coding'] },
   { id: 'dare', displayName: 'Dare', client: 'dare', models: ['z-ai/glm-4.7'] },
   { id: 'opencode', displayName: 'OpenCode', client: 'opencode', models: ['claude-opus-4-6', 'claude-sonnet-4-5'] },
 ];
@@ -174,6 +175,7 @@ function normalizeClient(rawClient) {
   if (trimmed === 'anthropic' || trimmed === 'claude') return 'anthropic';
   if (trimmed === 'openai' || trimmed === 'codex') return 'openai';
   if (trimmed === 'google' || trimmed === 'gemini') return 'google';
+  if (trimmed === 'kimi' || trimmed === 'moonshot') return 'kimi';
   if (trimmed === 'dare') return 'dare';
   if (trimmed === 'opencode') return 'opencode';
   return null;
@@ -189,10 +191,24 @@ function normalizeDisplayName(displayName) {
   return trimmed ? trimmed : undefined;
 }
 
-function normalizeModels(models) {
+function normalizeModelValue(value) {
+  const trimmed = String(value ?? '')
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .trim()
+    .replace(/(?:\[[0-9;]*m)+$/g, '')
+    .trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function sanitizeModels(models) {
   if (!Array.isArray(models)) return undefined;
-  const normalized = Array.from(new Set(models.map((v) => String(v).trim()).filter((v) => v.length > 0)));
-  return normalized.length > 0 ? normalized.sort() : undefined;
+  const normalized = Array.from(new Set(models.map(normalizeModelValue).filter((v) => v && v.length > 0)));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeModels(models) {
+  const normalized = sanitizeModels(models);
+  return normalized ? [...normalized].sort() : undefined;
 }
 
 function canonicalizeAccount(account) {
@@ -359,10 +375,12 @@ function setClientAuth(client, mode, options) {
   const accounts = readAccounts();
 
   if (mode === 'oauth') {
+    const spec = BUILTIN_ACCOUNT_SPECS.find((s) => s.client === client);
     // F340: protocol not persisted on new accounts — derived from well-known ID at runtime.
     accounts[accountRef] = {
       authType: 'oauth',
-      displayName: BUILTIN_ACCOUNT_SPECS.find((s) => s.client === client)?.displayName ?? accountRef,
+      displayName: spec?.displayName ?? accountRef,
+      models: sanitizeModels(spec?.models) ?? [],
     };
     // Warn about stale installer account that the resolver will prefer (has API key).
     // We intentionally do NOT auto-delete it here: installer accounts are global,

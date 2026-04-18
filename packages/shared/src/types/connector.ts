@@ -1,9 +1,13 @@
 /**
- * Connector Types — 外部信息源抽象
+ * Connector Types — 外部信息源 / notice transport 抽象
  *
- * Connector 是从外部系统（GitHub、iMessage、Slack 等）
- * 进入 Cat Cafe 的消息来源。每个 connector 有固定的视觉标识
- * （icon、颜色），在前端以独立气泡样式展示。
+ * Connector transport covers both:
+ * 1) true external systems（GitHub、iMessage、Slack 等）, and
+ * 2) thread-visible system notices that reuse the same persistence/socket path.
+ *
+ * Visual presentation is not implied by storage transport:
+ * - default connector messages render as ConnectorBubble
+ * - messages with `source.meta.presentation = 'system_notice'` render as in-thread notice bars
  *
  * BACKLOG #97
  */
@@ -13,7 +17,7 @@
 /** Shared prefix for scheduler trigger messages that act as reply anchors. */
 export const SCHEDULER_TRIGGER_PREFIX = '[定时任务]';
 
-/** Source metadata attached to messages from external connectors. */
+/** Source metadata attached to connector-transport messages. */
 export interface ConnectorSource {
   /** Stable connector identifier (used for routing + styling) */
   readonly connector: string;
@@ -23,7 +27,7 @@ export interface ConnectorSource {
   readonly icon: string;
   /** Link to original source (e.g., PR URL) */
   readonly url?: string;
-  /** Connector-specific metadata (not rendered, for debugging/routing) */
+  /** Connector-specific metadata (e.g. presentation='system_notice', debugging, routing) */
   readonly meta?: Readonly<Record<string, unknown>>;
   /** F134: Original sender info for group chat messages (message-level binding, not thread-level) */
   readonly sender?: { readonly id: string; readonly name?: string };
