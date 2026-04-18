@@ -409,12 +409,22 @@ try {
 
     # Track background jobs for cleanup
     $jobs = @()
+    $apiNodeEnv = switch ($Profile_) {
+        'dev' { 'development'; break }
+        'production' { 'production'; break }
+        'opensource' { 'production'; break }
+        default {
+            if ($Dev) { 'development' } else { 'production' }
+        }
+    }
+
     $runtimeEnvOverrides = @{
         REDIS_URL = $env:REDIS_URL
         MEMORY_STORE = $env:MEMORY_STORE
         CAT_CAFE_MCP_SERVER_PATH = $env:CAT_CAFE_MCP_SERVER_PATH
         API_SERVER_PORT = $ApiPort
         FRONTEND_PORT = $WebPort
+        NODE_ENV = $apiNodeEnv
     }
 
     # API Server

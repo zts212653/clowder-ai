@@ -662,10 +662,28 @@ background_eval_with_null_stdin() {
     register_managed_pid "$!"
 }
 
+api_node_env() {
+    case "$PROFILE" in
+        production|opensource)
+            printf '%s' 'production'
+            ;;
+        dev)
+            printf '%s' 'development'
+            ;;
+        *)
+            if [ "$PROD_WEB" = true ]; then
+                printf '%s' 'production'
+            else
+                printf '%s' 'development'
+            fi
+            ;;
+    esac
+}
+
 api_launch_command() {
-    local env_prefix=""
+    local env_prefix="NODE_ENV=$(api_node_env) "
     if [ "$DEBUG_MODE" = true ]; then
-        env_prefix="LOG_LEVEL=debug "
+        env_prefix="${env_prefix}LOG_LEVEL=debug "
     fi
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
         printf '%s' "cd packages/api && exec ${env_prefix}pnpm run start"
