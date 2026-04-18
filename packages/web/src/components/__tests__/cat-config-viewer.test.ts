@@ -149,7 +149,7 @@ describe('CatOverviewTab', () => {
     expect(html).not.toContain('npx antigravity --bridge');
   });
 
-  it('anchors the first-member guide target to the member edit body, not the availability toggle', () => {
+  it('anchors the first-member guide target to a keyboard-activatable edit button, not the availability toggle', () => {
     const html = renderToStaticMarkup(
       React.createElement(CatOverviewTab, {
         config: CONFIG,
@@ -166,6 +166,7 @@ describe('CatOverviewTab', () => {
     );
 
     expect(guideTarget).toBeTruthy();
+    expect(guideTarget?.tagName).toBe('BUTTON');
     expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
     expect(availabilityToggle).toBeTruthy();
     expect(guideTarget?.contains(availabilityToggle ?? null)).toBe(false);

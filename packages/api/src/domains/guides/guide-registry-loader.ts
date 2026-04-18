@@ -19,6 +19,7 @@ export interface GuideRegistryEntry {
   cross_system: boolean;
   estimated_time: string;
   flow_file: string;
+  requires_member_cards?: boolean;
 }
 
 interface RegistryFile {
@@ -77,6 +78,10 @@ export interface GuideMatch {
   estimatedTime: string;
   score: number;
   totalKeywords: number;
+}
+
+export interface GuideResolveContext {
+  memberCardCount?: number;
 }
 
 /**
@@ -229,12 +234,20 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
   return flow;
 }
 
-export function resolveGuideForIntent(intent: string): GuideMatch[] {
+function entryMeetsResolveContext(entry: GuideRegistryEntry, context?: GuideResolveContext): boolean {
+  if (entry.requires_member_cards && (context?.memberCardCount ?? 0) <= 0) {
+    return false;
+  }
+  return true;
+}
+
+export function resolveGuideForIntent(intent: string, context?: GuideResolveContext): GuideMatch[] {
   const entries = getRegistryEntries();
   const query = normalizeGuideIntent(intent);
   if (!query) return [];
   const allowReverseSubstringMatch = canUseReverseSubstringMatch(query);
   return entries
+    .filter((entry) => entryMeetsResolveContext(entry, context))
     .map((entry) => {
       const score = entry.keywords.filter((kw) => {
         const normalizedKeyword = normalizeGuideIntent(kw);

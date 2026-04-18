@@ -16,6 +16,8 @@ import { GuideLifecycleService } from '../domains/guides/GuideLifecycleService.j
 import { createGuideStoreBridge, type IGuideSessionStore } from '../domains/guides/GuideSessionRepository.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { getResolvedCats } from '../config/resolved-cats.js';
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -52,6 +54,7 @@ export async function registerCallbackGuideRoutes(
     socketManager: SocketManager;
     guideSessionStore?: IGuideSessionStore;
     loadGuideFlow?: (guideId: string) => unknown;
+    getGuideResolveContext?: () => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   },
 ): Promise<void> {
   const { registry } = deps;
@@ -73,6 +76,12 @@ export async function registerCallbackGuideRoutes(
     isValidGuideId,
     loadGuideFlow: deps.loadGuideFlow ?? defaultLoadGuideFlow,
   });
+  const getGuideResolveContext =
+    deps.getGuideResolveContext ??
+    (() => {
+      const projectRoot = resolveActiveProjectRoot();
+      return { memberCardCount: Object.keys(getResolvedCats(projectRoot)).length };
+    });
 
   // POST /api/callbacks/update-guide-state
   app.post('/api/callbacks/update-guide-state', async (request, reply) => {
@@ -146,7 +155,7 @@ export async function registerCallbackGuideRoutes(
     }
     const { intent } = parsed.data;
 
-    const matches = resolveGuideForIntent(intent);
+    const matches = resolveGuideForIntent(intent, await getGuideResolveContext());
     app.log.info({ intent, matchCount: matches.length, threadId: record.threadId }, '[F155] guide_resolve');
     return { status: 'ok', matches };
   });

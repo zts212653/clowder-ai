@@ -257,6 +257,11 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(matches[0]?.id, 'connect-feishu');
   });
 
+  test('filters member-edit guides when no member cards exist', () => {
+    const matches = resolveGuideForIntent('修改成员认证', { memberCardCount: 0 });
+    assert.equal(matches.some((match) => match.id === 'edit-member-auth'), false);
+  });
+
   test('rejects a flow file whose internal id does not match the requested guide id', () => {
     const guideId = 'test-mismatched-flow-id';
     const flowPath = resolve(repoRoot, 'guides', 'flows', `${guideId}.yaml`);

@@ -66,6 +66,7 @@ guides:
     name: 修改成员认证与模型
     description: 引导你为成员配置认证信息和默认模型
     flow_file: flows/edit-member-auth.yaml
+    requires_member_cards: true
     keywords:
       - 修改成员
       - 修改认证

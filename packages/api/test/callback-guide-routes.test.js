@@ -224,6 +224,24 @@ describe('F155 Guide callback routes', () => {
       assert.equal(body.matches.length, 0);
     });
 
+    test('filters edit-member-auth when no member cards exist', async () => {
+      const app = await createApp({
+        getGuideResolveContext: () => ({ memberCardCount: 0 }),
+      });
+      const { invocationId, callbackToken } = createCreds();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/guide-resolve',
+        payload: { invocationId, callbackToken, intent: '修改成员认证' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.equal(body.status, 'ok');
+      assert.equal(body.matches.some((match) => match.id === 'edit-member-auth'), false);
+    });
+
     test('rejects expired credentials', async () => {
       const app = await createApp();
 
