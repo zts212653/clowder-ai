@@ -259,7 +259,10 @@ describe('F155 guide registry loader target validation', async () => {
 
   test('filters member-edit guides when no member cards exist', () => {
     const matches = resolveGuideForIntent('修改成员认证', { memberCardCount: 0 });
-    assert.equal(matches.some((match) => match.id === 'edit-member-auth'), false);
+    assert.equal(
+      matches.some((match) => match.id === 'edit-member-auth'),
+      false,
+    );
   });
 
   test('rejects a flow file whose internal id does not match the requested guide id', () => {

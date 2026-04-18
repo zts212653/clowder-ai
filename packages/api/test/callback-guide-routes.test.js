@@ -240,7 +240,10 @@ describe('F155 Guide callback routes', () => {
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.body);
       assert.equal(body.status, 'ok');
-      assert.equal(body.matches.some((match) => match.id === 'edit-member-auth'), false);
+      assert.equal(
+        body.matches.some((match) => match.id === 'edit-member-auth'),
+        false,
+      );
     });
 
     test('rejects expired credentials', async () => {

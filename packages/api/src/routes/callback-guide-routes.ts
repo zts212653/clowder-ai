@@ -10,14 +10,14 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { getResolvedCats } from '../config/resolved-cats.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { GuideLifecycleService } from '../domains/guides/GuideLifecycleService.js';
 import { createGuideStoreBridge, type IGuideSessionStore } from '../domains/guides/GuideSessionRepository.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { requireCallbackAuth } from './callback-auth-prehandler.js';
-import { getResolvedCats } from '../config/resolved-cats.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
 // ---------------------------------------------------------------------------
 // Schemas
