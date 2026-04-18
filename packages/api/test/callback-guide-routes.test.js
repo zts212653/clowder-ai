@@ -4,7 +4,11 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 
@@ -61,8 +65,8 @@ describe('F155 Guide callback routes', () => {
     return app;
   }
 
-  function createCreds() {
-    const thread = threadStore.create('user-1', 'Test');
+  function createCreds(projectPath = 'default') {
+    const thread = threadStore.create('user-1', 'Test', projectPath);
     const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
     return { invocationId, callbackToken, threadId: thread.id };
   }
@@ -220,7 +224,10 @@ describe('F155 Guide callback routes', () => {
 
     test('filters guides that are unavailable in the current context', async () => {
       const app = await createApp({
-        getGuideAvailabilityContext: () => ({ memberCardCount: 0 }),
+        getGuideAvailabilityContext: (threadId) => {
+          assert.equal(typeof threadId, 'string');
+          return { memberCardCount: 0 };
+        },
       });
       const { invocationId, callbackToken } = createCreds();
 
@@ -237,6 +244,36 @@ describe('F155 Guide callback routes', () => {
         body.guides.some((guide) => guide.id === 'edit-member-auth'),
         false,
       );
+    });
+
+    test('derives default guide availability from the authenticated thread projectPath', async () => {
+      const app = await createApp();
+      const emptyProjectRoot = mkdtempSync(join(tmpdir(), 'guide-availability-'));
+      const registrySnapshot = Object.entries(catRegistry.getAllConfigs());
+      const { invocationId, callbackToken } = createCreds(emptyProjectRoot);
+
+      try {
+        catRegistry.reset();
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/get-available-guides',
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        });
+
+        assert.equal(res.statusCode, 200);
+        const body = JSON.parse(res.body);
+        assert.equal(body.status, 'ok');
+        assert.equal(
+          body.guides.some((guide) => guide.id === 'edit-member-auth'),
+          false,
+        );
+      } finally {
+        catRegistry.reset();
+        for (const [id, config] of registrySnapshot) {
+          catRegistry.register(id, config);
+        }
+        rmSync(emptyProjectRoot, { recursive: true, force: true });
+      }
     });
 
     test('rejects expired credentials', async () => {

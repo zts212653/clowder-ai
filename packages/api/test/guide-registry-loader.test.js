@@ -29,15 +29,35 @@ describe('F155 guide registry loader target validation', async () => {
     }
   });
 
-  test('loaded add-member flow waits for member profile save before completion', () => {
+  test('loaded add-member flow covers the wizard path before the editor handoff', () => {
     const flow = loadGuideFlow('add-member');
     const createIndex = flow.steps.findIndex((step) => step.id === 'click-add-member');
-    const editIndex = flow.steps.findIndex((step) => step.id === 'edit-member-profile');
+    const clientIndex = flow.steps.findIndex((step) => step.id === 'choose-client');
+    const providerIndex = flow.steps.findIndex((step) => step.id === 'choose-provider-account');
+    const modelIndex = flow.steps.findIndex((step) => step.id === 'choose-model');
+    const submitIndex = flow.steps.findIndex((step) => step.id === 'create-member');
+    const editIndex = flow.steps.findIndex((step) => step.id === 'done');
+    const clientStep = flow.steps[clientIndex];
+    const providerStep = flow.steps[providerIndex];
+    const modelStep = flow.steps[modelIndex];
+    const submitStep = flow.steps[submitIndex];
     const editStep = flow.steps[editIndex];
 
     assert.ok(createIndex >= 0, 'create step should exist');
-    assert.ok(editIndex > createIndex, 'edit step should happen after member creation');
-    assert.ok(editStep, 'edit-member-profile step should exist');
+    assert.ok(clientIndex > createIndex, 'wizard client step should happen after member creation');
+    assert.ok(providerIndex > clientIndex, 'provider step should happen after choosing client');
+    assert.ok(modelIndex > providerIndex, 'model step should happen after choosing provider');
+    assert.ok(submitIndex > modelIndex, 'submit step should happen after choosing model');
+    assert.ok(editIndex > submitIndex, 'editor handoff should happen after wizard submit');
+    assert.ok(clientStep, 'choose-client step should exist');
+    assert.ok(providerStep, 'choose-provider-account step should exist');
+    assert.ok(modelStep, 'choose-model step should exist');
+    assert.ok(submitStep, 'create-member step should exist');
+    assert.equal(clientStep.target, 'add-member.client');
+    assert.equal(providerStep.target, 'add-member.provider-profile');
+    assert.equal(modelStep.target, 'add-member.model');
+    assert.equal(submitStep.target, 'add-member.submit');
+    assert.equal(submitStep.advance, 'click');
     assert.equal(editStep.target, 'member-editor.profile');
     assert.equal(editStep.advance, 'confirm');
   });

@@ -50,7 +50,9 @@ export async function registerCallbackGuideRoutes(
     socketManager: SocketManager;
     guideSessionStore?: IGuideSessionStore;
     loadGuideFlow?: (guideId: string) => unknown;
-    getGuideAvailabilityContext?: () => Promise<{ memberCardCount: number }> | { memberCardCount: number };
+    getGuideAvailabilityContext?: (
+      threadId: string,
+    ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   },
 ): Promise<void> {
   const { registry } = deps;
@@ -74,8 +76,10 @@ export async function registerCallbackGuideRoutes(
   });
   const getGuideAvailabilityContext =
     deps.getGuideAvailabilityContext ??
-    (() => {
-      const projectRoot = resolveActiveProjectRoot();
+    (async (threadId: string) => {
+      const thread = await Promise.resolve(deps.threadStore.get(threadId));
+      const projectRoot =
+        thread?.projectPath && thread.projectPath !== 'default' ? thread.projectPath : resolveActiveProjectRoot();
       return { memberCardCount: Object.keys(getResolvedCats(projectRoot)).length };
     });
 
@@ -144,7 +148,7 @@ export async function registerCallbackGuideRoutes(
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
 
-    const guides = getAvailableGuides(await getGuideAvailabilityContext());
+    const guides = getAvailableGuides(await getGuideAvailabilityContext(record.threadId));
     app.log.info({ guideCount: guides.length, threadId: record.threadId }, '[F155] get_available_guides');
     return { status: 'ok', guides };
   });
