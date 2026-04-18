@@ -436,12 +436,11 @@ describe('Schedule Routes', () => {
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks/preview',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
         payload: {
           templateId: 'reminder',
           trigger: { type: 'once', delayMs: 1000 },
           params: { message: 'hello' },
-          invocationId,
-          callbackToken,
         },
       });
       assert.equal(res.statusCode, 200);
@@ -456,13 +455,12 @@ describe('Schedule Routes', () => {
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks/preview',
+        headers: { 'x-invocation-id': stale.invocationId, 'x-callback-token': stale.callbackToken },
         payload: {
           templateId: 'reminder',
           trigger: { type: 'once', delayMs: 1000 },
           params: { message: 'stale-preview' },
           deliveryThreadId: 'thread-explicit-preview',
-          invocationId: stale.invocationId,
-          callbackToken: stale.callbackToken,
         },
       });
 
@@ -471,24 +469,23 @@ describe('Schedule Routes', () => {
       assert.equal(body.code, 'STALE_INVOCATION');
     });
 
-    it('returns 401 for invalid callback credentials in preview', async () => {
+    it('returns 401 for invalid callback credentials in preview (fail-closed, #474)', async () => {
       const { invocationId } = registry.create('user-1', 'opus', 'thread-preview-invalid');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks/preview',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'invalid-token' },
         payload: {
           templateId: 'reminder',
           trigger: { type: 'once', delayMs: 1000 },
           params: { message: 'invalid-preview' },
           deliveryThreadId: 'thread-explicit-preview',
-          invocationId,
-          callbackToken: 'invalid-token',
         },
       });
 
       assert.equal(res.statusCode, 401);
       const body = res.json();
-      assert.equal(body.code, 'INVALID_CALLBACK_CREDENTIALS');
+      assert.ok(body.error.includes('expired'), 'preHandler rejects invalid creds before route handler');
     });
   });
 
@@ -668,12 +665,11 @@ describe('Schedule Routes', () => {
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
         payload: {
           templateId: 'reminder',
           trigger: { type: 'once', delayMs: 1000 },
           params: { message: 'body-auth-thread' },
-          invocationId,
-          callbackToken,
         },
       });
       assert.equal(res.statusCode, 200);
@@ -710,13 +706,12 @@ describe('Schedule Routes', () => {
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
         payload: {
           templateId: 'reminder',
           trigger: { type: 'once', delayMs: 1000 },
           params: { message: 'explicit-thread-wins' },
           deliveryThreadId: 'thread-explicit',
-          invocationId,
-          callbackToken,
         },
       });
       assert.equal(res.statusCode, 200);
@@ -733,13 +728,12 @@ describe('Schedule Routes', () => {
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
+        headers: { 'x-invocation-id': stale.invocationId, 'x-callback-token': stale.callbackToken },
         payload: {
           templateId: 'reminder',
           trigger: { type: 'once', delayMs: 1000 },
           params: { message: 'stale-create' },
           deliveryThreadId: 'thread-explicit-create',
-          invocationId: stale.invocationId,
-          callbackToken: stale.callbackToken,
         },
       });
 
@@ -750,24 +744,23 @@ describe('Schedule Routes', () => {
       assert.equal(stored, undefined);
     });
 
-    it('returns 401 and does not persist for invalid callback credentials', async () => {
+    it('returns 401 and does not persist for invalid callback credentials (fail-closed, #474)', async () => {
       const { invocationId } = registry.create('user-1', 'opus', 'thread-create-invalid');
       const res = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'invalid-token' },
         payload: {
           templateId: 'reminder',
           trigger: { type: 'once', delayMs: 1000 },
           params: { message: 'invalid-create' },
           deliveryThreadId: 'thread-explicit-create',
-          invocationId,
-          callbackToken: 'invalid-token',
         },
       });
 
       assert.equal(res.statusCode, 401);
       const body = res.json();
-      assert.equal(body.code, 'INVALID_CALLBACK_CREDENTIALS');
+      assert.ok(body.error.includes('expired'), 'preHandler rejects invalid creds before route handler');
       const stored = store.getAll().find((d) => d.params?.message === 'invalid-create');
       assert.equal(stored, undefined);
     });

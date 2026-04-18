@@ -502,9 +502,8 @@ describe('MCP callback end-to-end flow', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': env.CAT_CAFE_INVOCATION_ID, 'x-callback-token': env.CAT_CAFE_CALLBACK_TOKEN },
       payload: {
-        invocationId: env.CAT_CAFE_INVOCATION_ID,
-        callbackToken: env.CAT_CAFE_CALLBACK_TOKEN,
         content: 'Callback message from cat!',
       },
     });
@@ -551,7 +550,8 @@ describe('MCP callback end-to-end flow', () => {
     const app = await createApp();
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);

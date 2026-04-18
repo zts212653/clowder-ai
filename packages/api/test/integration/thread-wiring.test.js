@@ -416,9 +416,8 @@ describe('MCP callback stores message with threadId', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'callback msg',
       },
     });

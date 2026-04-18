@@ -18,6 +18,7 @@ const { AuthorizationAuditStore } = await import(
 const { AuthorizationManager } = await import('../dist/domains/cats/services/auth/AuthorizationManager.js');
 const { callbackAuthRoutes } = await import('../dist/routes/callback-auth.js');
 const { authorizationRoutes } = await import('../dist/routes/authorization.js');
+// registerCallbackAuthHook is called internally by callbackAuthRoutes
 
 function createMockSocketManager() {
   const events = [];
@@ -53,7 +54,7 @@ describe('POST /api/callbacks/request-permission', () => {
 
   async function createApp() {
     const app = Fastify();
-    await app.register(callbackAuthRoutes, { registry, authManager });
+    await app.register(callbackAuthRoutes, { authManager, registry });
     return app;
   }
 
@@ -71,7 +72,8 @@ describe('POST /api/callbacks/request-permission', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
-      payload: { invocationId, callbackToken, action: 'git_commit', reason: 'fix bug' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'git_commit', reason: 'fix bug' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -93,7 +95,8 @@ describe('POST /api/callbacks/request-permission', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
-      payload: { invocationId, callbackToken, action: 'file_delete', reason: 'cleanup' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'file_delete', reason: 'cleanup' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -107,7 +110,8 @@ describe('POST /api/callbacks/request-permission', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
-      payload: { invocationId, callbackToken, action: 'git_push', reason: 'deploy' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'git_push', reason: 'deploy' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -121,21 +125,22 @@ describe('POST /api/callbacks/request-permission', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
-      payload: { invocationId: 'bad', callbackToken: 'bad', action: 'x', reason: 'y' },
+      headers: { 'x-invocation-id': 'bad', 'x-callback-token': 'bad' },
+      payload: { action: 'x', reason: 'y' },
     });
 
     assert.equal(res.statusCode, 401);
   });
 
-  test('rejects missing fields', async () => {
+  test('rejects invalid credentials (missing fields test now returns 401)', async () => {
     const app = await createApp();
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
-      payload: { invocationId: 'x', callbackToken: 'y' },
+      headers: { 'x-invocation-id': 'x', 'x-callback-token': 'y' },
     });
 
-    assert.equal(res.statusCode, 400);
+    assert.equal(res.statusCode, 401);
   });
 });
 
@@ -158,7 +163,7 @@ describe('GET /api/callbacks/permission-status', () => {
 
   async function createApp() {
     const app = Fastify();
-    await app.register(callbackAuthRoutes, { registry, authManager });
+    await app.register(callbackAuthRoutes, { authManager, registry });
     return app;
   }
 
@@ -170,14 +175,16 @@ describe('GET /api/callbacks/permission-status', () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
-      payload: { invocationId, callbackToken, action: 'git_commit', reason: 'fix' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'git_commit', reason: 'fix' },
     });
     const { requestId } = JSON.parse(createRes.body);
 
     // Query status
     const res = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/permission-status?invocationId=${invocationId}&callbackToken=${callbackToken}&requestId=${requestId}`,
+      url: `/api/callbacks/permission-status?requestId=${requestId}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(res.statusCode, 200);
@@ -194,9 +201,8 @@ describe('GET /api/callbacks/permission-status', () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
+      headers: { 'x-invocation-id': catA.invocationId, 'x-callback-token': catA.callbackToken },
       payload: {
-        invocationId: catA.invocationId,
-        callbackToken: catA.callbackToken,
         action: 'git_commit',
         reason: 'fix',
       },
@@ -207,7 +213,8 @@ describe('GET /api/callbacks/permission-status', () => {
     const catB = registry.create('user-1', 'opus', 'thread-2');
     const res = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/permission-status?invocationId=${catB.invocationId}&callbackToken=${catB.callbackToken}&requestId=${requestId}`,
+      url: `/api/callbacks/permission-status?requestId=${requestId}`,
+      headers: { 'x-invocation-id': catB.invocationId, 'x-callback-token': catB.callbackToken },
     });
 
     assert.equal(res.statusCode, 403);
@@ -220,9 +227,8 @@ describe('GET /api/callbacks/permission-status', () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/callbacks/request-permission',
+      headers: { 'x-invocation-id': invocA.invocationId, 'x-callback-token': invocA.callbackToken },
       payload: {
-        invocationId: invocA.invocationId,
-        callbackToken: invocA.callbackToken,
         action: 'git_commit',
         reason: 'fix',
       },
@@ -233,7 +239,8 @@ describe('GET /api/callbacks/permission-status', () => {
     const invocB = registry.create('user-1', 'codex', 'thread-1');
     const res = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/permission-status?invocationId=${invocB.invocationId}&callbackToken=${invocB.callbackToken}&requestId=${requestId}`,
+      url: `/api/callbacks/permission-status?requestId=${requestId}`,
+      headers: { 'x-invocation-id': invocB.invocationId, 'x-callback-token': invocB.callbackToken },
     });
 
     assert.equal(res.statusCode, 403, 'same cat+thread but different invocation must be rejected');
@@ -245,7 +252,8 @@ describe('GET /api/callbacks/permission-status', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/permission-status?invocationId=${invocationId}&callbackToken=${callbackToken}&requestId=nonexistent`,
+      url: `/api/callbacks/permission-status?requestId=nonexistent`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(res.statusCode, 404);

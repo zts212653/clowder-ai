@@ -15,7 +15,10 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type {
+  InvocationRecord,
+  InvocationRegistry,
+} from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { GlobalControlStore } from '../infrastructure/scheduler/GlobalControlStore.js';
@@ -29,6 +32,7 @@ import {
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { ScheduleLifecycleNotifier, TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
 import { governanceRoutes } from './schedule-governance.js';
 
 /** #415: Normalize once-trigger input — accepts delayMs (relative) or fireAt (absolute) */
@@ -83,31 +87,25 @@ function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void
   if (subjectKey.startsWith('pr-')) target.add(`pr:${subjectKey.slice(3)}`);
 }
 
-function firstHeaderValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
+type DeliveryThreadResolutionCode = 'STALE_INVOCATION';
 
-type DeliveryThreadResolutionCode = 'STALE_INVOCATION' | 'INVALID_CALLBACK_CREDENTIALS';
-
+/** Resolve deliveryThreadId from preHandler auth (headers) or explicit body param.
+ *  Panel UI requests have no auth → uses explicit deliveryThreadId or null.
+ *  MCP requests have callbackAuth → infer from invocation record.
+ *  Invalid credentials are rejected at the preHandler level (fail-closed, #474). */
 function resolveDeliveryThreadId(
-  request: { headers: Record<string, string | string[] | undefined> },
-  body: { deliveryThreadId?: string; invocationId?: string; callbackToken?: string },
+  callbackAuth: InvocationRecord | undefined,
+  body: { deliveryThreadId?: string },
   registry?: InvocationRegistry,
 ): { deliveryThreadId: string | null; code: DeliveryThreadResolutionCode | null } {
-  const invocationId = body.invocationId ?? firstHeaderValue(request.headers['x-invocation-id']);
-  const callbackToken = body.callbackToken ?? firstHeaderValue(request.headers['x-callback-token']);
-  const hasAnyCallbackCredential = Boolean(invocationId || callbackToken);
-  if (!hasAnyCallbackCredential) {
+  if (!callbackAuth) {
     return { deliveryThreadId: body.deliveryThreadId ?? null, code: null };
   }
-  if (!registry) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
-  if (!invocationId || !callbackToken) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
-
-  const record = registry.verify(invocationId, callbackToken);
-  if (!record) return { deliveryThreadId: null, code: 'INVALID_CALLBACK_CREDENTIALS' };
-  if (!registry.isLatest(invocationId)) return { deliveryThreadId: null, code: 'STALE_INVOCATION' };
+  if (registry && !registry.isLatest(callbackAuth.invocationId)) {
+    return { deliveryThreadId: null, code: 'STALE_INVOCATION' };
+  }
   if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, code: null };
-  return { deliveryThreadId: record.threadId, code: null };
+  return { deliveryThreadId: callbackAuth.threadId, code: null };
 }
 
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
@@ -121,6 +119,9 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     notifyLifecycle,
     registry,
   } = opts;
+
+  // #476: Register callback auth preHandler for MCP-originated schedule requests
+  if (registry) registerCallbackAuthHook(app, registry);
 
   // GET /api/schedule/tasks
   // #320: Optional ?threadId= filter — resolves thread's task subjectKeys for cross-match
@@ -257,8 +258,6 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       params?: Record<string, unknown>;
       display?: { label: string; category: string; description?: string };
       deliveryThreadId?: string;
-      invocationId?: string;
-      callbackToken?: string;
     };
 
     if (!body.templateId) {
@@ -293,19 +292,12 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
-    const resolution = resolveDeliveryThreadId(request, body, registry);
+    const resolution = resolveDeliveryThreadId(request.callbackAuth, body, registry);
     if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {
         error: 'Stale callback invocation superseded by a newer invocation',
         code: 'STALE_INVOCATION',
-      };
-    }
-    if (resolution.code === 'INVALID_CALLBACK_CREDENTIALS') {
-      reply.status(401);
-      return {
-        error: 'Invalid callback credentials',
-        code: 'INVALID_CALLBACK_CREDENTIALS',
       };
     }
 
@@ -383,19 +375,12 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
-    const resolution = resolveDeliveryThreadId(request, body, registry);
+    const resolution = resolveDeliveryThreadId(request.callbackAuth, body, registry);
     if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {
         error: 'Stale callback invocation superseded by a newer invocation',
         code: 'STALE_INVOCATION',
-      };
-    }
-    if (resolution.code === 'INVALID_CALLBACK_CREDENTIALS') {
-      reply.status(401);
-      return {
-        error: 'Invalid callback credentials',
-        code: 'INVALID_CALLBACK_CREDENTIALS',
       };
     }
 

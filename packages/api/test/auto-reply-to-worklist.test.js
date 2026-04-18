@@ -105,9 +105,8 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '收到，opus！我来看',
       },
     });
@@ -148,9 +147,8 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '收到两位！',
       },
     });

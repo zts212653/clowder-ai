@@ -70,9 +70,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'REST 还是 GraphQL？',
         options: ['REST', 'GraphQL'],
         voters: ['codex', 'gemini'],
@@ -96,9 +95,8 @@ describe('POST /api/callbacks/start-vote', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: '哪个方案？',
         options: ['A', 'B'],
         voters: ['codex'],
@@ -119,9 +117,8 @@ describe('POST /api/callbacks/start-vote', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: '谁最坏？',
         options: ['opus', 'codex'],
         voters: ['codex', 'gemini'],
@@ -145,9 +142,8 @@ describe('POST /api/callbacks/start-vote', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'Q1?',
         options: ['A', 'B'],
         voters: ['codex'],
@@ -158,9 +154,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'Q2?',
         options: ['C', 'D'],
         voters: ['codex'],
@@ -178,9 +173,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': 'fake-id', 'x-callback-token': 'fake-token' },
       payload: {
-        invocationId: 'fake-id',
-        callbackToken: 'fake-token',
         question: 'Q?',
         options: ['A', 'B'],
         voters: ['codex'],
@@ -198,9 +192,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'Q?',
         options: ['A'],
         voters: ['codex'],
@@ -219,9 +212,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'Q?',
         options: ['A', 'B'],
         voters: ['codex'],
@@ -244,9 +236,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': old.invocationId, 'x-callback-token': old.callbackToken },
       payload: {
-        invocationId: old.invocationId,
-        callbackToken: old.callbackToken,
         question: 'Q?',
         options: ['A', 'B'],
         voters: ['codex'],
@@ -267,9 +258,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'Q?',
         options: ['A', 'B'],
         voters: ['codex'],
@@ -289,9 +279,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'Q?',
         options: ['A', 'B'],
         voters: ['codex'],
@@ -354,9 +343,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: '哪个方案好？',
         options: ['A', 'B'],
         voters: ['codex', 'gemini'],
@@ -421,9 +409,8 @@ describe('POST /api/callbacks/start-vote', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         question: 'Overflow test?',
         options: ['A', 'B'],
         voters: ['codex', 'gemini', 'sonnet', 'gpt52', 'spark', 'dare', 'antigravity'],

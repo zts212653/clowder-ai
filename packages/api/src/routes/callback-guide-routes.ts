@@ -15,30 +15,29 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { GuideLifecycleService } from '../domains/guides/GuideLifecycleService.js';
 import { createGuideStoreBridge, type IGuideSessionStore } from '../domains/guides/GuideSessionRepository.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
 const guideStatusSchema = z.enum(['offered', 'awaiting_choice', 'active', 'completed', 'cancelled']);
 
-const updateGuideStateSchema = callbackAuthSchema.extend({
+const updateGuideStateSchema = z.object({
   threadId: z.string().min(1),
   guideId: z.string().min(1),
   status: guideStatusSchema,
   currentStep: z.number().int().min(0).optional(),
 });
 
-const startGuideSchema = callbackAuthSchema.extend({
+const startGuideSchema = z.object({
   guideId: z.string().min(1),
 });
 
-const resolveGuideSchema = callbackAuthSchema.extend({
+const resolveGuideSchema = z.object({
   intent: z.string().min(1),
 });
 
-const controlGuideSchema = callbackAuthSchema.extend({
+const controlGuideSchema = z.object({
   action: z.enum(['next', 'skip', 'exit']),
 });
 
@@ -77,19 +76,17 @@ export async function registerCallbackGuideRoutes(
 
   // POST /api/callbacks/update-guide-state
   app.post('/api/callbacks/update-guide-state', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = updateGuideStateSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, threadId, guideId, status, currentStep } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
-    if (!registry.isLatest(invocationId)) return { status: 'stale_ignored' };
+    const { threadId, guideId, status, currentStep } = parsed.data;
+    if (!registry.isLatest(record.invocationId)) return { status: 'stale_ignored' };
     if (record.threadId !== threadId) {
       reply.status(403);
       return { error: 'Cross-thread write rejected' };
@@ -114,18 +111,16 @@ export async function registerCallbackGuideRoutes(
 
   // POST /api/callbacks/start-guide
   app.post('/api/callbacks/start-guide', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = startGuideSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request', details: parsed.error.issues };
     }
-    const { invocationId, callbackToken, guideId } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
-    if (!registry.isLatest(invocationId)) return { status: 'stale_ignored' };
+    const { guideId } = parsed.data;
+    if (!registry.isLatest(record.invocationId)) return { status: 'stale_ignored' };
 
     const result = await lifecycle.startGuideCallback({
       threadId: record.threadId,
@@ -141,17 +136,15 @@ export async function registerCallbackGuideRoutes(
 
   // POST /api/callbacks/guide-resolve
   app.post('/api/callbacks/guide-resolve', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = resolveGuideSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request', details: parsed.error.issues };
     }
-    const { invocationId, callbackToken, intent } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { intent } = parsed.data;
 
     const matches = resolveGuideForIntent(intent);
     app.log.info({ intent, matchCount: matches.length, threadId: record.threadId }, '[F155] guide_resolve');
@@ -160,18 +153,16 @@ export async function registerCallbackGuideRoutes(
 
   // POST /api/callbacks/guide-control
   app.post('/api/callbacks/guide-control', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = controlGuideSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request', details: parsed.error.issues };
     }
-    const { invocationId, callbackToken, action } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
-    if (!registry.isLatest(invocationId)) return { status: 'stale_ignored' };
+    const { action } = parsed.data;
+    if (!registry.isLatest(record.invocationId)) return { status: 'stale_ignored' };
 
     const result = await lifecycle.controlGuide({
       threadId: record.threadId,

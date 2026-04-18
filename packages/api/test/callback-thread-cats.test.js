@@ -31,9 +31,10 @@ describe('GET /api/callbacks/thread-cats', () => {
 
   async function setup({ records, threads, participants, services = new Map() } = {}) {
     const { registerCallbackThreadCatsRoutes } = await import('../dist/routes/callback-thread-cats-routes.js');
+    const { registerCallbackAuthHook } = await import('../dist/routes/callback-auth-prehandler.js');
     app = Fastify();
+    registerCallbackAuthHook(app, stubRegistry(records ?? new Map()));
     registerCallbackThreadCatsRoutes(app, {
-      registry: stubRegistry(records ?? new Map()),
       threadStore: stubThreadStore(threads, participants),
       agentRegistry: { getAllEntries: () => services },
     });
@@ -41,20 +42,21 @@ describe('GET /api/callbacks/thread-cats', () => {
     return app;
   }
 
-  it('returns 400 when auth params are missing', async () => {
+  it('returns 401 when auth headers are missing', async () => {
     await setup();
     const res = await app.inject({
       method: 'GET',
       url: '/api/callbacks/thread-cats',
     });
-    assert.equal(res.statusCode, 400);
+    assert.equal(res.statusCode, 401);
   });
 
   it('returns 401 for invalid callback credentials', async () => {
     await setup();
     const res = await app.inject({
       method: 'GET',
-      url: '/api/callbacks/thread-cats?invocationId=bad&callbackToken=bad',
+      url: '/api/callbacks/thread-cats',
+      headers: { 'x-invocation-id': 'bad', 'x-callback-token': 'bad' },
     });
     assert.equal(res.statusCode, 401);
   });
@@ -67,7 +69,8 @@ describe('GET /api/callbacks/thread-cats', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/callbacks/thread-cats?invocationId=inv-1&callbackToken=tok-1',
+      url: '/api/callbacks/thread-cats',
+      headers: { 'x-invocation-id': 'inv-1', 'x-callback-token': 'tok-1' },
     });
     assert.equal(res.statusCode, 404);
   });
@@ -85,7 +88,8 @@ describe('GET /api/callbacks/thread-cats', () => {
     await setup({ records, threads, participants, services });
     const res = await app.inject({
       method: 'GET',
-      url: '/api/callbacks/thread-cats?invocationId=inv-1&callbackToken=tok-1',
+      url: '/api/callbacks/thread-cats',
+      headers: { 'x-invocation-id': 'inv-1', 'x-callback-token': 'tok-1' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -110,7 +114,8 @@ describe('GET /api/callbacks/thread-cats', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/callbacks/thread-cats?invocationId=inv-1&callbackToken=tok-1',
+      url: '/api/callbacks/thread-cats',
+      headers: { 'x-invocation-id': 'inv-1', 'x-callback-token': 'tok-1' },
     });
     assert.equal(res.statusCode, 400);
   });

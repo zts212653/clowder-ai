@@ -28,6 +28,13 @@ export const NO_CONFIG_ERROR =
   'Clowder AI callback not configured. Missing CAT_CAFE_API_URL, CAT_CAFE_INVOCATION_ID, or CAT_CAFE_CALLBACK_TOKEN environment variables.';
 // ============ HTTP helpers ============
 
+export function buildAuthHeaders(config: CallbackConfig): Record<string, string> {
+  return {
+    'x-invocation-id': config.invocationId,
+    'x-callback-token': config.callbackToken,
+  };
+}
+
 export async function callbackPost(
   path: string,
   body: Record<string, unknown>,
@@ -36,14 +43,8 @@ export async function callbackPost(
   const config = getCallbackConfig();
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
-  const requestBody = {
-    invocationId: config.invocationId,
-    callbackToken: config.callbackToken,
-    ...body,
-  };
-
   const result = await sendCallbackRequest(
-    { apiUrl: config.apiUrl, path, body: requestBody },
+    { apiUrl: config.apiUrl, path, body, headers: buildAuthHeaders(config) },
     { enableOutbox: options?.enableOutbox === true },
   );
   if (result.ok) return successResult(JSON.stringify(result.data));
@@ -54,14 +55,12 @@ export async function callbackGet(path: string, params?: Record<string, string>)
   const config = getCallbackConfig();
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
-  const query = new URLSearchParams({
-    invocationId: config.invocationId,
-    callbackToken: config.callbackToken,
-    ...params,
-  });
+  const query = new URLSearchParams(params ?? {});
+  const qs = query.toString();
+  const url = qs ? `${config.apiUrl}${path}?${qs}` : `${config.apiUrl}${path}`;
 
   try {
-    const response = await fetch(`${config.apiUrl}${path}?${query.toString()}`);
+    const response = await fetch(url, { headers: buildAuthHeaders(config) });
     if (!response.ok) {
       const text = await response.text();
       return errorResult(`Callback failed (${response.status}): ${text}`);
