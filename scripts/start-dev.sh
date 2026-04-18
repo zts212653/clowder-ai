@@ -680,9 +680,9 @@ api_launch_command() {
         env_prefix="${env_prefix}LOG_LEVEL=debug "
     fi
     if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
-        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run start"
+        printf '%s' "cd packages/api && exec env ${env_prefix}pnpm run start"
     else
-        printf '%s' "cd packages/api && exec ${env_prefix}pnpm run dev"
+        printf '%s' "cd packages/api && exec env ${env_prefix}pnpm run dev"
     fi
 }
 
