@@ -17,14 +17,14 @@
 #   ./scripts/start-dev.sh --status   — 查看 daemon 状态
 #   ./scripts/start-dev.sh --profile=dev          — 家里开发默认值 (proxy ON, sidecar ON)
 #   ./scripts/start-dev.sh --profile=production   — 日常生产 (proxy OFF, sidecar OFF, TTL=永久)
-#   ./scripts/start-dev.sh --profile=opensource   — 开源演示 (proxy OFF, sidecar OFF, TTL=1天)
+#   ./scripts/start-dev.sh --profile=opensource   — 开源演示 (proxy OFF, sidecar OFF, TTL=永久)
 #   ./scripts/start-dev.sh -- --npm-registry=URL --pip-index-url=URL --hf-endpoint=URL
 #                                               — 显式指定安装/模型下载镜像（仅手动 override）
 #
 # Profile 说明:
 #   dev        — proxy ON, ASR/TTS/LLM ON, TTL=永久, redis-dev
 #   production — proxy OFF, ASR/TTS/LLM OFF, TTL=永久, redis-opensource (日常生产)
-#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=86400s, redis-opensource (开源演示)
+#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=永久, redis-opensource (开源演示)
 #   (无)       — 保持原有行为（各项 ENABLED 默认 0）
 #
 # .env 中的显式值覆盖 profile 默认值。启动摘要标注每个值的来源。
@@ -225,10 +225,10 @@ apply_profile_defaults() {
             _PROF_ASR_ENABLED=0
             _PROF_TTS_ENABLED=0
             _PROF_LLM_POSTPROCESS_ENABLED=0
-            _PROF_MESSAGE_TTL_SECONDS=86400
-            _PROF_THREAD_TTL_SECONDS=86400
-            _PROF_TASK_TTL_SECONDS=86400
-            _PROF_SUMMARY_TTL_SECONDS=86400
+            _PROF_MESSAGE_TTL_SECONDS=0
+            _PROF_THREAD_TTL_SECONDS=0
+            _PROF_TASK_TTL_SECONDS=0
+            _PROF_SUMMARY_TTL_SECONDS=0
             _PROF_REDIS_PROFILE=opensource
             ;;
         "")
