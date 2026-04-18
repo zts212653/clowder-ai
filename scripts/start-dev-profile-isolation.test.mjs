@@ -90,7 +90,7 @@ describe('start-dev strict profile isolation', () => {
       assert.match(result.stdout, /TTS=0/);
       assert.match(result.stdout, /LLM=0/);
       assert.match(result.stdout, /EMBED=/);
-      assert.match(result.stdout, /TTL=86400/);
+      assert.match(result.stdout, /TTL=0/);
       assert.match(result.stdout, /REDIS_PROFILE=opensource/);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });

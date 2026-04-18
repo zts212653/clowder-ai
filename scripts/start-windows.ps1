@@ -94,8 +94,8 @@ switch ($Profile_) {
         $profileDefaults = @{
             ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
             TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
-            MESSAGE_TTL_SECONDS = '86400'; THREAD_TTL_SECONDS = '86400'
-            TASK_TTL_SECONDS = '86400'; SUMMARY_TTL_SECONDS = '86400'
+            MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
+            TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
             REDIS_PROFILE = 'opensource'
         }
     }
