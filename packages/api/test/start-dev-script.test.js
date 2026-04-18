@@ -646,7 +646,22 @@ printf '%s' "$(api_launch_command)"
 `,
   );
 
-  assert.equal(output, 'cd packages/api && exec NODE_ENV=production pnpm run start');
+  assert.equal(output, 'cd packages/api && exec env NODE_ENV=production pnpm run start');
+});
+
+test('api_launch_command routes multiple env assignments through env before pnpm', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+CAT_CAFE_DIRECT_NO_WATCH=1
+PROD_WEB=true
+DEBUG_MODE=true
+printf '%s' "$(api_launch_command)"
+`,
+  );
+
+  assert.equal(output, 'cd packages/api && exec env NODE_ENV=production LOG_LEVEL=debug pnpm run start');
 });
 
 test('frontend_launch_command uses exec in production mode so wait tracks next start', () => {
