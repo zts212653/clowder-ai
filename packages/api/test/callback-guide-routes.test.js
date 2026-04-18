@@ -233,7 +233,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/guide-resolve',
-        payload: { invocationId, callbackToken, intent: '修改成员认证' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { intent: '修改成员认证' },
       });
 
       assert.equal(res.statusCode, 200);
