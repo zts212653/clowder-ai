@@ -49,7 +49,8 @@ const DEFAULT_CONNECTOR_THEME: ConnectorTailwindTheme = {
   bubble: 'border border-conn-blue-bubble-border bg-conn-blue-bubble-bg',
 };
 
-/** F056: Designed icon per connector — replaces emoji with SVG/PNG icons. */
+/** F056: Designed icon per connector — replaces emoji with SVG/PNG icons.
+ *  Thread-local system notices are filtered earlier in ChatMessage and do not render here. */
 function ConnectorIcon({ connector, fallbackIcon }: { connector: string; fallbackIcon: string }) {
   switch (connector) {
     case 'feishu':

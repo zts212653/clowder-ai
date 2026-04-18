@@ -1155,12 +1155,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     };
     const chatItems: TimelineItem[] = page.map((m) => ({
       id: m.id,
-      type: (isSystemUserMessage(m)
-        ? 'system'
-        : m.catId
-          ? 'assistant'
-          : m.source
-            ? 'connector'
+      type: (m.catId
+        ? isSystemUserMessage(m)
+          ? 'system'
+          : 'assistant'
+        : m.source
+          ? 'connector'
+          : isSystemUserMessage(m)
+            ? 'system'
             : 'user') as TimelineItem['type'],
       catId: m.catId,
       content: m.content,

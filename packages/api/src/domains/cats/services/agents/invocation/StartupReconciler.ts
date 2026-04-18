@@ -12,10 +12,10 @@
  * (Intake from community PR #78 / Issue #77, with source field fix.)
  */
 
+import { randomUUID } from 'node:crypto';
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
-import type { AgentMessage } from '../../types.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
 
 export interface StartupSweepResult {
@@ -40,14 +40,15 @@ interface MessageAppender {
   markDelivered?(id: string, deliveredAt: number): unknown;
 }
 
-interface AgentMessageBroadcaster {
-  broadcastAgentMessage(message: AgentMessage, threadId: string): void;
+interface ConnectorMessageBroadcaster {
+  broadcastToRoom(room: string, event: string, data: unknown): void;
 }
 
 const RECONCILER_SOURCE: ConnectorSource = {
   connector: 'startup-reconciler',
-  label: '⚠️ 重启通知',
+  label: '重启通知',
   icon: '⚠️',
+  meta: { presentation: 'system_notice', noticeTone: 'warning' },
 };
 
 export interface StartupReconcilerDeps {
@@ -59,7 +60,7 @@ export interface StartupReconcilerDeps {
   /** Phase A+: Optional — post visible error messages to affected threads. */
   messageStore?: MessageAppender;
   /** Phase A+: Optional — push real-time WebSocket notification to frontend. */
-  socketManager?: AgentMessageBroadcaster;
+  socketManager?: ConnectorMessageBroadcaster;
 }
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
@@ -196,23 +197,29 @@ export class StartupReconciler {
     let notified = 0;
     for (const [threadId, { catIds, userId }] of affectedThreads) {
       const catLabel = catIds.length === 1 ? catIds[0] : `${catIds.length} cats`;
-      const content =
-        `⚠️ 服务重启 — ${catLabel} 的进行中请求已中断，请重新发送。\n` +
-        `Service restarted — interrupted in-progress request (${catLabel}). Please resend your message.`;
+      const content = `服务刚重启，${catLabel} 的进行中请求已中断，请重新发送。`;
+      const fallbackId = `startup-reconciler-${threadId}-${randomUUID().slice(0, 8)}`;
+      let messageId = fallbackId;
+      let timestamp = Date.now();
 
       let persisted = false;
       let broadcasted = false;
       if (messageStore) {
         try {
-          await messageStore.append({
+          const stored = await messageStore.append({
             threadId,
             userId,
             catId: null,
             content,
             mentions: [],
             source: RECONCILER_SOURCE,
-            timestamp: Date.now(),
+            timestamp,
           });
+          if (stored && typeof stored === 'object') {
+            const maybeStored = stored as { id?: unknown; timestamp?: unknown };
+            if (typeof maybeStored.id === 'string') messageId = maybeStored.id;
+            if (typeof maybeStored.timestamp === 'number') timestamp = maybeStored.timestamp;
+          }
           persisted = true;
         } catch (err) {
           this.deps.log.warn(
@@ -223,11 +230,16 @@ export class StartupReconciler {
 
       if (socketManager) {
         try {
-          const errorCatId = catIds[0] ?? ('system' as CatId);
-          socketManager.broadcastAgentMessage(
-            { type: 'error', catId: errorCatId, error: content, isFinal: true, timestamp: Date.now() },
+          socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
             threadId,
-          );
+            message: {
+              id: messageId,
+              type: 'connector' as const,
+              content,
+              source: RECONCILER_SOURCE,
+              timestamp,
+            },
+          });
           broadcasted = true;
         } catch (err) {
           this.deps.log.warn(
