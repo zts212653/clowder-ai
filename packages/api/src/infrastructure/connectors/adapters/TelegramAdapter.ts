@@ -36,6 +36,7 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
   readonly connectorId = 'telegram';
   private readonly bot: Bot;
   private readonly log: FastifyBaseLogger;
+  private readonly placeholderChats = new Map<string, string>(); // msgId → chatId
   private sendMessageFn: ((chatId: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>) | null =
     null;
   private sendMediaFns: {
@@ -197,7 +198,20 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
    */
   async sendPlaceholder(externalChatId: string, text: string): Promise<string> {
     const msg = await this.bot.api.sendMessage(Number(externalChatId), text);
-    return String(msg.message_id);
+    const msgId = String(msg.message_id);
+    this.placeholderChats.set(msgId, externalChatId);
+    return msgId;
+  }
+
+  /**
+   * Delete a streaming placeholder message after outbound delivery succeeds.
+   * chatId is looked up from the placeholderChats cache set in sendPlaceholder.
+   */
+  async deleteMessage(platformMessageId: string): Promise<void> {
+    const chatId = this.placeholderChats.get(platformMessageId);
+    if (!chatId) return;
+    this.placeholderChats.delete(platformMessageId);
+    await this.bot.api.deleteMessage(Number(chatId), Number(platformMessageId));
   }
 
   /**
