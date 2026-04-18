@@ -1,6 +1,7 @@
-# F155 Guide Registry
-# Maps guide IDs to flow files, keywords, and discovery metadata.
-# MCP resolve tool matches user intent against keywords to suggest guides.
+# F150 Guide Registry
+# Maps guide IDs to flow files and user-facing discovery metadata.
+# Guide discovery now returns the available catalog directly; the cat chooses
+# among the returned guide descriptions instead of keyword-resolving an intent.
 
 guides:
   - id: add-member

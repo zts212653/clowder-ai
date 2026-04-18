@@ -51,7 +51,7 @@ intake_issue: "cat-cafe#1119"
 - [ ] **CustomEvent 迁移**：移除 `window.addEventListener('guide:start')` 桥接层，改用 Socket.io（server→client）+ Zustand actions（client-side）
 - [ ] **GuideSession 领域对象**：从 thread-scoped `guideState` 迁移到独立 `GuideSession` store `{ threadId, userId, guideId, sessionId, state }`
 - [ ] **文件拆分**：`callback-guide-routes.ts` 状态机迁移到 domain service；`GuideOverlay.tsx` 继续向 `guide-overlay-parts.tsx` 分解
-- [ ] **意图判定与 resolve 策略层**：猫先基于用户意图判断是直接解释还是需要引导，再通过 MCP `cat_cafe_guide_resolve(intent)` 解析具体场景；路由层不再直接从原始消息触发 guide，避免 hijack 正常对话
+- [ ] **意图判定与 guide catalog 策略层**：猫先基于用户意图判断是直接解释还是需要引导，再通过 MCP `cat_cafe_get_available_guides()` 获取当前可用场景目录，并基于返回描述选择具体场景；路由层不再直接从原始消息触发 guide，避免 hijack 正常对话
 
 **产品扩展**
 

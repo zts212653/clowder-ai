@@ -1,6 +1,6 @@
 /**
  * F155: Guide engine callback route tests
- * Tests: start-guide, guide-resolve, guide-control
+ * Tests: start-guide, get-available-guides, guide-control
  */
 
 import assert from 'node:assert/strict';
@@ -186,62 +186,52 @@ describe('F155 Guide callback routes', () => {
     });
   });
 
-  // ─── guide-resolve ───
+  // ─── get-available-guides ───
 
-  describe('POST /api/callbacks/guide-resolve', () => {
-    test('resolves matching intent', async () => {
+  describe('POST /api/callbacks/get-available-guides', () => {
+    test('returns the currently available guide catalog', async () => {
       const app = await createApp();
       const { invocationId, callbackToken } = createCreds();
 
       const res = await app.inject({
         method: 'POST',
-        url: '/api/callbacks/guide-resolve',
+        url: '/api/callbacks/get-available-guides',
         headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-        payload: { intent: '添加成员' },
       });
 
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.body);
       assert.equal(body.status, 'ok');
-      assert.ok(body.matches.length > 0);
-      assert.equal(body.matches[0].id, 'add-member');
-    });
-
-    test('returns empty matches for unrelated intent', async () => {
-      const app = await createApp();
-      const { invocationId, callbackToken } = createCreds();
-
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/callbacks/guide-resolve',
-        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-        payload: { intent: '天气预报' },
+      assert.ok(body.guides.length > 0);
+      assert.ok(body.guides.some((guide) => guide.id === 'add-member'));
+      assert.deepEqual(body.guides.find((guide) => guide.id === 'add-member'), {
+        id: 'add-member',
+        name: '添加成员',
+        description: '引导你完成新成员的创建和配置',
+        category: 'member-config',
+        priority: 'P0',
+        crossSystem: false,
+        estimatedTime: '3min',
       });
-
-      assert.equal(res.statusCode, 200);
-      const body = JSON.parse(res.body);
-      assert.equal(body.status, 'ok');
-      assert.equal(body.matches.length, 0);
     });
 
-    test('filters edit-member-auth when no member cards exist', async () => {
+    test('filters guides that are unavailable in the current context', async () => {
       const app = await createApp({
-        getGuideResolveContext: () => ({ memberCardCount: 0 }),
+        getGuideAvailabilityContext: () => ({ memberCardCount: 0 }),
       });
       const { invocationId, callbackToken } = createCreds();
 
       const res = await app.inject({
         method: 'POST',
-        url: '/api/callbacks/guide-resolve',
+        url: '/api/callbacks/get-available-guides',
         headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-        payload: { intent: '修改成员认证' },
       });
 
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.body);
       assert.equal(body.status, 'ok');
       assert.equal(
-        body.matches.some((match) => match.id === 'edit-member-auth'),
+        body.guides.some((guide) => guide.id === 'edit-member-auth'),
         false,
       );
     });
@@ -251,9 +241,8 @@ describe('F155 Guide callback routes', () => {
 
       const res = await app.inject({
         method: 'POST',
-        url: '/api/callbacks/guide-resolve',
+        url: '/api/callbacks/get-available-guides',
         headers: { 'x-invocation-id': 'fake', 'x-callback-token': 'fake' },
-        payload: { intent: '添加' },
       });
 
       assert.equal(res.statusCode, 401);

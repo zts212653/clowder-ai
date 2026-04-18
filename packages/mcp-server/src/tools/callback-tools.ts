@@ -790,8 +790,10 @@ export async function handleStartGuide(input: { guideId: string }): Promise<Tool
   return callbackPost('/api/callbacks/start-guide', { guideId: input.guideId });
 }
 
-export async function handleGuideResolve(input: { intent: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/guide-resolve', { intent: input.intent });
+export const getAvailableGuidesInputSchema = {};
+
+export async function handleGetAvailableGuides(): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/get-available-guides', {});
 }
 
 export async function handleGuideControl(input: { action: string }): Promise<ToolResult> {
@@ -1028,18 +1030,15 @@ export const callbackTools = [
     handler: handleUpdateGuideState,
   },
   {
-    name: 'cat_cafe_guide_resolve',
+    name: 'cat_cafe_get_available_guides',
     description:
-      'Explicitly match a user workflow/config/help intent to available guided flows. ' +
-      'Call this when a user asks how to do something step by step (e.g. "怎么添加成员", "how to add a member"). ' +
-      'Routing no longer auto-creates guide offers from raw chat text, so use this tool deliberately after deciding a guide is more helpful than a plain explanation. ' +
-      'Returns a ranked list of matching guide flows with IDs, names, and descriptions. ' +
-      'If matches are found, suggest the top match to the user and ask if they want to start the guide. ' +
-      'On confirmation, call cat_cafe_start_guide with the matched guideId.',
-    inputSchema: {
-      intent: z.string().min(1).describe('User intent text (e.g. "添加成员", "配置飞书")'),
-    },
-    handler: handleGuideResolve,
+      'Fetch the current catalog of guides that are actually available in this thread context. ' +
+      'Use this after you decide a user likely needs a step-by-step walkthrough instead of a plain explanation. ' +
+      'Returns guide IDs, names, descriptions, categories, priorities, and estimated times so you can recommend the best-fit guide to the user. ' +
+      'Do not guess from keywords alone — inspect the returned guide metadata first, then ask the user whether to start one. ' +
+      'On confirmation, call cat_cafe_start_guide with the chosen guideId.',
+    inputSchema: getAvailableGuidesInputSchema,
+    handler: handleGetAvailableGuides,
   },
   {
     name: 'cat_cafe_start_guide',

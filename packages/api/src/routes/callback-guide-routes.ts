@@ -4,7 +4,7 @@
  *
  * POST /api/callbacks/update-guide-state
  * POST /api/callbacks/start-guide
- * POST /api/callbacks/guide-resolve
+ * POST /api/callbacks/get-available-guides
  * POST /api/callbacks/guide-control
  */
 
@@ -35,10 +35,6 @@ const startGuideSchema = z.object({
   guideId: z.string().min(1),
 });
 
-const resolveGuideSchema = z.object({
-  intent: z.string().min(1),
-});
-
 const controlGuideSchema = z.object({
   action: z.enum(['next', 'skip', 'exit']),
 });
@@ -54,7 +50,7 @@ export async function registerCallbackGuideRoutes(
     socketManager: SocketManager;
     guideSessionStore?: IGuideSessionStore;
     loadGuideFlow?: (guideId: string) => unknown;
-    getGuideResolveContext?: () => Promise<{ memberCardCount: number }> | { memberCardCount: number };
+    getGuideAvailabilityContext?: () => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   },
 ): Promise<void> {
   const { registry } = deps;
@@ -63,7 +59,7 @@ export async function registerCallbackGuideRoutes(
   const {
     isValidGuideId,
     loadGuideFlow: defaultLoadGuideFlow,
-    resolveGuideForIntent,
+    getAvailableGuides,
   } = await import('../domains/guides/guide-registry-loader.js');
 
   if (!deps.guideSessionStore) return; // Skip guide routes when store not provided (e.g. tests)
@@ -76,8 +72,8 @@ export async function registerCallbackGuideRoutes(
     isValidGuideId,
     loadGuideFlow: deps.loadGuideFlow ?? defaultLoadGuideFlow,
   });
-  const getGuideResolveContext =
-    deps.getGuideResolveContext ??
+  const getGuideAvailabilityContext =
+    deps.getGuideAvailabilityContext ??
     (() => {
       const projectRoot = resolveActiveProjectRoot();
       return { memberCardCount: Object.keys(getResolvedCats(projectRoot)).length };
@@ -143,21 +139,14 @@ export async function registerCallbackGuideRoutes(
     return { status: 'ok', guideId, guideState: result.guideState };
   });
 
-  // POST /api/callbacks/guide-resolve
-  app.post('/api/callbacks/guide-resolve', async (request, reply) => {
+  // POST /api/callbacks/get-available-guides
+  app.post('/api/callbacks/get-available-guides', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
 
-    const parsed = resolveGuideSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request', details: parsed.error.issues };
-    }
-    const { intent } = parsed.data;
-
-    const matches = resolveGuideForIntent(intent, await getGuideResolveContext());
-    app.log.info({ intent, matchCount: matches.length, threadId: record.threadId }, '[F155] guide_resolve');
-    return { status: 'ok', matches };
+    const guides = getAvailableGuides(await getGuideAvailabilityContext());
+    app.log.info({ guideCount: guides.length, threadId: record.threadId }, '[F155] get_available_guides');
+    return { status: 'ok', guides };
   });
 
   // POST /api/callbacks/guide-control

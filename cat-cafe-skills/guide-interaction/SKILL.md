@@ -28,7 +28,7 @@ triggers:
 - 路由层不会再从原始消息或 `/guide` 文本自动创建 guide offer
 - 不要因为看到了关键词就擅自造一个引导
 - 如果用户只是想知道说明，直接回答
-- 如果用户明显需要一步一步操作，再调用 `cat_cafe_guide_resolve(intent=...)` 查找合适的 guide
+- 如果用户明显需要一步一步操作，再调用 `cat_cafe_get_available_guides()` 查看当前可用的 guide 目录，并基于返回的说明挑选最合适的 guide
 
 ## 系统注入格式
 
@@ -48,7 +48,7 @@ triggers:
 
 | 动作 | MCP 工具 | 何时使用 |
 |------|----------|----------|
-| 匹配候选 guide | `cat_cafe_guide_resolve` | 用户明确在问某项功能怎么做，且你判断交互引导比纯文字更合适 |
+| 获取可用 guide 目录 | `cat_cafe_get_available_guides` | 用户明确在问某项功能怎么做，且你判断交互引导比纯文字更合适 |
 | 持久化 guide 状态 | `cat_cafe_update_guide_state` | 已经决定 offer / preview / cancel / complete 某个 guide |
 | 发送交互选择卡片 | `cat_cafe_create_rich_block` | 给用户展示开始/预览/跳过等选择 |
 | 启动前端 guide overlay | `cat_cafe_start_guide` | 用户确认开始引导后 |
@@ -60,9 +60,10 @@ triggers:
 
 1. 先判断：用户是要一个简短解释，还是要一步一步带着做
 2. 如果简短解释就够，直接回答，不要创建 guide
-3. 如果适合引导，调用 `cat_cafe_guide_resolve(intent=用户的任务意图)`
-4. 没有匹配时，直接回答，不要伪造 guide
-5. 有清晰候选时，再进入 `Guide Matched` 的标准 offer 流程
+3. 如果适合引导，调用 `cat_cafe_get_available_guides()`
+4. 根据返回的 guide `id / name / description / estimatedTime` 判断最合适的候选
+5. 没有合适候选时，直接回答，不要伪造 guide
+6. 有清晰候选时，再进入 `Guide Matched` 的标准 offer 流程
 
 ### 2. Guide Matched
 

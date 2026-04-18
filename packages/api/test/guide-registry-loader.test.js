@@ -5,7 +5,7 @@ import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 describe('F155 guide registry loader target validation', async () => {
-  const { getRegistryEntries, getValidGuideIds, isValidGuideTarget, loadGuideFlow, resolveGuideForIntent } =
+  const { getAvailableGuides, getRegistryEntries, getValidGuideIds, isValidGuideTarget, loadGuideFlow } =
     await import('../dist/domains/guides/guide-registry-loader.js');
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -232,35 +232,25 @@ describe('F155 guide registry loader target validation', async () => {
     }
   });
 
-  test('matches meaningful partial queries without requiring full keyword', () => {
-    const matches = resolveGuideForIntent('添加');
-    assert.ok(matches.some((match) => match.id === 'add-member'));
-  });
+  test('returns guide catalog entries with user-facing metadata', () => {
+    const guides = getAvailableGuides();
+    const addMember = guides.find((guide) => guide.id === 'add-member');
 
-  test('does not offer guides for single-character queries', () => {
-    const matches = resolveGuideForIntent('添');
-    assert.equal(matches.length, 0);
-  });
-
-  test('matches exact keyword queries regardless of reverse-match threshold', () => {
-    const matches = resolveGuideForIntent('加成员');
-    assert.equal(matches[0]?.id, 'add-member');
-  });
-
-  test('matches provider onboarding intent to configure-first-provider', () => {
-    const matches = resolveGuideForIntent('first provider');
-    assert.equal(matches[0]?.id, 'configure-first-provider');
-  });
-
-  test('matches feishu setup intent to connect-feishu', () => {
-    const matches = resolveGuideForIntent('配置飞书');
-    assert.equal(matches[0]?.id, 'connect-feishu');
+    assert.deepEqual(addMember, {
+      id: 'add-member',
+      name: '添加成员',
+      description: '引导你完成新成员的创建和配置',
+      category: 'member-config',
+      priority: 'P0',
+      crossSystem: false,
+      estimatedTime: '3min',
+    });
   });
 
   test('filters member-edit guides when no member cards exist', () => {
-    const matches = resolveGuideForIntent('修改成员认证', { memberCardCount: 0 });
+    const guides = getAvailableGuides({ memberCardCount: 0 });
     assert.equal(
-      matches.some((match) => match.id === 'edit-member-auth'),
+      guides.some((guide) => guide.id === 'edit-member-auth'),
       false,
     );
   });
