@@ -409,12 +409,18 @@ try {
 
     # Track background jobs for cleanup
     $jobs = @()
+    # NODE_ENV is driven by launch mode (-Dev), not by profile.
+    # Profile controls data isolation (Redis, TTLs, sidecar features);
+    # -Dev controls whether the API runs in development or production mode.
+    $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
+
     $runtimeEnvOverrides = @{
         REDIS_URL = $env:REDIS_URL
         MEMORY_STORE = $env:MEMORY_STORE
         CAT_CAFE_MCP_SERVER_PATH = $env:CAT_CAFE_MCP_SERVER_PATH
         API_SERVER_PORT = $ApiPort
         FRONTEND_PORT = $WebPort
+        NODE_ENV = $apiNodeEnv
     }
 
     # API Server
