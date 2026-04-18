@@ -5,8 +5,9 @@ import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 describe('F155 guide registry loader target validation', async () => {
-  const { getAvailableGuides, getRegistryEntries, getValidGuideIds, isValidGuideTarget, loadGuideFlow } =
-    await import('../dist/domains/guides/guide-registry-loader.js');
+  const { getAvailableGuides, getRegistryEntries, getValidGuideIds, isValidGuideTarget, loadGuideFlow } = await import(
+    '../dist/domains/guides/guide-registry-loader.js'
+  );
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
   test('accepts registry-safe target ids', () => {

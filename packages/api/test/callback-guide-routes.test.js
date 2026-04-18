@@ -204,15 +204,18 @@ describe('F155 Guide callback routes', () => {
       assert.equal(body.status, 'ok');
       assert.ok(body.guides.length > 0);
       assert.ok(body.guides.some((guide) => guide.id === 'add-member'));
-      assert.deepEqual(body.guides.find((guide) => guide.id === 'add-member'), {
-        id: 'add-member',
-        name: '添加成员',
-        description: '引导你完成新成员的创建和配置',
-        category: 'member-config',
-        priority: 'P0',
-        crossSystem: false,
-        estimatedTime: '3min',
-      });
+      assert.deepEqual(
+        body.guides.find((guide) => guide.id === 'add-member'),
+        {
+          id: 'add-member',
+          name: '添加成员',
+          description: '引导你完成新成员的创建和配置',
+          category: 'member-config',
+          priority: 'P0',
+          crossSystem: false,
+          estimatedTime: '3min',
+        },
+      );
     });
 
     test('filters guides that are unavailable in the current context', async () => {
