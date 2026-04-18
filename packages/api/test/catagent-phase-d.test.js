@@ -40,7 +40,12 @@ before(() => {
   writeFileSync(join(tmpDir, 'hello.txt'), 'line1\nline2\nline3\nline4\nline5\n');
   writeFileSync(join(tmpDir, 'big.txt'), Array.from({ length: 400 }, (_, i) => `line ${i + 1}`).join('\n'));
   // Oversized file (>1 MiB) for bounded-read test — each line ~100 bytes × 12000 ≈ 1.2 MB
-  writeFileSync(join(tmpDir, 'huge.log'), Array.from({ length: 12_000 }, (_, i) => `[LOG] entry ${String(i + 1).padStart(5, '0')} ${'x'.repeat(80)}`).join('\n'));
+  writeFileSync(
+    join(tmpDir, 'huge.log'),
+    Array.from({ length: 12_000 }, (_, i) => `[LOG] entry ${String(i + 1).padStart(5, '0')} ${'x'.repeat(80)}`).join(
+      '\n',
+    ),
+  );
   mkdirSync(join(tmpDir, 'src'), { recursive: true });
   writeFileSync(join(tmpDir, 'src', 'index.ts'), 'export const VERSION = "1.0";\nconsole.log(VERSION);\n');
   writeFileSync(join(tmpDir, 'src', 'config.ts'), 'export const PORT = 3000;\n');
