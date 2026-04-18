@@ -663,21 +663,15 @@ background_eval_with_null_stdin() {
 }
 
 api_node_env() {
-    case "$PROFILE" in
-        production|opensource)
-            printf '%s' 'production'
-            ;;
-        dev)
-            printf '%s' 'development'
-            ;;
-        *)
-            if [ "$PROD_WEB" = true ]; then
-                printf '%s' 'production'
-            else
-                printf '%s' 'development'
-            fi
-            ;;
-    esac
+    # NODE_ENV is driven by launch mode (--prod-web), not by profile.
+    # Profile controls data isolation (Redis, TTLs, sidecar features);
+    # --prod-web controls whether the API runs in production or dev mode.
+    # dev:direct may carry --profile=opensource but is still development.
+    if [ "$PROD_WEB" = true ]; then
+        printf '%s' 'production'
+    else
+        printf '%s' 'development'
+    fi
 }
 
 api_launch_command() {

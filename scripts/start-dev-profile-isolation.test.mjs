@@ -158,13 +158,28 @@ describe('start-dev strict profile isolation', () => {
     }
   });
 
-  it('marks opensource profile API launches with NODE_ENV=production for child process semantics', () => {
+  it('marks opensource profile API launches WITHOUT --prod-web as NODE_ENV=development (dev:direct path)', () => {
     const sandboxDir = createSandbox();
     try {
       const result = runApiLaunchCommand({
         sandboxDir,
         env: { CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1' },
         extraArgs: ['--', '--profile=opensource'],
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /NODE_ENV=development/, result.stdout);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks --prod-web + --profile=opensource API launches as NODE_ENV=production (runtime/start:direct path)', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runApiLaunchCommand({
+        sandboxDir,
+        env: { CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1' },
+        extraArgs: ['--prod-web', '--', '--profile=opensource'],
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /NODE_ENV=production/, result.stdout);

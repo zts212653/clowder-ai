@@ -641,11 +641,12 @@ test('api_launch_command uses exec so wait tracks the long-lived server process'
     scriptPath,
     `
 CAT_CAFE_DIRECT_NO_WATCH=1
+PROD_WEB=true
 printf '%s' "$(api_launch_command)"
 `,
   );
 
-  assert.equal(output, 'cd packages/api && exec pnpm run start');
+  assert.equal(output, 'cd packages/api && exec NODE_ENV=production pnpm run start');
 });
 
 test('frontend_launch_command uses exec in production mode so wait tracks next start', () => {

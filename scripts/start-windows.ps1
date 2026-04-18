@@ -409,14 +409,10 @@ try {
 
     # Track background jobs for cleanup
     $jobs = @()
-    $apiNodeEnv = switch ($Profile_) {
-        'dev' { 'development'; break }
-        'production' { 'production'; break }
-        'opensource' { 'production'; break }
-        default {
-            if ($Dev) { 'development' } else { 'production' }
-        }
-    }
+    # NODE_ENV is driven by launch mode (-Dev), not by profile.
+    # Profile controls data isolation (Redis, TTLs, sidecar features);
+    # -Dev controls whether the API runs in development or production mode.
+    $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
 
     $runtimeEnvOverrides = @{
         REDIS_URL = $env:REDIS_URL
