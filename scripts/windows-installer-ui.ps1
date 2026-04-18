@@ -202,12 +202,18 @@ function Resolve-InstallerRedisPlan {
     if ($mode -eq "keep_local") {
         return [pscustomobject]@{ Mode = "keep_local"; RedisUrl = $anyRedisUrl }
     }
-    $redisUrl = if ($mode -eq "external") {
-        if (Test-InstallerConsoleUi) { Read-Host "  External Redis URL" } else { $defaultRedisUrl }
-    } else { "" }
-    if ($mode -eq "external" -and -not $redisUrl) {
-        Write-Warn "External Redis URL empty - using local Redis setup"
-        $mode = "portable"
+    $redisUrl = ""
+    if ($mode -eq "external") {
+        if (Test-InstallerConsoleUi) {
+            while (-not $redisUrl) {
+                $redisUrl = (Read-Host "  External Redis URL").Trim()
+                if (-not $redisUrl) {
+                    Write-Warn "External Redis URL is required when you choose external Redis."
+                }
+            }
+        } else {
+            $redisUrl = $defaultRedisUrl
+        }
     }
     return [pscustomobject]@{ Mode = $mode; RedisUrl = $redisUrl }
 }

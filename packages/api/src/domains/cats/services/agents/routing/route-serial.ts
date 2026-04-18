@@ -766,12 +766,17 @@ export async function* routeSerial(
             if (a2aMentions.length === 0) {
               try {
                 const targets = inlineHits.map((h) => `@${h.catId}`).join(', ');
-                const hintSource = { connector: 'inline-mention-hint', label: 'Routing hint', icon: 'lightbulb' };
+                const hintSource = {
+                  connector: 'inline-mention-hint',
+                  label: '路由提示',
+                  icon: '💡',
+                  meta: { presentation: 'system_notice', noticeTone: 'info' },
+                };
                 const stored = await deps.messageStore.append({
                   userId: 'system',
                   catId: null,
                   threadId,
-                  content: `💡 ${targets} was mentioned but not routed — @ must be on its own line at the start to trigger handoff.`,
+                  content: `想交接给 ${targets}？把它单独放到新起一行开头，才能触发交接。`,
                   mentions: [],
                   timestamp: Date.now(),
                   source: hintSource,

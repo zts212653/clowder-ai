@@ -80,9 +80,19 @@ Non-conversational state updates, alerts, and lightweight automation meta should
 
 | Notification Type | Surface | Persistence | Visual Treatment |
 |-------------------|---------|-------------|------------------|
-| **System Event** | Neutral gray / light blue | Persisted | Full-width `.system-notice-bar` |
+| **System Event** | Warm ivory surface + cool accent metadata | Persisted | Full-width `.system-notice-bar` |
 | **Scheduler Lifecycle** | Warm neutral / pale amber | Ephemeral | Top toast or centered notice pill |
-| **Warning / Error** | Soft red / coral | Persisted | `.system-notice-bar--alert` |
+| **Warning** | Warm ivory surface + amber metadata | Persisted | `.system-notice-bar--alert` |
+| **Error** | Warm rose surface + soft red metadata | Persisted | `.system-notice-bar--alert` |
+
+#### Tier 3 Transport Rule
+
+Persisted in-thread notices may still use the existing `connector_message` storage / WebSocket protocol for compatibility, but they are **not** Tier 2 connector bubbles.
+
+- Use `source.meta.presentation = 'system_notice'` to opt into Tier 3 rendering.
+- Use `source.meta.noticeTone = 'info' | 'warning' | 'error'` to control visual emphasis.
+- Examples: inline routing hint, restart interruption notice.
+- Do **not** use toast/snackbar for recoverable, context-dependent hints that users need to see inside the conversation timeline.
 
 #### Scheduled Task Hierarchy
 
@@ -111,6 +121,17 @@ Scheduled task UX is intentionally split by intent:
 <!-- Tier 3: Scheduler lifecycle toast -->
 <div class="notice-pill notice-pill--scheduler">
   <span class="icon">✅</span> Daily reminder created
+</div>
+
+<!-- Tier 3: Persisted in-thread system notice -->
+<div class="system-notice-bar">
+  <div class="system-notice-bar__meta">
+    <span class="label">Routing hint</span>
+    <span class="time">12:34</span>
+  </div>
+  <div class="system-notice-bar__box">
+    <span class="icon">💡</span> 想交接给 @codex？把它单独放到新起一行开头，才能触发交接。
+  </div>
 </div>
 
 <!-- Tier 1: Scheduler-triggered cat reply -->

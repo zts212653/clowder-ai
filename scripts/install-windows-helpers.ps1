@@ -544,12 +544,16 @@ function Read-InstallerSecret {
 }
 
 function Configure-InstallerAuth {
-    param([string]$ProjectRoot, $State)
+    param([string]$ProjectRoot, $State, [string[]]$SelectedCliCommands = @())
 
     $hasClaude = $null -ne (Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6)
     $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
     $hasGemini = $null -ne (Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6)
     $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
+    $shouldOfferClaude = $hasClaude -or ($SelectedCliCommands -contains "claude")
+    $shouldOfferCodex = $hasCodex -or ($SelectedCliCommands -contains "codex")
+    $shouldOfferGemini = $hasGemini -or ($SelectedCliCommands -contains "gemini")
+    $shouldOfferKimi = $hasKimi -or ($SelectedCliCommands -contains "kimi")
     $isInteractive = [Environment]::UserInteractive -and -not $env:CI
 
     if (-not $isInteractive) {
@@ -557,7 +561,7 @@ function Configure-InstallerAuth {
         return
     }
 
-    if ($hasClaude) {
+    if ($shouldOfferClaude) {
         Write-Host ""
         Write-Host "  Claude (claude):"
         $globalCatCafe = if ($env:CAT_CAFE_GLOBAL_CONFIG_ROOT) { $env:CAT_CAFE_GLOBAL_CONFIG_ROOT } else { $env:USERPROFILE }
@@ -593,7 +597,7 @@ function Configure-InstallerAuth {
         }
     }
 
-    if ($hasCodex) {
+    if ($shouldOfferCodex) {
         Write-Host ""
         Write-Host "  Codex (codex):"
         $globalCatCafeCodex = if ($env:CAT_CAFE_GLOBAL_CONFIG_ROOT) { $env:CAT_CAFE_GLOBAL_CONFIG_ROOT } else { $env:USERPROFILE }
@@ -630,7 +634,7 @@ function Configure-InstallerAuth {
         }
     }
 
-    if ($hasGemini) {
+    if ($shouldOfferGemini) {
         Write-Host ""
         Write-Host "  Gemini (gemini):"
         $globalCatCafeGemini = if ($env:CAT_CAFE_GLOBAL_CONFIG_ROOT) { $env:CAT_CAFE_GLOBAL_CONFIG_ROOT } else { $env:USERPROFILE }
@@ -666,7 +670,7 @@ function Configure-InstallerAuth {
         }
     }
 
-    if ($hasKimi) {
+    if ($shouldOfferKimi) {
         Write-Host ""
         Write-Host "  Kimi (kimi):"
         $kimiOptions = @(

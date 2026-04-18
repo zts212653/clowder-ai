@@ -197,6 +197,52 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.doesNotMatch(result.stdout, /running in-place \(deployment mode\)/);
   });
 
+  it('seeds missing runtime auth config from the launcher project during init', () => {
+    const projectDir = createTempProject('runtime-auth-config-seed');
+    const runtimeDir = mkdtempSync(join(tmpdir(), 'runtime-auth-config-worktree-'));
+    const remoteDir = mkdtempSync(join(tmpdir(), 'runtime-auth-config-remote-'));
+    tempDirs.push(runtimeDir, remoteDir);
+
+    execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['add', 'scripts', 'packages'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['init', '--bare', remoteDir], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+
+    mkdirSync(join(projectDir, '.cat-cafe'), { recursive: true });
+    writeFileSync(
+      join(projectDir, '.cat-cafe', 'accounts.json'),
+      `${JSON.stringify({ codex: { authType: 'oauth', models: ['gpt-5.4'] } }, null, 2)}\n`,
+      'utf8',
+    );
+    writeFileSync(
+      join(projectDir, '.cat-cafe', 'credentials.json'),
+      `${JSON.stringify({ 'installer-openai': { apiKey: 'sk-runtime' } }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const result = spawnSync(
+      'bash',
+      [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'init', '--dir', runtimeDir, '--no-install'],
+      {
+        cwd: projectDir,
+        encoding: 'utf8',
+      },
+    );
+
+    assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    const normalizedRuntimeDir = realpathSync(runtimeDir);
+    assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'accounts.json'), 'utf8')), {
+      codex: { authType: 'oauth', models: ['gpt-5.4'] },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'credentials.json'), 'utf8')), {
+      'installer-openai': { apiKey: 'sk-runtime' },
+    });
+  });
+
   it('auto-installs missing runtime dependencies before in-place start', () => {
     const projectDir = createTempProject('runtime-self-heal-install');
     const env = withStubbedPnpmEnv(projectDir);
