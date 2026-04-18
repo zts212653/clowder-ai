@@ -123,10 +123,12 @@ interface OrchestrationStep {
 
 ### 触发与发现规范
 
-三层触发机制：
-1. **对话触发（主）**：用户问意图 → 猫查 catalog → 建议引导 → [🐾 带我去做] 卡片 → 启动
-2. **主动发现**：系统检测到未完成配置 → 猫主动建议相关引导
-3. **目录浏览**：Console "场景引导" 入口，按类别列出所有可用流程
+当前阶段只保留一条触发路径：
+1. **对话意图触发**：用户在正常对话中表达配置/求助意图 → 猫先判断是直接解释还是适合走引导 → 调用 MCP `cat_cafe_guide_resolve(intent)` 解析场景 → 建议引导 → [🐾 带我去做] 卡片 → 用户确认后启动
+
+说明：
+- 路由层不直接根据原始消息关键词或显式命令触发 guide
+- 主动发现与目录浏览暂不作为当前设计的触发入口
 
 ### guide-authoring Skill
 
@@ -148,9 +150,9 @@ interface OrchestrationStep {
 ### 触发与发现（详细设计）
 
 **Guide Registry**（`guides/registry.yaml`）：注册所有可用引导，含 keywords + 意图映射。
-**MCP Tool**：`guide_resolve(intent, context)` → 关键词匹配 registry → 返回候选引导列表。
-**Skill Manifest**：猫检测到配置意图（"怎么/如何/配置"）→ 自动查 registry → 问用户"要我带你走一遍吗？"。
-**主动发现**：后端检测未完成配置状态 → 推送建议到聊天（复用现有 Socket.io 事件管道）。
+**MCP Tool**：`cat_cafe_guide_resolve(intent)` → 解析 registry → 返回候选引导列表。
+**Skill Manifest**：猫检测到配置意图（"怎么/如何/配置"）后，先判断是否需要交互引导；需要时调用 `cat_cafe_guide_resolve`，再问用户"要我带你走一遍吗？"。
+**Routing Boundary**：`GuideRoutingInterceptor` 仅负责续接已有 guideState（offered/awaiting_choice/active/completed），不从普通消息或显式命令直接创建新 guide offer。
 
 ## Acceptance Criteria
 

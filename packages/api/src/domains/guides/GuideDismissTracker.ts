@@ -2,8 +2,8 @@
  * B-6: Dismiss-rate tracker for guide offers.
  *
  * Tracks how many times each user has dismissed (cancelled) a specific
- * guide offer. The GuideOfferPolicy uses this count to suppress
- * re-offers after too many dismissals.
+ * guide offer. This data is available to explicit guide-resolution policies
+ * and should not be confused with raw-text routing.
  *
  * Guide state is runtime-only — dismiss counts reset on restart.
  * Port interface + in-memory implementation.
