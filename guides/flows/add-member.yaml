@@ -23,27 +23,7 @@ steps:
     tips: 点击这里开始添加新成员
     advance: click
 
-  - id: choose-client
-    target: add-member.client
-    tips: 先选择这个成员要使用的 Client（如 Codex、OpenCode、Claude）
-    advance: click
-
-  - id: choose-provider-account
-    target: add-member.provider-profile
-    tips: 为这个成员选择认证账号；后续模型会绑定在这套 Provider 配置上
-    advance: click
-
-  - id: choose-model
-    target: add-member.model
-    tips: 选择默认模型，完成成员的基础运行配置
-    advance: click
-
-  - id: create-member
-    target: add-member.submit
-    tips: 点击创建成员并进入详情编辑页
-    advance: click
-
   - id: done
     target: member-editor.profile
-    tips: 补充成员信息并点击保存；保存成功后会自动完成本次引导
+    tips: 在同一个成员编辑器里完成 Client、认证账号、默认模型和基本资料填写，然后点击保存；保存成功后会自动完成本次引导
     advance: confirm

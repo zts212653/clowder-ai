@@ -68,7 +68,7 @@ function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
-describe('CatCafeHub add-member flow', () => {
+describe('CatCafeHub add-member entry', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -147,7 +147,7 @@ describe('CatCafeHub add-member flow', () => {
     vi.clearAllMocks();
   });
 
-  it('opens mounted add-member wizard targets from the cats.add-member CTA', async () => {
+  it('opens the member editor directly from the cats.add-member CTA', async () => {
     await act(async () => {
       root.render(React.createElement(CatCafeHub));
     });
@@ -156,7 +156,7 @@ describe('CatCafeHub add-member flow', () => {
     await click(queryButton(container, '添加成员'));
     await flushEffects();
 
-    const firstStep = container.querySelector('[data-guide-id="add-member.client"]');
-    expect(firstStep).not.toBeNull();
+    expect(container.querySelector('[data-guide-id="member-editor.auth-config"]')).not.toBeNull();
+    expect(container.querySelector('[data-guide-id="add-member.client"]')).toBeNull();
   });
 });

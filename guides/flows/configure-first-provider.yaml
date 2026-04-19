@@ -23,25 +23,10 @@ steps:
     tips: 先创建一个成员，Provider / 账号 / 模型配置都会挂在成员身上
     advance: click
 
-  - id: choose-client
-    target: add-member.client
-    tips: 先选择这个成员要使用的 Client（如 Codex、OpenCode、Claude）
-    advance: click
-
-  - id: choose-provider-account
-    target: add-member.provider-profile
-    tips: 选择刚才准备好的认证账号；这里决定该成员实际走哪套 Provider 凭证
-    advance: click
-
-  - id: choose-model
-    target: add-member.model
-    tips: 选择默认模型，完成 Client → Provider 账号 → Model 的绑定
-    advance: click
-
-  - id: create-member
-    target: add-member.submit
-    tips: 点击创建成员并进入详情编辑页
-    advance: click
+  - id: config-auth
+    target: member-editor.auth-config
+    tips: 在这里完成 Client、Provider 账号和默认模型配置；完成后点击“已完成该步骤”
+    advance: confirm
 
   - id: done
     target: member-editor.profile

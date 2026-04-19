@@ -16,7 +16,6 @@ import {
 } from './cat-cafe-hub.navigation';
 import { CatOverviewTab, type ConfigData, SystemTab } from './config-viewer-tabs';
 import { HubAccountsTab } from './HubAccountsTab';
-import { HubAddMemberWizard } from './HubAddMemberWizard';
 import { HubCapabilityTab } from './HubCapabilityTab';
 import { HubCatEditor } from './HubCatEditor';
 import { HubClaudeRescueSection } from './HubClaudeRescueSection';
@@ -57,7 +56,6 @@ export function CatCafeHub() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [capTabEverOpened, setCapTabEverOpened] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [addMemberWizardOpen, setAddMemberWizardOpen] = useState(false);
   const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
   const [editingCat, setEditingCat] = useState<(typeof cats)[number] | null>(null);
   const [createDraft, setCreateDraft] = useState<Parameters<typeof HubCatEditor>[0]['draft']>(null);
@@ -106,12 +104,10 @@ export function CatCafeHub() {
   const openAddMember = useCallback(() => {
     setEditingCat(null);
     setCreateDraft(null);
-    setEditorOpen(false);
-    setAddMemberWizardOpen(true);
+    setEditorOpen(true);
   }, []);
 
   const openEditMember = useCallback((cat: (typeof cats)[number]) => {
-    setAddMemberWizardOpen(false);
     setCreateDraft(null);
     setEditingCat(cat);
     setEditorOpen(true);
@@ -125,18 +121,6 @@ export function CatCafeHub() {
     setEditorOpen(false);
     setEditingCat(null);
     setCreateDraft(null);
-  }, []);
-
-  const closeAddMemberWizard = useCallback(() => {
-    setAddMemberWizardOpen(false);
-    setCreateDraft(null);
-  }, []);
-
-  const handleAddMemberDraftComplete = useCallback((draft: NonNullable<typeof createDraft>) => {
-    setCreateDraft(draft);
-    setEditingCat(null);
-    setAddMemberWizardOpen(false);
-    setEditorOpen(true);
   }, []);
 
   const closeCoCreatorEditor = useCallback(() => {
@@ -288,11 +272,6 @@ export function CatCafeHub() {
             {tab === 'marketplace' && <MarketplacePanel />}
           </div>
         </div>
-        <HubAddMemberWizard
-          open={addMemberWizardOpen}
-          onClose={closeAddMemberWizard}
-          onComplete={handleAddMemberDraftComplete}
-        />
         <HubCatEditor
           open={editorOpen}
           cat={editingCat}

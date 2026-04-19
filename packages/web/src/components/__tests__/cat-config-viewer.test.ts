@@ -149,7 +149,7 @@ describe('CatOverviewTab', () => {
     expect(html).not.toContain('npx antigravity --bridge');
   });
 
-  it('anchors the first-member guide target to a keyboard-activatable edit button, not the availability toggle', () => {
+  it('anchors the first-member guide target to the existing keyboard-activatable member card', () => {
     const html = renderToStaticMarkup(
       React.createElement(CatOverviewTab, {
         config: CONFIG,
@@ -161,15 +161,12 @@ describe('CatOverviewTab', () => {
     root.innerHTML = html;
 
     const guideTarget = root.querySelector('[data-guide-id="cats.first-member"]');
-    const availabilityToggle = Array.from(root.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('已启用'),
-    );
 
     expect(guideTarget).toBeTruthy();
-    expect(guideTarget?.tagName).toBe('BUTTON');
+    expect(guideTarget?.tagName).toBe('SECTION');
+    expect(guideTarget?.getAttribute('role')).toBe('button');
+    expect(guideTarget?.getAttribute('tabindex')).toBe('0');
     expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
-    expect(availabilityToggle).toBeTruthy();
-    expect(guideTarget?.contains(availabilityToggle ?? null)).toBe(false);
   });
 });
 
