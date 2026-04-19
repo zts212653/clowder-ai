@@ -38,11 +38,24 @@ old_file_count() {
 
 error_like_count() {
   local target="$1"
+  local rg_output
+  local rg_status
   if [ ! -d "$target" ]; then
     echo 0
     return 0
   fi
-  rg -i -c 'error|fatal|panic|uncaught' "$target" 2>/dev/null | awk -F: '{sum += $NF} END {print sum + 0}'
+  if rg_output="$(rg -i -c 'error|fatal|panic|uncaught' "$target" 2>/dev/null)"; then
+    printf '%s\n' "$rg_output" | awk -F: '{sum += $NF} END {print sum + 0}'
+    return 0
+  fi
+
+  rg_status=$?
+  if [ "$rg_status" -eq 1 ]; then
+    echo 0
+    return 0
+  fi
+
+  return "$rg_status"
 }
 
 VIOLATIONS=0
