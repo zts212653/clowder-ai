@@ -111,7 +111,10 @@ export class StreamingOutboundHook {
       const adapter = this.opts.adapters.get(session.connectorId);
       if (!adapter?.editMessage || !session.platformMessageId) continue;
       try {
-        await adapter.editMessage(session.externalChatId, session.platformMessageId, `${accumulatedText} ▌`);
+        const chunkPrefix = session.connectorId === 'telegram'
+          ? `【${session.catDisplayName || '猫猫'}🐱 思考中...】\n`
+          : '';
+        await adapter.editMessage(session.externalChatId, session.platformMessageId, `${chunkPrefix}${accumulatedText} ▌`);
         session.lastUpdateAt = now;
         session.lastContentLength = accumulatedText.length;
         session.lastAccumulatedText = accumulatedText;
@@ -139,9 +142,14 @@ export class StreamingOutboundHook {
         // If deleteMessage exists, defer cleanup (delete placeholder after edit).
         const resolvedFinalText =
           finalText.trim().length > 0 ? finalText : session.lastAccumulatedText || '⚠️ 回复中断，请重试';
+        // Completion state: replace "思考中..." prefix with "✅" to signal done
+        const finalPrefix = session.connectorId === 'telegram'
+          ? `【${session.catDisplayName || '猫猫'}🐱 ✅】\n`
+          : '';
+        const finalMessage = `${finalPrefix}${resolvedFinalText}`;
         let editSucceeded = false;
         try {
-          await adapter.editMessage(session.externalChatId, session.platformMessageId, resolvedFinalText);
+          await adapter.editMessage(session.externalChatId, session.platformMessageId, finalMessage);
           editSucceeded = true;
         } catch (err) {
           this.opts.log.warn({ err }, '[StreamingOutbound] onStreamEnd editMessage failed — removing from skip list for fallback delivery');
