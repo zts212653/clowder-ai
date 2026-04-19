@@ -3,6 +3,7 @@
 import { useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { CatAvatar } from './CatAvatar';
+import { HubIcon } from './hub-icons';
 
 interface SummaryCardProps {
   topic: string;
@@ -33,7 +34,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
       <div className="bg-cafe-surface border-2 border-cafe rounded-lg shadow-md px-5 pt-4 pb-5 max-w-md w-full rotate-[-0.5deg] hover:rotate-0 transition-transform">
         {/* Topic header */}
         <div className="text-sm font-bold text-cafe-secondary mb-3 flex items-center gap-1.5">
-          <span>📷</span>
+          <HubIcon name="camera" className="h-3.5 w-3.5" />
           <span>{topic}</span>
         </div>
 
@@ -44,7 +45,17 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
             <ul className="space-y-1">
               {conclusions.map((c, i) => (
                 <li key={i} className="text-xs text-cafe-secondary flex gap-1.5">
-                  <span className="text-green-500 flex-shrink-0">✓</span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3 w-3 text-green-500 flex-shrink-0"
+                  >
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
                   <span>{c}</span>
                 </li>
               ))}
@@ -70,11 +81,11 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
         {/* Footer: creator + time */}
         <div className="flex items-center gap-2 pt-2 border-t border-cafe-subtle">
           {createdBy === 'system' ? (
-            <span className="text-xs">🤖</span>
+            <HubIcon name="bot" className="h-3.5 w-3.5 text-cafe-secondary" />
           ) : catData ? (
             <CatAvatar catId={createdBy} size={16} />
           ) : (
-            <span className="text-xs">👤</span>
+            <HubIcon name="user" className="h-3.5 w-3.5 text-cafe-secondary" />
           )}
           <span className="text-[10px] text-cafe-muted">
             {creatorLabel} · {formatTime(timestamp)}

@@ -1,6 +1,7 @@
 'use client';
 
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { HubIcon } from './hub-icons';
 import { MarkdownContent } from './MarkdownContent';
 
 function formatTime(ts: number): string {
@@ -13,10 +14,18 @@ function getNoticeTone(meta: Readonly<Record<string, unknown>> | undefined): 'in
   return tone === 'warning' || tone === 'error' ? tone : 'info';
 }
 
-function iconText(icon?: string): string {
-  if (!icon) return 'ℹ️';
-  if (icon === 'lightbulb') return '💡';
-  return icon;
+const ICON_MAP: Record<string, string> = {
+  lightbulb: 'sparkles',
+  '\u{1F4A1}': 'sparkles',
+  warning: 'alert-triangle',
+  '\u{26A0}\u{FE0F}': 'alert-triangle',
+  error: 'alert-triangle',
+  info: 'info',
+};
+
+function NoticeIcon({ icon }: { icon?: string }) {
+  const name = ICON_MAP[icon ?? ''] ?? 'info';
+  return <HubIcon name={name} className="h-4.5 w-4.5" />;
 }
 
 interface SystemNoticeBarProps {
@@ -40,7 +49,9 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
           className={`system-notice-bar ${tone !== 'info' ? 'system-notice-bar--alert' : ''} rounded-2xl px-4 py-3 text-cafe-secondary`}
         >
           <div className="flex items-start gap-3">
-            <span className="system-notice-bar__icon text-lg leading-none">{iconText(source.icon)}</span>
+            <span className="system-notice-bar__icon leading-none mt-0.5">
+              <NoticeIcon icon={source.icon} />
+            </span>
             <div className="min-w-0 flex-1 text-sm leading-6">
               <MarkdownContent content={message.content} />
             </div>

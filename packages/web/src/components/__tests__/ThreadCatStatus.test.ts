@@ -99,7 +99,7 @@ describe('ThreadCatStatus', () => {
         hasUserMention: true,
       }),
     );
-    expect(html).toContain('🐾');
+    expect(html).toContain('<svg');
     expect(html).toContain('猫猫 @ 了你');
   });
 
@@ -134,7 +134,7 @@ describe('ThreadCatStatus', () => {
         hasUserMention: true,
       }),
     );
-    expect(html).toContain('🐾');
+    expect(html).toContain('<svg');
   });
 });
 

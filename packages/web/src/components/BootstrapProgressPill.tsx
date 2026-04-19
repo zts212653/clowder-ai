@@ -43,7 +43,7 @@ export function BootstrapProgressPill({ progress, expanded: defaultExpanded }: B
                           : 'bg-gray-100 text-gray-400'
                     }`}
                   >
-                    {isDone ? '✓' : i + 1}
+                    {isDone ? '\u2713' : i + 1}
                   </span>
                   <span
                     className={

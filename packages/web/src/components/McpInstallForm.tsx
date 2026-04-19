@@ -240,7 +240,7 @@ export function McpInstallForm({ projectPath, onInstalled, onClose }: McpInstall
             <div className="space-y-0.5">
               {preview.risks.map((r) => (
                 <p key={r} className="text-xs text-amber-600">
-                  ⚠ {r}
+                  {r}
                 </p>
               ))}
             </div>

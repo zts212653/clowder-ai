@@ -16,6 +16,10 @@ describe('Community Issues Routes', () => {
     taskStore = new TaskStore();
   });
 
+  const mockThreadStore = {
+    create: async (_userId, title) => ({ id: `thread_${Date.now()}`, title, createdAt: Date.now() }),
+  };
+
   async function createApp() {
     const { communityIssueRoutes } = await import('../dist/routes/community-issues.js');
     const app = Fastify();
@@ -24,6 +28,7 @@ describe('Community Issues Routes', () => {
       communityIssueStore,
       taskStore,
       socketManager,
+      threadStore: mockThreadStore,
     });
     return app;
   }
@@ -216,6 +221,27 @@ describe('Community Issues Routes', () => {
     assert.equal(body.replyState, 'unreplied');
   });
 
+  test('POST /api/community-issues/:id/dispatch stores threadId as assignedThreadId', async () => {
+    const app = await createApp();
+    const created = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/community-issues',
+        payload: { repo: 'x/y', issueNumber: 100, issueType: 'feature', title: 'With thread' },
+      })
+    ).json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${created.id}/dispatch`,
+      payload: { threadId: 'thread_abc' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.state, 'discussing');
+    assert.equal(body.assignedThreadId, 'thread_abc');
+  });
+
   test('POST /api/community-issues/:id/dispatch returns 404 for unknown', async () => {
     const app = await createApp();
     const res = await app.inject({
@@ -303,6 +329,187 @@ describe('Community Issues Routes', () => {
     assert.equal(body.repos.length, 2);
     assert.ok(body.repos.includes('org/alpha'));
     assert.ok(body.repos.includes('org/beta'));
+  });
+
+  // --- Phase A: triage-complete + dispatch + resolve ---
+
+  const fivePass = [
+    { id: 'Q1', result: 'PASS' },
+    { id: 'Q2', result: 'PASS' },
+    { id: 'Q3', result: 'PASS' },
+    { id: 'Q4', result: 'PASS' },
+    { id: 'Q5', result: 'PASS' },
+  ];
+
+  async function createAndDispatch(app, overrides = {}) {
+    const issue = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/community-issues',
+        payload: { repo: 'org/repo', issueNumber: 1, issueType: 'feature', title: 'Test', ...overrides },
+      })
+    ).json();
+    await app.inject({ method: 'POST', url: `/api/community-issues/${issue.id}/dispatch` });
+    return issue;
+  }
+
+  test('POST triage-complete records first entry, returns await-second-cat', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().action, 'await-second-cat');
+  });
+
+  test('POST triage-complete resolves bugfix immediately', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueType: 'bug', issueNumber: 2 });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().action, 'resolved');
+    assert.equal(res.json().consensus.needsOwner, false);
+  });
+
+  test('POST triage-complete second entry resolves consensus', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueNumber: 3 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'WELCOME', questions: fivePass },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.action, 'resolved');
+    assert.equal(body.consensus.verdict, 'WELCOME');
+  });
+
+  test('triage-complete rejects if issue not dispatched', async () => {
+    const app = await createApp();
+    const issue = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/community-issues',
+        payload: { repo: 'org/repo', issueNumber: 4, issueType: 'feature', title: 'Not dispatched' },
+      })
+    ).json();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    assert.equal(res.statusCode, 409);
+  });
+
+  test('triage-complete validates payload', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueNumber: 5 });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
+
+  test('POST resolve accepts pending-decision issue', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueNumber: 6 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'POLITELY-DECLINE', questions: fivePass, reasonCode: 'NOT_NOW' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      payload: { decision: 'accepted' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().state, 'accepted');
+  });
+
+  test('POST resolve declines pending-decision issue', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueNumber: 7 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'NEEDS-DISCUSSION', questions: fivePass },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      payload: { decision: 'declined' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().state, 'declined');
+  });
+
+  test('POST resolve accepted with relatedFeature + threadId links thread', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueNumber: 9 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'POLITELY-DECLINE', questions: fivePass, reasonCode: 'UNSURE' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: { decision: 'accepted', relatedFeature: 'F056', threadId: 'thread_f056' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.state, 'accepted');
+    assert.equal(body.relatedFeature, 'F056');
+    assert.equal(body.assignedThreadId, 'thread_f056');
+  });
+
+  test('POST resolve rejects if not pending-decision', async () => {
+    const app = await createApp();
+    const issue = (
+      await app.inject({
+        method: 'POST',
+        url: '/api/community-issues',
+        payload: { repo: 'org/repo', issueNumber: 8, issueType: 'feature', title: 'Not pending' },
+      })
+    ).json();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      payload: { decision: 'accepted' },
+    });
+    assert.equal(res.statusCode, 409);
   });
 
   test('GET /api/community-repos includes repos from pr_tracking tasks', async () => {
