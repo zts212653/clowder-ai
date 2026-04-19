@@ -122,7 +122,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content: 'Just a status update, no mentions' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'Just a status update, no mentions' },
     });
 
     assert.equal(response.statusCode, 200);
@@ -142,9 +143,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '这个方案里，之前 @缅因猫 提过类似的思路',
       },
     });
@@ -165,9 +165,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '看看这段代码:\n```\n@缅因猫 这里是注释\n```\n完毕',
       },
     });
@@ -188,9 +187,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '修复完成了\n@缅因猫\n请帮忙 review',
       },
     });
@@ -215,9 +213,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '这是交接文档，DARE 源码目录执行\n是否接受完全禁用 --api-key argv\n@缅因猫',
       },
     });
@@ -258,9 +255,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '同步一下\n@缅因猫\n这条是冗余提醒',
       },
     });
@@ -290,9 +286,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '修完了，请帮忙 review\n@缅因猫',
       },
     });
@@ -327,9 +322,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '铲屎官快看！有事情！',
         targetCats: ['codex'],
       },
@@ -352,9 +346,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '铲屎官快看！有事情！',
         targetCats: ['default-user'],
       },
@@ -377,9 +370,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '通知一下',
         targetCats: ['codex', 'default-user', 'nonexistent-cat'],
       },
@@ -399,9 +391,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '请帮忙复核\n@缅因猫',
         targetCats: ['codex', 'gemini'],
       },
@@ -426,9 +417,8 @@ describe('post_message A2A mention invocation', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '@布偶猫\n这是自我引用测试',
       },
     });
@@ -486,9 +476,8 @@ describe('F052: cross-thread A2A mention routing', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '@codex 请处理这个跨线程任务',
         threadId: targetThread.id,
       },
@@ -510,9 +499,8 @@ describe('F052: cross-thread A2A mention routing', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '@codex 请处理',
         threadId: thread.id,
       },

@@ -19,6 +19,7 @@ interface OutboxEntry {
   apiUrl: string;
   path: string;
   body: Record<string, unknown>;
+  headers?: Record<string, string>;
   attempts: number;
   lastError: string;
 }
@@ -27,6 +28,7 @@ export interface CallbackRequest {
   apiUrl: string;
   path: string;
   body: Record<string, unknown>;
+  headers?: Record<string, string>;
 }
 
 function parseIntEnv(raw: string | undefined): number | null {
@@ -79,6 +81,16 @@ function parseOutboxEntry(raw: string): OutboxEntry | null {
   }
 }
 
+/** Extract auth headers from legacy body fields (pre-#476 outbox entries). */
+function legacyHeadersFromBody(body: Record<string, unknown>): Record<string, string> | undefined {
+  const invocationId = body.invocationId;
+  const callbackToken = body.callbackToken;
+  if (typeof invocationId === 'string' && typeof callbackToken === 'string') {
+    return { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+  }
+  return undefined;
+}
+
 async function enqueueOutbox(entry: OutboxEntry): Promise<boolean> {
   try {
     const dir = getOutboxDir();
@@ -122,7 +134,15 @@ async function flushOutbox(): Promise<void> {
         continue;
       }
 
-      const replay = await postJsonWithRetry(`${entry.apiUrl}${entry.path}`, JSON.stringify(entry.body), retryDelaysMs);
+      // Legacy fixup (#476): entries queued before header migration have creds
+      // in body, not headers. Migrate them so the new preHandler accepts them.
+      const replayHeaders = entry.headers ?? legacyHeadersFromBody(entry.body);
+      const replay = await postJsonWithRetry(
+        `${entry.apiUrl}${entry.path}`,
+        JSON.stringify(entry.body),
+        retryDelaysMs,
+        replayHeaders,
+      );
       if (replay.ok) {
         await unlink(processingPath);
         continue;
@@ -158,7 +178,7 @@ export async function sendCallbackRequest(
 
   const retryDelaysMs = getRetryDelaysMs();
   const payload = JSON.stringify(request.body);
-  const result = await postJsonWithRetry(`${request.apiUrl}${request.path}`, payload, retryDelaysMs);
+  const result = await postJsonWithRetry(`${request.apiUrl}${request.path}`, payload, retryDelaysMs, request.headers);
   if (result.ok) return { ok: true, data: result.data };
 
   if (enableOutbox && result.failure.retryable) {
@@ -169,6 +189,7 @@ export async function sendCallbackRequest(
       apiUrl: request.apiUrl,
       path: request.path,
       body: request.body,
+      ...(request.headers ? { headers: request.headers } : {}),
       attempts: 0,
       lastError: result.failure.error,
     });

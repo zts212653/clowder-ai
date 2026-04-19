@@ -71,10 +71,11 @@ describe('Mention Ack (#77)', () => {
   }
 
   async function getPending(app, invocationId, callbackToken, { includeAcked } = {}) {
-    const extra = includeAcked ? `&includeAcked=${encodeURIComponent(includeAcked)}` : '';
+    const extra = includeAcked ? `?includeAcked=${encodeURIComponent(includeAcked)}` : '';
     const res = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}${extra}`,
+      url: `/api/callbacks/pending-mentions${extra}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     return JSON.parse(res.body);
   }
@@ -83,7 +84,8 @@ describe('Mention Ack (#77)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/ack-mentions',
-      payload: { invocationId, callbackToken, upToMessageId },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { upToMessageId },
     });
     return { statusCode: res.statusCode, body: JSON.parse(res.body) };
   }
@@ -92,7 +94,8 @@ describe('Mention Ack (#77)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content },
     });
     return { statusCode: res.statusCode, body: JSON.parse(res.body) };
   }

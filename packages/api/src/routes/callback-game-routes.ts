@@ -10,11 +10,9 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
-const submitGameActionSchema = callbackAuthSchema.extend({
+const submitGameActionSchema = z.object({
   gameId: z.string().min(1),
   round: z.number().int().min(1),
   phase: z.string().min(1),
@@ -25,22 +23,18 @@ const submitGameActionSchema = callbackAuthSchema.extend({
   nonce: z.string().min(1).max(200),
 });
 
-export function registerCallbackGameRoutes(app: FastifyInstance, deps: { registry: InvocationRegistry }): void {
-  const { registry } = deps;
-
+export function registerCallbackGameRoutes(app: FastifyInstance): void {
   app.post('/api/callbacks/submit-game-action', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = submitGameActionSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, gameId, round, phase, seat, action, target, text, nonce } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { gameId, round, phase, seat, action, target, text, nonce } = parsed.data;
 
     // Proxy to existing game action route — reuses all validation + nonce dedup
     // Pass invocation threadId so downstream enforces thread-game isolation (P1 fix)

@@ -14,18 +14,14 @@ import { errorResult } from './file-tools.js';
 // ─── callbackDelete (schedule-specific) ──────────────────────
 
 async function callbackDelete(path: string): Promise<ToolResult> {
-  const { getCallbackConfig, NO_CONFIG_ERROR } = await import('./callback-tools.js');
+  const { getCallbackConfig, buildAuthHeaders, NO_CONFIG_ERROR } = await import('./callback-tools.js');
   const config = getCallbackConfig();
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
   try {
     const response = await fetch(`${config.apiUrl}${path}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-invocation-id': config.invocationId,
-        'x-callback-token': config.callbackToken,
-      },
+      headers: { 'Content-Type': 'application/json', ...buildAuthHeaders(config) },
     });
     if (!response.ok) {
       const text = await response.text();

@@ -88,7 +88,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/start-guide',
-        payload: { invocationId, callbackToken, guideId: 'add-member' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { guideId: 'add-member' },
       });
 
       assert.equal(res.statusCode, 200);
@@ -118,7 +119,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/start-guide',
-        payload: { invocationId, callbackToken, guideId: 'nonexistent-flow' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { guideId: 'nonexistent-flow' },
       });
 
       assert.equal(res.statusCode, 400);
@@ -133,7 +135,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/start-guide',
-        payload: { invocationId: 'fake', callbackToken: 'fake', guideId: 'add-member' },
+        headers: { 'x-invocation-id': 'fake', 'x-callback-token': 'fake' },
+        payload: { guideId: 'add-member' },
       });
 
       assert.equal(res.statusCode, 401);
@@ -149,7 +152,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/start-guide',
-        payload: { invocationId, callbackToken, guideId: 'add-member' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { guideId: 'add-member' },
       });
 
       const body = JSON.parse(res.body);
@@ -169,7 +173,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/start-guide',
-        payload: { invocationId, callbackToken, guideId: 'add-member' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { guideId: 'add-member' },
       });
 
       assert.equal(res.statusCode, 400);
@@ -191,7 +196,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/guide-resolve',
-        payload: { invocationId, callbackToken, intent: '添加成员' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { intent: '添加成员' },
       });
 
       assert.equal(res.statusCode, 200);
@@ -208,7 +214,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/guide-resolve',
-        payload: { invocationId, callbackToken, intent: '天气预报' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { intent: '天气预报' },
       });
 
       assert.equal(res.statusCode, 200);
@@ -223,7 +230,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/guide-resolve',
-        payload: { invocationId: 'fake', callbackToken: 'fake', intent: '添加' },
+        headers: { 'x-invocation-id': 'fake', 'x-callback-token': 'fake' },
+        payload: { intent: '添加' },
       });
 
       assert.equal(res.statusCode, 401);
@@ -241,7 +249,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/guide-control',
-        payload: { invocationId, callbackToken, action: 'next' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { action: 'next' },
       });
 
       assert.equal(res.statusCode, 200);
@@ -271,7 +280,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/guide-control',
-        payload: { invocationId, callbackToken, action: 'destroy' },
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { action: 'destroy' },
       });
 
       assert.equal(res.statusCode, 400);
@@ -283,7 +293,8 @@ describe('F155 Guide callback routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/guide-control',
-        payload: { invocationId: 'fake', callbackToken: 'fake', action: 'next' },
+        headers: { 'x-invocation-id': 'fake', 'x-callback-token': 'fake' },
+        payload: { action: 'next' },
       });
 
       assert.equal(res.statusCode, 401);

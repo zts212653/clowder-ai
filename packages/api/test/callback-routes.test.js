@@ -103,9 +103,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Hello from cat!',
       },
     });
@@ -155,9 +154,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Outbound test message',
       },
     });
@@ -181,9 +179,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'wrong-token' },
       payload: {
-        invocationId,
-        callbackToken: 'wrong-token',
         content: 'Hello',
       },
     });
@@ -207,9 +204,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Hello',
       },
     });
@@ -217,7 +213,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST post-message returns 400 for invalid body', async () => {
+  test('POST post-message returns 401 without credentials', async () => {
     const app = await createApp();
 
     const response = await app.inject({
@@ -226,7 +222,7 @@ describe('Callback Routes', () => {
       payload: { content: '' },
     });
 
-    assert.equal(response.statusCode, 400);
+    assert.equal(response.statusCode, 401);
   });
 
   test('POST post-message deduplicates by clientMessageId (at-least-once safe)', async () => {
@@ -236,9 +232,8 @@ describe('Callback Routes', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'idempotent message',
         clientMessageId: 'msg-001',
       },
@@ -249,9 +244,8 @@ describe('Callback Routes', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'idempotent message',
         clientMessageId: 'msg-001',
       },
@@ -275,9 +269,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
         content: 'cross-thread hello',
       },
@@ -304,9 +297,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
         content: '@缅因猫\n\n请 review 这个改动',
       },
@@ -329,9 +321,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Review 结果通知',
         targetCats: ['codex', 'gpt52'],
       },
@@ -354,9 +345,8 @@ describe('Callback Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Direction test',
         targetCats: ['codex', 'gpt52'],
       },
@@ -378,9 +368,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'FYI\n@codex',
         targetCats: ['gpt52'],
       },
@@ -404,9 +393,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '同步一下\n@codex\n@gpt52',
         targetCats: ['gemini'],
       },
@@ -430,9 +418,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: foreignThread.id,
         content: 'should fail',
       },
@@ -465,7 +452,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -480,7 +468,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -511,7 +500,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -537,7 +527,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=3`,
+      url: `/api/callbacks/thread-context?limit=3`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -573,7 +564,8 @@ describe('Callback Routes', () => {
 
     const catResponse = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&catId=codex`,
+      url: `/api/callbacks/thread-context?catId=codex`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(catResponse.statusCode, 200);
     const catBody = JSON.parse(catResponse.body);
@@ -582,7 +574,8 @@ describe('Callback Routes', () => {
 
     const userResponse = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&catId=user`,
+      url: `/api/callbacks/thread-context?catId=user`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(userResponse.statusCode, 200);
     const userBody = JSON.parse(userResponse.body);
@@ -618,7 +611,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&keyword=ReDiS`,
+      url: `/api/callbacks/thread-context?keyword=ReDiS`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -658,7 +652,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&catId=codex&keyword=redis`,
+      url: `/api/callbacks/thread-context?catId=codex&keyword=redis`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
@@ -672,7 +667,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&catId=unknown-cat`,
+      url: `/api/callbacks/thread-context?catId=unknown-cat`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 400);
@@ -705,7 +701,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -739,7 +736,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -791,7 +789,8 @@ describe('Callback Routes', () => {
     // Query thread-B from an invocation in thread-A
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&threadId=thread-B`,
+      url: `/api/callbacks/thread-context?threadId=thread-B`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -824,7 +823,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -851,7 +851,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&threadId=thread-B&limit=2`,
+      url: `/api/callbacks/thread-context?threadId=thread-B&limit=2`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -885,7 +886,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/list-threads?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/list-threads',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -931,7 +933,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/list-threads?invocationId=${invocationId}&callbackToken=${callbackToken}&activeSince=150&limit=1`,
+      url: `/api/callbacks/list-threads?activeSince=150&limit=1`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -950,7 +953,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/list-threads?invocationId=${invocationId}&callbackToken=${callbackToken}&keyword=design`,
+      url: `/api/callbacks/list-threads?keyword=design`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -965,7 +969,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/list-threads?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=0&activeSince=-1`,
+      url: `/api/callbacks/list-threads?limit=0&activeSince=-1`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 400);
@@ -980,7 +985,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/list-threads?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/list-threads',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 503);
@@ -1028,7 +1034,8 @@ describe('Callback Routes', () => {
 
     const allRes = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/list-tasks?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/list-tasks',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(allRes.statusCode, 200);
     const allBody = JSON.parse(allRes.body);
@@ -1036,7 +1043,8 @@ describe('Callback Routes', () => {
 
     const filteredRes = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/list-tasks?invocationId=${invocationId}&callbackToken=${callbackToken}&catId=codex&status=blocked`,
+      url: `/api/callbacks/list-tasks?catId=codex&status=blocked`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(filteredRes.statusCode, 200);
     const filteredBody = JSON.parse(filteredRes.body);
@@ -1052,9 +1060,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url:
-        `/api/callbacks/list-tasks?invocationId=${invocationId}` +
-        `&callbackToken=${callbackToken}&threadId=${foreignThread.id}`,
+      url: `/api/callbacks/list-tasks?threadId=${foreignThread.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 403);
@@ -1072,7 +1079,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/feat-index',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1135,7 +1143,8 @@ describe('Callback Routes', () => {
     const { invocationId, callbackToken } = registry.create('user-1', 'opus');
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/feat-index',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1161,7 +1170,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/feat-index',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1179,7 +1189,8 @@ describe('Callback Routes', () => {
 
     const hit = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}&featId=f043`,
+      url: `/api/callbacks/feat-index?featId=f043`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(hit.statusCode, 200);
     const hitBody = JSON.parse(hit.body);
@@ -1188,7 +1199,8 @@ describe('Callback Routes', () => {
 
     const miss = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}&featId=F04`,
+      url: `/api/callbacks/feat-index?featId=F04`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(miss.statusCode, 200);
     const missBody = JSON.parse(miss.body);
@@ -1206,7 +1218,8 @@ describe('Callback Routes', () => {
 
     const byFeatId = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}&query=F04`,
+      url: `/api/callbacks/feat-index?query=F04`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(byFeatId.statusCode, 200);
     const byFeatIdBody = JSON.parse(byFeatId.body);
@@ -1214,7 +1227,8 @@ describe('Callback Routes', () => {
 
     const byStatus = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}&query=PROGRESS`,
+      url: `/api/callbacks/feat-index?query=PROGRESS`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(byStatus.statusCode, 200);
     const byStatusBody = JSON.parse(byStatus.body);
@@ -1229,7 +1243,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=101`,
+      url: `/api/callbacks/feat-index?limit=101`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(response.statusCode, 400);
   });
@@ -1241,7 +1256,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?invocationId=${invocationId}&callbackToken=bad-token`,
+      url: '/api/callbacks/feat-index',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'bad-token' },
     });
     assert.equal(response.statusCode, 401);
   });
@@ -1269,7 +1285,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1313,7 +1330,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/pending-mentions?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1323,7 +1341,7 @@ describe('Callback Routes', () => {
     assert.equal(body.mentions[1].message, '@opus in thread-A again');
   });
 
-  test('GET pending-mentions returns 400 without credentials', async () => {
+  test('GET pending-mentions returns 401 without credentials', async () => {
     const app = await createApp();
 
     const response = await app.inject({
@@ -1331,7 +1349,7 @@ describe('Callback Routes', () => {
       url: '/api/callbacks/pending-mentions',
     });
 
-    assert.equal(response.statusCode, 400);
+    assert.equal(response.statusCode, 401);
   });
 
   // ---- SQLite memory service callbacks (F102 Phase D1) ----
@@ -1352,7 +1370,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=single%20bank&limit=1`,
+      url: `/api/callbacks/search-evidence?q=single%20bank&limit=1`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1375,7 +1394,8 @@ describe('Callback Routes', () => {
 
     await app.inject({
       method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy&limit=3`,
+      url: `/api/callbacks/search-evidence?q=bank-policy&limit=3`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(capturedArgs.query, 'bank-policy');
@@ -1393,7 +1413,8 @@ describe('Callback Routes', () => {
 
     await app.inject({
       method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=test`,
+      url: `/api/callbacks/search-evidence?q=test`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(capturedOpts.limit, 5);
@@ -1408,7 +1429,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=${callbackToken}&q=bank-policy`,
+      url: `/api/callbacks/search-evidence?q=bank-policy`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1424,7 +1446,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/search-evidence?invocationId=${invocationId}&callbackToken=wrong&q=test`,
+      url: `/api/callbacks/search-evidence?q=test`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'wrong' },
     });
 
     assert.equal(response.statusCode, 401);
@@ -1442,9 +1465,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/reflect',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         query: 'What changed in phase 5?',
       },
     });
@@ -1466,9 +1488,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/reflect',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         query: 'What changed in phase 5?',
       },
     });
@@ -1487,9 +1508,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/reflect',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'wrong' },
       payload: {
-        invocationId,
-        callbackToken: 'wrong',
         query: 'test',
       },
     });
@@ -1509,9 +1529,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/retain-memory',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'When storage is unavailable, fail-closed and surface explicit errors.',
       },
     });
@@ -1533,9 +1552,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/retain-memory',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': 'invalid-token' },
       payload: {
-        invocationId,
-        callbackToken: 'invalid-token',
         content: 'memory',
       },
     });
@@ -1553,9 +1571,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/retain-memory',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'memory item',
       },
     });
@@ -1580,9 +1597,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': old.invocationId, 'x-callback-token': old.callbackToken },
       payload: {
-        invocationId: old.invocationId,
-        callbackToken: old.callbackToken,
         content: 'Stale message from old invocation',
       },
     });
@@ -1608,9 +1624,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': latest.invocationId, 'x-callback-token': latest.callbackToken },
       payload: {
-        invocationId: latest.invocationId,
-        callbackToken: latest.callbackToken,
         content: 'Fresh message from latest invocation',
       },
     });
@@ -1639,7 +1654,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1669,7 +1685,8 @@ describe('Callback Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content },
     });
 
     // Should have 2 broadcasts: 1 text + 1 rich_block system_info
@@ -1701,7 +1718,8 @@ describe('Callback Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content: 'Hello' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'Hello' },
     });
 
     const msgs = socketManager.getMessages();
@@ -1723,7 +1741,8 @@ describe('Callback Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content },
     });
 
     const msgs = socketManager.getMessages();
@@ -1739,9 +1758,8 @@ describe('Callback Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/create-rich-block',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         block: { id: 'card-454', kind: 'card', v: 1, title: 'Test', bodyMarkdown: 'hi' },
       },
     });
@@ -1763,9 +1781,8 @@ describe('Callback Routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/generate-document',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
         payload: {
-          invocationId,
-          callbackToken,
           markdown: '# Test Doc\nHello from #454',
           format: 'md',
           baseName: 'test-454',
@@ -1793,7 +1810,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content: 'Plain message, no blocks' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'Plain message, no blocks' },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1812,9 +1830,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/create-rich-block',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         // Intentionally uses "type" instead of "kind", missing v
         block: { id: 'b1', type: 'card', title: 'Normalized', bodyMarkdown: '**bold**' },
       },
@@ -1883,7 +1900,8 @@ describe('Callback Routes', () => {
     // Request limit=10 — all 10 visible messages are buried under 500 hidden
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=10`,
+      url: `/api/callbacks/thread-context?limit=10`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -1941,7 +1959,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=10`,
+      url: `/api/callbacks/thread-context?limit=10`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -2011,7 +2030,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&limit=10`,
+      url: `/api/callbacks/thread-context?limit=10`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -2062,7 +2082,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&keyword=redis+lock`,
+      url: `/api/callbacks/thread-context?keyword=redis+lock`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -2090,7 +2111,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}`,
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -2114,7 +2136,8 @@ describe('Callback Routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/thread-context?invocationId=${invocationId}&callbackToken=${callbackToken}&threadId=thread-other`,
+      url: `/api/callbacks/thread-context?threadId=thread-other`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 
     assert.equal(response.statusCode, 200);
@@ -2132,9 +2155,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 99,
         catId: 'opus',
@@ -2162,9 +2184,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': 'bogus', 'x-callback-token': 'bogus' },
       payload: {
-        invocationId: 'bogus',
-        callbackToken: 'bogus',
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 1,
         catId: 'opus',
@@ -2183,9 +2204,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 1,
         catId: 'nonexistent-cat', // bogus — should be ignored
@@ -2205,9 +2225,8 @@ describe('Callback Routes', () => {
     const regA = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': userA.invocationId, 'x-callback-token': userA.callbackToken },
       payload: {
-        invocationId: userA.invocationId,
-        callbackToken: userA.callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 42,
         catId: 'opus',
@@ -2220,9 +2239,8 @@ describe('Callback Routes', () => {
     const regB = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': userB.invocationId, 'x-callback-token': userB.callbackToken },
       payload: {
-        invocationId: userB.invocationId,
-        callbackToken: userB.callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 42,
         catId: 'codex',
@@ -2270,9 +2288,8 @@ describe('Callback Routes', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': userA.invocationId, 'x-callback-token': userA.callbackToken },
       payload: {
-        invocationId: userA.invocationId,
-        callbackToken: userA.callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 77,
       },
@@ -2283,9 +2300,8 @@ describe('Callback Routes', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': userB.invocationId, 'x-callback-token': userB.callbackToken },
       payload: {
-        invocationId: userB.invocationId,
-        callbackToken: userB.callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 77,
       },
@@ -2303,9 +2319,8 @@ describe('Callback Routes', () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': inv1.invocationId, 'x-callback-token': inv1.callbackToken },
       payload: {
-        invocationId: inv1.invocationId,
-        callbackToken: inv1.callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 42,
         catId: 'opus',
@@ -2317,9 +2332,8 @@ describe('Callback Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': inv2.invocationId, 'x-callback-token': inv2.callbackToken },
       payload: {
-        invocationId: inv2.invocationId,
-        callbackToken: inv2.callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 42,
         catId: 'opus',
@@ -2346,9 +2360,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 1,
         catId: 'opus',
@@ -2369,9 +2382,8 @@ describe('Callback Routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 832,
         catId: 'opus', // ← LLM passed wrong catId
@@ -2400,9 +2412,8 @@ describe('Callback Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Hello from source thread',
         threadId: targetThread.id,
       },
@@ -2429,9 +2440,8 @@ describe('Callback Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'Hello same thread',
         threadId: thread.id,
       },

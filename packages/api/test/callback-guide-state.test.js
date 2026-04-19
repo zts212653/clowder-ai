@@ -97,7 +97,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, guideId: 'add-member', status: 'offered' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, guideId: 'add-member', status: 'offered' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -115,7 +116,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, guideId: 'add-member', status: 'active' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, guideId: 'add-member', status: 'active' },
     });
 
     assert.equal(res.statusCode, 400);
@@ -136,7 +138,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, guideId: 'add-member', status: 'active' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, guideId: 'add-member', status: 'active' },
     });
 
     assert.equal(res.statusCode, 400);
@@ -167,7 +170,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, guideId: 'add-member', status: 'offered' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, guideId: 'add-member', status: 'offered' },
     });
 
     assert.equal(res.statusCode, 400);
@@ -192,7 +196,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, guideId: 'add-member', status: 'offered' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, guideId: 'add-member', status: 'offered' },
     });
 
     assert.equal(res.statusCode, 400);
@@ -217,7 +222,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, guideId: 'add-member', status: 'offered' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, guideId: 'add-member', status: 'offered' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -234,7 +240,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread2.id, guideId: 'add-member', status: 'offered' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread2.id, guideId: 'add-member', status: 'offered' },
     });
 
     assert.equal(res.statusCode, 403);
@@ -266,7 +273,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-guide-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, guideId: 'add-member', status: 'active' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, guideId: 'add-member', status: 'active' },
     });
 
     assert.equal(res.statusCode, 403);
@@ -292,7 +300,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-guide',
-      payload: { invocationId, callbackToken, guideId: 'add-member' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { guideId: 'add-member' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -326,7 +335,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-guide',
-      payload: { invocationId, callbackToken, guideId: 'add-member' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { guideId: 'add-member' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -357,7 +367,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-guide',
-      payload: { invocationId, callbackToken, guideId: 'add-member' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { guideId: 'add-member' },
     });
 
     assert.equal(res.statusCode, 400);
@@ -380,7 +391,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-guide',
-      payload: { invocationId, callbackToken, guideId: 'add-member' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { guideId: 'add-member' },
     });
 
     assert.equal(res.statusCode, 400);
@@ -394,7 +406,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/start-guide',
-      payload: { invocationId, callbackToken, guideId: 'add-member' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { guideId: 'add-member' },
     });
 
     assert.equal(res.statusCode, 403);
@@ -424,7 +437,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/guide-control',
-      payload: { invocationId, callbackToken, action: 'next' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'next' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -456,7 +470,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/guide-control',
-      payload: { invocationId, callbackToken, action: 'next' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'next' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -488,7 +503,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/guide-control',
-      payload: { invocationId, callbackToken, action: 'next' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'next' },
     });
 
     assert.equal(res.statusCode, 400);
@@ -511,7 +527,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/guide-control',
-      payload: { invocationId, callbackToken, action: 'exit' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'exit' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -527,7 +544,8 @@ describe('F155 Guide State Callbacks', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/guide-control',
-      payload: { invocationId, callbackToken, action: 'exit' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { action: 'exit' },
     });
 
     assert.equal(res.statusCode, 403);

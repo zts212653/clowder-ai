@@ -115,9 +115,8 @@ describe('Callback Game Action', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/submit-game-action',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         // missing gameId, round, phase, seat, action, nonce
       },
     });
@@ -134,9 +133,8 @@ describe('Callback Game Action', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/submit-game-action',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         gameId: 'game-1',
         round: 1,
         phase: 'night_wolf',
@@ -163,9 +161,8 @@ describe('Callback Game Action', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/submit-game-action',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         gameId: 'nonexistent',
         round: 1,
         phase: 'night_wolf',
@@ -189,9 +186,8 @@ describe('Callback Game Action', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/submit-game-action',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         gameId: 'game-2',
         round: 1,
         phase: 'night_wolf',
@@ -220,9 +216,8 @@ describe('Callback Game Action', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/submit-game-action',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         gameId: 'game-B',
         round: 1,
         phase: 'night_wolf',

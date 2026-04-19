@@ -86,9 +86,8 @@ describe('Bootcamp Flow Integration', () => {
     const step2 = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
         phase: 'phase-1-intro',
         leadCat: 'opus',
@@ -106,7 +105,8 @@ describe('Bootcamp Flow Integration', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/callbacks/update-bootcamp-state',
-        payload: { invocationId: creds.invocationId, callbackToken: creds.callbackToken, threadId, phase, ...extra },
+        headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+        payload: { threadId, phase, ...extra },
       });
       assert.equal(res.statusCode, 200, `Phase ${phase} should succeed`);
       return JSON.parse(res.body);
@@ -120,7 +120,8 @@ describe('Bootcamp Flow Integration', () => {
     const step3 = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
-      payload: { invocationId: envCreds.invocationId, callbackToken: envCreds.callbackToken, threadId: thread.id },
+      headers: { 'x-invocation-id': envCreds.invocationId, 'x-callback-token': envCreds.callbackToken },
+      payload: { threadId: thread.id },
     });
     assert.equal(step3.statusCode, 200);
     assert.ok('node' in JSON.parse(step3.body));

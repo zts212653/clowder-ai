@@ -70,9 +70,8 @@ describe('Callback Bootcamp Env Check', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
       },
     });
@@ -111,9 +110,8 @@ describe('Callback Bootcamp Env Check', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
       },
     });
@@ -144,9 +142,8 @@ describe('Callback Bootcamp Env Check', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
       },
     });
@@ -173,9 +170,8 @@ describe('Callback Bootcamp Env Check', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
       },
     });
@@ -194,9 +190,8 @@ describe('Callback Bootcamp Env Check', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: 'nonexistent',
       },
     });

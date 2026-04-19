@@ -6,36 +6,21 @@
 import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { isCatAvailable } from '../config/cat-config-loader.js';
-import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { categorizeThreadCats } from './thread-cats-core.js';
 
 interface ThreadCatsCallbackDeps {
-  registry: InvocationRegistry;
   threadStore: IThreadStore;
   agentRegistry: { getAllEntries(): Map<string, unknown> };
 }
 
-const threadCatsQuerySchema = callbackAuthSchema;
-
 export function registerCallbackThreadCatsRoutes(app: FastifyInstance, deps: ThreadCatsCallbackDeps): void {
-  const { registry, threadStore, agentRegistry } = deps;
+  const { threadStore, agentRegistry } = deps;
 
   app.get('/api/callbacks/thread-cats', async (request, reply) => {
-    const parsed = threadCatsQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Missing invocationId or callbackToken' };
-    }
-
-    const { invocationId, callbackToken } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
 
     const threadId = record.threadId;
     if (!threadId) {

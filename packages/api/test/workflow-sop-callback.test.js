@@ -99,12 +99,13 @@ describe('WorkflowSop callback route', () => {
 
   before(async () => {
     const module = await import('../dist/routes/callback-workflow-sop-routes.js');
+    const { registerCallbackAuthHook } = await import('../dist/routes/callback-auth-prehandler.js');
 
     workflowSopStore = createInMemoryWorkflowSopStore();
 
     app = Fastify();
+    registerCallbackAuthHook(app, createStubRegistry());
     module.registerCallbackWorkflowSopRoutes(app, {
-      registry: createStubRegistry(),
       workflowSopStore,
       backlogStore: createStubBacklogStore(),
     });
@@ -119,10 +120,12 @@ describe('WorkflowSop callback route', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-workflow-sop',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
       payload: {
-        invocationId: INVOCATION_ID,
-        callbackToken: CALLBACK_TOKEN,
         backlogItemId: 'item-1',
         featureId: 'F073',
         stage: 'impl',
@@ -141,10 +144,8 @@ describe('WorkflowSop callback route', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-workflow-sop',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-invocation-id': 'bad-id', 'x-callback-token': 'bad-token' },
       payload: {
-        invocationId: 'bad-id',
-        callbackToken: 'bad-token',
         backlogItemId: 'item-1',
         featureId: 'F073',
       },
@@ -156,10 +157,12 @@ describe('WorkflowSop callback route', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-workflow-sop',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
       payload: {
-        invocationId: INVOCATION_ID,
-        callbackToken: CALLBACK_TOKEN,
         backlogItemId: 'nonexistent',
         featureId: 'F073',
       },
@@ -171,10 +174,12 @@ describe('WorkflowSop callback route', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-workflow-sop',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
       payload: {
-        invocationId: INVOCATION_ID,
-        callbackToken: CALLBACK_TOKEN,
         // missing backlogItemId and featureId
       },
     });

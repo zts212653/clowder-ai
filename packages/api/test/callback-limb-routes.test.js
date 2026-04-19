@@ -3,6 +3,7 @@ import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
+import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { registerCallbackLimbRoutes } from '../dist/routes/callback-limb-routes.js';
 
 function mockNode(overrides = {}) {
@@ -36,10 +37,8 @@ describe('callback-limb-routes (Fastify injection)', () => {
     validInvocationId = creds.invocationId;
     validToken = creds.callbackToken;
 
-    registerCallbackLimbRoutes(app, {
-      limbRegistry,
-      invocationRegistry,
-    });
+    registerCallbackAuthHook(app, invocationRegistry);
+    registerCallbackLimbRoutes(app, { limbRegistry });
 
     await app.ready();
   });
@@ -48,7 +47,8 @@ describe('callback-limb-routes (Fastify injection)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/list',
-      payload: { invocationId: validInvocationId, callbackToken: validToken },
+      headers: { 'x-invocation-id': validInvocationId, 'x-callback-token': validToken },
+      payload: {},
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
@@ -61,7 +61,8 @@ describe('callback-limb-routes (Fastify injection)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/list',
-      payload: { invocationId: validInvocationId, callbackToken: validToken },
+      headers: { 'x-invocation-id': validInvocationId, 'x-callback-token': validToken },
+      payload: {},
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
@@ -82,7 +83,8 @@ describe('callback-limb-routes (Fastify injection)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/list',
-      payload: { invocationId: validInvocationId, callbackToken: validToken, capability: 'camera' },
+      headers: { 'x-invocation-id': validInvocationId, 'x-callback-token': validToken },
+      payload: { capability: 'camera' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
@@ -90,13 +92,14 @@ describe('callback-limb-routes (Fastify injection)', () => {
     assert.equal(body.nodes[0].nodeId, 'iphone-1');
   });
 
-  it('POST /api/callback/limb/list returns 403 with bad credentials', async () => {
+  it('POST /api/callback/limb/list returns 401 with bad credentials', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/list',
-      payload: { invocationId: 'bad', callbackToken: 'bad' },
+      headers: { 'x-invocation-id': 'bad', 'x-callback-token': 'bad' },
+      payload: {},
     });
-    assert.equal(res.statusCode, 403);
+    assert.equal(res.statusCode, 401);
   });
 
   it('POST /api/callback/limb/invoke calls node and returns result', async () => {
@@ -105,9 +108,8 @@ describe('callback-limb-routes (Fastify injection)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/invoke',
+      headers: { 'x-invocation-id': validInvocationId, 'x-callback-token': validToken },
       payload: {
-        invocationId: validInvocationId,
-        callbackToken: validToken,
         nodeId: 'iphone-1',
         command: 'camera.snap',
         params: { quality: 'high' },
@@ -123,9 +125,8 @@ describe('callback-limb-routes (Fastify injection)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/invoke',
+      headers: { 'x-invocation-id': validInvocationId, 'x-callback-token': validToken },
       payload: {
-        invocationId: validInvocationId,
-        callbackToken: validToken,
         nodeId: 'nonexistent',
         command: 'test',
       },
@@ -136,20 +137,21 @@ describe('callback-limb-routes (Fastify injection)', () => {
     assert.ok(body.error.includes('Unknown node'));
   });
 
-  it('POST /api/callback/limb/invoke returns 403 with bad credentials', async () => {
+  it('POST /api/callback/limb/invoke returns 401 with bad credentials', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/invoke',
-      payload: { invocationId: 'bad', callbackToken: 'bad', nodeId: 'x', command: 'y' },
+      headers: { 'x-invocation-id': 'bad', 'x-callback-token': 'bad' },
+      payload: { nodeId: 'x', command: 'y' },
     });
-    assert.equal(res.statusCode, 403);
+    assert.equal(res.statusCode, 401);
   });
 
   it('POST /api/callback/limb/invoke returns 400 for missing required fields', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/invoke',
-      payload: { invocationId: validInvocationId, callbackToken: validToken },
+      headers: { 'x-invocation-id': validInvocationId, 'x-callback-token': validToken },
     });
     assert.equal(res.statusCode, 400);
   });

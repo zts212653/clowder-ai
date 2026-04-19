@@ -11,8 +11,7 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import { runEnvironmentCheck } from '../domains/cats/services/bootcamp/env-check.js';
 import type { BootcampStateV1, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { BOOTCAMP_PHASE_ACHIEVEMENTS } from '../domains/leaderboard/achievement-defs.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
-import { EXPIRED_CREDENTIALS_ERROR } from './callback-errors.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
 /** Ordered phase list — index determines valid transitions (forward-only) */
 const PHASE_ORDER = [
@@ -35,7 +34,7 @@ const PHASE_INDEX = new Map(PHASE_ORDER.map((p, i) => [p, i]));
 
 const bootcampPhaseSchema = z.enum([...PHASE_ORDER]);
 
-const updateBootcampStateCallbackSchema = callbackAuthSchema.extend({
+const updateBootcampStateCallbackSchema = z.object({
   threadId: z.string().min(1),
   phase: bootcampPhaseSchema.optional(),
   leadCat: catIdSchema().optional(),
@@ -60,21 +59,19 @@ export function registerCallbackBootcampRoutes(
   const { registry, threadStore } = deps;
 
   app.post('/api/callbacks/update-bootcamp-state', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = updateBootcampStateCallbackSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, threadId, ...updates } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { threadId, ...updates } = parsed.data;
 
     // P2: Stale invocation guard — ignore if superseded by newer invocation
-    if (!registry.isLatest(invocationId)) {
+    if (!registry.isLatest(record.invocationId)) {
       return { status: 'stale_ignored' };
     }
 
@@ -169,26 +166,24 @@ export function registerCallbackBootcampRoutes(
   });
 
   // POST /api/callbacks/bootcamp-env-check — run env check and auto-store results
-  const envCheckCallbackSchema = callbackAuthSchema.extend({
+  const envCheckCallbackSchema = z.object({
     threadId: z.string().min(1),
   });
 
   app.post('/api/callbacks/bootcamp-env-check', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
     const parsed = envCheckCallbackSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { invocationId, callbackToken, threadId } = parsed.data;
-    const record = registry.verify(invocationId, callbackToken);
-    if (!record) {
-      reply.status(401);
-      return EXPIRED_CREDENTIALS_ERROR;
-    }
+    const { threadId } = parsed.data;
 
     // P2: Stale invocation guard
-    if (!registry.isLatest(invocationId)) {
+    if (!registry.isLatest(record.invocationId)) {
       return { status: 'stale_ignored' };
     }
 

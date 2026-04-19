@@ -9,7 +9,6 @@ import { type CatId, catRegistry, createCatId, DEFAULT_TIMEOUT_MINUTES } from '@
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import {
   type MultiMentionCreateParams,
@@ -20,7 +19,7 @@ import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { callbackAuthSchema } from './callback-auth-schema.js';
+import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
 // ── Singleton orchestrator ───────────────────────────────────────────
 let globalOrchestrator: MultiMentionOrchestrator | undefined;
@@ -36,7 +35,7 @@ export function resetMultiMentionOrchestrator(): void {
 }
 
 // ── Schema ───────────────────────────────────────────────────────────
-const multiMentionSchema = callbackAuthSchema.extend({
+const multiMentionSchema = z.object({
   targets: z.array(z.string().min(1)).min(1).max(3),
   question: z.string().min(1).max(5000),
   callbackTo: z.string().min(1),
@@ -48,13 +47,12 @@ const multiMentionSchema = callbackAuthSchema.extend({
   triggerType: z.string().optional(),
 });
 
-const multiMentionStatusSchema = callbackAuthSchema.extend({
+const multiMentionStatusSchema = z.object({
   requestId: z.string().min(1),
 });
 
 // ── Deps ─────────────────────────────────────────────────────────────
 export interface MultiMentionRouteDeps {
-  registry: InvocationRegistry;
   messageStore: IMessageStore;
   socketManager: SocketManager;
   router: AgentRouter;
@@ -420,17 +418,12 @@ async function flushResult(
 
 // ── Route registration ───────────────────────────────────────────────
 export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMentionRouteDeps): void {
-  const { registry } = deps;
-
   // POST /api/callbacks/multi-mention
   app.post<{ Body: z.infer<typeof multiMentionSchema> }>('/api/callbacks/multi-mention', async (request, reply) => {
-    const body = multiMentionSchema.parse(request.body);
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
 
-    // Auth: verify invocation
-    const record = registry.verify(body.invocationId, body.callbackToken);
-    if (!record) {
-      return reply.status(401).send({ error: 'Invalid or expired callback credentials' });
-    }
+    const body = multiMentionSchema.parse(request.body);
 
     // Validate all targets are registered cats
     const targetCatIds: CatId[] = [];
@@ -532,12 +525,10 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
   app.get<{ Querystring: z.infer<typeof multiMentionStatusSchema> }>(
     '/api/callbacks/multi-mention-status',
     async (request, reply) => {
-      const query = multiMentionStatusSchema.parse(request.query);
+      const record = requireCallbackAuth(request, reply);
+      if (!record) return;
 
-      const record = registry.verify(query.invocationId, query.callbackToken);
-      if (!record) {
-        return reply.status(401).send({ error: 'Invalid or expired callback credentials' });
-      }
+      const query = multiMentionStatusSchema.parse(request.query);
 
       const orch = getMultiMentionOrchestrator();
       try {

@@ -98,9 +98,8 @@ describe('auto-replyTo for A2A invocations', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '收到！我来看看',
       },
     });
@@ -167,9 +166,8 @@ describe('auto-replyTo for A2A invocations', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '回复其他消息',
         replyTo: otherMsg.id, // Explicit replyTo
       },
@@ -194,9 +192,8 @@ describe('auto-replyTo for A2A invocations', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '直接用户请求的回复',
       },
     });
@@ -243,9 +240,8 @@ describe('auto-replyTo for A2A invocations', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'P3-2 hardening test',
       },
     });
@@ -288,9 +284,8 @@ describe('auto-replyTo for A2A invocations', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '跨 thread 回复',
       },
     });
