@@ -214,28 +214,28 @@ export function HubMemberOverviewCard({
             data-guide-id={guideTargetId}
             className="min-w-0 flex-1 cursor-pointer text-left"
           >
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
-            {cat.source === 'runtime' ? (
-              <span className="rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[11px] font-semibold text-[#9D7BC7]">
-                动态创建
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-2.5 text-[13px] text-[#8A776B]">
-            {getMetaSummary(cat, configCat)}
-            {cat.adapterMode ? (
-              <span
-                className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                  cat.adapterMode === 'acp' ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-500'
-                }`}
-              >
-                {cat.adapterMode.toUpperCase()}
-              </span>
-            ) : null}
-          </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
+              {cat.source === 'runtime' ? (
+                <span className="rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[11px] font-semibold text-[#9D7BC7]">
+                  动态创建
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2.5 text-[13px] text-[#8A776B]">
+              {getMetaSummary(cat, configCat)}
+              {cat.adapterMode ? (
+                <span
+                  className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                    cat.adapterMode === 'acp' ? 'bg-[#E8F5E9] text-[#4CAF50]' : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {cat.adapterMode.toUpperCase()}
+                </span>
+              ) : null}
+            </p>
 
-          <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
+            <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
           </button>
         </div>
         <button
