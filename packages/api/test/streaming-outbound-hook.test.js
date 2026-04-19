@@ -313,11 +313,13 @@ describe('StreamingOutboundHook', () => {
     await hook.onStreamChunk('thread-1', 'Partial streaming content', 'inv-tg');
     await hook.onStreamEnd('thread-1', 'Final complete answer', 'inv-tg');
 
-    // editMessage must have been called with final content (no ▌ cursor)
+    // editMessage must have been called with final content (no ▌ cursor), with ✅ completion prefix
     const edits = telegramAdapter._calls.editMessage;
     assert.ok(edits.length >= 1, 'editMessage must be called at least once');
     const lastEdit = edits[edits.length - 1];
-    assert.equal(lastEdit.text, 'Final complete answer', 'Last edit must be final content without cursor');
+    assert.ok(lastEdit.text.includes('✅'), 'Last edit must contain ✅ completion marker');
+    assert.ok(lastEdit.text.includes('Final complete answer'), 'Last edit must contain final content');
+    assert.ok(!lastEdit.text.includes('▌'), 'Last edit must not contain streaming cursor');
     // deleteMessage must NOT be called yet (deferred until cleanupPlaceholders)
     assert.equal(telegramAdapter._calls.deleteMessage.length, 0, 'deleteMessage must be deferred');
 
@@ -386,13 +388,15 @@ describe('StreamingOutboundHook', () => {
 
     const edits = telegramAdapter._calls.editMessage;
     const lastEdit = edits[edits.length - 1];
-    // Should fall back to lastAccumulatedText, not error message, since we had chunks
-    assert.equal(lastEdit.text, 'Accumulated so far', 'Must fall back to lastAccumulatedText when finalText empty');
+    // Should fall back to lastAccumulatedText, with ✅ completion prefix
+    assert.ok(lastEdit.text.includes('✅'), 'Must contain ✅ completion marker');
+    assert.ok(lastEdit.text.includes('Accumulated so far'), 'Must fall back to lastAccumulatedText when finalText empty');
   });
 
   it('uses streamed text fallback when inline-final-delivery ends without final text', async () => {
     const telegramAdapter = wrapAdapter({
       connectorId: 'telegram',
+      ownsFinalDelivery: true,
       sendReply: async () => {},
       sendPlaceholder: async (_chatId, _text) => 'msg-tg-1',
       editMessage: async (_chatId, _msgId, _text) => {},
@@ -424,8 +428,11 @@ describe('StreamingOutboundHook', () => {
     await hook.onStreamEnd('thread-1', '', 'inv-1');
 
     assert.equal(telegramAdapter._calls.editMessage.length, 2);
-    assert.equal(telegramAdapter._calls.editMessage[0].text, 'Partial answer ▌');
-    assert.equal(telegramAdapter._calls.editMessage[1].text, 'Partial answer');
+    assert.ok(telegramAdapter._calls.editMessage[0].text.includes('思考中...'), 'chunk edit must have 思考中 prefix');
+    assert.ok(telegramAdapter._calls.editMessage[0].text.includes('Partial answer ▌'), 'chunk edit must have content + cursor');
+    assert.ok(telegramAdapter._calls.editMessage[1].text.includes('✅'), 'final edit must have ✅ completion marker');
+    assert.ok(telegramAdapter._calls.editMessage[1].text.includes('Partial answer'), 'final edit must have content');
+    assert.ok(!telegramAdapter._calls.editMessage[1].text.includes('▌'), 'final edit must not have cursor');
   });
 
   it('onStreamEnd cleans up session (second call is no-op)', async () => {
