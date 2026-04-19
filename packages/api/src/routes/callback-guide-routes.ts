@@ -35,6 +35,10 @@ const startGuideSchema = z.object({
   guideId: z.string().min(1),
 });
 
+const resolveGuideSchema = z.object({
+  intent: z.string().min(1).optional(),
+});
+
 const controlGuideSchema = z.object({
   action: z.enum(['next', 'skip', 'exit']),
 });
@@ -62,6 +66,7 @@ export async function registerCallbackGuideRoutes(
     isValidGuideId,
     loadGuideFlow: defaultLoadGuideFlow,
     getAvailableGuides,
+    resolveGuideForIntent,
   } = await import('../domains/guides/guide-registry-loader.js');
 
   if (!deps.guideSessionStore) return; // Skip guide routes when store not provided (e.g. tests)
@@ -156,7 +161,28 @@ export async function registerCallbackGuideRoutes(
   app.post('/api/callbacks/get-available-guides', getAvailableGuidesResponse);
 
   // POST /api/callbacks/guide-resolve (legacy alias during tool rename rollout)
-  app.post('/api/callbacks/guide-resolve', getAvailableGuidesResponse);
+  app.post('/api/callbacks/guide-resolve', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
+    const parsed = resolveGuideSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+
+    const context = await getGuideAvailabilityContext(record.threadId);
+    const intent = parsed.data.intent?.trim();
+    if (intent) {
+      const matches = resolveGuideForIntent(intent, context);
+      app.log.info({ intent, matchCount: matches.length, threadId: record.threadId }, '[F155] guide_resolve');
+      return { status: 'ok', matches };
+    }
+
+    const guides = getAvailableGuides(context);
+    app.log.info({ guideCount: guides.length, threadId: record.threadId }, '[F155] guide_resolve_discovery_alias');
+    return { status: 'ok', guides };
+  });
 
   // POST /api/callbacks/guide-control
   app.post('/api/callbacks/guide-control', async (request, reply) => {

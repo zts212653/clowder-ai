@@ -65,7 +65,7 @@ export function CreateApiKeyAccountSection({
         <span className="text-sm text-[#C8946B]">{expanded ? '▾ 收起' : '▸ 展开'}</span>
       </button>
       {expanded && (
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 space-y-3" data-guide-id="accounts.create-details">
           <input
             value={displayName}
             onChange={(e) => onDisplayNameChange(e.target.value)}
@@ -104,6 +104,7 @@ export function CreateApiKeyAccountSection({
             onClick={onCreate}
             disabled={busy || !canCreate}
             className="rounded bg-[#D49266] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#c47f52] disabled:opacity-50"
+            data-guide-id="accounts.create-submit"
           >
             {busy ? '创建中...' : '创建'}
           </button>

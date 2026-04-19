@@ -186,44 +186,40 @@ function GuideOverlayInner() {
         return;
       }
       if (e.key === 'Tab' && currentStep) {
-        const targetEl = document.querySelector(buildGuideTargetSelector(currentStep.target));
+        const targetEl = document.querySelector<HTMLElement>(buildGuideTargetSelector(currentStep.target));
         const hud = hudRef.current;
         if (!hud) return;
 
-        const focusableInHud = hud.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])');
-        const lastHudFocusable = focusableInHud[focusableInHud.length - 1];
+        const focusableInHud = getFocusableElements(hud);
+        const focusableInTarget = getFocusableElements(targetEl);
         const firstHudFocusable = focusableInHud[0];
-        const isInHud = hud.contains(document.activeElement);
-        const isOnTarget = targetEl && document.activeElement === targetEl;
+        const lastHudFocusable = focusableInHud[focusableInHud.length - 1];
+        const firstTargetFocusable = focusableInTarget[0];
+        const lastTargetFocusable = focusableInTarget[focusableInTarget.length - 1];
+        const activeElement = document.activeElement as HTMLElement | null;
+        const isInHud = !!activeElement && hud.contains(activeElement);
+        const isInTarget = !!activeElement && !!targetEl && targetEl.contains(activeElement);
 
-        // If focus escaped the trap (neither in HUD nor on target), pull it back
-        if (!isInHud && !isOnTarget) {
+        // If focus escaped the trap, pull it back into the HUD.
+        if (!isInHud && !isInTarget) {
           e.preventDefault();
           firstHudFocusable?.focus();
           return;
         }
 
         if (e.shiftKey) {
-          if (document.activeElement === firstHudFocusable && targetEl) {
+          if (activeElement === firstHudFocusable) {
             e.preventDefault();
-            (targetEl as HTMLElement).focus();
-          } else if (isOnTarget) {
-            e.preventDefault();
-            lastHudFocusable?.focus();
-          } else if (document.activeElement === firstHudFocusable) {
-            // No target element available — wrap within HUD
+            (lastTargetFocusable ?? lastHudFocusable)?.focus();
+          } else if (activeElement === firstTargetFocusable) {
             e.preventDefault();
             lastHudFocusable?.focus();
           }
         } else {
-          if (document.activeElement === lastHudFocusable && targetEl) {
+          if (activeElement === lastHudFocusable) {
             e.preventDefault();
-            (targetEl as HTMLElement).focus();
-          } else if (isOnTarget) {
-            e.preventDefault();
-            firstHudFocusable?.focus();
-          } else if (document.activeElement === lastHudFocusable) {
-            // No target element available — wrap within HUD
+            (firstTargetFocusable ?? firstHudFocusable)?.focus();
+          } else if (activeElement === lastTargetFocusable) {
             e.preventDefault();
             firstHudFocusable?.focus();
           }
@@ -782,4 +778,28 @@ export function computeShieldPanels(
 export function buildGuideTargetSelector(target: string): string {
   const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(target) : target;
   return `[data-guide-id="${escaped}"]`;
+}
+
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([type="hidden"]):not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+  '[contenteditable="true"]',
+  '[contenteditable=""]',
+  '[contenteditable="plaintext-only"]',
+].join(', ');
+
+function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return [];
+
+  const elements = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => !el.hasAttribute('inert'),
+  );
+  if (root.matches(FOCUSABLE_SELECTOR) && !root.hasAttribute('inert')) {
+    elements.unshift(root);
+  }
+  return elements;
 }

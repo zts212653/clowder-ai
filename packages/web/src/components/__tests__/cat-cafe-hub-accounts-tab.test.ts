@@ -523,6 +523,44 @@ describe('CatCafeHub provider profiles tab', () => {
     expect(guideTarget?.tagName).toBe('BUTTON');
   });
 
+  it('exposes actionable guide targets for the expanded account details and submit button', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/api/accounts')) {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubAccountsTab));
+    });
+    await flushEffects();
+
+    const expandButton = container.querySelector('[data-guide-id="accounts.create-form"]') as HTMLButtonElement | null;
+    expect(expandButton).toBeTruthy();
+
+    await act(async () => {
+      expandButton?.click();
+    });
+    await flushEffects();
+
+    const detailsTarget = container.querySelector('[data-guide-id="accounts.create-details"]');
+    const submitTarget = container.querySelector('[data-guide-id="accounts.create-submit"]');
+
+    expect(detailsTarget).toBeTruthy();
+    expect(detailsTarget?.querySelector('input[placeholder*="账号显示名"]')).toBeTruthy();
+    expect(detailsTarget?.querySelector('input[placeholder*="API 服务地址"]')).toBeTruthy();
+    expect(detailsTarget?.querySelector('input[placeholder*="sk-"]')).toBeTruthy();
+    expect(submitTarget).toBeTruthy();
+    expect(submitTarget?.tagName).toBe('BUTTON');
+  });
+
   it('keeps settings expanded when the current guide step targets settings.group', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/config') {

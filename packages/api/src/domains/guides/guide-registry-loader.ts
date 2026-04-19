@@ -85,6 +85,19 @@ export interface GuideAvailabilityContext {
   memberCardCount?: number;
 }
 
+export interface GuideMatch {
+  id: string;
+  name: string;
+  description: string;
+  estimatedTime: string;
+  score: number;
+  totalKeywords: number;
+}
+
+export interface GuideResolveContext {
+  memberCardCount?: number;
+}
+
 /**
  * Match user intent against guide registry keywords.
  * Returns matched guides sorted by score (highest first), or empty array.
@@ -144,7 +157,21 @@ interface RawFlowFile {
 }
 
 const flowCache = new Map<string, OrchestrationFlow>();
+const MIN_ASCII_REVERSE_MATCH_LENGTH = 3;
+const MIN_NON_ASCII_REVERSE_MATCH_LENGTH = 2;
 const SUPPORTED_FLOW_SCHEMA_VERSION = 1;
+
+function normalizeGuideIntent(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function canUseReverseSubstringMatch(query: string): boolean {
+  const compact = query.replace(/\s+/g, '');
+  if (!compact) return false;
+  return /^[a-z0-9._-]+$/i.test(compact)
+    ? compact.length >= MIN_ASCII_REVERSE_MATCH_LENGTH
+    : compact.length >= MIN_NON_ASCII_REVERSE_MATCH_LENGTH;
+}
 
 function normalizeFlowSchemaVersion(guideId: string, schemaVersion?: number): 1 {
   if (schemaVersion == null) {
@@ -221,11 +248,41 @@ export function loadGuideFlow(guideId: string): OrchestrationFlow {
   return flow;
 }
 
-function entryIsAvailable(entry: GuideRegistryEntry, context?: GuideAvailabilityContext): boolean {
+function entryIsAvailable(
+  entry: GuideRegistryEntry,
+  context?: GuideAvailabilityContext | GuideResolveContext,
+): boolean {
   if (entry.requires_member_cards && (context?.memberCardCount ?? 0) <= 0) {
     return false;
   }
   return true;
+}
+
+export function resolveGuideForIntent(intent: string, context?: GuideResolveContext): GuideMatch[] {
+  const entries = getRegistryEntries();
+  const query = normalizeGuideIntent(intent);
+  if (!query) return [];
+  const allowReverseSubstringMatch = canUseReverseSubstringMatch(query);
+
+  return entries
+    .filter((entry) => entryIsAvailable(entry, context))
+    .map((entry) => {
+      const score = entry.keywords.filter((keyword) => {
+        const normalizedKeyword = normalizeGuideIntent(keyword);
+        return query.includes(normalizedKeyword) || (allowReverseSubstringMatch && normalizedKeyword.includes(query));
+      }).length;
+
+      return {
+        id: entry.id,
+        name: entry.name,
+        description: entry.description,
+        estimatedTime: entry.estimated_time,
+        score,
+        totalKeywords: entry.keywords.length,
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.totalKeywords - b.totalKeywords);
 }
 
 export function getAvailableGuides(context?: GuideAvailabilityContext): AvailableGuide[] {

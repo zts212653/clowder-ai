@@ -29,9 +29,14 @@ steps:
     advance: click
 
   - id: fill-api-key
-    target: accounts.api-key
-    tips: 填写 API Key 和相关信息，然后点击创建
+    target: accounts.create-details
+    tips: 填写账号显示名、API 服务地址、API Key 和至少一个模型
     advance: confirm
+
+  - id: submit-account
+    target: accounts.create-submit
+    tips: 填写完成后，点击创建账号
+    advance: click
 
   - id: done-hint
     target: accounts.account-list

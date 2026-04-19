@@ -222,7 +222,7 @@ describe('F155 Guide callback routes', () => {
       );
     });
 
-    test('keeps the legacy /guide-resolve alias compatible with guide discovery responses', async () => {
+    test('keeps the legacy /guide-resolve alias compatible with discovery responses when no intent is provided', async () => {
       const app = await createApp();
       const { invocationId, callbackToken } = createCreds();
 
@@ -237,6 +237,27 @@ describe('F155 Guide callback routes', () => {
       assert.equal(legacyBody.status, 'ok');
       assert.ok(legacyBody.guides.length > 0);
       assert.ok(legacyBody.guides.some((guide) => guide.id === 'add-member'));
+    });
+
+    test('preserves the legacy /guide-resolve { matches } contract when callers still send intent', async () => {
+      const app = await createApp();
+      const { invocationId, callbackToken } = createCreds();
+
+      const legacyRes = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/guide-resolve',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { intent: '帮我添加成员并配置认证' },
+      });
+
+      assert.equal(legacyRes.statusCode, 200);
+      const legacyBody = JSON.parse(legacyRes.body);
+      assert.equal(legacyBody.status, 'ok');
+      assert.ok(Array.isArray(legacyBody.matches));
+      assert.ok(legacyBody.matches.length > 0);
+      assert.equal(legacyBody.matches[0].id, 'add-member');
+      assert.equal(typeof legacyBody.matches[0].score, 'number');
+      assert.equal(legacyBody.guides, undefined);
     });
 
     test('filters guides that are unavailable in the current context', async () => {

@@ -37,6 +37,12 @@ const INPUT_FLOW: OrchestrationFlow = {
   steps: [{ id: 'step-input', target: 'member-editor.name', tips: 'type name', advance: 'input' }],
 };
 
+const TARGET_SUBTREE_FLOW: OrchestrationFlow = {
+  id: 'target-subtree-flow',
+  name: 'Target Subtree Flow',
+  steps: [{ id: 'step-subtree', target: 'accounts.create-details', tips: 'fill account details', advance: 'confirm' }],
+};
+
 const CARD_FLOW: OrchestrationFlow = {
   id: 'card-flow',
   name: 'Card Flow',
@@ -79,6 +85,9 @@ describe('GuideOverlay auto-advance lifecycle', () => {
   let target: HTMLButtonElement;
   let confirmTarget: HTMLDivElement;
   let inputTarget: HTMLInputElement;
+  let formTarget: HTMLDivElement;
+  let formTargetInputs: HTMLInputElement[];
+  let formTargetButton: HTMLButtonElement;
   let delayedCardTarget: HTMLDivElement;
   let interactiveCardTarget: HTMLDivElement;
   let rafId = 0;
@@ -129,6 +138,17 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     inputTarget.setAttribute('data-guide-id', 'member-editor.name');
     document.body.appendChild(inputTarget);
 
+    formTarget = document.createElement('div');
+    formTarget.setAttribute('data-guide-id', 'accounts.create-details');
+    formTarget.innerHTML = `
+      <input type="text" aria-label="display name" />
+      <input type="url" aria-label="base url" />
+      <button type="button">Create</button>
+    `;
+    formTargetInputs = Array.from(formTarget.querySelectorAll('input'));
+    formTargetButton = formTarget.querySelector('button') as HTMLButtonElement;
+    document.body.appendChild(formTarget);
+
     delayedCardTarget = document.createElement('div');
     delayedCardTarget.setAttribute('data-guide-id', 'async.card');
     delayedCardTarget.textContent = 'Delayed Card Content';
@@ -159,6 +179,7 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     target.remove();
     confirmTarget.remove();
     inputTarget.remove();
+    formTarget.remove();
     delayedCardTarget.remove();
     interactiveCardTarget.remove();
     act(() => {
@@ -388,6 +409,46 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     });
 
     expect(useGuideStore.getState().session?.phase).toBe('complete');
+  });
+
+  it('cycles between the HUD and focusable descendants inside the target subtree without hijacking inner tab order', () => {
+    act(() => {
+      useGuideStore.getState().startGuide(TARGET_SUBTREE_FLOW);
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    const confirmButton = container.querySelector('[aria-label="已完成该步骤"]') as HTMLButtonElement | null;
+    const exitButton = container.querySelector('[aria-label="退出引导"]') as HTMLButtonElement | null;
+    expect(confirmButton).toBeTruthy();
+    expect(exitButton).toBeTruthy();
+
+    act(() => {
+      confirmButton?.focus();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(formTargetInputs[0]);
+
+    formTargetInputs[1].focus();
+    const middleTabEvent = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(middleTabEvent);
+    });
+    expect(middleTabEvent.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(formTargetInputs[1]);
+
+    act(() => {
+      formTargetButton.focus();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(exitButton);
+
+    act(() => {
+      formTargetInputs[0].focus();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(confirmButton);
   });
 
   it('captures card media after the source target appears asynchronously', () => {
