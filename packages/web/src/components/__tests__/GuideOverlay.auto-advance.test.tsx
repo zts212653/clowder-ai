@@ -268,6 +268,22 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     expect((fallbackShield as HTMLDivElement).style.pointerEvents).toBe('none');
   });
 
+  it('blocks unrelated UI interaction after the guide target is resolved', () => {
+    act(() => {
+      useGuideStore.getState().startGuide(FLOW);
+      useGuideStore.getState().setPhase('active');
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+
+    const panels = Array.from(container.querySelectorAll('[data-guide-click-shield="panel"]'));
+    expect(panels.length).toBeGreaterThan(0);
+    for (const panel of panels) {
+      expect((panel as HTMLDivElement).style.pointerEvents).toBe('auto');
+    }
+  });
+
   it('debounces input auto-advance from the latest keystroke', () => {
     act(() => {
       useGuideStore.getState().startGuide(INPUT_FLOW);

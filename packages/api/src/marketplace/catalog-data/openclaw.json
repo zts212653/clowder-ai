@@ -1,0 +1,90 @@
+[
+  {
+    "id": "openclaw-filesystem",
+    "name": "Filesystem",
+    "description": "Open-source file system access server — read, write, search, and manage files securely",
+    "clawType": "mcp_server",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/Users"],
+    "trustLevel": "verified",
+    "publisher": "OpenClaw Core",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "openclaw-everything",
+    "name": "Everything",
+    "description": "Reference MCP server demonstrating all protocol features — tools, resources, prompts, sampling",
+    "clawType": "mcp_server",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-everything"],
+    "trustLevel": "official",
+    "publisher": "MCP Working Group",
+    "versionRef": "0.5.0"
+  },
+  {
+    "id": "openclaw-puppeteer",
+    "name": "Puppeteer",
+    "description": "Headless browser automation — screenshots, navigation, form interaction, and page evaluation",
+    "clawType": "mcp_server",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-puppeteer"],
+    "trustLevel": "verified",
+    "publisher": "MCP Community",
+    "versionRef": "0.6.2"
+  },
+  {
+    "id": "openclaw-playwright",
+    "name": "Playwright",
+    "description": "Browser automation via Playwright — supports Chromium, Firefox, WebKit with rich page interactions",
+    "clawType": "mcp_server",
+    "command": "npx",
+    "args": ["-y", "@anthropic-ai/mcp-server-playwright"],
+    "trustLevel": "verified",
+    "publisher": "MCP Community",
+    "versionRef": "0.3.0"
+  },
+  {
+    "id": "openclaw-figma-connector",
+    "name": "Figma Connector",
+    "description": "Community-maintained Figma integration — design file access, component export, and style extraction",
+    "clawType": "mcp_server",
+    "command": "npx",
+    "args": ["-y", "mcp-server-figma"],
+    "trustLevel": "community",
+    "publisher": "ClawHub Contributors",
+    "versionRef": "0.2.0"
+  },
+  {
+    "id": "openclaw-git",
+    "name": "Git",
+    "description": "Git repository operations — log, diff, blame, branch management, and commit history analysis",
+    "clawType": "mcp_server",
+    "command": "uvx",
+    "args": ["mcp-server-git", "--repository", ""],
+    "trustLevel": "official",
+    "publisher": "MCP Working Group",
+    "versionRef": "0.4.1"
+  },
+  {
+    "id": "openclaw-redis",
+    "name": "Redis",
+    "description": "Redis database client — get, set, list keys, run commands, and monitor data in Redis instances",
+    "clawType": "mcp_server",
+    "command": "npx",
+    "args": ["-y", "mcp-server-redis"],
+    "trustLevel": "community",
+    "publisher": "ClawHub Contributors",
+    "versionRef": "0.1.3"
+  },
+  {
+    "id": "openclaw-kubernetes",
+    "name": "Kubernetes",
+    "description": "Kubernetes cluster management — list pods, get logs, describe resources, and monitor deployments",
+    "clawType": "mcp_server",
+    "command": "npx",
+    "args": ["-y", "mcp-server-kubernetes"],
+    "trustLevel": "community",
+    "publisher": "ClawHub Contributors",
+    "versionRef": "0.2.0"
+  }
+]

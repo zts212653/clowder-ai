@@ -253,6 +253,41 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0);
   });
 
+  it('aborted invocation does not emit spawn_started after stop wins the race', async () => {
+    const controller = new AbortController();
+    let releaseRunningUpdate;
+    const runningUpdateGate = new Promise((resolve) => {
+      releaseRunningUpdate = resolve;
+    });
+
+    deps.invocationTracker.tryStartThreadAll.mock.mockImplementation(() => controller);
+    deps.invocationRecordStore.update.mock.mockImplementation(async (_id, data) => {
+      if (data?.status === 'running') {
+        await runningUpdateGate;
+      }
+    });
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield { type: 'text', catId: 'opus', content: 'late', timestamp: Date.now() };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '先发再停', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 200);
+
+    controller.abort('user_stop');
+    releaseRunningUpdate();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const spawnStarted = deps.socketManager.broadcastToRoom.mock.calls.find((c) => c.arguments[1] === 'spawn_started');
+    assert.equal(spawnStarted, undefined);
+  });
+
   it('immediate execution passes queueHasQueuedMessages fairness callback to routeExecution', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.invocationQueue.enqueue({
@@ -399,6 +434,90 @@ describe('POST /api/messages deliveryMode', () => {
 
     const canceledCall = updateCalls.find((c) => c.arguments[1]?.status === 'canceled');
     assert.ok(canceledCall, 'should mark as canceled when signal aborted');
+  });
+
+  it('F148 fix: abort after partial completion still acks collected cursors', async () => {
+    const controller = new AbortController();
+
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.invocationTracker.start.mock.mockImplementation(() => controller);
+    deps.invocationTracker.startAll.mock.mockImplementation(() => controller);
+    deps.invocationTracker.tryStartThread.mock.mockImplementation(() => controller);
+    deps.invocationTracker.tryStartThreadAll.mock.mockImplementation(() => controller);
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['gemini', 'opus'],
+      intent: { intent: 'execute' },
+    }));
+    deps.router.routeExecution.mock.mockImplementation(
+      async function* (_userId, _content, _threadId, _messageId, _targetCats, _intent, opts) {
+        opts.cursorBoundaries.set('gemini', 'boundary-gemini-001');
+        yield { type: 'text', catId: 'gemini', content: 'done', timestamp: Date.now() };
+        yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
+        controller.abort('preempted');
+        yield { type: 'text', catId: 'opus', content: 'partial', timestamp: Date.now() };
+      },
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@gemini @opus 测试取消后补 ack', threadId: 'thread-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const ackCalls = deps.router.ackCollectedCursors.mock.calls;
+    assert.equal(ackCalls.length, 1, 'should ack collected cursors for completed cats before abort');
+    assert.equal(ackCalls[0].arguments[0], 'user-1');
+    assert.equal(ackCalls[0].arguments[1], 'thread-1');
+    const boundaries = ackCalls[0].arguments[2];
+    assert.ok(boundaries instanceof Map, 'boundaries should be a Map');
+    assert.equal(boundaries.get('gemini'), 'boundary-gemini-001');
+
+    const updateCalls = deps.invocationRecordStore.update.mock.calls;
+    const succeededCall = updateCalls.find((c) => c.arguments[1]?.status === 'succeeded');
+    assert.ok(!succeededCall, 'should NOT mark as succeeded when signal aborted');
+    const canceledCall = updateCalls.find((c) => c.arguments[1]?.status === 'canceled');
+    assert.ok(canceledCall, 'should mark as canceled when signal aborted');
+  });
+
+  it('F148 fix: exception after partial completion still acks collected cursors', async () => {
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['gemini', 'opus'],
+      intent: { intent: 'execute' },
+    }));
+    deps.router.routeExecution.mock.mockImplementation(
+      async function* (_userId, _content, _threadId, _messageId, _targetCats, _intent, opts) {
+        opts.cursorBoundaries.set('gemini', 'boundary-gemini-002');
+        yield { type: 'text', catId: 'gemini', content: 'done', timestamp: Date.now() };
+        yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
+        throw new Error('ACP process crashed');
+      },
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@gemini @opus 测试异常后补 ack', threadId: 'thread-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const ackCalls = deps.router.ackCollectedCursors.mock.calls;
+    assert.equal(ackCalls.length, 1, 'should ack collected cursors before failing the invocation');
+    const boundaries = ackCalls[0].arguments[2];
+    assert.ok(boundaries instanceof Map, 'boundaries should be a Map');
+    assert.equal(boundaries.get('gemini'), 'boundary-gemini-002');
+
+    const updateCalls = deps.invocationRecordStore.update.mock.calls;
+    const failedCall = updateCalls.find((c) => c.arguments[1]?.status === 'failed');
+    assert.ok(failedCall, 'should mark invocation as failed on exception');
   });
 
   it('default mode with active invocation → falls back to queue', async () => {

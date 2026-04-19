@@ -60,4 +60,33 @@ describe('deriveActiveCats — slot-first truth source', () => {
 
     expect(active).toEqual(['opus']);
   });
+
+  it('returns cats from invocation slots when targetCats is empty', () => {
+    const active = deriveActiveCats({
+      targetCats: [],
+      snapshotCats: [],
+      hasActiveInvocation: true,
+      activeInvocations: {
+        'inv-1': { catId: 'opus', mode: 'ideate' },
+        'inv-2': { catId: 'codex', mode: 'execute' },
+      },
+    });
+
+    expect(active).toEqual(['opus', 'codex']);
+  });
+
+  it('dedupes repeated cats across multiple live invocation slots', () => {
+    const active = deriveActiveCats({
+      targetCats: [],
+      snapshotCats: [],
+      hasActiveInvocation: true,
+      activeInvocations: {
+        'inv-1': { catId: 'opus', mode: 'ideate' },
+        'inv-2': { catId: 'opus', mode: 'execute' },
+        'inv-3': { catId: 'codex', mode: 'execute' },
+      },
+    });
+
+    expect(active).toEqual(['opus', 'codex']);
+  });
 });

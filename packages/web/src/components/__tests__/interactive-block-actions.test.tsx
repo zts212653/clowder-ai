@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InteractiveBlock } from '@/components/rich/InteractiveBlock';
 import type { RichInteractiveBlock } from '@/stores/chat-types';
+import { useGuideStore } from '@/stores/guideStore';
 
 const apiFetchMock = vi.fn();
 const mockUpdateRichBlock = vi.fn();
@@ -26,7 +27,6 @@ vi.mock('@/utils/userId', () => ({
 describe('InteractiveBlock direct callback actions', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let receivedGuideStart: string | null;
   const block: RichInteractiveBlock = {
     id: 'guide-offer',
     kind: 'interactive',
@@ -46,10 +46,6 @@ describe('InteractiveBlock direct callback actions', () => {
     ],
   };
 
-  const onGuideStart = (e: Event) => {
-    receivedGuideStart = (e as CustomEvent<{ flowId: string }>).detail.flowId;
-  };
-
   beforeAll(() => {
     (globalThis as Record<string, unknown>).React = React;
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -61,25 +57,24 @@ describe('InteractiveBlock direct callback actions', () => {
   });
 
   beforeEach(() => {
-    receivedGuideStart = null;
     apiFetchMock.mockReset();
     mockUpdateRichBlock.mockReset();
     mockStoreState.currentThreadId = 'thread-1';
+    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    window.addEventListener('guide:start', onGuideStart);
   });
 
   afterEach(() => {
-    window.removeEventListener('guide:start', onGuideStart);
     act(() => {
       root.unmount();
     });
     container.remove();
+    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
   });
 
-  it('does not dispatch guide:start when callback endpoint fails', async () => {
+  it('does not queue a local guide start when callback endpoint fails', async () => {
     apiFetchMock.mockResolvedValue({ ok: false, status: 500 });
 
     await act(async () => {
@@ -102,10 +97,10 @@ describe('InteractiveBlock direct callback actions', () => {
     });
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/guide-actions/start', expect.objectContaining({ method: 'POST' }));
-    expect(receivedGuideStart).toBeNull();
+    expect(useGuideStore.getState().pendingStart).toBeNull();
   });
 
-  it('does not dispatch local guide:start after the active thread changes before start resolves', async () => {
+  it('does not queue a local guide start after the active thread changes before start resolves', async () => {
     let resolveStart: ((value: { ok: boolean; status: number }) => void) | null = null;
     apiFetchMock.mockImplementation(
       () =>
@@ -140,7 +135,7 @@ describe('InteractiveBlock direct callback actions', () => {
       await Promise.resolve();
     });
 
-    expect(receivedGuideStart).toBeNull();
+    expect(useGuideStore.getState().pendingStart).toBeNull();
   });
 
   it('rejects callback actions outside the safe guide-actions allowlist', async () => {
@@ -180,7 +175,7 @@ describe('InteractiveBlock direct callback actions', () => {
     });
 
     expect(apiFetchMock).not.toHaveBeenCalled();
-    expect(receivedGuideStart).toBeNull();
+    expect(useGuideStore.getState().pendingStart).toBeNull();
   });
 
   it('rejects disallowed guide-actions callback endpoints even when they share the prefix', async () => {
@@ -222,7 +217,7 @@ describe('InteractiveBlock direct callback actions', () => {
     });
 
     expect(apiFetchMock).not.toHaveBeenCalled();
-    expect(receivedGuideStart).toBeNull();
+    expect(useGuideStore.getState().pendingStart).toBeNull();
   });
 
   it('keeps guide offer card interactive after preview selection', async () => {
@@ -270,7 +265,7 @@ describe('InteractiveBlock direct callback actions', () => {
     expect(startBtnAfterPreview).toBeTruthy();
     expect(startBtnAfterPreview?.disabled).toBe(false);
     expect(apiFetchMock.mock.calls.some(([url]) => url === '/api/guide-actions/start')).toBe(false);
-    expect(receivedGuideStart).toBeNull();
+    expect(useGuideStore.getState().pendingStart).toBeNull();
 
     await act(async () => {
       startBtnAfterPreview!.click();
@@ -284,7 +279,7 @@ describe('InteractiveBlock direct callback actions', () => {
     });
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/guide-actions/start', expect.objectContaining({ method: 'POST' }));
-    expect(receivedGuideStart).toBe('add-member');
+    expect(useGuideStore.getState().pendingStart).toEqual({ guideId: 'add-member', threadId: 'thread-1' });
   });
 
   it('keeps ordinary non-callback interactive blocks one-shot', async () => {

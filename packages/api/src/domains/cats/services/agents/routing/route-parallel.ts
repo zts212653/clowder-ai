@@ -44,6 +44,7 @@ import {
   isUserFacingSystemInfoContent,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
+  shouldAppendExplicitCurrentMessage,
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
@@ -158,7 +159,7 @@ export async function* routeParallel(
       }
       const staticIdentity = buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
-      const mcpInstructions = needsMcpInjection(mcpAvailable)
+      const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
             currentCatId: catId as string,
             teammates: teammates.map((id) => id as string),
@@ -184,6 +185,32 @@ export async function* routeParallel(
           /* best-effort: signal lookup failure does not block invocation */
         }
       }
+
+      // F163 AC-A3: always_on constitutional docs injection (fail-open, flag-gated)
+      // shadow: query but do NOT inject into prompt (record-only for experiment diff)
+      // on: query AND inject into prompt
+      // off: skip entirely
+      let alwaysOnDocs: readonly { anchor: string; title: string; summary: string }[] | undefined;
+      let alwaysOnInjectionMode: 'off' | 'shadow' | 'on' = 'off';
+      if (deps.evidenceStore) {
+        try {
+          const { freezeFlags } = await import('../../../../../domains/memory/f163-types.js');
+          const f163Flags = freezeFlags();
+          alwaysOnInjectionMode = f163Flags.alwaysOnInjection;
+          if (alwaysOnInjectionMode !== 'off') {
+            const queryAlwaysOn = (
+              deps.evidenceStore as { queryAlwaysOn?: () => Array<{ anchor: string; title: string; summary: string }> }
+            ).queryAlwaysOn;
+            if (queryAlwaysOn) {
+              const docs = queryAlwaysOn();
+              if (docs.length > 0) alwaysOnDocs = docs;
+            }
+          }
+        } catch {
+          /* fail-open: always_on lookup failure does not block invocation */
+        }
+      }
+
       const invocationContext = buildInvocationContext({
         catId,
         mode: 'parallel',
@@ -196,6 +223,7 @@ export async function* routeParallel(
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         ...(bootcampState ? { bootcampState, threadId } : {}),
+        ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
       });
 
@@ -298,8 +326,9 @@ export async function* routeParallel(
         const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);
         // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
-        // If it was present but filtered out (e.g. whisper), injecting would leak private content.
-        if (!inc.includesCurrentUserMessage && !inc.currentMessageFilteredOut) parts.push(message);
+        // Defensive guard: if the current message ID is already present anywhere in
+        // the assembled context text, do not append the raw message again.
+        if (shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) parts.push(message);
         prompt = parts.join('\n\n---\n\n');
       } else {
         // Per-cat context budget (Phase 4.0)
@@ -645,9 +674,9 @@ export async function* routeParallel(
           }
         }
         const catTools = catToolEvents.get(msg.catId);
-        // A2A only triggers in routeSerial; routeParallel stores mentions
-        // but never chains (MVP safety boundary — see Phase 3.9 design doc)
-        const mentions = parseA2AMentions(storedContent, msg.catId as CatId);
+        // F167 L2 AC-A5: parallel mode has no routing semantics, so persist mentions=[]
+        // to keep parallel @ mentions out of MessageStore.getMentionsFor() / pending-mentions flow.
+        // L2 suppression log below still surfaces the raw @ tokens from the text for observability.
 
         // F079 Phase 2: Vote interception for parallel routing.
         // @all / multi-cat requests route here, so [VOTE:xxx] must be handled too.
@@ -735,7 +764,7 @@ export async function* routeParallel(
             userId,
             catId: msg.catId as CatId,
             content: storedContent,
-            mentions,
+            mentions: [],
             origin: 'stream',
             timestamp: Date.now(),
             threadId,
@@ -992,25 +1021,18 @@ export async function* routeParallel(
 
       const isFinal = completedCount === targetCats.length;
 
-      // F5: When all parallel cats are done, emit follow-up hints for A2A mentions
+      // F167 L2: parallel 模式 @ 无路由语义（independent thinking），
+      // 不 emit a2a_followup_available 提示，避免引导用户/猫猫误以为 @ 真的转移了球权。
+      // 若文本里仍出现 @句柄，仅记录 suppressedInParallel 日志用于观测。
       if (isFinal) {
-        const followupMentions: Array<{ catId: string; mentionedBy: string }> = [];
         for (const [cid, text] of catText.entries()) {
           const ms = parseA2AMentions(text, cid as CatId);
-          for (const target of ms) {
-            followupMentions.push({ catId: target, mentionedBy: cid });
+          if (ms.length > 0) {
+            log.info(
+              { threadId, cat: cid, suppressedMentions: ms, suppressedInParallel: true },
+              'F167 L2: parallel-mode @ mentions suppressed (no routing, no followup hint)',
+            );
           }
-        }
-        if (followupMentions.length > 0) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId: msg.catId as CatId,
-            content: JSON.stringify({
-              type: 'a2a_followup_available',
-              mentions: followupMentions,
-            }),
-            timestamp: Date.now(),
-          };
         }
       }
 

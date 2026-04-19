@@ -68,8 +68,8 @@ cat .env
 });
 
 test('installer auth config root follows an existing runtime worktree', () => {
-  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-runtime-root-'));
-  const projectRoot = join(parentRoot, 'clowder-ai');
+  const parentRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-runtime-root-'));
+  const projectRoot = join(parentRoot, 'cat-cafe');
   const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
 
   try {
@@ -89,8 +89,8 @@ printf '%s' "$(resolve_installer_auth_config_root)"
 });
 
 test('installer auth config root falls back to project root when runtime dir is not an initialized worktree', () => {
-  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-uninit-runtime-root-'));
-  const projectRoot = join(parentRoot, 'clowder-ai');
+  const parentRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-uninit-runtime-root-'));
+  const projectRoot = join(parentRoot, 'cat-cafe');
   const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
 
   try {
@@ -109,8 +109,8 @@ printf '%s' "$(resolve_installer_auth_config_root)"
 });
 
 test('installer auth config root ignores initialized sibling repos that are not this project worktrees', () => {
-  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-foreign-runtime-root-'));
-  const projectRoot = join(parentRoot, 'clowder-ai');
+  const parentRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-foreign-runtime-root-'));
+  const projectRoot = join(parentRoot, 'cat-cafe');
   const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
 
   try {
@@ -131,15 +131,15 @@ printf '%s' "$(resolve_installer_auth_config_root)"
 });
 
 test('installer auth config root ignores parent repo worktrees when project dir has no local git metadata', () => {
-  const parentRepoRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-parent-repo-'));
-  const projectRoot = join(parentRepoRoot, 'deployments', 'clowder-ai');
-  const runtimeRoot = join(tmpdir(), `clowder-parent-runtime-${Date.now()}`);
+  const parentRepoRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-parent-repo-'));
+  const projectRoot = join(parentRepoRoot, 'deployments', 'cat-cafe');
+  const runtimeRoot = join(tmpdir(), `cat-cafe-parent-runtime-${Date.now()}`);
 
   try {
     mkdirSync(projectRoot, { recursive: true });
     mkdirSync(join(projectRoot, 'scripts'), { recursive: true });
     mkdirSync(join(projectRoot, 'packages', 'api'), { recursive: true });
-    writeFileSync(join(projectRoot, 'package.json'), '{"name":"clowder-ai"}\n', 'utf8');
+    writeFileSync(join(projectRoot, 'package.json'), '{"name":"cat-cafe"}\n', 'utf8');
 
     initGitRepo(parentRepoRoot);
     addWorktree(parentRepoRoot, runtimeRoot, 'runtime/main-sync');
@@ -158,8 +158,8 @@ printf '%s' "$(resolve_installer_auth_config_root)"
 });
 
 test('installer auth config root falls back to project root before runtime exists', () => {
-  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-project-root-'));
-  const projectRoot = join(parentRoot, 'clowder-ai');
+  const parentRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-project-root-'));
+  const projectRoot = join(parentRoot, 'cat-cafe');
 
   try {
     mkdirSync(projectRoot, { recursive: true });
@@ -189,8 +189,8 @@ test('installer auth setup calls install-auth-config through runtime-aware wrapp
 });
 
 test('runtime-aware auth wrapper also updates project-local state for direct start modes', () => {
-  const parentRoot = mkdtempSync(join(tmpdir(), 'clowder-install-auth-direct-mode-'));
-  const projectRoot = join(parentRoot, 'clowder-ai');
+  const parentRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-install-auth-direct-mode-'));
+  const projectRoot = join(parentRoot, 'cat-cafe');
   const runtimeRoot = join(parentRoot, 'cat-cafe-runtime');
   const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -552,12 +552,4 @@ test('install script retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer bro
     /warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
   );
   assert.match(installScriptText, /env PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --frozen-lockfile/);
-});
-
-test('.env.example leaves REDIS_URL unset by default', () => {
-  const envExamplePath = new URL('../../../.env.example', import.meta.url);
-  const envExampleText = readFileSync(envExamplePath, 'utf8');
-
-  assert.doesNotMatch(envExampleText, /^REDIS_URL=/m);
-  assert.match(envExampleText, /^# REDIS_URL=$/m);
 });

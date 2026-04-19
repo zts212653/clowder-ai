@@ -26,6 +26,21 @@ import {
   writeKimiMcpConfig,
 } from './mcp-config-adapters.js';
 
+// ────────── F146: Per-project mutex for capability config writes ──────────
+
+const capabilityLocks = new Map<string, Promise<unknown>>();
+
+export function withCapabilityLock<T>(projectRoot: string, fn: () => Promise<T>): Promise<T> {
+  const prev = capabilityLocks.get(projectRoot) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  capabilityLocks.set(projectRoot, next);
+  const cleanup = () => {
+    if (capabilityLocks.get(projectRoot) === next) capabilityLocks.delete(projectRoot);
+  };
+  next.then(cleanup, cleanup);
+  return next;
+}
+
 // ────────── Constants ──────────
 
 const CAPABILITIES_FILENAME = 'capabilities.json';

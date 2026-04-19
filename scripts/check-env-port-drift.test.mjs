@@ -789,6 +789,33 @@ describe(
       );
     });
 
+    it('temp target public gate installs dependencies without inherited production env', () => {
+      const content = readSyncScript();
+      const envHelper = readFunctionBody(content, 'run_public_acceptance_env');
+      const gate = readFunctionBody(content, 'run_target_public_gate');
+
+      assert.match(
+        envHelper,
+        /-u NODE_ENV/,
+        'run_public_acceptance_env should clear inherited NODE_ENV so temp target installs do not skip devDependencies',
+      );
+      assert.match(
+        envHelper,
+        /-u npm_config_production/,
+        'run_public_acceptance_env should clear npm_config_production for temp target public gate',
+      );
+      assert.match(
+        envHelper,
+        /-u NPM_CONFIG_PRODUCTION/,
+        'run_public_acceptance_env should clear uppercase production npm config as well',
+      );
+      assert.match(
+        gate,
+        /run_public_acceptance_env pnpm install --frozen-lockfile/,
+        'temp target install must use the sanitized env helper so public gate sees devDependencies',
+      );
+    });
+
     it('temp target public gate preserves full test:public output before tailing', () => {
       const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
       assert.match(

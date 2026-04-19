@@ -79,9 +79,9 @@ vi.mock('@/hooks/useChatSocketCallbacks', () => ({
 }));
 
 // Stub child components to isolate ChatContainer behavior
-vi.mock('@/components/ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('@/components/ChatInput', () => ({ ChatInput: () => null }));
-vi.mock('@/components/ChatContainerHeader', () => ({
+vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
+vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
+vi.mock('../ChatContainerHeader', () => ({
   ChatContainerHeader: (props: { onToggleSidebar: () => void; onOpenMobileStatus: () => void }) =>
     React.createElement(
       'div',
@@ -90,25 +90,24 @@ vi.mock('@/components/ChatContainerHeader', () => ({
       React.createElement('button', { 'data-testid': 'mobile-status-trigger', onClick: props.onOpenMobileStatus }),
     ),
 }));
-vi.mock('@/components/ThreadSidebar', () => ({
+vi.mock('../ThreadSidebar', () => ({
   ThreadSidebar: (props: { onClose: () => void }) =>
     React.createElement('div', { 'data-testid': 'sidebar', onClick: props.onClose }, 'Sidebar'),
 }));
-vi.mock('@/components/RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('@/components/MobileStatusSheet', () => ({
+vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
+vi.mock('../MobileStatusSheet', () => ({
   MobileStatusSheet: (props: { open: boolean }) =>
     React.createElement('div', { 'data-testid': 'mobile-status', 'data-open': String(props.open) }),
 }));
-vi.mock('@/components/ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('@/components/ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
-vi.mock('@/components/ConfirmDialog', () => ({ ConfirmDialog: () => null }));
-vi.mock('@/components/MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('@/components/MessageActions', () => ({
+vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
+vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
+vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
+vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('@/components/CatCafeHub', () => ({ CatCafeHub: () => null }));
-vi.mock('@/components/SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('@/components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));
+vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
+vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
+vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 
 describe('ChatContainer mobile interactions', () => {
   let container: HTMLDivElement;

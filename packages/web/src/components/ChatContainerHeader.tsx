@@ -1,9 +1,9 @@
-import Link from 'next/link';
 import { useChatStore } from '@/stores/chatStore';
 import { ExportButton } from './ExportButton';
 import { HubButton } from './HubButton';
 import { CatCafeLogo } from './icons/CatCafeLogo';
 import { ThemeToggle } from './ThemeToggle';
+import { ThreadCatPill } from './ThreadCatPill';
 import { VoiceCompanionButton } from './VoiceCompanionButton';
 
 interface ChatContainerHeaderProps {
@@ -35,6 +35,8 @@ export function ChatContainerHeader({
   onToggleStatusPanel,
   defaultCatId,
 }: ChatContainerHeaderProps) {
+  const signalInboxHref = `/signals?from=${encodeURIComponent(threadId)}`;
+
   return (
     <header className="border-b border-cocreator-light bg-cocreator-bg safe-area-top">
       <div className="px-5 py-3 flex items-center gap-2">
@@ -55,12 +57,21 @@ export function ChatContainerHeader({
         <CatCafeLogo className="h-16 w-auto -my-3" />
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
-          <ThreadIndicator threadId={threadId} />
+          <div className="flex items-center gap-2 min-w-0">
+            <ThreadIndicator threadId={threadId} />
+            {/* F154 Phase B: Preferred cat pill — desktop only (KD-10) */}
+            <div className="hidden lg:block flex-shrink-0">
+              <ThreadCatPill threadId={threadId} />
+            </div>
+          </div>
         </div>
         <ExportButton threadId={threadId} />
         <VoiceCompanionButton threadId={threadId} defaultCatId={defaultCatId} />
-        <Link
-          href={`/signals?from=${encodeURIComponent(threadId)}`}
+        <button
+          type="button"
+          onClick={() => {
+            window.location.assign(signalInboxHref);
+          }}
           className="p-1 rounded-lg hover:bg-cocreator-light transition-colors"
           title="Signal Inbox"
           aria-label="Signal Inbox"
@@ -72,7 +83,7 @@ export function ChatContainerHeader({
               clipRule="evenodd"
             />
           </svg>
-        </Link>
+        </button>
         {authPendingCount > 0 && (
           <span
             className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold animate-pulse-subtle"
@@ -126,7 +137,10 @@ function ThreadIndicator({ threadId }: { threadId: string }) {
   const projectName = INTERNAL_BASENAMES.includes(rawBasename) && brandName ? brandName : rawBasename;
 
   return (
-    <p className="text-xs text-cafe-secondary truncate" title={`${title}${projectName ? ` · ${projectName}` : ''}`}>
+    <p
+      className="text-xs text-cafe-secondary truncate min-w-0"
+      title={`${title}${projectName ? ` · ${projectName}` : ''}`}
+    >
       <span className="font-medium text-cafe-secondary">{title}</span>
       {projectName && <span className="text-cafe-muted"> · {projectName}</span>}
     </p>

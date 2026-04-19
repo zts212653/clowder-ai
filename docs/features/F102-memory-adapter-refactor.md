@@ -8,7 +8,17 @@ created: 2026-03-11
 
 # F102: 记忆组件 Adapter 化重构 — IEvidenceStore + 本地索引
 
-> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-04-04 (Phase A~J) | **Reopened**: 2026-04-13 (Phase K) | **Re-closed**: 2026-04-14 (Phase K done, AC-K3/K4 deferred)
+>
+> ### 给其他猫的快速现状（2026-04-16 更新）
+>
+> **Message 级别检索已上线运行。** 用 `search_evidence(scope="threads", depth="raw")` 可搜到具体消息（speaker + timestamp + passageId）。当前限制：`depth=raw` 仅走 lexical 模式（会显示 `[DEGRADED]` 提示），passage 向量路径（AC-K3）deferred。日常用 `mode="hybrid"` 搜 thread 时 depth 默认 summary 级别，已包含消息摘要；需要定位具体消息时切 `depth="raw"`。
+>
+> 近期修复链（2026-04-14~16，PR #1155/#1160/#1179/#1192/#1195/#1204）：depth=raw 降级信号 → passage 排序 → heading→keywords 索引 → auto-rebuild 机制 → lexical recall backfill → docs scope filter 修正。核心检索能力已经过三轮 dogfood 验证。
+>
+> 晚间复测（2026-04-15，`F148` 深术语样本）显示：`scope="threads", depth="raw"` 对 `briefing→invocation link telemetry`、`B+A AutoSummarizer + regex` 这类 query 已能命中具体 passage；`scope="docs", depth="summary"` 暴露出的 `scope=docs` 混入 thread digest 异常已由 PR #1204 修复（排 `thread/session`，保留 file-backed `discussion` 文档）。下一步按同一组 `F148` 样本 re-dogfood，确认 docs summary 对深实现名词的残余短板到底是过滤还是排序。
+>
+> **后续优化方向**：评测基准从手挑 query 升级为“固定回归集 + seeded 随机 feature 抽样 + query 扰动变体”，避免 recall dogfood 对已知样例过拟合。
 
 ## Why
 
@@ -1346,7 +1356,7 @@ Knowledge Feed（Phase H）从 Workspace "知识模式"迁移到 `/memory` Tab 1
 
 ## 实现路线图（F/G/Gap 整体规划）
 
-> **当前状态**：Phase A~E ✅ + G foundation ✅ + H ✅ + I ✅ + F-4 ✅ + J ✅ + F-1/2/3 ✅ + Known Issues fix ✅ (PR #908) + Batch 1/2/3 ✅ + follow-up ✅。F102 已进入 feature close。
+> **当前状态**：Phase A~E ✅ + G foundation ✅ + H ✅ + I ✅ + F-4 ✅ + J ✅ + F-1/2/3 ✅ + Known Issues fix ✅ (PR #908) + Batch 1/2/3 ✅ + follow-up ✅ + **Phase K ✅**（AC-K1/K2 闭环，PR #1155）+ **post-K dogfood fixes ✅**（PR #1160/#1179/#1192/#1195/#1204 — passage ranking + heading keywords + auto-rebuild + recall backfill + docs scope filter）。AC-K3/K4 deferred。
 > **team lead指示**：开源同步时增强功能需要开关，默认 off。
 
 ### 收尾三批次（2026-04-01 三方收敛：Ragdoll+Maine Coon GPT-5.4+team lead）
@@ -1444,8 +1454,54 @@ Batch 3: /memory 体验层收口 ✅ PR #915
 
 **Phase A~E 的全部功能（FTS5 + 向量检索 + thread passages + session chain drill-down）在 flag off 时照常工作。增强功能是 additive，不影响基础能力。**
 
+## Phase K: Contract Closure — 对外契约闭环（2026-04-13 重新打开）
+
+> **起因**：其他线程的猫猫投诉"F102 没做完"。Maine Coon(GPT-5.4) 审计后定位到 4 项未闭环，
+> 其中 2 项是契约缺口（P1），2 项是能力增强（P3 deferred）。
+> **team lead指示**：不做脚手架，完整挂在 F102 issue 里实现。
+
+### P1: 契约缺口修复
+
+**AC-K1: `depth=raw` 强制降级必须告知调用方**
+
+当前状态：`SqliteEvidenceStore.ts:299` 在 `depth=raw` 时短路返回，跳过 mode 分支。
+API route `evidence.ts:99` 始终返回 `degraded: false`。前端仍允许选择 `semantic/hybrid`。
+
+- [x] 后端：当 `depth=raw && mode !== 'lexical'` 时，在返回中设 `degraded: true`，`degradeReason: 'raw_lexical_only'`，附 `effectiveMode: 'lexical'`
+- [x] 前端：当 `depth=raw` 时，mode 下拉锁定为"精确"并显示提示（"消息级检索仅支持精确匹配"）
+- [x] `SearchOptions` / `EvidenceSearchResponse` 补 `effectiveMode` 字段
+
+**AC-K2: passage 字段类型对齐**
+
+当前状态：后端返回 `{ passageId, content, speaker, createdAt, context }`（evidence-helpers.ts:26），
+前端期望 `{ text, score }`（EvidenceSearch.tsx:22）。`p.text` 渲染为 undefined。
+
+- [x] 前端 `SearchResultItem.passages` 类型改为匹配后端实际返回
+- [x] passage 渲染展示 `content`、`speaker`、`createdAt`，不再渲染不存在的 `text/score`
+- [x] context passages（上下文窗口）也正确渲染
+
+### P3: 能力增强（Deferred — 等场景倒逼再开）
+
+**AC-K3: passage-level vector path**（`depth=raw` 支持 `semantic/hybrid`）
+
+- ADR-020 已记录为 deferred
+- Phase I follow-up plan 已明确排除
+- 开启条件：有跨语言 raw 消息定位的真实场景
+
+**AC-K4: L2 Rollup**（多 L1 segment 凝结为更高层摘要）
+
+- ADR-020 KD-42 已记录为 deferred
+- segment ledger 已就绪，升级只改读路径
+- 开启条件：session chain 长度达到 L1 瓶颈
+
+### Phase K 验收标准
+
+- AC-K1/K2 全部打勾 → Phase K done → F102 re-close
+- AC-K3/K4 保持 deferred 状态，不阻塞 K close
+
 ## Review Gate
 
 - Phase A: 跨 family review（Maine Coon优先）— 接口设计需要多方确认
 - Phase B: 同 family review（Ragdoll Sonnet 可）— 实现层面
 - Phase G foundation: Maine Coon(GPT-5.4) review 4 轮放行 — 8 findings 全部闭环（PR #604）
+- Phase K: 跨 family review（Maine Coon优先）— 对外契约改动

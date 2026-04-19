@@ -149,18 +149,16 @@ describe('MobileStatusSheet', () => {
   });
 
   it('shows cats that only exist in activeInvocations on mobile', () => {
-    useChatStore.setState({
-      activeInvocations: {
-        'inv-main': { catId: 'opus', mode: 'ideate' },
-        'inv-main-codex': { catId: 'codex', mode: 'ideate' },
-      },
-    });
-
     const props = {
       ...baseProps,
       open: true,
       targetCats: ['opus'],
       catStatuses: { opus: 'streaming' as CatStatus, codex: 'pending' as CatStatus },
+      activeInvocations: {
+        'inv-main': { catId: 'opus', mode: 'ideate' },
+        'inv-main-codex': { catId: 'codex', mode: 'ideate' },
+      },
+      hasActiveInvocation: true,
     };
 
     act(() => {

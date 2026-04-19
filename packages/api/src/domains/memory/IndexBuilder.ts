@@ -23,6 +23,18 @@ import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { SIGNAL_FLAGS } from './summary-config.js';
 import type { VectorStore } from './VectorStore.js';
 
+/**
+ * Bump when scanner extraction logic changes (e.g., new fields derived from
+ * the same source files). A version mismatch triggers an automatic full
+ * re-index on the next rebuild(), so users only need to restart the API.
+ *
+ * History:
+ *   1 — initial (implicit, pre-versioning)
+ *   2 — CatCafeScanner: section headings → keywords (PR #1179)
+ *   3 — Phase D: pathToAuthority backfill (authority derived from path)
+ */
+export const INDEXING_VERSION = 3;
+
 /** Higher number = higher priority for anchor ownership */
 const KIND_PRIORITY: Record<EvidenceKind, number> = {
   feature: 4,
@@ -153,10 +165,40 @@ export class IndexBuilder implements IIndexBuilder {
     }
   }
 
+  /** Returns true when scanner logic has changed since last index build. */
+  private hasIndexingVersionChanged(): boolean {
+    try {
+      const db = this.store.getDb();
+      const row = db.prepare("SELECT value FROM embedding_meta WHERE key = 'indexing_version'").get() as
+        | { value: string }
+        | undefined;
+      return row?.value !== String(INDEXING_VERSION);
+    } catch {
+      return true; // table missing or error → treat as version mismatch
+    }
+  }
+
+  private async storeIndexingVersion(): Promise<void> {
+    try {
+      await this.store.runExclusive(() => {
+        const db = this.store.getDb();
+        db.prepare("INSERT OR REPLACE INTO embedding_meta (key, value) VALUES ('indexing_version', ?)").run(
+          String(INDEXING_VERSION),
+        );
+      });
+    } catch {
+      // fail-open: version not persisted → next restart will re-index (safe)
+    }
+  }
+
   async rebuild(options?: { force?: boolean }): Promise<RebuildResult> {
     const start = Date.now();
     let indexed = 0;
     let skipped = 0;
+
+    // Auto-force when scanner logic has changed since last rebuild
+    const versionChanged = this.hasIndexingVersionChanged();
+    const effectiveForce = options?.force || versionChanged;
 
     // F152 Phase A: delegate to pluggable scanner (KD-5)
     const scannedItems = this.scanner.discover(this.scanRoot, this.buildScanOptions());
@@ -177,9 +219,9 @@ export class IndexBuilder implements IIndexBuilder {
 
       currentAnchors.add(item.anchor);
 
-      // Skip if hash unchanged AND provenance already populated (unless force)
+      // Skip if hash unchanged AND provenance already populated (unless force/version bump)
       // P1-2 fix: don't skip when existing doc lacks provenance but new scan provides it
-      if (!options?.force) {
+      if (!effectiveForce) {
         const existing = await this.store.getByAnchor(item.anchor);
         if (existing?.sourceHash === item.sourceHash) {
           const needsProvenanceBackfill = !existing?.provenance?.tier && item.provenance?.tier;
@@ -208,7 +250,9 @@ export class IndexBuilder implements IIndexBuilder {
     }
 
     // Phase D: auto-extract edges from frontmatter cross-references (AC-D18, KD-29)
-    this.store.getDb().prepare("DELETE FROM edges WHERE relation = 'related'").run();
+    await this.store.runExclusive(() => {
+      this.store.getDb().prepare("DELETE FROM edges WHERE relation = 'related'").run();
+    });
 
     for (const scanned of scannedItems) {
       if (!scanned.rawContent) continue;
@@ -328,7 +372,7 @@ export class IndexBuilder implements IIndexBuilder {
     // Phase I (AC-I1/I3): Backfill from JSONL transcripts for threads with expired Redis messages
     if (this.transcriptDataDir && threads.length > 0) {
       for (const thread of threads) {
-        this.backfillPassagesFromTranscript(thread.id);
+        await this.backfillPassagesFromTranscript(thread.id);
       }
     }
 
@@ -348,6 +392,9 @@ export class IndexBuilder implements IIndexBuilder {
 
     // Phase C: generate embeddings for indexed items
     await this.embedIndexedItems(indexedItems);
+
+    // Persist current indexing version so next startup can detect changes
+    await this.storeIndexingVersion();
 
     return { docsIndexed: indexed, docsSkipped: skipped, durationMs: Date.now() - start };
   }
@@ -617,17 +664,19 @@ export class IndexBuilder implements IIndexBuilder {
    * P1 fix (砚砚 review): accumulate from delta, not from flushed summary snapshot.
    */
   accumulateSummaryDelta(threadId: string, messageContent: string): void {
-    try {
-      const db = this.store.getDb();
-      const tokenEstimate = Math.ceil(messageContent.length / 4);
+    const tokenEstimate = Math.ceil(messageContent.length / 4);
 
-      let signalFlags = 0;
-      const lower = messageContent.toLowerCase();
-      if (/(?:决定|agreed|kd-|decided|confirmed)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.DECISION;
-      if (/(?:\.ts|\.js|\.tsx|pr\s*#|commit|merge|diff)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.CODE;
-      if (/(?:fix|bug|error|修复|报错)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.ERROR_FIX;
+    let signalFlags = 0;
+    const lower = messageContent.toLowerCase();
+    if (/(?:决定|agreed|kd-|decided|confirmed)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.DECISION;
+    if (/(?:\.ts|\.js|\.tsx|pr\s*#|commit|merge|diff)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.CODE;
+    if (/(?:fix|bug|error|修复|报错)/i.test(lower)) signalFlags |= SIGNAL_FLAGS.ERROR_FIX;
 
-      db.prepare(`
+    // Fire-and-forget through write queue (F163 AC-A5 single-writer contract)
+    void this.store
+      .runExclusive(() => {
+        const db = this.store.getDb();
+        db.prepare(`
         INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
         VALUES (?, 1, ?, ?, 'concat')
         ON CONFLICT(thread_id) DO UPDATE SET
@@ -635,9 +684,10 @@ export class IndexBuilder implements IIndexBuilder {
           pending_token_count = pending_token_count + ?,
           pending_signal_flags = pending_signal_flags | ?
       `).run(threadId, tokenEstimate, signalFlags, tokenEstimate, signalFlags);
-    } catch {
-      // fail-open
-    }
+      })
+      .catch(() => {
+        /* fail-open */
+      });
   }
 
   /** Flush dirty threads: re-index only the threads that have been marked dirty. */
@@ -759,7 +809,8 @@ export class IndexBuilder implements IIndexBuilder {
         }
       });
 
-      tx(messages);
+      // Route batch insert through single-writer queue (F163 AC-A5)
+      await this.store.runExclusive(() => tx(messages));
     }
   }
 
@@ -769,7 +820,7 @@ export class IndexBuilder implements IIndexBuilder {
    * and inserts as passages with INSERT OR IGNORE (idempotent).
    * Returns count of newly added passages.
    */
-  backfillPassagesFromTranscript(threadId: string): number {
+  async backfillPassagesFromTranscript(threadId: string): Promise<number> {
     if (!this.transcriptDataDir) return 0;
     const db = this.store.getDb();
     const threadDir = join(this.transcriptDataDir, 'threads', threadId);
@@ -833,7 +884,7 @@ export class IndexBuilder implements IIndexBuilder {
           }
         }
 
-        // Insert accumulated text per invocation as passages
+        // Insert accumulated text per invocation — routed through single-writer queue (F163 AC-A5)
         const tx = db.transaction(() => {
           for (const [invId, data] of invocationTexts) {
             if (!data.text.trim()) continue;
@@ -851,7 +902,7 @@ export class IndexBuilder implements IIndexBuilder {
             if (result.changes > 0) added++;
           }
         });
-        tx();
+        await this.store.runExclusive(() => tx());
       }
     }
     return added;

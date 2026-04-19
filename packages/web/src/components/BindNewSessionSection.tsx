@@ -13,9 +13,10 @@ export interface BindNewSessionSectionProps {
   threadId: string;
   activeCatIds: Set<string>;
   onBound: () => void;
+  disabled?: boolean;
 }
 
-export function BindNewSessionSection({ threadId, activeCatIds, onBound }: BindNewSessionSectionProps) {
+export function BindNewSessionSection({ threadId, activeCatIds, onBound, disabled }: BindNewSessionSectionProps) {
   const { cats } = useCatData();
   const [expanded, setExpanded] = useState(false);
   const [selectedCat, setSelectedCat] = useState('');
@@ -27,6 +28,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound }: BindN
   const availableCats = cats.filter((c) => !activeCatIds.has(c.id));
 
   const handleBind = async () => {
+    if (disabled) return;
     const trimmed = sessionId.trim();
     if (!trimmed || !selectedCat || status === 'saving') return;
     setStatus('saving');
@@ -58,7 +60,8 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound }: BindN
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="text-[10px] text-cafe-muted hover:text-cafe-secondary transition-colors mt-1"
+        disabled={disabled}
+        className="text-[10px] text-cafe-muted hover:text-cafe-secondary transition-colors mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         + 绑定外部 Session
       </button>
@@ -109,7 +112,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound }: BindN
         <button
           type="button"
           onClick={() => void handleBind()}
-          disabled={status === 'saving' || !sessionId.trim() || !selectedCat}
+          disabled={status === 'saving' || !sessionId.trim() || !selectedCat || disabled}
           className="w-full text-[10px] px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
         >
           {status === 'saving'

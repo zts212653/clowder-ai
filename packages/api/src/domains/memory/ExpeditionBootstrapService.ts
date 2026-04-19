@@ -9,6 +9,7 @@ export interface ProjectSummary {
   coreModules: string[];
   docsList: Array<{ path: string; tier: 'authoritative' | 'derived' | 'soft_clue' }>;
   tierCoverage: Record<string, number>;
+  kindCoverage: Record<string, number>;
 }
 
 export interface BootstrapProgress {
@@ -40,6 +41,8 @@ interface BootstrapDeps {
   getFingerprint: (projectPath: string) => string;
   /** Query evidence store for real tier stats (architectural alignment with F102). Falls back to structural summary classification when absent. */
   getTierCoverage?: (projectPath: string) => Promise<Record<string, number>>;
+  /** Query evidence store for kind-based coverage (F102 content type dimension). */
+  getKindCoverage?: (projectPath: string) => Promise<Record<string, number>>;
 }
 
 const SECRETS_PATTERNS = [/^\.env/, /\.key$/, /\.pem$/, /^credentials/i, /^secrets$/];
@@ -88,6 +91,14 @@ export class ExpeditionBootstrapService {
         if (Object.keys(storeTiers).length > 0) {
           summary.tierCoverage = storeTiers;
           finalDocsIndexed = Object.values(storeTiers).reduce((a, b) => a + b, 0);
+        }
+      }
+
+      // Overlay kind-based coverage from evidence store (F102 content type dimension)
+      if (this.deps.getKindCoverage) {
+        const storeKinds = await this.deps.getKindCoverage(projectPath);
+        if (Object.keys(storeKinds).length > 0) {
+          summary.kindCoverage = storeKinds;
         }
       }
 
@@ -253,5 +264,7 @@ export function buildStructuralSummary(projectPath: string, options: { maxFiles?
     tierCoverage[doc.tier] = (tierCoverage[doc.tier] || 0) + 1;
   }
 
-  return { projectName, techStack, dirStructure, coreModules, docsList, tierCoverage };
+  const kindCoverage: Record<string, number> = {};
+
+  return { projectName, techStack, dirStructure, coreModules, docsList, tierCoverage, kindCoverage };
 }

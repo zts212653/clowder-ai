@@ -12,17 +12,29 @@ export interface SecurityHeadersOptions {
   apiBaseUrl?: string;
 }
 
+interface HostAllowlist {
+  exact: Set<string>;
+  patterns: RegExp[];
+}
+
 /**
  * F156 D-6: Build Host allowlist from CORS origins + API base URL.
- * Extracts hostnames from string origins, always includes loopback.
+ * Extracts hostnames from string origins, collects RegExp origins as
+ * hostname-level patterns. Always includes loopback.
  * Host header may include port — we match hostname part only.
  */
-function buildAllowedHosts(origins: (string | RegExp)[], apiBaseUrl?: string): Set<string> {
-  const hosts = new Set<string>(LOOPBACK_HOSTS);
+function buildAllowedHosts(origins: (string | RegExp)[], apiBaseUrl?: string): HostAllowlist {
+  const exact = new Set<string>(LOOPBACK_HOSTS);
+  const patterns: RegExp[] = [];
   for (const origin of origins) {
-    if (typeof origin !== 'string') continue;
+    if (origin instanceof RegExp) {
+      // RegExp origins (e.g. PRIVATE_NETWORK_ORIGIN) match "http://host:port".
+      // For Host header check we need to test "http://<hostname>".
+      patterns.push(origin);
+      continue;
+    }
     try {
-      hosts.add(new URL(origin).hostname);
+      exact.add(new URL(origin).hostname);
     } catch {
       // skip malformed origins
     }
@@ -30,12 +42,12 @@ function buildAllowedHosts(origins: (string | RegExp)[], apiBaseUrl?: string): S
   // Split-host: API may live on a different domain than the frontend
   if (apiBaseUrl) {
     try {
-      hosts.add(new URL(apiBaseUrl).hostname);
+      exact.add(new URL(apiBaseUrl).hostname);
     } catch {
       // skip malformed URL
     }
   }
-  return hosts;
+  return { exact, patterns };
 }
 
 function extractHostname(rawHost: string): string {
@@ -49,6 +61,13 @@ function extractHostname(rawHost: string): string {
   return colonIdx >= 0 ? rawHost.slice(0, colonIdx) : rawHost;
 }
 
+function isHostAllowed(hostname: string, allowlist: HostAllowlist): boolean {
+  if (allowlist.exact.has(hostname)) return true;
+  // Test hostname against RegExp origin patterns by wrapping as "http://hostname"
+  const syntheticOrigin = `http://${hostname}`;
+  return allowlist.patterns.some((re) => re.test(syntheticOrigin));
+}
+
 function securityHeaders(app: FastifyInstance, opts: SecurityHeadersOptions, done: () => void) {
   const origins = opts.allowedOrigins ?? resolveFrontendCorsOrigins(process.env);
   const apiUrl = opts.apiBaseUrl ?? process.env.NEXT_PUBLIC_API_URL;
@@ -58,7 +77,7 @@ function securityHeaders(app: FastifyInstance, opts: SecurityHeadersOptions, don
   app.addHook('onRequest', (request, reply, next) => {
     const rawHost = request.headers.host ?? '';
     const hostname = extractHostname(rawHost);
-    if (!allowedHosts.has(hostname)) {
+    if (!isHostAllowed(hostname, allowedHosts)) {
       reply.code(403).send({ error: 'Host not allowed' });
       return;
     }

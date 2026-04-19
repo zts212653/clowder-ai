@@ -66,6 +66,8 @@ export interface OutboundDeliveryHookOptions {
   readonly messageLookup?:
     | ((messageId: string) => Promise<{ source?: { sender?: { id: string; name?: string } } } | null>)
     | undefined;
+  /** Resolve audio blocks with text but no url (voiceMode frontend-only blocks) by synthesizing TTS. */
+  readonly resolveVoiceBlocks?: ((blocks: RichBlock[], catId: string) => Promise<RichBlock[]>) | undefined;
 }
 
 export class OutboundDeliveryHook {
@@ -138,7 +140,32 @@ export class OutboundDeliveryHook {
     const textPrefix = catDisplayName ? `【${catDisplayName}🐱】\n` : '';
     const finalContent = `${textPrefix}${content}`;
 
-    const hasRichBlocks = richBlocks && richBlocks.length > 0;
+    // Resolve audio blocks that have text but no url (voiceMode frontend-only blocks).
+    // Without resolution, these would be silently dropped by Phase 6's url check.
+    let resolvedBlocks = richBlocks;
+    const hasUnresolvedAudio = resolvedBlocks?.some(
+      (b) => b.kind === 'audio' && 'text' in b && (!('url' in b) || !b.url),
+    );
+    if (hasUnresolvedAudio && this.opts.resolveVoiceBlocks && catId) {
+      try {
+        resolvedBlocks = await this.opts.resolveVoiceBlocks(resolvedBlocks!, catId);
+      } catch (err) {
+        this.opts.log.warn({ err }, '[OutboundDeliveryHook] resolveVoiceBlocks failed — degrading to text');
+      }
+    }
+    // Fallback: convert any remaining audio-without-url to plaintext-renderable blocks
+    // so they are NOT silently dropped by Phase 6's url filter.
+    if (resolvedBlocks?.some((b) => b.kind === 'audio' && 'text' in b && (!('url' in b) || !b.url))) {
+      resolvedBlocks = resolvedBlocks.map((b) => {
+        if (b.kind === 'audio' && 'text' in b && (!('url' in b) || !b.url)) {
+          return { id: b.id, kind: 'card' as const, v: 1 as const, title: '🔊 语音', bodyMarkdown: b.text as string };
+        }
+        return b;
+      });
+    }
+    // After resolve + fallback, normalize to a concrete array so TS narrows downstream.
+    const finalBlocks = resolvedBlocks ?? [];
+    const hasRichBlocks = finalBlocks.length > 0;
     const outMeta = replyToSender ? { replyToSender } : undefined;
 
     await Promise.allSettled(
@@ -176,19 +203,19 @@ export class OutboundDeliveryHook {
             await adapter.sendRichMessage(
               binding.externalChatId,
               content,
-              richBlocks,
+              finalBlocks,
               catDisplayName || 'Cat',
               outMeta,
             );
           } else if (
             hasRichBlocks &&
             adapter.sendMedia &&
-            richBlocks.some((b) => b.kind === 'audio' || b.kind === 'file' || b.kind === 'media_gallery')
+            finalBlocks.some((b) => b.kind === 'audio' || b.kind === 'file' || b.kind === 'media_gallery')
           ) {
             // Media-capable adapter without sendRichMessage (e.g. WeChat):
             // BUG-5 corrected: context_token is reusable, so send text first, then media.
             // Render non-media blocks (html_widget, card, etc.) as plaintext alongside text content.
-            const nonMediaBlocks = richBlocks.filter(
+            const nonMediaBlocks = finalBlocks.filter(
               (b) => b.kind !== 'audio' && b.kind !== 'file' && b.kind !== 'media_gallery',
             );
             const blockText = nonMediaBlocks.length > 0 ? renderAllRichBlocksPlaintext(nonMediaBlocks) : '';
@@ -199,7 +226,7 @@ export class OutboundDeliveryHook {
             // Media blocks sent below in Phase 5/6/J
           } else if (hasRichBlocks) {
             // Fallback for adapters without sendMedia: render blocks as plaintext
-            const blockText = renderAllRichBlocksPlaintext(richBlocks);
+            const blockText = renderAllRichBlocksPlaintext(finalBlocks);
             await adapter.sendReply(binding.externalChatId, `${finalContent}\n\n${blockText}`, outMeta);
           } else {
             await adapter.sendReply(binding.externalChatId, finalContent, outMeta);
@@ -209,7 +236,7 @@ export class OutboundDeliveryHook {
           // Phase 5: Send media_gallery image items as image messages
           if (hasRichBlocks && adapter.sendMedia) {
             const resolve = this.opts.mediaPathResolver;
-            for (const block of richBlocks) {
+            for (const block of finalBlocks) {
               if (block.kind === 'audio' && 'url' in block && block.url) {
                 const absPath = resolve?.(block.url);
                 this.opts.log.info(

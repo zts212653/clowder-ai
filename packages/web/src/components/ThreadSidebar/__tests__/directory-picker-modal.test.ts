@@ -151,7 +151,22 @@ describe('DirectoryPickerModal', () => {
     expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: undefined }));
   });
 
-  it('confirm button is disabled when no project is selected', async () => {
+  it('confirm button is disabled when no project available at all', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/projects/cwd') return jsonFail();
+      if (path === '/api/backlog/items') return jsonOk({ items: [] });
+      return jsonFail();
+    });
+    render({ existingProjects: [] });
+    await flush();
+    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('创建对话'),
+    ) as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(confirmBtn.disabled).toBe(true);
+  });
+
+  it('auto-selects cwdPath on mount so confirm button is enabled', async () => {
     setupCwdSuccess();
     render();
     await flush();
@@ -159,7 +174,29 @@ describe('DirectoryPickerModal', () => {
       b.textContent?.includes('创建对话'),
     ) as HTMLButtonElement;
     expect(confirmBtn).toBeTruthy();
-    expect(confirmBtn.disabled).toBe(true);
+    expect(confirmBtn.disabled).toBe(false);
+  });
+
+  it('auto-selects first existing project when cwdPath unavailable', async () => {
+    const existingPath = '/home/user/other';
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/projects/cwd') return jsonFail();
+      if (path === '/api/backlog/items') return jsonOk({ items: [] });
+      return jsonFail();
+    });
+    const fns = render({ existingProjects: [existingPath] });
+    await flush();
+    clickConfirm();
+    expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: existingPath }));
+  });
+
+  it('auto-selects cwdPath over existingProjects when both available', async () => {
+    const existingPath = '/home/user/other';
+    setupCwdSuccess();
+    const fns = render({ existingProjects: [existingPath] });
+    await flush();
+    clickConfirm();
+    expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: CWD_PATH }));
   });
 
   // ── F113: Browse directory button (replaces F068 osascript picker) ──

@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import './helpers/setup-cat-registry.js';
 import { gameRoutes } from '../dist/routes/games.js';
 
 /** In-memory GameStore stub */

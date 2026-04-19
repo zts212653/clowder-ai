@@ -73,7 +73,7 @@ Hub 全链路支持 kimi 成员管理：
 | 风险 | 缓解 |
 |------|------|
 | kimi CLI 未安装时 agent service 测试全 skip | CI 加 stub binary + test:public 排除 |
-| 社区 PR 基于 pre-F340 代码，字段名过时 | maintainer commit 统一对齐 provider→clientId |
+| 社区 PR 基于 accounts refactor (clowder-ai#340) 之前的代码，字段名过时 | maintainer commit 统一对齐 provider→clientId |
 | SystemPromptBuilder size 超限 | 阈值 +100 适配新 cat roster |
 
 ## Key Decisions

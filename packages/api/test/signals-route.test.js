@@ -127,6 +127,19 @@ describe('signals routes', () => {
     assert.equal(res.statusCode, 401);
   });
 
+  it('GET /api/signals/inbox trusts localhost origin fallback', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/signals/inbox?limit=10',
+      headers: { origin: 'http://localhost:3003' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(Array.isArray(body.items), true);
+    assert.equal(body.items.length, 3);
+  });
+
   it('GET /api/signals/inbox returns today inbox items', async () => {
     const res = await app.inject({
       method: 'GET',

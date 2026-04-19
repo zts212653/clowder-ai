@@ -45,7 +45,7 @@ export const guideTransitions = meter.createCounter('cat_cafe.guide.transitions'
   description: 'Guide lifecycle state transitions',
 });
 
-// --- F479: Inline @mention detection observability ---
+// --- clowder-ai#489: Inline @mention detection observability ---
 
 /** Counter: total inline action mention detection runs. */
 export const inlineActionChecked = meter.createCounter('cat_cafe.a2a.inline_action.checked', {
@@ -90,6 +90,26 @@ export const inlineActionRoutedSetSkip = meter.createCounter('cat_cafe.a2a.inlin
 /** Counter: baseline — line-start @mention detected (model compliance). */
 export const lineStartDetected = meter.createCounter('cat_cafe.a2a.line_start.detected', {
   description: 'Line-start @mention detected (baseline for model format compliance)',
+});
+
+// --- F061 Phase 2d: Antigravity stream_error grace recovery ---
+
+/** Counter: stream_error buffered after partial text while waiting for recovery tail. */
+export const antigravityStreamErrorBuffered = meter.createCounter('cat_cafe.antigravity.stream_error.buffered_total', {
+  description: 'Buffered Antigravity stream_error after partial text while waiting for a recovery tail',
+});
+
+/** Counter: buffered stream_error recovered by later text. */
+export const antigravityStreamErrorRecovered = meter.createCounter(
+  'cat_cafe.antigravity.stream_error.recovered_total',
+  {
+    description: 'Buffered Antigravity stream_error later recovered by additional streamed text',
+  },
+);
+
+/** Counter: buffered stream_error expired without recovery and was surfaced to the user. */
+export const antigravityStreamErrorExpired = meter.createCounter('cat_cafe.antigravity.stream_error.expired_total', {
+  description: 'Buffered Antigravity stream_error expired without recovery and was surfaced',
 });
 
 /** Liveness state type. */

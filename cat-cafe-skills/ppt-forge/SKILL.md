@@ -97,6 +97,52 @@ description: >
 
 审美五维：色彩体系 · 字体排印 · 空间网格 · 视觉元素 · 密度平衡
 
+## HTML Slide 预览（ref: browser-preview skill）
+
+Slide 做完必须先自己看一遍再交活。预览走 **Hub 内嵌浏览器**（browser-preview skill），禁止用 Chrome MCP / `open` 命令 / Playwright。
+
+### 预览流程
+
+```
+1. 图片内联 — 所有 <img src="xxx.png"> 必须转成 data URI
+   原因：Preview Gateway 要求每个请求带 __preview_port 参数，
+   相对路径请求（如 /image.png）不带此参数 → 400 错误 → 图裂。
+
+2. 起 HTTP server — 每个 slide 用独立端口
+   原因：BrowserPanel 按 port 去重，同 port 只创建 1 个 tab。
+   N 个 slide → N 个端口 → N 个 tab。
+   python3 -m http.server PORT（每个 slide 一个端口）
+
+3. 调 auto-open API — 每个端口调一次
+   curl -X POST http://localhost:3003/api/preview/auto-open \
+     -H "Content-Type: application/json" \
+     -d '{"port": PORT, "path": "/slide.html"}'
+   间隔 300ms 避免 socket 事件丢失。
+```
+
+### 图片内联参考
+
+```python
+import base64, re, os
+def inline_images(html_path):
+    with open(html_path) as f: content = f.read()
+    def replace(m):
+        src = m.group(1)
+        if not os.path.exists(src): return m.group(0)
+        b64 = base64.b64encode(open(src,'rb').read()).decode()
+        mime = 'image/png' if src.endswith('.png') else 'image/jpeg'
+        return f'src="data:{mime};base64,{b64}"'
+    return re.sub(r'src="([^"]+\.(?:png|jpg|jpeg|gif|webp))"', replace, content)
+```
+
+### 陷阱速查
+
+| 现象 | 根因 | 修法 |
+|------|------|------|
+| 图片裂了 | 相对路径缺 `__preview_port` | 图片转 data URI |
+| 只有 1 个 tab | 同 port 去重 | 每 slide 独立端口 |
+| proxy error | HTTP server 没跑 | 先 `curl localhost:PORT` 验证 |
+
 ## 密度填充手法
 
 详见 [ppt-density-playbook.md](../refs/ppt-density-playbook.md)

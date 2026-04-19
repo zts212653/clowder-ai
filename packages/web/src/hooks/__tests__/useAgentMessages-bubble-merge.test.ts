@@ -27,6 +27,9 @@ const mockSetMessageThinking = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockReplaceMessageId = vi.fn();
 const mockPatchMessage = vi.fn();
+const mockRemoveActiveInvocation = vi.fn((invocationId: string) => {
+  delete storeState.activeInvocations[invocationId];
+});
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -70,6 +73,8 @@ const storeState = {
   getThreadState: mockGetThreadState,
   currentThreadId: 'thread-1',
   catInvocations: {} as Record<string, { invocationId?: string }>,
+  activeInvocations: {} as Record<string, { catId: string; mode: string }>,
+  removeActiveInvocation: mockRemoveActiveInvocation,
 };
 
 let captured: ReturnType<typeof useAgentMessages> | undefined;
@@ -107,6 +112,7 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     captured = undefined;
     storeState.messages = [];
     storeState.catInvocations = {};
+    storeState.activeInvocations = {};
     vi.clearAllMocks();
   });
 
@@ -416,5 +422,82 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
 
     const appendCalls = mockAppendToMessage.mock.calls.filter(([id]) => id === 'msg-live');
     expect(appendCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('final done preserves a recovered partial stream bubble', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    storeState.messages.push({
+      id: 'msg-partial-done',
+      type: 'assistant',
+      catId: 'opus',
+      content: '铲屎官，我活着，',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-partial-done' } },
+      timestamp: Date.now() - 1000,
+    });
+    storeState.catInvocations = { opus: { invocationId: 'inv-partial-done' } };
+    storeState.activeInvocations = {
+      'inv-partial-done': { catId: 'opus', mode: 'execute' },
+    };
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        invocationId: 'inv-partial-done',
+        isFinal: true,
+      });
+    });
+
+    expect(storeState.messages).toContainEqual(
+      expect.objectContaining({
+        id: 'msg-partial-done',
+        content: '铲屎官，我活着，',
+        isStreaming: false,
+      }),
+    );
+  });
+
+  it('terminal error preserves a recovered partial stream bubble', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    storeState.messages.push({
+      id: 'msg-partial-error',
+      type: 'assistant',
+      catId: 'opus',
+      content: '铲屎官，我活着，',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-partial-error' } },
+      timestamp: Date.now() - 1000,
+    });
+    storeState.catInvocations = { opus: { invocationId: 'inv-partial-error' } };
+    storeState.activeInvocations = {
+      'inv-partial-error': { catId: 'opus', mode: 'execute' },
+    };
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'error',
+        catId: 'opus',
+        error: 'stream interrupted',
+        invocationId: 'inv-partial-error',
+        isFinal: true,
+      });
+    });
+
+    expect(storeState.messages).toContainEqual(
+      expect.objectContaining({
+        id: 'msg-partial-error',
+        content: '铲屎官，我活着，',
+        isStreaming: false,
+      }),
+    );
   });
 });

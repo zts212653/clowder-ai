@@ -60,28 +60,23 @@ docs/prompts/YYYY-MM-DD-{topic}-research-prompt.md
 
 ## Prompt 模板（Step 1）
 
-```markdown
-# {Topic} 调研
+**使用 8 槽位骨架模板**：`cat-cafe-skills/refs/research-prompt-template.md`
 
-> 委托人：{who}  日期：YYYY-MM-DD
+8 个槽位：
+1. `Problem Frame` — 任务边界 + 非目标
+2. `Current Hypotheses` — 我们的假设 + 证据缺口
+3. `Disconfirm First` — 先找反例（反确认偏误）
+4. `Source Mix Quota` — 来源配额（论文/工程/开源/竞品）
+5. `Local Constraints` — 我们的约束（多引擎/人在环/知识在 repo）
+6. `Output Schema` — 支持/反对/未定 + 置信度
+7. `Decision Interface` — 映射到 采纳/试点/搁置
+8. `Risk Register` — 如果结论错了炸在哪
 
-## 背景
-{为什么需要这个调研，哪些项目上下文是相关的}
+**发送前自动注入**（模板底部有清单）：当前 Feature spec、相关 ADR、最近教训、BACKLOG 上下文。
 
-## 需要调研的问题
-1. {具体问题 + 范围}
-2. {具体问题}
+**收到后 Quality Gate**（模板底部有标准）：反例覆盖、来源多样性、约束对齐、可行动、风险意识。
 
-## 输出要求
-- 每个结论标注信息来源（URL 或文档名）
-- 区分"已确认"和"推测"
-- 给出推荐方向 + 风险
-
-## 参考资料
-{相关项目文档链接或已有代码路径}
-```
-
-详细模板见 `../refs/` 目录。
+实战范例：*(internal reference removed)*
 
 ## Quota 意识
 

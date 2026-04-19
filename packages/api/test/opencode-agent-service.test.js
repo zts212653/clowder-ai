@@ -457,7 +457,7 @@ describe('OpenCodeAgentService', () => {
     );
   });
 
-  // ── F189: OPENCODE_CONFIG passthrough clears anthropic env vars ──
+  // ── clowder-ai#223: OPENCODE_CONFIG passthrough clears anthropic env vars ──
 
   test('OPENCODE_CONFIG in callbackEnv clears ANTHROPIC env vars', async () => {
     const proc = createMockProcess();

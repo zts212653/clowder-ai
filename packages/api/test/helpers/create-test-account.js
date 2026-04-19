@@ -1,5 +1,5 @@
 /**
- * F340 — Test helper: writes accounts to global ~/.cat-cafe/accounts.json
+ * clowder-ai#340 — Test helper: writes accounts to global ~/.cat-cafe/accounts.json
  * + credentials.json (the canonical stores) and returns a profile-like
  * object so existing test assertions on `profile.id` continue to work.
  */
@@ -132,13 +132,13 @@ export async function createProviderProfile(projectRoot, opts) {
   // Ensure catalog exists (for breeds/roster, not for accounts)
   await ensureCatalog(projectRoot);
 
-  // F340: Write account to global ~/.cat-cafe/accounts.json
+  // clowder-ai#340: Write account to global ~/.cat-cafe/accounts.json
   const globalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT || projectRoot;
   const globalCatCafeDir = resolve(globalRoot, '.cat-cafe');
   mkdirSync(globalCatCafeDir, { recursive: true });
   const accountsPath = resolve(globalCatCafeDir, 'accounts.json');
   const accounts = existsSync(accountsPath) ? JSON.parse(readFileSync(accountsPath, 'utf-8')) : {};
-  // F340: protocol not persisted — derived at runtime from well-known account IDs.
+  // clowder-ai#340: protocol not persisted — derived at runtime from well-known account IDs.
   accounts[id] = {
     authType,
     ...(opts.displayName || opts.name ? { displayName: opts.displayName || opts.name } : {}),

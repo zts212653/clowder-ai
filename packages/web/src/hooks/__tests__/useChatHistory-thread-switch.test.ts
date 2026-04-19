@@ -2,11 +2,22 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
-import { useChatHistory } from '../useChatHistory';
+import { __resetTaskCacheForTest, useChatHistory } from '../useChatHistory';
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
+}));
+
+// F164: Mock offline-store so IDB calls resolve immediately (this test is about
+// thread-switch ordering, not IndexedDB behavior).
+vi.mock('@/utils/offline-store', () => ({
+  loadThreadMessages: vi.fn().mockResolvedValue(null),
+  saveThreadMessages: vi.fn().mockResolvedValue(undefined),
+  loadThreads: vi.fn().mockResolvedValue(null),
+  saveThreads: vi.fn().mockResolvedValue(undefined),
+  clearAll: vi.fn().mockResolvedValue(undefined),
 }));
 
 function HookHost({ threadId }: { threadId: string }) {
@@ -55,6 +66,8 @@ describe('useChatHistory thread switch ordering', () => {
       threads: [],
       isLoadingThreads: false,
     });
+    useTaskStore.getState().clearTasks();
+    __resetTaskCacheForTest();
 
     // Keep requests pending so this test only observes immediate switch side-effects.
     apiFetchMock.mockImplementation(() => new Promise<Response>(() => {}));
@@ -78,8 +91,10 @@ describe('useChatHistory thread switch ordering', () => {
     expect(state.messages.map((m) => m.id)).toEqual(['a1']);
   });
 
-  it('clears messages when thread is already synced with no cache', () => {
-    act(() => {
+  it('clears messages when thread is already synced with no cache', async () => {
+    // F164: bootstrap is now async (IDB lookup before clear), so we need
+    // await act() to flush the microtask before asserting.
+    await act(async () => {
       root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
     });
 
@@ -391,5 +406,129 @@ describe('useChatHistory thread switch ordering', () => {
     });
 
     vi.useRealTimers();
+  });
+
+  it('restores cached tasks immediately when revisiting a thread', async () => {
+    let resolveThreadARevisit!: (value: Response) => void;
+    const threadARevisit = new Promise<Response>((resolve) => {
+      resolveThreadARevisit = resolve;
+    });
+    const tasksByThread = new Map<string, object[]>([
+      [
+        'thread-a',
+        [
+          {
+            id: 'task-a',
+            kind: 'work',
+            threadId: 'thread-a',
+            subjectKey: null,
+            title: 'Task A',
+            ownerCatId: null,
+            status: 'todo',
+            why: 'seed',
+            createdBy: 'user',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      ],
+      [
+        'thread-b',
+        [
+          {
+            id: 'task-b',
+            kind: 'work',
+            threadId: 'thread-b',
+            subjectKey: null,
+            title: 'Task B',
+            ownerCatId: null,
+            status: 'doing',
+            why: 'seed',
+            createdBy: 'user',
+            createdAt: 2,
+            updatedAt: 2,
+          },
+        ],
+      ],
+    ]);
+    const taskRequestCounts = new Map<string, number>();
+
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url.includes('/api/messages')) {
+        return Promise.resolve(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+      }
+      if (url.includes('/api/tasks')) {
+        const parsed = new URL(url, 'http://localhost');
+        const nextThreadId = parsed.searchParams.get('threadId');
+        if (!nextThreadId) {
+          throw new Error(`missing threadId in mock url: ${url}`);
+        }
+        const nextCount = (taskRequestCounts.get(nextThreadId) ?? 0) + 1;
+        taskRequestCounts.set(nextThreadId, nextCount);
+        if (nextThreadId === 'thread-a' && nextCount === 2) {
+          return threadARevisit;
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ tasks: tasksByThread.get(nextThreadId) ?? [] }), { status: 200 }),
+        );
+      }
+      if (url.includes('/task-progress')) {
+        return Promise.resolve(new Response(JSON.stringify({ taskProgress: {} }), { status: 200 }));
+      }
+      if (url.includes('/queue')) {
+        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-a']);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-b' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-b']);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      await Promise.resolve();
+    });
+
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-a']);
+
+    resolveThreadARevisit(
+      new Response(
+        JSON.stringify({
+          tasks: [
+            {
+              id: 'task-a2',
+              kind: 'work',
+              threadId: 'thread-a',
+              subjectKey: null,
+              title: 'Task A2',
+              ownerCatId: null,
+              status: 'done',
+              why: 'updated',
+              createdBy: 'user',
+              createdAt: 3,
+              updatedAt: 3,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-a2']);
   });
 });

@@ -35,8 +35,10 @@ export interface McpCallbackOptions {
  * fallback when native MCP is unavailable for any reason.
  *
  * @param mcpAvailable - true when native MCP is configured AND server path exists
+ * @param clientId - provider clientId; 'antigravity' skips injection (LS persistent process can't receive callback env)
  */
-export function needsMcpInjection(mcpAvailable: boolean): boolean {
+export function needsMcpInjection(mcpAvailable: boolean, clientId?: string): boolean {
+  if (clientId === 'antigravity') return false;
   return !mcpAvailable;
 }
 
@@ -68,7 +70,7 @@ export function buildMcpCallbackInstructions(opts: McpCallbackOptions): string {
 
 ### HTTP 回调（异步）
 凭证: \`$CAT_CAFE_INVOCATION_ID\` + \`$CAT_CAFE_CALLBACK_TOKEN\`
-可用工具: post-message / register-pr-tracking / thread-context / list-threads / feat-index / list-tasks / pending-mentions / update-task / create-rich-block / search-evidence / reflect / retain-memory / request-permission / submit-game-action
+可用工具: post-message / register-pr-tracking / thread-context / list-threads / feat-index / list-tasks / pending-mentions / create-task / update-task / create-rich-block / search-evidence / reflect / retain-memory / request-permission / submit-game-action
 跨 thread: cross-post-message + \`threadId\`
 检索消息: thread-context + \`catId\`/\`keyword\`
 检索 feature: feat-index + \`featId\`/\`query\`

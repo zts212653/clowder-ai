@@ -19,6 +19,7 @@ import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata }
 import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool, PoolKey } from './AcpProcessPool.js';
 import { transformAcpEvent } from './acp-event-transformer.js';
+import { resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
 import type { AcpMcpServer } from './types.js';
 
@@ -129,9 +130,20 @@ export class GeminiAcpAdapter implements AgentService {
     let eventCount = 0;
 
     try {
+      // F145 Phase E: merge user project MCP servers per-invoke (thread.projectPath → workingDirectory)
+      let invokeServers = this.mcpServers;
+      const userProjectRoot = options?.workingDirectory;
+      if (userProjectRoot && userProjectRoot !== this.projectRoot) {
+        const baseNames = new Set(this.mcpServers.map((s) => s.name));
+        const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
+        if (userServers.length > 0) {
+          invokeServers = [...this.mcpServers, ...userServers];
+        }
+      }
+
       // Per-invocation: merge callbackEnv into cat-cafe* MCP servers so callback tools
       // (multi_mention, post_message, etc.) get CAT_CAFE_API_URL / token / invocationId.
-      const sessionMcpServers = materializeSessionMcpServers(this.mcpServers, options?.callbackEnv);
+      const sessionMcpServers = materializeSessionMcpServers(invokeServers, options?.callbackEnv);
       const envDiag = callbackEnvDiagnostic(options?.callbackEnv);
       log.info(
         { ...ctx, cwd, promptLen: prompt.length, mcpCount: sessionMcpServers.length, ...envDiag },

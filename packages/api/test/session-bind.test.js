@@ -137,12 +137,13 @@ describe('Session bind API route', () => {
     return { app, sessionChainStore, threadStore };
   }
 
-  test('returns 401 without identity', async () => {
+  test('returns 401 without identity for untrusted browser origin', async () => {
     const { app } = await buildApp();
     try {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/threads/thread-1/sessions/opus/bind',
+        headers: { origin: 'https://evil.example' },
         payload: { cliSessionId: 'cli-new' },
       });
       assert.equal(res.statusCode, 401);

@@ -1,0 +1,288 @@
+{
+  "version": 1,
+  "description": "F163 Phase A gold set — 55 queries for NDCG@10 + MRR evaluation",
+  "created": "2026-04-16",
+  "queries": [
+    {
+      "query": "F042",
+      "relevantAnchors": ["docs/features/F042-prompt-skills-optimization.md"],
+      "relevance": { "docs/features/F042-prompt-skills-optimization.md": 3 }
+    },
+    {
+      "query": "F163",
+      "relevantAnchors": ["docs/features/F163-memory-entropy-reduction.md"],
+      "relevance": { "docs/features/F163-memory-entropy-reduction.md": 3 }
+    },
+    {
+      "query": "F102",
+      "relevantAnchors": ["docs/features/F102-memory-system.md"],
+      "relevance": { "docs/features/F102-memory-system.md": 3 }
+    },
+    {
+      "query": "F073",
+      "relevantAnchors": ["docs/features/F073-sop-auto-guardian.md"],
+      "relevance": { "docs/features/F073-sop-auto-guardian.md": 3 }
+    },
+    {
+      "query": "F100",
+      "relevantAnchors": ["docs/features/F100-self-evolution.md"],
+      "relevance": { "docs/features/F100-self-evolution.md": 3 }
+    },
+    {
+      "query": "ADR-020",
+      "relevantAnchors": ["docs/decisions/ADR-020-f102-memory-architecture.md"],
+      "relevance": { "docs/decisions/ADR-020-f102-memory-architecture.md": 3 }
+    },
+    {
+      "query": "ADR-011",
+      "relevantAnchors": ["docs/decisions/ADR-011-doc-metadata-contract.md"],
+      "relevance": { "docs/decisions/ADR-011-doc-metadata-contract.md": 3 }
+    },
+    {
+      "query": "ADR-005",
+      "relevantAnchors": ["docs/decisions/ADR-005-hindsight-integration-decisions.md"],
+      "relevance": { "docs/decisions/ADR-005-hindsight-integration-decisions.md": 3 }
+    },
+    {
+      "query": "Redis isolation",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "Redis port 6399",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "memory system architecture",
+      "relevantAnchors": ["docs/decisions/ADR-020-f102-memory-architecture.md", "docs/features/F102-memory-system.md"],
+      "relevance": { "docs/decisions/ADR-020-f102-memory-architecture.md": 3, "docs/features/F102-memory-system.md": 3 }
+    },
+    {
+      "query": "MCP server architecture",
+      "relevantAnchors": ["docs/features/F043-mcp-normalization.md"],
+      "relevance": { "docs/features/F043-mcp-normalization.md": 3 }
+    },
+    {
+      "query": "session chain",
+      "relevantAnchors": ["docs/features/F102-memory-system.md"],
+      "relevance": { "docs/features/F102-memory-system.md": 3 }
+    },
+    {
+      "query": "worktree lifecycle",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "review discipline",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "knowledge lifecycle governance",
+      "relevantAnchors": [
+        "docs/features/F163-memory-entropy-reduction.md",
+        "docs/features/F152-knowledge-lifecycle.md"
+      ],
+      "relevance": {
+        "docs/features/F163-memory-entropy-reduction.md": 3,
+        "docs/features/F152-knowledge-lifecycle.md": 2
+      }
+    },
+    {
+      "query": "prompt engineering optimization",
+      "relevantAnchors": ["docs/features/F042-prompt-skills-optimization.md"],
+      "relevance": { "docs/features/F042-prompt-skills-optimization.md": 3 }
+    },
+    {
+      "query": "design language",
+      "relevantAnchors": ["docs/features/F056-design-language.md"],
+      "relevance": { "docs/features/F056-design-language.md": 3 }
+    },
+    {
+      "query": "task board thread-level persistence",
+      "relevantAnchors": ["docs/features/F160-yarn-ball-task-board.md"],
+      "relevance": { "docs/features/F160-yarn-ball-task-board.md": 3 }
+    },
+    {
+      "query": "voting system",
+      "relevantAnchors": ["docs/features/F079-voting-system.md"],
+      "relevance": { "docs/features/F079-voting-system.md": 3 }
+    },
+    {
+      "query": "self evolution mechanism",
+      "relevantAnchors": ["docs/features/F100-self-evolution.md"],
+      "relevance": { "docs/features/F100-self-evolution.md": 3 }
+    },
+    {
+      "query": "open source plan",
+      "relevantAnchors": ["docs/features/F059-open-source.md"],
+      "relevance": { "docs/features/F059-open-source.md": 3 }
+    },
+    {
+      "query": "TTL silent data loss",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "Promise timeout cancellation",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "ADR drift detection",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "context engineering",
+      "relevantAnchors": ["docs/phases/phase-5.0-context-engineering.md"],
+      "relevance": { "docs/phases/phase-5.0-context-engineering.md": 3 }
+    },
+    {
+      "query": "phase 4 direction",
+      "relevantAnchors": ["docs/phases/phase-4.0-direction.md"],
+      "relevance": { "docs/phases/phase-4.0-direction.md": 3 }
+    },
+    {
+      "query": "agent to agent communication",
+      "relevantAnchors": ["docs/features/F002-a2a.md", "docs/decisions/ADR-001-agent-call.md"],
+      "relevance": { "docs/features/F002-a2a.md": 3, "docs/decisions/ADR-001-agent-call.md": 2 }
+    },
+    {
+      "query": "rich blocks",
+      "relevantAnchors": ["docs/features/F022-rich-blocks.md"],
+      "relevance": { "docs/features/F022-rich-blocks.md": 3 }
+    },
+    {
+      "query": "token budget observability",
+      "relevantAnchors": ["docs/features/F008-token-budget.md"],
+      "relevance": { "docs/features/F008-token-budget.md": 3 }
+    },
+    {
+      "query": "cascade delete semantic",
+      "relevantAnchors": ["docs/decisions/ADR-007-cascade-delete.md"],
+      "relevance": { "docs/decisions/ADR-007-cascade-delete.md": 3 }
+    },
+    {
+      "query": "why first protocol",
+      "relevantAnchors": ["docs/decisions/ADR-002-why-first.md"],
+      "relevance": { "docs/decisions/ADR-002-why-first.md": 3 }
+    },
+    {
+      "query": "document frontmatter contract",
+      "relevantAnchors": ["docs/decisions/ADR-011-doc-metadata-contract.md"],
+      "relevance": { "docs/decisions/ADR-011-doc-metadata-contract.md": 3 }
+    },
+    {
+      "query": "Hindsight integration",
+      "relevantAnchors": ["docs/decisions/ADR-005-hindsight-integration-decisions.md"],
+      "relevance": { "docs/decisions/ADR-005-hindsight-integration-decisions.md": 3 }
+    },
+    {
+      "query": "multi-writer state spider web",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "video studio pipeline",
+      "relevantAnchors": ["docs/features/F138-video-studio.md"],
+      "relevance": { "docs/features/F138-video-studio.md": 3 }
+    },
+    {
+      "query": "PPT generation",
+      "relevantAnchors": ["docs/features/F144-ppt-forge.md"],
+      "relevance": { "docs/features/F144-ppt-forge.md": 3 }
+    },
+    {
+      "query": "CVO bootcamp onboarding",
+      "relevantAnchors": ["docs/features/F087-cvo-bootcamp.md"],
+      "relevance": { "docs/features/F087-cvo-bootcamp.md": 3 }
+    },
+    {
+      "query": "git health panel",
+      "relevantAnchors": ["docs/features/F082-git-health-panel.md"],
+      "relevance": { "docs/features/F082-git-health-panel.md": 3 }
+    },
+    {
+      "query": "workspace navigator",
+      "relevantAnchors": ["docs/features/F131-workspace-navigator.md"],
+      "relevance": { "docs/features/F131-workspace-navigator.md": 3 }
+    },
+    {
+      "query": "SOP auto guardian",
+      "relevantAnchors": ["docs/features/F073-sop-auto-guardian.md"],
+      "relevance": { "docs/features/F073-sop-auto-guardian.md": 3 }
+    },
+    {
+      "query": "pack system architecture",
+      "relevantAnchors": ["docs/decisions/ADR-021-f129-pack-system.md"],
+      "relevance": { "docs/decisions/ADR-021-f129-pack-system.md": 3 }
+    },
+    {
+      "query": "schedule abstraction unified",
+      "relevantAnchors": ["docs/decisions/ADR-022-schedule-abstraction.md"],
+      "relevance": { "docs/decisions/ADR-022-schedule-abstraction.md": 3 }
+    },
+    {
+      "query": "technical debt cleanup",
+      "relevantAnchors": ["docs/phases/phase-3.6-debt-cleanup.md", "docs/phases/phase-3.7-pre4-debt-cleanup.md"],
+      "relevance": { "docs/phases/phase-3.6-debt-cleanup.md": 3, "docs/phases/phase-3.7-pre4-debt-cleanup.md": 2 }
+    },
+    {
+      "query": "memory operation profiles",
+      "relevantAnchors": ["docs/phases/phase-5.1-memory-operation-profiles.md"],
+      "relevance": { "docs/phases/phase-5.1-memory-operation-profiles.md": 3 }
+    },
+    {
+      "query": "config visibility",
+      "relevantAnchors": ["docs/features/F001-config-visibility.md"],
+      "relevance": { "docs/features/F001-config-visibility.md": 3 }
+    },
+    {
+      "query": "explicit memory",
+      "relevantAnchors": ["docs/features/F003-explicit-memory.md"],
+      "relevance": { "docs/features/F003-explicit-memory.md": 3 }
+    },
+    {
+      "query": "mode system",
+      "relevantAnchors": ["docs/features/F011-mode-system.md"],
+      "relevance": { "docs/features/F011-mode-system.md": 3 }
+    },
+    {
+      "query": "context monitoring",
+      "relevantAnchors": ["docs/features/F024-context-monitoring.md"],
+      "relevance": { "docs/features/F024-context-monitoring.md": 3 }
+    },
+    {
+      "query": "backlog management",
+      "relevantAnchors": ["docs/features/F015-backlog-management.md", "docs/features/F049-mission-control-backlog.md"],
+      "relevance": { "docs/features/F015-backlog-management.md": 3, "docs/features/F049-mission-control-backlog.md": 2 }
+    },
+    {
+      "query": "rsync delete runtime wipeout",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "ioredis keyPrefix eval",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "handoff context why",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "over correction root cause",
+      "relevantAnchors": ["docs/lessons-learned.md"],
+      "relevance": { "docs/lessons-learned.md": 3 }
+    },
+    {
+      "query": "add member guide UI",
+      "relevantAnchors": ["docs/features/F155-add-member-guide.md"],
+      "relevance": { "docs/features/F155-add-member-guide.md": 3 }
+    }
+  ]
+}

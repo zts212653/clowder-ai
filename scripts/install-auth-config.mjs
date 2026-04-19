@@ -9,6 +9,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // F340: protocol removed — builtins derive protocol from well-known ID at runtime.
 const BUILTIN_ACCOUNT_SPECS = [
@@ -26,6 +27,11 @@ const BUILTIN_ACCOUNT_SPECS = [
 ];
 
 const CONFIG_SUBDIR = '.cat-cafe';
+const TEST_SANDBOX_ENV = 'CAT_CAFE_TEST_SANDBOX';
+const TEST_SANDBOX_ALLOW_UNSAFE_ROOT_ENV = 'CAT_CAFE_TEST_SANDBOX_ALLOW_UNSAFE_ROOT';
+// NOTE: duplicated in packages/api/src/config/test-config-write-guard.ts because this
+// standalone script cannot import the TS helper directly. Keep the two guards in sync.
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // Set by CLI entry point — determines where accounts/credentials are stored
 // when CAT_CAFE_GLOBAL_CONFIG_ROOT is not set (matches runtime behavior).
@@ -109,6 +115,23 @@ function resolveGlobalRoot() {
   if (envRoot) return path.resolve(envRoot);
   if (_activeProjectDir) return path.resolve(_activeProjectDir);
   return homedir();
+}
+
+function assertSafeTestConfigRoot(targetRoot, source) {
+  if (process.env[TEST_SANDBOX_ENV] !== '1') return;
+  if (process.env[TEST_SANDBOX_ALLOW_UNSAFE_ROOT_ENV] === '1') return;
+
+  const resolvedTarget = path.resolve(targetRoot);
+  const resolvedHome = path.resolve(process.env.CAT_CAFE_TEST_REAL_HOME || homedir());
+  const unsafeTargets = [];
+  if (resolvedTarget === REPO_ROOT) unsafeTargets.push(`repo root (${REPO_ROOT})`);
+  if (resolvedTarget === resolvedHome) unsafeTargets.push(`HOME (${resolvedHome})`);
+  if (unsafeTargets.length === 0) return;
+
+  throw new Error(
+    `[test sandbox] Refusing ${source} write/migration against ${unsafeTargets.join(' / ')}. ` +
+      'Use a temp project root or explicit CAT_CAFE_GLOBAL_CONFIG_ROOT for isolation.',
+  );
 }
 
 function globalDir() {
@@ -202,7 +225,7 @@ function normalizeModelValue(value) {
 
 function sanitizeModels(models) {
   if (!Array.isArray(models)) return undefined;
-  const normalized = Array.from(new Set(models.map(normalizeModelValue).filter((v) => v && v.length > 0)));
+  const normalized = Array.from(new Set(models.map(normalizeModelValue).filter((value) => value && value.length > 0)));
   return normalized.length > 0 ? normalized : undefined;
 }
 
@@ -370,6 +393,7 @@ function migrateAllLegacySources(projectDir) {
 // ── Commands ──
 
 function setClientAuth(client, mode, options) {
+  assertSafeTestConfigRoot(resolveGlobalRoot(), 'install-auth-config.setClientAuth');
   const accountRef =
     options.profileId || (mode === 'api_key' ? `installer-${client}` : builtinAccountIdForClient(client));
   const accounts = readAccounts();
@@ -432,6 +456,7 @@ function findBoundCats(catalogFile, profileId) {
 }
 
 function removeClientAuth(client, profileId, projectDir, { force = false } = {}) {
+  assertSafeTestConfigRoot(resolveGlobalRoot(), 'install-auth-config.removeClientAuth');
   // Step 1: Check the passed project for bindings — block if still in use.
   if (projectDir) {
     const bound = findBoundCats(path.join(projectDir, CONFIG_SUBDIR, 'cat-catalog.json'), profileId);
@@ -486,6 +511,7 @@ try {
     // Migrate legacy files before applying
     const projDir = getOptional(values, 'project-dir', '');
     _activeProjectDir = projDir;
+    assertSafeTestConfigRoot(resolveGlobalRoot(), 'install-auth-config.client-auth.set');
     migrateAllLegacySources(projDir);
     const mode = getRequired(values, 'mode');
     if (mode === 'oauth') {
@@ -517,6 +543,7 @@ try {
     }
     const projectDir = getRequired(values, 'project-dir');
     _activeProjectDir = projectDir;
+    assertSafeTestConfigRoot(resolveGlobalRoot(), 'install-auth-config.client-auth.remove');
     // Migrate legacy files before removal so accounts/credentials are in global store
     migrateAllLegacySources(projectDir);
     const force = values.get('force')?.[0] === 'true';
@@ -527,6 +554,7 @@ try {
   if (positionals[0] === 'claude-profile' && positionals[1] === 'set') {
     const projectDir = getOptional(values, 'project-dir', '');
     _activeProjectDir = projectDir;
+    assertSafeTestConfigRoot(resolveGlobalRoot(), 'install-auth-config.claude-profile.set');
     // Migrate legacy files before applying new setting
     migrateAllLegacySources(projectDir);
     const apiKey = getOptional(values, 'api-key', '') || process.env._INSTALLER_API_KEY || '';
@@ -548,6 +576,7 @@ try {
   if (positionals[0] === 'claude-profile' && positionals[1] === 'remove') {
     const projectDir = getRequired(values, 'project-dir');
     _activeProjectDir = projectDir;
+    assertSafeTestConfigRoot(resolveGlobalRoot(), 'install-auth-config.claude-profile.remove');
     migrateAllLegacySources(projectDir);
     const forceRemove = values.get('force')?.[0] === 'true';
     removeClientAuth('anthropic', 'installer-managed', projectDir, { force: forceRemove });

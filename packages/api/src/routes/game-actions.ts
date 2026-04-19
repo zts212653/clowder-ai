@@ -51,17 +51,26 @@ export const gameActionRoutes: FastifyPluginAsync<GameActionRoutesOptions> = asy
   app.post<{
     Params: { gameId: string };
   }>('/api/game/:gameId/action', async (request, reply) => {
+    const { gameId } = request.params;
+    const callbackInvocationId = request.headers['x-callback-invocation-id'] as string | undefined;
     const parseResult = submitActionSchema.safeParse(request.body);
     if (!parseResult.success) {
+      request.log.warn(
+        { gameId, callbackInvocationId, issues: parseResult.error.issues },
+        '[F101] game action rejected: invalid request',
+      );
       reply.status(400);
       return { error: 'Invalid request', details: parseResult.error.issues };
     }
 
-    const { gameId } = request.params;
     const { round, phase, seat, action, target, text, nonce } = parseResult.data;
 
     const callerCatId = request.headers['x-cat-id'] as string | undefined;
     if (!callerCatId) {
+      request.log.warn(
+        { gameId, callbackInvocationId, round, phase, seat, action, target, nonce },
+        '[F101] game action rejected: missing x-cat-id',
+      );
       reply.status(401);
       return { error: 'x-cat-id header is required' };
     }
@@ -69,12 +78,32 @@ export const gameActionRoutes: FastifyPluginAsync<GameActionRoutesOptions> = asy
     // P0: Verify caller identity via x-cat-cafe-user header (system-authenticated)
     const userId = resolveUserId(request);
     if (!userId) {
+      request.log.warn(
+        { gameId, callbackInvocationId, callerCatId, round, phase, seat, action, target, nonce },
+        '[F101] game action rejected: missing x-cat-cafe-user',
+      );
       reply.status(401);
       return { error: 'x-cat-cafe-user header is required' };
     }
 
+    const logCtx = {
+      gameId,
+      callbackInvocationId,
+      callerCatId,
+      userId,
+      round,
+      phase,
+      seat,
+      action,
+      target: target ?? null,
+      hasText: Boolean(text),
+      nonce,
+    };
+    request.log.info(logCtx, '[F101] game action received');
+
     const runtime = await gameStore.getGame(gameId);
     if (!runtime) {
+      request.log.warn(logCtx, '[F101] game action rejected: game not found');
       reply.status(404);
       return { error: 'Game not found' };
     }
@@ -82,6 +111,10 @@ export const gameActionRoutes: FastifyPluginAsync<GameActionRoutesOptions> = asy
     // P0: Verify the caller owns the thread this game belongs to
     const thread = await threadStore.get(runtime.threadId);
     if (!thread || thread.createdBy !== userId) {
+      request.log.warn(
+        { ...logCtx, threadId: runtime.threadId },
+        '[F101] game action rejected: thread ownership mismatch',
+      );
       reply.status(403);
       return { error: 'Access denied: you do not own this game thread' };
     }
@@ -89,21 +122,31 @@ export const gameActionRoutes: FastifyPluginAsync<GameActionRoutesOptions> = asy
     // P1: Callback thread isolation — invocation must belong to the game's thread
     const callbackThreadId = request.headers['x-callback-thread-id'] as string | undefined;
     if (callbackThreadId && callbackThreadId !== runtime.threadId) {
+      request.log.warn(
+        { ...logCtx, threadId: runtime.threadId, callbackThreadId },
+        '[F101] game action rejected: callback thread mismatch',
+      );
       reply.status(403);
       return { error: 'Invocation thread does not match game thread' };
     }
 
     if (runtime.status !== 'playing') {
+      request.log.warn({ ...logCtx, status: runtime.status }, '[F101] game action rejected: game not active');
       reply.status(409);
       return { error: `Game is not active (status: ${runtime.status})` };
     }
 
     if (runtime.round !== round) {
+      request.log.warn({ ...logCtx, runtimeRound: runtime.round }, '[F101] game action rejected: round mismatch');
       reply.status(409);
       return { error: `Round mismatch: game is on round ${runtime.round}, you sent ${round}` };
     }
 
     if (runtime.currentPhase !== phase) {
+      request.log.warn(
+        { ...logCtx, runtimePhase: runtime.currentPhase },
+        '[F101] game action rejected: phase mismatch',
+      );
       reply.status(409);
       return { error: `Phase mismatch: game is on phase ${runtime.currentPhase}, you sent ${phase}` };
     }
@@ -111,21 +154,28 @@ export const gameActionRoutes: FastifyPluginAsync<GameActionRoutesOptions> = asy
     const seatId = `P${seat}` as SeatId;
     const seatObj = runtime.seats.find((s) => s.seatId === seatId);
     if (!seatObj) {
+      request.log.warn({ ...logCtx, seatId }, '[F101] game action rejected: seat does not exist');
       reply.status(400);
       return { error: `Seat ${seat} does not exist in this game` };
     }
 
     if (seatObj.actorId !== callerCatId) {
+      request.log.warn(
+        { ...logCtx, seatId, expectedActorId: seatObj.actorId },
+        '[F101] game action rejected: actor mismatch',
+      );
       reply.status(403);
       return { error: `You (${callerCatId}) are not the actor for seat ${seat} (${seatObj.actorId})` };
     }
 
     if (!seatObj.alive) {
+      request.log.warn({ ...logCtx, seatId }, '[F101] game action rejected: seat not alive');
       reply.status(409);
       return { error: `Seat ${seat} is not alive` };
     }
 
     if (isNonceDuplicate(gameId, nonce)) {
+      request.log.info({ ...logCtx, seatId }, '[F101] game action deduplicated');
       return { accepted: true, deduplicated: true };
     }
 
@@ -141,9 +191,11 @@ export const gameActionRoutes: FastifyPluginAsync<GameActionRoutesOptions> = asy
       await orchestrator.handlePlayerAction(gameId, seatId, gameAction);
       recordNonce(gameId, nonce);
       actionNotifier?.onActionReceived(gameId, seatId);
+      request.log.info({ ...logCtx, seatId }, '[F101] game action accepted');
       return { accepted: true };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      request.log.warn({ ...logCtx, seatId, error: message }, '[F101] game action rejected: orchestrator error');
       reply.status(400);
       return { error: message };
     }

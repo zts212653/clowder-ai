@@ -104,7 +104,11 @@ export function DirectoryPickerModal({
 
   // F068-R7: Confirm creation with currently selected project
   const confirmCreate = useCallback(() => {
-    if (selectedPath === null) return;
+    console.log('[DirectoryPicker] confirmCreate called, selectedPath=', selectedPath);
+    if (selectedPath === null) {
+      console.warn('[DirectoryPicker] selectedPath is null — button should be disabled');
+      return;
+    }
     selectWithOptions(selectedPath === 'lobby' ? undefined : selectedPath);
   }, [selectedPath, selectWithOptions]);
 
@@ -137,7 +141,9 @@ export function DirectoryPickerModal({
     }
   }, [pathInput, handleSelectPath]);
 
-  // Fetch cwd for "推荐" badge
+  // Fetch cwd for "推荐" badge + auto-select as default project.
+  // cwdPath is the true default; existingProjects[0] is fallback only when cwd fails.
+  // `prev ??` ensures user's explicit click is never overwritten.
   useEffect(() => {
     (async () => {
       try {
@@ -145,12 +151,15 @@ export function DirectoryPickerModal({
         if (res.ok) {
           const data = await res.json();
           setCwdPath(data.path);
+          setSelectedPath((prev) => prev ?? data.path);
+          return;
         }
       } catch {
-        // ignore — cwd is optional
+        // cwd unavailable — fall through to existingProjects fallback
       }
+      setSelectedPath((prev) => prev ?? (existingProjects.length > 0 ? existingProjects[0] : null));
     })();
-  }, []);
+  }, [existingProjects]);
 
   // Escape to close
   useEffect(() => {
@@ -213,7 +222,7 @@ export function DirectoryPickerModal({
             <button
               type="button"
               onClick={() => handleSelectPath(cwdPath)}
-              className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cocreator-bg rounded-lg transition-colors flex items-center gap-2 ${selectedPath === cwdPath ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : 'ring-1 ring-cocreator-primary/30 bg-cocreator-bg/50'}`}
+              className={`w-full text-left px-3 py-2.5 text-sm text-cafe-secondary hover:bg-cocreator-bg rounded-lg transition-colors flex items-center gap-2 ${selectedPath === cwdPath ? 'ring-2 ring-cocreator-primary bg-cocreator-bg' : ''}`}
               title={cwdPath}
             >
               <FolderIcon />
@@ -324,7 +333,7 @@ export function DirectoryPickerModal({
 
         {/* ── Cat selector (collapsed by default, hidden when browser is open) ── */}
         {catsExpanded && !showBrowser && (
-          <div className="px-5 py-2 border-t border-cafe-subtle">
+          <div className="px-5 py-2 border-t border-cafe-subtle overflow-y-auto max-h-[40vh]">
             <CatSelector selectedCats={selectedCats} onSelectionChange={setSelectedCats} />
             {/* F33: Session binding */}
             {selectedCats.length > 0 && (

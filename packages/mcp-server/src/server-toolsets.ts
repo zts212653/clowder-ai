@@ -21,22 +21,53 @@ type ToolDef = {
   handler: (args: never) => Promise<unknown>;
 };
 
-const collabTools: readonly ToolDef[] = [
+/**
+ * F061: CAT_CAFE_READONLY=true → whitelist-only tool registration.
+ * Used by Antigravity's persistent MCP registration where callback credentials
+ * are unavailable. Bridge handles writes; LS only gets read-only tools.
+ *
+ * Whitelist approach: new tools default to excluded (safer than blacklist).
+ * Design doc: docs/discussions/2026-04-12-f061-antigravity-mcp-evolution-design.md
+ */
+export const READONLY_ALLOWED_TOOLS = new Set([
+  // Evidence & knowledge (local SQLite, no credentials needed)
+  'cat_cafe_search_evidence',
+  'cat_cafe_reflect',
+  'cat_cafe_get_rich_block_rules',
+  // Session chain (read-only API calls, no callback creds needed)
+  'cat_cafe_list_session_chain',
+  'cat_cafe_read_session_events',
+  'cat_cafe_read_session_digest',
+  'cat_cafe_read_invocation_detail',
+  // Signals (read-only)
+  'signal_list_inbox',
+  'signal_get_article',
+  'signal_search',
+  'signal_list_studies',
+]);
+
+const isReadonly = process.env['CAT_CAFE_READONLY'] === 'true';
+
+function applyReadonlyFilter(tools: readonly ToolDef[]): readonly ToolDef[] {
+  return isReadonly ? tools.filter((t) => READONLY_ALLOWED_TOOLS.has(t.name)) : tools;
+}
+
+const collabTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackTools,
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,
-];
+]);
 
-const memoryTools: readonly ToolDef[] = [
+const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackMemoryTools,
   ...distillationTools,
   ...evidenceTools,
   ...reflectTools,
   ...sessionChainTools,
-];
+]);
 
-const signalTools: readonly ToolDef[] = [...signalsTools, ...signalStudyTools];
+const signalTools: readonly ToolDef[] = applyReadonlyFilter([...signalsTools, ...signalStudyTools]);
 
 function registerTools(server: McpServer, tools: readonly ToolDef[]): void {
   for (const tool of tools) {

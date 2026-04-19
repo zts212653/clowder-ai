@@ -1,12 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import type { ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getBubbleInvocationId, shouldForceReplaceHydrationForCachedMessages } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
 import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
+import {
+  loadThreadMessages as loadCachedMessages,
+  saveThreadMessages as saveMessagesSnapshot,
+} from '@/utils/offline-store';
 
 type SavedScrollState = {
   top: number;
@@ -16,9 +22,14 @@ type SavedScrollState = {
 // clowder-ai#27: route navigation remounts the page, so scroll memory must live
 // outside React refs to survive /thread/A → /thread/B → /thread/A.
 const scrollPositionsByThread = new Map<string, SavedScrollState>();
+const taskCacheByThread = new Map<string, TaskItem[]>();
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 const MAX_RESTORE_FRAMES = 90;
 const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
+
+export function __resetTaskCacheForTest() {
+  taskCacheByThread.clear();
+}
 
 function isNearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX;
@@ -35,9 +46,6 @@ const HISTORY_PAGE_SIZE = 50;
 // In export mode (?export=true), load all messages in one request for screenshot capture.
 // Normal browsing still uses 50-per-page pagination.
 const EXPORT_LIMIT = 10000;
-// Keep first-screen message priority, but don't let secondary hydration stall indefinitely.
-const SECONDARY_HYDRATION_FALLBACK_MS = 300;
-
 function isAbortError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'name' in err && (err as { name?: string }).name === 'AbortError';
 }
@@ -427,23 +435,7 @@ export function useChatHistory(threadId: string) {
               rich?: { v: number; blocks: unknown[] };
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
-              scheduler?: {
-                hiddenTrigger?: boolean;
-                toast?: {
-                  type: 'success' | 'error' | 'info';
-                  title: string;
-                  message: string;
-                  duration: number;
-                  lifecycleEvent:
-                    | 'registered'
-                    | 'paused'
-                    | 'resumed'
-                    | 'deleted'
-                    | 'succeeded'
-                    | 'failed'
-                    | 'missed_window';
-                };
-              };
+              scheduler?: SchedulerMessageExtra['scheduler'];
             };
             timestamp: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
@@ -455,7 +447,7 @@ export function useChatHistory(threadId: string) {
             mentionsUser?: boolean;
             deliveredAt?: number;
             replyTo?: string;
-            replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+            replyPreview?: ReplyPreview;
           }) =>
             ({
               id: m.id,
@@ -532,12 +524,23 @@ export function useChatHistory(threadId: string) {
             ].join(','),
           });
           replaceMessages(mergedMsgs, data.hasMore ?? false);
-          return;
+          // F164: Snapshot merged messages to IndexedDB (fire-and-forget)
+          if (useChatStore.getState().currentThreadId === fetchForThread) {
+            void saveMessagesSnapshot(fetchForThread, mergedMsgs, data.hasMore ?? false).catch(() => {});
+          }
+          return true;
         }
         prependHistory(historyMsgs, data.hasMore ?? false);
+        // F164: Snapshot fetched messages to IndexedDB (fire-and-forget)
+        const snapshotState = useChatStore.getState();
+        if (snapshotState.currentThreadId === fetchForThread) {
+          void saveMessagesSnapshot(fetchForThread, snapshotState.messages, data.hasMore ?? false).catch(() => {});
+        }
+        return true;
       } catch (err) {
         // AbortError is expected during thread switch — ignore silently
-        if (isAbortError(err)) return;
+        if (isAbortError(err)) return false;
+        return false;
       } finally {
         // Do not let stale/aborted request clear loading state for a newer thread request.
         if (abortRef.current === controller && threadIdRef.current === fetchForThread) {
@@ -562,7 +565,9 @@ export function useChatHistory(threadId: string) {
       if (abortRef.current !== controller) return;
       if (threadIdRef.current !== fetchForThread) return;
       const data = await res.json();
-      setTasks(data.tasks ?? []);
+      const tasks = data.tasks ?? [];
+      taskCacheByThread.set(fetchForThread, tasks);
+      setTasks(tasks);
     } catch (err) {
       if (isAbortError(err)) return;
     }
@@ -695,6 +700,12 @@ export function useChatHistory(threadId: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, setQueue, setQueuePaused, updateThreadCatStatus]);
 
+  // Restore per-thread tasks before paint so revisiting a thread does not show
+  // an empty secondary panel while revalidation is still in flight.
+  useLayoutEffect(() => {
+    setTasks(taskCacheByThread.get(threadId) ?? []);
+  }, [threadId, setTasks]);
+
   // Load history + tasks when threadId changes (handles initial mount and navigation)
   useEffect(() => {
     // PR #794: ChatContainer no longer unmounts on thread switch, so tracking
@@ -721,7 +732,6 @@ export function useChatHistory(threadId: string) {
     const cached = state.threadStates[threadId];
     const hasCachedMessages = cached && cached.messages.length > 0;
     const isThreadSynced = state.currentThreadId === threadId;
-
     // #80 fix-A: If the thread has an active invocation, force-refresh from API
     // so that DraftStore drafts are merged into the response. Without this,
     // switching away and back shows stale cached messages (no streaming draft).
@@ -738,44 +748,55 @@ export function useChatHistory(threadId: string) {
       void fetchQueue();
     };
 
-    const secondaryFallbackTimer: ReturnType<typeof setTimeout> = setTimeout(() => {
-      hydrateSecondaryPanels();
-    }, SECONDARY_HYDRATION_FALLBACK_MS);
+    // F164: Reset offline badge on every thread switch so stale state from
+    // a previous thread's aborted fetch never leaks to the new thread.
+    useChatStore.getState().setOfflineSnapshot(false);
 
     const bootstrap = async () => {
-      try {
-        if (!hasCachedMessages) {
-          // During route thread switches, this effect can run before setCurrentThread.
-          // Clearing too early would wipe the previous thread snapshot in the store.
-          if (isThreadSynced) {
+      if (!hasCachedMessages) {
+        // F164: Try IndexedDB snapshot before API fetch
+        let restoredFromIdb = false;
+        try {
+          const idbSnapshot = await loadCachedMessages(threadId);
+          if (idbSnapshot && idbSnapshot.messages.length > 0) {
+            replaceMessages(idbSnapshot.messages, idbSnapshot.hasMore);
+            useChatStore.getState().setOfflineSnapshot(true);
+            restoredFromIdb = true;
+          } else if (isThreadSynced) {
             clearMessages();
           }
-          await fetchHistory();
-        } else if (hasActiveInvocation || (cached && cached.unreadCount > 0) || hasUnstableBubbleIdentity) {
-          // #80 fix-A P1: Force-refresh with replace mode — the async response handler
-          // will clear stale cache after setCurrentThread has run, then set fresh data
-          // including DraftStore drafts in correct timestamp order.
-          // F069-R4: Also force-refresh when the thread has unread messages. Without this,
-          // the cached message list may lack the server's latest real messages, causing
-          // the read-ack in ChatContainer to send an old sortable ID — the server still
-          // counts messages after that ID as unread, and the badge reappears.
-          // F123: If the cached snapshot already contains unstable bubble identity
-          // (duplicate same-invocation bubbles or local-only draft/stream state),
-          // thread switch must reconcile against authoritative history instead of
-          // trusting the cached timeline until a later F5.
-          await fetchHistory(undefined, { replace: true });
+        } catch {
+          if (isThreadSynced) clearMessages();
         }
-      } finally {
-        // Prioritize first-screen messages, then hydrate secondary panels.
-        hydrateSecondaryPanels();
+        // Always fetch fresh data from API (replace snapshot)
+        const fetchOk = await fetchHistory(undefined, { replace: true });
+        // F164: Clear offline badge only after successful API fetch
+        if (restoredFromIdb && fetchOk) {
+          useChatStore.getState().setOfflineSnapshot(false);
+        }
+      } else if (hasActiveInvocation || (cached && cached.unreadCount > 0) || hasUnstableBubbleIdentity) {
+        // #80 fix-A P1: Force-refresh with replace mode — the async response handler
+        // will clear stale cache after setCurrentThread has run, then set fresh data
+        // including DraftStore drafts in correct timestamp order.
+        // F069-R4: Also force-refresh when the thread has unread messages. Without this,
+        // the cached message list may lack the server's latest real messages, causing
+        // the read-ack in ChatContainer to send an old sortable ID — the server still
+        // counts messages after that ID as unread, and the badge reappears.
+        // F123: If the cached snapshot already contains unstable bubble identity
+        // (duplicate same-invocation bubbles or local-only draft/stream state),
+        // thread switch must reconcile against authoritative history instead of
+        // trusting the cached timeline until a later F5.
+        await fetchHistory(undefined, { replace: true });
       }
     };
 
+    // AC-4: secondary panels should hydrate in parallel with message history,
+    // not wait for fetchHistory() to settle before the first request starts.
+    hydrateSecondaryPanels();
     void bootstrap();
 
     return () => {
       // Scroll save is now done during render (before DOM commit), not here.
-      clearTimeout(secondaryFallbackTimer);
       cancelPendingRestore();
       abortRef.current?.abort();
     };

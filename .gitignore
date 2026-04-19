@@ -14,6 +14,7 @@ packages/web/public/workbox-*.js
 packages/web/public/workbox-*.js.map
 packages/web/public/swe-worker-*.js
 packages/web/public/worker-*.js
+packages/web/public/vendor/
 
 # Environment files
 .env
@@ -104,6 +105,7 @@ dump.rdb.backup*
 
 # Root-level skills/ (Pencil plugin generated)
 /skills/
+
 docs/bug-report/werewolf-investigation/poster-screenshot.png
 .worktrees/
 
@@ -147,3 +149,8 @@ __pycache__/
 .claude/skills/browser-automation
 .claude/skills/browser-preview
 .claude/skills/video-forge
+.claude/skills/knowledge-engineering
+.claude/skills/enterprise-workflow
+
+# Design exports (generated from .pen, regeneratable)
+designs/exports/
