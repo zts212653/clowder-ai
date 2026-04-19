@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { reconnectGame } from '@/hooks/useGameReconnect';
@@ -22,6 +21,7 @@ import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
@@ -178,7 +178,6 @@ export function ChatInput({
     setShowGameMenu(false);
   }, []);
 
-  const router = useRouter();
   const [gameStarting, setGameStarting] = useState(false);
 
   const startGame = useCallback(
@@ -207,7 +206,7 @@ export function ChatInput({
         }
         // Success — dismiss lobby and navigate
         setLobbyMode(null);
-        router.push(`/thread/${data.gameThreadId}`);
+        pushThreadRouteWithHistory(data.gameThreadId, typeof window !== 'undefined' ? window : undefined);
         // Hydrate game state immediately (socket reconnect won't fire for same connection)
         reconnectGame(data.gameThreadId).catch(() => {});
       } catch (err) {
@@ -224,7 +223,7 @@ export function ChatInput({
         setGameStarting(false);
       }
     },
-    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting, router],
+    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting],
   );
 
   const insertMention = useCallback(

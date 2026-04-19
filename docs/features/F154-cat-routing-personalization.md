@@ -9,7 +9,8 @@ community_issue: "clowder-ai#385, clowder-ai#391"
 
 # F154: Cat Routing Personalization — 全局默认猫 + 首选猫入口 + 单次定向
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P2
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P2
+> **Completed**: 2026-04-12
 
 ## Why
 
@@ -50,7 +51,7 @@ team experience（2026-04-09）：
 - **权限**：修改全局默认猫需 owner 权限（与 member overview 页面现有权限一致），非 owner 调用返回 403
 - **MVP 路径**：Phase A 仅通过 Hub API（member overview 入口）修改，不提供 connector `/config set` 命令（避免群聊权限篡改风险）。Connector 端全局配置入口视需求放入后续 Phase（KD-7）
 
-### Phase B: Hub 可见性 + UX 统一
+### Phase B: Hub 可见性 + UX 统一 ✅
 
 **B1 — Thread Header 首选猫 Pill 指示器**（Siamese UX 设计）：
 - Thread header 右侧显示 Pill 组件：`[🐱 猫头像 猫名 ▾]`，点击展开 CatSelector popover（复用 `ThreadCatSettings`）
@@ -63,6 +64,9 @@ team experience（2026-04-09）：
 - 当前默认猫卡片高亮 + "默认" badge；点击其他卡片切换（二次确认）
 - 卡片含：猫头像 + 名字 + 品种色带 + 在线状态
 - 清晰标注影响范围："新 thread 没有历史时，默认由这只猫回复"
+- **实现参考**：社区 PR `clowder-ai#419`（评估结论：问题 welcome，PR as-is 不 merge，但以下设计可参考）
+  - Resolver 分离：考虑将 `getDefaultResponderCatId()` 从通用 `getDefaultCatId()` 拆出，避免"默认回复猫"配置影响 reviewer-matcher / invocation 等其他 fallback 场景
+  - Config 持久化：Phase A 的 `setRuntimeDefaultCatId()` 是内存变量（重启丢失），B2 必须解决。参考 PR 的 config schema + PATCH endpoint + 3-tier fallback 路径
 
 **B3 — Connector 可见性**：
 - `/status` 输出增加"首选猫"信息
@@ -80,10 +84,10 @@ team experience（2026-04-09）：
 - [x] AC-A7: 猫名解析冲突时返回候选列表并拒绝执行，禁止猜测命中；exact alias match 优先于 partial displayName match
 
 ### Phase B（Hub 可见性 + UX）
-- [ ] AC-B1: Thread header 显示当前首选猫（头像 + 名字），无首选猫时不显示
-- [ ] AC-B2: Member overview 有全局默认猫选择器
-- [ ] AC-B3: `/status` 输出包含首选猫信息
-- [ ] AC-B4: Hub 和 Connector 设置的 preferredCats 实时同步（同一个 thread model）
+- [x] AC-B1: Thread header 显示当前首选猫（头像 + 名字），无首选猫时不显示
+- [x] AC-B2: Member overview 有全局默认猫选择器
+- [x] AC-B3: `/status` 输出包含首选猫信息
+- [x] AC-B4: Hub 和 Connector 设置的 preferredCats 实时同步（同一个 thread model）
 
 ## 需求点 Checklist
 
@@ -130,6 +134,7 @@ team experience（2026-04-09）：
 | KD-7 | Phase A 全局默认猫仅通过 Hub API（owner 权限）修改，不提供 connector `/config set` 命令 | 群聊 connector 无权限模型，任何成员可执行 = 配置篡改风险；Maine Coon P1 review | 2026-04-09 |
 | KD-8 | 猫名解析冲突时拒绝执行 + 返回候选列表，禁止猜测命中 | partial match 歧义会导致误路由，用户应看到候选并精确选择；Maine Coon P2 review | 2026-04-09 |
 | KD-9 | Phase B 设计先看现场再画 | 凭想象画设计稿导致与实际 ChatContainerHeader 严重冲突，触发 Design in Context 流程护栏补充 | 2026-04-10 |
+| KD-10 | Phase B 先做桌面端，移动端退化策略记为 known limitation | 顶栏 ThreadIndicator 在手机上已很长（thread 标题 + 项目名），加 Pill 会挤爆。退化方案：窄屏隐藏 Pill（用 sidebar ThreadCatSettings 操作）、中屏只显色点不显猫名 | 2026-04-12 |
 
 ## Review Gate
 

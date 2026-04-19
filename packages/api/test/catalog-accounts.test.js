@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-describe('global accounts (F340)', () => {
+describe('global accounts (clowder-ai#340)', () => {
   let globalRoot;
   let projectRoot;
   let previousGlobalRoot;
@@ -169,7 +169,7 @@ describe('global accounts (F340)', () => {
 
     // Reading accounts should trigger project-level legacy migration
     const result = readCatalogAccounts(projectRoot);
-    // F340: protocol not migrated — derived at runtime from well-known account IDs.
+    // clowder-ai#340: protocol not migrated — derived at runtime from well-known account IDs.
     assert.equal(result['my-custom'].protocol, undefined);
     assert.equal(result['my-custom'].baseUrl, 'https://custom.api/v1');
 
@@ -530,7 +530,7 @@ describe('global accounts (F340)', () => {
     resetMigrationState();
 
     // Simulate: CAT_CAFE_GLOBAL_CONFIG_ROOT is unset, projectRoot != homedir.
-    // Old installer (pre-F340) wrote secrets to homedir when --project-dir was not given.
+    // Old installer (pre-clowder-ai#340) wrote secrets to homedir when --project-dir was not given.
     delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
 
     const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-'));

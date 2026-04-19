@@ -378,7 +378,7 @@ describe('cat-catalog-store', () => {
     const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
     const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     assert.equal(hydrated.breeds[0]?.displayName, '运行时布偶猫');
-    // F340: migration does NOT backfill accountRef — unbound variants stay unbound
+    // clowder-ai#340: migration does NOT backfill accountRef — unbound variants stay unbound
     assert.equal(hydrated.breeds[0]?.variants[0]?.accountRef, undefined);
   });
 
@@ -810,5 +810,5 @@ describe('cat-catalog-store', () => {
     );
   });
 
-  // F340: removed api_key bootstrap model fallback test — filterBootstrapCatalog + bootstrapBindings deleted
+  // clowder-ai#340: removed api_key bootstrap model fallback test — filterBootstrapCatalog + bootstrapBindings deleted
 });

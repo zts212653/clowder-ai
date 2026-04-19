@@ -6,7 +6,7 @@
  * so the caller can surface instructions instead of silently blocking.
  * Fixes: clowder-ai#123 (preflight blocks new projects without guidance)
  */
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isSameProject } from '../../utils/monorepo-root.js';
 import type { Provider } from './governance-pack.js';
@@ -97,24 +97,44 @@ export async function checkGovernancePreflight(
     };
   }
 
-  let hasSkillsLink = false;
+  // ADR-025: Skills may be directory-level symlinks (legacy) or real directories
+  // containing per-skill symlinks. Check both patterns.
+  let hasSkillsSetup = false;
   for (const dir of skillsDirs) {
+    const dirPath = join(projectPath, dir);
     try {
-      const stat = await lstat(join(projectPath, dir));
-      if (stat.isSymbolicLink()) {
-        hasSkillsLink = true;
+      const dirStat = await lstat(dirPath);
+      if (dirStat.isSymbolicLink()) {
+        // Legacy directory-level symlink
+        hasSkillsSetup = true;
         break;
       }
+      if (dirStat.isDirectory()) {
+        // ADR-025: real directory — check for per-skill symlinks inside
+        const entries = await readdir(dirPath);
+        for (const entry of entries) {
+          try {
+            const entryStat = await lstat(join(dirPath, entry));
+            if (entryStat.isSymbolicLink()) {
+              hasSkillsSetup = true;
+              break;
+            }
+          } catch {
+            /* skip unreadable entries */
+          }
+        }
+        if (hasSkillsSetup) break;
+      }
     } catch {
-      // continue
+      // directory doesn't exist — continue
     }
   }
-  if (!hasSkillsLink) {
+  if (!hasSkillsSetup) {
     const dirLabel = govProvider ? PROVIDER_SKILLS_DIR[govProvider] : 'skills';
     return {
       ready: false,
       needsBootstrap: true,
-      reason: `No ${dirLabel} symlink in ${projectPath}. Governance bootstrap may have failed.`,
+      reason: `No ${dirLabel} symlinks in ${projectPath}. Governance bootstrap may have failed.`,
       bootstrapCommand: `POST /api/governance/confirm { "projectPath": "${projectPath}" }`,
     };
   }

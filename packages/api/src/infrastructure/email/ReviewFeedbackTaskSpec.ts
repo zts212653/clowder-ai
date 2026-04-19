@@ -1,5 +1,5 @@
 /**
- * F140/F320: ReviewFeedbackTaskSpec — detect new PR review feedback (comments + decisions).
+ * F140 + clowder-ai#320: ReviewFeedbackTaskSpec — detect new PR review feedback (comments + decisions).
  *
  * #320: Reads from unified TaskStore (kind=pr_tracking) instead of PrTrackingStore.
  * KD-11: Replaces ReviewCommentsTaskSpec with richer model.

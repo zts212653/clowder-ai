@@ -68,6 +68,8 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('/api/callbacks/post-message'));
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.content, 'Hello from cat!');
+    assert.equal(body.invocationId, 'test-invocation');
+    assert.equal(body.callbackToken, 'test-token');
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
@@ -152,6 +154,8 @@ describe('MCP Callback Tools', () => {
 
     assert.equal(result.isError, undefined);
     assert.ok(capturedUrl.includes('/api/callbacks/pending-mentions'));
+    assert.ok(capturedUrl.includes('invocationId=test-invocation'));
+    assert.ok(capturedUrl.includes('callbackToken=test-token'));
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
@@ -618,6 +622,8 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.action, 'git_commit');
     assert.equal(body.reason, 'Committing bug fix');
     assert.equal(body.context, 'Fix for issue #42');
+    assert.equal(body.invocationId, 'test-invocation');
+    assert.equal(body.callbackToken, 'test-token');
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
     assert.ok(result.content[0].text.includes('granted'));
@@ -670,6 +676,8 @@ describe('MCP Callback Tools', () => {
     assert.equal(result.isError, undefined);
     assert.ok(capturedUrl.includes('/api/callbacks/permission-status'));
     assert.ok(capturedUrl.includes('requestId=req-123'));
+    assert.ok(capturedUrl.includes('invocationId=test-invocation'));
+    assert.ok(capturedUrl.includes('callbackToken=test-token'));
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
     assert.ok(result.content[0].text.includes('granted'));

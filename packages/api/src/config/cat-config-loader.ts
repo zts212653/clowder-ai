@@ -67,10 +67,10 @@ const catVariantSchema = z.object({
 
   defaultModel: z.string().min(1),
   mcpSupport: z.boolean(),
-  cli: cliConfigSchema,
+  cli: cliConfigSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
   cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
-  /** F340 P5: Model provider name (renamed from ocProviderName). */
+  /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider: z
     .string()
     .trim()
@@ -221,7 +221,7 @@ const catCafeConfigSchemaV2 = z
 /** Union of all versions — loader handles migration */
 const catCafeConfigSchema = z.union([catCafeConfigSchemaV1, catCafeConfigSchemaV2]);
 
-/** F340: Read cat-template.json directly — cat-config.json is no longer a runtime source. */
+/** clowder-ai#340: Read cat-template.json directly — cat-config.json is no longer a runtime source. */
 function readTemplate(templatePath: string): string {
   try {
     return readFileSync(templatePath, 'utf-8');
@@ -665,6 +665,11 @@ export function hasRuntimeDefaultCatOverride(): boolean {
   return _runtimeDefaultCatId !== null;
 }
 
+/** Unified owner userId: configured env or single-user fallback. */
+export function getOwnerUserId(): string {
+  return process.env.DEFAULT_OWNER_USER_ID?.trim() || 'default-user';
+}
+
 // ── Variant CLI effort accessor ──────────────────────────────────────
 
 /** catId → variant index (lazy, rebuilt on config change) */
@@ -705,7 +710,7 @@ export function getCatEffort(catId: string, config?: CatCafeConfig, fallbackProv
   }
 
   const variant = _catIdToVariant.get(catId);
-  if (variant?.cli.effort) {
+  if (variant?.cli?.effort) {
     // Defense-in-depth: validate persisted effort against current provider.
     // Stale cross-provider values (e.g. 'max' on openai) are cleaned at write
     // time, but historical data may still contain them.

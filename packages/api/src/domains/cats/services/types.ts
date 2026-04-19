@@ -3,7 +3,7 @@
  * Agent 服务的共享类型定义
  */
 
-import type { CatId, MessageContent } from '@cat-cafe/shared';
+import type { CatId, MessageContent, ReplyPreview } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
 
@@ -79,6 +79,8 @@ export interface MessageMetadata {
   usage?: TokenUsage;
   /** F061: false when provider cannot verify which model actually ran (e.g. CDP bridge) */
   modelVerified?: boolean;
+  /** F061: diagnostic context attached when empty_response is triggered */
+  diagnostics?: Record<string, unknown>;
 }
 
 /**
@@ -140,7 +142,7 @@ export interface AgentMessage {
   /** F121: ID of the message this message is replying to */
   replyTo?: string;
   /** F121: Hydrated preview of the replied-to message */
-  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+  replyPreview?: ReplyPreview;
   /** F061: Whether this message mentions the co-creator (@user/@铲屎官/configured patterns) */
   mentionsUser?: boolean;
   /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations */

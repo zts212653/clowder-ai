@@ -68,7 +68,7 @@ describe('useChatHistory request priority', () => {
     apiFetchMock.mockReset();
   });
 
-  it('loads messages before secondary hydration endpoints on cold mount', async () => {
+  it('starts messages and secondary hydration endpoints together on cold mount', async () => {
     let resolveMessages: ((value: Response) => void) | null = null;
     const messagesPromise = new Promise<Response>((resolve) => {
       resolveMessages = resolve;
@@ -96,9 +96,9 @@ describe('useChatHistory request priority', () => {
 
     const urlsBeforeHistoryResolved = apiFetchMock.mock.calls.map(([url]) => String(url));
     expect(urlsBeforeHistoryResolved.filter((u) => u.includes('/api/messages'))).toHaveLength(1);
-    expect(urlsBeforeHistoryResolved.some((u) => u.includes('/api/tasks'))).toBe(false);
-    expect(urlsBeforeHistoryResolved.some((u) => u.includes('/task-progress'))).toBe(false);
-    expect(urlsBeforeHistoryResolved.some((u) => u.includes('/queue'))).toBe(false);
+    expect(urlsBeforeHistoryResolved.some((u) => u.includes('/api/tasks'))).toBe(true);
+    expect(urlsBeforeHistoryResolved.some((u) => u.includes('/task-progress'))).toBe(true);
+    expect(urlsBeforeHistoryResolved.some((u) => u.includes('/queue'))).toBe(true);
 
     resolveMessages!(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
 
@@ -112,7 +112,7 @@ describe('useChatHistory request priority', () => {
     expect(urlsAfterHistoryResolved.some((u) => u.includes('/queue'))).toBe(true);
   });
 
-  it('starts secondary hydration after fallback delay when history request stalls (cloud P1)', async () => {
+  it('does not wait for a fallback timer to start secondary hydration when history stalls', async () => {
     vi.useFakeTimers();
     let resolveMessages: ((value: Response) => void) | null = null;
     const messagesPromise = new Promise<Response>((resolve) => {
@@ -139,24 +139,22 @@ describe('useChatHistory request priority', () => {
       root.render(React.createElement(HookHost, { threadId: 'thread-priority' }));
     });
 
-    // Initially, only history request should start.
     const initialUrls = apiFetchMock.mock.calls.map(([url]) => String(url));
     expect(initialUrls.filter((u) => u.includes('/api/messages'))).toHaveLength(1);
-    expect(initialUrls.some((u) => u.includes('/api/tasks'))).toBe(false);
-    expect(initialUrls.some((u) => u.includes('/task-progress'))).toBe(false);
-    expect(initialUrls.some((u) => u.includes('/queue'))).toBe(false);
+    expect(initialUrls.filter((u) => u.includes('/api/tasks'))).toHaveLength(1);
+    expect(initialUrls.filter((u) => u.includes('/task-progress'))).toHaveLength(1);
+    expect(initialUrls.filter((u) => u.includes('/queue'))).toHaveLength(1);
 
-    // If history hangs, secondary hydration should still start after fallback delay.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(350);
     });
 
-    const fallbackUrls = apiFetchMock.mock.calls.map(([url]) => String(url));
-    expect(fallbackUrls.some((u) => u.includes('/api/tasks'))).toBe(true);
-    expect(fallbackUrls.some((u) => u.includes('/task-progress'))).toBe(true);
-    expect(fallbackUrls.some((u) => u.includes('/queue'))).toBe(true);
+    const urlsAfterDelay = apiFetchMock.mock.calls.map(([url]) => String(url));
+    expect(urlsAfterDelay.filter((u) => u.includes('/api/messages'))).toHaveLength(1);
+    expect(urlsAfterDelay.filter((u) => u.includes('/api/tasks'))).toHaveLength(1);
+    expect(urlsAfterDelay.filter((u) => u.includes('/task-progress'))).toHaveLength(1);
+    expect(urlsAfterDelay.filter((u) => u.includes('/queue'))).toHaveLength(1);
 
-    // Clean up pending promise to avoid dangling async.
     resolveMessages!(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
     await act(async () => {
       await Promise.resolve();

@@ -13,31 +13,6 @@ function getNoticeTone(meta: Readonly<Record<string, unknown>> | undefined): 'in
   return tone === 'warning' || tone === 'error' ? tone : 'info';
 }
 
-function getToneClass(tone: 'info' | 'warning' | 'error') {
-  if (tone === 'warning') {
-    return {
-      label: 'text-[#9A6A32]',
-      time: 'text-cafe-muted',
-      box: 'border border-[#E8DCCF] bg-cafe-surface/90 text-cafe-secondary',
-      icon: 'text-[#B7791F]',
-    };
-  }
-  if (tone === 'error') {
-    return {
-      label: 'text-[#A45D5D]',
-      time: 'text-cafe-muted',
-      box: 'border border-[#F0DEDA] bg-[#FFF8F7] text-cafe-secondary',
-      icon: 'text-[#C76B6B]',
-    };
-  }
-  return {
-    label: 'text-[#5F7D9A]',
-    time: 'text-cafe-muted',
-    box: 'border border-[#D9E5F1] bg-cafe-surface/90 text-cafe-secondary',
-    icon: 'text-[#6488B0]',
-  };
-}
-
 function iconText(icon?: string): string {
   if (!icon) return 'ℹ️';
   if (icon === 'lightbulb') return '💡';
@@ -53,20 +28,19 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
   if (!source) return null;
 
   const tone = getNoticeTone(source.meta);
-  const style = getToneClass(tone);
 
   return (
-    <div data-message-id={message.id} className="flex justify-center mb-3">
+    <div data-message-id={message.id} data-notice-tone={tone} className="flex justify-center mb-3">
       <div className="max-w-[85%] w-full">
         <div className="flex items-center gap-2 mb-1 px-1">
-          <span className={`text-xs font-medium ${style.label}`}>{source.label}</span>
-          <span className={`text-xs ${style.time}`}>{formatTime(message.timestamp)}</span>
+          <span className="system-notice-bar__label text-xs font-medium">{source.label}</span>
+          <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
         </div>
         <div
-          className={`system-notice-bar ${tone !== 'info' ? 'system-notice-bar--alert' : ''} rounded-2xl px-4 py-3 ${style.box}`}
+          className={`system-notice-bar ${tone !== 'info' ? 'system-notice-bar--alert' : ''} rounded-2xl px-4 py-3 text-cafe-secondary`}
         >
           <div className="flex items-start gap-3">
-            <span className={`text-lg leading-none ${style.icon}`}>{iconText(source.icon)}</span>
+            <span className="system-notice-bar__icon text-lg leading-none">{iconText(source.icon)}</span>
             <div className="min-w-0 flex-1 text-sm leading-6">
               <MarkdownContent content={message.content} />
             </div>

@@ -9,7 +9,28 @@
 
 每页至少混合 **3 种以上**填充手段。底部空白 > 20% 时必须加内容。
 
-## 填充手段清单（8 种）
+## 密度检查清单（人工自检 + 部分自动）
+
+> 从 relay-claw pptx-craft 对标学来，结合我们的实战经验。
+> ⚠️ **自动化状态**：目前 `density-analyzer` 只自动检测空白率/overflow/elementCount。
+> 其余指标为**人工自检项**，尚未接入 gate chain。
+
+| 指标 | 门禁值 | 自动化 | 怎么测 |
+|------|--------|--------|--------|
+| 空白率 | < 30% | ✅ `densityGate` | `whitespaceRatio` |
+| 溢出 | 0 个 | ✅ `densityGate` | `overflowCount` |
+| 元素数 | — | 📊 报告字段 | `elementCount`（仅输出，不参与 gate 判定） |
+| 数据可视化 | ≥ 1 图表 或 ≥ 3 数据卡片 | ❌ 人工 | 数 `<canvas>` + 数据卡片 |
+| 核心要点 | 6-10 个列表项或卡片 | ❌ 人工 | 数主要信息单元 |
+| 视觉图标 | ≥ 3 个 emoji/SVG | ❌ 人工 | 数图标元素 |
+| 大段文字 | 无连续 > 100 字段落 | ❌ 人工 | 扫描文本节点 |
+| 数据来源 | 页脚有标注 | ❌ 人工 | 检查 footer |
+| 填充手段 | ≥ 3 种混合使用 | ❌ 人工 | 对照下方清单 |
+
+**不满足 → 执行密度补充循环**（搜索真实数据 → 转换为可视化 → 重新生成）。
+详见 `ppt-slide-authoring.md` "密度补充循环"。
+
+## 填充手段清单（9 种）
 
 ### 1. KPI 数字块
 大号数字 + 小号标签。放页面顶部做概括性数据。
@@ -62,6 +83,30 @@
 | L3 正文 | 详细内容 | 11-12px |
 | L4 辅助 | 灰色描述 | 9-10px |
 | L5 脚注 | 来源/时间 | 8-9px gray |
+
+### 9. ECharts 数据图表 ★★
+**从 relay-claw 学来的杀手级手段。** 一个图表 = 几十行文字的信息密度。
+- 数据/对比/趋势 → 必须用 ECharts，不用纯文字
+- 柱状图、折线图、饼图、雷达图、散点图等
+- 颜色用品牌色板，坐标轴文字用深色（禁止浅灰）
+
+```html
+<div class="border border-[#d4d4d4] bg-white p-2 overflow-hidden">
+  <div id="chart-1" style="width:100%;min-height:200px;"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+echarts.init(document.getElementById('chart-1')).setOption({
+  animation: false, // 必须关闭！导出截图不等动画
+  color: ['#C7020E','#FF6B6B','#FFA940','#FADB14','#52C41A','#1890FF'],
+  xAxis: { type: 'category', data: ['Q1','Q2','Q3','Q4'],
+    axisLabel: { color: '#252525' } },
+  yAxis: { type: 'value', splitLine: { lineStyle: { color: '#d4d4d4' } },
+    axisLabel: { color: '#252525' } },
+  series: [{ type: 'bar', data: [120, 200, 150, 280] }]
+});
+</script>
+```
 
 ## 间距规则
 
@@ -191,6 +236,13 @@ Layer Header
 8. **SmartArt 用 flexbox + ▶**：简单有效，不需要 SVG 依赖
 9. **单一证据源约束**：页面上所有数字必须可追溯到声明的证据源（Maine Coon D1 审查 P1 教训）
 10. **观看模式自洽**：7-8px 字号 = document 模式，不要声明 presentation（Maine Coon P1 教训）
+
+### D5 HTML→PPTX 转换教训 (2026-04-12)
+
+11. **Screenshot-first > flat extraction**：CSS 布局（flexbox/grid/overflow/absolute）无法用独立 text box 还原。截图做背景 + 关键元素（表格）原生 overlay = 视觉保真 + 局部可编辑
+12. **SCREENSHOT_SCALE = 4**（`types.ts`）：1x/2x 截图在 Retina/5K 屏上模糊。4x（5120×2880）才清晰。这是产线常量，不是临时参数
+13. **截图前隐藏 overlay 元素**：截图背景 + 原生 overlay 同位叠加 = 重影。截图前 `visibility:hidden` 隐藏 overlay 区域，保持占位不影响布局
+14. **XML 通过 ≠ 视觉通过**：PPT 场景渲染结果是唯一裁决标准，文本拆分正确不代表视觉正确（Maine Coon D5 R2 教训）
 
 ## 待补充
 

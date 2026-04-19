@@ -1,3 +1,5 @@
+import type { ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+
 /** Content block types matching backend MessageContent */
 export interface TextContent {
   type: 'text';
@@ -252,16 +254,7 @@ export interface ChatMessage {
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
     /** Scheduler presentation metadata (hidden trigger / ephemeral lifecycle toast) */
-    scheduler?: {
-      hiddenTrigger?: boolean;
-      toast?: {
-        type: 'success' | 'error' | 'info';
-        title: string;
-        message: string;
-        duration: number;
-        lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
-      };
-    };
+    scheduler?: SchedulerMessageExtra['scheduler'];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
     /** F070: Governance blocked data for actionable bootstrap card */
@@ -286,7 +279,7 @@ export interface ChatMessage {
   /** F121: ID of the message this is replying to */
   replyTo?: string;
   /** F121: Server-hydrated reply preview (sender + truncated content) */
-  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
+  replyPreview?: ReplyPreview;
 }
 
 export type ChatMessagePatch = Omit<Partial<ChatMessage>, 'id' | 'type'>;

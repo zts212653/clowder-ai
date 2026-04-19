@@ -26,7 +26,10 @@ test('Windows installer exits immediately when native installs are cancelled by 
   assert.match(installScript, /if \(Test-InstallerCancellation -ErrorRecord \$ErrorRecord\) \{/);
   assert.match(installScript, /Write-Err "\$Context cancelled by user"/);
   assert.match(installScript, /Exit-InstallerIfCancelled -ErrorRecord \$_ -Context "pnpm installation"/);
-  assert.match(installScript, /Exit-InstallerIfCancelled -ErrorRecord \$frozenInstallError -Context "pnpm install"/);
+  assert.match(
+    installScript,
+    /Exit-InstallerIfCancelled -ErrorRecord \$frozenInstallResult\.ErrorRecord -Context "pnpm install"/,
+  );
   assert.match(installScript, /Exit-InstallerIfCancelled -ErrorRecord \$_ -Context "\$\(\$tool.Name\) CLI install"/);
   assert.match(installScript, /exit 1/);
 });

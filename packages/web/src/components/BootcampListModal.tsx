@@ -1,10 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { BootcampIcon } from './icons/BootcampIcon';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
 /** Phase labels for human-readable display */
 const PHASE_LABELS: Record<string, string> = {
@@ -54,7 +54,6 @@ interface BootcampListModalProps {
 }
 
 export function BootcampListModal({ open, onClose, currentThreadId }: BootcampListModalProps) {
-  const router = useRouter();
   const storeThreads = useChatStore((s) => s.threads);
   const setThreads = useChatStore((s) => s.setThreads);
   const [isCreating, setIsCreating] = useState(false);
@@ -92,7 +91,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
   if (!open) return null;
 
   const handleNavigate = (threadId: string) => {
-    router.push(`/thread/${threadId}`);
+    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
     onClose();
   };
 
@@ -110,7 +109,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
       if (!res.ok) return;
       const thread: Thread = await res.json();
       setThreads([thread, ...storeThreads]);
-      router.push(`/thread/${thread.id}`);
+      pushThreadRouteWithHistory(thread.id, typeof window !== 'undefined' ? window : undefined);
       onClose();
     } finally {
       setIsCreating(false);

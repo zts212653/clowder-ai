@@ -13,7 +13,7 @@ function ensureEsbuild(): Promise<EsbuildModule> {
       .then(async (mod) => {
         await mod
           .initialize({
-            wasmURL: 'https://unpkg.com/esbuild-wasm@0.27.3/esbuild.wasm',
+            wasmURL: '/vendor/esbuild/esbuild.wasm',
           })
           .catch((err) => {
             if (!String(err).includes('already')) throw err;

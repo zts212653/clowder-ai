@@ -142,6 +142,8 @@ ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac -b:a 128k output.mp4
 | 画面不够就暴力慢放 | 按 retiming 优先级处理 |
 | 没压缩就用原始素材 | 入库前统一压缩（CRF 23） |
 | segment contract 扁平不分层 | 4 层：source/narration/render/control |
+| 加速后沿用原始时间轴切段 | **加速会压缩时长，后续段的起始时间必须重新计算。** 例：A 段原 130s 以 2x 输出 65s，B 段在 final timeline 从 65s 开始而非 130s。用 output duration 逐段累加，不要用 source timestamps 直接拼 |
+| 只加速长等待段忽略短等待 | 分段不够细时，"Thinking"状态可能散落在多个区间里。逐段审素材，把所有等待态都标出来分别处理 |
 
 ## 技术栈
 

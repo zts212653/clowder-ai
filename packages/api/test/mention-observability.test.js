@@ -1,5 +1,5 @@
 /**
- * F479: Inline @mention detection observability — counter + shadow detection tests.
+ * clowder-ai#489: Inline @mention detection observability — counter + shadow detection tests.
  *
  * Tests the OTel counter instruments and in-process shadow detection added for
  * issue #479 (inline @mention detection observability).
@@ -8,11 +8,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { describe, it, mock } from 'node:test';
+import { describe, it } from 'node:test';
 
 // --- 1. Counter instrument existence ---
 
-describe('F479: mention observability counters', () => {
+describe('clowder-ai#489: mention observability counters', () => {
   it('exports all 8+1 inline mention counters from instruments.ts', async () => {
     const instruments = await import('../dist/infrastructure/telemetry/instruments.js');
 
@@ -45,7 +45,7 @@ describe('F479: mention observability counters', () => {
 
 // --- 2. Shadow detection ---
 
-describe('F479: shadow detection', () => {
+describe('clowder-ai#489: shadow detection', () => {
   it('detectInlineActionMentionsWithShadow returns both strict hits and shadow misses', async () => {
     const { detectInlineActionMentionsWithShadow } = await import(
       '../dist/domains/cats/services/agents/routing/a2a-mentions.js'
@@ -219,7 +219,7 @@ describe('F479: shadow detection', () => {
 
 // --- 3. routedSet skip detection ---
 
-describe('F479: routedSet skip tracking', () => {
+describe('clowder-ai#489: routedSet skip tracking', () => {
   it('detectInlineActionMentionsWithShadow reports routedSetSkips', async () => {
     const { detectInlineActionMentionsWithShadow } = await import(
       '../dist/domains/cats/services/agents/routing/a2a-mentions.js'

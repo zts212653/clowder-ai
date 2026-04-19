@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
-import { clearRuntimeDefaultCatId, getDefaultCatId, setRuntimeDefaultCatId } from '../dist/config/cat-config-loader.js';
+import {
+  clearRuntimeDefaultCatId,
+  getDefaultCatId,
+  getOwnerUserId,
+  setRuntimeDefaultCatId,
+} from '../dist/config/cat-config-loader.js';
 
 describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   let originalDefault;
@@ -34,6 +39,63 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
     setRuntimeDefaultCatId('codex');
     setRuntimeDefaultCatId('gemini');
     assert.equal(getDefaultCatId(), 'gemini');
+    clearRuntimeDefaultCatId();
+  });
+});
+
+describe('getOwnerUserId fallback', () => {
+  it('returns DEFAULT_OWNER_USER_ID when set', () => {
+    const orig = process.env.DEFAULT_OWNER_USER_ID;
+    try {
+      process.env.DEFAULT_OWNER_USER_ID = 'you';
+      assert.equal(getOwnerUserId(), 'you');
+    } finally {
+      if (orig === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = orig;
+    }
+  });
+
+  it('falls back to default-user when env not set', () => {
+    const orig = process.env.DEFAULT_OWNER_USER_ID;
+    try {
+      delete process.env.DEFAULT_OWNER_USER_ID;
+      assert.equal(getOwnerUserId(), 'default-user');
+    } finally {
+      if (orig !== undefined) process.env.DEFAULT_OWNER_USER_ID = orig;
+    }
+  });
+});
+
+describe('PUT /api/config/default-cat works without DEFAULT_OWNER_USER_ID', () => {
+  let app;
+
+  before(async () => {
+    catRegistry.reset();
+    catRegistry.register('opus', CAT_CONFIGS.opus);
+    catRegistry.register('codex', CAT_CONFIGS.codex);
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    clearRuntimeDefaultCatId();
+    const { configRoutes } = await import('../dist/routes/config.js');
+    app = Fastify();
+    await app.register(configRoutes);
+    await app.ready();
+  });
+
+  after(async () => {
+    clearRuntimeDefaultCatId();
+    catRegistry.reset();
+    await app?.close();
+  });
+
+  it('default-user can change default cat when env not configured', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/config/default-cat',
+      headers: { 'x-cat-cafe-user': 'default-user' },
+      payload: { catId: 'codex' },
+    });
+    assert.equal(res.statusCode, 200, `expected 200 but got ${res.statusCode}: ${res.payload}`);
+    assert.equal(getDefaultCatId(), 'codex');
     clearRuntimeDefaultCatId();
   });
 });

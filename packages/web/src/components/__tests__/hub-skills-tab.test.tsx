@@ -67,6 +67,8 @@ describe('HubSkillsTab', () => {
           allMounted: false,
           registrationConsistent: true,
         },
+        staleness: null,
+        conflicts: [],
       }),
     );
 

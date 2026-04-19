@@ -15,6 +15,7 @@ import {
   StepBadge,
   WifiIcon,
 } from './HubConfigIcons';
+import { WeComBotSetupPanel } from './WeComBotSetupPanel';
 import { WeixinQrPanel } from './WeixinQrPanel';
 
 interface PlatformFieldStatus {
@@ -163,6 +164,42 @@ export function HubConnectorConfigTab() {
               <span className="text-cafe-muted shrink-0">{isExpanded ? <ChevronDown /> : <ChevronRight />}</span>
             </button>
 
+            {/* F132 Phase E: WeCom Bot guided setup — dedicated panel with validate+connect */}
+            {isExpanded && platform.id === 'wecom-bot' && (
+              <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
+                {guideSteps.map((step, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <StepBadge num={idx + 1} />
+                      <span className="text-[13px] font-medium text-cafe">{step.text}</span>
+                    </div>
+                    {idx === 0 && (
+                      <div className="ml-[26px]">
+                        <a
+                          href={platform.docsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs text-blue-600 bg-sky-50 rounded-lg px-3 py-2 hover:bg-sky-100 transition-colors"
+                        >
+                          <ExternalLinkIcon />
+                          <span>developer.work.weixin.qq.com → WeCom AI Bot docs</span>
+                        </a>
+                      </div>
+                    )}
+                    {idx === guideSteps.length - 1 && (
+                      <div className="ml-[26px]">
+                        <WeComBotSetupPanel
+                          configured={platform.configured}
+                          onConnected={() => void fetchStatus()}
+                          onDisconnected={() => void fetchStatus()}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {isExpanded && platform.id === 'weixin' && (
               <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
                 {filteredSteps.map((step, idx) => (
@@ -181,7 +218,7 @@ export function HubConnectorConfigTab() {
               </div>
             )}
 
-            {isExpanded && platform.id !== 'weixin' && (
+            {isExpanded && platform.id !== 'weixin' && platform.id !== 'wecom-bot' && (
               <div className="border-t border-cafe-subtle px-4 py-4 space-y-3.5">
                 {guideSteps.map((step, idx) => (
                   <div key={idx} className="space-y-1.5">

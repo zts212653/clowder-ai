@@ -49,6 +49,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   // Stable default for each test (independent of localStorage)
+  useChatStore.getState().setLoadingThreads(false);
   useChatStore.getState().setUiThinkingExpandedByDefault(false);
   useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'collapsed', cliOutput: 'collapsed' });
 });

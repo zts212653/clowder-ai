@@ -258,6 +258,84 @@ describe('WeComBotAdapter', () => {
       assert.equal(result.senderId, 'user_grp');
     });
 
+    // ── Bug-8: @mention stripping in group chats ──
+
+    it('strips leading @mention from group text (Bug-8)', () => {
+      const frame = makeTextFrame({
+        chattype: 'group',
+        chatid: 'grp_001',
+        content: '@宪宪 /threads',
+      });
+      const result = makeAdapter().parseEvent(frame);
+      assert.ok(result);
+      assert.equal(result.text, '/threads');
+    });
+
+    it('strips @mention with Chinese bot name in group (Bug-8)', () => {
+      const frame = makeTextFrame({
+        chattype: 'group',
+        chatid: 'grp_002',
+        content: '@布偶猫 hello world',
+      });
+      const result = makeAdapter().parseEvent(frame);
+      assert.ok(result);
+      assert.equal(result.text, 'hello world');
+    });
+
+    it('strips @mention without space before / command (Bug-8 P2)', () => {
+      const frame = makeTextFrame({
+        chattype: 'group',
+        chatid: 'grp_nospace',
+        content: '@宪宪/threads',
+      });
+      const result = makeAdapter().parseEvent(frame);
+      assert.ok(result);
+      assert.equal(result.text, '/threads');
+    });
+
+    it('does NOT strip @mention from DM text (Bug-8)', () => {
+      const frame = makeTextFrame({
+        chattype: 'single',
+        content: '@宪宪 /threads',
+      });
+      const result = makeAdapter().parseEvent(frame);
+      assert.ok(result);
+      assert.equal(result.text, '@宪宪 /threads');
+    });
+
+    it('strips @mention from group mixed message text (Bug-8)', () => {
+      const frame = {
+        headers: { req_id: 'req_mix_grp' },
+        body: {
+          msgtype: 'mixed',
+          chattype: 'group',
+          from: { userid: 'user_mix_grp' },
+          chatid: 'grp_mix_001',
+          msgid: 'msg_mix_grp',
+          mixed: {
+            msg_item: [
+              { msgtype: 'text', text: { content: '@宪宪 看这张图' } },
+              { msgtype: 'image', image: { url: 'https://img.jpg' } },
+            ],
+          },
+        },
+      };
+      const result = makeAdapter().parseEvent(frame);
+      assert.ok(result);
+      assert.equal(result.text, '看这张图');
+    });
+
+    it('returns empty string after stripping @mention-only text in group (Bug-8)', () => {
+      const frame = makeTextFrame({
+        chattype: 'group',
+        chatid: 'grp_empty',
+        content: '@宪宪',
+      });
+      const result = makeAdapter().parseEvent(frame);
+      assert.ok(result);
+      assert.equal(result.text, '');
+    });
+
     it('returns null for unsupported message type', () => {
       const frame = {
         headers: { req_id: 'req_unsupported' },
@@ -1295,6 +1373,78 @@ describe('WeComBotAdapter', () => {
       });
       assert.ok(result);
       assert.equal(result.messageId, '');
+    });
+  });
+
+  // ── Connection health state (F132 bugfix: disconnected_event recovery) ──
+  describe('connection health state', () => {
+    it('getConnectionState() returns "disconnected" before startStream', () => {
+      const adapter = makeAdapter();
+      assert.equal(adapter.getConnectionState(), 'disconnected');
+    });
+
+    it('getConnectionState() returns "connected" after authenticated event', async () => {
+      const adapter = makeAdapter();
+      // Simulate authenticated via _setConnectionState test helper
+      adapter._setConnectionState('connected');
+      assert.equal(adapter.getConnectionState(), 'connected');
+    });
+
+    it('getConnectionState() returns "disconnected" after disconnect', () => {
+      const adapter = makeAdapter();
+      adapter._setConnectionState('connected');
+      adapter._setConnectionState('disconnected');
+      assert.equal(adapter.getConnectionState(), 'disconnected');
+    });
+
+    it('getConnectionState() returns "reconnecting" during reconnect', () => {
+      const adapter = makeAdapter();
+      adapter._setConnectionState('reconnecting');
+      assert.equal(adapter.getConnectionState(), 'reconnecting');
+    });
+  });
+
+  // ── Stale state cleanup on disconnect ──
+  describe('stale state cleanup on disconnect', () => {
+    it('clearStaleState() clears activeStreams', async () => {
+      const adapter = makeAdapter();
+      seedChat(adapter);
+      adapter._injectReplyStream(async () => {});
+      adapter._injectGenerateReqId(() => 'stale_stream');
+
+      await adapter.sendPlaceholder('user_001', 'test');
+      assert.equal(adapter._getActiveStreams().size, 1);
+
+      adapter._clearStaleState();
+      assert.equal(adapter._getActiveStreams().size, 0);
+    });
+
+    it('clearStaleState() clears lastFrameByChat cache', async () => {
+      const adapter = makeAdapter();
+      adapter._setLastFrame('chat_a', makeFrame('r1'));
+      adapter._setLastFrame('chat_b', makeFrame('r2'));
+
+      adapter._clearStaleState();
+      // After clearing, sendPlaceholder should fall back (no cached frame)
+      const streamCalls = [];
+      adapter._injectReplyStream(async () => {
+        streamCalls.push(true);
+      });
+      adapter._injectSendMessage(async () => {});
+      // This would use cached frame if it existed, but should fall back
+      const result = await adapter.sendPlaceholder('chat_a', 'test');
+      assert.equal(result, '');
+    });
+  });
+
+  // ── Outbound fail-fast when disconnected ──
+  describe('outbound fail-fast when disconnected', () => {
+    it('sendReply throws when connection state is disconnected (no DI override)', async () => {
+      const adapter = makeAdapter();
+      // No injection = uses real wsClient which is null
+      await assert.rejects(() => adapter.sendReply('user_001', 'test'), {
+        message: /wsClient not connected/,
+      });
     });
   });
 });

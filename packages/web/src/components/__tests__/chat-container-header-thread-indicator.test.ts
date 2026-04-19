@@ -2,14 +2,32 @@
  * Thread indicator in ChatContainerHeader.
  * Verifies that the header shows the current thread title (not just "Clowder AI").
  */
-import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainerHeader } from '@/components/ChatContainerHeader';
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) =>
     React.createElement('a', { href, ...rest }, children),
+}));
+vi.mock('@/components/ThreadCatPill', () => ({
+  ThreadCatPill: () => null,
+}));
+vi.mock('@/components/ExportButton', () => ({
+  ExportButton: () => null,
+}));
+vi.mock('@/components/HubButton', () => ({
+  HubButton: () => null,
+}));
+vi.mock('@/components/ThemeToggle', () => ({
+  ThemeToggle: () => null,
+}));
+vi.mock('@/components/VoiceCompanionButton', () => ({
+  VoiceCompanionButton: () => null,
+}));
+vi.mock('@/components/icons/CatCafeLogo', () => ({
+  CatCafeLogo: () => React.createElement('span', null, 'logo'),
 }));
 
 const TEST_THREADS = [
@@ -54,82 +72,53 @@ const defaultProps = {
 
 describe('ChatContainerHeader thread indicator', () => {
   let container: HTMLDivElement;
-  let root: Root;
-
-  beforeAll(() => {
-    (globalThis as { React?: typeof React }).React = React;
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  });
 
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
-    root = createRoot(container);
   });
 
   afterEach(() => {
-    act(() => root.unmount());
     container.remove();
   });
 
-  afterAll(() => {
-    delete (globalThis as { React?: typeof React }).React;
-    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
-  });
+  const renderHeader = (threadId: string) => {
+    container.innerHTML = renderToStaticMarkup(React.createElement(ChatContainerHeader, { ...defaultProps, threadId }));
+    return container;
+  };
 
   it('shows "大厅" when threadId is default', () => {
-    act(() => {
-      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'default' }));
-    });
-
-    expect(container.textContent).toContain('大厅');
+    expect(renderHeader('default').textContent).toContain('大厅');
   });
 
   it('shows thread title and project name when a specific thread is selected', () => {
-    act(() => {
-      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_xyz' }));
-    });
-
-    expect(container.textContent).toContain('讨论 F095 设计');
-    expect(container.textContent).toContain('cat-cafe');
+    const rendered = renderHeader('thread_xyz');
+    expect(rendered.textContent).toContain('讨论 F095 设计');
+    expect(rendered.textContent).toContain('cat-cafe');
   });
 
   it('shows "未命名对话" when thread has no title', () => {
     mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_no_title', title: null }];
-    act(() => {
-      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_no_title' }));
-    });
-
-    expect(container.textContent).toContain('未命名对话');
+    expect(renderHeader('thread_no_title').textContent).toContain('未命名对话');
   });
 
   it('hides sentinel projectPath "default" from thread label', () => {
     mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_sentinel', projectPath: 'default' }];
-    act(() => {
-      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_sentinel' }));
-    });
-
-    expect(container.textContent).toContain('讨论 F095 设计');
-    expect(container.textContent).not.toContain('default');
+    const rendered = renderHeader('thread_sentinel');
+    expect(rendered.textContent).toContain('讨论 F095 设计');
+    expect(rendered.textContent).not.toContain('default');
   });
 
   it('preserves "default" label for real path ending in /default', () => {
     mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_real_default', projectPath: '/tmp/default' }];
-    act(() => {
-      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_real_default' }));
-    });
-
-    expect(container.textContent).toContain('讨论 F095 设计');
-    expect(container.textContent).toContain('default');
+    const rendered = renderHeader('thread_real_default');
+    expect(rendered.textContent).toContain('讨论 F095 设计');
+    expect(rendered.textContent).toContain('default');
   });
 
   it('extracts basename from Windows backslash path', () => {
     mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_win', projectPath: 'C:\\Users\\dev\\my-app' }];
-    act(() => {
-      root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_win' }));
-    });
-
-    expect(container.textContent).toContain('my-app');
+    expect(renderHeader('thread_win').textContent).toContain('my-app');
   });
 
   it('maps internal basename to brand name when NEXT_PUBLIC_BRAND_NAME is set', () => {
@@ -137,12 +126,9 @@ describe('ChatContainerHeader thread indicator', () => {
     process.env.NEXT_PUBLIC_BRAND_NAME = 'Clowder AI';
     try {
       mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_brand', projectPath: '/home/user/cat-cafe' }];
-      act(() => {
-        root.render(React.createElement(ChatContainerHeader, { ...defaultProps, threadId: 'thread_brand' }));
-      });
-
-      expect(container.textContent).toContain('Clowder AI');
-      expect(container.textContent).not.toContain('cat-cafe');
+      const rendered = renderHeader('thread_brand');
+      expect(rendered.textContent).toContain('Clowder AI');
+      expect(rendered.textContent).not.toContain('cat-cafe');
     } finally {
       if (origEnv === undefined) delete process.env.NEXT_PUBLIC_BRAND_NAME;
       else process.env.NEXT_PUBLIC_BRAND_NAME = origEnv;

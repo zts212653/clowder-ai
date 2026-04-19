@@ -2,8 +2,9 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const {
   loadCatConfig,
@@ -228,7 +229,7 @@ describe('cat-config-loader', () => {
       try {
         const config = loadCatConfig();
         const variant = config.breeds[0].variants[0];
-        // F340: catalog's provider='anthropic' is kept (matches clientId, but retained to
+        // clowder-ai#340: catalog's provider='anthropic' is kept (matches clientId, but retained to
         // prevent template's stale provider='openai' from leaking through the merge).
         assert.equal(variant.clientId, 'anthropic');
         assert.equal(variant.provider, 'anthropic', 'catalog provider must override template provider');
@@ -877,6 +878,14 @@ describe('getCatEffort', () => {
     assert.equal(getCatEffort('opus', config), 'xhigh');
   });
 
+  it('does not throw for variants without cli config (F061 bridge providers)', () => {
+    const config = loadCatConfig();
+    // antigravity has no cli — should not throw, returns provider default
+    const result = getCatEffort('antigravity', config);
+    assert.equal(typeof result, 'string', 'should return a string effort level');
+    assert.ok(result, 'should return a truthy default effort');
+  });
+
   it('rejects stale cross-provider effort from historical data (defense-in-depth)', () => {
     // Simulates a catalog written before the PATCH write-time cleanup was added:
     // an openai cat still carrying anthropic-only effort 'max'.
@@ -927,7 +936,11 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
   });
 
   it('total cat count is 13 (opus + sonnet + opus-45 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode)', () => {
-    const config = loadCatConfig();
+    // Use template directly to avoid catalog overlay pollution from earlier tests
+    const templatePath =
+      process.env.CAT_TEMPLATE_PATH ??
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
+    const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
     assert.equal(Object.keys(all).length, 13);
     assert.ok(all.opus);
@@ -945,11 +958,12 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all.opencode); // F105: OpenCode external agent
   });
 
-  it('projects antigravity commandArgs from cli.defaultArgs when variant.commandArgs is absent', () => {
+  it('antigravity variants have no cli config (F061 Bridge replaces CDP)', () => {
     const config = loadCatConfig();
     const all = toAllCatConfigs(config);
-    assert.deepEqual(all.antigravity.commandArgs, ['.', '--remote-debugging-port=9000']);
-    assert.deepEqual(all['antig-opus'].commandArgs, ['.', '--remote-debugging-port=9000']);
+    // F061 Phase 2: CLI/CDP removed, Bridge handles communication
+    assert.equal(all.antigravity.cli, undefined);
+    assert.equal(all['antig-opus'].cli, undefined);
   });
 });
 

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F145]
-related_features: [F041, F043]
+related_features: [F041, F043, F149]
 topics: [mcp, capability, bootstrap, devex]
 doc_kind: spec
 created: 2026-03-27
@@ -8,7 +8,7 @@ created: 2026-03-27
 
 # F145: MCP Portable Provisioning — 声明式 MCP 期望态 + 本机解析
 
-> **Status**: done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1 | **Completed**: 2026-04-12
 
 ## Why
 
@@ -80,6 +80,36 @@ created: 2026-03-27
 3. **capabilities.json bootstrap 补齐**：`cat-cafe` 主 server 加入 bootstrap/migration（当前只有 split 三件套）
 4. **mcp:doctor 对齐**：确认 doctor 报告包含 `cat-cafe` 主 server 状态
 
+### Phase E: Per-Project MCP for ACP Sessions ✅
+
+**痛点**：社区用户用 Cat Café 开发自己的项目。不同项目目录下有不同的 `.mcp.json`（database MCP、docker MCP、figma MCP 等）。当前各猫猫对用户项目 `.mcp.json` 的支持情况：
+
+| 猫猫 | 读用户项目 `.mcp.json` | 原因 |
+|---|---|---|
+| Ragdoll（Claude Code） | ✅ 原生支持 | Claude Code 运行在项目目录，自动发现 `.mcp.json` |
+| Maine Coon（Codex） | ✅ 原生支持 | 同上 |
+| Siamese（Gemini ACP） | ❌ 不支持 | `acp-mcp-resolver.ts` 的 `projectRoot` 硬编码为 `findMonorepoRoot()`，只读 Cat Café monorepo 的 `.mcp.json` |
+
+**根因**：`resolveAcpMcpServers(projectRoot, whitelist)` 只走两条路：
+1. 内建 cat-cafe-* → 从 `projectRoot/packages/mcp-server/dist/` 自动生成
+2. 外部 server → 从 `projectRoot/.mcp.json` 读取（但只匹配 `whitelist` 里的 server）
+
+**两个缺口**：
+1. `projectRoot` 固定为 Cat Café monorepo，不是用户的项目目录
+2. 即使 `projectRoot` 指向用户项目，resolver 也只读 `whitelist` 里声明的 server，不会 merge 用户项目 `.mcp.json` 里的全部 server
+
+**改法**：
+1. `resolveAcpMcpServers` 新增参数 `userProjectRoot`（用户项目目录）
+2. 读 `userProjectRoot/.mcp.json` 的所有 server（不限于 whitelist）
+3. Merge 策略：内建 cat-cafe-* 优先 → whitelist 外部 server 次之 → 用户项目 server 补充
+4. 去重：同名 server 以前两层为准（防止用户项目覆盖内建 server）
+
+**架构准备度**（已有 seam）：
+- Pool key 已包含 `projectPath`（不同项目自动隔离）
+- `newSession(cwd, mcpServers)` 已参数化
+- `materializeSessionMcpServers` 已支持 per-invocation env 注入
+- 缺：invoke 链路中 thread/workspace → projectRoot 的上下文传递
+
 ## Acceptance Criteria
 
 ### Phase A（Pencil Resolver + 去机器态）✅
@@ -104,6 +134,13 @@ created: 2026-03-27
 - [x] AC-C3: `capabilities.json` bootstrap 包含 `cat-cafe` 主 server（含 limb tools）
 - [x] AC-C4: 新机器 clone + `pnpm install` 后，Gemini ACP session 自动获得内置 MCP servers（无需手写 `.mcp.json`）
 - [x] AC-C5: 现有 ACP adapter + resolver 测试全绿 + 新增 auto-provision 回归测试
+
+### Phase E（Per-Project MCP for ACP）✅
+- [x] AC-E1: `resolveAcpMcpServers` 接受 `userProjectRoot` 参数，读取用户项目目录的 `.mcp.json`
+- [x] AC-E2: 用户项目 `.mcp.json` 的 server 自动 merge 到 ACP session MCP 列表
+- [x] AC-E3: 同名 server 优先级：内建 cat-cafe-* > whitelist 外部 > 用户项目
+- [x] AC-E4: 用户项目没有 `.mcp.json` 时不报错（graceful degrade，仅内建 + whitelist）
+- [x] AC-E5: 不同 `userProjectRoot` 的 ACP session 拿到不同的 MCP server 集合
 
 ## Dependencies
 

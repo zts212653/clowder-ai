@@ -8,7 +8,7 @@ created: 2026-03-27
 
 # F155: Scene-Based Bidirectional Guidance Engine
 
-> **Status**: Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: 布偶猫/宪宪 | **Priority**: P1
+> **Status**: Phase A accepted / frozen — 基础引导引擎已验收冻结，可开 PR 合入 | **Owner**: Ragdoll/Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -18,8 +18,6 @@ Console 功能日益复杂，但入口简单，用户不知道从哪开始。复
 - 用户不知道"添加新成员"需要先配认证
 - 飞书/钉钉等外部系统的权限配置需要反复截图沟通
 - 猫猫无法实时看到用户操作状态，只能靠用户描述和截图诊断问题
-
-> 铲屎官原话："我们的目标是让我们自己只承载我们真真需要的配置和功能；剩下的通过引导式来承载。猫猫们可以实时观察到当前用户的操作状态和效果，如果失败也就知道哪里有问题。不需要用户自己反复截图来证明和说明自己做的咋样了。"
 
 ## What
 
@@ -76,8 +74,8 @@ interface OrchestrationStep {
 **MCP 工具**（callback auth）：
 - `resolve` — 根据用户意图匹配候选流程
 - `start` — 启动引导 session
-- `control` — next/back/skip/exit
-- `update-guide-state` — 通用状态机更新
+- `control` — next/skip/exit（不再支持 back）
+- `update-guide-state` — offered / awaiting_choice / completed / cancelled 等非 start 状态更新
 
 **CI 验证**：`scripts/gen-guide-catalog.mjs` 校验 v2 schema + target whitelist
 
@@ -203,7 +201,7 @@ interface OrchestrationStep {
 
 - **Related**: F087（猫猫训练营 — 类似的引导概念，但面向不同场景）
 - **Related**: F110（训练营愿景引导增强 — 引导 UX 模式可复用）
-- **Related**: F134（飞书群聊 — 飞书对接是 P0 验证场景之一）
+- **Related**: F134（飞书群聊 — 早期候选跨系统场景，已在 KD-13 后移出当前 scope）
 - **Related**: F099（Hub 导航可扩展 — Hub tab/深链基础设施）
 
 ## Risk
@@ -215,14 +213,6 @@ interface OrchestrationStep {
 | collect_input 敏感值泄露 | AC-S1 封存规则 + 服务端 TTL |
 | 流程文档与页面演进脱节 | CI gate 每次构建校验 tag manifest |
 | Guide Engine 性能影响正常操作 | 遮罩层 z-index 隔离 + 不影响非引导区域交互 |
-
-## Open Questions
-
-| # | 问题 | 状态 |
-|---|------|------|
-| OQ-1 | Guide Engine 是否需要支持流程嵌套（一个 flow 调用另一个 flow 作为子步骤）？ | ⬜ 未定（建议 Phase B 后评估） |
-| OQ-2 | 主动发现的触发条件如何定义？由前端检测还是后端推送？ | ⬜ 未定 |
-| OQ-3 | guide-authoring skill 是否需要自动从录屏生成初始 flow YAML？ | ⬜ 未定 |
 
 ## Key Decisions
 
@@ -244,30 +234,7 @@ interface OrchestrationStep {
 | KD-14 | 禁用引导模式下全局 Esc 退出，仅保留显式退出按钮 | CVO 手测反馈：误触 Esc 导致引导意外退出，体验差 | 2026-04-09 |
 | KD-15 | 双向可观测拆出为独立 feature，不再是 F155 Phase B | CVO + gpt52 共识：observe substrate 应更大——不只服务 guide，可被 debug/diagnostics 复用 | 2026-04-09 |
 
-## Timeline
-
-| 日期 | 事件 |
-|------|------|
-| 2026-03-27 | 三猫讨论收敛 + 立项 |
-| 2026-03-30 | v2 tag-based auto-advance engine 跑通，HUD 收敛为 exit-only，flow 改为运行时加载 |
-| 2026-03-31 | P0 场景 add-member 4 步端到端验证通过 |
-| 2026-04-01 | `add-member` 第 4 步收敛为 `confirm` 型步骤，保存成功后才允许完成 |
-| 2026-04-03 | guide completion callback 打通：前端 complete → 后端 `guideState=completed` → Socket `guide_complete` |
-| 2026-04-06 | CVO 方向校准：Phase B 聚焦平台内引导，跨系统配置改为独立页签（KD-13） |
-| 2026-04-09 | CVO 验收 Phase A 通过；Esc 误退修复（KD-14）；observe 拆出独立 feature（KD-15）；Phase A accepted/frozen |
-
 ## Review Gate
 
-- Phase A: 砚砚(gpt52) 负责安全边界 + 可测性 review
-- Phase B: 砚砚(gpt52) 安全 review + 烁烁(gemini25) 视觉 review
-
-## Links
-
-| 类型 | 路径 | 说明 |
-|------|------|------|
-| **Discussion** | `docs/discussions/2026-03-27-F150-guidance-engine-convergence.md` | 三猫讨论收敛纪要 |
-| **Scene Catalog** | `docs/features/F155-scene-catalog.md` | 全量引导场景清单（12 场景，含步骤概要） |
-| **Skill** | `cat-cafe-skills/guide-authoring/SKILL.md` | 引导流程设计 SOP |
-| **Feature** | `docs/features/F087-bootcamp.md` | 类似引导概念（训练营） |
-| **Feature** | `docs/features/F134-feishu-group-chat.md` | 飞书对接（P0 验证场景） |
-| **Feature** | `docs/features/F137-weixin-personal-gateway.md` | 微信对接（P1 验证场景） |
+- Phase A: Maine Coon(gpt52) 负责安全边界 + 可测性 review
+- Phase B: Maine Coon(gpt52) 安全 review + Siamese(gemini25) 视觉 review

@@ -1,4 +1,3 @@
-import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -151,7 +150,7 @@ describe('ChatMessage author precedence', () => {
       timestamp: Date.now(),
       contentBlocks: [],
       replyTo: 'scheduler-trigger-1',
-      replyPreview: { senderCatId: 'system', content: `${SCHEDULER_TRIGGER_PREFIX} 喝水提醒` },
+      replyPreview: { senderCatId: 'system', content: '内部 trigger', kind: 'scheduler_trigger' as const },
     };
 
     act(() => {
@@ -166,6 +165,6 @@ describe('ChatMessage author precedence', () => {
     expect(container.textContent).toContain('⏰');
     expect(container.textContent).toContain('定时提醒');
     expect(container.textContent).toContain('该喝水了，去接一杯温水。');
-    expect(container.textContent).not.toContain(`${SCHEDULER_TRIGGER_PREFIX} 喝水提醒`);
+    expect(container.textContent).not.toContain('内部 trigger');
   });
 });

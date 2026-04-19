@@ -9,6 +9,7 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { RecallFeed } from './memory/RecallFeed';
+import { TaskBoardPanel } from './TaskBoardPanel';
 import { useConfirm } from './useConfirm';
 import { BrowserPanel } from './workspace/BrowserPanel';
 import { ChangesPanel } from './workspace/ChangesPanel';
@@ -749,15 +750,40 @@ export function WorkspacePanel() {
               </svg>
               调度
             </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceMode('tasks')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+                workspaceMode === 'tasks'
+                  ? 'bg-cocreator-bg text-cocreator-dark border border-cocreator-light/60'
+                  : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
+              }`}
+            >
+              <svg
+                className="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="1" />
+              </svg>
+              任务
+            </button>
           </div>
 
-          {/* Knowledge / Schedule / Dev mode routing */}
+          {/* Knowledge / Schedule / Tasks / Dev mode routing */}
           {workspaceMode === 'recall' ? (
             <div className="flex-1 min-h-0 overflow-y-auto">
               <RecallFeed />
             </div>
           ) : workspaceMode === 'schedule' ? (
             <SchedulePanel />
+          ) : workspaceMode === 'tasks' ? (
+            <TaskBoardPanel />
           ) : (
             <>
               {/* Files / Changes toggle */}

@@ -84,11 +84,20 @@ const mockStoreState = {
   addThreadActiveInvocation: vi.fn(),
 };
 
+(globalThis as { __mockUseSocketStoreState?: typeof mockStoreState }).__mockUseSocketStoreState = mockStoreState;
+
 vi.mock('@/stores/chatStore', () => {
-  const getState = () => mockStoreState;
-  const useChatStore = ((selector?: (state: typeof mockStoreState) => unknown) =>
-    selector ? selector(getState()) : getState()) as typeof import('@/stores/chatStore').useChatStore;
-  useChatStore.getState = getState;
+  const getState = () =>
+    (globalThis as { __mockUseSocketStoreState?: typeof mockStoreState }).__mockUseSocketStoreState!;
+  const useChatStore = Object.assign(
+    <T>(selector?: (state: typeof mockStoreState) => T) => {
+      const state = getState();
+      return selector ? selector(state) : state;
+    },
+    {
+      getState,
+    },
+  );
   return { useChatStore };
 });
 
@@ -138,6 +147,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     vi.useRealTimers();
     delete (globalThis as { React?: typeof React }).React;
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    delete (globalThis as { __mockUseSocketStoreState?: typeof mockStoreState }).__mockUseSocketStoreState;
   });
 
   beforeEach(() => {
@@ -187,9 +197,9 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
 
     // Advance past RECONNECT_RECONCILE_DELAY_MS (2000ms)
     await act(async () => {
-      vi.advanceTimersByTime(2500);
-      // Let async apiFetch resolve
-      await vi.runAllTimersAsync();
+      // Bounded advance past RECONNECT_RECONCILE_DELAY_MS (2000ms).
+      // runAllTimersAsync would infinite-loop on the stale-watchdog setInterval.
+      await vi.advanceTimersByTimeAsync(2500);
     });
 
     // Server had no active invocations → stale state cleared → catch-up triggered
@@ -222,8 +232,7 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     });
 
     await act(async () => {
-      vi.advanceTimersByTime(2500);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(2500);
     });
 
     // Server still active → re-hydrate, don't catch-up

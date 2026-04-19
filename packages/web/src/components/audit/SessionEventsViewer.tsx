@@ -104,8 +104,10 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
     [sessionId],
   );
 
+  // Stale-while-revalidate: keep old data visible during view switch.
+  // fetchEvents() replaces data on success; cursor/history reset here
+  // because the new view always starts at page 0.
   useEffect(() => {
-    setData([]);
     setCursor(0);
     setCursorHistory([]);
     fetchEvents(view, 0);
@@ -159,12 +161,15 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
         ))}
       </div>
 
-      {/* Content */}
+      {/* Content — stale-while-revalidate: show old data with loading indicator */}
       <div className="max-h-72 overflow-y-auto p-2">
-        {loading && <div className="text-xs text-cafe-muted py-2">加载中...</div>}
+        {loading && data.length > 0 && (
+          <div className="text-[10px] text-cafe-muted text-center py-1 animate-pulse">Refreshing...</div>
+        )}
+        {loading && data.length === 0 && <div className="text-xs text-cafe-muted py-2">加载中...</div>}
         {error && <div className="text-xs text-red-500 py-2">加载失败</div>}
 
-        {!loading && !error && view === 'chat' && (
+        {!error && view === 'chat' && (
           <div className="space-y-1.5">
             {(data as ChatMessage[]).map((msg, i) => (
               <div
@@ -182,7 +187,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
           </div>
         )}
 
-        {!loading && !error && view === 'handoff' && (
+        {!error && view === 'handoff' && (
           <div className="space-y-1.5">
             {(data as HandoffSummary[]).map((inv) => (
               <div key={inv.invocationId} className="rounded border border-cafe-subtle px-2 py-1.5 text-[11px]">
@@ -209,7 +214,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
           </div>
         )}
 
-        {!loading && !error && view === 'raw' && (
+        {!error && view === 'raw' && (
           <div className="space-y-1">
             {(data as RawEvent[]).map((evt) => (
               <div key={evt.eventNo} className="text-[10px] font-mono bg-cafe-surface-elevated rounded px-1.5 py-1">

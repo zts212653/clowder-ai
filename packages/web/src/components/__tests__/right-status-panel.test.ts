@@ -8,7 +8,7 @@ function render(props: RightStatusPanelProps): string {
 }
 
 describe('RightStatusPanel', () => {
-  it('renders status title, mode, and active cats', () => {
+  it('renders status title, mode, and only live active cats', () => {
     const html = render({
       intentMode: 'execute',
       targetCats: ['opus', 'codex'],
@@ -33,7 +33,7 @@ describe('RightStatusPanel', () => {
     expect(html).toContain('当前调用');
     expect(html).toContain('消息统计');
     expect(html).toContain('布偶猫');
-    expect(html).toContain('缅因猫');
+    expect(html).not.toContain('缅因猫');
     expect(html).toContain('12');
   });
 

@@ -75,7 +75,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.id, 'my-glm');
     assert.equal(profile.authType, 'api_key');
     assert.equal(profile.kind, 'api_key');
-    // F340: protocol no longer on custom accounts — derived at runtime by client/provider
+    // clowder-ai#340: protocol no longer on custom accounts — derived at runtime by client/provider
     assert.equal(profile.protocol, undefined);
     assert.equal(profile.baseUrl, 'https://open.bigmodel.cn/api/paas/v4');
     assert.equal(profile.apiKey, 'glm-xxx');
@@ -196,7 +196,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     });
     await writeCredentials({});
 
-    // F340: No protocol matching — custom accounts not discoverable by client.
+    // clowder-ai#340: No protocol matching — custom accounts not discoverable by client.
     // Falls through to synthetic builtin for 'anthropic' → 'claude'.
     const profile = resolveForClient(projectRoot, 'anthropic');
     assert.ok(profile);
@@ -214,7 +214,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     });
     await writeCredentials({ 'custom-ant': { apiKey: 'sk-custom-proxy' } });
 
-    // F340: Custom accounts require explicit preferredAccountRef
+    // clowder-ai#340: Custom accounts require explicit preferredAccountRef
     const profile = resolveForClient(projectRoot, 'anthropic', 'custom-ant');
     assert.ok(profile);
     assert.equal(profile.apiKey, 'sk-custom-proxy');

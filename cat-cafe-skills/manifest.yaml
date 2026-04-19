@@ -59,6 +59,22 @@ skills:
     next: ["pencil-design", "tdd"]
     sop_step: null
 
+  guide-interaction:
+    description: >
+      场景引导交互模式：匹配到引导流程后，向用户提供交互式选择卡片，
+      处理用户选择（开始引导/步骤概览/跳过），启动前端引导 overlay。
+      Use when: 系统注入了 Guide Available（自动触发，不需要手动加载）。
+      Not for: 没有匹配到引导流程的普通对话。
+      Output: 引导选择卡片 + 状态持久化 + 前端引导启动。
+    triggers:
+      - "引导流程"
+      - "guide"
+    not_for:
+      - "没有匹配到引导流程的普通对话"
+    output: "Guide choice card / state persistence / overlay start"
+    next: ["guide-authoring"]
+    sop_step: null
+
   # ── 协作思考 ──
   collaborative-thinking:
     description: >
@@ -441,11 +457,12 @@ skills:
   # ── Skill 编写 ──
   writing-skills:
     description: >
-      创建或修改 Cat Café skill 的元技能（含 CSO、测试、发布）。
-      Use when: 写新 skill、修改现有 skill、验证 skill 质量；
+      创建或修改 Cat Café skill / MCP tool description 的元技能（含质量标准、范本、发布）。
+      Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
       或者功能实现中产出了 SKILL.md / cat-cafe-skills/ 新目录 / manifest.yaml skill 条目。
       Not for: 使用 skill（直接触发对应 skill）。
       Output: 新/更新的 SKILL.md + manifest 条目 + symlinks。
+      GOTCHA: 软硬同重——skill/MCP 质量 = 代码质量，写之前先看范本。
     triggers:
       - "写 skill"
       - "新 skill"
@@ -455,6 +472,9 @@ skills:
       - "manifest.yaml skill"
       - "创建 hook"
       - "新增 hook"
+      - "写 MCP"
+      - "MCP description"
+      - "tool description"
     not_for:
       - "使用 skill"
     output: "SKILL.md + manifest entry + symlinks"
@@ -519,6 +539,56 @@ skills:
     sop_step: null
     merged_from: null
     feature: "F066"
+
+  # ── 企业 IM 工作流 (F162) ──
+  enterprise-workflow:
+    description: >
+      企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。
+      Use when: 铲屎官要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
+      Not for: 普通聊天、消息收发（那是 F088 Transport Plane 的活）。
+      Output: 资源链接（文档 URL、企微会议链接、日程 summary 等）通过 callback 返回。
+    triggers:
+      - "创建文档"
+      - "写个文档"
+      - "create doc"
+      - "建个表格"
+      - "创建表格"
+      - "smart table"
+      - "多维表"
+      - "bitable"
+      - "建个待办"
+      - "创建待办"
+      - "todo"
+      - "创建任务"
+      - "task"
+      - "约个会"
+      - "创建会议"
+      - "create meeting"
+      - "创建日程"
+      - "calendar event"
+      - "幻灯片"
+      - "slides"
+      - "deck"
+      - "整理成文档"
+      - "拆成任务"
+      - "golden chain"
+      - "黄金链路"
+      - "工作流"
+      - "enterprise workflow"
+      - "飞书"
+      - "feishu"
+      - "lark"
+      - "企微"
+      - "wecom"
+      - "企业微信"
+    not_for:
+      - "普通聊天"
+      - "消息收发"
+    output: "Enterprise resource links returned through callback"
+    next: []
+    sop_step: null
+    merged_from: null
+    feature: "F162"
 
   # ── Workspace 导航 (F131) ──
   workspace-navigator:

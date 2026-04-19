@@ -198,4 +198,16 @@ describe('sendMessageSchema whisper validation', () => {
     });
     assert.ok(result.success);
   });
+
+  test('accepts long text up to 100K characters', () => {
+    const longContent = 'x'.repeat(50000);
+    const result = sendMessageSchema.safeParse({ content: longContent });
+    assert.ok(result.success, `50K text should be accepted: ${JSON.stringify(result.error?.issues)}`);
+  });
+
+  test('rejects text exceeding 100K characters', () => {
+    const tooLong = 'x'.repeat(100001);
+    const result = sendMessageSchema.safeParse({ content: tooLong });
+    assert.equal(result.success, false, 'text over 100K should be rejected');
+  });
 });

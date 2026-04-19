@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-describe('accountStartupHook (F340 fail-fast)', () => {
+describe('accountStartupHook (clowder-ai#340 fail-fast)', () => {
   let globalRoot;
   let projectRoot;
   let previousGlobalRoot;

@@ -10,7 +10,7 @@ import type {
   ResolutionItem,
   Slice,
 } from '@cat-cafe/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
 import { CreateIntentCardForm } from './CreateIntentCardForm';
@@ -51,17 +51,25 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [projectItems, setProjectItems] = useState<BacklogItem[]>([]);
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
 
-  // Load all data for the active project, with cancellation guard
+  // Data is stale when it belongs to a different project than the one we're viewing
+  const isStale = loadedProjectId !== project.id;
+
+  // Sync inert attribute with stale state — pointer-events-none blocks mouse
+  // interactions but not keyboard/focus; inert blocks everything.
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    if (isStale) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  }, [isStale]);
+
+  // Load all data for the active project — stale-while-revalidate:
+  // keep old project data visible until the new project's data arrives.
   useEffect(() => {
     let cancelled = false;
-    setIntentCards([]);
-    setAuditFrame(null);
-    setExecutionDigests([]);
-    setResolutions([]);
-    setSlices([]);
-    setRefluxPatterns([]);
-    setProjectItems([]);
     setLoading(true);
 
     const load = async () => {
@@ -76,35 +84,54 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
       ]);
       if (cancelled) return;
 
+      // Per-source clearing: on failure, clear that data source so no
+      // stale data from the previous project survives a partial success.
       if (cardsRes.status === 'fulfilled' && cardsRes.value.ok) {
         const body = (await cardsRes.value.json()) as { cards: IntentCard[] };
         if (!cancelled) setIntentCards(body.cards);
+      } else if (!cancelled) {
+        setIntentCards([]);
       }
       if (frameRes.status === 'fulfilled' && frameRes.value.ok) {
         const body = (await frameRes.value.json()) as { frame: NeedAuditFrameType };
         if (!cancelled) setAuditFrame(body.frame);
+      } else if (!cancelled) {
+        setAuditFrame(null);
       }
       if (itemsRes.status === 'fulfilled' && itemsRes.value.ok) {
         const body = (await itemsRes.value.json()) as { items: BacklogItem[] };
         if (!cancelled) setProjectItems(body.items);
+      } else if (!cancelled) {
+        setProjectItems([]);
       }
       if (digestsRes.status === 'fulfilled' && digestsRes.value.ok) {
         const body = (await digestsRes.value.json()) as { digests: DispatchExecutionDigest[] };
         if (!cancelled) setExecutionDigests(body.digests);
+      } else if (!cancelled) {
+        setExecutionDigests([]);
       }
       if (resRes.status === 'fulfilled' && resRes.value.ok) {
         const body = (await resRes.value.json()) as { resolutions: ResolutionItem[] };
         if (!cancelled) setResolutions(body.resolutions);
+      } else if (!cancelled) {
+        setResolutions([]);
       }
       if (slicesRes.status === 'fulfilled' && slicesRes.value.ok) {
         const body = (await slicesRes.value.json()) as { slices: Slice[] };
         if (!cancelled) setSlices(body.slices);
+      } else if (!cancelled) {
+        setSlices([]);
       }
       if (refluxRes.status === 'fulfilled' && refluxRes.value.ok) {
         const body = (await refluxRes.value.json()) as { patterns: RefluxPattern[] };
         if (!cancelled) setRefluxPatterns(body.patterns);
+      } else if (!cancelled) {
+        setRefluxPatterns([]);
       }
-      if (!cancelled) setLoading(false);
+      if (!cancelled) {
+        setLoadedProjectId(project.id);
+        setLoading(false);
+      }
     };
     void load();
     return () => {
@@ -226,15 +253,21 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
           <button
             type="button"
             onClick={() => void handleImportBacklog()}
-            className="rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] hover:bg-[#F7EEDB]"
+            disabled={isStale}
+            className="rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] hover:bg-[#F7EEDB] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             导入 Backlog
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Stale barrier: show refreshing indicator and block interactions until fresh data arrives */}
+      {isStale && (
+        <div className="px-6 py-1 text-center text-[10px] text-[#9A866F] animate-pulse">Refreshing project data...</div>
+      )}
+
+      {/* Content — inert when stale blocks ALL interaction (mouse + keyboard + focus) to prevent cross-project writes */}
+      <div ref={contentRef} className={`min-h-0 flex-1 overflow-auto ${isStale ? 'opacity-60' : ''}`}>
         <div className="grid min-h-0 grid-cols-1 gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
           {/* Left column */}
           <div className="space-y-4">

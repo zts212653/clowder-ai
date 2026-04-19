@@ -6,11 +6,15 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-describe('RedisSessionChainStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisSessionChainStore;
   let createRedisClient;
   let redis;

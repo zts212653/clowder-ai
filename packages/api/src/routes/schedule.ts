@@ -14,7 +14,7 @@
  * DELETE /api/schedule/control/tasks/:id → remove task override (AC-D1)
  */
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type {
   InvocationRecord,
   InvocationRegistry,
@@ -33,6 +33,7 @@ import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { ScheduleLifecycleNotifier, TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
+import { deriveCallbackActor } from './callback-scope-helpers.js';
 import { governanceRoutes } from './schedule-governance.js';
 
 /** #415: Normalize once-trigger input — accepts delayMs (relative) or fireAt (absolute) */
@@ -89,11 +90,16 @@ function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void
 
 type DeliveryThreadResolutionCode = 'STALE_INVOCATION';
 
+interface ScheduleActor {
+  triggerUserId: string;
+  createdBy: string;
+}
+
 /** Resolve deliveryThreadId from preHandler auth (headers) or explicit body param.
  *  Panel UI requests have no auth → uses explicit deliveryThreadId or null.
  *  MCP requests have callbackAuth → infer from invocation record.
  *  Invalid credentials are rejected at the preHandler level (fail-closed, #474). */
-function resolveDeliveryThreadId(
+function resolveScopedDeliveryThreadId(
   callbackAuth: InvocationRecord | undefined,
   body: { deliveryThreadId?: string },
   registry?: InvocationRegistry,
@@ -106,6 +112,20 @@ function resolveDeliveryThreadId(
   }
   if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, code: null };
   return { deliveryThreadId: callbackAuth.threadId, code: null };
+}
+
+function deriveScheduleActor(request: FastifyRequest, body: { createdBy?: string }): ScheduleActor {
+  if (request.callbackAuth) {
+    const actor = deriveCallbackActor(request.callbackAuth);
+    return {
+      triggerUserId: actor.userId,
+      createdBy: actor.catId,
+    };
+  }
+  return {
+    triggerUserId: resolveHeaderUserId(request) ?? 'default-user',
+    createdBy: body.createdBy ?? 'unknown',
+  };
 }
 
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
@@ -292,7 +312,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
-    const resolution = resolveDeliveryThreadId(request.callbackAuth, body, registry);
+    const resolution = resolveScopedDeliveryThreadId(request.callbackAuth, body, registry);
     if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {
@@ -362,9 +382,10 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       return { error: 'params must be a plain object' };
     }
 
-    // Server-authoritative: always overwrite triggerUserId from request identity.
-    // Prevents client from forging userId on scheduler-triggered cat replies.
-    params.triggerUserId = resolveHeaderUserId(request) ?? 'default-user';
+    const actor = deriveScheduleActor(request, body);
+    // Server-authoritative: callback-authenticated writes derive actor fields from
+    // the verified invocation record; panel requests fall back to request identity.
+    params.triggerUserId = actor.triggerUserId;
 
     const id = `dyn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const display = body.display
@@ -375,7 +396,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         }
       : { label: template.label, category: template.category, description: template.description };
 
-    const resolution = resolveDeliveryThreadId(request.callbackAuth, body, registry);
+    const resolution = resolveScopedDeliveryThreadId(request.callbackAuth, body, registry);
     if (resolution.code === 'STALE_INVOCATION') {
       reply.status(409);
       return {
@@ -392,7 +413,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       display,
       deliveryThreadId: resolution.deliveryThreadId,
       enabled: true,
-      createdBy: body.createdBy ?? 'unknown',
+      createdBy: actor.createdBy,
       createdAt: new Date().toISOString(),
     };
 

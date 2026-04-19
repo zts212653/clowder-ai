@@ -181,6 +181,7 @@ import {
   workspaceRoutes,
 } from './routes/index.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
+import { marketplaceRoutes } from './routes/marketplace.js';
 import { previewRoutes } from './routes/preview.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
@@ -451,6 +452,9 @@ async function main(): Promise<void> {
       ? resolve(process.cwd(), '..', '..')
       : process.cwd();
 
+  const { initRepoIdentity, isSameRepo } = await import('./utils/is-same-repo.js');
+  initRepoIdentity(repoRoot);
+
   const { createMemoryServices } = await import('./domains/memory/factory.js');
   const memoryServices = await createMemoryServices({
     type: 'sqlite',
@@ -505,6 +509,13 @@ async function main(): Promise<void> {
   const { ExpeditionBootstrapService } = await import('./domains/memory/ExpeditionBootstrapService.js');
   const indexStateManager = new IndexStateManager(memoryServices.store.getDb());
   const { execFileSync } = await import('node:child_process');
+  const getFingerprint = (projectPath: string) => {
+    try {
+      return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectPath, encoding: 'utf-8' }).trim();
+    } catch {
+      return '';
+    }
+  };
   const expeditionBootstrapService = new ExpeditionBootstrapService(indexStateManager, {
     rebuildIndex: async (projectPath: string) => {
       const startMs = Date.now();
@@ -512,16 +523,9 @@ async function main(): Promise<void> {
       const summary = buildStructuralSummary(projectPath);
       return { docsIndexed: summary.docsList.length, durationMs: Date.now() - startMs };
     },
-    getFingerprint: (projectPath: string) => {
-      try {
-        return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectPath, encoding: 'utf-8' }).trim();
-      } catch {
-        return '';
-      }
-    },
+    getFingerprint,
     getTierCoverage: async (projectPath: string) => {
-      // Guard: only overlay store tiers for our own repo (Phase D: project isolation)
-      if (resolve(projectPath) !== resolve(repoRoot)) return {};
+      if (!isSameRepo(projectPath, repoRoot)) return {};
 
       const db = memoryServices.store.getDb();
       const rows = db
@@ -532,6 +536,23 @@ async function main(): Promise<void> {
       const result: Record<string, number> = {};
       for (const row of rows) {
         result[row.provenance_tier] = row.cnt;
+      }
+      return result;
+    },
+    getKindCoverage: async (projectPath: string) => {
+      if (!isSameRepo(projectPath, repoRoot)) return {};
+
+      const { mapKindToSourceType } = await import('./routes/evidence-helpers.js');
+      const db = memoryServices.store.getDb();
+      const rows = db
+        .prepare(
+          `SELECT kind, COUNT(*) as cnt FROM evidence_docs WHERE kind IS NOT NULL AND source_path NOT LIKE 'archive/%' GROUP BY kind`,
+        )
+        .all() as Array<{ kind: string; cnt: number }>;
+      const result: Record<string, number> = {};
+      for (const row of rows) {
+        const sourceType = mapKindToSourceType(row.kind);
+        result[sourceType] = (result[sourceType] || 0) + row.cnt;
       }
       return result;
     },
@@ -899,7 +920,6 @@ async function main(): Promise<void> {
         case 'antigravity':
           service = new AntigravityAgentService({
             catId,
-            commandArgs: config.commandArgs,
           });
           break;
         case 'opencode':
@@ -1090,6 +1110,7 @@ async function main(): Promise<void> {
     messageStore,
     log: app.log,
   });
+  socketManager.setQueueProcessor(queueProcessor);
 
   // F101: Game engine store (created early so messages route can intercept /game commands)
   const { RedisGameStore } = await import('./domains/cats/services/stores/redis/RedisGameStore.js');
@@ -1402,6 +1423,7 @@ async function main(): Promise<void> {
     stateManager: indexStateManager,
     bootstrapService: expeditionBootstrapService,
     socketManager: socketManager!,
+    getFingerprint,
   });
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(configRoutes);
@@ -1411,6 +1433,19 @@ async function main(): Promise<void> {
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes);
+
+  // F146 Phase B: Marketplace adapter — stub loaders, real catalog fetchers in Phase C
+  {
+    const { createAdapterRegistry } = await import('./marketplace/index.js');
+    const registry = createAdapterRegistry({
+      claude: { catalogLoader: async () => [] },
+      codex: { catalogLoader: async () => [] },
+      openclaw: { catalogLoader: async () => [] },
+      antigravity: { catalogLoader: async () => [] },
+    });
+    await app.register(marketplaceRoutes, { registry });
+  }
+
   await app.register(workspaceRoutes, {
     socketEmit: (event, data, room) => {
       socketManager?.broadcastToRoom(room, event, data);
@@ -1473,6 +1508,18 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
+  });
+
+  // F163: Knowledge promotion admin API (localhost-only)
+  const { f163AdminRoutes } = await import('./routes/f163-admin.js');
+  await app.register(f163AdminRoutes, {
+    evidenceStore: memoryServices.evidenceStore as unknown as Parameters<typeof f163AdminRoutes>[1]['evidenceStore'],
+  });
+
+  // F163 Phase C: Knowledge audit routes (contradiction check, flag-review, review-queue, health-report)
+  const { f163AuditRoutes } = await import('./routes/f163-audit-routes.js');
+  await app.register(f163AuditRoutes, {
+    evidenceStore: memoryServices.evidenceStore as unknown as Parameters<typeof f163AuditRoutes>[1]['evidenceStore'],
   });
 
   // F152 Phase C: Distillation routes (global lesson reflow)
@@ -1774,12 +1821,12 @@ async function main(): Promise<void> {
     app.log.warn(`[api] CLI config regeneration failed (best-effort): ${String(err)}`);
   }
 
-  // F340: Account startup — fail-fast (LL-043 / migration conflict / corrupt credentials).
+  // clowder-ai#340: Account startup — fail-fast (LL-043 / migration conflict / corrupt credentials).
   // Errors propagate to main().catch → process.exit(1).
   {
     const { accountStartupHook } = await import('./config/account-startup.js');
     const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
-    app.log.info(`[api] F340 accounts: ${startupResult.accountCount} account(s) loaded`);
+    app.log.info(`[api] clowder-ai#340 accounts: ${startupResult.accountCount} account(s) loaded`);
   }
 
   // F101 Phase G: Recover auto-play loops for active games after restart.
@@ -2037,7 +2084,8 @@ async function main(): Promise<void> {
           .map((line: string) => JSON.parse(line));
       };
 
-      const effectiveUserId = process.env.DEFAULT_OWNER_USER_ID || 'default-user';
+      const { getOwnerUserId } = await import('./config/cat-config-loader.js');
+      const effectiveUserId = getOwnerUserId();
 
       taskRunnerV2.register(
         createRepoScanTaskSpec({
@@ -2130,6 +2178,13 @@ async function main(): Promise<void> {
     }
     (connectorHubOpts as { weixinAdapter?: unknown }).weixinAdapter = handle.weixinAdapter;
     (connectorHubOpts as { startWeixinPolling?: () => void }).startWeixinPolling = handle.startWeixinPolling;
+    // F132 Phase E: WeCom Bot dynamic start/stop
+    (
+      connectorHubOpts as { startWeComBotStream?: (botId: string, secret: string) => Promise<void> }
+    ).startWeComBotStream = handle.startWeComBotStream;
+    (connectorHubOpts as { stopWeComBot?: () => Promise<void> }).stopWeComBot = handle.stopWeComBot;
+    // F132 bugfix: live health getter for status endpoint
+    (connectorHubOpts as { getWeComBotAdapter?: () => unknown }).getWeComBotAdapter = handle.getWeComBotAdapter;
     (connectorHubOpts as { permissionStore?: unknown }).permissionStore = handle.permissionStore;
   }
 

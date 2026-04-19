@@ -10,9 +10,12 @@
  */
 
 import type { GuideStateV1 } from '../cats/services/stores/ports/ThreadStore.js';
+import { matchGuideOfferCandidate } from './GuideMatchingEngine.js';
 import type { GuideStateBridge, IGuideSessionStore } from './GuideSessionRepository.js';
 import { sessionToLegacyState } from './GuideSessionRepository.js';
 import { canAccessGuideState, hasHiddenForeignNonTerminalGuideState } from './guide-state-access.js';
+
+export { isExplicitGuideRequest, stripExplicitPrefix } from './GuideMatchingEngine.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -145,103 +148,6 @@ async function resolveExistingCandidate(
   resolveOwnership(gs, selectionMatch, justCompleted, targetCats, targetCatIds, ctx);
 }
 
-/**
- * B-6: Detect explicit guide trigger from message.
- * `/guide <name>` or `引导 <name>` are explicit commands that bypass
- * confidence thresholds and dismiss suppression.
- */
-const EXPLICIT_GUIDE_RE = /^(?:\/guide\b|引导(?=\s|$))/i;
-
-export function isExplicitGuideRequest(message: string): boolean {
-  return EXPLICIT_GUIDE_RE.test(message.trim());
-}
-
-/** Strip explicit command prefix so keyword matching sees the intent. */
-export function stripExplicitPrefix(message: string): string {
-  return message.trim().replace(EXPLICIT_GUIDE_RE, '').trim();
-}
-
-/** Match raw user message against guide registry with B-6 offer policy. */
-async function matchNewCandidate(
-  message: string,
-  targetCats: readonly string[],
-  userId: string,
-  log: { info: (...args: unknown[]) => void } | undefined,
-  ctx: GuideRoutingContext,
-  dismissTracker?: import('./GuideDismissTracker.js').IGuideDismissTracker,
-): Promise<void> {
-  try {
-    const { resolveGuideForIntent, getTriggerStrategies, getRegistryEntries } = await import(
-      './guide-registry-loader.js'
-    );
-    const { evaluateGuideOffer } = await import('./GuideOfferPolicy.js');
-
-    const isExplicit = isExplicitGuideRequest(message);
-    const intent = isExplicit ? stripExplicitPrefix(message) : message;
-    if (!intent) return;
-
-    // B-6: Explicit triggers try direct ID/name match first, then keyword fallback
-    let matches = resolveGuideForIntent(intent);
-    if (matches.length === 0 && isExplicit) {
-      const normalized = intent.toLowerCase().replace(/[-_]/g, ' ').trim();
-      const entry = getRegistryEntries().find(
-        (e) => e.id.toLowerCase() === intent.toLowerCase() || e.name.toLowerCase() === normalized,
-      );
-      if (entry) {
-        matches = [
-          {
-            id: entry.id,
-            name: entry.name,
-            description: entry.description,
-            estimatedTime: entry.estimated_time,
-            score: entry.keywords.length,
-            totalKeywords: entry.keywords.length,
-          },
-        ];
-      }
-    }
-    if (matches.length === 0) return;
-
-    // B-6: Fetch dismiss counts + trigger strategies, apply policy
-    const guideIds = matches.map((m) => m.id);
-    const dismissCounts = dismissTracker
-      ? await dismissTracker.getDismissCounts(userId, guideIds).catch(() => ({}))
-      : {};
-    const triggerStrategies = getTriggerStrategies();
-
-    const result = evaluateGuideOffer({
-      candidates: matches.map((m) => ({
-        id: m.id,
-        name: m.name,
-        score: m.score,
-        totalKeywords: m.totalKeywords,
-      })),
-      triggerStrategies,
-      userId,
-      isExplicitTrigger: isExplicit,
-      dismissCounts,
-    });
-
-    if (result) {
-      const top = matches.find((m) => m.id === result.id)!;
-      ctx.candidate = {
-        id: top.id,
-        name: top.name,
-        estimatedTime: top.estimatedTime,
-        status: 'offered',
-        isNewOffer: true,
-      };
-      ctx.offerOwner = targetCats[0];
-      log?.info(
-        { guideId: top.id, guideName: top.name, confidence: result.confidence },
-        '[F155] guide candidate accepted by offer policy',
-      );
-    }
-  } catch {
-    /* best-effort: guide matching failure does not block invocation */
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Phase 1: Prepare
 // ---------------------------------------------------------------------------
@@ -286,7 +192,15 @@ export async function prepareGuideContext(params: {
   }
 
   if (!ctx.candidate && !ctx.hiddenForeign) {
-    await matchNewCandidate(message, targetCats, userId, log, ctx, dismissTracker);
+    const match = await matchGuideOfferCandidate({ message, userId, dismissTracker });
+    if (match) {
+      ctx.candidate = match.candidate;
+      ctx.offerOwner = targetCats[0];
+      log?.info(
+        { guideId: match.candidate.id, guideName: match.candidate.name, confidence: match.confidence },
+        '[F155] guide candidate accepted by offer policy',
+      );
+    }
   }
 
   return ctx;

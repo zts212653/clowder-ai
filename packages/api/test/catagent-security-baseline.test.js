@@ -18,7 +18,7 @@ const { resolveApiCredentials } = await import(
   '../dist/domains/cats/services/agents/providers/catagent/catagent-credentials.js'
 );
 
-// ── Credentials (account-binding fail-closed) ──
+// -- Credentials (account-binding fail-closed) --
 
 test('resolveApiCredentials returns null when catConfig is null', () => {
   const result = resolveApiCredentials('/tmp', 'opus', null);
@@ -64,7 +64,7 @@ test('resolveApiCredentials does not scan credentials.json even when key exists 
   }
 });
 
-// ── Sandbox (delegates to shared resolveWorkspacePath) ──
+// -- Sandbox (delegates to shared resolveWorkspacePath) --
 // Error patterns match upstream WorkspaceSecurityError directly (no translation layer).
 
 const { resolveSecurePath } = await import('../dist/domains/cats/services/agents/providers/catagent/catagent-tools.js');
@@ -142,7 +142,7 @@ test('resolveSecurePath allows ENOENT (file does not exist yet)', async () => {
   }
 });
 
-// ── Denylist (shared with workspace-security.ts via delegation) ──
+// -- Denylist (shared with workspace-security.ts via delegation) --
 
 test('resolveSecurePath blocks .env files', async () => {
   const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'catagent-sec-')));

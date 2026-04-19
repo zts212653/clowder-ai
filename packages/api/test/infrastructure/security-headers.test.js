@@ -140,6 +140,57 @@ describe('F156 D-6: Host derived from configured origins', () => {
   });
 });
 
+// --- F156 D-6: Private network Host validation (CORS_ALLOW_PRIVATE_NETWORK) ---
+
+describe('F156 D-6: Private network Host allowed when CORS_ALLOW_PRIVATE_NETWORK=true', () => {
+  let app;
+
+  before(async () => {
+    const { PRIVATE_NETWORK_ORIGIN } = await import('../../dist/config/frontend-origin.js');
+    app = Fastify();
+    // Simulate: CORS_ALLOW_PRIVATE_NETWORK=true adds the RegExp to origins
+    await app.register(securityHeadersPlugin, {
+      allowedOrigins: ['http://localhost:3003', PRIVATE_NETWORK_ORIGIN],
+    });
+    app.get('/api/test', async () => ({ ok: true }));
+    await app.ready();
+  });
+
+  after(async () => {
+    if (app) await app.close();
+  });
+
+  it('allows Host: 192.168.1.88:3004 (LAN access from phone)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/test', headers: { host: '192.168.1.88:3004' } });
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('allows Host: 10.0.0.5:3004 (10.x private network)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/test', headers: { host: '10.0.0.5:3004' } });
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('allows Host: 100.64.1.2:3004 (Tailscale CGNAT)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/test', headers: { host: '100.64.1.2:3004' } });
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('allows Host: 172.16.0.1:3004 (172.16-31.x private network)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/test', headers: { host: '172.16.0.1:3004' } });
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('still rejects non-private Host even with private network enabled', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/test', headers: { host: 'evil.com:3004' } });
+    assert.equal(res.statusCode, 403);
+  });
+
+  it('still rejects public IPs (not in RFC 1918/Tailscale range)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/test', headers: { host: '8.8.8.8:3004' } });
+    assert.equal(res.statusCode, 403);
+  });
+});
+
 // --- F156 D-6 R3: Split-host API deployment (NEXT_PUBLIC_API_URL) ---
 
 describe('F156 D-6: Split-host API deployment', () => {

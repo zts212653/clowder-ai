@@ -45,7 +45,7 @@ export const guideTransitions = meter.createCounter('cat_cafe.guide.transitions'
   description: 'Guide lifecycle state transitions',
 });
 
-// --- F479: Inline @mention detection observability ---
+// --- clowder-ai#489: Inline @mention detection observability ---
 
 /** Counter: total inline action mention detection runs. */
 export const inlineActionChecked = meter.createCounter('cat_cafe.a2a.inline_action.checked', {

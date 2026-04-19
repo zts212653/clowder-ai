@@ -48,7 +48,7 @@ describe('MCP Signal Tools', () => {
     const result = await handleSignalListInbox({
       limit: 5,
       source: 'anthropic-news',
-      tier: 1,
+      tier: '1',
     });
 
     assert.equal(result.isError, undefined);
@@ -128,7 +128,7 @@ describe('MCP Signal Tools', () => {
       query: 'claude',
       status: 'read',
       source: 'anthropic-news',
-      tier: 1,
+      tier: '1',
       limit: 10,
     });
 
@@ -140,6 +140,41 @@ describe('MCP Signal Tools', () => {
     assert.equal(parsed.searchParams.get('source'), 'anthropic-news');
     assert.equal(parsed.searchParams.get('tier'), '1');
     assert.equal(parsed.searchParams.get('limit'), '10');
+  });
+
+  // Bug-C: Gemini rejects numeric enum in tool schema (INVALID_ARGUMENT 400).
+  // tier must be STRING enum for Gemini function declaration compatibility.
+  test('tier schema accepts string values and handler produces correct URL params', async () => {
+    const { handleSignalListInbox, handleSignalSearch } = await import('../dist/tools/signals-tools.js');
+
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return { ok: true, json: async () => ({ items: [] }) };
+    };
+
+    // String tier "2" must be accepted and produce tier=2 in URL
+    await handleSignalListInbox({ tier: '2' });
+    assert.equal(new URL(urls[0]).searchParams.get('tier'), '2', 'inbox: string tier must produce tier=2');
+
+    await handleSignalSearch({ query: 'test', tier: '3' });
+    assert.equal(new URL(urls[1]).searchParams.get('tier'), '3', 'search: string tier must produce tier=3');
+  });
+
+  test('tier Zod schema rejects invalid values', async () => {
+    const { signalListInboxInputSchema } = await import('../dist/tools/signals-tools.js');
+    const { z } = await import('zod');
+    const schema = z.object(signalListInboxInputSchema);
+
+    // Valid string tiers
+    assert.doesNotThrow(() => schema.parse({ tier: '1' }));
+    assert.doesNotThrow(() => schema.parse({ tier: '4' }));
+    assert.doesNotThrow(() => schema.parse({})); // optional
+
+    // Invalid values
+    assert.throws(() => schema.parse({ tier: '5' }));
+    assert.throws(() => schema.parse({ tier: '0' }));
+    assert.throws(() => schema.parse({ tier: 'high' }));
   });
 
   test('handleSignalSummarize reads article then PATCHes summary', async () => {
