@@ -453,7 +453,12 @@ export function WorkspaceTree({
         <TreeSkeleton />
       ) : tree.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
-          <span className="text-2xl mb-2">🐾</span>
+          <svg viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 mb-2 text-cocreator-dark/30">
+            <path d="M12 15C15 15 17.5 17 17.5 19.5C17.5 21 16 22.5 12 22.5C8 22.5 6.5 21 6.5 19.5C6.5 17 9 15 12 15Z" />
+            <ellipse cx="6" cy="11.5" rx="2.5" ry="3" />
+            <ellipse cx="12" cy="10" rx="3" ry="3.5" />
+            <ellipse cx="18" cy="11.5" rx="2.5" ry="3" />
+          </svg>
           <p className="text-xs text-cocreator-dark/50">还没有文件树</p>
           <p className="text-[10px] text-cocreator-dark/30 mt-1">选择一个 worktree 开始浏览</p>
         </div>

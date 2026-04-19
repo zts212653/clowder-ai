@@ -36,6 +36,37 @@ export interface CreateCommunityIssueInput {
   readonly title: string;
 }
 
+// Phase A: Triage types for Direction Card orchestration
+export type Verdict = 'WELCOME' | 'NEEDS-DISCUSSION' | 'POLITELY-DECLINE';
+export type QuestionId = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Q5';
+export type QuestionGrade = 'PASS' | 'WARN' | 'FAIL' | 'UNKNOWN';
+
+export interface QuestionResult {
+  readonly id: QuestionId;
+  readonly result: QuestionGrade;
+}
+
+export interface TriageEntry {
+  readonly catId: string;
+  readonly verdict: Verdict;
+  readonly questions: readonly QuestionResult[];
+  readonly reasonCode?: string;
+  readonly relatedFeature?: string;
+  readonly timestamp: number;
+}
+
+export interface ConsensusResult {
+  readonly verdict: Verdict;
+  readonly needsOwner: boolean;
+  readonly reasonCode?: string;
+  readonly resolvedAt: number;
+}
+
+export interface DirectionCardPayload {
+  readonly entries: readonly TriageEntry[];
+  readonly consensus?: ConsensusResult;
+}
+
 export interface UpdateCommunityIssueInput {
   readonly state?: IssueState;
   readonly replyState?: ReplyState;

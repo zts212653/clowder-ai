@@ -77,7 +77,9 @@ export function InstallPlanDetail({
       </div>
 
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-50 text-lg">⚙️</div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-50">
+          <HubIcon name="settings" className="h-5 w-5 text-purple-500" />
+        </div>
         <div className="flex-1">
           <h3 className="text-sm font-semibold text-cafe">{result.displayName}</h3>
           {result.publisherIdentity && <p className="text-xs text-cafe-muted">{result.publisherIdentity}</p>}
@@ -92,7 +94,9 @@ export function InstallPlanDetail({
       <p className="text-xs leading-relaxed text-cafe-secondary">{result.componentSummary}</p>
 
       <div className="rounded-lg border border-cafe-border bg-white p-3">
-        <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">⚙ 安装配置</p>
+        <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">
+          <HubIcon name="settings" className="h-3.5 w-3.5" /> 安装配置
+        </p>
         {plan.mcpEntry && (
           <>
             {'transport' in plan.mcpEntry && plan.mcpEntry.transport && (
@@ -112,7 +116,9 @@ export function InstallPlanDetail({
 
       {plan.mcpEntry?.env && Object.keys(plan.mcpEntry.env).length > 0 && (
         <div className="rounded-lg border border-cafe-border bg-white p-3">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">🔑 环境变量 (可选)</p>
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-cafe">
+            <HubIcon name="key" className="h-3.5 w-3.5" /> 环境变量 (可选)
+          </p>
           {Object.entries(plan.mcpEntry.env).map(([key, val]) => (
             <ConfigRow key={key} label={key} value={val} />
           ))}
@@ -130,12 +136,16 @@ export function InstallPlanDetail({
         </div>
       )}
 
-      <div className={`rounded-lg p-2.5 text-xs ${trustColor}`}>
+      <div className={`flex items-center gap-1.5 rounded-lg p-2.5 text-xs ${trustColor}`}>
+        <HubIcon
+          name={result.trustLevel === 'official' ? 'shield' : result.trustLevel === 'verified' ? 'check' : 'users'}
+          className="h-3.5 w-3.5 shrink-0"
+        />
         {result.trustLevel === 'official'
-          ? '🛡 官方认证服务，由平台维护'
+          ? '官方认证服务，由平台维护'
           : result.trustLevel === 'verified'
-            ? '✓ 社区验证服务，经审核'
-            : '👥 社区贡献服务，使用前请审查'}
+            ? '社区验证服务，经审核'
+            : '社区贡献服务，使用前请审查'}
       </div>
 
       <div>

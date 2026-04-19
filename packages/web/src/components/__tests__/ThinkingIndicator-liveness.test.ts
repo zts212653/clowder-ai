@@ -211,6 +211,6 @@ describe('F118 ThinkingIndicator liveness states', () => {
     });
 
     expect(container.textContent).toContain('思考中');
-    expect(container.textContent).toContain('🐾');
+    expect(container.innerHTML).toContain('<svg');
   });
 });

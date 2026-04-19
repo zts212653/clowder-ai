@@ -155,7 +155,7 @@ function PrRow({ item, onNavigate }: { item: PrBoardItem; onNavigate: (threadId:
   );
 }
 
-export function CommunityPanel() {
+export function CommunityPanel({ threadId }: { threadId?: string }) {
   const [board, setBoard] = useState<BoardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [repo, setRepo] = useState('zts212653/clowder-ai');
@@ -204,7 +204,11 @@ export function CommunityPanel() {
   const dispatchIssue = useCallback(
     async (issueId: string) => {
       try {
-        const res = await fetch(`/api/community-issues/${issueId}/dispatch`, { method: 'POST' });
+        const res = await fetch(`/api/community-issues/${issueId}/dispatch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threadId }),
+        });
         if (res.ok) fetchBoard();
       } catch {
         /* ignore */

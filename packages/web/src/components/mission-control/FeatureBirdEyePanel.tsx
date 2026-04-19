@@ -180,7 +180,17 @@ function DoneFeatureChip({ tag, featureItems }: { tag: string; featureItems: Bac
     >
       <span className="font-medium">{tag}</span>
       {featureName && <span className="text-[#6B8F65] max-w-[120px] truncate">{featureName}</span>}
-      <span>✓</span>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-2.5 w-2.5"
+      >
+        <path d="M20 6L9 17l-5-5" />
+      </svg>
     </span>
   );
 }

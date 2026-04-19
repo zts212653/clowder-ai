@@ -102,7 +102,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: '🎓 猫猫训练营',
+          title: '猫猫训练营',
           bootcampState: { v: 1, phase: 'phase-0-select-cat', startedAt: Date.now() },
         }),
       });
@@ -176,7 +176,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
                   {/* Top row: title + badge */}
                   <div className="flex items-center justify-between mb-2">
                     <span className={`text-[15px] font-semibold ${isCompleted ? 'text-cafe-secondary' : 'text-cafe'}`}>
-                      {t.title ?? '🎓 猫猫训练营'}
+                      {t.title ?? '猫猫训练营'}
                     </span>
                     <span
                       className={`text-xs font-medium px-2.5 py-1 rounded-full ${
@@ -187,13 +187,13 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
                             : 'bg-amber-100 text-amber-700'
                       }`}
                     >
-                      {isCurrent ? '当前' : isCompleted ? '已完成 ✓' : '进行中'}
+                      {isCurrent ? '当前' : isCompleted ? '已完成' : '进行中'}
                     </span>
                   </div>
                   {/* Meta: task + phase */}
                   <div className="flex items-center justify-between text-[13px] text-cafe-secondary mb-2">
                     <div className="flex items-center gap-4">
-                      {t.selectedTaskId && <span>⭐ {t.selectedTaskId}</span>}
+                      {t.selectedTaskId && <span>{t.selectedTaskId}</span>}
                       <span>
                         Phase {phaseNum}/{PHASE_ORDER.length} · {phaseLabel}
                       </span>

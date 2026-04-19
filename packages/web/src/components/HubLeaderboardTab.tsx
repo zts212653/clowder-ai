@@ -127,7 +127,7 @@ export function HubLeaderboardTab() {
             <SectionCard title="成就墙">
               <AchievementWall achievements={data.achievements ?? []} />
             </SectionCard>
-            <SectionCard title="CVO 能力等级 🐾">
+            <SectionCard title="CVO 能力等级">
               {data.cvoLevel ? (
                 <CvoLevelCard level={data.cvoLevel} />
               ) : (
