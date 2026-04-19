@@ -120,6 +120,28 @@ export interface IncrementalContextResult {
 }
 
 /**
+ * Decide whether the routing layer should append the raw current user message
+ * outside the incremental context envelope.
+ *
+ * The normal path is:
+ * - append when the current message is genuinely absent from unseen history
+ * - do NOT append when the message was filtered out for privacy
+ *
+ * Defensive guard:
+ * some smart-window / metadata paths can still surface the current message ID
+ * inside `contextText` even when `includesCurrentUserMessage` is false.
+ * In that case, appending the raw message would duplicate it in the same prompt.
+ */
+export function shouldAppendExplicitCurrentMessage(
+  inc: Pick<IncrementalContextResult, 'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'>,
+  currentUserMessageId: string | undefined,
+): boolean {
+  if (inc.includesCurrentUserMessage || inc.currentMessageFilteredOut) return false;
+  if (currentUserMessageId && inc.contextText.includes(currentUserMessageId)) return false;
+  return true;
+}
+
+/**
  * Keep cursor boundary monotonic within one invocation.
  * When the same cat is invoked multiple times (A2A re-entry), later passes may
  * observe fewer relevant messages and produce an older boundary; this helper

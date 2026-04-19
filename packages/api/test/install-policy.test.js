@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { evaluateInstallPolicy } from '../src/config/capabilities/install-policy.ts';
+import { evaluateInstallPolicy } from '../dist/config/capabilities/install-policy.js';
 
 describe('InstallPolicyEngine', () => {
   test('allows official trust level by default', () => {

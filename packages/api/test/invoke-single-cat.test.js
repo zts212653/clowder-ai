@@ -1216,6 +1216,32 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(classifyResumeFailure('upstream timeout'), null);
   });
 
+  it('isTransientCliExitCode1: context-overflow messages must NOT be treated as transient (bug: Codex duplicate user turn in rollout)', async () => {
+    const { isTransientCliExitCode1 } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-helpers.js'
+    );
+
+    // Real shape emitted by CodexAgentService.withRecentDiagnostics when session is context-full
+    const contextOverflowMsg =
+      "Codex CLI: CLI 异常退出 (code: 1, signal: none)\n最近流错误:\n- Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.";
+    assert.equal(
+      isTransientCliExitCode1(contextOverflowMsg),
+      false,
+      'context-window overflow is not recoverable — retrying writes a duplicate user turn into the rollout',
+    );
+
+    // Variant without the Chinese prefix (defensive matching on keyword only)
+    const altMsg = 'CLI 异常退出 (code: 1, signal: none)\ncontext window exceeded';
+    assert.equal(isTransientCliExitCode1(altMsg), false, 'context window phrase also non-transient');
+
+    // Regression guard: bare transient exit with no overflow marker still retries
+    assert.equal(
+      isTransientCliExitCode1('Codex CLI: CLI 异常退出 (code: 1, signal: none)'),
+      true,
+      'vanilla transient exit without overflow marker must still be retryable',
+    );
+  });
+
   it('session self-heal: retries once without --resume when Claude reports missing conversation', async () => {
     let invokeCount = 0;
     const sessionDeletes = [];
@@ -1685,6 +1711,44 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(
       msgs.some((m) => m.type === 'error' && String(m.error).includes('CLI 异常退出')),
       'error should be preserved when partial output already streamed',
+    );
+  });
+
+  it('transient CLI self-heal: does NOT retry when Codex error carries context-window overflow (prevents duplicate user turn)', async () => {
+    let invokeCount = 0;
+    const service = {
+      async *invoke() {
+        invokeCount++;
+        yield {
+          type: 'error',
+          catId: 'codex',
+          error:
+            "Codex CLI: CLI 异常退出 (code: 1, signal: none)\n最近流错误:\n- Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(makeDeps(), {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-codex-overflow',
+        threadId: 'thread-codex-overflow',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(
+      invokeCount,
+      1,
+      'context-window overflow must NOT trigger retry — retry would duplicate the user turn in Codex rollout JSONL',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'error' && String(m.error).includes('ran out of room')),
+      'context-overflow error must be surfaced to the user, not silently suppressed',
     );
   });
 

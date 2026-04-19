@@ -8,6 +8,17 @@ import { join } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import {
+  GENAI_MODEL,
+  GENAI_SYSTEM,
+  STREAM_ERROR_PATH,
+} from '../../../../../../infrastructure/telemetry/genai-semconv.js';
+import {
+  antigravityStreamErrorBuffered,
+  antigravityStreamErrorExpired,
+  antigravityStreamErrorRecovered,
+} from '../../../../../../infrastructure/telemetry/instruments.js';
+import { normalizeModel } from '../../../../../../infrastructure/telemetry/model-normalizer.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { AntigravityBridge, type BridgeConnection } from './AntigravityBridge.js';
 import { classifyStep, transformTrajectorySteps } from './antigravity-event-transformer.js';
@@ -17,6 +28,7 @@ import { ExecutorRegistry } from './executors/ExecutorRegistry.js';
 import { RunCommandExecutor } from './executors/RunCommandExecutor.js';
 
 const log = createModuleLogger('antigravity-service');
+const STREAM_ERROR_GRACE_WINDOW_MS = 4_500;
 
 export interface AntigravityAgentServiceOptions {
   catId?: CatId;
@@ -29,6 +41,8 @@ export interface AntigravityAgentServiceOptions {
   pollTimeoutMs?: number;
   /** Auto-approve pending Antigravity interactions — YOLO mode (default: true) */
   autoApprove?: boolean;
+  /** Grace window for buffered stream_error after partial text (default: 4500ms) */
+  streamErrorGraceWindowMs?: number;
 }
 
 export class AntigravityAgentService implements AgentService {
@@ -37,6 +51,7 @@ export class AntigravityAgentService implements AgentService {
   private readonly bridge: AntigravityBridge;
   private readonly pollTimeoutMs: number;
   private readonly autoApprove: boolean;
+  private readonly streamErrorGraceWindowMs: number;
 
   constructor(options?: AntigravityAgentServiceOptions) {
     this.catId = options?.catId
@@ -49,6 +64,7 @@ export class AntigravityAgentService implements AgentService {
     this.bridge = injectedBridge ?? new AntigravityBridge(options?.connection);
     this.pollTimeoutMs = options?.pollTimeoutMs ?? 60_000;
     this.autoApprove = options?.autoApprove ?? process.env['ANTIGRAVITY_AUTO_APPROVE'] !== 'false';
+    this.streamErrorGraceWindowMs = options?.streamErrorGraceWindowMs ?? STREAM_ERROR_GRACE_WINDOW_MS;
 
     // F061 Phase 2c: auto-attach default native executors when the service owns its bridge.
     // Tests that inject a mock bridge opt out here; they stub nativeExecuteAndPush directly.
@@ -123,6 +139,24 @@ export class AntigravityAgentService implements AgentService {
       let stallProbed = false;
       let lastDelivered = stepsBefore;
       const handledToolCallIds = new Set<string>();
+      let pendingStreamError: AgentMessage | null = null;
+      let streamErrorGraceDeadline = 0;
+      const streamErrorMetricAttrs = {
+        [GENAI_SYSTEM]: 'antigravity',
+        [GENAI_MODEL]: normalizeModel(this.model),
+        [STREAM_ERROR_PATH]: 'partial_text',
+      } as const;
+
+      const clearPendingStreamError = (reason: 'recovered' | 'superseded' | 'expired') => {
+        if (!pendingStreamError) return;
+        if (reason === 'recovered') {
+          antigravityStreamErrorRecovered.add(1, streamErrorMetricAttrs);
+        } else if (reason === 'expired') {
+          antigravityStreamErrorExpired.add(1, streamErrorMetricAttrs);
+        }
+        pendingStreamError = null;
+        streamErrorGraceDeadline = 0;
+      };
 
       // Diagnostic counters for empty_response observability
       let totalStepsSeen = 0;
@@ -131,13 +165,54 @@ export class AntigravityAgentService implements AgentService {
       let lastBatchStepTypes: string[] = [];
       const seenUnknownKeys = new Set<string>();
       const pollOnce = async function* (self: AntigravityAgentService, fromStep: number) {
-        for await (const batch of self.bridge.pollForSteps(
-          cascadeId,
-          fromStep,
-          self.pollTimeoutMs,
-          2_000,
-          options?.signal,
-        )) {
+        const iterator = self.bridge
+          .pollForSteps(cascadeId, fromStep, self.pollTimeoutMs, 2_000, options?.signal)
+          [Symbol.asyncIterator]();
+
+        while (true) {
+          let nextBatch: Awaited<ReturnType<typeof iterator.next>>;
+          if (pendingStreamError) {
+            const remainingMs = streamErrorGraceDeadline - Date.now();
+            if (remainingMs <= 0) {
+              log.warn({ cascadeId }, 'stream_error grace expired without recovery');
+              yield pendingStreamError;
+              clearPendingStreamError('expired');
+              terminalAbort = true;
+              try {
+                await iterator.return?.(undefined);
+              } catch {
+                // best-effort cleanup only
+              }
+              return;
+            }
+
+            let timeoutHandle;
+            const raced = await Promise.race([
+              iterator.next(),
+              new Promise<'__grace_timeout__'>((resolve) => {
+                timeoutHandle = setTimeout(() => resolve('__grace_timeout__'), remainingMs);
+              }),
+            ]);
+            clearTimeout(timeoutHandle);
+            if (raced === '__grace_timeout__') {
+              log.warn({ cascadeId }, 'stream_error grace expired without recovery');
+              yield pendingStreamError;
+              clearPendingStreamError('expired');
+              terminalAbort = true;
+              try {
+                await iterator.return?.(undefined);
+              } catch {
+                // best-effort cleanup only
+              }
+              return;
+            }
+            nextBatch = raced;
+          } else {
+            nextBatch = await iterator.next();
+          }
+
+          if (nextBatch.done) return;
+          const batch = nextBatch.value;
           if (batch.cursor.awaitingUserInput) {
             if (self.autoApprove && !autoApproveAttempted) {
               autoApproveAttempted = true;
@@ -202,46 +277,68 @@ export class AntigravityAgentService implements AgentService {
                 'step structure snapshot',
               );
             }
-            const fatalErrors: AgentMessage[] = [];
             const seenFatalKeys = new Set<string>();
+            const batchHasSpecificError = messages.some(
+              (msg) =>
+                msg.type === 'error' && (msg.errorCode === 'upstream_error' || msg.errorCode === 'model_capacity'),
+            );
             for (const msg of messages) {
-              if (msg.type === 'text') hasText = true;
               const isFatal = msg.type === 'error' && msg.errorCode && msg.errorCode !== 'tool_error';
-              if (isFatal) {
-                const key = `${msg.errorCode}:${msg.error}`;
-                if (seenFatalKeys.has(key)) {
-                  log.info('suppressed duplicate fatal error in same batch: %s', msg.error);
-                } else {
-                  seenFatalKeys.add(key);
-                  fatalErrors.push(msg);
+              if (!isFatal) {
+                if (msg.type === 'text') {
+                  if (pendingStreamError) {
+                    log.info({ cascadeId }, 'stream_error recovered mid-stream');
+                    clearPendingStreamError('recovered');
+                  }
+                  hasText = true;
                 }
-              } else {
                 yield msg;
+                continue;
               }
-            }
-            if (fatalErrors.length > 0) {
+
+              const key = `${msg.errorCode}:${msg.error}`;
+              if (seenFatalKeys.has(key)) {
+                log.info('suppressed duplicate fatal error in same batch: %s', msg.error);
+                continue;
+              }
+              seenFatalKeys.add(key);
               fatalSeen = true;
-              const hasSpecificError = fatalErrors.some(
-                (e) => e.errorCode === 'upstream_error' || e.errorCode === 'model_capacity',
-              );
-              // Bug-A: upstream_error is recoverable — model self-corrects in Antigravity LS.
-              // model_capacity is always terminal (server overload trumps everything).
-              // stream_error is terminal only when upstream_error is absent — when both
-              // co-occur, stream_error is noise (suppressed below) and the model can
-              // still self-correct.
-              const hasModelCapacity = fatalErrors.some((e) => e.errorCode === 'model_capacity');
-              const hasStreamError = fatalErrors.some((e) => e.errorCode === 'stream_error');
-              const hasUpstreamError = fatalErrors.some((e) => e.errorCode === 'upstream_error');
-              if (hasModelCapacity || (hasStreamError && !hasUpstreamError)) {
-                terminalAbort = true;
+
+              if (msg.errorCode === 'stream_error' && batchHasSpecificError) {
+                log.info('suppressed stream_error in favor of upstream_error: %s', msg.error);
+                continue;
               }
-              for (const err of fatalErrors) {
-                if (hasSpecificError && err.errorCode === 'stream_error') {
-                  log.info('suppressed stream_error in favor of upstream_error: %s', err.error);
-                  continue;
+
+              if (msg.errorCode === 'model_capacity') {
+                if (pendingStreamError) {
+                  log.info({ cascadeId }, 'stream_error superseded by model_capacity');
+                  clearPendingStreamError('superseded');
                 }
-                yield err;
+                terminalAbort = true;
+                yield msg;
+                continue;
               }
+
+              if (msg.errorCode === 'upstream_error') {
+                if (pendingStreamError) {
+                  log.info({ cascadeId }, 'stream_error superseded by upstream_error');
+                  clearPendingStreamError('superseded');
+                }
+                yield msg;
+                continue;
+              }
+
+              if (msg.errorCode === 'stream_error' && hasText) {
+                if (!pendingStreamError) {
+                  antigravityStreamErrorBuffered.add(1, streamErrorMetricAttrs);
+                }
+                pendingStreamError = msg;
+                streamErrorGraceDeadline = Date.now() + self.streamErrorGraceWindowMs;
+                continue;
+              }
+
+              terminalAbort = true;
+              yield msg;
             }
 
             // F061 Phase 2c: dispatch WAITING RUN_COMMAND steps through native executor.
@@ -279,8 +376,21 @@ export class AntigravityAgentService implements AgentService {
           for await (const msg of pollOnce(this, lastDelivered)) {
             yield msg;
           }
+          if (pendingStreamError) {
+            log.warn({ cascadeId }, 'stream_error grace expired after poll completion without recovery');
+            yield pendingStreamError;
+            clearPendingStreamError('expired');
+            terminalAbort = true;
+          }
         } catch (err) {
           const isStall = err instanceof Error && err.message.includes('stall');
+          if (pendingStreamError && isStall) {
+            log.warn({ cascadeId }, 'stream_error grace expired on stall without recovery');
+            yield pendingStreamError;
+            clearPendingStreamError('expired');
+            terminalAbort = true;
+            break;
+          }
           if (isStall && this.autoApprove && !stallProbed) {
             stallProbed = true;
             try {
@@ -294,6 +404,7 @@ export class AntigravityAgentService implements AgentService {
           }
           throw err;
         }
+        if (terminalAbort) break;
       }
 
       if (!hasText && !fatalSeen) {

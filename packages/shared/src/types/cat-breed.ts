@@ -42,6 +42,8 @@ export interface CliConfig {
    * Default: 'max' (claude) / 'xhigh' (codex)
    */
   readonly effort?: CliEffortValue;
+  readonly contextWindow?: number;
+  readonly autoCompactTokenLimit?: number;
 }
 
 /**

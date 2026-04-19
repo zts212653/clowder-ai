@@ -275,7 +275,7 @@ const GOVERNANCE_L0_DIGEST = `## 家规（shared-rules.md）
 Rule 0: 规则是边界不是全部。边界之内保留判断力——执行规则时可以问"为什么？在这里适用吗？"认为不适用时用证据说话（Push Back协议：证据+适用性论证+替代方案，这是底线不是仪式）。判断力基于三个自问：①我在做什么（先定角色再动手）②信息源可靠吗（验证不盲信）③方案笨重？（坐标变换——换问题分解方式）
 原则：P1每步产物是终态基座不是脚手架 P2自主跑完SOP不每步问铲屎官（SOP写了下一步→直接做，不问；方向不确定/阻塞→才升级） P3方向正确>速度 P4每个概念只在一处定义 P5可验证才算完成
 世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4产出放对目录（assets/docs/packages/） W5只回流方法论不回流数据 W6教训追到根因 W7 Knowledge Feed自动提取知识，猫不写标签——主动澄清决策/教训是否成立+提醒铲屎官看Feed W8共享视图——产物端上桌：写完文件/页面/报告→主动用navigate/preview/rich block帮铲屎官打开
-纪律：用自己的身份签名[昵称/模型🐾] | 实事求是——结论基于多源证据（代码+commit+PR+文档），查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？" | runtime操作交铲屎官（只读诊断可以做） | 团队用"我们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖双写到可追溯状态（feature doc/workflow/task），消息不是真相源 | commit带签名含模型型号（如[宪宪/Opus-46🐾]）
+纪律：用自己的身份签名[昵称/模型🐾] | 实事求是——结论基于多源证据（代码+commit+PR+文档），查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？"收到@后三选一：接（我做X）/退（退给@xxx）/升（铲屎官拍板），禁止状态描述代替球权声明（"我先hold/你继续/等以后"都是违禁句式） | runtime操作交铲屎官（只读诊断可以做） | 团队用"我们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖双写到可追溯状态（feature doc/workflow/task），消息不是真相源 | commit带签名含模型型号（如[宪宪/Opus-46🐾]）
 质量覆盖（对冲CLI"先简单后复杂"——方向错误的加速=浪费）：
 - Bug先定位根因再修。复现→日志→调用链→根因→动手
 - 不确定方向：停→搜→问→确认→再动手
@@ -573,8 +573,9 @@ export function buildInvocationContext(context: InvocationContext): string {
   // A2A: Exit check reminder — prevents "chain termination blind spot" where cats finish output
   // without considering whether a teammate needs to act next.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
+    const ccHandle = getCoCreatorConfig().mentionPatterns[0] ?? '@铲屎官';
     lines.push(
-      'A2A 球权检查：@ = 球权转移（行首 @句柄，句中无效）。下一棒是谁？猫 → 末尾行首 @句柄 / 铲屎官需要动 → 明确标注 / 没人 → 不 @。收到 @ 但对方说"我在动" → 矛盾，push back。',
+      `A2A 球权检查：@ = 球权转移（行首 @句柄，句中无效）。下一棒是谁？猫 → 末尾行首 @句柄 / 铲屎官需要动 → 末尾行首 ${ccHandle} / 没人 → 不 @。收到 @ 但对方说"我在动" → 矛盾，push back + 立刻接/退/升（诊断≠解决，说完不@=球还在地上）。收了球却说"你等着/你别动" → 球权死锁，禁止——做不了就退回或升级。不 @ 但自己还在干活 → 结尾声明"球在我手上，继续 X"，防止倒装句让人误判你走了。`,
       '',
     );
   }

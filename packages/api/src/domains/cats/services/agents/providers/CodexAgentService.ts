@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
-import { getCatEffort } from '../../../../../config/cat-config-loader.js';
+import { getCatContextWindowConfig, getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -248,6 +248,15 @@ export class CodexAgentService implements AgentService {
     const effortLevel = getCatEffort(this.catId as string, undefined, 'openai');
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
+    const ctxConfig = getCatContextWindowConfig(this.catId as string);
+    const contextWindowArgs: string[] = ctxConfig
+      ? [
+          '--config',
+          `model_context_window=${ctxConfig.contextWindow}`,
+          '--config',
+          `model_auto_compact_token_limit=${ctxConfig.autoCompactTokenLimit}`,
+        ]
+      : [];
     const catCafeMcpArgs = buildCatCafeMcpConfigArgs(options?.workingDirectory, options?.callbackEnv);
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor — passed as-is, no implicit wrapping.
@@ -298,6 +307,7 @@ export class CodexAgentService implements AgentService {
           '--json',
           ...modelArgs,
           ...reasoningArgs,
+          ...contextWindowArgs,
           ...approvalArgs,
           ...customProviderArgs,
           ...userConfigArgs,
@@ -311,6 +321,7 @@ export class CodexAgentService implements AgentService {
           '--json',
           ...modelArgs,
           ...reasoningArgs,
+          ...contextWindowArgs,
           '--sandbox',
           sandboxMode,
           '--add-dir',

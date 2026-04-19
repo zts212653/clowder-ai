@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { checkToolPermission, getSkillPermissions } from '../src/skill-security/skill-permissions.ts';
+import { checkToolPermission, getSkillPermissions } from '../dist/skill-security/skill-permissions.js';
 
 describe('SkillPermissions', () => {
   test('external skill cannot access capabilities write path', () => {

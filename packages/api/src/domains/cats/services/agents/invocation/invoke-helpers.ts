@@ -67,7 +67,12 @@ export function isMissingClaudeSessionError(message: string | undefined): boolea
 
 export function isTransientCliExitCode1(message: string | undefined): boolean {
   if (!message) return false;
-  return /CLI 异常退出 \(code:\s*1(?:,\s*signal:\s*none)?\)/i.test(message);
+  if (!/CLI 异常退出 \(code:\s*1(?:,\s*signal:\s*none)?\)/i.test(message)) return false;
+  // Context-window overflow is NOT recoverable by retrying — a second resume
+  // writes the same user turn into the rollout JSONL again (see bug-report
+  // 2026-04-19-codex-transient-retry-context-overflow).
+  if (/ran out of room|context window|context_window/i.test(message)) return false;
+  return true;
 }
 
 /** Transient ACP prompt failure: Google API connection dropped mid-stream.

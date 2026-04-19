@@ -1047,7 +1047,7 @@ export function useAgentMessages() {
         if (msg.isFinal) {
           // F108: clear this cat's invocation slot on terminal error
           if (msg.invocationId) {
-            // cat-cafe#869: Same multi-cat slot-aware cleanup as the done(isFinal) path.
+            // F869: Same multi-cat slot-aware cleanup as the done(isFinal) path.
             const slotState = useChatStore.getState();
             const primarySlot = slotState.activeInvocations[msg.invocationId];
             if (primarySlot?.catId === msg.catId) {
@@ -1110,6 +1110,7 @@ export function useAgentMessages() {
       getCurrentInvocationStateForCat,
       getOrRecoverActiveAssistantMessageId,
       ensureActiveAssistantMessage,
+      maybeMigrateSequentialInvocationOwnership,
       recordLateBindBubbleCreate,
       shouldSuppressLateStreamChunk,
       setHasActiveInvocation,

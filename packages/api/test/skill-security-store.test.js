@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { beforeEach, describe, test } from 'node:test';
-import { SkillSecurityStore } from '../src/skill-security/skill-security-store.ts';
+import { SkillSecurityStore } from '../dist/skill-security/skill-security-store.js';
 
 describe('SkillSecurityStore', () => {
   let store;

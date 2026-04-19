@@ -41,6 +41,8 @@ const cliConfigSchema = z.object({
   outputFormat: z.string().min(1),
   defaultArgs: z.array(z.string()).optional(),
   effort: z.enum(['low', 'medium', 'high', 'max', 'xhigh']).optional(),
+  contextWindow: z.number().positive().int().optional(),
+  autoCompactTokenLimit: z.number().positive().int().optional(),
 });
 
 const contextBudgetSchema = z.object({
@@ -731,6 +733,28 @@ export function getCatEffort(catId: string, config?: CatCafeConfig, fallbackProv
     if (normalized) return normalized;
   }
   return 'high';
+}
+
+export interface CatContextWindowConfig {
+  contextWindow: number;
+  autoCompactTokenLimit: number;
+}
+
+export function getCatContextWindowConfig(catId: string): CatContextWindowConfig | undefined {
+  const cfg = getCachedConfig();
+  if (!cfg) return undefined;
+
+  if (!_catIdToVariant || _catIdToVariantSource !== cfg) {
+    _catIdToVariant = buildCatIdToVariantIndex(cfg);
+    _catIdToVariantSource = cfg;
+  }
+
+  const variant = _catIdToVariant.get(catId);
+  if (!variant?.cli?.contextWindow) return undefined;
+  return {
+    contextWindow: variant.cli.contextWindow,
+    autoCompactTokenLimit: variant.cli.autoCompactTokenLimit ?? Math.floor(variant.cli.contextWindow * 0.88),
+  };
 }
 
 // ── F149: ACP config accessor (raw variant field, not in CatConfig type) ──────

@@ -44,6 +44,7 @@ import {
   isUserFacingSystemInfoContent,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
+  shouldAppendExplicitCurrentMessage,
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
@@ -325,8 +326,9 @@ export async function* routeParallel(
         const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);
         // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
-        // If it was present but filtered out (e.g. whisper), injecting would leak private content.
-        if (!inc.includesCurrentUserMessage && !inc.currentMessageFilteredOut) parts.push(message);
+        // Defensive guard: if the current message ID is already present anywhere in
+        // the assembled context text, do not append the raw message again.
+        if (shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) parts.push(message);
         prompt = parts.join('\n\n---\n\n');
       } else {
         // Per-cat context budget (Phase 4.0)

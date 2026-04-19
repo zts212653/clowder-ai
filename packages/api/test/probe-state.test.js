@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { buildProbeState, computeToolDiff } from '../src/config/capabilities/probe-state.ts';
+import { buildProbeState, computeToolDiff } from '../dist/config/capabilities/probe-state.js';
 
 describe('ProbeState', () => {
   test('connected probe with tools sets ready', () => {

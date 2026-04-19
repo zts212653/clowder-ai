@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { buildLockVersion } from '../src/config/capabilities/version-lock.ts';
+import { buildLockVersion } from '../dist/config/capabilities/version-lock.js';
 
 describe('VersionLock', () => {
   test('builds lock from marketplace source', () => {

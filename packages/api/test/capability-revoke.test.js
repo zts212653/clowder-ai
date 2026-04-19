@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { revokeCapability } from '../src/config/capabilities/capability-revoke.ts';
+import { revokeCapability } from '../dist/config/capabilities/capability-revoke.js';
 
 describe('Capability Revoke', () => {
   const makeEntry = (overrides = {}) => ({

@@ -275,8 +275,8 @@ function checkForStaleActiveInvocations(): void {
     toProbe.add(threadId);
   }
 
-  // Active thread: read directly from flat state.
   if (currentThreadId && canProbe(currentThreadId)) {
+    // Active thread: read directly from flat state.
     if (state.hasActiveInvocation) {
       // Direction 1 on active: derive staleness from oldest invocation.startedAt, since
       // snapshotActive.lastActivity is always Date.now() while streaming.

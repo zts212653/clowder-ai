@@ -132,6 +132,8 @@ export interface Thread {
   bootcampState?: BootcampStateV1;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
+  /** F168: Auto-switch workspace panel when this thread is opened. */
+  preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
 }
 
 /** F088 Phase G: Connector Hub thread state for IM command isolation. */

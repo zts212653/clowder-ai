@@ -1683,21 +1683,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
 
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
-        if (catId === 'gemini') {
-          log.info(
-            {
-              catId,
-              threadId,
-              invocationId,
-              reason: 'missing_session',
-              attempt: attempt + 1,
-              retryAttempt: attempt + 2,
-              elapsedMs: Date.now() - attemptStartedAt,
-              hadSessionId: Boolean(options.sessionId),
-            },
-            'Gemini retrying invoke',
-          );
-        }
+        const retryReason = suppressedPromptLimitError
+          ? 'prompt_token_limit'
+          : suppressedTimeoutError
+            ? 'cli_timeout'
+            : 'missing_session';
+        log.info(
+          {
+            catId,
+            threadId,
+            invocationId,
+            reason: retryReason,
+            retryReason,
+            attempt: attempt + 1,
+            retryAttempt: attempt + 2,
+            elapsedMs: Date.now() - attemptStartedAt,
+            hadSessionId: Boolean(options.sessionId),
+          },
+          'cat retrying invoke (session self-heal)',
+        );
         try {
           await sessionManager.delete(userId, catId, threadId);
         } catch {
@@ -1730,21 +1734,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         continue;
       }
       if (shouldRetryOnTransientCliExit && attempt + 1 < maxAttempts) {
-        if (catId === 'gemini') {
-          log.info(
-            {
-              catId,
-              threadId,
-              invocationId,
-              reason: 'transient_cli_exit',
-              attempt: attempt + 1,
-              retryAttempt: attempt + 2,
-              elapsedMs: Date.now() - attemptStartedAt,
-              hadSessionId: Boolean(options.sessionId),
-            },
-            'Gemini retrying invoke',
-          );
-        }
+        log.info(
+          {
+            catId,
+            threadId,
+            invocationId,
+            reason: 'transient_cli_exit',
+            retryReason: 'transient_cli_exit',
+            attempt: attempt + 1,
+            retryAttempt: attempt + 2,
+            elapsedMs: Date.now() - attemptStartedAt,
+            hadSessionId: Boolean(options.sessionId),
+          },
+          'cat retrying invoke (transient CLI exit)',
+        );
         allowTransientRetry = false;
         continue;
       }

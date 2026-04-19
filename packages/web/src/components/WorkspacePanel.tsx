@@ -8,6 +8,7 @@ import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { CommunityPanel } from './CommunityPanel';
 import { RecallFeed } from './memory/RecallFeed';
 import { TaskBoardPanel } from './TaskBoardPanel';
 import { useConfirm } from './useConfirm';
@@ -240,6 +241,24 @@ export function WorkspacePanel() {
       setPendingRevealPath(null);
     }
     prevThreadRef.current = currentThreadId;
+  }, [currentThreadId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // F168: Auto-switch workspace mode based on thread's preferredWorkspaceMode
+  useEffect(() => {
+    if (!currentThreadId) return;
+    let cancelled = false;
+    apiFetch(`/api/threads/${currentThreadId}`)
+      ?.then((res) => res.json())
+      .then((thread: { preferredWorkspaceMode?: string }) => {
+        if (cancelled) return;
+        const valid = new Set(['dev', 'recall', 'schedule', 'tasks', 'community']);
+        if (thread.preferredWorkspaceMode && valid.has(thread.preferredWorkspaceMode)) {
+          setWorkspaceMode(thread.preferredWorkspaceMode as typeof workspaceMode);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [currentThreadId]); // eslint-disable-line react-hooks/exhaustive-deps
   // F120: Listen for port discovery via Socket.IO
   useEffect(() => {
@@ -773,6 +792,30 @@ export function WorkspacePanel() {
               </svg>
               任务
             </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceMode('community')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
+                workspaceMode === 'community'
+                  ? 'bg-cocreator-bg text-cocreator-dark border border-cocreator-light/60'
+                  : 'text-cocreator-dark/40 hover:text-cocreator-dark/60'
+              }`}
+            >
+              <svg
+                className="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+              </svg>
+              社区
+            </button>
           </div>
 
           {/* Knowledge / Schedule / Tasks / Dev mode routing */}
@@ -784,6 +827,8 @@ export function WorkspacePanel() {
             <SchedulePanel />
           ) : workspaceMode === 'tasks' ? (
             <TaskBoardPanel />
+          ) : workspaceMode === 'community' ? (
+            <CommunityPanel />
           ) : (
             <>
               {/* Files / Changes toggle */}

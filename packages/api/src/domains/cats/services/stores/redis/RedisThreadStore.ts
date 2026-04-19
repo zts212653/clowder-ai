@@ -748,6 +748,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.connectorHubState) {
       result.connectorHubState = JSON.stringify(thread.connectorHubState);
     }
+    if (thread.preferredWorkspaceMode) {
+      result.preferredWorkspaceMode = thread.preferredWorkspaceMode;
+    }
     return result;
   }
 
@@ -837,6 +840,10 @@ export class RedisThreadStore implements IThreadStore {
       } catch {
         /* ignore malformed JSON */
       }
+    }
+    const validModes = new Set(['dev', 'recall', 'schedule', 'tasks', 'community']);
+    if (data.preferredWorkspaceMode && validModes.has(data.preferredWorkspaceMode)) {
+      result.preferredWorkspaceMode = data.preferredWorkspaceMode as Thread['preferredWorkspaceMode'];
     }
     return result;
   }

@@ -62,6 +62,7 @@ import { TranscriptWriter } from './domains/cats/services/session/TranscriptWrit
 import { createAuthorizationAuditStore } from './domains/cats/services/stores/factories/AuthorizationAuditStoreFactory.js';
 import { createAuthorizationRuleStore } from './domains/cats/services/stores/factories/AuthorizationRuleStoreFactory.js';
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
+import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
 import { createPendingRequestStore } from './domains/cats/services/stores/factories/PendingRequestStoreFactory.js';
@@ -125,6 +126,7 @@ import {
   catsRoutes,
   claudeRescueRoutes,
   commandsRoutes,
+  communityIssueRoutes,
   configRoutes,
   connectorHubRoutes,
   connectorMediaRoutes,
@@ -358,6 +360,7 @@ async function main(): Promise<void> {
   const { InMemoryGuideDismissTracker } = await import('./domains/guides/GuideDismissTracker.js');
   const dismissTracker = new InMemoryGuideDismissTracker();
   const taskStore = createTaskStore(redis);
+  const communityIssueStore = createCommunityIssueStore(redis);
   if (redis) {
     const { RedisPrTrackingStore } = await import('./infrastructure/email/RedisPrTrackingStore.js');
     const { backfillLegacyPrTracking } = await import('./infrastructure/email/backfill-legacy-pr-tracking.js');
@@ -1387,6 +1390,7 @@ async function main(): Promise<void> {
     });
   }
   await app.register(tasksRoutes, { taskStore, socketManager });
+  await app.register(communityIssueRoutes, { communityIssueStore, taskStore, socketManager });
   await app.register(backlogRoutes, { backlogStore, threadStore, messageStore });
 
   // F076: External projects + Need Audit
@@ -1434,14 +1438,16 @@ async function main(): Promise<void> {
   await app.register(auditRoutes, { threadStore });
   await app.register(capabilitiesRoutes);
 
-  // F146 Phase B: Marketplace adapter — stub loaders, real catalog fetchers in Phase C
   {
     const { createAdapterRegistry } = await import('./marketplace/index.js');
+    const { loadClaudeCatalog, loadCodexCatalog, loadOpenClawCatalog, loadAntigravityCatalog } = await import(
+      './marketplace/catalog-loaders.js'
+    );
     const registry = createAdapterRegistry({
-      claude: { catalogLoader: async () => [] },
-      codex: { catalogLoader: async () => [] },
-      openclaw: { catalogLoader: async () => [] },
-      antigravity: { catalogLoader: async () => [] },
+      claude: { catalogLoader: loadClaudeCatalog },
+      codex: { catalogLoader: loadCodexCatalog },
+      openclaw: { catalogLoader: loadOpenClawCatalog },
+      antigravity: { catalogLoader: loadAntigravityCatalog },
     });
     await app.register(marketplaceRoutes, { registry });
   }

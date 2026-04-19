@@ -639,9 +639,9 @@ interface ChatState {
   workspaceRevealPath: string | null;
   setWorkspaceRevealPath: (path: string | null, originThreadId?: string | null) => void;
 
-  // Phase H + F139 + F160: Workspace mode (dev tools / knowledge feed / schedule panel / task board)
-  workspaceMode: 'dev' | 'recall' | 'schedule' | 'tasks';
-  setWorkspaceMode: (mode: 'dev' | 'recall' | 'schedule' | 'tasks') => void;
+  // Phase H + F139 + F160 + F168: Workspace mode
+  workspaceMode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
+  setWorkspaceMode: (mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community') => void;
 
   // ── F120: Preview auto-open (always-mounted listener) ──
   pendingPreviewAutoOpen: { port: number; path: string } | null;

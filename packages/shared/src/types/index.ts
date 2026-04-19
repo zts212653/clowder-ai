@@ -145,6 +145,17 @@ export type {
   ParsedCommand,
   SlashCommandDefinition,
 } from './command.js';
+// Community Issue types (F168 社区事务编排引擎)
+export type {
+  CommunityIssueItem,
+  ConsensusState,
+  CreateCommunityIssueInput,
+  IssueState,
+  IssueType,
+  PrBoardGroup,
+  ReplyState,
+  UpdateCommunityIssueInput,
+} from './community-issue.js';
 // Connector types (F97 外部信息源抽象)
 export type {
   ConnectorDefinition,

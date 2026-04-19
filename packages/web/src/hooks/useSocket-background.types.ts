@@ -1,4 +1,3 @@
-import type { ReplyPreview } from '@cat-cafe/shared';
 import type {
   CatInvocationInfo,
   CatStatusType,
@@ -30,7 +29,7 @@ export interface BackgroundAgentMessage {
   /** F121: Reply-to message ID */
   replyTo?: string;
   /** F121: Server-hydrated reply preview */
-  replyPreview?: ReplyPreview;
+  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
   /** F108: Invocation ID — distinguishes messages from concurrent invocations */
   invocationId?: string;
   timestamp: number;

@@ -1031,7 +1031,13 @@
       "name": "A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏",
       "status": "in-progress | **Owner**: Ragdoll | **Priority**: P0",
       "file": "F167-a2a-chain-quality.md"
+    },
+    {
+      "id": "F168",
+      "name": "Community Operations Board — 社区事务编排引擎",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F168-community-ops-board.md"
     }
   ],
-  "generated_at": "2026-04-19T02:54:06.514Z"
+  "generated_at": "2026-04-19T13:01:16.922Z"
 }

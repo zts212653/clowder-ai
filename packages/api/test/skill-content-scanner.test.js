@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { scanSkillContent } from '../src/skill-security/content-scanner.ts';
+import { scanSkillContent } from '../dist/skill-security/content-scanner.js';
 
 describe('SkillContentScanner', () => {
   test('flags "ignore all previous instructions"', () => {
