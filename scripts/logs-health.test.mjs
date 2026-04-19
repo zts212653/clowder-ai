@@ -13,15 +13,19 @@ test('logs-health treats ripgrep no-match as zero errors', () => {
   const sandbox = mkdtempSync(resolve(tmpdir(), 'logs-health-'));
   const scriptsDir = resolve(sandbox, 'scripts');
   const processLogsDir = resolve(sandbox, 'data/logs/process');
+  const binDir = resolve(sandbox, 'bin');
 
   mkdirSync(scriptsDir, { recursive: true });
   mkdirSync(processLogsDir, { recursive: true });
+  mkdirSync(binDir, { recursive: true });
   writeFileSync(resolve(scriptsDir, 'logs-health.sh'), scriptText, 'utf8');
   writeFileSync(resolve(processLogsDir, 'clean.log'), 'all systems nominal\n', 'utf8');
+  writeFileSync(resolve(binDir, 'rg'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 
   const result = spawnSync('bash', [resolve(scriptsDir, 'logs-health.sh')], {
     cwd: sandbox,
     encoding: 'utf8',
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
