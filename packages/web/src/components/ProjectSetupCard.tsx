@@ -7,6 +7,7 @@
 import { useCallback, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
+import { HubIcon } from './hub-icons';
 
 /* Anime-style cat illustrations generated via Gemini */
 
@@ -154,7 +155,7 @@ export function ProjectSetupCard({
             {isEmptyDir && gitAvailable && !isGitRepo && (
               <div className="rounded-xl ring-1 ring-cocreator-primary/30 p-4 hover:bg-cocreator-primary/[0.03] transition-colors">
                 <div className="flex items-center gap-3 mb-2.5">
-                  <span className="text-lg">🐱</span>
+                  <HubIcon name="folder" className="h-5 w-5 text-cocreator-primary" />
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-cafe-black">克隆 Git 仓库</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cocreator-primary/10 text-cocreator-primary font-medium">
@@ -186,7 +187,7 @@ export function ProjectSetupCard({
                     disabled={!cloneUrl.trim()}
                     className="min-w-[6.5rem] px-4 py-2 rounded-lg bg-cocreator-primary hover:bg-cocreator-dark text-white text-xs font-medium transition-colors disabled:opacity-40"
                   >
-                    🐾 立即拉取
+                    立即拉取
                   </button>
                 </div>
               </div>
@@ -196,7 +197,7 @@ export function ProjectSetupCard({
             {gitAvailable && !isGitRepo && (
               <div className="rounded-xl ring-1 ring-cocreator-primary/30 p-4 hover:bg-cocreator-primary/[0.03] transition-colors">
                 <div className="flex items-center gap-3">
-                  <span className="text-lg">🐾</span>
+                  <HubIcon name="terminal" className="h-5 w-5 text-cocreator-primary" />
                   <div className="flex-1">
                     <span className="text-sm font-semibold text-cafe-black">初始化全新项目</span>
                     <p className="text-[11px] text-gray-500 mt-0.5">从零开始，为你铺设标准的协作规则和猫砂盆。</p>
@@ -206,7 +207,7 @@ export function ProjectSetupCard({
                     onClick={() => handleSetup('init')}
                     className="min-w-[6.5rem] px-4 py-2 rounded-lg bg-cocreator-primary hover:bg-cocreator-dark text-white text-xs font-medium transition-colors"
                   >
-                    🐾 初始化
+                    初始化
                   </button>
                 </div>
               </div>
@@ -215,7 +216,7 @@ export function ProjectSetupCard({
             {/* Option 3: Skip git */}
             <div className="rounded-xl ring-1 ring-cocreator-primary/30 p-4 hover:bg-cocreator-primary/[0.03] transition-colors">
               <div className="flex items-center gap-3">
-                <span className="text-lg">😺</span>
+                <HubIcon name="settings" className="h-5 w-5 text-cocreator-primary" />
                 <div className="flex-1">
                   <span className="text-sm font-semibold text-cafe-black">
                     {isGitRepo ? '初始化协作配置' : '跳过 Git，仅初始化协作'}
@@ -229,7 +230,7 @@ export function ProjectSetupCard({
                   onClick={() => handleSetup('skip')}
                   className="min-w-[6.5rem] px-4 py-2 rounded-lg bg-cocreator-primary hover:bg-cocreator-dark text-white text-xs font-medium transition-colors"
                 >
-                  🐾 {isGitRepo ? '初始化' : '跳过'}
+                  {isGitRepo ? '初始化' : '跳过'}
                 </button>
               </div>
             </div>

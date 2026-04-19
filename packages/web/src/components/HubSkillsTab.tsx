@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { HubIcon } from './hub-icons';
 
 interface SkillMount {
   claude: boolean;
@@ -49,12 +50,12 @@ interface SkillsData {
 
 function MountBadge({ mounted }: { mounted: boolean }) {
   return mounted ? (
-    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600 text-xs font-bold">
-      ✓
+    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600">
+      <HubIcon name="check" className="h-3 w-3" />
     </span>
   ) : (
-    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-500 text-xs font-bold">
-      ✗
+    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-500">
+      <HubIcon name="x" className="h-3 w-3" />
     </span>
   );
 }

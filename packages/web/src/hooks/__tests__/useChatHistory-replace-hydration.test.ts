@@ -542,6 +542,7 @@ describe('useChatHistory replace hydration', () => {
         catId: 'codex',
         content: 'partial draft content',
         thinking: 'draft thinking',
+        thinkingChunks: ['draft thinking'],
         toolEvents: [{ id: 'te-draft-1', type: 'tool_use' as const, label: 'Read file', timestamp: now - 10 }],
         origin: 'stream' as const,
         extra: { stream: { invocationId: 'inv-2' } },
@@ -605,6 +606,7 @@ describe('useChatHistory replace hydration', () => {
         ],
       }),
     );
+    expect(useChatStore.getState().messages.find((m) => m.id === 'server-msg-2')?.thinkingChunks).toBeUndefined();
   });
 
   it('preserves local blob URLs when a kept stream bubble survives replace hydration', async () => {

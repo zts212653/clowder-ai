@@ -276,12 +276,12 @@ TTL=0（铁律 #5），用户数据默认持久化
 ## Acceptance Criteria
 
 ### Phase A（定方向卡片 + Inbox 分拣）
-- [ ] AC-A1: 首猫 triage 后自动向 Inbox 发结构化定方向卡片（rich block）
-- [ ] AC-A2: 定方向卡片包含：事项来源、关联 feat、5 问结果、猫建议、team lead决策点
-- [ ] AC-A3: 首猫自动 @ 第二只猫交叉评估方向（非 bugfix 场景）
-- [ ] AC-A4: 两猫意见汇总后，自动标记是否需要team lead拍板
-- [ ] AC-A5: 已有 feat 事项自动路由到该 feat thread 并 @ 负责猫
-- [ ] AC-A6: 全新事项经team lead OK 后，首猫创建新 thread 并分配负责猫
+- [ ] AC-A1: 首猫 triage 后自动向 Inbox 发结构化定方向卡片（rich block）— 后端 TriageEntry 类型+triage-complete 端点已就绪，rich block 渲染待 Phase D skill 接入
+- [ ] AC-A2: 定方向卡片包含：事项来源、关联 feat、5 问结果、猫建议、team lead决策点 — DirectionCardPayload 类型已含全部字段，卡片渲染待 Phase D
+- [ ] AC-A3: 首猫自动 @ 第二只猫交叉评估方向（非 bugfix 场景）— 后端 await-second-cat 流程已就绪，自动 @ 待 Phase D skill 编排
+- [x] AC-A4: 两猫意见汇总后，自动标记是否需要team lead拍板 — resolveConsensus + TriageOrchestrator 完整实现
+- [x] AC-A5: 已有 feat 事项自动路由到该 feat thread 并 @ 负责猫 — routeAccepted 支持 relatedFeature+threadId 透传，猫侧通过 resolve 端点调用
+- [x] AC-A6: 全新事项经team lead OK 后，首猫创建新 thread 并分配负责猫 — resolve 端点+routeAccepted 自动创建 thread+resolveUserId 身份链
 
 ### Phase B（台账 + 生命周期）
 - [x] AC-B1: `CommunityIssueItem` 独立存储，持久化（TTL=0）

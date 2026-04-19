@@ -1,25 +1,32 @@
 /**
  * Community Issue + Board Routes (F168)
  *
- * POST   /api/community-issues          → 创建 issue 台账
- * GET    /api/community-issues?repo=xxx  → 列出 repo 下 issues
- * GET    /api/community-issues/:id       → 获取单个
- * PATCH  /api/community-issues/:id       → 更新状态/字段
- * DELETE /api/community-issues/:id       → 删除
- * GET    /api/community-board?repo=xxx   → 聚合看板（issues + PR projection）
+ * POST   /api/community-issues              → 创建 issue 台账
+ * GET    /api/community-issues?repo=xxx      → 列出 repo 下 issues
+ * GET    /api/community-issues/:id           → 获取单个
+ * PATCH  /api/community-issues/:id           → 更新状态/字段
+ * DELETE /api/community-issues/:id           → 删除
+ * POST   /api/community-issues/:id/dispatch  → 手动触发 triage
+ * POST   /api/community-issues/:id/triage-complete → 猫上报 triage 结果
+ * POST   /api/community-issues/:id/resolve   → 铲屎官拍板 accept/decline
+ * GET    /api/community-board?repo=xxx       → 聚合看板（issues + PR projection）
  */
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { ICommunityIssueStore } from '../domains/cats/services/stores/ports/CommunityIssueStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { derivePrGroup } from '../domains/community/derivePrGroup.js';
+import { TriageOrchestrator } from '../domains/community/TriageOrchestrator.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { resolveUserId } from '../utils/request-identity.js';
 
 export interface CommunityIssuesRoutesOptions {
   communityIssueStore: ICommunityIssueStore;
   taskStore: ITaskStore;
   socketManager: SocketManager;
+  threadStore?: Pick<IThreadStore, 'create'>;
 }
 
 const VALID_ISSUE_TYPES = ['bug', 'feature', 'enhancement', 'question'] as const;
@@ -130,10 +137,94 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       reply.status(409);
       return { error: 'Issue already dispatched or assigned' };
     }
+    const { threadId } = (request.body ?? {}) as { threadId?: string };
     const updated = await communityIssueStore.update(id, {
       state: 'discussing',
+      ...(threadId && { assignedThreadId: threadId }),
     });
     return updated;
+  });
+
+  const triageCompleteSchema = z.object({
+    catId: z.string().min(1),
+    verdict: z.enum(['WELCOME', 'NEEDS-DISCUSSION', 'POLITELY-DECLINE']),
+    questions: z
+      .array(
+        z.object({
+          id: z.enum(['Q1', 'Q2', 'Q3', 'Q4', 'Q5']),
+          result: z.enum(['PASS', 'WARN', 'FAIL', 'UNKNOWN']),
+        }),
+      )
+      .length(5),
+    reasonCode: z.string().optional(),
+    relatedFeature: z.string().nullable().optional(),
+  });
+
+  app.post('/api/community-issues/:id/triage-complete', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = triageCompleteSchema.safeParse(request.body);
+    if (!result.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: result.error.issues };
+    }
+
+    const issue = await communityIssueStore.get(id);
+    if (!issue) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+    if (issue.state !== 'discussing' && issue.state !== 'pending-decision') {
+      reply.status(409);
+      return { error: 'Issue not in triageable state', currentState: issue.state };
+    }
+
+    const entry = { ...result.data, timestamp: Date.now() } as import('@cat-cafe/shared').TriageEntry;
+    const orchestrator = new TriageOrchestrator({ communityIssueStore, threadStore: opts.threadStore });
+    return orchestrator.recordTriageEntry(id, entry);
+  });
+
+  const resolveSchema = z.object({
+    decision: z.enum(['accepted', 'declined']),
+    relatedFeature: z.string().nullable().optional(),
+    threadId: z.string().min(1).optional(),
+    catId: z.string().min(1).optional(),
+  });
+
+  app.post('/api/community-issues/:id/resolve', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = resolveSchema.safeParse(request.body);
+    if (!result.success) {
+      reply.status(400);
+      return { error: 'Invalid body', details: result.error.issues };
+    }
+
+    const issue = await communityIssueStore.get(id);
+    if (!issue) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+    if (issue.state !== 'pending-decision') {
+      reply.status(409);
+      return { error: 'Issue not pending decision', currentState: issue.state };
+    }
+
+    const userId = resolveUserId(request, { defaultUserId: 'system' }) ?? 'system';
+    const orchestrator = new TriageOrchestrator({ communityIssueStore, threadStore: opts.threadStore });
+    if (result.data.decision === 'accepted') {
+      await orchestrator.routeAccepted(
+        id,
+        result.data.relatedFeature ?? issue.relatedFeature,
+        userId,
+        result.data.threadId ?? undefined,
+      );
+    } else {
+      await orchestrator.routeDeclined(id);
+    }
+    if (result.data.catId) {
+      await communityIssueStore.update(id, { assignedCatId: result.data.catId });
+    }
+
+    return communityIssueStore.get(id);
   });
 
   app.get('/api/community-repos', async () => {

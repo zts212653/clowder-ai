@@ -183,6 +183,19 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
   const fallback = preferCurrent ? history : current;
   const toolEvents = pickRicherToolEvents(preferred.toolEvents, fallback.toolEvents);
   const thinking = pickLongerText(preferred.thinking, fallback.thinking);
+  const getConsistentThinkingChunks = (message: ChatMessageData): string[] | undefined => {
+    if (!message.thinkingChunks || message.thinkingChunks.length === 0) return undefined;
+    const rendered = message.thinkingChunks.join('\n\n---\n\n');
+    if (!message.thinking || rendered === message.thinking) {
+      return message.thinkingChunks;
+    }
+    return undefined;
+  };
+  const preferredThinkingChunks = getConsistentThinkingChunks(preferred);
+  const fallbackThinkingChunks = getConsistentThinkingChunks(fallback);
+  const thinkingChunks =
+    (thinking && thinking === preferred.thinking ? preferredThinkingChunks : undefined) ??
+    (thinking && thinking === fallback.thinking ? fallbackThinkingChunks : undefined);
   const extra = mergeMessageExtra(preferred.extra, fallback.extra);
 
   return {
@@ -195,6 +208,7 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     ...(toolEvents ? { toolEvents } : {}),
     ...((preferred.metadata ?? fallback.metadata) ? { metadata: preferred.metadata ?? fallback.metadata } : {}),
     ...(thinking ? { thinking } : {}),
+    ...(thinkingChunks ? { thinkingChunks } : {}),
     ...(extra ? { extra } : {}),
     ...((preferred.summary ?? fallback.summary) ? { summary: preferred.summary ?? fallback.summary } : {}),
     ...((preferred.source ?? fallback.source) ? { source: preferred.source ?? fallback.source } : {}),

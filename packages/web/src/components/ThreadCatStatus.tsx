@@ -1,6 +1,7 @@
 'use client';
 
 import type { CatStatusType, ThreadState } from '@/stores/chat-types';
+import { PawIcon } from './icons/PawIcon';
 
 /**
  * ASCII cat status indicator for thread sidebar.
@@ -45,8 +46,8 @@ export function ThreadCatStatus({
       )}
       {status === 'done' && <span className="text-green-500 text-[10px]">&#10003;</span>}
       {hasUserMention && (
-        <span className="text-[11px]" title="猫猫 @ 了你">
-          🐾
+        <span title="猫猫 @ 了你">
+          <PawIcon className="h-3 w-3 text-cafe-secondary" />
         </span>
       )}
       {unreadCount > 0 && (
