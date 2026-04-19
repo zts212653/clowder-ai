@@ -24,8 +24,8 @@ steps:
     advance: click
 
   - id: config-auth
-    target: member-editor.auth-config
-    tips: 在认证与模型区域选择 Client、认证信息和模型，然后点击保存
+    target: member-editor.profile
+    tips: 在这个编辑器里完成认证信息和模型配置，然后点击保存
     advance: confirm
 
   - id: done

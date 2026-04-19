@@ -88,7 +88,7 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(doneStep.advance, 'confirm');
   });
 
-  test('loaded edit-member-auth flow returns to the member card after saving auth changes', () => {
+  test('loaded edit-member-auth flow keeps save reachable during auth configuration', () => {
     const flow = loadGuideFlow('edit-member-auth');
     const selectStep = flow.steps.find((step) => step.id === 'select-member');
     const authStep = flow.steps.find((step) => step.id === 'config-auth');
@@ -98,7 +98,8 @@ describe('F155 guide registry loader target validation', async () => {
     assert.ok(authStep, 'config-auth step should exist');
     assert.ok(doneStep, 'done step should exist');
     assert.equal(selectStep.target, 'cats.first-member');
-    assert.equal(authStep.target, 'member-editor.auth-config');
+    assert.equal(authStep.target, 'member-editor.profile');
+    assert.equal(authStep.advance, 'confirm');
     assert.equal(doneStep.target, 'cats.first-member');
     assert.equal(doneStep.advance, 'confirm');
   });
