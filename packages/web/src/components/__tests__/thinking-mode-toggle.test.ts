@@ -151,7 +151,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
   });
 
-  it('thread-level bubble override loaded async beats initial global default after refresh-like hydration', async () => {
+  it('thread-level bubble override loaded async keeps thinking bubble collapsed during refresh-like hydration', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
     const { RightStatusPanel } = await import('@/components/RightStatusPanel');
 
@@ -184,8 +184,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
     expect(container.textContent).not.toContain(THINKING_TEXT);
-    expect(container.textContent).toContain('Thinking: 恢复中');
-    expect(container.textContent).toContain('恢复中...');
+    expect(container.textContent).toContain('Thinking: 跟随全局');
 
     act(() => {
       useChatStore.setState({
@@ -361,7 +360,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).not.toContain(THINKING_TEXT);
   });
 
-  it('bubble toggle collapses on first click when thread is following an expanded global default', async () => {
+  it('bubble toggle first click promotes a global-expanded thread to explicit expanded override', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
     const { RightStatusPanel } = await import('@/components/RightStatusPanel');
 
@@ -412,23 +411,23 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).toContain(THINKING_TEXT);
     expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
 
-    const collapseButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '折叠',
+    const expandButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '展开',
     );
-    expect(collapseButton).toBeTruthy();
+    expect(expandButton).toBeTruthy();
 
     await act(async () => {
-      collapseButton?.click();
+      expandButton?.click();
       await Promise.resolve();
     });
 
-    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
-    expect(container.textContent).not.toContain(THINKING_TEXT);
+    expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).toContain(THINKING_TEXT);
     expect(apiFetchMock).toHaveBeenCalledWith(
       '/api/threads/thread-global',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ bubbleThinking: 'collapsed' }),
+        body: JSON.stringify({ bubbleThinking: 'expanded' }),
       }),
     );
   });
