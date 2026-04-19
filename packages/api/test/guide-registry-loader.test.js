@@ -88,6 +88,21 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(doneStep.advance, 'confirm');
   });
 
+  test('loaded edit-member-auth flow returns to the member card after saving auth changes', () => {
+    const flow = loadGuideFlow('edit-member-auth');
+    const selectStep = flow.steps.find((step) => step.id === 'select-member');
+    const authStep = flow.steps.find((step) => step.id === 'config-auth');
+    const doneStep = flow.steps.find((step) => step.id === 'done');
+
+    assert.ok(selectStep, 'select-member step should exist');
+    assert.ok(authStep, 'config-auth step should exist');
+    assert.ok(doneStep, 'done step should exist');
+    assert.equal(selectStep.target, 'cats.first-member');
+    assert.equal(authStep.target, 'member-editor.auth-config');
+    assert.equal(doneStep.target, 'cats.first-member');
+    assert.equal(doneStep.advance, 'confirm');
+  });
+
   test('loaded connect-feishu flow reuses the rendered feishu connector card target', () => {
     const flow = loadGuideFlow('connect-feishu');
     const expandStep = flow.steps.find((step) => step.id === 'expand-feishu');

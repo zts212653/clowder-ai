@@ -29,6 +29,6 @@ steps:
     advance: confirm
 
   - id: done
-    target: member-editor.profile
-    tips: 配置完成，该成员现在使用新的模型了
+    target: cats.first-member
+    tips: 保存后会回到成员列表；如果还想继续调整认证或模型，可以从这里重新打开编辑
     advance: confirm
