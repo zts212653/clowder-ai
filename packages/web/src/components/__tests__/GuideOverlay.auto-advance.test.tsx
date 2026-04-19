@@ -446,7 +446,9 @@ describe('GuideOverlay auto-advance lifecycle', () => {
 
     act(() => {
       formTargetInputs[0].focus();
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }),
+      );
     });
     expect(document.activeElement).toBe(confirmButton);
   });
