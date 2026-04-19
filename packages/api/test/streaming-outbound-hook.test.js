@@ -215,6 +215,219 @@ describe('StreamingOutboundHook', () => {
     assert.ok(!adapter._calls.editMessage[0].text.includes('▌'));
   });
 
+  it('tracks inline-final-delivery connectors until cleanup finishes', async () => {
+    const telegramAdapter = wrapAdapter({
+      connectorId: 'telegram',
+      ownsFinalDelivery: true,
+      sendReply: async () => {},
+      sendPlaceholder: async (_chatId, _text) => 'msg-tg-1',
+      editMessage: async (_chatId, _msgId, _text) => {},
+      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
+    });
+    const adapters = new Map([['telegram', telegramAdapter]]);
+    const bindingStore = createBindingStore([
+      {
+        connectorId: 'telegram',
+        externalChatId: 'tg-chat1',
+        threadId: 'thread-1',
+        userId: 'u1',
+        createdAt: Date.now(),
+      },
+    ]);
+    const log = {
+      warn: () => {},
+      info: () => {},
+      error: () => {},
+      debug: () => {},
+      fatal: () => {},
+      trace: () => {},
+      child: () => log,
+    };
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log, updateIntervalMs: 0, minDeltaChars: 0 });
+
+    await hook.onStreamStart('thread-1', 'opus', 'inv-1');
+    assert.deepEqual(hook.getDeliverySkipConnectorIds('thread-1', 'inv-1'), ['telegram']);
+
+    await hook.onStreamEnd('thread-1', 'Final telegram text', 'inv-1');
+    assert.deepEqual(hook.getDeliverySkipConnectorIds('thread-1', 'inv-1'), ['telegram']);
+
+    await hook.cleanupPlaceholders('thread-1', 'inv-1');
+    assert.deepEqual(hook.getDeliverySkipConnectorIds('thread-1', 'inv-1'), []);
+  });
+
+  it('uses explicit ownsFinalDelivery flag instead of inferring from method combinations', async () => {
+    const telegramAdapter = wrapAdapter({
+      connectorId: 'telegram',
+      ownsFinalDelivery: true,
+      sendReply: async () => {},
+      sendPlaceholder: async (_chatId, _text) => 'msg-tg-1',
+      editMessage: async (_chatId, _msgId, _text) => {},
+      deleteMessage: async (_msgId) => {},
+      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
+    });
+    const adapters = new Map([['telegram', telegramAdapter]]);
+    const bindingStore = createBindingStore([
+      {
+        connectorId: 'telegram',
+        externalChatId: 'tg-chat1',
+        threadId: 'thread-1',
+        userId: 'u1',
+        createdAt: Date.now(),
+      },
+    ]);
+    const log = {
+      warn: () => {},
+      info: () => {},
+      error: () => {},
+      debug: () => {},
+      fatal: () => {},
+      trace: () => {},
+      child: () => log,
+    };
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log, updateIntervalMs: 0, minDeltaChars: 0 });
+
+    await hook.onStreamStart('thread-1', 'opus', 'inv-explicit');
+    assert.deepEqual(hook.getDeliverySkipConnectorIds('thread-1', 'inv-explicit'), ['telegram']);
+  });
+
+  it('Telegram ownsFinalDelivery+deleteMessage: editMessage writes final content before cleanup', async () => {
+    // Regression test for: streaming stops updating after many edits, final content never written
+    // Root cause: deleteMessage presence caused onStreamEnd to defer without writing final content
+    const telegramAdapter = wrapAdapter({
+      connectorId: 'telegram',
+      ownsFinalDelivery: true,
+      sendReply: async () => {},
+      sendPlaceholder: async (_chatId, _text) => 'msg-tg-1',
+      editMessage: async (_chatId, _msgId, _text) => {},
+      deleteMessage: async (_msgId) => {},
+      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
+    });
+    const adapters = new Map([['telegram', telegramAdapter]]);
+    const bindingStore = createBindingStore([
+      { connectorId: 'telegram', externalChatId: 'tg-chat1', threadId: 'thread-1', userId: 'u1', createdAt: Date.now() },
+    ]);
+    const log = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {}, fatal: () => {}, trace: () => {}, child: function() { return log; } };
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log, updateIntervalMs: 0, minDeltaChars: 0 });
+
+    await hook.onStreamStart('thread-1', 'opus', 'inv-tg');
+    await hook.onStreamChunk('thread-1', 'Partial streaming content', 'inv-tg');
+    await hook.onStreamEnd('thread-1', 'Final complete answer', 'inv-tg');
+
+    // editMessage must have been called with final content (no ▌ cursor)
+    const edits = telegramAdapter._calls.editMessage;
+    assert.ok(edits.length >= 1, 'editMessage must be called at least once');
+    const lastEdit = edits[edits.length - 1];
+    assert.equal(lastEdit.text, 'Final complete answer', 'Last edit must be final content without cursor');
+    // deleteMessage must NOT be called yet (deferred until cleanupPlaceholders)
+    assert.equal(telegramAdapter._calls.deleteMessage.length, 0, 'deleteMessage must be deferred');
+
+    // After cleanup, placeholder is deleted
+    await hook.cleanupPlaceholders('thread-1', 'inv-tg');
+    assert.equal(telegramAdapter._calls.deleteMessage.length, 1);
+    assert.equal(telegramAdapter._calls.deleteMessage[0].msgId, 'msg-tg-1');
+  });
+
+  it('Telegram ownsFinalDelivery: editMessage failure removes connectorId from skip list for fallback delivery', async () => {
+    // Regression: if final editMessage throws (429/network), skip list must be cleared
+    // so OutboundDeliveryHook can deliver as fallback — otherwise answer is silently lost
+    const telegramAdapter = wrapAdapter({
+      connectorId: 'telegram',
+      ownsFinalDelivery: true,
+      sendReply: async () => {},
+      sendPlaceholder: async (_chatId, _text) => 'msg-tg-fail',
+      editMessage: async (_chatId, _msgId, _text) => { throw new Error('429 Too Many Requests'); },
+      deleteMessage: async (_msgId) => {},
+      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
+    });
+    const adapters = new Map([['telegram', telegramAdapter]]);
+    const bindingStore = createBindingStore([
+      { connectorId: 'telegram', externalChatId: 'tg-chat1', threadId: 'thread-1', userId: 'u1', createdAt: Date.now() },
+    ]);
+    const log = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {}, fatal: () => {}, trace: () => {}, child: function() { return log; } };
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log, updateIntervalMs: 0, minDeltaChars: 0 });
+
+    await hook.onStreamStart('thread-1', 'opus', 'inv-fail');
+    // Before onStreamEnd, telegram is in skip list
+    assert.deepEqual(hook.getDeliverySkipConnectorIds('thread-1', 'inv-fail'), ['telegram']);
+
+    // editMessage will throw — should not propagate, but must remove from skip list
+    await hook.onStreamEnd('thread-1', 'Final answer', 'inv-fail');
+
+    // Skip list must be cleared so OutboundDeliveryHook delivers as fallback
+    assert.deepEqual(hook.getDeliverySkipConnectorIds('thread-1', 'inv-fail'), [],
+      'skip list must be empty after editMessage failure so OutboundDeliveryHook can deliver');
+    // deleteMessage must NOT be deferred (edit failed, nothing to clean up)
+    await hook.cleanupPlaceholders('thread-1', 'inv-fail');
+    assert.equal(telegramAdapter._calls.deleteMessage.length, 0,
+      'deleteMessage must not be called when editMessage failed');
+  });
+
+  it('Telegram ownsFinalDelivery+deleteMessage: falls back to lastAccumulatedText when finalText empty', async () => {
+    const telegramAdapter = wrapAdapter({
+      connectorId: 'telegram',
+      ownsFinalDelivery: true,
+      sendReply: async () => {},
+      sendPlaceholder: async (_chatId, _text) => 'msg-tg-2',
+      editMessage: async (_chatId, _msgId, _text) => {},
+      deleteMessage: async (_msgId) => {},
+      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
+    });
+    const adapters = new Map([['telegram', telegramAdapter]]);
+    const bindingStore = createBindingStore([
+      { connectorId: 'telegram', externalChatId: 'tg-chat1', threadId: 'thread-1', userId: 'u1', createdAt: Date.now() },
+    ]);
+    const log = { warn: () => {}, info: () => {}, error: () => {}, debug: () => {}, fatal: () => {}, trace: () => {}, child: function() { return log; } };
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log, updateIntervalMs: 0, minDeltaChars: 0 });
+
+    await hook.onStreamStart('thread-1', 'opus', 'inv-tg2');
+    await hook.onStreamChunk('thread-1', 'Accumulated so far', 'inv-tg2');
+    // finalText is empty (stream interrupted)
+    await hook.onStreamEnd('thread-1', '', 'inv-tg2');
+
+    const edits = telegramAdapter._calls.editMessage;
+    const lastEdit = edits[edits.length - 1];
+    // Should fall back to lastAccumulatedText, not error message, since we had chunks
+    assert.equal(lastEdit.text, 'Accumulated so far', 'Must fall back to lastAccumulatedText when finalText empty');
+  });
+
+  it('uses streamed text fallback when inline-final-delivery ends without final text', async () => {
+    const telegramAdapter = wrapAdapter({
+      connectorId: 'telegram',
+      sendReply: async () => {},
+      sendPlaceholder: async (_chatId, _text) => 'msg-tg-1',
+      editMessage: async (_chatId, _msgId, _text) => {},
+      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
+    });
+    const adapters = new Map([['telegram', telegramAdapter]]);
+    const bindingStore = createBindingStore([
+      {
+        connectorId: 'telegram',
+        externalChatId: 'tg-chat1',
+        threadId: 'thread-1',
+        userId: 'u1',
+        createdAt: Date.now(),
+      },
+    ]);
+    const log = {
+      warn: () => {},
+      info: () => {},
+      error: () => {},
+      debug: () => {},
+      fatal: () => {},
+      trace: () => {},
+      child: () => log,
+    };
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log, updateIntervalMs: 0, minDeltaChars: 0 });
+
+    await hook.onStreamStart('thread-1', 'opus', 'inv-1');
+    await hook.onStreamChunk('thread-1', 'Partial answer', 'inv-1');
+    await hook.onStreamEnd('thread-1', '', 'inv-1');
+
+    assert.equal(telegramAdapter._calls.editMessage.length, 2);
+    assert.equal(telegramAdapter._calls.editMessage[0].text, 'Partial answer ▌');
+    assert.equal(telegramAdapter._calls.editMessage[1].text, 'Partial answer');
+  });
+
   it('onStreamEnd cleans up session (second call is no-op)', async () => {
     const { hook, adapter } = createHook();
     await hook.onStreamStart('thread-1');
