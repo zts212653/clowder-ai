@@ -12,12 +12,17 @@ import type { CatId, CreateTaskInput, UpdateTaskInput } from '@cat-cafe/shared';
 import { catIdSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { GrowthService } from '../domains/cats/services/growth/GrowthService.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
   socketManager: SocketManager;
+  /** F160: Optional growth service for XP awards on task completion */
+  growthService?: GrowthService;
+  /** F160 Phase C: Activity event bus — replaces direct awardXp calls */
+  activityBus?: import('../domains/activity/ActivityEventBus.js').ActivityEventBus;
 }
 
 const VALID_STATUSES = ['todo', 'doing', 'blocked', 'done'] as const;
@@ -69,7 +74,7 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
 }
 
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
-  const { taskStore, socketManager } = opts;
+  const { taskStore, socketManager, growthService, activityBus } = opts;
 
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {
@@ -119,6 +124,9 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Invalid request body', details: result.error.issues };
     }
 
+    // F160: Read old status before update to detect actual state transition
+    const oldTask = result.data.status === 'done' ? await taskStore.get(id) : undefined;
+
     const updated = await taskStore.update(id, toUpdateInput(result.data));
     if (!updated) {
       reply.status(404);
@@ -126,6 +134,11 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     }
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+
+    // F160: Award XP only on actual transition to 'done' (idempotent)
+    if (result.data.status === 'done' && oldTask && oldTask.status !== 'done' && updated.ownerCatId) {
+      activityBus?.record('task_completed', updated.ownerCatId);
+    }
 
     return updated;
   });

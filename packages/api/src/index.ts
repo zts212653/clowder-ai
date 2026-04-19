@@ -140,8 +140,10 @@ import {
   guideActionRoutes,
   intentCardRoutes,
   invocationsRoutes,
+  journeyRoutes,
   leaderboardEventsRoutes,
   leaderboardRoutes,
+  leadershipRoutes,
   memoryPublishRoutes,
   memoryRoutes,
   messageActionsRoutes,
@@ -1074,6 +1076,36 @@ async function main(): Promise<void> {
     dailyTimer.unref();
   }
 
+  // F160: Cat Journey RPG — XP attributes + profiles (created early for AgentRouter injection)
+  const growthService = redis
+    ? new (await import('./domains/cats/services/growth/GrowthService.js')).GrowthService(redis)
+    : undefined;
+
+  // ADR-023: Activity Event Spine
+  const { ActivityEventBus } = await import('./domains/activity/ActivityEventBus.js');
+  const activityBus = new ActivityEventBus();
+
+  // Phase D: Co-Creator Leadership Service (铲屎官六维)
+  const leadershipService = redis
+    ? new (await import('./domains/cats/services/growth/LeadershipService.js')).LeadershipService(redis)
+    : undefined;
+
+  if (growthService) {
+    const { JourneyProjector } = await import('./domains/activity/JourneyProjector.js');
+    new JourneyProjector(activityBus, growthService);
+  }
+
+  if (leadershipService) {
+    const { LeadershipProjector } = await import('./domains/activity/LeadershipProjector.js');
+    new LeadershipProjector(activityBus, leadershipService);
+  }
+
+  // F160 → F102: Promote high-value activity events to memory (ADR-023 MemoryProjector)
+  if (memoryServices.evidenceStore) {
+    const { MemoryProjector } = await import('./domains/activity/MemoryProjector.js');
+    new MemoryProjector(activityBus, memoryServices.evidenceStore);
+  }
+
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({
     agentRegistry,
@@ -1098,6 +1130,8 @@ async function main(): Promise<void> {
     packStore,
     evidenceStore: memoryServices.evidenceStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
+    ...(growthService ? { growthService } : {}),
+    activityBus,
     guideSessionStore,
     dismissTracker,
   });
@@ -1176,6 +1210,7 @@ async function main(): Promise<void> {
     queueProcessor,
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
+    activityBus,
   };
   await app.register(messagesRoutes, messagesOpts);
   await app.register(queueRoutes, {
@@ -1193,11 +1228,13 @@ async function main(): Promise<void> {
     router,
     invocationTracker,
     queueProcessor,
+    activityBus,
   });
   await app.register(messageActionsRoutes, {
     messageStore,
     socketManager,
     threadStore,
+    activityBus,
   });
   // F155: Frontend-facing guide actions (no MCP auth, uses userId header)
   if (threadStore) {
@@ -1228,6 +1265,47 @@ async function main(): Promise<void> {
   // F150: Tool/Skill/MCP usage statistics
   if (toolUsageCounter) {
     await app.register(toolUsageRoutes, { toolUsageCounter });
+  }
+  // Phase D: Leadership routes BEFORE journey routes (avoid :catId collision)
+  if (leadershipService) {
+    await app.register(leadershipRoutes, { leadershipService });
+  }
+  if (growthService) {
+    // F160 Phase E (AC-E1): Evolution event service — records milestone narrative events
+    const { EvolutionService } = await import('./domains/cats/services/growth/EvolutionService.js');
+    const evolutionSvc = new EvolutionService(redis!);
+    growthService.evolutionService = evolutionSvc;
+    await app.register(journeyRoutes, { growthService, evolutionService: evolutionSvc });
+    // F160 Phase C: Achievement system — wire up bidirectional reference
+    const { AchievementService } = await import('./domains/cats/services/growth/AchievementService.js');
+    const achievementSvc = new AchievementService(redis!, growthService);
+    growthService.achievementService = achievementSvc;
+    // AC-C5: Broadcast achievement unlock events via WebSocket
+    if (socketManager) {
+      const sm = socketManager;
+      achievementSvc.onUnlock = (_memberId, unlocked, defs) => {
+        for (const u of unlocked) {
+          const def = defs.find((d) => d.id === u.achievementId);
+          sm.broadcastToRoom('thread:default', 'achievement_unlocked', {
+            memberId: u.memberId,
+            achievementId: u.achievementId,
+            label: def?.label,
+            rarity: def?.rarity,
+            unlockedAt: u.unlockedAt,
+          });
+          // AC-E1: Record achievement unlock as evolution event
+          if (def?.label) evolutionSvc.recordAchievement(u.memberId, u.achievementId, def.label);
+        }
+      };
+    }
+    await app.register((await import('./routes/achievements.js')).achievementRoutes, {
+      achievementService: achievementSvc,
+    });
+    // F160 AC-E3: Monthly review template — requires both growth + evolution services
+    const { MonthlyReviewService } = await import('./domains/cats/services/growth/MonthlyReviewService.js');
+    const { createMonthlyReviewTemplate } = await import('./infrastructure/scheduler/templates/monthly-review.js');
+    const reviewSvc = new MonthlyReviewService(growthService, evolutionSvc);
+    templateRegistry.register(createMonthlyReviewTemplate(reviewSvc));
   }
   // F075 Phase B+C: Game + Achievement stores
   const { GameStore } = await import('./domains/leaderboard/game-store.js');
@@ -1328,6 +1406,8 @@ async function main(): Promise<void> {
     reflectionService: memoryServices.reflectionService,
     limbRegistry,
     limbPairingStore,
+    ...(growthService ? { growthService } : {}),
+    activityBus,
     guideSessionStore,
   } as Parameters<typeof callbacksRoutes>[1];
   await app.register(callbacksRoutes, callbackOpts);
@@ -1389,7 +1469,7 @@ async function main(): Promise<void> {
       isCatAvailable: (catId: string) => isCatAvailable(catId),
     });
   }
-  await app.register(tasksRoutes, { taskStore, socketManager });
+  await app.register(tasksRoutes, { taskStore, socketManager, growthService, activityBus });
   await app.register(communityIssueRoutes, { communityIssueStore, taskStore, socketManager });
   await app.register(backlogRoutes, { backlogStore, threadStore, messageStore });
 
@@ -1490,6 +1570,8 @@ async function main(): Promise<void> {
     sessionSealer,
     transcriptReader,
     ...(hookToken ? { hookToken } : {}),
+    ...(growthService ? { growthService } : {}),
+    activityBus,
   });
 
   // F33 Phase 3: Session strategy config (runtime overrides via Redis)

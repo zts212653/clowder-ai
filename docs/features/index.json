@@ -986,6 +986,12 @@
     },
     {
       "id": "F160",
+      "name": "Cat Journey (猫猫足迹) — Activity Footprint Visualization",
+      "status": "Phase A-C complete, Phase D 6/7, Phase E 3/7 | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F160-cat-journey.md"
+    },
+    {
+      "id": "F160",
       "name": "毛线球升级 — Thread-Level Persistent Task Board",
       "status": "done | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F160-task-board-upgrade.md"
@@ -1039,5 +1045,5 @@
       "file": "F168-community-ops-board.md"
     }
   ],
-  "generated_at": "2026-04-19T13:01:16.922Z"
+  "generated_at": "2026-04-19T14:13:08.690Z"
 }

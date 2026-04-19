@@ -16,6 +16,7 @@ import { dirname, resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
+  builtinAccountIdForClient,
   resolveBuiltinClientForProvider,
   resolveForClient,
   validateRuntimeProviderBinding,

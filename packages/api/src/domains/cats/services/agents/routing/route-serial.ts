@@ -27,6 +27,7 @@ import {
   inlineActionShadowMiss,
   lineStartDetected,
 } from '../../../../../infrastructure/telemetry/instruments.js';
+import { detectInvocationPurpose } from '../../../../../routes/callback-a2a-trigger.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import {
@@ -45,6 +46,7 @@ import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAudi
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import { hydrateReplyPreview, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import { classifyTool } from '../../tool-usage/classify.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
@@ -609,6 +611,21 @@ export async function* routeSerial(
             );
           }
 
+          // F160 Phase C: Record tool usage via activity bus
+          if (effectiveMsg.type === 'tool_use' && effectiveMsg.catId) {
+            const toolInput = effectiveMsg.toolInput as Record<string, unknown> | undefined;
+            const toolName = effectiveMsg.toolName ?? 'unknown';
+            const { category } = classifyTool(toolName, toolInput);
+            deps.activityBus?.record('tool_used', effectiveMsg.catId as string, { toolName, category });
+            // AC-D6: AskUserQuestion → clarification_requested (L1 explicit detection)
+            if (toolName === 'AskUserQuestion') {
+              deps.activityBus?.record('clarification_requested', effectiveMsg.catId as string, {
+                source: 'explicit',
+                confidence: 1.0,
+              });
+            }
+          }
+
           // #80: Draft flush — fire-and-forget periodic persistence for F5 recovery
           if (deps.draftStore && ownInvocationId) {
             const now = Date.now();
@@ -949,6 +966,29 @@ export async function* routeSerial(
             },
           });
           storedMsgId = storedMsg.id;
+          // F160 Phase C: Record activity based on invocation purpose
+          // Chain: worklist purpose (legacy F27) → content detection (A2A direct) → queue purpose (F122B queue)
+          {
+            const purpose =
+              worklistEntry.a2aPurpose.get(catId) ??
+              (directMessageFrom ? detectInvocationPurpose(message) : undefined) ??
+              options.a2aPurpose;
+            if (purpose === 'review') {
+              // P2 fix: include finding metadata so MemoryProjector can promote reviews
+              const findingMatches = textContent.match(/\bP[12]\b/g);
+              const findingCount = findingMatches?.length ?? 0;
+              deps.activityBus?.record('review_submitted', catId as string, {
+                hasFindings: findingCount > 0,
+                findingCount,
+              });
+              // Heuristic: scan response for P1/P2 bug findings → award bug_caught
+              if (findingCount > 0) {
+                deps.activityBus?.record('bug_caught', catId as string);
+              }
+            } else {
+              deps.activityBus?.record('message_sent', catId as string);
+            }
+          }
           // F088-P3: Stash rich blocks for outbound delivery
           if (options.persistenceContext && allRichBlocks.length > 0) {
             options.persistenceContext.richBlocks = allRichBlocks;
@@ -1090,6 +1130,8 @@ export async function* routeSerial(
             worklistEntry.a2aFrom.set(nextCat, catId);
             // F121: response-text path — set trigger message for auto-replyTo
             if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+            // F160 ADR-023: A2A bond via event bus — JourneyProjector is sole bond recorder
+            deps.activityBus?.record('a2a_handoff_completed', catId as string, { participants: [catId, nextCat] });
           }
         }
 

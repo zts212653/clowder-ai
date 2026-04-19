@@ -35,10 +35,14 @@ interface SessionHooksRouteOptions extends FastifyPluginOptions {
   transcriptReader: TranscriptReader;
   /** Shared secret for hook authentication. If set, X-Cat-Cafe-Hook-Token header is required. */
   hookToken?: string;
+  /** F160: Growth XP service — awards session_seal XP on successful seal */
+  growthService?: import('../domains/cats/services/growth/GrowthService.js').GrowthService;
+  /** F160 Phase C: Activity event bus — replaces direct awardXp calls */
+  activityBus?: import('../domains/activity/ActivityEventBus.js').ActivityEventBus;
 }
 
 export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHooksRouteOptions): Promise<void> {
-  const { sessionChainStore, sessionSealer, transcriptReader, hookToken } = opts;
+  const { sessionChainStore, sessionSealer, transcriptReader, hookToken, growthService, activityBus } = opts;
 
   // Hook authentication guard — fail-closed: always requires valid token
   app.addHook('onRequest', async (request, reply) => {
@@ -136,6 +140,11 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
         status: sealResult.status,
       };
     }
+
+    // F160: Award session_seal XP (fire-and-forget)
+    // Phase E: Include lastUsage for cache efficiency bonus (AC-E4)
+    if (record.catId)
+      activityBus?.record('session_sealed', record.catId, record.lastUsage ? { lastUsage: record.lastUsage } : {});
 
     // Slow path: async transcript flush (fire-and-forget)
     sessionSealer.finalize({ sessionId: record.id }).catch(() => {

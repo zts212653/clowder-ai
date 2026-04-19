@@ -50,38 +50,43 @@ if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
 
-const transport = pino.transport({
-  targets: [
-    {
-      target: 'pino/file',
-      options: { destination: 1 },
-      level: 'trace',
-    },
-    {
-      target: 'pino-roll',
-      options: {
-        file: resolve(LOG_DIR, 'api.log'),
-        frequency: 'daily',
-        dateFormat: 'yyyy-MM-dd',
-        limit: { count: RETENTION_FILES },
-        mkdir: true,
-      },
-      level: 'trace',
-    },
-  ],
-});
+// pino.transport() spawns worker threads for each target. In test context these
+// threads outlive individual tests, causing "async activity after test ended" failures.
+// When PINO_DISABLE_TRANSPORT=1 (set by test harnesses), fall back to sync stdout.
+const transport =
+  process.env.PINO_DISABLE_TRANSPORT === '1'
+    ? undefined
+    : pino.transport({
+        targets: [
+          {
+            target: 'pino/file',
+            options: { destination: 1 },
+            level: 'trace',
+          },
+          {
+            target: 'pino-roll',
+            options: {
+              file: resolve(LOG_DIR, 'api.log'),
+              frequency: 'daily',
+              dateFormat: 'yyyy-MM-dd',
+              limit: { count: RETENTION_FILES },
+              mkdir: true,
+            },
+            level: 'trace',
+          },
+        ],
+      });
 
-export const logger = pino(
-  {
-    level: LOG_LEVEL,
-    timestamp: () => `,"time":"${new Date().toISOString()}"`,
-    redact: {
-      paths: REDACT_PATHS,
-      censor: '[REDACTED]',
-    },
+const pinoOpts = {
+  level: LOG_LEVEL,
+  timestamp: () => `,"time":"${new Date().toISOString()}"`,
+  redact: {
+    paths: REDACT_PATHS,
+    censor: '[REDACTED]',
   },
-  transport,
-);
+};
+
+export const logger = transport ? pino(pinoOpts, transport) : pino(pinoOpts);
 
 export function createModuleLogger(module: string): pino.Logger {
   return logger.child({ module });

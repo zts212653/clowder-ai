@@ -24,6 +24,7 @@ import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import { classifyTool } from '../../tool-usage/classify.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
@@ -538,11 +539,23 @@ export async function* routeParallel(
 
       // F150: Fire-and-forget tool usage counter
       if (effectiveMsg.type === 'tool_use' && deps.toolUsageCounter && effectiveMsg.catId) {
+        const toolInput = effectiveMsg.toolInput as Record<string, unknown> | undefined;
         deps.toolUsageCounter.recordToolUse(
           effectiveMsg.catId as string,
           effectiveMsg.toolName ?? 'unknown',
-          effectiveMsg.toolInput as Record<string, unknown> | undefined,
+          toolInput,
         );
+        // F160 Phase C: Record tool usage via activity bus
+        const toolName = effectiveMsg.toolName ?? 'unknown';
+        const { category } = classifyTool(toolName, toolInput);
+        deps.activityBus?.record('tool_used', effectiveMsg.catId as string, { toolName, category });
+        // AC-D6: AskUserQuestion → clarification_requested (L1 explicit detection)
+        if (toolName === 'AskUserQuestion') {
+          deps.activityBus?.record('clarification_requested', effectiveMsg.catId as string, {
+            source: 'explicit',
+            confidence: 1.0,
+          });
+        }
       }
       if (effectiveMsg.metadata && effectiveMsg.catId && !catMeta.has(effectiveMsg.catId)) {
         catMeta.set(effectiveMsg.catId, effectiveMsg.metadata);
@@ -776,6 +789,8 @@ export async function* routeParallel(
               ...(ownInvId ? { stream: { invocationId: ownInvId } } : {}),
             },
           });
+          // F160 Phase C: Record message_sent via activity bus (fire-and-forget)
+          deps.activityBus?.record('message_sent', msg.catId as string);
           // F088-P3: Stash rich blocks for outbound delivery
           if (options.persistenceContext && allRichBlocks.length > 0) {
             options.persistenceContext.richBlocks = [

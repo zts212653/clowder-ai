@@ -20,8 +20,10 @@ export class ImageExporter {
    * Capture a screenshot of the given URL.
    * For pages taller than CHUNK_HEIGHT, scrolls through the page in chunks
    * and stitches them together using Sharp.
+   * @param viewportWidth — override default 1280px (e.g. 480 for card exports)
    */
-  async capture(url: string, userId: string): Promise<Buffer> {
+  async capture(url: string, userId: string, viewportWidth?: number): Promise<Buffer> {
+    const width = viewportWidth ?? VIEWPORT_WIDTH;
     try {
       if (!this.browser) {
         this.browser = await puppeteer.launch({
@@ -33,7 +35,7 @@ export class ImageExporter {
       const page = await this.browser.newPage();
 
       await page.setExtraHTTPHeaders({ 'X-Cat-Cafe-User': userId });
-      await page.setViewport({ width: VIEWPORT_WIDTH, height: CHUNK_HEIGHT });
+      await page.setViewport({ width, height: CHUNK_HEIGHT });
 
       const exportUrl = new URL(url);
       exportUrl.searchParams.set('export', 'true');
@@ -66,7 +68,7 @@ export class ImageExporter {
 
       // Short page: single viewport screenshot (no stitching needed)
       if (pageHeight <= CHUNK_HEIGHT) {
-        await page.setViewport({ width: VIEWPORT_WIDTH, height: pageHeight });
+        await page.setViewport({ width, height: pageHeight });
         await this.waitForPaint(page);
         const screenshot = await page.screenshot({ type: 'png' });
         log.info({ bytes: screenshot.length }, 'Captured single screenshot');
@@ -94,7 +96,7 @@ export class ImageExporter {
 
         // For the last chunk, resize viewport to exact remaining height
         if (chunkH < CHUNK_HEIGHT) {
-          await page.setViewport({ width: VIEWPORT_WIDTH, height: chunkH });
+          await page.setViewport({ width, height: chunkH });
           await this.waitForPaint(page);
           // Re-scroll after resize: with the larger viewport, scrollTo(y) above was
           // clamped to maxScrollTop (= pageHeight - oldViewportHeight). After shrinking
@@ -115,7 +117,7 @@ export class ImageExporter {
       // Stitch chunks vertically using Sharp
       const stitched = await sharp({
         create: {
-          width: VIEWPORT_WIDTH,
+          width,
           height: pageHeight,
           channels: 4,
           background: { r: 255, g: 255, b: 255, alpha: 1 },

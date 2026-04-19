@@ -14,6 +14,7 @@ export type {
   A2ATask,
   A2ATaskStatus,
 } from './a2a.js';
+export { ACHIEVEMENT_DEFINITIONS } from './achievement-definitions.js';
 // Authorization types (猫猫授权系统)
 export type {
   AuthorizationAuditEntry,
@@ -249,6 +250,64 @@ export type {
   TriageIntentCardInput,
   TriageResult,
 } from './intent-card.js';
+// Journey types (F160 Cat Journey 猫猫足迹 — renamed from Growth RPG, ADR-023)
+export type {
+  // Backward-compat aliases (deprecated)
+  AchievementCategory,
+  AchievementCondition,
+  AchievementDefinition,
+  AchievementRarity,
+  // New canonical names
+  ActivityEvent,
+  ActivityEventType,
+  // Shared (unchanged)
+  BondLevel,
+  CatAttributes,
+  CatBond,
+  CatGrowthProfile,
+  CatJourneyProfile,
+  CatTitle,
+  DimensionStat,
+  // Phase E: Evolution Events (AC-E1)
+  EvolutionEvent,
+  EvolutionEventType,
+  FootfallEvent,
+  FootfallSource,
+  GrowthDimension,
+  GrowthOverview,
+  HighlightMoment,
+  InvocationPurpose,
+  JourneyOverview,
+  // Phase D: Co-Creator Leadership (铲屎官六维)
+  LeadershipDimension,
+  LeadershipFootfallSource,
+  LeadershipProfile,
+  LeadershipStat,
+  LeadershipTitleCondition,
+  LeadershipTitleDefinition,
+  MomentCategory,
+  MomentCondition,
+  MomentDefinition,
+  MomentRarity,
+  TitleCondition,
+  TitleDefinition,
+  TitleRarity,
+  TraitDimension,
+  UnlockedAchievement,
+  UnlockedMoment,
+  UnlockedTitle,
+  XpEvent,
+  XpSource,
+} from './journey.js';
+export {
+  DIMENSION_LABELS,
+  GROWTH_DIMENSIONS,
+  LEADERSHIP_DIMENSIONS,
+  LEADERSHIP_LABELS,
+  LEADERSHIP_LIVE_DIMS,
+  LEADERSHIP_SHADOW_DIMS,
+  TRAIT_DIMENSIONS,
+} from './journey.js';
 // Leaderboard types (F075 排行榜)
 export type {
   Achievement,
@@ -266,6 +325,7 @@ export type {
   StreakCat,
   WorkStats,
 } from './leaderboard.js';
+export { LEADERSHIP_TITLE_DEFINITIONS } from './leadership-title-definitions.js';
 // Limb types (F126 四肢控制面)
 export type {
   ILimbNode,
@@ -458,6 +518,7 @@ export type {
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';
+export { TITLE_DEFINITIONS } from './title-definitions.js';
 // TTS types (F34 TTS Provider)
 export type {
   ITtsProvider,

@@ -113,6 +113,8 @@ export interface MessagesRoutesOptions {
   outboundHook?: OutboundDeliveryHookLike;
   /** F088 ISSUE-15: Streaming hook for connector platforms (late-bound after gateway bootstrap) */
   streamingHook?: StreamingHookLike;
+  /** F160 Phase E: Activity bus for fast execution bonus (AC-E7) */
+  activityBus?: import('../domains/activity/ActivityEventBus.js').ActivityEventBus;
 }
 
 const log = createModuleLogger('routes/messages');
@@ -961,6 +963,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 : {}),
             });
             finalStatus = 'succeeded';
+
+            // AC-E7: Fast execution bonus — cat completed in < 60s → bonus execution XP
+            if (opts.activityBus && collectedUsage.size > 0) {
+              const FAST_THRESHOLD_MS = 60_000;
+              for (const [catId, usage] of collectedUsage) {
+                if (usage.durationMs != null && usage.durationMs < FAST_THRESHOLD_MS) {
+                  opts.activityBus.record('task_completed', catId, { fastExecution: true });
+                }
+              }
+            }
 
             // Push notification: cat(s) finished responding
             const pushSvc = getPushNotificationService();

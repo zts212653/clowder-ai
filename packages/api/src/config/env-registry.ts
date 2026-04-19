@@ -250,6 +250,13 @@ export const ENV_VARS: EnvDefinition[] = [
     exampleRecommended: true,
   },
   {
+    name: 'PINO_DISABLE_TRANSPORT',
+    defaultValue: '',
+    description: '设为 1 禁用 Pino worker thread transport（测试环境用，防止 async 泄漏）',
+    category: 'server',
+    sensitive: false,
+  },
+  {
     name: 'DEBUG',
     defaultValue: 'false',
     description: '调试模式开关（详细日志，非生产环境用）',

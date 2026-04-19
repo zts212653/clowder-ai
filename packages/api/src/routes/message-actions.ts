@@ -14,6 +14,8 @@ export interface MessageActionsRoutesOptions {
   messageStore: IMessageStore;
   socketManager: SocketManager;
   threadStore?: IThreadStore;
+  /** AC-D6: Activity bus for leadership event emission */
+  activityBus?: import('../domains/activity/ActivityEventBus.js').ActivityEventBus;
 }
 
 const deleteBodySchema = z.object({
@@ -227,12 +229,42 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
       return { error: `Block ${blockId} is not interactive (kind: ${block.kind})` };
     }
 
+    // P2-3: Capture old state before mutation for idempotency check
+    const interactiveBlock = block as {
+      interactiveType?: string;
+      options?: Array<{ id: string }>;
+      selectedIds?: string[];
+    };
+    const oldSelectedIds = interactiveBlock.selectedIds;
+
     // Merge patch into block
     const mutable = block as unknown as Record<string, unknown>;
     if (disabled !== undefined) mutable.disabled = disabled;
     if (selectedIds !== undefined) mutable.selectedIds = selectedIds;
 
     await opts.messageStore.updateExtra(id, msg.extra);
+
+    // AC-D6: Only 'confirm'-type interactive blocks count as leadership decisions.
+    if (selectedIds?.length && interactiveBlock.interactiveType === 'confirm' && opts.activityBus) {
+      // P2-3: Validate selectedIds against block.options
+      const validOptionIds = new Set((interactiveBlock.options ?? []).map((o) => o.id));
+      const validatedIds = selectedIds.filter((sid) => validOptionIds.has(sid));
+      // P2-3: Idempotency — skip if no valid options or selectedIds unchanged
+      const oldSet = new Set(oldSelectedIds ?? []);
+      const isChanged =
+        validatedIds.length > 0 &&
+        (validatedIds.length !== oldSet.size || validatedIds.some((sid) => !oldSet.has(sid)));
+      if (isChanged) {
+        opts.activityBus.record('decision_confirmed', 'co-creator', {
+          source: 'explicit',
+          confidence: 1.0,
+          blockId,
+          messageId: id,
+          threadId: msg.threadId,
+        });
+      }
+    }
+
     return { status: 'ok' };
   });
 };

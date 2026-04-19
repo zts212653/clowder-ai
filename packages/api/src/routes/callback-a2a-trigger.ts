@@ -12,7 +12,7 @@
  * invocation as before.
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, InvocationPurpose } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId, getRoster } from '../config/cat-config-loader.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -29,6 +29,18 @@ import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+
+/**
+ * F160 Phase B: Detect review intent from A2A trigger message content.
+ * Matches keywords from request-review skill triggers + common review patterns.
+ */
+const REVIEW_PATTERNS =
+  /(?:请\s*review|帮我看看|request[- ]?review|review\s*请求|code\s*review|re-?review|review\s*结果|review\s*意见)/i;
+
+export function detectInvocationPurpose(content: string): InvocationPurpose {
+  return REVIEW_PATTERNS.test(content) ? 'review' : 'discussion';
+}
+
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface QueueProcessorLike {
@@ -195,6 +207,7 @@ export async function enqueueA2ATargets(
         intent: 'execute',
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
+        a2aPurpose: detectInvocationPurpose(opts.content),
       });
       queueDiagnostics.push({
         catId,
@@ -250,7 +263,15 @@ export async function enqueueA2ATargets(
   // Legacy path: F27 worklist + standalone fallback (when invocationQueue dep not wired)
   // F27: Try to push to parent worklist first
   if (hasWorklist(threadId)) {
-    const pushResult = pushToWorklist(threadId, targetCats, callerCatId, opts.parentInvocationId, triggerMessageId);
+    const purpose = detectInvocationPurpose(opts.content);
+    const pushResult = pushToWorklist(
+      threadId,
+      targetCats,
+      callerCatId,
+      opts.parentInvocationId,
+      triggerMessageId,
+      purpose,
+    );
     const enqueued = pushResult.added;
     if (enqueued.length > 0) {
       if (deliveryCursorStore) {

@@ -31,6 +31,8 @@ export interface InvocationsRoutesOptions {
   uploadDir?: string;
   /** F39: Queue processor for auto-dequeue on retry complete */
   queueProcessor?: QueueProcessor;
+  /** F160 Phase E: Activity bus for error recovery XP (AC-E6) */
+  activityBus?: import('../domains/activity/ActivityEventBus.js').ActivityEventBus;
 }
 
 export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = async (app, opts) => {
@@ -241,6 +243,13 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
 
           await opts.invocationRecordStore.update(id, { status: 'succeeded' });
           finalStatus = 'succeeded';
+
+          // AC-E6: Award error recovery XP — retry succeeded after prior failure
+          if (snapshotStatus === 'failed') {
+            for (const cat of record.targetCats) {
+              opts.activityBus?.record('task_completed', cat, { recoveredFromFailure: true });
+            }
+          }
         }
       } catch (err) {
         log.error({ err }, 'Retry execution error');

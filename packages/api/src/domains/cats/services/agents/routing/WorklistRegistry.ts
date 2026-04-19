@@ -14,7 +14,7 @@
  * and MAX_A2A_DEPTH limit.
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, InvocationPurpose } from '@cat-cafe/shared';
 
 /** F122: Structured result from pushToWorklist — reason explains empty adds */
 export type PushReason = 'not_found' | 'depth_limit' | 'caller_mismatch' | 'all_duplicate' | 'pingpong_terminated';
@@ -51,6 +51,11 @@ export interface WorklistEntry {
    * Used by auto-replyTo to thread replies back to the triggering @mention message.
    */
   a2aTriggerMessageId: Map<CatId, string>;
+  /**
+   * F160 Phase B: Invocation purpose tag per target cat.
+   * Enables dimension-aware XP routing (e.g. 'review' → review_given instead of discussion).
+   */
+  a2aPurpose: Map<CatId, InvocationPurpose>;
   /**
    * F167 L1: ping-pong streak tracking — records the last same-pair (A↔B) push run.
    * Incremented on every 1-target A2A push where {caller, target} matches this pair
@@ -127,6 +132,7 @@ export function registerWorklist(
     executedIndex: 0,
     a2aFrom: new Map(),
     a2aTriggerMessageId: new Map(),
+    a2aPurpose: new Map(),
   };
   registry.set(key, entry);
 
@@ -184,6 +190,7 @@ export function pushToWorklist(
   callerCatId?: CatId,
   parentInvocationId?: string,
   triggerMessageId?: string,
+  purpose?: InvocationPurpose,
 ): PushResult {
   const key = registryKey(threadId, parentInvocationId);
   const entry = registry.get(key);
@@ -233,6 +240,9 @@ export function pushToWorklist(
       }
       if (triggerMessageId !== undefined) {
         entry.a2aTriggerMessageId.set(cat, triggerMessageId);
+      }
+      if (purpose !== undefined) {
+        entry.a2aPurpose.set(cat, purpose);
       }
     } else if (callerCatId !== undefined) {
       // Target already pending:

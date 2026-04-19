@@ -95,6 +95,10 @@ export interface CallbackRoutesOptions {
   limbRegistry?: import('../domains/limb/LimbRegistry.js').LimbRegistry;
   /** F126 Phase C: Limb pairing store for remote device approval */
   limbPairingStore?: import('../domains/limb/LimbPairingStore.js').LimbPairingStore;
+  /** F160: Growth XP service — awards discussion XP on cat messages */
+  growthService?: import('../domains/cats/services/growth/GrowthService.js').GrowthService;
+  /** F160 Phase C: Activity event bus — replaces direct awardXp calls */
+  activityBus?: import('../domains/activity/ActivityEventBus.js').ActivityEventBus;
   /** F088: Outbound delivery hook for connector-bound threads (late-bound after gateway bootstrap). */
   outboundHook?: {
     deliver(
@@ -308,6 +312,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     validateRepo,
     featIndexProvider,
     queueProcessor,
+    growthService,
+    activityBus,
   } = opts;
 
   // #476: Unified callback auth — extract credentials from headers, decorate request.callbackAuth
@@ -512,6 +518,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
     });
+
+    // F160 Phase C: Record message_sent via activity bus (JourneyProjector handles co-creator)
+    // Phase E (AC-E5): Enrich with intent for ideate distinction
+    let messageSentMeta: Record<string, unknown> = {};
+    if (record.parentInvocationId && invocationRecordStore) {
+      const invRec = await invocationRecordStore.get(record.parentInvocationId);
+      if (invRec && 'intent' in invRec) messageSentMeta = { intent: invRec.intent };
+    }
+    activityBus?.record('message_sent', record.catId, messageSentMeta);
 
     // F121: Hydrate reply preview for broadcast
     const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
@@ -1122,6 +1137,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Buffer the block — consumed at append time in route-serial/route-parallel
     const isNew = getRichBlockBuffer().add(record.threadId, record.catId as string, resolvedBlock, invocationId);
 
+    // F160 Phase C: Record rich block creation via activity bus (fire-and-forget, only for new blocks)
+    if (isNew) activityBus?.record('rich_block_created', record.catId);
+
     // Only broadcast new blocks (dedup retries at server to prevent frontend duplicates)
     // #454: include invocationId so frontend can exact-match callback to stream bubble
     if (isNew) {
@@ -1308,6 +1326,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     evidenceStore: opts.evidenceStore,
     markerQueue: opts.markerQueue,
     reflectionService: opts.reflectionService,
+    ...(growthService ? { growthService } : {}),
+    ...(activityBus ? { activityBus } : {}),
   });
 
   // F126: Limb node callback routes
@@ -1328,6 +1348,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(invocationTracker ? { invocationTracker } : {}),
       ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
       ...(queueProcessor ? { queueProcessor } : {}),
+      ...(growthService ? { growthService } : {}),
+      ...(activityBus ? { activityBus } : {}),
     });
     // Wire orchestrator into SocketManager for cancel propagation (P1-1 fix)
     if (typeof socketManager.setMultiMentionOrchestrator === 'function') {

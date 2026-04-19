@@ -489,4 +489,62 @@ describe('MultiMentionOrchestrator', () => {
     assert.equal(aborted, 0);
     assert.equal(ctrlA.signal.aborted, false, 'catA should be untouched');
   });
+
+  // ── recordFailure (Phase D) ─────────────────────────────────────
+
+  test('recordFailure records with status "failed" instead of "received"', () => {
+    const req = orch.create({
+      threadId: 'thread1',
+      initiator,
+      callbackTo: initiator,
+      targets: [catA, catB],
+      question: 'test',
+      timeoutMinutes: 8,
+    });
+    orch.start(req.id);
+
+    orch.recordFailure(req.id, catA, '[dispatch error]');
+    orch.recordResponse(req.id, catB, 'answer B');
+
+    const result = orch.getResult(req.id);
+    const respA = result.responses.find((r) => r.catId === catA);
+    const respB = result.responses.find((r) => r.catId === catB);
+    assert.equal(respA.status, 'failed');
+    assert.equal(respB.status, 'received');
+  });
+
+  test('recordFailure still counts toward completion (fills the slot)', () => {
+    const req = orch.create({
+      threadId: 'thread1',
+      initiator,
+      callbackTo: initiator,
+      targets: [catA],
+      question: 'test',
+      timeoutMinutes: 8,
+    });
+    orch.start(req.id);
+
+    const status = orch.recordFailure(req.id, catA, '[dispatch error]');
+    assert.equal(status, 'done'); // Still transitions to done
+  });
+
+  test('failure responses are NOT counted as received in getResult', () => {
+    const req = orch.create({
+      threadId: 'thread1',
+      initiator,
+      callbackTo: initiator,
+      targets: [catA, catB, catC],
+      question: 'test',
+      timeoutMinutes: 8,
+    });
+    orch.start(req.id);
+
+    orch.recordFailure(req.id, catA, '[error]');
+    orch.recordResponse(req.id, catB, 'ok');
+    orch.recordResponse(req.id, catC, 'ok');
+
+    const result = orch.getResult(req.id);
+    const received = result.responses.filter((r) => r.status === 'received');
+    assert.equal(received.length, 2); // only catB + catC
+  });
 });

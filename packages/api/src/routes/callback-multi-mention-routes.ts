@@ -69,18 +69,28 @@ export interface MultiMentionRouteDeps {
     ): void;
     unregisterEntryCompleteHook?(entryId: string): void;
   };
+  /** F160: Growth XP service — awards mention_collab XP */
+  growthService?: import('../domains/cats/services/growth/GrowthService.js').GrowthService;
+  /** F160 Phase C: Activity event bus — replaces direct awardXp calls */
+  activityBus?: import('../domains/activity/ActivityEventBus.js').ActivityEventBus;
 }
 
 // ── Timeout tracking ────────────────────────────────────────────────
 const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function scheduleTimeout(requestId: string, timeoutMinutes: number, log: FastifyBaseLogger): void {
+function scheduleTimeout(
+  requestId: string,
+  timeoutMinutes: number,
+  log: FastifyBaseLogger,
+  onTimeout?: () => void,
+): void {
   const ms = timeoutMinutes * 60_000;
   const timer = setTimeout(() => {
     const orch = getMultiMentionOrchestrator();
     log.info({ requestId, timeoutMinutes }, '[F086] Multi-mention timeout fired');
     orch.handleTimeout(requestId);
     activeTimers.delete(requestId);
+    onTimeout?.();
   }, ms);
   // Unref so it doesn't keep the process alive
   timer.unref();
@@ -145,7 +155,15 @@ function dispatchViaQueue(
           return;
         }
         const finalResponse = responseText || (status === 'failed' ? '[dispatch error]' : '');
-        const newStatus = orch.recordResponse(requestId, catId, finalResponse);
+        const newStatus =
+          status === 'failed'
+            ? orch.recordFailure(requestId, catId, finalResponse)
+            : orch.recordResponse(requestId, catId, finalResponse);
+        // F160 Phase C: Record multi-mention completion via activity bus (JourneyProjector handles bond + co-creator)
+        // Only record for actual successes — failed dispatches should not earn collab XP or bond
+        if (status !== 'failed') {
+          deps.activityBus?.record('multi_mention_completed', catId, { participants: [initiator, catId] });
+        }
         log.info(
           { requestId, catId, newStatus, responseLength: finalResponse.length },
           '[F122B B6] multi-mention queue response recorded',
@@ -294,6 +312,8 @@ async function dispatchToTarget(
 
     // Record response in orchestrator
     const newStatus = orch.recordResponse(requestId, targetCatId, finalResponse);
+    // F160 Phase C: Record multi-mention completion via activity bus (JourneyProjector handles bond + co-creator)
+    deps.activityBus?.record('multi_mention_completed', targetCatId, { participants: [initiator, targetCatId] });
     log.info(
       { requestId, targetCatId, newStatus, responseLength: finalResponse.length, toolsUsed: toolsUsed.length },
       '[F086] Multi-mention response recorded',
@@ -327,12 +347,18 @@ async function dispatchToTarget(
         );
       }
     }
-    // Record failure response in orchestrator
-    orch.recordResponse(
-      requestId,
-      targetCatId,
-      `[dispatch error: ${err instanceof Error ? err.message : String(err)}]`,
-    );
+    // Aborted dispatches are intentional cancels — don't record as failure or flush
+    if (!controller.signal.aborted) {
+      const failStatus = orch.recordFailure(
+        requestId,
+        targetCatId,
+        `[dispatch error: ${err instanceof Error ? err.message : String(err)}]`,
+      );
+      if (failStatus === 'done') {
+        cancelTimeout(requestId);
+        void flushResult(deps, requestId, threadId, userId, log);
+      }
+    }
   } finally {
     // F122 AC-A7: unconditional slot release — covers early return, registerDispatch
     // throw, routeExecution crash, and normal completion. InvocationTracker.complete()
@@ -404,12 +430,35 @@ async function flushResult(
     },
   });
 
+  // F160 Phase C: deep_collab bonus — award all successful responders when 3+ cats participated
+  // JourneyProjector handles co-creator awards automatically for collab events
+  const successfulCats = result.responses.filter((r) => r.status === 'received');
+  if (successfulCats.length >= 3 && deps.activityBus) {
+    for (const resp of successfulCats) {
+      deps.activityBus.record('deep_collab_completed', resp.catId, {
+        participants: successfulCats.map((r) => r.catId),
+      });
+    }
+  }
+
+  // Phase D: Request-level completion event (fires ONCE per multi-mention, for LeadershipProjector)
+  if (deps.activityBus) {
+    const allTargets = result.request.targets;
+    deps.activityBus.record('multi_mention_request_completed', result.request.initiator, {
+      requestId,
+      targets: allTargets,
+      targetCount: allTargets.length,
+      successCount: successfulCats.length,
+      isDeepCollab: successfulCats.length >= 3,
+    });
+  }
+
   log.info(
     {
       requestId,
       threadId,
       status: result.request.status,
-      responseCount: result.responses.filter((r) => r.status === 'received').length,
+      responseCount: successfulCats.length,
       totalTargets: result.request.targets.length,
     },
     '[F086] Multi-mention result flushed',
@@ -471,9 +520,14 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
       return reply.send({ requestId: mmRequest.id, status: mmRequest.status });
     }
 
-    // Start + schedule timeout
+    // Start + schedule timeout (with flushResult on timeout for leadership scoring)
     orch.start(mmRequest.id);
-    scheduleTimeout(mmRequest.id, mmRequest.timeoutMinutes, request.log);
+    scheduleTimeout(mmRequest.id, mmRequest.timeoutMinutes, request.log, () => {
+      // Only flush on timeout — if already done, flushResult was called by the response handler
+      if (orch.getStatus(mmRequest.id) === 'timeout') {
+        void flushResult(deps, mmRequest.id, record.threadId, record.userId, request.log);
+      }
+    });
 
     // Dispatch to all targets in parallel (fire and forget)
     // F122B B6: Use InvocationQueue when available, legacy direct dispatch as fallback
@@ -504,6 +558,13 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         );
       }
     }
+
+    // Phase D: Coordination footfall — attribute to actual caller, not hardcoded co-creator
+    deps.activityBus?.record('multi_mention_dispatched', callerCatId, {
+      requestId: mmRequest.id,
+      targets: body.targets,
+      targetCount: targetCatIds.length,
+    });
 
     request.log.info(
       {

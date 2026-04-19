@@ -1,7 +1,7 @@
 /**
- * F129 GrowthBoundary — Ensures exported packs contain no private Growth data.
- * KD-11: Pack = shareable cultural seed; Growth = local private relationship fruit.
- * Growth data must never appear in exported or installed packs.
+ * F129 JourneyBoundary — Ensures exported packs contain no private Journey data.
+ * KD-11: Pack = shareable cultural seed; Journey = local private relationship fruit.
+ * Journey data must never appear in exported or installed packs.
  */
 
 import { readdir, stat } from 'node:fs/promises';
@@ -12,11 +12,11 @@ export interface GrowthCheckResult {
   violations: string[];
 }
 
-/** File extensions that always indicate Growth/private data */
+/** File extensions that always indicate Journey/private data */
 const GROWTH_EXTENSIONS: RegExp[] = [/\.sqlite$/i, /\.db$/i, /\.env$/i, /\.env\./i];
 
 /**
- * Exact directory names that indicate Growth data containers.
+ * Exact directory names that indicate Journey data containers.
  * Only matches the directory entry name itself — not substrings of filenames.
  */
 const GROWTH_DIR_NAMES = new Set(['sessions', 'threads', 'preferences', 'evidence', 'memory', 'digest', 'growth']);
@@ -28,7 +28,7 @@ const GROWTH_FILE_STEMS: RegExp[] = [/^credentials/i, /^secrets/i];
 const PACK_SAFE_PARENTS = new Set(['knowledge', 'masks', 'workflows', 'expression', 'bridges', 'assets']);
 
 /**
- * Recursively scan a pack directory for Growth data violations.
+ * Recursively scan a pack directory for Journey data violations.
  * Returns { clean: true } if no violations found.
  */
 export async function checkGrowthBoundary(packDir: string): Promise<GrowthCheckResult> {
@@ -64,7 +64,7 @@ async function scanDir(
     let violated = false;
 
     if (isDir) {
-      // Directories: flag if name matches Growth container, UNLESS inside a pack-safe parent
+      // Directories: flag if name matches Journey container, UNLESS inside a pack-safe parent
       if (!insideSafeParent && GROWTH_DIR_NAMES.has(entry.toLowerCase())) {
         violations.push(relPath);
         violated = true;

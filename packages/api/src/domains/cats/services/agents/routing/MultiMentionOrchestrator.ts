@@ -101,6 +101,20 @@ export class MultiMentionOrchestrator {
   }
 
   recordResponse(requestId: string, catId: CatId, content: string): MultiMentionStatus {
+    return this.recordResponseWithStatus(requestId, catId, content, 'received');
+  }
+
+  /** Record a failed dispatch so it counts as a response (fills the slot) but NOT as a success. */
+  recordFailure(requestId: string, catId: CatId, content: string): MultiMentionStatus {
+    return this.recordResponseWithStatus(requestId, catId, content, 'failed');
+  }
+
+  private recordResponseWithStatus(
+    requestId: string,
+    catId: CatId,
+    content: string,
+    status: 'received' | 'failed',
+  ): MultiMentionStatus {
     const entry = this.entries.get(requestId);
     if (!entry) throw new Error(`Multi-mention request not found: ${requestId}`);
 
@@ -123,7 +137,7 @@ export class MultiMentionOrchestrator {
       catId,
       content,
       timestamp: Date.now(),
-      status: 'received',
+      status,
     });
 
     // Check completion

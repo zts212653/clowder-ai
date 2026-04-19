@@ -33,6 +33,8 @@ export interface QueueEntry {
   callerCatId?: string;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
+  /** F160 Phase B: invocation purpose detected at enqueue time (review vs discussion) */
+  a2aPurpose?: 'discussion' | 'review';
 }
 
 export interface EnqueueResult {
@@ -130,6 +132,7 @@ export class InvocationQueue {
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
       senderMeta: input.senderMeta,
+      a2aPurpose: input.a2aPurpose,
     };
     q.push(entry);
     this.originalContents.set(entry.id, input.content);

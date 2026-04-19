@@ -168,6 +168,10 @@ export interface AgentRouterOptions {
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150: Tool usage counter */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F160: Growth XP service */
+  growthService?: import('../../growth/GrowthService.js').GrowthService;
+  /** F160 Phase C: Activity event bus — replaces direct awardXp calls */
+  activityBus?: import('../../../../activity/ActivityEventBus.js').ActivityEventBus;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6: Dismiss tracker for guide offer suppression */
@@ -214,6 +218,10 @@ export class AgentRouter {
   private evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** F150 */
   private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F160 */
+  private growthService?: import('../../growth/GrowthService.js').GrowthService;
+  /** F160 Phase C */
+  private activityBus?: import('../../../../activity/ActivityEventBus.js').ActivityEventBus;
   /** F155 B-4 */
   private guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6 */
@@ -256,6 +264,8 @@ export class AgentRouter {
     this.packStore = options.packStore;
     this.evidenceStore = options.evidenceStore;
     this.toolUsageCounter = options.toolUsageCounter;
+    this.growthService = options.growthService;
+    this.activityBus = options.activityBus;
     this.guideSessionStore = options.guideSessionStore;
     this.dismissTracker = options.dismissTracker;
   }
@@ -686,6 +696,8 @@ export class AgentRouter {
       ...(this.packStore ? { packStore: this.packStore } : {}),
       ...(this.evidenceStore ? { evidenceStore: this.evidenceStore } : {}),
       ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),
+      ...(this.growthService ? { growthService: this.growthService } : {}),
+      ...(this.activityBus ? { activityBus: this.activityBus } : {}),
     };
   }
 
@@ -791,6 +803,8 @@ export class AgentRouter {
       persistenceContext?: PersistenceContext;
       /** F108: parentInvocationId for WorklistRegistry concurrent isolation */
       parentInvocationId?: string;
+      /** F160 Phase B: invocation purpose from queue entry */
+      a2aPurpose?: import('@cat-cafe/shared').InvocationPurpose;
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
@@ -819,6 +833,7 @@ export class AgentRouter {
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       ...(options?.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+      ...(options?.a2aPurpose ? { a2aPurpose: options.a2aPurpose } : {}),
     };
 
     if (intent.intent === 'ideate' && targetCats.length > 1) {
