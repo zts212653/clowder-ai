@@ -9,6 +9,7 @@
 'use client';
 
 import { type ReactNode, useState } from 'react';
+import { HubIcon } from './hub-icons';
 
 // ────────── Types ──────────
 
@@ -571,7 +572,7 @@ export function SkillHealthBanner({ health, items }: { health: SkillHealthSummar
           : 'bg-amber-50/60 border-amber-200/40 text-amber-700'
       }`}
     >
-      <span className="text-base leading-none mt-0.5">{allGood ? '✓' : '!'}</span>
+      <HubIcon name={allGood ? 'check' : 'alert-triangle'} className="h-4 w-4 mt-0.5 shrink-0" />
       <div className="space-y-1">
         <div className="flex items-center gap-3">
           <span className={health.allMounted ? 'text-emerald-600' : 'text-amber-600'}>

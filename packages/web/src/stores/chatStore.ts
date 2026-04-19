@@ -140,6 +140,7 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
 const MAX_BLOB_MESSAGES = 200;
 
 const UI_THINKING_EXPANDED_KEY = 'catcafe.ui.thinkingExpandedByDefault';
+const THINKING_CHUNK_SEPARATOR = '\n\n---\n\n';
 
 function loadUiThinkingExpandedByDefault(): boolean {
   if (typeof window === 'undefined') return false;
@@ -157,6 +158,40 @@ function persistUiThinkingExpandedByDefault(next: boolean) {
   } catch {
     // ignore storage failures (privacy mode, quota, etc.)
   }
+}
+
+function renderThinkingChunks(chunks: string[]): string {
+  return chunks.join(THINKING_CHUNK_SEPARATOR);
+}
+
+function getThinkingChunks(message: Pick<ChatMessage, 'thinking' | 'thinkingChunks'>): string[] {
+  if (message.thinkingChunks && message.thinkingChunks.length > 0) {
+    if (!message.thinking || renderThinkingChunks(message.thinkingChunks) === message.thinking) {
+      return message.thinkingChunks;
+    }
+  }
+  return message.thinking ? [message.thinking] : [];
+}
+
+function appendThinkingChunk(
+  message: Pick<ChatMessage, 'thinking' | 'thinkingChunks'>,
+  next: string,
+): Pick<ChatMessage, 'thinking' | 'thinkingChunks'> {
+  const existingChunks = getThinkingChunks(message);
+  if (existingChunks.length === 0) {
+    return { thinking: next, thinkingChunks: [next] };
+  }
+  if (existingChunks.at(-1) === next) {
+    return {
+      thinking: renderThinkingChunks(existingChunks),
+      thinkingChunks: existingChunks,
+    };
+  }
+  const thinkingChunks = [...existingChunks, next];
+  return {
+    thinking: renderThinkingChunks(thinkingChunks),
+    thinkingChunks,
+  };
 }
 
 export type BubbleExpandState = 'expanded' | 'collapsed';
@@ -1202,9 +1237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setMessageThinking: (messageId, thinking) =>
     set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === messageId ? { ...m, thinking: m.thinking ? `${m.thinking}\n\n---\n\n${thinking}` : thinking } : m,
-      ),
+      messages: state.messages.map((m) => (m.id === messageId ? { ...m, ...appendThinkingChunk(m, thinking) } : m)),
     })),
 
   setMessageStreamInvocation: (messageId, invocationId) =>
@@ -1546,7 +1579,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) =>
       updateThreadMessage(state, threadId, messageId, (m) => ({
         ...m,
-        thinking: m.thinking ? `${m.thinking}\n\n---\n\n${thinking}` : thinking,
+        ...appendThinkingChunk(m, thinking),
       })),
     ),
 

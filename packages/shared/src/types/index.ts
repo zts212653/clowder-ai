@@ -148,13 +148,20 @@ export type {
 // Community Issue types (F168 社区事务编排引擎)
 export type {
   CommunityIssueItem,
+  ConsensusResult,
   ConsensusState,
   CreateCommunityIssueInput,
+  DirectionCardPayload,
   IssueState,
   IssueType,
   PrBoardGroup,
+  QuestionGrade,
+  QuestionId,
+  QuestionResult,
   ReplyState,
+  TriageEntry,
   UpdateCommunityIssueInput,
+  Verdict,
 } from './community-issue.js';
 // Connector types (F97 外部信息源抽象)
 export type {

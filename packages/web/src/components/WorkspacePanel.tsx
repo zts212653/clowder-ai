@@ -828,7 +828,7 @@ export function WorkspacePanel() {
           ) : workspaceMode === 'tasks' ? (
             <TaskBoardPanel />
           ) : workspaceMode === 'community' ? (
-            <CommunityPanel />
+            <CommunityPanel threadId={currentThreadId} />
           ) : (
             <>
               {/* Files / Changes toggle */}
