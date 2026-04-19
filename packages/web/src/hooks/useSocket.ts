@@ -878,8 +878,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
   }, [threadId, storeThreadId]);
 
-  const cancelInvocation = useCallback((tid: string) => {
-    socketRef.current?.emit('cancel_invocation', { threadId: tid });
+  const cancelInvocation = useCallback((tid: string, catId?: string) => {
+    socketRef.current?.emit('cancel_invocation', catId ? { threadId: tid, catId } : { threadId: tid });
   }, []);
 
   return { socketRef, joinRoom, leaveRoom, syncRooms, cancelInvocation };

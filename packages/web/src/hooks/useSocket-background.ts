@@ -287,14 +287,18 @@ function markThreadInvocationActive(msg: BackgroundAgentMessage, options: Handle
 function markThreadInvocationComplete(msg: BackgroundAgentMessage, options: HandleBackgroundMessageOptions): void {
   options.store.setThreadLoading(msg.threadId, false);
   options.store.setThreadCatInvocation(msg.threadId, msg.catId, { invocationId: undefined });
+
+  // Snapshot slot count before removal to detect actual transition to zero.
+  const stateBefore = options.store.getThreadState(msg.threadId);
+  const slotsBefore = Object.keys(stateBefore.activeInvocations ?? {}).length;
+
   // F108: slot-aware — remove specific invocation if ID available.
   // Cancel fallback: find and remove only this cat's latest active slot to avoid
   // clearing other cats' slots during multi-cat concurrent dispatch.
   if (msg.invocationId) {
     // F869: Multi-cat slot-aware cleanup. Only remove the slot that belongs to
     // THIS cat (primary key or synthetic key), not another cat's slot.
-    const threadState = options.store.getThreadState(msg.threadId);
-    const primarySlot = threadState.activeInvocations[msg.invocationId];
+    const primarySlot = stateBefore.activeInvocations[msg.invocationId];
     if (primarySlot?.catId === msg.catId) {
       options.store.removeThreadActiveInvocation(msg.threadId, msg.invocationId);
     }
@@ -308,12 +312,23 @@ function markThreadInvocationComplete(msg: BackgroundAgentMessage, options: Hand
       options.store.removeThreadActiveInvocation(msg.threadId, orphan);
     }
   } else {
-    const threadState = options.store.getThreadState(msg.threadId);
-    const catSlot = findLatestActiveInvocationIdForCat(threadState.activeInvocations, msg.catId);
+    const catSlot = findLatestActiveInvocationIdForCat(stateBefore.activeInvocations, msg.catId);
     if (catSlot) {
       options.store.removeThreadActiveInvocation(msg.threadId, catSlot);
     } else {
       options.store.setThreadHasActiveInvocation(msg.threadId, false);
+    }
+  }
+
+  // Fix: clear targetCats/catStatuses when the last tracked invocation ends.
+  // Only fire when we actually transitioned from >0 to 0 slots — not when
+  // there were never any tracked slots (e.g. legacy paths without activeInvocations).
+  // Without this, stale cats accumulate via merge semantics in setThreadTargetCats,
+  // causing the status panel to display the wrong cat after thread switch.
+  if (slotsBefore > 0) {
+    const slotsAfter = Object.keys(options.store.getThreadState(msg.threadId).activeInvocations ?? {}).length;
+    if (slotsAfter === 0) {
+      options.store.replaceThreadTargetCats(msg.threadId, []);
     }
   }
 }

@@ -8,9 +8,17 @@ import { apiFetch } from '@/utils/api-client';
 import { AuditExplorerPanel } from './audit/AuditExplorerPanel';
 import { CatTokenUsage } from './CatTokenUsage';
 import { PlanBoardPanel } from './PlanBoardPanel';
-import { deriveActiveCats } from './parallel-status-helpers';
 import { SessionChainPanel } from './SessionChainPanel';
-import { type CatStatus, type IntentMode, modeLabel, statusLabel, statusTone, truncateId } from './status-helpers';
+import {
+  type CatStatus,
+  collectSnapshotActiveCats,
+  deriveActiveCats,
+  type IntentMode,
+  modeLabel,
+  statusLabel,
+  statusTone,
+  truncateId,
+} from './status-helpers';
 import { CatInvocationTime, CollapsibleIds } from './status-panel-parts';
 
 export interface RightStatusPanelProps {
@@ -18,6 +26,8 @@ export interface RightStatusPanelProps {
   targetCats: string[];
   catStatuses: Record<string, CatStatus>;
   catInvocations: Record<string, CatInvocationInfo>;
+  activeInvocations?: Record<string, { catId: string; mode: string; startedAt?: number }>;
+  hasActiveInvocation?: boolean;
   threadId: string;
   messageSummary: {
     total: number;
@@ -320,26 +330,20 @@ export function RightStatusPanel({
   targetCats,
   catStatuses,
   catInvocations,
+  activeInvocations,
+  hasActiveInvocation,
   threadId,
   messageSummary,
   width,
 }: RightStatusPanelProps) {
-  const activeInvocations = useChatStore((s) => s.activeInvocations);
   // F26: Split into active (working now) vs history (appeared before)
   const { activeCats, historyCats } = useMemo(() => {
-    const snapshotCats = Object.entries(catInvocations)
-      .filter(([, inv]) => {
-        const taskProgress = inv.taskProgress;
-        if (!taskProgress || taskProgress.tasks.length === 0) return false;
-        return taskProgress.snapshotStatus !== 'completed';
-      })
-      .map(([catId]) => catId);
-    const slotCats = deriveActiveCats(targetCats, activeInvocations);
-    const active = Array.from(new Set([...slotCats, ...snapshotCats]));
+    const snapshotCats = collectSnapshotActiveCats(catInvocations);
+    const active = deriveActiveCats({ targetCats, snapshotCats, activeInvocations, hasActiveInvocation });
     const allParticipants = new Set([...active, ...Object.keys(catInvocations)]);
     const history = [...allParticipants].filter((c) => !active.includes(c));
     return { activeCats: active, historyCats: history };
-  }, [targetCats, catInvocations, activeInvocations]);
+  }, [targetCats, catInvocations, activeInvocations, hasActiveInvocation]);
 
   const { getCatById } = useCatData();
   const [historyOpen, setHistoryOpen] = useState(false);

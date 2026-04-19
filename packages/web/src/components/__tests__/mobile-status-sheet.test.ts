@@ -84,6 +84,26 @@ describe('MobileStatusSheet', () => {
     expect(container.textContent).toContain('缅因猫');
   });
 
+  it('prefers activeInvocations over stale targetCats when provided', () => {
+    const props = {
+      ...baseProps,
+      open: true,
+      targetCats: ['codex'],
+      catStatuses: { codex: 'pending' as CatStatus, dare: 'streaming' as CatStatus },
+      activeInvocations: {
+        'inv-dare-1': { catId: 'dare', mode: 'execute' },
+      },
+      hasActiveInvocation: true,
+    };
+
+    act(() => {
+      root.render(React.createElement(MobileStatusSheet, props));
+    });
+
+    expect(container.textContent).toContain('dare');
+    expect(container.textContent).not.toContain('缅因猫');
+  });
+
   it('shows close button that calls onClose', () => {
     let closed = false;
     const props = {
