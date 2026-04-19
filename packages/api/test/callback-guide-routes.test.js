@@ -246,7 +246,7 @@ describe('F155 Guide callback routes', () => {
       );
     });
 
-    test('derives default guide availability from the authenticated thread projectPath', async () => {
+    test('derives default guide availability from the authenticated thread projectPath only', async () => {
       const app = await createApp();
       const emptyProjectRoot = mkdtempSync(join(tmpdir(), 'guide-availability-'));
       const registrySnapshot = Object.entries(catRegistry.getAllConfigs());
@@ -254,6 +254,18 @@ describe('F155 Guide callback routes', () => {
 
       try {
         catRegistry.reset();
+        catRegistry.register('foreign-runtime-cat', {
+          id: 'foreign-runtime-cat',
+          displayName: 'Foreign Runtime Cat',
+          nickname: '外部猫',
+          mentionPatterns: ['@foreign-runtime-cat'],
+          breed: 'maine-coon',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.4',
+          color: { primary: '#111111', secondary: '#ffffff' },
+          roleDescription: '',
+          personality: '',
+        });
         const res = await app.inject({
           method: 'POST',
           url: '/api/callbacks/get-available-guides',

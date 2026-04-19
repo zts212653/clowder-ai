@@ -10,7 +10,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { getResolvedCats } from '../config/resolved-cats.js';
+import { getProjectResolvedCats } from '../config/resolved-cats.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { GuideLifecycleService } from '../domains/guides/GuideLifecycleService.js';
@@ -80,7 +80,7 @@ export async function registerCallbackGuideRoutes(
       const thread = await Promise.resolve(deps.threadStore.get(threadId));
       const projectRoot =
         thread?.projectPath && thread.projectPath !== 'default' ? thread.projectPath : resolveActiveProjectRoot();
-      return { memberCardCount: Object.keys(getResolvedCats(projectRoot)).length };
+      return { memberCardCount: Object.keys(getProjectResolvedCats(projectRoot)).length };
     });
 
   // POST /api/callbacks/update-guide-state

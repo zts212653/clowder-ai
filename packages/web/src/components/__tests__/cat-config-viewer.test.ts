@@ -149,7 +149,7 @@ describe('CatOverviewTab', () => {
     expect(html).not.toContain('npx antigravity --bridge');
   });
 
-  it('anchors the first-member guide target to the existing keyboard-activatable member card', () => {
+  it('anchors the first-member guide target to the edit-only control, not the whole card', () => {
     const html = renderToStaticMarkup(
       React.createElement(CatOverviewTab, {
         config: CONFIG,
@@ -163,10 +163,10 @@ describe('CatOverviewTab', () => {
     const guideTarget = root.querySelector('[data-guide-id="cats.first-member"]');
 
     expect(guideTarget).toBeTruthy();
-    expect(guideTarget?.tagName).toBe('SECTION');
-    expect(guideTarget?.getAttribute('role')).toBe('button');
-    expect(guideTarget?.getAttribute('tabindex')).toBe('0');
+    expect(guideTarget?.tagName).toBe('BUTTON');
+    expect(guideTarget?.closest('section')?.textContent).toContain('布偶猫 · 宪宪');
     expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
+    expect(guideTarget?.textContent).not.toContain('已启用');
   });
 });
 

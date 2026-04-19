@@ -106,6 +106,13 @@ describe('CatCafeHub add-member entry', () => {
           }),
         );
       }
+      if (path === '/api/config/default-cat') {
+        return Promise.resolve(
+          jsonResponse({
+            catId: '',
+          }),
+        );
+      }
       if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({

@@ -29,35 +29,15 @@ describe('F155 guide registry loader target validation', async () => {
     }
   });
 
-  test('loaded add-member flow covers the wizard path before the editor handoff', () => {
+  test('loaded add-member flow goes straight from add-member CTA into the member editor', () => {
     const flow = loadGuideFlow('add-member');
     const createIndex = flow.steps.findIndex((step) => step.id === 'click-add-member');
-    const clientIndex = flow.steps.findIndex((step) => step.id === 'choose-client');
-    const providerIndex = flow.steps.findIndex((step) => step.id === 'choose-provider-account');
-    const modelIndex = flow.steps.findIndex((step) => step.id === 'choose-model');
-    const submitIndex = flow.steps.findIndex((step) => step.id === 'create-member');
     const editIndex = flow.steps.findIndex((step) => step.id === 'done');
-    const clientStep = flow.steps[clientIndex];
-    const providerStep = flow.steps[providerIndex];
-    const modelStep = flow.steps[modelIndex];
-    const submitStep = flow.steps[submitIndex];
     const editStep = flow.steps[editIndex];
 
     assert.ok(createIndex >= 0, 'create step should exist');
-    assert.ok(clientIndex > createIndex, 'wizard client step should happen after member creation');
-    assert.ok(providerIndex > clientIndex, 'provider step should happen after choosing client');
-    assert.ok(modelIndex > providerIndex, 'model step should happen after choosing provider');
-    assert.ok(submitIndex > modelIndex, 'submit step should happen after choosing model');
-    assert.ok(editIndex > submitIndex, 'editor handoff should happen after wizard submit');
-    assert.ok(clientStep, 'choose-client step should exist');
-    assert.ok(providerStep, 'choose-provider-account step should exist');
-    assert.ok(modelStep, 'choose-model step should exist');
-    assert.ok(submitStep, 'create-member step should exist');
-    assert.equal(clientStep.target, 'add-member.client');
-    assert.equal(providerStep.target, 'add-member.provider-profile');
-    assert.equal(modelStep.target, 'add-member.model');
-    assert.equal(submitStep.target, 'add-member.submit');
-    assert.equal(submitStep.advance, 'click');
+    assert.ok(editIndex > createIndex, 'editor handoff should happen after member creation');
+    assert.equal(flow.steps.length, 4);
     assert.equal(editStep.target, 'member-editor.profile');
     assert.equal(editStep.advance, 'confirm');
   });
@@ -92,23 +72,18 @@ describe('F155 guide registry loader target validation', async () => {
     assert.equal(doneStep.target, 'connector.weixin');
   });
 
-  test('loaded configure-first-provider flow covers the client → provider → model path', () => {
+  test('loaded configure-first-provider flow uses the member editor auth section after add-member', () => {
     const flow = loadGuideFlow('configure-first-provider');
-    const clientStep = flow.steps.find((step) => step.id === 'choose-client');
-    const providerStep = flow.steps.find((step) => step.id === 'choose-provider-account');
-    const modelStep = flow.steps.find((step) => step.id === 'choose-model');
-    const submitStep = flow.steps.find((step) => step.id === 'create-member');
+    const createStep = flow.steps.find((step) => step.id === 'click-add-member');
+    const authStep = flow.steps.find((step) => step.id === 'config-auth');
     const doneStep = flow.steps.find((step) => step.id === 'done');
 
-    assert.ok(clientStep, 'choose-client step should exist');
-    assert.ok(providerStep, 'choose-provider-account step should exist');
-    assert.ok(modelStep, 'choose-model step should exist');
-    assert.ok(submitStep, 'create-member step should exist');
+    assert.ok(createStep, 'click-add-member step should exist');
+    assert.ok(authStep, 'config-auth step should exist');
     assert.ok(doneStep, 'done step should exist');
-    assert.equal(clientStep.target, 'add-member.client');
-    assert.equal(providerStep.target, 'add-member.provider-profile');
-    assert.equal(modelStep.target, 'add-member.model');
-    assert.equal(submitStep.target, 'add-member.submit');
+    assert.equal(createStep.target, 'cats.add-member');
+    assert.equal(authStep.target, 'member-editor.auth-config');
+    assert.equal(authStep.advance, 'confirm');
     assert.equal(doneStep.target, 'member-editor.profile');
     assert.equal(doneStep.advance, 'confirm');
   });

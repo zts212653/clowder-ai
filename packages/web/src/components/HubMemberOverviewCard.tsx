@@ -180,6 +180,7 @@ export function HubMemberOverviewCard({
 }) {
   const status = getStatusBadge(cat);
   const title = [cat.breedDisplayName ?? cat.displayName, cat.nickname].filter(Boolean).join(' · ');
+  const editCard = () => onEdit?.(cat);
 
   return (
     <section
@@ -189,17 +190,7 @@ export function HubMemberOverviewCard({
       onDragOver={draggable ? (event) => onDragOver?.(cat, event) : undefined}
       onDrop={draggable ? (event) => onDrop?.(cat, event) : undefined}
       onDragEnd={draggable ? (event) => onDragEnd?.(cat, event) : undefined}
-      role={onEdit ? 'button' : undefined}
-      tabIndex={onEdit ? 0 : undefined}
-      onClick={() => onEdit?.(cat)}
-      onKeyDown={(event) => {
-        if (!onEdit) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onEdit(cat);
-        }
-      }}
-      data-guide-id={guideTargetId}
+      onClick={editCard}
       className={`rounded-[20px] px-[18px] py-[18px] shadow-sm transition hover:shadow-md ${isDragging ? 'opacity-40' : ''}`}
       style={{ backgroundColor: '#FFFDFC', border: `1px solid ${cat.source === 'runtime' ? '#D9C7EA' : '#F1E7DF'}` }}
     >
@@ -214,7 +205,15 @@ export function HubMemberOverviewCard({
               ⠿
             </span>
           ) : null}
-          <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              editCard();
+            }}
+            data-guide-id={guideTargetId}
+            className="min-w-0 flex-1 cursor-pointer text-left"
+          >
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-[17px] font-bold text-[#2D2118]">{title}</h3>
             {cat.source === 'runtime' ? (
@@ -237,7 +236,7 @@ export function HubMemberOverviewCard({
           </p>
 
           <p className="mt-2 text-[13px] text-[#9D7BC7]">{formatMentionPreview(cat.mentionPatterns)}</p>
-        </div>
+          </button>
         </div>
         <button
           type="button"
