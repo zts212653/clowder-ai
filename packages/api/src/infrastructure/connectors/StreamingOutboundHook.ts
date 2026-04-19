@@ -64,8 +64,13 @@ export class StreamingOutboundHook {
         // P2: Group chat @mention — add sender name to prefix when available
         const senderSuffix = binding.connectorId === 'feishu' && senderHint?.name ? `→${senderHint.name}` : '';
         const prefix = displayName || senderSuffix ? `【${displayName || '猫猫'}🐱${senderSuffix}】` : '';
+        const telegramDisplayName = displayName || '猫猫';
         const placeholderText =
-          binding.connectorId === 'feishu' ? `${prefix}${pickReceiptLine(catId)}` : `${prefix}🤔 思考中...`;
+          binding.connectorId === 'feishu'
+            ? `${prefix}${pickReceiptLine(catId)}`
+            : binding.connectorId === 'telegram'
+              ? `【${telegramDisplayName}🐱 思考中...】`
+              : `${prefix}🤔 思考中...`;
         const msgId = await adapter.sendPlaceholder(binding.externalChatId, placeholderText);
         if (msgId) {
           const ownsFinalDelivery = adapter.ownsFinalDelivery === true;

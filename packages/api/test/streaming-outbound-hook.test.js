@@ -102,7 +102,7 @@ describe('StreamingOutboundHook', () => {
     assert.ok(!text.includes('placeholder'), `Receipt should not be a raw placeholder, got: ${text}`);
   });
 
-  it('F157 P1-2: non-Feishu adapter gets generic "思考中" placeholder, not receipt text', async () => {
+  it('F157 P1-2: Telegram adapter gets 【猫猫🐱 思考中...】 placeholder (scheme C start state)', async () => {
     const telegramAdapter = wrapAdapter({
       connectorId: 'telegram',
       sendReply: async () => {},
@@ -134,7 +134,9 @@ describe('StreamingOutboundHook', () => {
     await hook.onStreamStart('thread-1', 'opus');
     assert.equal(telegramAdapter._calls.sendPlaceholder.length, 1);
     const text = telegramAdapter._calls.sendPlaceholder[0].text;
-    assert.ok(text.includes('思考中'), `Non-Feishu adapter should get generic text, got: ${text}`);
+    assert.ok(text.includes('🐱'), `Telegram placeholder must contain 🐱, got: ${text}`);
+    assert.ok(text.includes('思考中'), `Telegram placeholder must contain 思考中, got: ${text}`);
+    assert.ok(!text.includes('🤔'), `Telegram placeholder must not use old 🤔 format, got: ${text}`);
   });
 
   it('F157 P2: sender hint adds sender name to Feishu receipt prefix with 🐱', async () => {
