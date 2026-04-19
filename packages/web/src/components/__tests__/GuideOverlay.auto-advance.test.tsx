@@ -140,6 +140,9 @@ describe('GuideOverlay auto-advance lifecycle', () => {
         <p>Interactive Card Content</p>
         <button type="button" tabindex="0">Do thing</button>
         <a href="https://example.com">Open docs</a>
+        <div data-guide-id="interactive.card.child">
+          <span data-guide-id="interactive.card.grandchild">Nested helper</span>
+        </div>
       </div>
     `;
 
@@ -423,8 +426,10 @@ describe('GuideOverlay auto-advance lifecycle', () => {
     expect(preview?.textContent).toContain('Interactive Card Content');
     expect(preview?.textContent).toContain('Do thing');
     expect(preview?.textContent).toContain('Open docs');
+    expect(preview?.textContent).toContain('Nested helper');
     expect(preview?.querySelector('button')).toBeNull();
     expect(preview?.querySelector('a')).toBeNull();
     expect(preview?.querySelector('[tabindex]')).toBeNull();
+    expect(preview?.querySelector('[data-guide-id]')).toBeNull();
   });
 });

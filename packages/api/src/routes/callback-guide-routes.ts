@@ -8,7 +8,7 @@
  * POST /api/callbacks/guide-control
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getProjectResolvedCats } from '../config/resolved-cats.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
@@ -83,6 +83,15 @@ export async function registerCallbackGuideRoutes(
       return { memberCardCount: Object.keys(getProjectResolvedCats(projectRoot)).length };
     });
 
+  const getAvailableGuidesResponse = async (request: FastifyRequest, reply: FastifyReply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
+    const guides = getAvailableGuides(await getGuideAvailabilityContext(record.threadId));
+    app.log.info({ guideCount: guides.length, threadId: record.threadId }, '[F155] get_available_guides');
+    return { status: 'ok', guides };
+  };
+
   // POST /api/callbacks/update-guide-state
   app.post('/api/callbacks/update-guide-state', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
@@ -144,14 +153,10 @@ export async function registerCallbackGuideRoutes(
   });
 
   // POST /api/callbacks/get-available-guides
-  app.post('/api/callbacks/get-available-guides', async (request, reply) => {
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
+  app.post('/api/callbacks/get-available-guides', getAvailableGuidesResponse);
 
-    const guides = getAvailableGuides(await getGuideAvailabilityContext(record.threadId));
-    app.log.info({ guideCount: guides.length, threadId: record.threadId }, '[F155] get_available_guides');
-    return { status: 'ok', guides };
-  });
+  // POST /api/callbacks/guide-resolve (legacy alias during tool rename rollout)
+  app.post('/api/callbacks/guide-resolve', getAvailableGuidesResponse);
 
   // POST /api/callbacks/guide-control
   app.post('/api/callbacks/guide-control', async (request, reply) => {

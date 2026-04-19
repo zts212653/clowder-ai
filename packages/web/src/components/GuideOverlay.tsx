@@ -667,7 +667,6 @@ function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: str
         return;
       }
       const clone = source.cloneNode(true) as HTMLElement;
-      clone.removeAttribute('data-guide-id');
       sanitizeCardClone(clone);
       clone.style.pointerEvents = 'none';
       containerRef.current.innerHTML = '';
@@ -693,6 +692,7 @@ function CardCaptureBlock({ guideTarget, alt }: { guideTarget: string; alt?: str
 
 function sanitizeCardClone(clone: HTMLElement) {
   clone.setAttribute('inert', '');
+  stripGuideIds(clone);
 
   for (const el of Array.from(clone.querySelectorAll<HTMLElement>('button, a, summary, details')).reverse()) {
     const replacement = document.createElement('span');
@@ -721,6 +721,13 @@ function sanitizeCardClone(clone: HTMLElement) {
   )) {
     el.removeAttribute('tabindex');
     el.setAttribute('contenteditable', 'false');
+  }
+}
+
+function stripGuideIds(clone: HTMLElement) {
+  clone.removeAttribute('data-guide-id');
+  for (const el of clone.querySelectorAll<HTMLElement>('[data-guide-id]')) {
+    el.removeAttribute('data-guide-id');
   }
 }
 

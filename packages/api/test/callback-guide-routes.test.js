@@ -222,6 +222,23 @@ describe('F155 Guide callback routes', () => {
       );
     });
 
+    test('keeps the legacy /guide-resolve alias compatible with guide discovery responses', async () => {
+      const app = await createApp();
+      const { invocationId, callbackToken } = createCreds();
+
+      const legacyRes = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/guide-resolve',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      });
+
+      assert.equal(legacyRes.statusCode, 200);
+      const legacyBody = JSON.parse(legacyRes.body);
+      assert.equal(legacyBody.status, 'ok');
+      assert.ok(legacyBody.guides.length > 0);
+      assert.ok(legacyBody.guides.some((guide) => guide.id === 'add-member'));
+    });
+
     test('filters guides that are unavailable in the current context', async () => {
       const app = await createApp({
         getGuideAvailabilityContext: (threadId) => {
