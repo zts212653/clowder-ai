@@ -40,8 +40,10 @@ export interface IStreamableOutboundAdapter extends IOutboundAdapter {
   sendPlaceholder(externalChatId: string, text: string): Promise<string>;
   /** Edit an already-sent message in place. */
   editMessage(externalChatId: string, platformMessageId: string, text: string): Promise<void>;
-  /** Delete a message by platform message ID (cleanup after streaming). */
-  deleteMessage?(platformMessageId: string): Promise<void>;
+  /** Delete a message by platform message ID (cleanup after streaming). externalChatId is optional for adapters that need it for lookup. */
+  deleteMessage?(platformMessageId: string, externalChatId?: string): Promise<void>;
+  /** When true, adapter owns final content delivery inline (e.g. Telegram editMessage). StreamingOutboundHook skips OutboundDeliveryHook for this connector. */
+  readonly ownsFinalDelivery?: boolean;
   /**
    * F157: Edit a streaming placeholder to a minimal completion state (e.g. "✅ 已回复").
    * When present, cleanup prefers this over deleteMessage to avoid "recall" notifications.

@@ -34,9 +34,11 @@ export interface TelegramInboundMessage {
 
 export class TelegramAdapter implements IStreamableOutboundAdapter {
   readonly connectorId = 'telegram';
+  /** StreamingOutboundHook: Telegram owns final delivery via editMessage inline. */
+  readonly ownsFinalDelivery = true;
   private readonly bot: Bot;
   private readonly log: FastifyBaseLogger;
-  private readonly placeholderChats = new Map<string, string>(); // msgId → chatId
+  private readonly placeholderChats = new Map<string, string>(); // `${chatId}:${msgId}` → chatId
   private sendMessageFn: ((chatId: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>) | null =
     null;
   private sendMediaFns: {
@@ -199,18 +201,25 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
   async sendPlaceholder(externalChatId: string, text: string): Promise<string> {
     const msg = await this.bot.api.sendMessage(Number(externalChatId), text);
     const msgId = String(msg.message_id);
-    this.placeholderChats.set(msgId, externalChatId);
+    // Use composite key to avoid collision: Telegram message_id is chat-scoped, not global.
+    this.placeholderChats.set(`${externalChatId}:${msgId}`, externalChatId);
     return msgId;
   }
 
   /**
    * Delete a streaming placeholder message after outbound delivery succeeds.
    * chatId is looked up from the placeholderChats cache set in sendPlaceholder.
+   * Key is composite `${externalChatId}:${platformMessageId}` to avoid cross-chat collision.
    */
-  async deleteMessage(platformMessageId: string): Promise<void> {
-    const chatId = this.placeholderChats.get(platformMessageId);
+  async deleteMessage(platformMessageId: string, externalChatId?: string): Promise<void> {
+    // Prefer caller-supplied chatId for lookup; fall back to scanning by msgId suffix.
+    const key = externalChatId
+      ? `${externalChatId}:${platformMessageId}`
+      : [...this.placeholderChats.keys()].find((k) => k.endsWith(`:${platformMessageId}`));
+    if (!key) return;
+    const chatId = this.placeholderChats.get(key);
     if (!chatId) return;
-    this.placeholderChats.delete(platformMessageId);
+    this.placeholderChats.delete(key);
     await this.bot.api.deleteMessage(Number(chatId), Number(platformMessageId));
   }
 
@@ -280,5 +289,17 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
     sendVoice: (chatId: number, input: string | InputFile) => Promise<unknown>;
   }): void {
     this.sendMediaFns = fns;
+  }
+
+  /**
+   * Test helper: inject mock bot.api methods (sendMessage, deleteMessage, editMessageText).
+   * @internal
+   */
+  _injectBotApi(api: {
+    sendMessage?: (chatId: number, text: string) => Promise<{ message_id: number }>;
+    deleteMessage?: (chatId: number, msgId: number) => Promise<void>;
+    editMessageText?: (chatId: number, msgId: number, text: string) => Promise<void>;
+  }): void {
+    Object.assign(this.bot.api, api);
   }
 }

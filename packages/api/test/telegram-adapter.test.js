@@ -271,4 +271,36 @@ describe('TelegramAdapter', () => {
       assert.ok(sendCalls[0].text.includes('Review'), 'block content must also appear');
     });
   });
+
+  // P1-A fix: ownsFinalDelivery must be true so StreamingOutboundHook uses inline-final path
+  describe('ownsFinalDelivery', () => {
+    it('is true on TelegramAdapter', () => {
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      assert.equal(adapter.ownsFinalDelivery, true);
+    });
+  });
+
+  // P1-B fix: placeholderChats uses composite key — two chats with same msgId must not collide
+  describe('deleteMessage() composite key', () => {
+    it('deletes correct chat when two chats share the same message_id', async () => {
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      const deleteCalls = [];
+      adapter._injectBotApi({
+        sendMessage: async (chatId, text) => ({ message_id: 1 }),
+        deleteMessage: async (chatId, msgId) => { deleteCalls.push({ chatId, msgId }); },
+        editMessageText: async () => {},
+      });
+
+      // Two different chats both get message_id=1
+      await adapter.sendPlaceholder('1001', 'thinking...');
+      await adapter.sendPlaceholder('1002', 'thinking...');
+
+      // Delete only chat 1002's placeholder
+      await adapter.deleteMessage('1', '1002');
+
+      assert.equal(deleteCalls.length, 1);
+      assert.equal(deleteCalls[0].chatId, 1002);
+      assert.equal(deleteCalls[0].msgId, 1);
+    });
+  });
 });
