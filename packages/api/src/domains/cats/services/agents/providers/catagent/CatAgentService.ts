@@ -246,16 +246,15 @@ export class CatAgentService implements AgentService {
     }
     const httpStatus = (err as { httpStatus?: number }).httpStatus;
     const message = err instanceof Error ? err.message : String(err);
+    const status = httpStatus ?? 0;
     if (httpStatus) {
       log.warn(`[${this.catId}] API error ${httpStatus}: ${message.slice(0, 200)}`);
-      for (const msg of mapAnthropicError({ status: httpStatus, message }, this.catId, 'catagent', model)) {
-        yield { ...msg, metadata: { ...metadata, ...msg.metadata, usage: totalUsage } };
-      }
     } else {
       log.error(`[${this.catId}] Unexpected error: ${message}`);
-      for (const msg of mapAnthropicError({ status: 0, message }, this.catId, 'catagent', model)) {
-        yield { ...msg, metadata: { ...metadata, ...msg.metadata, usage: totalUsage } };
-      }
+    }
+    for (const msg of mapAnthropicError({ status, message }, this.catId, 'catagent', model)) {
+      const usage = totalUsage ?? msg.metadata?.usage;
+      yield { ...msg, metadata: { ...metadata, ...msg.metadata, usage } };
     }
   }
 }

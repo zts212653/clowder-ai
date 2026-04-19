@@ -536,4 +536,19 @@ describe('D2: agentic loop', () => {
     // MAX_TOOL_TURNS = 15, so exactly 15 API calls (turns 0..14)
     assert.equal(callCount, 15, `expected 15 API calls, got ${callCount}`);
   });
+
+  test('first-turn API error preserves zero usage in done (usage regression)', async () => {
+    globalThis.fetch = async (_url, _init) => {
+      return { ok: false, status: 503, text: async () => 'Service unavailable' };
+    };
+
+    const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
+    const msgs = await collect(svc.invoke('test'));
+
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done, 'has done event');
+    assert.ok(done.metadata.usage, 'done.metadata.usage is not undefined');
+    assert.equal(done.metadata.usage.inputTokens, 0, 'zero input tokens');
+    assert.equal(done.metadata.usage.outputTokens, 0, 'zero output tokens');
+  });
 });
