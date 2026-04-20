@@ -11,6 +11,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..', '..', '..');
 const doctorScriptSource = join(repoRoot, 'scripts', 'mcp-doctor.mjs');
 const tempDirs = [];
+const pencilBinarySuffix = `out/mcp-server-${
+  process.platform === 'win32' ? 'windows' : process.platform === 'linux' ? 'linux' : 'darwin'
+}-${process.arch === 'x64' ? 'x64' : 'arm64'}${process.platform === 'win32' ? '.exe' : ''}`;
 
 function buildCapabilities(extraCapabilities = []) {
   return [
@@ -247,6 +250,26 @@ describe('mcp-doctor.mjs', () => {
     assert.match(result.stdout, /\[ready\] scoped-package — stdio npx/);
   });
 
+  it('does not treat slash-bearing package specs as local artifact paths', () => {
+    const { root, binDir } = createSandbox([
+      {
+        id: 'slash-package-spec',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          transport: 'stdio',
+          command: 'npx',
+          args: ['github:modelcontextprotocol/servers'],
+        },
+      },
+    ]);
+
+    const result = runDoctor(root, binDir);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[ready\] slash-package-spec — stdio npx/);
+  });
+
   it('expands home-relative artifact args before checking the filesystem', () => {
     const { root, binDir } = createSandbox([
       {
@@ -323,5 +346,37 @@ describe('mcp-doctor.mjs', () => {
 
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.match(result.stdout, /\[unresolved\] pencil-custom — configured PENCIL_MCP_BIN is not executable/);
+  });
+
+  it('ignores discovered Pencil binaries that are not executable', (t) => {
+    if (process.platform === 'win32') t.skip('non-executable file mode is not meaningful on win32');
+
+    const { root, binDir } = createSandbox([
+      {
+        id: 'pencil-discovered',
+        type: 'mcp',
+        enabled: true,
+        mcpServer: {
+          resolver: 'pencil',
+        },
+      },
+    ]);
+
+    const homeDir = join(root, 'fake-home');
+    const pencilDir = join(homeDir, '.vscode', 'extensions', 'highagency.pencildev-0.6.41-universal');
+    mkdirSync(join(pencilDir, 'out'), { recursive: true });
+    writeFileSync(join(pencilDir, pencilBinarySuffix), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+
+    const result = runDoctor(root, binDir, {
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      PENCIL_MCP_APP: 'vscode',
+    });
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(
+      result.stdout,
+      /\[unresolved\] pencil-discovered — resolver declared but no local Pencil installation found/,
+    );
   });
 });

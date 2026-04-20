@@ -13,6 +13,7 @@ const resolvedPath = path.join(repoRoot, '.cat-cafe', 'mcp-resolved.json');
 const manifestPath = path.join(repoRoot, 'cat-cafe-skills', 'manifest.yaml');
 const WINDOWS_DRIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
 const URL_SCHEME_RE = /^[A-Za-z][A-Za-z\d+.-]*:\/\//;
+const LOCAL_ARTIFACT_ROOT_SEGMENTS = new Set(['scripts', 'packages', 'tools', 'bin', 'dist', 'src']);
 const LOCAL_ARTIFACT_EXTENSIONS = new Set([
   '.js',
   '.mjs',
@@ -155,7 +156,13 @@ function isLocalArtifactArg(value) {
   }
 
   if (artifactArg.includes('/') || artifactArg.includes('\\')) {
-    return true;
+    if (artifactArg.includes(':')) return false;
+    if (LOCAL_ARTIFACT_EXTENSIONS.has(path.extname(artifactArg).toLowerCase())) {
+      return true;
+    }
+
+    const [firstSegment] = artifactArg.split(/[\\/]/);
+    return LOCAL_ARTIFACT_ROOT_SEGMENTS.has(firstSegment);
   }
 
   return LOCAL_ARTIFACT_EXTENSIONS.has(path.extname(artifactArg).toLowerCase());
@@ -222,7 +229,7 @@ function findLatestPencilBinary() {
     for (const entry of readdirSync(dir)) {
       if (!entry.startsWith('highagency.pencildev-')) continue;
       const binaryPath = path.join(dir, entry, binarySuffix);
-      if (existsSync(binaryPath)) candidates.push({ command: binaryPath, app, version: entry });
+      if (isExecutableCommandPath(binaryPath)) candidates.push({ command: binaryPath, app, version: entry });
     }
   }
 
