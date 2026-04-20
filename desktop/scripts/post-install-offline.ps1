@@ -87,6 +87,15 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 $BundleDir = Join-Path $ProjectRoot "bundled\cli-tools"
 $StatusFile = Join-Path $ProjectRoot ".cat-cafe\cli-tools-status.json"
 
+# Prepend bundled Node to PATH so CLI provisioning uses it instead of system npm.
+# Without this, clean Windows machines lacking pre-installed Node/npm fail silently.
+# NOTE: Installer maps bundled\node\* → {app}\node\ (see clowder-ai.iss:89).
+$BundledNodeDir = Join-Path $ProjectRoot "node"
+if (Test-Path (Join-Path $BundledNodeDir "node.exe")) {
+    $env:PATH = "$BundledNodeDir;$env:PATH"
+    Write-Ok "Bundled Node.js found — prepended to PATH"
+}
+
 Write-Step "Step 1/4 - Generate .env"
 
 $envFile = Join-Path $ProjectRoot ".env"

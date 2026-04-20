@@ -166,9 +166,18 @@ if (-not $reuseBundled) {
         }
         Remove-Item $extractDir -Recurse -Force
         Remove-Item $zipPath -Force
+        # Verify critical executables actually landed (guards against empty/corrupt archives)
+        $nodeExe = Join-Path $bundledNode "node.exe"
+        $npmCmd = Join-Path $bundledNode "npm.cmd"
+        if (-not (Test-Path $nodeExe) -or -not (Test-Path $npmCmd)) {
+            Write-Err "Node extraction succeeded but node.exe or npm.cmd missing in $bundledNode"
+            exit 1
+        }
         Write-Ok "Node.js portable bundled ($nodeArchive)"
     } catch {
-        Write-Warn "Node.js download failed — installer will require system Node.js at runtime"
+        Write-Err "Node.js download failed: $_"
+        Write-Err "Bundled Node is required for clean-machine installs. Build aborted."
+        exit 1
     }
 }
 
@@ -196,14 +205,7 @@ if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
         Remove-Item $zipPath -Force
         Write-Ok "Redis portable bundled ($($asset.name))"
     } catch {
-        Write-Warn "Redis download failed — trying local copy from fork..."
-        $forkRedis = "D:\code\clowder-ai-my\bundled\redis"
-        if (Test-Path $forkRedis) {
-            Copy-Item "$forkRedis\*" $bundledRedis -Recurse -Force
-            Write-Ok "Redis copied from fork"
-        } else {
-            Write-Warn "No local Redis copy available"
-        }
+        Write-Warn "Redis download failed — installer will use memory store or system Redis"
     }
 }
 
