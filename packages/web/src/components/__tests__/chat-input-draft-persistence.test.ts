@@ -11,6 +11,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput, threadDrafts, threadImageDrafts } from '@/components/ChatInput';
+import { useChatStore } from '@/stores/chatStore';
 
 // ── Mocks ──
 vi.mock('@/components/icons/SendIcon', () => ({
@@ -59,6 +60,12 @@ const originalRevokeObjectURL = URL.revokeObjectURL;
 beforeEach(() => {
   threadDrafts.clear();
   threadImageDrafts.clear();
+  useChatStore.setState({
+    currentThreadId: 'default',
+    hasDraft: false,
+    threadStates: {},
+    pendingChatInsert: null,
+  });
   URL.createObjectURL = vi.fn((file: Blob) => `blob:${(file as File).name ?? 'image'}`);
   URL.revokeObjectURL = vi.fn();
   container = document.createElement('div');
@@ -276,6 +283,7 @@ describe('ChatInput draft persistence', () => {
     for (let i = 1; i <= 5; i++) {
       threadImageDrafts.set(`thread-LRU-${i}`, [new File([`${i}`], `${i}.png`, { type: 'image/png' })]);
     }
+    useChatStore.getState().setThreadHasDraft('thread-LRU-1', true);
     // Pre-seed 6th so useState initializer picks it up as images
     threadImageDrafts.set('thread-LRU-6', [new File(['6'], '6.png', { type: 'image/png' })]);
     expect(threadImageDrafts.size).toBe(6);
@@ -293,6 +301,7 @@ describe('ChatInput draft persistence', () => {
     // LRU eviction: max 5, oldest (thread-LRU-1) should be evicted
     expect(threadImageDrafts.size).toBeLessThanOrEqual(5);
     expect(threadImageDrafts.has('thread-LRU-1')).toBe(false);
+    expect(useChatStore.getState().getThreadState('thread-LRU-1').hasDraft).toBe(false);
     expect(threadImageDrafts.has('thread-LRU-6')).toBe(true);
   });
 

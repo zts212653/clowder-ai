@@ -18,6 +18,7 @@ describe('chatStore multi-thread state', () => {
       isLoadingHistory: false,
       hasMore: true,
       hasActiveInvocation: false,
+      hasDraft: false,
       intentMode: null,
       targetCats: [],
       catStatuses: {},
@@ -89,6 +90,17 @@ describe('chatStore multi-thread state', () => {
 
     useChatStore.getState().setCurrentThread('thread-a');
     expect(useChatStore.getState().intentMode).toBe('ideate');
+  });
+
+  it('preserves hasDraft when switching threads', () => {
+    useChatStore.getState().setThreadHasDraft('thread-a', true);
+    expect(useChatStore.getState().getThreadState('thread-a').hasDraft).toBe(true);
+
+    useChatStore.getState().setCurrentThread('thread-b');
+    expect(useChatStore.getState().threadStates['thread-a']?.hasDraft).toBe(true);
+
+    useChatStore.getState().setCurrentThread('thread-a');
+    expect(useChatStore.getState().getThreadState('thread-a').hasDraft).toBe(true);
   });
 
   it('preserves currentGame when switching threads', () => {
