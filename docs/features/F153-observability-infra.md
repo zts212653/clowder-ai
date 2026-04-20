@@ -65,10 +65,27 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 5. **guardrail 回归测试** — `telemetry-debug.test.js` 覆盖 env 组合 + exporter ordering
 6. **启动链回归测试** — `start-dev-profile-isolation.test.mjs` / `start-dev-script.test.js` 覆盖 Unix / Windows 的 `NODE_ENV` 注入
 
-### Phase E: 后续增强
+### Phase E: Hub 内嵌观测台（clowder-ai#544）
 
-- Grafana 统一看板
-- burn-rate 告警规则
+方案 B：API 代理 + 自建轻量前端，零外部依赖（不引入 Grafana/Tempo/Sentry）。
+
+**L1: 数据层（API 侧）**
+1. `LocalTraceExporter` — 自定义 SpanExporter → 内存 ring buffer，按 traceId 索引
+2. `/api/telemetry/metrics` — 从 Prometheus client registry 读当前值，返回结构化 JSON
+3. `/api/telemetry/traces` — 查询 LocalTraceStore，支持按 traceId/invocationId/catId 筛选
+4. `/api/telemetry/health` — 聚合 /ready + liveness + 最近错误率
+5. 时序快照 ring buffer — 定时采样写入内存，支持趋势查询
+
+**L2: 前端展示**
+6. Hub 新增「观测台」Tab — 总览面板（指标卡片 + 趋势折线图）+ 按猫猫/thread 筛选
+7. Span 瀑布图组件 — 嵌套时间条，在 invocation 详情页展示调用链
+8. 轻量图表库 — 趋势折线图、延迟分布
+
+**L3: 告警**
+9. API 侧 burn-rate 阈值检查（setInterval）→ SystemNoticeBar 推送（复用 F508）
+
+### Phase F: 后续增强（视 Phase E 落地情况决定）
+
 - MCP call spans + tool execution duration spans（真实执行边界）
 - 更广的 runtime exporter 级 tracing tests（in-memory exporter 验证父子关系）
 
@@ -110,6 +127,15 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 - [x] AC-D5: Windows `start-windows.ps1` 通过 API Start-Job 注入同样的 `NODE_ENV` 语义
 - [x] AC-D6: `telemetry-debug.test.js` + `start-dev-profile-isolation.test.mjs` + `start-dev-script.test.js` 覆盖 guardrail 与启动链回归
 
+### Phase E（Hub 内嵌观测台）— clowder-ai#544
+- [ ] AC-E1: LocalTraceExporter 将 spans 写入内存 ring buffer，按 traceId 可查
+- [ ] AC-E2: `/api/telemetry/metrics` 返回当前 metrics 的结构化 JSON
+- [ ] AC-E3: `/api/telemetry/traces` 支持按 traceId/invocationId/catId 筛选
+- [ ] AC-E4: Hub 「观测台」Tab 展示总览面板（关键指标卡片 + 趋势折线图）
+- [ ] AC-E5: Span 瀑布图组件在 invocation 详情页可用
+- [ ] AC-E6: burn-rate 超标时 SystemNoticeBar 弹出 notice
+- [ ] AC-E7: 零额外进程 — 所有逻辑在现有 API + Web 进程内运行
+
 ## Dependencies
 
 - **Related**: F130（API 日志治理 — 同属可观测性，F130 管 logging，F153 管 metrics/tracing）
@@ -137,3 +163,6 @@ team experience（2026-04-09）："这是可观测性基础设施 PR，核心是
 | KD-7 | Phase B 2 轮 review 后放行 intake | P1（脱敏）+ P2（tool_use + scope）全部修完 | 2026-04-12 |
 | KD-8 | clowder-ai#489 双猫重审后放行 merge + absorb | strict/shadow/narrative 三级模型成立；剩余架构偏好降为 non-blocking | 2026-04-15 |
 | KD-9 | `TELEMETRY_DEBUG` 走 default-deny + 启动链显式注入 `NODE_ENV` | 只在真实 dev/test 语义下开放 raw exporter，避免 runtime/profile 脱钩 | 2026-04-18 |
+| KD-10 | NODE_ENV 由启动模式（PROD_WEB/-Dev）决定，不由 profile 决定 | dev:direct + --profile=opensource 是开发模式，不应标 production | 2026-04-20 |
+| KD-11 | Phase E 走方案 B（API 代理 + 自建前端），不引入 Grafana/Tempo/Sentry | 零外部依赖，贴合猫咖数据模型，零额外进程 | 2026-04-21 |
+| KD-12 | Trace 存储用 in-process ring buffer，不引入 Tempo | 零额外进程，保留最近 N 小时即够用 | 2026-04-21 |
